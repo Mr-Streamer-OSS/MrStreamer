@@ -7,5 +7,6 @@ import { useEffect } from "react";
  */
 export default function NotFound() {
   useEffect(() => (router.canGoBack() ? router.back() : router.replace("/")), []);
+
   return null;
 }

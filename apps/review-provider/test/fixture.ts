@@ -12,34 +12,43 @@ export const USER = "fixture_reviewer";
 export const PASSWORD = "nonsecret_fixture_password_for_contract_tests";
 export const FIXTURE_NOW = Date.UTC(2026, 9, 25, 12);
 export const FIXTURE_ORIGIN = "https://review.fixture.invalid";
+
 export async function digest(value: string | Uint8Array): Promise<string> {
   const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value);
   const hash = await crypto.subtle.digest("SHA-256", bytes);
+
   return [...new Uint8Array(hash)].map((n) => n.toString(16).padStart(2, "0")).join("");
 }
 
 export async function fixture() {
   const objects = new Map<string, Uint8Array>();
+
   async function fact(name: string, mime: ObjectFact["mime"]): Promise<ObjectFact> {
     const bytes = new TextEncoder().encode(
       `NON-MEDIA HTTP fixture ${name} 0123456789 abcdefghijklmnopqrstuvwxyz`,
     );
+
     const key = `fixture/${name}.bin`;
     objects.set(key, bytes);
+
     return { key, sha256: await digest(bytes), bytes: bytes.length, mime };
   }
+
   const originals = {
     movie: await fact("movie", "video/mp4"),
     "episode-1": await fact("episode-1", "video/mp4"),
     "episode-2": await fact("episode-2", "video/mp4"),
   };
+
   const artwork = {
     "movie-cover": await fact("movie-cover", "image/png"),
     "movie-backdrop": await fact("movie-backdrop", "image/png"),
     "series-cover": await fact("series-cover", "image/png"),
     "series-backdrop": await fact("series-backdrop", "image/png"),
   };
+
   const segments: Segment[] = [];
+
   for (const original of ORIGINALS) {
     for (let i = 0; i < original.frames / 144; i++) {
       segments.push({
@@ -53,6 +62,7 @@ export async function fixture() {
       });
     }
   }
+
   const media: MediaIndex = {
     version: 1,
     sourceCommit: "synthetic-http-fixture-not-media",
@@ -74,6 +84,7 @@ export async function fixture() {
     ),
     renditions: (["540p", "180p"] as const).map((id) => {
       const sizes = segments.map((s) => s.files[id].bytes);
+
       return {
         id,
         width: id === "540p" ? 960 : 320,
@@ -85,6 +96,7 @@ export async function fixture() {
       };
     }),
   };
+
   return {
     media,
     objects,

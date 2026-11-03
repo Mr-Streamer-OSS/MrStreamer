@@ -60,6 +60,7 @@ export function ChannelOverlay({
 }) {
   const categories = useCategoryMap();
   const customLists = useQuery(queries.customLists()).data;
+
   return (
     <div className="no-drag absolute inset-y-0 left-0 z-20 flex">
       <div className="flex h-full w-[26rem] flex-col bg-black pt-16">
@@ -122,18 +123,21 @@ function Channels({
   const favourites = useFavouriteKeys();
   const toggleFavourite = useToggleFavourite();
   const sourceOf = useSourceOf();
+
   const virtualizer = useVirtualizer({
     count: channels.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => ROW_REM * rem,
     overscan: 8,
   });
+
   useEffect(() => {
     virtualizer.measure();
   }, [rem, virtualizer]);
   // Opens on the playing channel.
   useEffect(() => {
     const index = channels.findIndex((channel) => ownedKey(channel) === playingKey);
+
     if (index > 0) virtualizer.scrollToIndex(index, { align: "center" });
   }, [channels.length > 0]);
   // Only the keyboard scrolls the list.
@@ -142,17 +146,21 @@ function Channels({
   }, [selected, virtualizer]);
 
   const items = virtualizer.getVirtualItems();
+
   const listings = useVisibleListings(
     channels,
     items.map((item) => item.index),
   );
+
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-6">
       <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
         {items.map((item) => {
           const channel = channels[item.index];
+
           if (!channel) return null;
           const key = ownedKey(channel);
+
           return (
             <Row
               key={key}
@@ -208,6 +216,7 @@ function Row({
   onToggleFavourite: () => void;
 }) {
   const current = listing?.now ?? null;
+
   return (
     <div
       role="button"

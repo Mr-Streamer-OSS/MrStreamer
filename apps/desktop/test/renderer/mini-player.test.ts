@@ -13,12 +13,15 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
  */
 async function loaded() {
   const answer = ipc.hold("window.miniPlayerAvailable");
+
   const [{ miniPlayer }, { closeWatch, openWatch, useUi }] = await Promise.all([
     import("../../src/renderer/src/app/mini-player.ts"),
     import("../../src/renderer/src/app/ui-store.ts"),
   ]);
+
   answer.resolve(true);
   await settle();
+
   return { miniPlayer, closeWatch, openWatch, useUi };
 }
 
@@ -125,6 +128,7 @@ describe("the mini player", () => {
       const request = fullScreen.hold("request");
       void miniPlayer.toggle();
       await settle();
+
       if (granted) request.grant();
       await settle();
       expect(fullScreen.on).toBe(granted);
@@ -161,6 +165,7 @@ describe("the mini player", () => {
 
     vi.useFakeTimers();
     ipc.hold("window.setMiniPlayer").resolve(null);
+
     if (!answered) fullScreen.hold("request");
     let back = false;
     void miniPlayer.leave().then(() => (back = true));

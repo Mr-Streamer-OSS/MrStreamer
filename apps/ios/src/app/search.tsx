@@ -114,14 +114,17 @@ function* foundTitles(
   limit: number,
 ): Steps<Found | null> {
   const page = yield* searchTitlesSteps(index, kind, query, limit);
+
   if (page.total === 0) return null;
   const left = page.total - page.titles.length;
   const data: Row[] = [];
   const due = pacer();
+
   for (const title of page.titles) {
     if (due()) yield;
     data.push({ kind: "title", title });
   }
+
   return {
     title: kind === "movie" ? "Movies" : "Series",
     total: page.total,
@@ -132,26 +135,34 @@ function* foundTitles(
 
 function* foundChannels(library: Library, query: string): Steps<Found | null> {
   const channels = yield* searchChannelsSteps(library, query);
+
   if (channels.length === 0) return null;
   const data: Row[] = [];
   const due = pacer();
+
   for (const channel of channels) {
     if (due()) yield;
     data.push({ kind: "channel", channel });
   }
+
   return { title: "Channels", total: channels.length, data, more: null };
 }
 
 /** The guide's programmes found on `library`'s channels, as rows; null for none. */
 function foundProgrammes(found: readonly FoundProgramme[], library: Library): Found | null {
   const data: Row[] = [];
+
   for (const programme of found) {
     const channel = library.byKey.get(programme.key);
+
     if (!channel) continue;
+
     const provider =
       library.labels.size > 1 ? library.labels.get(channel.subscriptionId) : undefined;
+
     data.push({ kind: "programme", found: programme, channel, provider });
   }
+
   return data.length > 0 ? { title: "Programmes", total: data.length, data, more: null } : null;
 }
 
@@ -177,21 +188,25 @@ function useSection(request: Request | null, session: RefObject<SearchSession>) 
   useEffect(() => {
     mounted.current = true;
     let active = true;
+
     const wanted = () =>
       active &&
       latest.current === request &&
       !session.current.closed &&
       session.current.generation === request?.generation;
+
     if (request) {
       void inTasks(request.steps(), wanted).then((found) => {
         if (wanted()) setFinished({ request, found });
       });
     }
+
     return () => {
       active = false;
       mounted.current = false;
     };
   }, [request, session]);
+
   return {
     found:
       !session.current.closed &&
@@ -245,6 +260,7 @@ function stillLoading(
         ? words("Movies and series still loading, {settled} of {count} providers.", providers)
         : words("Channels still loading, {settled} of {count} providers.", providers);
   }
+
   return channels && titles
     ? words("Movies, series and channels still loading.")
     : titles
@@ -270,22 +286,29 @@ function searchStatus(
   lists: TitleLists,
 ): SearchStatus | null {
   const sentences: string[] = [];
+
   const channelsLoading =
     catalogue.kind === "loading" || members.some((member) => unsettled(member, member.live));
+
   const titlesLoading =
     lists.kind === "loading" || members.some((member) => unsettled(member, member.titles));
+
   const settled = members.filter(
     (member) => !unsettled(member, member.live) && !unsettled(member, member.titles),
   ).length;
+
   if (channelsLoading || titlesLoading) {
     const providers =
       members.length > 1 && settled < members.length ? { settled, count: members.length } : null;
+
     sentences.push(stillLoading(channelsLoading, titlesLoading, providers));
   }
+
   const failed = members.filter(
     (member) =>
       !member.needsSecret && (member.live.kind === "failed" || member.titles.kind === "failed"),
   );
+
   if (
     sentences.length === 0 &&
     failed.length === 0 &&
@@ -294,7 +317,9 @@ function searchStatus(
     return null;
   const channels = catalogue.kind === "ready";
   const titles = lists.kind === "ready";
+
   if (channels || titles) sentences.push(searchedWhat(channels, titles));
+
   return {
     text: sentences.join(" "),
     loading: channelsLoading || titlesLoading ? { settled, of: Math.max(1, members.length) } : null,
@@ -355,6 +380,7 @@ export default function Search() {
   const [asked, setAsked] = useState(() => firstPage(searched));
   const { limits } = asked.query === searched ? asked : firstPage(searched);
   const index = lists.kind === "ready" ? lists.index : null;
+
   // Each kind is searched apart, so Show more searches its own kind again and nothing else.
   // A new metadata version adds TMDB's names to search.
   const movieRequest = useMemo(
@@ -367,6 +393,7 @@ export default function Search() {
         : null,
     [index, query, searched, limits.movie, metadata, entry.generation],
   );
+
   const seriesRequest = useMemo(
     () =>
       index && searched
@@ -377,6 +404,7 @@ export default function Search() {
         : null,
     [index, query, searched, limits.series, metadata, entry.generation],
   );
+
   const channelRequest = useMemo(
     () =>
       library && searched
@@ -387,19 +415,23 @@ export default function Search() {
         : null,
     [library, query, searched, entry.generation],
   );
+
   const movies = useSection(movieRequest, session);
   const series = useSection(seriesRequest, session);
   const channels = useSection(channelRequest, session);
+
   // The guide is searched over every channel, in Search's order, and again whenever a guide or
   // provider changes; an answer read under a provider since replaced never shows.
   const channelKeys = useMemo(
     () => library?.channels.map((channel) => channel.key) ?? [],
     [library],
   );
+
   const guideIds = useMemo(
     () => [...new Set(library?.channels.map((channel) => channel.subscriptionId))],
     [library],
   );
+
   const loadProgrammes = useCallback(
     (signal: AbortSignal) =>
       searched && channelKeys.length > 0
@@ -407,7 +439,9 @@ export default function Search() {
         : Promise.resolve({ found: [], unsearched: false }),
     [query, searched, channelKeys],
   );
+
   const programmeRead = useGuideRead(loadProgrammes, guideIds);
+
   const programmes = useMemo(
     () =>
       !session.current.closed && library && programmeRead.value
@@ -415,16 +449,19 @@ export default function Search() {
         : null,
     [programmeRead.value, library, entry.generation],
   );
+
   const sections = useMemo(
     () => [movies.found, series.found, channels.found, programmes].filter((found) => found != null),
     [movies.found, series.found, channels.found, programmes],
   );
+
   // The programme whose detail shows, for the query and provider/catalogue it was found under.
   const [detail, setDetail] = useState<{
     found: FoundProgramme;
     generation: number;
     request: typeof programmeRead.request;
   } | null>(null);
+
   // As the guide is read again, as on return from the background, the same programme's newest
   // token, so the detail reads on.
   const shownDetail =
@@ -434,10 +471,12 @@ export default function Search() {
             key === detail.found.key && programme.start === detail.found.programme.start,
         ) ?? detail.found)
       : null;
+
   const showMore = useCallback(
     (section: Found) => {
       if (!section.more) return;
       const { kind } = section.more;
+
       if (!(kind === "movie" ? movies : series).current()) return;
       setAsked((current) => ({
         query: searched,
@@ -452,6 +491,7 @@ export default function Search() {
 
   const change = useCallback((text: string) => {
     if (session.current.closed || text === input.current) return;
+
     if (text.trim() !== input.current.trim()) setAsked(firstPage(text.trim()));
     input.current = text;
     session.current.generation++;
@@ -459,38 +499,47 @@ export default function Search() {
     setEntry({ text, generation: session.current.generation });
     onSearchText(text);
   }, []);
+
   const dismiss = () => {
     if (session.current.closed) return false;
     session.current.closed = true;
     session.current.generation++;
     setEntry({ text: input.current, generation: session.current.generation });
     Keyboard.dismiss();
+
     return true;
   };
+
   const close = () => {
     if (dismiss()) back();
   };
+
   // Watch live in a programme's detail closes Search under Watch, as a channel row does, so Watch
   // closes onto the screen Search opened over.
   useEffect(() => {
     if (watching && shownDetail) close();
   });
+
   const watch = (channel: Channel) => {
     if (!library || !channels.current()) return;
     close();
     playChannel(channel, library.placeOf.get(channel.key) ?? "", { watch: true });
   };
+
   const openProgramme = (found: FoundProgramme) => {
     const { generation } = entry;
+
     if (session.current.closed || session.current.generation !== generation) return;
     Keyboard.dismiss();
     setDetail({ found, generation, request: programmeRead.request });
   };
+
   const open = (title: Title) => {
     if (!(title.kind === "movie" ? movies : series).current()) return;
     close();
     openDetails(title);
   };
+
   // Closes Search and opens Settings on the tab under it.
   const settings = () => {
     if (dismiss()) {
@@ -501,6 +550,7 @@ export default function Search() {
 
   const playing = channelStatus(phase);
   const searching = !session.current.closed && searched !== "";
+
   const pending =
     movies.pending ||
     series.pending ||
@@ -510,9 +560,11 @@ export default function Search() {
       channelKeys.length > 0 &&
       programmeRead.pending &&
       programmeRead.value === undefined);
+
   // A guide that could not be searched is said, and not taken for one without the name.
   const unsearched =
     searched !== "" && (programmeRead.failed || programmeRead.value?.unsearched === true);
+
   const providers = libraryStatus(members, {
     channels: true,
     titles: true,
@@ -521,6 +573,7 @@ export default function Search() {
     retry,
     settings,
   });
+
   const line = useProviderStatus(
     searchLine(
       searching ? status : null,
@@ -529,6 +582,7 @@ export default function Search() {
       searching && unsearched,
     ),
   );
+
   const keyboard = useKeyboardHeight();
   // The height under the search field, for results and the status line together; measured as
   // laid out, so a turn of the phone updates it, as the keyboard updates its reserve.
@@ -546,6 +600,7 @@ export default function Search() {
   // Read out from here, once per change, wherever the line sits.
   useStatusAnnouncement(line?.text ?? null, line?.announce ?? false);
   const shown = line ? { ...line, announce: false } : null;
+
   return (
     <Animated.View style={[styles.screen, { transform: [{ translateY: drop }] }]}>
       <View
@@ -710,13 +765,16 @@ function searchLine(
 ): Status | null {
   if (!status && !providers && !pending && !unsearched) return null;
   const actions = [...(providers?.actions ?? [])];
+
   // One Retry, the shared line's own when it has one, in the interface language either way.
   if (status?.retry.length && !actions.some((action) => action.label === t("Retry"))) {
     actions.push({ label: t("Retry"), onPress: () => status.retry.forEach(retry) });
   }
+
   // The persistent recovery owns its full explanation. Otherwise Search supplies the loading
   // sentence, including indexing and provider counts, rather than repeating libraryStatus's.
   const text = providers?.inline ? providers.text : (status?.text ?? "");
+
   return {
     ...providers,
     text: [
@@ -750,15 +808,18 @@ function useKeyboardHeight(): number {
       Keyboard.scheduleLayoutAnimation(event);
       setTop(event.endCoordinates.screenY);
     });
+
     const hide = Keyboard.addListener("keyboardWillHide", (event) => {
       Keyboard.scheduleLayoutAnimation(event);
       setTop(null);
     });
+
     return () => {
       change.remove();
       hide.remove();
     };
   }, []);
+
   return top === null ? 0 : Math.max(0, window - top);
 }
 
@@ -779,14 +840,17 @@ function Nothing({
   lists: TitleLists;
 }) {
   const locale = useLocale();
+
   const searched = useMemo(() => {
     if (!library || lists.kind !== "ready") return null;
+
     return words("Searched {channels}, {movies} and {series}.", {
       channels: words("{count} channels", { count: library.channels.length }),
       movies: words("{count} movies", { count: titleCount(lists.index, "movie") }),
       series: words("{count} series", { count: titleCount(lists.index, "series") }),
     });
   }, [library, lists, locale]);
+
   return (
     <View style={styles.nothing} accessible accessibilityLiveRegion="polite">
       <Text style={styles.nothingText}>{words('Nothing named "{query}".', { query })}</Text>
@@ -807,6 +871,7 @@ function TitleRow({
   const line = [words(title.kind === "movie" ? "kind.movie" : "kind.series"), title.year]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -843,6 +908,7 @@ function ProgrammeRow({
 }) {
   const now = Date.now();
   const day = localDay(found.programme.start);
+
   const line = [
     day.from === localDay(now).from ? null : dayLabel(day, now),
     programmeRange(found.programme),
@@ -851,6 +917,7 @@ function ProgrammeRow({
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <Pressable
       accessibilityRole="button"

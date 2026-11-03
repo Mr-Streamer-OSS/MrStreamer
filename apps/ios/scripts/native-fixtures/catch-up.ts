@@ -28,12 +28,15 @@ const panelClock = new Intl.DateTimeFormat("en-US", {
   minute: "numeric",
   hourCycle: "h23",
 });
+
 /** How far `time` on the panel's clock is ahead of UTC, in ms. */
 function panelOffset(time: number) {
   const parts = Object.fromEntries(
     panelClock.formatToParts(time).map((p) => [p.type, Number(p.value)]),
   );
+
   const { year = 0, month = 1, day = 1, hour = 0, minute = 0 } = parts;
+
   return Date.UTC(year, month - 1, day, hour, minute) - (time - (time % 60_000));
 }
 
@@ -43,16 +46,21 @@ function panelOffset(time: number) {
  */
 function panelTime(text: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})$/.exec(text);
+
   if (!match) return null;
   const [, year, month, day, hour, minute] = match.map(Number);
   const asUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0);
+
   // Date.UTC rolls a day or hour past its end into the next, as 30 February into March.
   if (new Date(asUtc).toISOString().slice(0, 16) !== text.replace(/:(\d{2})-/, "T$1:")) return null;
+
   // The clock's offsets either side of the time, which differ only around a change.
   const named = [-3, 3].flatMap((hours) => {
     const time = asUtc - panelOffset(asUtc + hours * 60 * 60_000);
+
     return time + panelOffset(time) === asUtc ? [time] : [];
   });
+
   return named.length > 0 ? Math.min(...named) : null;
 }
 
@@ -67,10 +75,13 @@ export function catchUpPlaylist(
   now = Date.now(),
 ): string | null {
   const from = panelTime(start);
+
   if (!days || from === null || minutes < 1) return null;
+
   if (from >= now || from < now - days * DAY_MS) return null;
   const end = from + minutes * 60_000;
   const seconds = (Math.min(end, now) - from) / 1000;
   const uri = (n: number) => `/hls/${id}/past/${n}.ts`;
+
   return recordingPlaylist(media, from, seconds, uri, end <= now);
 }

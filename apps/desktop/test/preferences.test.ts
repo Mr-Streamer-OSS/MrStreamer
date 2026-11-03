@@ -23,17 +23,22 @@ import {
 const disk = vi.hoisted<{ ready: Promise<void>; arrived?: () => void }>(() => ({
   ready: Promise.resolve(),
 }));
+
 vi.mock("../src/main/platform/json-file.ts", async (original) => {
   const actual = await original<typeof import("../src/main/platform/json-file.ts")>();
+
   const writeJsonFile: typeof actual.writeJsonFile = async (path, value) => {
     if (path.endsWith("preferences.json")) {
       disk.arrived?.();
       await disk.ready;
     }
+
     return actual.writeJsonFile(path, value);
   };
+
   return { ...actual, writeJsonFile };
 });
+
 afterEach(() => {
   disk.ready = Promise.resolve();
   delete disk.arrived;
@@ -48,6 +53,7 @@ async function start(dataDir: string) {
       ),
     ),
   );
+
   return {
     runtime,
     settings: await promised(runtime, Settings),
@@ -64,6 +70,7 @@ async function connected() {
   const { settings, subscriptions } = await start(dataDir);
   const login = demoLogin(provider);
   const { id } = await subscriptions.add(login);
+
   return { dataDir, settings, subscriptions, id, login };
 }
 
@@ -73,7 +80,9 @@ async function savedAs(
   id: string,
 ) {
   const found = (await subscriptions.saved()).find((each) => each.id === id);
+
   if (!found) throw new Error(`${id} isn't saved`);
+
   return found;
 }
 
@@ -83,11 +92,13 @@ const stored = async (dataDir: string): Promise<unknown> =>
 describe("preferences", () => {
   it("keeps Home row order, hidden and future rows across restart and subscription removal", async () => {
     const { dataDir, settings, subscriptions, id } = await connected();
+
     const homeRows = [
       { id: "watchlist", visible: false },
       { id: "future-row", visible: false },
       { id: "continue", visible: true },
     ];
+
     await settings.update({ homeRows });
     await settings.update({ volume: 0.4 });
     expect((await (await settingsIn(dataDir)).get()).homeRows).toEqual(homeRows);
@@ -100,6 +111,7 @@ describe("preferences", () => {
     await (await settingsIn(dataDir)).update({ audioLanguage: "nl", autoplayNext: false });
 
     const patch = ipcInputs["preferences.update"]()({ volume: 0.3, muted: true });
+
     if (patch instanceof type.errors) throw new Error(patch.summary);
     await (await settingsIn(dataDir)).update(patch);
 
@@ -124,6 +136,7 @@ describe("preferences", () => {
       lastCategoryId: "7",
       titleVersions: { "movie:603": "4012" },
     };
+
     expect(await settings.ofSubscription(id)).toEqual(left);
     expect(await (await settingsIn(dataDir)).ofSubscription(id)).toEqual(left);
     expect(await settings.get()).toEqual({
@@ -272,6 +285,7 @@ describe("preferences", () => {
 
   it("keeps what a newer version wrote when it saves", async () => {
     const dataDir = await tempDir();
+
     const newer = {
       volume: 1,
       muted: false,
@@ -279,6 +293,7 @@ describe("preferences", () => {
       lastCategoryId: null,
       subtitles: "nl",
     };
+
     await writeFile(join(dataDir, "preferences.json"), JSON.stringify(newer));
 
     await (await settingsIn(dataDir)).update({ volume: 0.5 });
@@ -382,6 +397,7 @@ describe("the next-episode delay", () => {
     async (nextEpisodeDelaySeconds) => {
       const dataDir = await tempDir();
       const patch = ipcInputs["preferences.update"]()({ nextEpisodeDelaySeconds });
+
       if (patch instanceof type.errors) throw new Error(patch.summary);
       expect((await (await settingsIn(dataDir)).update(patch)).nextEpisodeDelaySeconds).toBe(
         nextEpisodeDelaySeconds,
@@ -413,6 +429,7 @@ describe("the next-episode delay", () => {
     "preserves unsupported raw %j through writes, older readers and original-source forgetting",
     async (nextEpisodeDelaySeconds) => {
       const { dataDir, subscriptions, id } = await connected();
+
       const raw = {
         volume: 0.4,
         muted: true,
@@ -427,6 +444,7 @@ describe("the next-episode delay", () => {
         interfaceLanguage: "de-DE",
         futurePreference: { mode: "kept" },
       };
+
       await writeFile(join(dataDir, "preferences.json"), JSON.stringify(raw));
       const settings = await settingsIn(dataDir);
       expect(await settings.get()).toMatchObject({
@@ -440,6 +458,7 @@ describe("the next-episode delay", () => {
       await settings.updateSubscription(id, { lastChannelId: "9" });
       await settings.dropLegacyLists();
       await Effect.runPromise(await settings.prepareForget(await savedAs(subscriptions, id)));
+
       const expected = {
         volume: 0.6,
         muted: true,
@@ -450,11 +469,14 @@ describe("the next-episode delay", () => {
         interfaceLanguage: "fr-FR",
         futurePreference: { mode: "kept" },
       };
+
       expect(await stored(dataDir)).toEqual(expected);
+
       // Stable's schema has no delay key, and retains it when reconstructing the flat file.
       const stable = Preferences().omit("nextEpisodeDelaySeconds").merge(SubscriptionPreferences())(
         await stored(dataDir),
       );
+
       if (stable instanceof type.errors) throw new Error(stable.summary);
       await writeFile(
         join(dataDir, "preferences.json"),
@@ -588,11 +610,13 @@ describe("remembered Live TV discovery", () => {
       const { dataDir, subscriptions, id, login } = await connected();
       const provider = await fakeProvider();
       const second = await subscriptions.add({ ...login, server: provider.url });
+
       const future = {
         version: 98,
         selection: { kind: "future", opaque: [1, 2] },
         legacy: "future",
       };
+
       const path = join(dataDir, "preferences.json");
       await writeFile(
         path,
@@ -681,6 +705,7 @@ it.each(["general", "added"] as const)(
     const dataDir = await tempDir();
     const { runtime, settings, subscriptions } = await start(dataDir);
     let subscriptionId: string | null = null;
+
     if (kind === "added") {
       const original = await fakeProvider();
       await subscriptions.add(demoLogin(original));
@@ -694,12 +719,15 @@ it.each(["general", "added"] as const)(
     disk.arrived = arrived.resolve;
     disk.ready = released.promise;
     const expected = subscriptionId ? { lastCategoryId: "kept" } : { muted: true };
+
     const fiber = runtime.runFork(
       subscriptionId
         ? Effect.asVoid(raw.updateSubscription(subscriptionId, { lastCategoryId: "kept" }))
         : Effect.asVoid(raw.update({ muted: true })),
     );
+
     let stopping: Promise<unknown> | undefined;
+
     try {
       await arrived.promise;
       stopping = runtime.runPromise(Fiber.interrupt(fiber));
@@ -709,10 +737,13 @@ it.each(["general", "added"] as const)(
       released.resolve();
       delete disk.arrived;
     }
+
     await stopping;
+
     const file = subscriptionId
       ? join(dataDir, "subscriptions", subscriptionId, "preferences.json")
       : join(dataDir, "preferences.json");
+
     const persisted: unknown = JSON.parse(await readFile(file, "utf8"));
     expect(persisted).toMatchObject(expected);
     expect(

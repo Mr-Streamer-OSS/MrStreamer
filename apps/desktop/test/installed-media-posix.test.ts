@@ -8,17 +8,22 @@ import { closeNative } from "./e2e/analytics-exit.ts";
 import { ownedGroup, type OwnershipSample } from "./e2e/installed-media-posix.ts";
 
 vi.mock("node:fs", { spy: true });
+
 const { readFileSync: readFile } = await vi.importActual<typeof fs>("node:fs");
 const children: ChildProcess[] = [];
 const executable = fs.realpathSync(process.execPath);
+
 function child(detached = true) {
   const app = spawn(process.execPath, ["-e", "process.on('message',()=>process.exit(0))"], {
     detached,
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
+
   children.push(app);
+
   return app;
 }
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(
@@ -40,6 +45,7 @@ async function lingeringChild(autoExitMs: number) {
   const profile = fs.mkdtempSync(join(tmpdir(), "installed-media-drain-"));
   const release = join(profile, "release");
   const signals = join(profile, "signals");
+
   const companion = `
     const fs = require('node:fs');
     for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'])
@@ -52,6 +58,7 @@ async function lingeringChild(autoExitMs: number) {
     });
     process.send('ready');
   `;
+
   const app = spawn(
     process.execPath,
     [
@@ -67,6 +74,7 @@ async function lingeringChild(autoExitMs: number) {
     ],
     { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] },
   );
+
   children.push(app);
   const samples: OwnershipSample[] = [];
   const owner = ownedGroup(app, executable, Date.now(), (sample) => samples.push(sample));
@@ -79,6 +87,7 @@ async function lingeringChild(autoExitMs: number) {
     alreadyExited: false,
     requestError: null,
   });
+
   return {
     owner,
     samples,
@@ -96,6 +105,7 @@ async function lingeringChild(autoExitMs: number) {
 describe.runIf(posix)("installed media POSIX ownership", () => {
   it("waits for an actual owned child after strict main close and retains the transient rows", async () => {
     const fixture = await lingeringChild(600);
+
     try {
       const immediate = fixture.owner.sample();
       expect(immediate.map((row) => row.pid)).toContain(fixture.pid);
@@ -115,6 +125,7 @@ describe.runIf(posix)("installed media POSIX ownership", () => {
 
   it("fails at the child deadline, preserves the actual survivor and profile, and sends no signal", async () => {
     const fixture = await lingeringChild(5000);
+
     try {
       await expect(fixture.owner.drain(60)).rejects.toThrow("survivors; profile retained");
       expect(fixture.samples.at(-1)?.group).toEqual([

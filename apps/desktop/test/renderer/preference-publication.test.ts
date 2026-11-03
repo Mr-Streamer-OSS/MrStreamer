@@ -15,15 +15,18 @@ import { player } from "../../src/renderer/src/player/player.ts";
 
 let stop = () => {};
 let client: QueryClient;
+
 beforeEach(() => {
   ipc.reset();
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
+
 afterEach(() => {
   stop();
   client.clear();
   vi.useRealTimers();
 });
+
 const snapshot = (
   revision: number,
   preferences: Partial<Preferences> = {},
@@ -31,6 +34,7 @@ const snapshot = (
   revision,
   preferences: { ...defaultPreferences, ...preferences },
 });
+
 const cached = () => client.getQueryData<PreferenceSnapshot>(["preferences"]);
 
 it("accepts initial reads, save replies and events through one newest-revision path, including React Query's late completion", async () => {
@@ -59,12 +63,14 @@ it("preserves an event that arrives after queryFn returned but before React Quer
   stop = syncPreferences(client, (preferences) => applied.push(preferences));
   ipc.always("preferences.get", snapshot(1));
   let injected = false;
+
   const unsubscribe = client.getQueryCache().subscribe((event) => {
     if (!injected && event.type === "updated" && cached()?.revision === 1) {
       injected = true;
       ipc.emit("preferences.changed", snapshot(2, { muted: true }));
     }
   });
+
   await client.fetchQuery(preferenceQuery());
   unsubscribe();
   expect(cached()).toEqual(snapshot(2, { muted: true }));
@@ -110,11 +116,13 @@ it("applies field effects once per accepted change and prevents an older policy 
   acceptPreferences(client, snapshot(1, { adultTitles: true, titleLanguage: "en" }));
   const old = Promise.withResolvers<string>();
   let reads = 0;
+
   const observer = new QueryObserver(client, {
     queryKey: ["watchlist", "shown"],
     queryFn: () => (++reads === 1 ? old.promise : Promise.resolve("ordinary only")),
     staleTime: Infinity,
   });
+
   const unsubscribe = observer.subscribe(() => {});
   const changed = snapshot(2, { adultTitles: false, titleLanguage: "nl" });
   ipc.emit("preferences.changed", changed);

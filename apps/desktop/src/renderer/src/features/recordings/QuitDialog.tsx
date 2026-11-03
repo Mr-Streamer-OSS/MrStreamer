@@ -16,6 +16,7 @@ export function QuitDialog() {
   const open = useQuitAsked((state) => state.asked);
   const keep = useRef<HTMLButtonElement>(null);
   const close = () => useQuitAsked.setState({ asked: false });
+
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && close()}>
       <Dialog.Portal>
@@ -56,6 +57,7 @@ function QuitDetails() {
   const live = useLiveRecordings();
   const schedules = useSchedules().data ?? [];
   const [last] = live;
+
   // Not one recording now, nor one held back that wouldn't record with the app open either.
   const next = schedules
     .flatMap((each) =>
@@ -64,6 +66,7 @@ function QuitDetails() {
         : [],
     )
     .toSorted((a, b) => a.start - b.start)[0];
+
   return (
     <>
       {last && (

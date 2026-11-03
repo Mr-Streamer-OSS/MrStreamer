@@ -19,7 +19,9 @@ import {
 export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
   try {
     const files = await readdir(dataDir);
+
     if (files.length === 0) return "fresh";
+
     if (
       files.some((file) =>
         ["preferences.json", "subscription.json", "subscriptions.json", "mrstreamer.db"].includes(
@@ -31,6 +33,7 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return "fresh";
   }
+
   return "unknown";
 }
 
@@ -41,35 +44,43 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
  */
 function withoutSummaries(kept: unknown): unknown {
   const legacy = FormatOne()(kept);
+
   if (legacy instanceof type.errors) return kept;
+
   return {
     ...legacy,
     format: 2,
     pending: legacy.pending.filter((item) => LegacySummary()(item) instanceof type.errors),
   };
 }
+
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
 
 /** Analytics state is private. Never use storage diagnostics that print a parse failure's values. */
 export function analyticsStore(dataDir: string) {
   const path = join(dataDir, "analytics.json");
+
   return {
     async load(): Promise<AnalyticsRecord | null> {
       let text: string;
+
       try {
         text = await readFile(path, "utf8");
       } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
         throw new Error("Analytics state unavailable.");
       }
+
       let record: AnalyticsRecord;
       let migrated: boolean;
+
       try {
         const parsed: unknown = JSON.parse(text);
         const current = withoutSummaries(parsed);
         migrated = current !== parsed;
         const checked = LegacyRecord()(withoutFutureDiagnostics(current));
+
         if (
           checked instanceof type.errors ||
           checked.firstSeen !== (checked.installationId !== null) ||
@@ -82,8 +93,10 @@ export function analyticsStore(dataDir: string) {
         record = checked;
         // Optional new work cannot turn valid .15 consent into an unavailable preference.
         const optional = type({ "summaries?": "unknown" })(current);
+
         if (!(optional instanceof type.errors) && optional.summaries !== undefined) {
           const block = SummaryBlock()(optional.summaries);
+
           if (
             !(block instanceof type.errors) &&
             checked.enabled &&
@@ -123,9 +136,12 @@ export function analyticsStore(dataDir: string) {
             };
           }
         }
+
         const lifecycle = type({ "lifecycle?": "unknown" })(current);
+
         if (!(lifecycle instanceof type.errors) && lifecycle.lifecycle !== undefined) {
           const block = LifecycleBlock()(lifecycle.lifecycle);
+
           if (
             !(block instanceof type.errors) &&
             checked.enabled &&
@@ -154,8 +170,10 @@ export function analyticsStore(dataDir: string) {
       } catch {
         throw new Error("Analytics state unavailable.");
       }
+
       // The discarded counts leave the disk now, not at the next unrelated write.
       if (migrated) await writeJsonFile(path, record);
+
       return record;
     },
     save(record: AnalyticsRecord): Promise<void> {
@@ -169,7 +187,9 @@ function withoutFutureDiagnostics(value: unknown): unknown {
   const queue = type({
     pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
   })(value);
+
   if (queue instanceof type.errors) return value;
+
   return {
     ...queue,
     pending: queue.pending.map((item) =>

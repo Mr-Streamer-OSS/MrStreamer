@@ -53,6 +53,7 @@ import { useWatchlist, watchlistRows } from "../../../watchlist.ts";
 
 /** How many channels On now shows. */
 const ON_NOW = 12;
+
 /** How many movies Home shows before the Movies tab. */
 const MOVIES = 20;
 
@@ -74,6 +75,7 @@ export default function Home() {
   const catalogue = useCatalogue();
   const roster = useRoster();
   const hasMovies = useHasTitles("movie");
+
   // A failure with no channels at all has its own notice below the Stage.
   const status = libraryStatus(roster.kind === "ready" ? roster.members : [], {
     channels: catalogue.kind !== "failed",
@@ -83,31 +85,39 @@ export default function Home() {
     retry: retryProvider,
     settings: openSettings,
   });
+
   const { recentChannels: recent = [], region } = useSavedState();
   const playback = usePlayback();
   const continuing = useContinueWatching();
   const saved = useWatchlist();
   const titlesShown = continuing.length > 0 || saved.length > 0;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
+
   const recentChannels = library
     ? recent.flatMap((key) => {
         const channel = library.byKey.get(key);
+
         return channel ? [channel] : [];
       })
     : [];
+
   const listed =
     recentChannels.length > 0
       ? recentChannels
       : ((library?.regions.find((each) => each.name === region) ?? library?.regions[0])?.channels ??
         []);
+
   const onNow = listed.slice(0, ON_NOW);
+
   const preview = useCallback(
     (channel: Channel) =>
       library && playChannel(channel, placeOf(library, channel), { watch: false }),
     [library],
   );
+
   const playing = channelStatus(playback.phase);
   const suggested = onNow[0] ?? null;
+
   const shown =
     playback.phase.kind === "idle"
       ? suggested
@@ -118,6 +128,7 @@ export default function Home() {
   const guideKeys = [
     ...new Set([...(shown ? [shown.key] : []), ...onNow.map((channel) => channel.key)]),
   ].slice(0, ON_NOW);
+
   const programmes = useGuideListings(guideKeys, library);
 
   return (
@@ -171,6 +182,7 @@ export default function Home() {
 /** Home's scrolling content, clear of the status line at its end. */
 function Content({ children }: { children: ReactNode }) {
   const inset = useDockInset();
+
   return (
     <ScrollView
       style={styles.screen}
@@ -252,6 +264,7 @@ function Favourites({
 }) {
   const favourites = useFavourites();
   const channels = favourites?.shown.map(({ channel }) => channel) ?? [];
+
   return (
     <View style={styles.block}>
       <ShelfHead
@@ -304,13 +317,17 @@ function Tiles({
           testID === "home-channel" && channel.ambiguous
             ? library.labels.get(channel.subscriptionId)
             : undefined;
+
         const place = placeOf(library, channel);
+
         const fallback =
           provider && place.endsWith(` · ${provider}`)
             ? place.slice(0, -provider.length - 3)
             : place;
+
         const line = channel.key === playing?.id ? live(playing.word) : shelfOf(fallback);
         const programme = programmePresentation(programmes?.get(channel.key), now);
+
         return (
           <View key={channel.key} style={styles.tile}>
             <Pressable
@@ -389,17 +406,23 @@ function MoviesForYou() {
   const locale = useLocale();
   const made = useCollections("movie");
   const lists = useTitleLists();
+
   const shelf = useMemo(() => {
     if (!made) return null;
     const [row] = collectionRows(made, "for-you", null);
+
     if (row) return { name: t("Movies for you"), titles: row.titles };
     const all = made.list("all").slice(0, MOVIES);
+
     return all.length > 0 ? { name: t("Movies"), titles: all } : null;
     // Its name is in the interface language; the posters stay.
   }, [made, locale]);
+
   // Still posters until the first collections are made; a failure says so in the status line.
   if (!made) return lists.kind === "failed" ? null : <PlaceholderShelf />;
+
   if (!shelf) return null;
+
   return <Shelf name={shelf.name} titles={shelf.titles} onPress={(title) => openDetails(title)} />;
 }
 
@@ -415,6 +438,7 @@ function TitleRows() {
   const roster = useRoster();
   const saved = useWatchlist();
   const metadata = useMetadataVersion();
+
   const watchlist = useMemo(
     () =>
       lists.kind === "ready"
@@ -432,7 +456,9 @@ function TitleRows() {
     // A new metadata version renames titles; a provider losing its password drops its own.
     [lists, saved, roster, metadata],
   );
+
   const entryOf = (key: string) => continuing.find((entry) => entry.title.key === key);
+
   return (
     <>
       {continuing.length > 0 ? (
@@ -443,6 +469,7 @@ function TitleRows() {
           done={(title) => entryOf(title.key)?.done ?? null}
           onPress={(title) => {
             const entry = entryOf(title.key);
+
             if (entry) resume(entry);
           }}
           onLongPress={(title) =>
@@ -456,7 +483,9 @@ function TitleRows() {
               (index) => {
                 // The version that goes on is asked for, over the one picked before.
                 const version = entryOf(title.key)?.version;
+
                 if (index === 0) openDetails({ ...title, ...version }, version !== undefined);
+
                 if (index === 1) void removeFromContinue(title).catch(() => undefined);
               },
             )
@@ -504,11 +533,14 @@ function Stage({
   now: number;
 }) {
   const { phase, watch, pip, external, muted } = playback;
+
   const shows =
     (phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused") &&
     !watch &&
     !pip;
+
   const title = phase.kind === "idle" ? (channel?.title ?? t("Nothing playing")) : phase.item.title;
+
   const status =
     phase.kind === "idle"
       ? line
@@ -525,9 +557,11 @@ function Stage({
                 : muted
                   ? t("Muted")
                   : t("Live");
+
   const programmeShown = programmePresentation(programme, now);
   // The logo where the picture isn't: idle, connecting, failed, or shown elsewhere.
   const logo = channel && (phase.kind !== "playing" || !shows) ? channel : null;
+
   return (
     <View style={styles.stage} testID="home-stage">
       {logo ? (

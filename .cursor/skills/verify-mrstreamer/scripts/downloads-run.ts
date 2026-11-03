@@ -63,28 +63,36 @@ function baseDriver(
 ) {
   const wait = async (check: () => Promise<boolean>, timeout = 30_000) => {
     const deadline = Date.now() + timeout;
+
     while (Date.now() < deadline) {
       abort.signal.throwIfAborted();
+
       if (await check().catch(() => false)) return;
       await delay(150, undefined, { signal: abort.signal });
     }
+
     throw new Error(`Timed out waiting for ${check.toString()}`);
   };
+
   const exists = (expression: string) => page.evaluate<boolean>(`!!(${expression})`);
+
   const capture = async (name: string) => {
     if (style !== "single")
       await page.evaluate(
         "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
       );
     const shot = await page.send("Page.captureScreenshot", { format: "png" });
+
     if (!record(shot.result) || typeof shot.result["data"] !== "string")
       throw new Error("No screenshot returned.");
     await writeFile(join(evidence, `${name}.png`), Buffer.from(shot.result["data"], "base64"));
     const tree = await page.send("Accessibility.getFullAXTree");
     await writeFile(join(evidence, `${name}.ax.json`), JSON.stringify(tree.result, null, 2));
   };
+
   const click = async (label: string, element: string) => {
     await wait(() => exists(element));
+
     if (style === "single") action(label);
     await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
     // Pressed only where the pointer reaches it: a closing dialog or search can still cover it.
@@ -99,11 +107,14 @@ function baseDriver(
           target.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       })()`),
     );
+
     if (style !== "single") action(label);
+
     const point = await page.evaluate<{ x: number; y: number }>(`(() => {
       const box = ${element}.getBoundingClientRect();
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     })()`);
+
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
       await page.send("Input.dispatchMouseEvent", {
         type,
@@ -112,8 +123,10 @@ function baseDriver(
         clickCount: 1,
       });
   };
+
   const key = async (name: string, code: number, modifiers = 0) => {
     action(`Press ${name}`);
+
     for (const type of ["rawKeyDown", "keyUp"])
       await page.send("Input.dispatchKeyEvent", {
         type,
@@ -123,23 +136,29 @@ function baseDriver(
         ...defined({ modifiers: style === "series" ? modifiers : undefined }),
       });
   };
+
   /** Enter or Space as a keyboard sends it, with its character, which presses a focused button. */
   const press = async (name: "Enter" | " ") => {
     action(`Press ${name === " " ? "Space" : name}`);
+
     const which =
       name === " "
         ? { key: " ", code: "Space", windowsVirtualKeyCode: 32, text: " " }
         : { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" };
+
     await page.send("Input.dispatchKeyEvent", { type: "keyDown", ...which });
     await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...which });
   };
+
   /** Tab, as the viewer presses it, until `element` has the keyboard. */
   const tabTo = async (label: string, element: string) => {
     for (let tabs = 0; tabs < 150; tabs++) {
       if (await exists(`(${element}) === document.activeElement`)) {
         action(`${label} (${tabs} Tab presses)`);
+
         return;
       }
+
       await page.send("Input.dispatchKeyEvent", {
         type: "rawKeyDown",
         key: "Tab",
@@ -148,12 +167,16 @@ function baseDriver(
       });
       await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab" });
     }
+
     throw new Error(`Tab never reached ${element}`);
   };
+
   const text = (selector = "body") =>
     page.evaluate<string>(`document.querySelector(${JSON.stringify(selector)})?.innerText ?? ""`);
+
   return { page, wait, exists, capture, click, key, press, tabTo, text };
 }
+
 export type BaseDriver = ReturnType<typeof baseDriver>;
 
 /**
@@ -227,6 +250,7 @@ export async function ownedRun<D>(
   let running: { app: ChildProcess; page?: Page } | undefined;
   let failed: unknown;
   const cleanupErrors: string[] = [];
+
   try {
     await options.prepare?.(observed);
     profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
@@ -234,9 +258,11 @@ export async function ownedRun<D>(
     tmdb = await startFakeTmdb();
     pictures = await options.pictures();
     const picturesUrl = `http://127.0.0.1:${(pictures.address() as AddressInfo).port}`;
+
     const fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) =>
       Number(new URL(url).port),
     );
+
     observed["fixturePorts"] = fixturePorts;
     /** Each start's own process, debugging port, profile and renderer, as checked. */
     const starts: Record<string, unknown>[] = [];
@@ -245,6 +271,7 @@ export async function ownedRun<D>(
 
     const start = async (label: string, which: Build = { kind: "candidate" }) => {
       const port = await freePort();
+
       const env = Object.fromEntries(
         Object.entries(process.env).filter(
           ([name]) =>
@@ -254,6 +281,7 @@ export async function ownedRun<D>(
             !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
         ),
       );
+
       // A packaged build takes no --require: its main's requests are only the fixtures'.
       if (which.kind === "candidate")
         Object.assign(env, {
@@ -262,6 +290,7 @@ export async function ownedRun<D>(
           VERIFY_IMAGES: picturesUrl,
         });
       const executable = which.kind === "candidate" ? build.executable : which.executable;
+
       const app = spawn(
         executable,
         [
@@ -298,9 +327,12 @@ export async function ownedRun<D>(
           },
         },
       );
+
       running = { app };
+
       for (const stream of [app.stdout, app.stderr])
         stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
+
       // A spawn error or an interrupt ends the wait for the window as the run's failure.
       const page = await Promise.race([
         style !== "single" ? connect(port, "page", { app }) : connect(port),
@@ -311,9 +343,11 @@ export async function ownedRun<D>(
           });
         }),
       ]);
+
       running = { app, page };
       const command = await page.send("Browser.getBrowserCommandLine");
       const args = record(command.result) ? command.result["arguments"] : null;
+
       if (
         !Array.isArray(args) ||
         !args.includes(`--user-data-dir=${owned.profile}`) ||
@@ -321,16 +355,21 @@ export async function ownedRun<D>(
         (which.kind === "candidate" && !args.includes(desktop))
       )
         throw new Error("CDP belongs to a different app instance.");
+
       const renderer =
         which.kind === "candidate"
           ? pathToFileURL(join(desktop, "out/renderer/")).href
           : pathToFileURL(join(dirname(which.executable), "resources/app.asar/")).href;
+
       const deadline = Date.now() + 30_000;
       let url = "";
+
       while (Date.now() < deadline && !url.startsWith(renderer)) {
         url = await page.evaluate<string>("location.href").catch(() => "");
+
         if (!url.startsWith(renderer)) await delay(150, undefined, { signal: abort.signal });
       }
+
       if (!url.startsWith(renderer)) throw new Error(`Wrong renderer: ${url}`);
       starts.push(
         options.describe({
@@ -344,6 +383,7 @@ export async function ownedRun<D>(
         }),
       );
       await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+
       if (options.watchWindow) {
         await page.send("Network.enable");
         page.on("Network.requestWillBeSent", (params) => {
@@ -351,13 +391,16 @@ export async function ownedRun<D>(
             windowRequests.push({ at: Date.now(), url: String(params["request"]["url"]) });
         });
       }
+
       action(
         style === "single"
           ? `Start the app (${label}) on the run's profile`
           : `Start ${which.kind === "candidate" ? "this build" : "the earlier build"} (${label}) on the run's profile`,
       );
+
       return options.driver(page, baseDriver(page, style, abort, evidence, action));
     };
+
     const quit = async (label: string) => {
       if (!running) return;
       action(`Quit the app (${label})`);
@@ -372,10 +415,12 @@ export async function ownedRun<D>(
     });
   } catch (error) {
     failed = error;
+
     if (running?.page) {
       const shot = await running.page
         .send("Page.captureScreenshot", { format: "png" })
         .catch(() => undefined);
+
       if (record(shot?.result) && typeof shot.result["data"] === "string")
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
@@ -387,24 +432,31 @@ export async function ownedRun<D>(
         cleanupErrors.push(String(error));
       }
     };
+
     await clean(async () => options.release?.(clean));
+
     if (running) {
       const owned = running;
       await clean(() => stop(owned.app, owned.page));
       owned.page?.close();
     }
+
     if (provider) {
       if (style !== "single") observed["streamsAfterExit"] = provider.activeStreams();
       await clean(() => provider!.close());
     }
+
     if (tmdb) await clean(() => tmdb!.close());
+
     if (pictures?.listening)
       await clean(() => new Promise<void>((resolve) => pictures!.close(() => resolve())));
     observed["mainNetwork"] = summarise(readLines(networkLog), observed["fixturePorts"]);
+
     if (profile && (!running || running.app.exitCode !== null || running.app.signalCode !== null))
       await clean(() => rm(profile!, { recursive: true, force: true, maxRetries: 5 }));
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", interrupt);
+
     if (cleanupErrors.length) failed ??= new Error(cleanupErrors.join("\n"));
     await writeFile(join(evidence, "electron.log"), log.join(""));
     await writeFile(
@@ -439,6 +491,7 @@ export async function ownedRun<D>(
     );
     console.log(`${failed ? "FAIL" : "PASS"} ${options.done}: ${evidence}`);
   }
+
   if (failed) throw failed;
 }
 
@@ -458,13 +511,17 @@ export function readLines(path: string): Connection[] {
 function summarise(lines: readonly Connection[], fixtures: unknown) {
   const ports = new Set(Array.isArray(fixtures) ? fixtures : []);
   const by = new Map<string, number>();
+
   for (const line of lines) {
     if (line.kind === "ipc") continue;
+
     const where =
       line.kind === "artwork"
         ? `artwork ${line.host}`
         : `${line.kind} ${line.host}:${line.port}${ports.has(line.port) ? " (fixture)" : ""}`;
+
     by.set(where, (by.get(where) ?? 0) + 1);
   }
+
   return Object.fromEntries(by);
 }

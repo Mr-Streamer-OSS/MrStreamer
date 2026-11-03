@@ -8,9 +8,13 @@ import type {
 import { nativePlayer } from "./native-player.ts";
 
 const port = nativePlayer();
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
+
 let owner: typeof import("../src/playback.ts");
+
 const item = (id: string, subscriptionId: string | null = "sub") => ({
   id,
   subscriptionId,
@@ -20,20 +24,26 @@ const item = (id: string, subscriptionId: string | null = "sub") => ({
   next: false,
   versions: false,
 });
+
 const options = { watch: true, login: [] };
 const source = async () => ({ url: "file:clear.mp4", container: "mp4" });
+
 const tick = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 };
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (cause: unknown) => void;
+
   const promise = new Promise<T>((yes, no) => {
     resolve = yes;
     reject = no;
   });
+
   return { promise, resolve, reject };
 }
+
 const receipt = (attemptId: number, itemId: number | null): ObservedDetachResult => ({
   kind: "detached",
   attemptId,
@@ -42,6 +52,7 @@ const receipt = (attemptId: number, itemId: number | null): ObservedDetachResult
   appWorkDrained: true,
   providerDisconnect: "unobservable",
 });
+
 let stop: (() => void) | undefined;
 
 beforeEach(async () => {
@@ -61,6 +72,7 @@ beforeEach(async () => {
   owner = await import("../src/playback.ts");
   stop = undefined;
 });
+
 afterEach(async () => {
   stop?.();
   void owner.stop();
@@ -74,11 +86,13 @@ async function start(id = "a", subscriptionId: string | null = "sub") {
     { kind: "file", originalLanguage: null, open: source },
     options,
   );
+
   return {
     attemptId: port.replaceObservedAsync.mock.calls.at(-1)![1],
     itemId: port.replaceObservedAsync.mock.calls.at(-1)![1],
   };
 }
+
 function event(
   identity: { attemptId: number; itemId: number },
   kind: "playing" | "paused" = "playing",
@@ -109,15 +123,19 @@ async function knownPausedBeforeReply() {
       itemId: 1,
     });
     event({ attemptId: 1, itemId: 1 }, "paused", 2);
+
     return admission.promise;
   });
   const outcome = vi.fn();
+
   const playing = owner.play(
     item("a"),
     { kind: "file", originalLanguage: null, open: source },
     { ...options, outcome },
   );
+
   await tick();
+
   return { admission, playing, outcome };
 }
 
@@ -126,11 +144,14 @@ describe("managed playback ownership", () => {
     // The compatibility port admits legacy writes so old-product controls fail on assertions.
     port.replaceAsync.mockResolvedValue();
     const seen: number[] = [];
+
     const open = async () => {
       seen.push(port.replaceObservedAsync.mock.calls.length);
       expect(port.listeners.has("playbackObservation")).toBe(true);
+
       return source();
     };
+
     await owner.play(item("a"), { kind: "file", originalLanguage: null, open: open }, options);
     await owner.play(item("b"), { kind: "file", originalLanguage: null, open: open }, options);
     expect(seen).toEqual([0, 1]);
@@ -154,11 +175,13 @@ describe("managed playback ownership", () => {
     void owner.stop();
     expect(owner.playbackState.get()).toMatchObject({ phase: { kind: "idle" }, closing: ["sub"] });
     const lookup = vi.fn(source);
+
     const next = owner.play(
       item("b"),
       { kind: "file", originalLanguage: null, open: lookup },
       options,
     );
+
     await tick();
     expect(lookup).not.toHaveBeenCalled();
     expect(closed).toBe(false);
@@ -174,11 +197,13 @@ describe("managed playback ownership", () => {
     const ack = deferred<ObservedDetachResult>();
     port.detachObservedAsync.mockReturnValueOnce(ack.promise);
     const lookup = vi.fn(source);
+
     const next = owner.play(
       item("b"),
       { kind: "file", originalLanguage: null, open: lookup },
       options,
     );
+
     await vi.advanceTimersByTimeAsync(3000);
     await next;
     expect(owner.playbackState.get().phase.kind).toBe("failed");
@@ -194,6 +219,7 @@ describe("managed playback ownership", () => {
     "keeps %s closure blocked",
     async (answer) => {
       const a = await start();
+
       if (answer === "rejected")
         port.detachObservedAsync.mockRejectedValueOnce(new Error("private raw cause"));
       else
@@ -225,11 +251,13 @@ describe("managed playback ownership", () => {
     void reader.closed.then(() => {
       closed = true;
     });
+
     const next = owner.play(
       item("copy:2", null),
       { kind: "file", originalLanguage: null, open: source },
       options,
     );
+
     await tick();
     expect(owner.playbackState.get().closing).toEqual([]);
     expect(closed).toBe(false);
@@ -241,24 +269,30 @@ describe("managed playback ownership", () => {
 
   it("rapid A-B-C and a late source cannot attach or acknowledge early drain", async () => {
     const lookupA = deferred<Awaited<ReturnType<typeof source>>>();
+
     const a = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: () => lookupA.promise },
       options,
     );
+
     await tick();
     const bLookup = vi.fn(source);
+
     const b = owner.play(
       item("b"),
       { kind: "file", originalLanguage: null, open: bLookup },
       options,
     );
+
     const cLookup = vi.fn(source);
+
     const c = owner.play(
       item("c"),
       { kind: "file", originalLanguage: null, open: cLookup },
       options,
     );
+
     await tick();
     expect(bLookup).not.toHaveBeenCalled();
     expect(cLookup).not.toHaveBeenCalled();
@@ -279,6 +313,7 @@ describe("managed playback ownership", () => {
     );
     const b = { attemptId: 2, itemId: 2 };
     event(b, "playing", 10);
+
     const cases = [
       { kind: "ready", durationSeconds: 9 },
       {
@@ -293,10 +328,12 @@ describe("managed playback ownership", () => {
       { kind: "media-services-reset" },
       { kind: "tracks", tracks: { ...b, revision: 100 } },
     ];
+
     for (const body of cases)
       for (const stamp of [a, { ...b, itemId: 99 }, { ...b, sequence: 9 }]) {
         port.emit("playbackObservation", { version: 1, sequence: 20, ...stamp, ...body });
       }
+
     port.emit("statusChange", { status: "error", error: { message: "legacy raw" } });
     port.emit("playingChange", { isPlaying: false });
     port.emit("timeUpdate", { currentTime: 999 });
@@ -336,11 +373,13 @@ describe("managed playback ownership", () => {
   it("returning to Watch clears a connecting stream's Close pause", async () => {
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
     stop = () => lookup.resolve({ url: "file:clear.mp4", container: "mp4" });
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     await tick();
     void owner.closeWatch();
     owner.openWatch();
@@ -355,11 +394,13 @@ describe("managed playback ownership", () => {
   it("returning to Watch preserves the viewer's explicit Pause during loading", async () => {
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
     stop = () => lookup.resolve({ url: "file:clear.mp4", container: "mp4" });
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     await tick();
     owner.togglePause();
     void owner.closeWatch();
@@ -381,11 +422,13 @@ describe("managed playback ownership", () => {
   it("loading Pause waits for paused acknowledgement and never treats waiting as acknowledgement", async () => {
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
     stop = () => lookup.resolve({ url: "file:clear.mp4", container: "mp4" });
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     owner.togglePause();
     lookup.resolve(await source());
     await playing;
@@ -427,19 +470,23 @@ describe("managed playback ownership", () => {
     async (returnAt) => {
       const lookup = deferred<Awaited<ReturnType<typeof source>>>();
       stop = () => lookup.resolve({ url: "file:clear.mp4", container: "mp4" });
+
       const playing = owner.play(
         item("a"),
         { kind: "file", originalLanguage: null, open: () => lookup.promise },
         options,
       );
+
       owner.togglePause();
       owner.setAside();
       lookup.resolve(await source());
       await playing;
       event({ attemptId: 1, itemId: 1 });
+
       if (returnAt === "before-ack") owner.openWatch();
       event({ attemptId: 1, itemId: 1 }, "paused", 2);
       port.play.mockClear();
+
       if (returnAt === "after-ack") owner.openWatch();
       expect(port.play).not.toHaveBeenCalled();
       expect(owner.playbackState.get()).toMatchObject({ watch: true, phase: { kind: "paused" } });
@@ -449,11 +496,13 @@ describe("managed playback ownership", () => {
   it("unsetAside clears the away pause of a loading local copy", async () => {
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
     stop = () => lookup.resolve({ url: "file:copy.mp4", container: "mp4" });
+
     const playing = owner.play(
       item("copy:1", null),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     owner.setAside();
     owner.unsetAside();
     lookup.resolve(await source());
@@ -483,11 +532,13 @@ describe("managed playback ownership", () => {
   it("unsetAside preserves a viewer loading Pause of a local copy", async () => {
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
     stop = () => lookup.resolve({ url: "file:copy.mp4", container: "mp4" });
+
     const playing = owner.play(
       item("copy:1", null),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     owner.togglePause();
     owner.setAside();
     owner.unsetAside();
@@ -512,14 +563,17 @@ describe("managed playback ownership", () => {
         itemId: 1,
       });
       event({ attemptId: 1, itemId: 1 }, "paused", 2);
+
       return admission.promise;
     });
     const outcome = vi.fn();
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: source },
       { ...options, outcome },
     );
+
     owner.togglePause();
     await tick();
     expect(owner.playbackState.get().phase.kind).toBe("paused");
@@ -548,13 +602,16 @@ describe("managed playback ownership", () => {
         itemId: 1,
       });
       event({ attemptId: 1, itemId: 1 }, "paused", 2);
+
       return admission.promise;
     });
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: source },
       options,
     );
+
     await tick();
     expect(owner.playbackState.get().phase.kind).toBe("loading");
     owner.togglePause();
@@ -584,6 +641,7 @@ describe("managed playback ownership", () => {
         await held.playing;
         expect(port.play).not.toHaveBeenCalled();
       }
+
       owner.togglePause();
       expect(port.play).toHaveBeenCalledOnce();
       port.pause.mockClear();
@@ -672,15 +730,18 @@ describe("managed playback ownership", () => {
 
   it("an accepted paused sample cannot acknowledge a newer Pause from a clock subscriber", async () => {
     const held = await knownPausedBeforeReply();
+
     const unsubscribe = owner.playbackClock.subscribe(() => {
       unsubscribe();
       owner.togglePause();
     });
+
     const cleanup = stop;
     stop = () => {
       unsubscribe();
       cleanup?.();
     };
+
     port.observation(
       {
         kind: "state",
@@ -735,6 +796,7 @@ describe("managed playback ownership", () => {
         underlying: [],
       },
     } as const;
+
     const failed = vi.fn();
     owner.onPlaybackFailure(failed);
     port.replaceObservedAsync.mockImplementationOnce(
@@ -748,6 +810,7 @@ describe("managed playback ownership", () => {
           terminal: true,
           failure,
         } satisfies PlaybackObservation);
+
         return { kind: "failed", attemptId, itemId: null, failure };
       },
     );
@@ -767,11 +830,13 @@ describe("managed playback ownership", () => {
     port.detachObservedAsync.mockReturnValueOnce(ack.promise);
     await start();
     const lookup = vi.fn(source);
+
     const next = owner.play(
       item("b"),
       { kind: "file", originalLanguage: null, open: lookup },
       options,
     );
+
     await tick();
     expect(lookup).not.toHaveBeenCalled();
     ack.resolve(receipt(1, null));
@@ -815,6 +880,7 @@ describe("managed playback ownership", () => {
 it("preserves a constructed but unattached item's failure and deduplicates its result", async () => {
   const reported = vi.fn();
   owner.onPlaybackFailure(reported);
+
   const failure = {
     kind: "network",
     evidence: {
@@ -824,6 +890,7 @@ it("preserves a constructed but unattached item's failure and deduplicates its r
       underlying: [],
     },
   } as const;
+
   port.replaceObservedAsync.mockImplementationOnce(async (_source, attemptId) => {
     port.emit("playbackObservation", {
       version: 1,
@@ -834,6 +901,7 @@ it("preserves a constructed but unattached item's failure and deduplicates its r
       terminal: true,
       failure,
     });
+
     return { kind: "failed", attemptId, itemId: 81, failure };
   });
   port.detachObservedAsync.mockResolvedValueOnce(receipt(1, 81));
@@ -853,11 +921,13 @@ it("does not repeat an old detach or let its event change the replacement", asyn
   port.detachObservedAsync.mockReturnValueOnce(ack.promise);
   void owner.stop();
   void owner.stop();
+
   const next = owner.play(
     item("b"),
     { kind: "file", originalLanguage: null, open: source },
     options,
   );
+
   await tick();
   expect(port.detachObservedAsync).toHaveBeenCalledExactlyOnceWith(a.attemptId);
   ack.resolve(receipt(a.attemptId, a.itemId));
@@ -878,21 +948,27 @@ it.each(["replace", "drop", "replace-and-restore"] as const)(
   async (change) => {
     const { xtreamProvider } = await import("@mrstreamer/core/xtream");
     const sources = await import("../src/sources.ts");
+
     const provider = xtreamProvider(
       { server: "http://fixture.invalid", username: "fixture", password: "fixture" },
       { userAgent: "MrStreamer fixture" },
     );
+
     const original = { revision: 1, provider, login: [] };
     sources.setSource("sub", original);
     const lookup = deferred<Awaited<ReturnType<typeof source>>>();
+
     const playing = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: () => lookup.promise },
       options,
     );
+
     await tick();
+
     if (change === "drop") sources.dropSource("sub");
     else sources.setSource("sub", { revision: 2, provider, login: [] });
+
     if (change === "replace-and-restore") sources.setSource("sub", original);
     expect(owner.playbackState.get().phase.kind).toBe("idle");
     expect(owner.playbackState.get().closing).toEqual(["sub"]);
@@ -916,6 +992,7 @@ it("queries fresh facts for current ready and track observations without choosin
   });
   await tick();
   expect(port.getObservedTracksAsync).toHaveBeenCalledOnce();
+
   const tracks = {
     ...identity,
     revision: 1,
@@ -925,6 +1002,7 @@ it("queries fresh facts for current ready and track observations without choosin
     selectedAudioId: null,
     selectedSubtitleId: null,
   } as const;
+
   port.emit("playbackObservation", {
     version: 1,
     sequence: 2,
@@ -940,22 +1018,28 @@ it("queries fresh facts for current ready and track observations without choosin
 it("an initially absent source can restore during reclaim before lookup binds it", async () => {
   const { xtreamProvider } = await import("@mrstreamer/core/xtream");
   const sources = await import("../src/sources.ts");
+
   const provider = xtreamProvider(
     { server: "http://fixture.invalid", username: "fixture", password: "fixture" },
     { userAgent: "MrStreamer fixture" },
   );
+
   const reclaim = deferred<void>();
   stop = () => reclaim.resolve();
   owner.onAdmission({ acquire: () => reclaim.promise, release: () => undefined });
+
   const lookup = vi.fn(async () => {
     expect(sources.sourceOf("sub").provider).toBe(provider);
+
     return source();
   });
+
   const playing = owner.play(
     item("a"),
     { kind: "file", originalLanguage: null, open: lookup },
     options,
   );
+
   await tick();
   sources.setSource("sub", { revision: 1, provider, login: [] });
   expect(owner.playbackState.get()).toMatchObject({ watch: true, phase: { kind: "loading" } });
@@ -975,24 +1059,30 @@ it.each(["lookup", "format"] as const)(
     const login = ["r79-fixture-user", "r79-fixture-secret"];
     const uncertain = ["short/sig", "en", "ab/c", "ab", "1,1"];
     const detail = `Unbroken: live/${login[0]}/${login[1]}/1.ts sig=guest|${encodeURIComponent(uncertain[0]!)} overlap=ab/cd self=21,1,1`;
+
     const provider = xtreamProvider(
       { server: "http://fixture.invalid", username: login[0]!, password: login[1]! },
       { userAgent: "MrStreamer fixture" },
     );
+
     const reclaim = deferred<void>();
     stop = () => reclaim.resolve();
     owner.onAdmission({ acquire: () => reclaim.promise, release: () => undefined });
+
     const lookup = vi.fn(async () => {
       if (failureAt === "format") {
         throw new AppFailure({ kind: "stream", failure: { kind: "unsupported", detail } });
       }
+
       throw new Error(detail);
     });
+
     const playing = owner.play(
       item("late-login"),
       { kind: "file", originalLanguage: null, open: lookup },
       options,
     );
+
     await tick();
     sources.setSource("sub", { revision: 1, provider, login, uncertain });
     reclaim.resolve();
@@ -1029,19 +1119,23 @@ it("an obsolete pre-reader reclaim does not hold another provider's selection", 
   const reclaim = vi.fn((id: string) => (id === "s1" ? first.promise : Promise.resolve()));
   owner.onAdmission({ acquire: (id) => reclaim(id), release: () => undefined });
   const oldLookup = vi.fn(source);
+
   const old = owner.play(
     item("a", "s1"),
     { kind: "file", originalLanguage: null, open: oldLookup },
     options,
   );
+
   await tick();
   expect(reclaim).toHaveBeenCalledExactlyOnceWith("s1");
   const newLookup = vi.fn(source);
+
   const next = owner.play(
     item("b", "s2"),
     { kind: "file", originalLanguage: null, open: newLookup },
     options,
   );
+
   await tick();
   expect(newLookup).toHaveBeenCalledOnce();
   expect(reclaim.mock.calls.map(([id]) => id)).toEqual(["s1", "s2"]);
@@ -1061,24 +1155,30 @@ it.each(["resolve", "reject"] as const)(
       first.resolve();
       second.resolve();
     };
+
     const reclaim = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
     owner.onAdmission({ acquire: (id) => reclaim(id), release: () => undefined });
     const oldLookup = vi.fn(source);
+
     const old = owner.play(
       item("a"),
       { kind: "file", originalLanguage: null, open: oldLookup },
       options,
     );
+
     await tick();
     const newLookup = vi.fn(source);
+
     const next = owner.play(
       item("b"),
       { kind: "file", originalLanguage: null, open: newLookup },
       options,
     );
+
     await tick();
     expect(reclaim).toHaveBeenCalledTimes(2);
     expect(newLookup).not.toHaveBeenCalled();
+
     if (ending === "resolve") first.resolve();
     else first.reject(new Error("obsolete reclaim refused"));
     await old;
@@ -1097,6 +1197,7 @@ it.each(["close", "aside", "pip-start", "pip-stop"] as const)(
     await start();
     const request = owner.request();
     expect(request.stands()).toBe(true);
+
     if (change === "close") void owner.closeWatch();
     else if (change === "aside") owner.setAside();
     else owner.pictureInPicture(change === "pip-start");
@@ -1156,10 +1257,12 @@ describe("original provider-file observation", () => {
     });
     await tick();
     expect(observed).toHaveBeenLastCalledWith({ audio: ["en"], subtitles: [] });
+
     const unknown = {
       ...fileTracks(id, 2),
       subtitles: { state: "unavailable" as const, options: [] },
     };
+
     port.emit("playbackObservation", {
       version: 1,
       sequence: 2,
@@ -1169,6 +1272,7 @@ describe("original provider-file observation", () => {
     });
     await tick();
     expect(observed).toHaveBeenCalledOnce();
+
     const ready = {
       ...fileTracks(id, 3),
       subtitles: {
@@ -1187,6 +1291,7 @@ describe("original provider-file observation", () => {
         })),
       },
     };
+
     port.emit("playbackObservation", {
       version: 1,
       sequence: 3,
@@ -1199,6 +1304,7 @@ describe("original provider-file observation", () => {
       { audio: ["en"], subtitles: [] },
       { audio: ["en"], subtitles: ["nl"] },
     ]);
+
     const same = {
       ...ready,
       revision: 4,
@@ -1211,6 +1317,7 @@ describe("original provider-file observation", () => {
         options: ready.audio.options.map((track) => ({ ...track, revision: 4 })),
       },
     };
+
     port.emit("playbackObservation", {
       version: 1,
       sequence: 4,
@@ -1220,6 +1327,7 @@ describe("original provider-file observation", () => {
     });
     await tick();
     expect(observed).toHaveBeenCalledTimes(2);
+
     const excessive = {
       ...fileTracks(id, 5),
       audio: {
@@ -1231,6 +1339,7 @@ describe("original provider-file observation", () => {
         })),
       },
     };
+
     port.emit("playbackObservation", {
       version: 1,
       sequence: 5,
@@ -1277,13 +1386,16 @@ it("a source replacement retires a manual audio request before its late acknowle
   preferences.updateMediaPreferences("audio", { kind: "follow-title" });
   preferences.updateMediaPreferences("titleLanguage", "en");
   preferences.updateMediaPreferences("subtitles", { kind: "off" });
+
   const provider = xtreamProvider(
     { server: "http://fixture.invalid", username: "fixture", password: "fixture" },
     { userAgent: "MrStreamer fixture" },
   );
+
   sources.setSource("sub", { revision: 1, provider, login: [] });
   const identity = await start();
   const base = fileTracks(identity.attemptId);
+
   const tracks = {
     ...base,
     audio: {
@@ -1294,8 +1406,10 @@ it("a source replacement retires a manual audio request before its late acknowle
       ],
     },
   };
+
   port.getObservedTracksAsync.mockResolvedValue(tracks);
   const row = (await owner.trackChoices("audio"))?.find((each) => each.label === "German");
+
   if (!row) throw new Error("No German row");
   const ack = deferred<{ kind: "requested" }>();
   stop = () => ack.resolve({ kind: "requested" });

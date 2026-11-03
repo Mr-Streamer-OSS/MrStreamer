@@ -9,6 +9,7 @@ import { PAGES, SITE } from "../scripts/pages.ts";
 
 const revision = "a".repeat(40);
 const canonical = PAGES.map(({ address }) => SITE + address);
+
 const manifest = {
   site: SITE,
   revision,
@@ -16,7 +17,9 @@ const manifest = {
   key: INDEXNOW_KEY,
   urlList: canonical,
 };
+
 const cleanup: (() => Promise<void> | void)[] = [];
+
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
@@ -31,12 +34,14 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
     join(folder, "sitemap.xml"),
     `<urlset>${canonical.map((url) => `<url><loc>${url}</loc></url>`).join("")}</urlset>`,
   );
+
   const requests: {
     method: string | undefined;
     path: string | undefined;
     body: string;
     contentType: string | undefined;
   }[] = [];
+
   const server = createServer(async (req, res) => {
     // Counted as it arrives, so a request its sender gave up on while its body came still counts.
     const request = {
@@ -45,9 +50,13 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
       body: "",
       contentType: req.headers["content-type"],
     };
+
     requests.push(request);
+
     for await (const chunk of req) request.body += String(chunk);
+
     if (override?.(req, res)) return;
+
     if (req.url === `/${INDEXNOW_KEY}.txt`) res.end(INDEXNOW_KEY);
     else if (req.url === `/${INDEXNOW_MARKER}`)
       res.end(readFileSync(join(folder, INDEXNOW_MARKER)));
@@ -57,6 +66,7 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
       res.end();
     }
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanup.push(
     () =>
@@ -66,15 +76,19 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
       }),
   );
   const address = server.address();
+
   if (!address || typeof address === "string") throw new Error("No fixture address");
   const origin = `http://127.0.0.1:${address.port}`;
+
   const options = {
     publicOrigin: origin,
     endpoint: `${origin}/api`,
     readinessDelayMs: 0,
     requestTimeoutMs: 500,
   };
+
   const submit = () => notifyIndexNow(folder, revision, options);
+
   return { folder, origin, options, submit, requests };
 }
 
@@ -86,8 +100,10 @@ describe("IndexNow production notification HTTP contract", () => {
         if (req.url !== "/api") return false;
         res.statusCode = status;
         res.end();
+
         return true;
       });
+
       const result = await f.submit();
       expect(result).toContain(`HTTP ${status}`);
       expect(result).toContain("Indexing is not guaranteed");
@@ -123,15 +139,19 @@ describe("IndexNow production notification HTTP contract", () => {
     buildId: { buildId: "22222222-2222-4222-8222-222222222222" },
     domain: { site: "https://preview.example.org" },
   };
+
   it.each(["key", "revision", "buildId", "domain", "redirect"])(
     "never POSTs when the public %s differs",
     async (mismatch) => {
       const f = await fixture((req, res) => {
         if (mismatch === "key" && req.url?.endsWith(".txt")) {
           res.end("different-public-key");
+
           return true;
         }
+
         if (req.url !== `/${INDEXNOW_MARKER}`) return false;
+
         if (mismatch === "redirect") {
           res.writeHead(302, { Location: "https://example.org/preview" });
           res.end();
@@ -142,8 +162,10 @@ describe("IndexNow production notification HTTP contract", () => {
               ...published[mismatch],
             }),
           );
+
         return true;
       });
+
       await expect(f.submit()).rejects.toThrow();
       expect(f.requests.filter(({ method }) => method === "POST")).toHaveLength(0);
       expect(f.requests).toHaveLength(mismatch === "key" ? 6 : 12);
@@ -152,11 +174,14 @@ describe("IndexNow production notification HTTP contract", () => {
 
   it("waits for propagation then sends once", async () => {
     let checks = 0;
+
     const f = await fixture((req, res) => {
       if (req.url !== `/${INDEXNOW_MARKER}` || ++checks > 2) return false;
       res.end("previous-build");
+
       return true;
     });
+
     await f.submit();
     expect(checks).toBe(3);
     expect(f.requests.filter(({ method }) => method === "POST")).toHaveLength(1);
@@ -190,10 +215,12 @@ describe("IndexNow production notification HTTP contract", () => {
     key: { key: "bad" },
     empty: { urlList: [] },
   };
+
   it.each(["ownership", "revision", "site", "key", "empty"])(
     "rejects invalid packaged %s before HTTP",
     async (invalid) => {
       const f = await fixture();
+
       if (invalid === "ownership") writeFileSync(join(f.folder, `${INDEXNOW_KEY}.txt`), "wrong");
       else
         writeFileSync(
@@ -215,8 +242,10 @@ describe("IndexNow production notification HTTP contract", () => {
         if (req.url !== "/api") return false;
         res.writeHead(status, { "Retry-After": "999999" });
         res.end("untrusted upstream body");
+
         return true;
       });
+
       await expect(f.submit()).rejects.toThrow(`HTTP ${status}`);
       expect(f.requests.filter(({ method }) => method === "POST")).toHaveLength(1);
     },
@@ -231,12 +260,17 @@ describe("IndexNow production notification HTTP contract", () => {
             res.writeHead(200);
             res.write("partial");
           }
+
           return true;
         }
+
         if (req.url !== "/api") return false;
+
         if (failure === "disconnect") res.destroy();
+
         return true;
       });
+
       // Each request gets long enough to reach the fixture under a busy suite before its deadline
       // ends it, and the public reads, tried six times, stay quick. A disconnect ends at once.
       const requestTimeoutMs = failure === "disconnect" ? 2000 : failure === "api" ? 500 : 100;
@@ -256,12 +290,15 @@ describe("IndexNow production notification HTTP contract", () => {
 
   it("cancels during readiness without POST", async () => {
     const controller = new AbortController();
+
     const f = await fixture((req, res) => {
       if (!req.url?.endsWith(".txt")) return false;
       controller.abort();
       res.end("old-key");
+
       return true;
     });
+
     await expect(
       notifyIndexNow(f.folder, revision, { ...f.options, signal: controller.signal }),
     ).rejects.toThrow();
@@ -272,8 +309,10 @@ describe("IndexNow production notification HTTP contract", () => {
     const f = await fixture((req, res) => {
       if (!req.url?.endsWith(".txt")) return false;
       res.end("x".repeat(65_537));
+
       return true;
     });
+
     await expect(f.submit()).rejects.toThrow("64 KiB");
     expect(f.requests).toHaveLength(6);
   });
@@ -292,6 +331,7 @@ async function runCLI(folder: string, origin: string, onStart?: (cancel: () => v
     throw new Error("Unexpected external request in CLI fixture");
   };`,
   );
+
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const child = spawn(
       process.execPath,
@@ -300,6 +340,7 @@ async function runCLI(folder: string, origin: string, onStart?: (cancel: () => v
         env: { PATH: process.env["PATH"], GITHUB_STEP_SUMMARY: join(folder, "summary.md") },
       },
     );
+
     onStart?.(() => {
       child.kill("SIGTERM");
     });
@@ -318,15 +359,19 @@ async function runCLI(folder: string, origin: string, onStart?: (cancel: () => v
 describe("IndexNow notification CLI", () => {
   it("cancels the real CLI during readiness with a nonzero exit and no POST", async () => {
     let cancel: (() => void) | undefined;
+
     const f = await fixture((req, res) => {
       if (!req.url?.endsWith(".txt")) return false;
       res.end("previous-key");
       cancel?.();
+
       return true;
     });
+
     const result = await runCLI(f.folder, f.origin, (stop) => {
       cancel = stop;
     });
+
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("website is already deployed");
     expect(f.requests).toHaveLength(1);
@@ -337,16 +382,20 @@ describe("IndexNow notification CLI", () => {
       if (req.url !== "/api") return false;
       res.statusCode = status;
       res.end();
+
       return true;
     });
+
     const result = await runCLI(f.folder, f.origin);
     expect(result.code).toBe(status === 200 ? 0 : 1);
     const summary = readFileSync(join(f.folder, "summary.md"), "utf8");
     expect(summary).toContain(`HTTP ${status}`);
+
     if (status > 202) {
       expect(result.stderr).toContain("website is already deployed");
       expect(summary).toContain("website is already deployed");
     }
+
     expect(f.requests.filter(({ method }) => method === "POST")).toHaveLength(1);
   });
 });

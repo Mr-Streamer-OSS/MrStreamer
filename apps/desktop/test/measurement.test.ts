@@ -22,11 +22,14 @@ async function run(args: readonly string[], summary?: string) {
   const child = spawn(process.execPath, args, {
     env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
   });
+
   let stdout = "",
     stderr = "";
+
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
   const [status] = (await once(child, "close")) as [number | null];
+
   return { status, stdout, stderr };
 }
 
@@ -79,6 +82,7 @@ describe("measurement result contract", () => {
   it("requires every warm search query and its declared sample count", () => {
     const measured = report();
     measured.workload["warmSearchRunsPerQuery"] = 30;
+
     for (const [name, unit] of Object.entries(APP_SEARCH_METRICS))
       measured.metrics[name] = metric(
         unit,
@@ -94,10 +98,13 @@ describe("measurement result contract", () => {
   it("compares complete samples with absolute deltas, spread and warning-only budgets", () => {
     const before = report(),
       after = report();
+
     after.metrics["time to picture"]!.samples = [140];
+
     const measure = compareMeasurements([before], [after]).find(
       (value) => value.name === "time to picture",
     );
+
     expect(measure).toMatchObject({
       absoluteDelta: 40,
       relativeDelta: 0.4,
@@ -116,11 +123,13 @@ describe("measurement result contract", () => {
     const missing = report();
     delete missing.metrics["time to picture"];
     expect(() => compareMeasurements([report()], [missing])).toThrow(/complete metric/);
+
     for (const samples of [[], [NaN], [Infinity]]) {
       const invalid = report();
       invalid.metrics["time to picture"]!.samples = samples;
       expect(() => validateMeasurement(invalid)).toThrow();
     }
+
     const wrongUnit = report();
     wrongUnit.metrics["time to picture"]!.unit = "count";
     expect(() => compareMeasurements([report()], [wrongUnit])).toThrow(/unit/);
@@ -143,6 +152,7 @@ describe("measurement result contract", () => {
   it("uses calibrated resolution and handles a zero baseline without invented percentages", () => {
     const before = report(),
       after = report();
+
     before.metrics["streams opened, Home to Watch (count)"]!.samples = [0];
     after.calibration![0]!.observationErrorMs = 30;
     after.metrics["time to picture"]!.samples = [140];
@@ -159,6 +169,7 @@ describe("measurement result contract", () => {
 
 it("comparison CLI retains a warning verdict but exits nonzero for invalid instrumentation", async () => {
   const directory = mkdtempSync(join(tmpdir(), "measurement-contract-"));
+
   try {
     const before = join(directory, "before.json");
     writeFileSync(before, JSON.stringify(report()));
@@ -166,17 +177,21 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
     slower.metrics["time to picture"]!.samples = [140];
     const incomplete = report();
     delete incomplete.metrics["time to picture"];
+
     /** Compares the baseline with `candidate` offline, each into its own retained folder. */
     const compare = async (name: string, candidate: Measurement) => {
       const after = join(directory, `${name}.json`),
         output = join(directory, name),
         summary = join(directory, `${name}-summary.md`);
+
       writeFileSync(summary, "");
       writeFileSync(after, JSON.stringify(candidate));
+
       const result = await run(
         [compareBuilds, "--baseline-json", before, "--candidate-json", after, "--output", output],
         summary,
       );
+
       return {
         after,
         result,
@@ -184,11 +199,13 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
         saved: JSON.parse(readFileSync(join(output, "comparison.json"), "utf8")),
       };
     };
+
     const [valid, inconclusive, invalid] = await Promise.all([
       compare("warning", slower),
       compare("inconclusive", report()),
       compare("invalid", incomplete),
     ]);
+
     expect(valid.result.status, valid.result.stderr).toBe(0);
     expect(valid.saved).toMatchObject({
       status: "valid",
@@ -231,6 +248,7 @@ it("comparison CLI retains a warning verdict but exits nonzero for invalid instr
 it("counts are whole numbers from 1 to their maximum", () => {
   expect(positiveCount("1", "rounds", 20)).toBe(1);
   expect(positiveCount("20", "rounds", 20)).toBe(20);
+
   for (const value of ["0", "21", "NaN", "2.5", "-1", ""])
     expect(() => positiveCount(value, "rounds", 20)).toThrow(
       "rounds must be an integer from 1 to 20",
@@ -279,6 +297,7 @@ it("rejects retained reports with forged movement or unmatched execution environ
       value.environment.loadAverage = [Infinity, 0, 0];
     },
   ];
+
   for (const mutate of mutations) {
     const value = report();
     mutate(value);
@@ -288,14 +307,17 @@ it("rejects retained reports with forged movement or unmatched execution environ
 
 it("small public workloads create nested destinations and reject incomplete retained service reports", async () => {
   const directory = mkdtempSync(join(tmpdir(), "measurement-services-"));
+
   try {
     // A regular file cannot be a destination directory. Fail before generating even this tiny guide.
     const blocker = join(directory, "blocker");
     writeFileSync(blocker, "occupied");
+
     const workloads = [
       ["guide", ["--guide-channels", "2", "--programmes", "70"], "now and next for 60 channels"],
       ["viewing", ["--events", "1"], "watch"],
     ] as const;
+
     const [denied, ...measured] = await Promise.all([
       run([
         "--expose-gc",
@@ -315,15 +337,20 @@ it("small public workloads create nested destinations and reject incomplete reta
         ]),
       ),
     ]);
+
     expect(denied!.status).toBe(1);
     expect(denied!.stderr).toContain("Measurement destination is not writable");
+
     for (const [index, [tool, , metricName]] of workloads.entries()) {
       expect(measured[index]!.status, measured[index]!.stderr).toBe(0);
+
       const retained = JSON.parse(
         readFileSync(join(directory, tool, "nested", "result.json"), "utf8"),
       ) as Measurement;
+
       expect(retained.tool).toBe(tool);
       expect(() => compareMeasurements([retained], [retained])).not.toThrow();
+
       const mutations: ((value: Measurement) => void)[] = [
         (value) => {
           value.metrics[metricName]!.samples = [1];
@@ -335,6 +362,7 @@ it("small public workloads create nested destinations and reject incomplete reta
           value.workload[tool === "guide" ? "programmesPerChannel" : "inputEvents"] = -1;
         },
       ];
+
       for (const mutate of mutations) {
         const value = structuredClone(retained);
         mutate(value);
@@ -351,13 +379,16 @@ it("reports separated slowdowns, overlapping ranges and insufficient samples", (
   // Two samples are enough to inspect ranges, but do not claim repeated-comparison confidence.
   const before = report(),
     after = report();
+
   for (const value of [before, after]) {
     value.workload["runs"] = 2;
+
     for (const [name, measure] of Object.entries(value.metrics))
       if (name !== "installed size (MB)" && name !== "streams opened, Home to Watch (count)")
         measure.samples.push(measure.samples[0]!);
     value.observations!.push(...structuredClone(value.observations!));
   }
+
   before.metrics["time to picture"]!.samples = [100, 130];
   after.metrics["time to picture"]!.samples = [120, 200];
   after.metrics["channel switch"]!.samples = [140, 160];
@@ -377,8 +408,10 @@ it("requires five pooled samples and warns on separated count increases, includi
   const countReport = (count: number) => {
     const value = report();
     value.metrics["streams opened per tune (count)"]!.samples = [count];
+
     return value;
   };
+
   const baseline = [1, 1, 2, 1, 1].map(countReport);
   const candidate = [2, 2, 2, 2, 2].map(countReport);
   const overlap = compareMeasurements(baseline, candidate);
@@ -394,10 +427,12 @@ it("requires five pooled samples and warns on separated count increases, includi
       (value) => value.outcome === "inconclusive" && value.insufficientSamples,
     ),
   ).toBe(true);
+
   const separated = compareMeasurements(
     Array.from({ length: 5 }, () => countReport(10)),
     Array.from({ length: 5 }, () => countReport(11)),
   );
+
   expect(separated.find((value) => value.name === "streams opened per tune (count)")).toMatchObject(
     {
       absoluteDelta: 1,

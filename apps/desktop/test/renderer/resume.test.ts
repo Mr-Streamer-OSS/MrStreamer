@@ -118,10 +118,13 @@ beforeEach(async () => {
   ipc.always("viewing.episodes", { progress: [halfway], marks: [], undoable: null });
   useUi.setState(useUi.getInitialState(), true);
   client = new QueryClient();
+
   function Probe() {
     resume = useResume();
+
     return null;
   }
+
   const mounted = queryView(client);
   await mounted.render(createElement(Probe));
   unmount = mounted.unmount;

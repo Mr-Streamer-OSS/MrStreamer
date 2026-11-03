@@ -11,4 +11,5 @@ export const BuildProperties = lazy(() =>
     distribution: "'direct' | 'store'",
   }).onUndeclaredKey("delete"),
 );
+
 export type BuildProperties = Infer<typeof BuildProperties>;

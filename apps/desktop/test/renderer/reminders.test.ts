@@ -22,6 +22,7 @@ vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date(2026, 9, 14, 21, 0, 0));
 });
+
 afterAll(() => vi.useRealTimers());
 
 const MINUTE = 60_000;
@@ -54,6 +55,7 @@ const reminder = (id: string, minutes: number, changes: Partial<Reminder> = {}):
 });
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   player.reset();
@@ -79,6 +81,7 @@ async function shown(list: ReminderList, before: () => void = () => {}) {
   ipc.answer("reminders.list", () => current);
   ipc.answer("reminders.cancel", ({ id }) => {
     current = { ...current, reminders: current.reminders.filter((each) => each.id !== id) };
+
     return null;
   });
   ipc.answer("reminders.dismiss", ({ id }) => {
@@ -88,12 +91,14 @@ async function shown(list: ReminderList, before: () => void = () => {}) {
         each.id === id ? { ...each, banner: false } : each,
       ),
     };
+
     return null;
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const stop = syncReminders(client);
   const mounted = queryView(client);
   const { container } = mounted;
+
   const tree = (bell: boolean) =>
     createElement(
       Fragment,
@@ -101,19 +106,23 @@ async function shown(list: ReminderList, before: () => void = () => {}) {
       bell && createElement(RemindersMenu),
       createElement(ReminderBanners),
     );
+
   await mounted.render(tree(true));
   unmount = () => {
     mounted.unmount();
     stop();
   };
+
   const bell = () =>
     [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
       button.getAttribute("aria-label")?.startsWith("Reminders"),
     )!;
+
   const cross = (title: string) =>
     document.querySelector<HTMLButtonElement>(
       `button[aria-label="Remove the reminder for ${title}"]`,
     )!;
+
   return {
     bell,
     /** The main process's list is now `next`, and it hasn't said so yet. */
@@ -150,6 +159,7 @@ async function shown(list: ReminderList, before: () => void = () => {}) {
       cross(title).focus();
       await act(async () => cross(title).click());
       await ready(() => expect(ipc.argsOf("reminders.cancel").at(-1)).toEqual({ id: title }));
+
       return answer;
     },
     press: (key: string) =>
@@ -191,6 +201,7 @@ describe("reminders", () => {
         reminder("Gone", 24 * 60, { status: { kind: "gone" } }),
       ],
     });
+
     await ready(() => expect(page.bell().getAttribute("aria-label")).toBe("Reminders, 3 to come"));
     expect(page.bell().textContent).toBe("3");
     await page.open();
@@ -209,6 +220,7 @@ describe("reminders", () => {
       notifications: null,
       reminders: [reminder("First", 30), reminder("Second", 60)],
     });
+
     await page.open();
     await ready(() => expect(page.rows()).toHaveLength(2));
     page.cross("First").focus();
@@ -270,6 +282,7 @@ describe("reminders", () => {
       },
       () => ipc.answer("library.channel", () => channel),
     );
+
     await ready(() =>
       expect(page.banner()?.textContent).toBe("Starts nowSki JumpingEurosport 1WatchDismiss"),
     );
@@ -301,14 +314,17 @@ describe("reminders", () => {
       },
       () => ipc.refuse("library.channel", { kind: "channel-not-found", channelId: "11" }),
     );
+
     await ready(() =>
       expect(page.banner()?.textContent).toBe(
         "Started 12 min agoLate FilmEurosport 1 · Not available nowWatchDismiss",
       ),
     );
+
     const watch = [...page.banner()!.querySelectorAll("button")].find(
       (button) => button.textContent === "Watch",
     );
+
     expect(watch?.disabled).toBe(true);
     await page.click("Dismiss", page.banner()!);
     expect(ipc.argsOf("reminders.dismiss")).toEqual([{ id: "Late Film" }]);
@@ -358,9 +374,11 @@ describe("the keys as a reminder's row goes", () => {
     await page.open();
     await ready(() => expect(page.rows()).toHaveLength(all.length));
     const answers: Awaited<ReturnType<typeof page.takeOut>>[] = [];
+
     for (const title of out) answers.push(await page.takeOut(title));
     const rest = { notifications: null, reminders: all.filter((each) => !out.includes(each.id)) };
     const answer = () => act(async () => answers.forEach((each) => each.resolve(null)));
+
     /** Main's list loses them: the change and the answers in `order`, until all is read. */
     const lose = async (order: (typeof orders)[number]) => {
       if (order === "the change first") await page.change(rest);
@@ -368,6 +386,7 @@ describe("the keys as a reminder's row goes", () => {
         page.serve(rest);
         await answer();
       }
+
       const left = rest.reminders.map((each) => each.id).join();
       await ready(() =>
         expect(
@@ -378,20 +397,25 @@ describe("the keys as a reminder's row goes", () => {
               .join() === left,
         ).toBe(true),
       );
+
       if (order === "the change first") await answer();
       else await page.change(rest);
       await page.settled();
     };
+
     return { page, rest, answer, lose };
   }
 
   /** Each element the keys land on from now, by its label. */
   const landings = () => {
     const landed: string[] = [];
+
     const land = ({ target }: FocusEvent) =>
       landed.push((target as Element).getAttribute("aria-label") ?? (target as Element).tagName);
+
     document.addEventListener("focus", land, true);
     onTestFinished(() => document.removeEventListener("focus", land, true));
+
     return landed;
   };
 

@@ -52,19 +52,25 @@ const edges = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 const { native } = await import("./native-files.ts");
+
 vi.mock("../src/account.ts", async () => {
   const { useSyncExternalStore } = await import("react");
+
   const subscribe = (listener: () => void) => {
     edges.roster.add(listener);
+
     return () => {
       edges.roster.delete(listener);
     };
   };
+
   return {
     members: () => edges.members,
     onRoster: (listener: () => void) => {
       edges.roster.add(listener);
+
       return () => edges.roster.delete(listener);
     },
     shownOf: (titles: { kind: string; value?: unknown; last?: unknown }) =>
@@ -84,44 +90,59 @@ vi.mock("../src/account.ts", async () => {
     savable: (id: string, source: unknown) => edges.sources.get(id) === source,
   };
 });
+
 vi.mock("../src/sources.ts", () => ({
   currentSource: (id: string) => edges.sources.get(id),
   sourceOf: (id: string) => {
     const found = edges.sources.get(id);
+
     if (!found) throw new Error(`${id} isn't signed in`);
+
     return found;
   },
 }));
+
 vi.mock("../src/viewing.ts", async () => {
   const { useSyncExternalStore } = await import("react");
+
   const subscribe = (listener: () => void) => {
     edges.watching.add(listener);
+
     return () => edges.watching.delete(listener);
   };
+
   return {
     serveViewing: () => undefined,
     useViewing: () => useSyncExternalStore(subscribe, () => edges.viewing),
   };
 });
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
+
 vi.mock("../src/errors.ts", () => ({ describeError: () => "failed" }));
+
 vi.mock("../src/tab-bar.ts", () => ({ useFixedTabBar: () => undefined }));
+
 vi.mock("../src/resume.ts", () => ({
   detailsHref: () => "/",
   openDetails: (title: Title, asked = false) => edges.opened.push({ title, asked }),
   resume: () => undefined,
   useContinueWatching: () => [],
 }));
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("react-native", async () => {
   const { createElement, Fragment, memo } = await import("react");
   const { reactNative } = await import("./react-native.ts");
+
   return {
     ...reactNative,
     useWindowDimensions: () => ({ width: 390, height: 844 }),
@@ -148,14 +169,19 @@ vi.mock("react-native", async () => {
     ),
     Pressable: (props: Parameters<typeof reactNative.Pressable>[0]) => {
       const { onPress, accessibilityLabel, testID } = props;
+
       if (onPress && accessibilityLabel) edges.presses.set(accessibilityLabel, onPress);
+
       if (onPress && testID) edges.presses.set(`native:${testID}`, onPress);
+
       return reactNative.Pressable(props);
     },
   };
 });
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: {},
     Message: ({
@@ -173,13 +199,17 @@ vi.mock("../src/ui.tsx", async () => {
       ),
   };
 });
+
 vi.mock("../src/artwork-cache.ts", () => ({ useArtwork: () => ({ kind: "none" }) }));
+
 vi.mock("../src/titles-ui.tsx", async (importOriginal) => {
   const { createElement } = await import("react");
   const actual = await importOriginal<typeof import("../src/titles-ui.tsx")>();
+
   /** A row or a grid as the ids of its titles. */
   const shown = (name: string, titles: readonly Title[]) =>
     createElement("section", { "data-shown": name }, titles.map(ownedKey).join(","));
+
   return {
     Artwork: () => null,
     CollectionTileView: () => null,
@@ -214,7 +244,9 @@ vi.mock("../src/titles-ui.tsx", async (importOriginal) => {
     }) => {
       if (edges.nativeGrid)
         return createElement(actual.PosterGrid, { titles, header, empty, onPress });
+
       for (const title of titles) edges.presses.set(`tile:${title.id}`, () => onPress(title));
+
       return createElement(
         "div",
         null,
@@ -228,15 +260,20 @@ vi.mock("../src/titles-ui.tsx", async (importOriginal) => {
     },
   };
 });
+
 vi.mock("../src/watchlist.ts", () => ({
   alignWatchlist: () => undefined,
   serveWatchlist: () => undefined,
 }));
+
 vi.mock("../src/header.tsx", () => ({ tabHref: () => "/" }));
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   const pass = ({ children }: { children?: React.ReactNode }) =>
     createElement(Fragment, null, children);
+
   return {
     Docked: ({
       children,
@@ -258,9 +295,11 @@ vi.mock("../src/loading.tsx", async () => {
     useDockInset: () => 0,
   };
 });
+
 vi.mock("@mrstreamer/core/metadata/store", () => ({
   metadataStore: (deps: { onChange: (change: { content: boolean }) => void }) => {
     edges.notify = deps.onChange;
+
     return {
       get: (kind: string, id: string) => edges.known?.(kind, id) ?? null,
       name: () => null,
@@ -276,12 +315,14 @@ vi.mock("@mrstreamer/core/metadata/store", () => ({
 
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 interface FakeProvider {
   readonly url: string;
   readonly titles: unknown;
   serveTitles(select: (all: unknown) => unknown): void;
   close(): Promise<void>;
 }
+
 const { startFakeProvider, measurementTitles } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -298,6 +339,7 @@ const { startFakeProvider, measurementTitles } = (await import(FAKE_PROVIDER)) a
 function tmdbOf(round: number) {
   return (_kind: string, id: string): TitleMetadata => {
     const n = Number(id);
+
     return {
       genres: [[28, 35], [35], [18, 80], [99]][n % 4] ?? [],
       language: n % 3 === 0 ? "nl" : "en",
@@ -313,6 +355,7 @@ function tmdbOf(round: number) {
 /** What screens read of collections: every list, its name and size, rows, genres and services. */
 function shown(made: Collections, like: Title | undefined) {
   const liked = like ? (`like:${ownedKey(like)}` as const) : null;
+
   const ids: CollectionId[] = [
     "all",
     "4k",
@@ -326,6 +369,7 @@ function shown(made: Collections, like: Title | undefined) {
     ...made.services().map((service) => `service:${service.id}` as const),
     ...(liked ? [liked] : []),
   ];
+
   return {
     lists: ids.map((id) => ({
       id,
@@ -343,6 +387,7 @@ function shown(made: Collections, like: Title | undefined) {
 
 let provider: FakeProvider;
 let catalogue: OnDemandCatalogue;
+
 beforeAll(async () => {
   provider = await startFakeProvider({ username: "fixture", password: "pass", titles: 6000 });
   // Added in the last days, so New this week and this month hold titles by the clock now.
@@ -353,10 +398,12 @@ beforeAll(async () => {
     { userAgent: "fixture" },
   ).onDemandCatalogue();
 });
+
 afterAll(() => provider.close());
 
 describe("the collections Movies, Series, Home and details show", () => {
   type Owner = typeof import("../src/titles.ts");
+
   let titles: Owner;
 
   /** The app's owner as a launch starts it, with no subscriptions yet. */
@@ -409,10 +456,12 @@ describe("the collections Movies, Series, Home and details show", () => {
       ["b", catalogue],
     ]);
     prefs.updateMediaPreferences("titleLanguage", "en");
+
     const { views, bare } = await watch(
       () => indexed() !== before && titles.titlesWorkedOut(),
       "replacement English index",
     );
+
     stop();
     expect(
       obsolete.every(
@@ -425,11 +474,13 @@ describe("the collections Movies, Series, Home and details show", () => {
     ).toBe(true);
     expect(bare).toBe(0);
     expect(views.length).toBeGreaterThan(0);
+
     const permitted = {
       ...catalogue,
       movies: catalogue.movies.filter((row) => !adultIn(catalogue.movieCategories)(row)),
       series: catalogue.series.filter((row) => !adultIn(catalogue.seriesCategories)(row)),
     };
+
     const expected = indexCatalogue(
       [
         { subscriptionId: "a", catalogue: permitted },
@@ -437,9 +488,12 @@ describe("the collections Movies, Series, Home and details show", () => {
       ],
       "en",
     );
+
     for (const view of views) {
       expect(view.index).not.toBeNull();
+
       if (!view.index) throw new Error("Incomplete view");
+
       for (const kind of ["movie", "series"] as const) {
         expect(kindOf(view.index, kind).titles).toEqual(kindOf(expected, kind).titles);
         expect(holds(kindOf(view.index, kind).titles, "retired")).toBe(false);
@@ -449,6 +503,7 @@ describe("the collections Movies, Series, Home and details show", () => {
   });
 
   const subscribe = (...ids: string[]) => list(ids.map((id) => [id, catalogue]));
+
   /** Subscriptions with these lists, as their provider gave them, in this order. */
   const list = (lists: ReadonlyArray<readonly [string, OnDemandCatalogue]>) => {
     edges.members = lists.map(([id, value]) => ({
@@ -456,21 +511,28 @@ describe("the collections Movies, Series, Home and details show", () => {
       needsSecret: false,
       titles: { kind: "ready", value, took: 1 },
     }));
+
     for (const listener of edges.roster) listener();
   };
+
   /** The same lists as a provider gives them again: other objects, as a reload brings. */
   const again = (): OnDemandCatalogue => ({ ...catalogue, movies: [...catalogue.movies] });
+
   /** Whether `titles` holds a title of subscription `id`. */
   const holds = (titles: readonly Title[], id: string) =>
     titles.some((title) => title.versions.some((each) => each.subscriptionId === id));
+
   /** Whether `made` lists a title of subscription `id`. */
   const listsFrom = (made: Collections, id: string) => holds(made.list("all"), id);
+
   /** Whether `made` holds the titles `index` lists of `kind`, whatever metadata ranked them. */
   const madeOf = (made: Collections | null, kind: TitleKind, index: IndexedCatalogue | null) => {
     if (!made || !index) return false;
     const keys = (list: readonly Title[]) => list.map(ownedKey).toSorted().join(",");
+
     return keys(made.list("all")) === keys(kindOf(index, kind).titles);
   };
+
   /** What a screen reads each time the lists change, while `ready` doesn't hold yet. */
   async function watch(ready: () => boolean, what: string) {
     const views: Array<{
@@ -478,6 +540,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       movie: Collections | null;
       series: Collections | null;
     }> = [];
+
     const stop = titles.onTitleLists(() =>
       views.push({
         index: indexed(),
@@ -485,19 +548,25 @@ describe("the collections Movies, Series, Home and details show", () => {
         series: titles.collectionsOf("series"),
       }),
     );
+
     /** Tasks in which lists showed without both kinds' collections. */
     let bare = 0;
     await until(() => {
       if (indexed() && (!titles.collectionsOf("movie") || !titles.collectionsOf("series"))) bare++;
+
       return ready();
     }, what);
     stop();
+
     return { views, bare };
   }
+
   const indexed = () => {
     const lists = titles.titleLists();
+
     return lists.kind === "ready" ? lists.index : null;
   };
+
   /** Resolves once `ready` holds, checking after each task; fails after a few seconds. */
   async function until(ready: () => boolean, what: string) {
     for (let waited = 0; !ready(); waited += 1) {
@@ -505,6 +574,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       await new Promise((done) => setTimeout(done, 1));
     }
   }
+
   /** What making `kind`'s collections at once gives for the lists that show and metadata now. */
   const atOnce = (kind: TitleKind, index: IndexedCatalogue) =>
     collections({
@@ -517,8 +587,10 @@ describe("the collections Movies, Series, Home and details show", () => {
       expiresAt: (id) => edges.expiry?.(kind === "movie" ? "movie" : "tv", id) ?? Infinity,
       now: Date.now(),
     });
+
   const seedOf = (index: IndexedCatalogue) =>
     kindOf(index, "movie").titles.find((title) => title.tmdbId && !title.adult);
+
   /**
    * Resolves once `kind`'s collections show what making them at once now gives, comparing each
    * collections the owner holds once.
@@ -528,11 +600,14 @@ describe("the collections Movies, Series, Home and details show", () => {
     let checked: Collections | null = null;
     await until(() => {
       const made = titles.collectionsOf(kind);
+
       if (!made || made === checked) return false;
       checked = made;
+
       return JSON.stringify(shown(made, like)) === expected;
     }, "the latest collections");
   }
+
   /** The metadata store learned something lists show, and says so. */
   const learn = (round: number) => {
     edges.known = tmdbOf(round);
@@ -545,15 +620,18 @@ describe("the collections Movies, Series, Home and details show", () => {
       movies: [...catalogue.movies, ...browseFixture("movie").catalogue.movies],
       series: [...catalogue.series, ...browseFixture("series").catalogue.series],
     };
+
     expect(titles.collectionsOf("movie")).toBeNull();
     list([["a", fresh]]);
     const initial = await watch(() => titles.titlesWorkedOut(), "initial collections");
     expect(initial.bare).toBe(0);
     expect(initial.views.length).toBeGreaterThan(0);
+
     for (const view of initial.views) {
       for (const kind of ["movie", "series"] as const)
         expect(madeOf(view[kind], kind, view.index)).toBe(true);
     }
+
     const before = indexed();
     const prior = [titles.collectionsOf("movie"), titles.collectionsOf("series")];
     const snapshot = JSON.stringify(prior.map((made) => made?.list("all")));
@@ -564,18 +642,22 @@ describe("the collections Movies, Series, Home and details show", () => {
     learn(1);
     learn(2);
     expect([titles.collectionsOf("movie"), titles.collectionsOf("series")]).toEqual(prior);
+
     const { views, bare } = await watch(
       () => indexed() !== before && titles.titlesWorkedOut(),
       "refresh",
     );
+
     expect(bare).toBe(0);
     expect(views.length).toBeGreaterThan(0);
+
     for (const view of views) {
       for (const kind of ["movie", "series"] as const) {
         expect(madeOf(view[kind], kind, view.index)).toBe(true);
         expect(view[kind] && listsFrom(view[kind], "b")).toBe(true);
       }
     }
+
     // Metadata-only work must publish the late answer without another catalogue refresh.
     const sameIndex = indexed();
     learn(3);
@@ -597,8 +679,10 @@ describe("the collections Movies, Series, Home and details show", () => {
       "latest metadata",
     );
     expect(indexed()).toBe(sameIndex);
+
     for (const kind of ["movie", "series"] as const) {
       const made = titles.collectionsOf(kind);
+
       if (!made) throw new Error("No collections");
       expect(made.services()).toMatchObject([{ id: 8, name: "Netflix" }]);
       expect(made.list("service:8").map(ownedKey)).toEqual(["a:en-hd"]);
@@ -607,14 +691,18 @@ describe("the collections Movies, Series, Home and details show", () => {
       expect(made.list("popular").every((title) => title.originalLanguage === "en")).toBe(true);
       expect(made.list("popular")[0]?.genres).toEqual(["Drama", "Crime"]);
       const seed = made.list("service:8")[0];
+
       if (!seed) throw new Error("No seed");
       expect(made.list(`like:${ownedKey(seed)}`).length).toBeGreaterThan(0);
     }
+
     // Previously published collections must never be mutated by later work.
     expect(JSON.stringify(prior.map((made) => made?.list("all")))).toBe(snapshot);
+
     const stable = [titles.collectionsOf("movie"), titles.collectionsOf("series")].map((made) =>
       made?.list("all").map(ownedKey),
     );
+
     const notices: unknown[] = [];
     const stop = titles.onTitleLists(() => notices.push(titles.titleLists()));
     edges.members = edges.members.map((member) => ({
@@ -626,13 +714,16 @@ describe("the collections Movies, Series, Home and details show", () => {
         since: 0,
       },
     }));
+
     for (const listener of edges.roster) listener();
+
     try {
       for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
       expect(notices).toEqual([]);
     } finally {
       stop();
     }
+
     expect(
       [titles.collectionsOf("movie"), titles.collectionsOf("series")].map((made) =>
         made?.list("all").map(ownedKey),
@@ -648,29 +739,38 @@ describe("the collections Movies, Series, Home and details show", () => {
       learn(1);
       await new Promise((done) => setTimeout(done, 0));
       const retired: string[] = [];
+
       const stop = titles.onTitleLists(() => {
         for (const kind of ["movie", "series"] as const) {
           const made = titles.collectionsOf(kind);
+
           if (made && listsFrom(made, "b")) retired.push(kind);
         }
       });
+
       try {
         subscribe(...(all ? [] : ["a"]));
         expect(titles.collectionsOf("movie")).toBeNull();
         expect(titles.collectionsOf("series")).toBeNull();
+
         for (let task = 0; task < 200; task++) {
           await new Promise((done) => setTimeout(done, 1));
+
           for (const kind of ["movie", "series"] as const) {
             const index = indexed();
             expect(index && holds(kindOf(index, kind).titles, "b")).toBeFalsy();
             const made = titles.collectionsOf(kind);
+
             if (all) expect(made).toBeNull();
             else if (made) expect(listsFrom(made, "b")).toBe(false);
           }
         }
+
         expect(retired).toEqual([]);
+
         if (!all) {
           await until(() => titles.titlesWorkedOut(), "remaining subscription");
+
           for (const kind of ["movie", "series"] as const) {
             expect(madeOf(titles.collectionsOf(kind), kind, indexed())).toBe(true);
             expect(listsFrom(titles.collectionsOf(kind)!, "a")).toBe(true);
@@ -689,6 +789,7 @@ describe("the collections Movies, Series, Home and details show", () => {
         titleFile: async (kind: string, id: string) => ({ url: `${login}/${kind}/${id}` }),
       },
     });
+
     /** Both subscriptions' lists showing, then b removed: a film of a's, and how many listen. */
     async function removedB() {
       edges.sources.set("a", loginOf("first"));
@@ -696,16 +797,19 @@ describe("the collections Movies, Series, Home and details show", () => {
       subscribe("a", "b");
       await until(() => titles.collectionsOf("movie") !== null, "the first collections");
       const index = indexed();
+
       const film =
         index &&
         kindOf(index, "movie")
           .titles.flatMap((title) => title.versions)
           .find((version) => version.subscriptionId === "a" && version.container);
+
       if (!film) throw new Error("No film of a's");
       const listening = edges.roster.size;
       edges.sources.delete("b");
       subscribe("a");
       expect(titles.titleLists().kind).toBe("loading");
+
       return { ref: { kind: "movie", subscriptionId: "a", id: film.id } as const, listening };
     }
 
@@ -714,6 +818,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       const asked = titles.titleFile(ref, new AbortController().signal);
       // a signs in again, with a new password, while the request waits.
       edges.sources.set("a", loginOf("second"));
+
       for (const listener of edges.roster) listener();
       expect(await asked).toMatchObject({ url: `second/movie/${ref.id}` });
       expect(edges.roster.size).toBe(listening);
@@ -728,6 +833,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       await expect(stopped).rejects.toThrow("Another title was chosen");
       edges.sources.delete("a");
       edges.members = [];
+
       for (const listener of edges.roster) listener();
       await expect(removed).rejects.toMatchObject({ error: { kind: "no-subscription" } });
       expect(edges.roster.size).toBe(listening);
@@ -743,6 +849,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
     const index = indexed();
     const first = titles.collectionsOf("movie");
+
     if (!index || !first) throw new Error("No collections");
     const firstSelection = titles.collectionSelection("movie", first);
     expect(first.validAt(start + 4_000)).toBe(true);
@@ -757,6 +864,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       "collections made again",
     );
     const remade = titles.collectionsOf("movie")?.list("all");
+
     for (let task = 0; task < 100; task++) await new Promise((done) => setTimeout(done, 1));
     expect(titles.collectionsOf("movie")?.list("all")).toEqual(remade);
     // Six days on, what was new this week no longer is.
@@ -766,6 +874,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     expect(titles.collectionsOf("movie")?.size("new-week")).toBe(0);
     // The clock goes back a day: what was made for later is made again for now.
     const laterView = titles.collectionsOf("movie");
+
     if (!laterView) throw new Error("No collections");
     const later = laterView.list("all");
     const laterSelection = titles.collectionSelection("movie", laterView);
@@ -783,15 +892,19 @@ describe("the collections Movies, Series, Home and details show", () => {
   describe("on screen", () => {
     const window = new Window();
     const REACT_DOM = "react-dom/client";
+
     type Root = { render(node: unknown): void; unmount(): void };
+
     let root: Root;
     let container: ReturnType<typeof window.document.createElement>;
     beforeEach(async () => {
       Object.assign(globalThis, { window, document: window.document });
       (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
       const { createRoot } = (await import(REACT_DOM)) as {
         createRoot(container: object): Root;
       };
+
       container = window.document.createElement("div");
       window.document.body.append(container);
       root = createRoot(container);
@@ -802,9 +915,11 @@ describe("the collections Movies, Series, Home and details show", () => {
     });
 
     const draw = (node: React.ReactNode) => React.act(async () => root.render(node));
+
     /** What a row or grid shows, as its titles' ids; null when it isn't there. */
     const showing = (name: string) =>
       container.querySelector(`[data-shown="${name}"]`)?.textContent ?? null;
+
     /** Runs tasks inside act until `ready`, as the app's tasks run between draws. */
     async function settled(ready: () => boolean, what: string) {
       for (let task = 0; !ready(); task++) {
@@ -814,17 +929,21 @@ describe("the collections Movies, Series, Home and details show", () => {
         });
       }
     }
+
     const ids = (titles: readonly Title[]) => titles.map(ownedKey).join(",");
 
     const click = async (label: string) => {
       const button = [...container.querySelectorAll("button")].find(
         (button) => button.getAttribute("aria-label") === label || button.textContent === label,
       );
+
       if (!button) throw new Error(`No button ${label}. ${container.textContent}`);
       await React.act(async () => button.click());
     };
+
     const press = async (label: string) => {
       const action = edges.presses.get(label);
+
       if (!action) throw new Error(`No press ${label}`);
       await React.act(async () => action());
     };
@@ -843,6 +962,7 @@ describe("the collections Movies, Series, Home and details show", () => {
         expect(oldTap).toBeTypeOf("function");
         const retained = titles.collectionsOf(kind);
         const count = `4 of 4 ${kind === "movie" ? "movies" : "series"}`;
+
         const loseSource = async () =>
           React.act(async () => {
             edges.sources.delete("a");
@@ -856,8 +976,10 @@ describe("the collections Movies, Series, Home and details show", () => {
                 since: 1,
               },
             }));
+
             for (const listener of edges.roster) listener();
           });
+
         const recoverSource = async () =>
           React.act(async () => {
             edges.sources.set("a", { provider: { titleFile: () => null } });
@@ -871,8 +993,10 @@ describe("the collections Movies, Series, Home and details show", () => {
                 since: 2,
               },
             }));
+
             for (const listener of edges.roster) listener();
           });
+
         await loseSource();
         expect(titles.collectionsOf(kind)).toBe(retained);
         expect(container.textContent).toContain(count);
@@ -976,6 +1100,7 @@ describe("the collections Movies, Series, Home and details show", () => {
             since: 1,
           },
         }));
+
         for (const listener of edges.roster) listener();
       });
       // The roster rerenders this same mounted route. Collections deliberately stay retained.
@@ -1025,12 +1150,15 @@ describe("the collections Movies, Series, Home and details show", () => {
       "keeps truthful pending feedback and controls on a %s",
       async (place) => {
         const { CollectionScreen, TitlesHome } = await import("../src/titles-screen.tsx");
+
         const pending = () => {
           edges.members = [
             { entry: { id: "a" }, needsSecret: false, titles: { kind: "loading", last: null } },
           ];
+
           for (const listener of edges.roster) listener();
         };
+
         if (place === "pushed collection") {
           pending();
           await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
@@ -1041,6 +1169,7 @@ describe("the collections Movies, Series, Home and details show", () => {
           await click(place === "All tab" ? "All" : "4K");
           await React.act(async () => pending());
         }
+
         expect(titles.titleLists().kind).toBe("loading");
         expect(container.querySelector('[role="status"]')?.textContent).toBe("Loading movies.");
         expect(container.textContent).not.toContain("Catalogue unavailable");
@@ -1157,6 +1286,7 @@ describe("the collections Movies, Series, Home and details show", () => {
           titles: { kind: "failed", error: { kind: "network" }, last: null, since: 1 },
         },
       ];
+
       for (const listener of edges.roster) listener();
       await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
       expect(container.textContent).toContain("failed");
@@ -1177,6 +1307,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       await until(() => titles.collectionsOf("movie") !== null, "the first collections");
       const index = indexed();
       const seed = index && seedOf(index);
+
       if (!index || !seed) throw new Error("No lists");
       await draw(React.createElement(TitlesHome, { kind: "movie" }));
       expect(showing("New this week")).not.toBeNull();
@@ -1185,6 +1316,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       expect(atOnce("movie", index).list("new-week")).toEqual([]);
       await React.act(async () => {
         edges.viewing = { recentTitles: [{ title: seed }] };
+
         for (const listener of edges.watching) listener();
       });
       await settled(() => showing("New this week") === null, "For you as it stands now");
@@ -1197,6 +1329,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       subscribe("a");
       await until(() => titles.collectionsOf("movie") !== null, "the first collections");
       const index = indexed();
+
       if (!index) throw new Error("No lists");
       await draw(React.createElement(CollectionScreen, { kind: "movie", id: "all" }));
       expect(showing("grid")).toBe(ids(atOnce("movie", index).list("all")));

@@ -12,6 +12,7 @@ import {
 } from "../scripts/validation-evidence.ts";
 
 const expected = { sha: "a".repeat(40), identity: "b".repeat(64) };
+
 const producer: Producer = {
   repository: "Mr-Streamer-OSS/MrStreamer",
   event: "push",
@@ -20,6 +21,7 @@ const producer: Producer = {
   sha: expected.sha,
   conclusion: "success",
 };
+
 const evidence: Evidence = {
   version: 1,
   ...expected,
@@ -30,6 +32,7 @@ const evidence: Evidence = {
 
 test("only complete exact-source validation from a successful trusted main producer is reusable", () => {
   assert.equal(acceptsEvidence(evidence, expected, producer), true);
+
   for (const patch of [
     { repository: "fork/repo" },
     { event: "pull_request" },
@@ -39,6 +42,7 @@ test("only complete exact-source validation from a successful trusted main produ
     { conclusion: "failure" },
   ])
     assert.equal(acceptsEvidence(evidence, expected, { ...producer, ...patch }), false);
+
   for (const value of [
     null,
     {},
@@ -51,6 +55,7 @@ test("only complete exact-source validation from a successful trusted main produ
     { ...evidence, profile: "other" },
   ])
     assert.equal(acceptsEvidence(value, expected, producer), false);
+
   for (const result of ["skipped", "failure"]) {
     for (const part of ["check", "test"])
       assert.equal(
@@ -62,6 +67,7 @@ test("only complete exact-source validation from a successful trusted main produ
         false,
       );
   }
+
   assert.equal(
     acceptsEvidence(
       { ...evidence, results: { ...evidence.results, website: "failure" } },
@@ -74,6 +80,7 @@ test("only complete exact-source validation from a successful trusted main produ
 
 test("the verification CLI accepts complete and refuses invalid evidence through each entry path", () => {
   const dir = mkdtempSync(join(tmpdir(), "validation-cli-"));
+
   try {
     const script = resolve(import.meta.dirname, "../scripts/validation-evidence.ts");
     const link = join(dir, "verify.ts");
@@ -94,16 +101,20 @@ test("the verification CLI accepts complete and refuses invalid evidence through
       }),
     );
     writeFileSync(metadata, JSON.stringify(producer));
+
     for (const entry of [script, link]) {
       for (const flags of [[], ["--preserve-symlinks-main"]]) {
         const result = spawnSync(process.execPath, [...flags, entry, "verify", invalid, invalid], {
           encoding: "utf8",
         });
+
         assert.equal(result.status, 1, result.stderr);
+
         const accepted = spawnSync(process.execPath, [...flags, entry, "verify", valid, metadata], {
           encoding: "utf8",
           env: { ...process.env, VALIDATION_SHA: expected.sha },
         });
+
         assert.equal(accepted.status, 0, accepted.stderr);
       }
     }

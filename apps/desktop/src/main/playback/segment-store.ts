@@ -41,6 +41,7 @@ export function segmentStore(limits: SegmentLimits = SEGMENT_LIMITS) {
 
   function drop(index: number): void {
     const segment = segments.get(index);
+
     if (!segment) return;
     segments.delete(index);
     bytes -= segment.length;
@@ -58,6 +59,7 @@ export function segmentStore(limits: SegmentLimits = SEGMENT_LIMITS) {
           signal.removeEventListener("abort", look);
           resolve();
         };
+
         makers.add(look);
         signal.addEventListener("abort", look, { once: true });
         look();
@@ -69,6 +71,7 @@ export function segmentStore(limits: SegmentLimits = SEGMENT_LIMITS) {
       drop(index);
       segments.set(index, segment);
       bytes += segment.length;
+
       for (const waiter of waiting.filter((each) => each.index === index)) waiter.done(segment);
     },
     has: (index: number): boolean => segments.has(index),
@@ -79,24 +82,31 @@ export function segmentStore(limits: SegmentLimits = SEGMENT_LIMITS) {
      */
     take(index: number, signal: AbortSignal): Promise<Buffer | null> {
       asked = index;
+
       for (const kept of [...segments.keys()]) if (!wanted(kept)) drop(kept);
+
       for (const maker of [...makers]) maker();
       const ready = segments.get(index);
+
       if (ready) return Promise.resolve(ready);
+
       return new Promise((resolve) => {
         const waiter = {
           index,
           done: (segment: Buffer | null) => {
             const at = waiting.indexOf(waiter);
+
             if (at === -1) return;
             waiting.splice(at, 1);
             signal.removeEventListener("abort", left);
             resolve(segment);
           },
         };
+
         const left = () => waiter.done(null);
         signal.addEventListener("abort", left, { once: true });
         waiting.push(waiter);
+
         while (waiting.length > limits.waiting) waiting[0]!.done(null);
       });
     },

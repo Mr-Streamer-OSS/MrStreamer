@@ -26,6 +26,7 @@ const SOUND = [
   { id: "sound-en", name: "English", language: "en", frequency: 440 },
   { id: "sound-nl", name: "Nederlands", language: "nl", frequency: 660 },
 ] as const;
+
 const SUBTITLES = [
   { id: "subtitles-en", name: "English", language: "en" },
   { id: "subtitles-nl", name: "Nederlands", language: "nl" },
@@ -64,6 +65,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
       "1200k",
     ],
   ]);
+
   // A little short of the picture's minute: AAC's leading frames would otherwise add a 31st segment.
   const sounds = new Map<string, Media>(
     SOUND.map((sound) => [
@@ -74,6 +76,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
       ]),
     ]),
   );
+
   // Subtitle times are on the picture's clock, which its first segment's first timestamp starts.
   const [base] = execFileSync(
     "ffprobe",
@@ -84,12 +87,14 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
     ],
     { encoding: "utf8" },
   ).match(/\d+/) ?? ["0"];
+
   const subtitles = new Map<string, Media>(
     SUBTITLES.map((subtitle) => {
       const hash = basename(picture.dir).slice(-12);
       const dir = join(dirname(picture.dir), `tracks-${subtitle.id}-${hash}`);
       mkdirSync(dir, { recursive: true });
       let at = 0;
+
       const segments = picture.segments.map((segment, index) => {
         const file = `${String(index).padStart(3, "0")}.vtt`;
         const second = Math.round(at);
@@ -108,13 +113,18 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
         );
         renameSync(making, join(dir, file));
         at += segment.seconds;
+
         return { file, seconds: segment.seconds };
       });
+
       maker.record(`tracks-${subtitle.id}`, dir, "apps/ios/scripts/native-fixtures/tracks.ts");
+
       return [subtitle.id, { dir, segments }];
     }),
   );
+
   const renditions = new Map([["picture", picture], ...sounds, ...subtitles]);
+
   for (const [id, media] of renditions) {
     if (media.segments.length !== picture.segments.length) {
       throw new Error(
@@ -122,6 +132,7 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
       );
     }
   }
+
   const at = (rendition: string) => `/hls/${TRACKS_STREAM_ID}/${rendition}`;
 
   return {
@@ -149,17 +160,22 @@ export function liveTracks(maker: ReturnType<typeof mediaMaker>, started: number
     serve(path: string): { readonly type: string; readonly body: string | Buffer } | undefined {
       const match = /^([a-z-]+)(?:\.m3u8|\/(\d+)\.(?:ts|vtt))$/.exec(path);
       const media = match?.[1] ? renditions.get(match[1]) : undefined;
+
       if (!match || !media) return undefined;
       const [, rendition = "", n] = match;
       const subtitle = subtitles.has(rendition);
+
       if (n === undefined) {
         const uri = (each: number) => `${at(rendition)}/${each}.${subtitle ? "vtt" : "ts"}`;
+
         return {
           type: "application/vnd.apple.mpegurl",
           body: livePlaylist(media, started, uri, { timing: picture }),
         };
       }
+
       const segment = media.segments[Number(n) % media.segments.length];
+
       return segment
         ? {
             type: subtitle ? "text/vtt" : "video/mp2t",

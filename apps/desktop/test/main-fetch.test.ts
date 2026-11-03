@@ -20,9 +20,11 @@ describe("Main's fetch", () => {
         );
       });
     });
+
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
     try {
       await expect(fetch(`${origin}/codings`)).rejects.toThrow(TypeError);
       // What a stream left behind would throw as the socket closes, a moment later.

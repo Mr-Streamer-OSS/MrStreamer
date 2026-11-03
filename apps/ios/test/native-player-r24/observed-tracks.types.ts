@@ -20,6 +20,7 @@ const nativeAudioWithoutLanguage = {
   itemId: 1,
   revision: 1,
 } as const;
+
 const nativeSubtitleWithoutLanguage = {
   ...nativeAudioWithoutLanguage,
   group: "subtitles",
@@ -28,14 +29,17 @@ const nativeSubtitleWithoutLanguage = {
 
 export const audio: ObservedAudioTrack = nativeAudioWithoutLanguage;
 export const subtitle: ObservedSubtitleTrack = nativeSubtitleWithoutLanguage;
+
 export const knownAudio = {
   ...nativeAudioWithoutLanguage,
   language: "en",
 } satisfies ObservedAudioTrack;
+
 export const knownSubtitle = {
   ...nativeSubtitleWithoutLanguage,
   language: "nl",
 } satisfies ObservedSubtitleTrack;
+
 export const knownLanguages = [
   knownAudio.language.toLowerCase(),
   knownSubtitle.language.toLowerCase(),
@@ -50,15 +54,19 @@ export function uncheckedNativeLanguage(track: ObservedAudioTrack | ObservedSubt
   const language: string = track.language;
   // @ts-expect-error Consumers must handle native absence before using string methods.
   const lowered = track.language.toLowerCase();
+
   return { language, lowered };
 }
 
 // @ts-expect-error This correction does not relax the legacy audio declaration.
 export const legacyAudio: AudioTrack = nativeAudioWithoutLanguage;
+
 // @ts-expect-error This correction does not relax the legacy subtitle declaration.
 export const legacySubtitle: SubtitleTrack = nativeSubtitleWithoutLanguage;
+
 // @ts-expect-error Native item identity remains mandatory even when language is absent.
 export const missingItem: ObservedAudioTrack = { ...knownAudio, itemId: undefined };
+
 // @ts-expect-error The exact record still requires its snapshot revision.
 export const missingRevision: ObservedSubtitleTrack = { ...knownSubtitle, revision: undefined };
 

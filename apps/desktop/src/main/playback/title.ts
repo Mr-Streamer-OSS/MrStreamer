@@ -79,10 +79,12 @@ function defineProbe() {
       "visual_impaired?": "number",
     }),
   });
+
   const Frame = type({
     "stream_index?": "number",
     "side_data_list?": type({ "side_data_type?": "string" }).array(),
   });
+
   return type({
     "streams?": Stream.array(),
     "format?": type({
@@ -94,7 +96,9 @@ function defineProbe() {
     "frames?": Frame.array(),
   });
 }
+
 const Probe = lazy(defineProbe);
+
 type Stream = NonNullable<Infer<typeof Probe>["streams"]>[number];
 
 /** The subtitle codecs the app shows, by how they are carried. Others aren't listed. */
@@ -117,15 +121,19 @@ const SUBTITLE_FORMATS: Readonly<Record<string, SubtitleFormat>> = {
 /** What ffprobe's JSON says about a file, or null when it isn't ffprobe's JSON. */
 export function readProbe(json: unknown): TitleProbe | null {
   const probe = Probe()(json);
+
   if (probe instanceof type.errors) return null;
   const streams = probe.streams ?? [];
   const duration = Number(probe.format?.duration);
   const origin = Number(probe.format?.start_time);
+
   // Cover pictures are video streams too; the picture is the first moving one.
   const video = streams.find(
     (stream) => stream.codec_type === "video" && !stream.disposition?.attached_pic,
   );
+
   const formats = probe.format?.format_name?.split(",") ?? [];
+
   return {
     container: formats.includes("matroska")
       ? "matroska"
@@ -161,7 +169,9 @@ export function readProbe(json: unknown): TitleProbe | null {
     subtitles: [
       ...streams.flatMap((stream): TitleProbe["subtitles"][number][] => {
         const format = SUBTITLE_FORMATS[stream.codec_name ?? ""];
+
         if (stream.codec_type !== "subtitle" || !format) return [];
+
         const subtitle = {
           ...facts(stream),
           codec: stream.codec_name ?? null,
@@ -170,9 +180,11 @@ export function readProbe(json: unknown): TitleProbe | null {
           forced: stream.disposition?.forced === 1,
           hearingImpaired: stream.disposition?.hearing_impaired === 1,
         };
+
         if (format !== "teletext") return [subtitle];
         // One track per subtitle page; a stream that names none plays the first page it carries.
         const pages = teletextPages(stream.extradata, stream.tags?.language);
+
         return pages.length === 0 ? [subtitle] : pages.map((page) => ({ ...subtitle, ...page }));
       }),
       // Closed captions inside an H.264 or HEVC picture, channel 1, under the picture's own
@@ -222,11 +234,14 @@ function teletextPages(
   const bytes = hexBytes(extradata);
   const names = (languages ?? "").split(",");
   const pages = [];
+
   for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
     const kind = bytes[offset]! >> 3;
+
     if (kind !== 0x02 && kind !== 0x05) continue;
     const magazine = bytes[offset]! & 0x07 || 8;
     const page = magazine * 100 + Number(bytes[offset + 1]!.toString(16));
+
     if (!Number.isInteger(page)) continue;
     pages.push({
       page,
@@ -234,12 +249,14 @@ function teletextPages(
       hearingImpaired: kind === 0x05,
     });
   }
+
   return pages;
 }
 
 /** The bytes of ffprobe's hex dump: "00000000: 1088  .." lines. */
 function hexBytes(dump: string | undefined): number[] {
   if (!dump) return [];
+
   return dump
     .split("\n")
     .flatMap(
@@ -262,14 +279,17 @@ function facts(stream: Stream) {
 function pixelDepth(stream: Stream): number | null {
   const format = stream.pix_fmt ?? "";
   const planar = /^(?:yuva?(?:420|422|444)|gbra?)p(?:(\d+)(?:le|be))?$/.exec(format);
+
   if (planar) return planar[1] ? Number(planar[1]) : 8;
   const explicit = Number(stream.bits_per_raw_sample);
+
   return Number.isInteger(explicit) && explicit > 0 ? explicit : null;
 }
 
 /** Chroma is known only for the planar YUV formats ffprobe reports here. */
 function pixelChroma(format: string | undefined): "420" | "422" | "444" | null {
   const chroma = /^yuva?(420|422|444)p(?:\d+(?:le|be))?$/.exec(format ?? "")?.[1];
+
   return chroma === "420" || chroma === "422" || chroma === "444" ? chroma : null;
 }
 
@@ -381,10 +401,14 @@ export function titlePlan(
     ...(run.start > 0 ? ["-ss", seconds(run.start)] : []),
     ...["-copyts", "-i", urls.source],
   ];
+
   if (video) args.push("-map", `0:${video.id}`);
+
   if (sound) args.push("-map", `0:${sound.id}`);
+
   if (video && copyVideo) {
     args.push("-c:v", "copy");
+
     if (video.codec === "hevc" || video.codec === "hevc-10bit") args.push("-tag:v", "hvc1");
   } else if (video) {
     args.push(
@@ -392,8 +416,10 @@ export function titlePlan(
       ...H264_IMAGE_ARGUMENTS,
     );
   }
+
   if (sound && copySound) {
     args.push("-c:a", "copy");
+
     // AAC from an MPEG-TS file comes with ADTS headers, which MP4 doesn't take.
     if (sound.codec === "aac") args.push("-bsf:a", "aac_adtstoasc");
   } else if (sound) args.push(...AAC_STEREO_ARGUMENTS);
@@ -404,7 +430,9 @@ export function titlePlan(
     // Short fragments reach the player sooner, and let it hold back reading while paused.
     ...["-frag_duration", "1000000", "pipe:1"],
   );
+
   if (side) args.push(...side.args);
+
   if (video && copyVideo) {
     // Copied video starts at the keyframe before `start`; the report says which.
     args.push(
@@ -412,6 +440,7 @@ export function titlePlan(
       ...["-method", "PUT", urls.start],
     );
   }
+
   return {
     video: !video ? "none" : copyVideo ? "copy" : "convert",
     audio: !sound ? "none" : copySound ? "copy" : "convert",
@@ -462,8 +491,11 @@ export function receiverPlan(
     ...(run.cuts.seek === null ? [] : ["-ss", run.cuts.seek.toFixed(6)]),
     ...["-copyts", "-i", urls.source],
   ];
+
   if (video) args.push("-map", `0:${video.id}`);
+
   if (sound) args.push("-map", `0:${sound.id}`);
+
   if (video && copyVideo) args.push("-c:v", "copy");
   else if (video) {
     args.push(
@@ -476,10 +508,13 @@ export function receiverPlan(
       ...H264_IMAGE_ARGUMENTS,
     );
   }
+
   if (sound && copySound) args.push("-c:a", "copy");
   else if (sound) args.push(...AAC_STEREO_ARGUMENTS);
   args.push(...segmentArguments(run.cuts, run.from, run.first, urls.segments));
+
   if (side) args.push(...side.args);
+
   return {
     video: !video ? "none" : copyVideo ? "copy" : "convert",
     audio: !sound ? "none" : copySound ? "copy" : "convert",
@@ -499,7 +534,9 @@ export function selectedPlan(
   url: string,
 ): { readonly subtitle: SubtitleOutput; readonly args: readonly string[] } | null {
   const side = subtitleSide(probe, subtitle, url, 0);
+
   if (!side) return null;
+
   return {
     subtitle: side.output,
     args: [...["-hide_banner", "-loglevel", "error", "-copyts", "-i", "pipe:0"], ...side.args],
@@ -528,10 +565,12 @@ function subtitleSide(
   stream?: number,
 ): { readonly output: SubtitleOutput; readonly args: readonly string[] } | null {
   const track = probe.subtitles.find((each) => each.id === id);
+
   if (!track) return null;
   // The track's place in the file ffmpeg reads: its own, unless that file holds it alone.
   const map = ["-map", `0:${stream ?? track.id}`];
   const send = ["-flush_packets", "1", "-method", "PUT", url];
+
   const packets = (
     codec: SubtitleCodec,
     container: "mpegts" | "sup",
@@ -553,10 +592,12 @@ function subtitleSide(
       ...send,
     ],
   });
+
   switch (track.codec) {
     case null: {
       const hevc = probe.video?.name === "hevc";
       const units = hevc ? "39|40" : "6";
+
       return packets(
         "captions",
         "mpegts",
@@ -564,6 +605,7 @@ function subtitleSide(
         { captions: hevc ? "hevc" : "h264" },
       );
     }
+
     case "hdmv_pgs_subtitle":
       return packets("pgs", "sup", ["-c:s", "copy"]);
     case "dvd_subtitle":
@@ -577,6 +619,7 @@ function subtitleSide(
       return packets("captions", "mpegts", ["-c:s", "copy"], { captions: "track" });
     default:
       if (track.format !== "text") return null;
+
       return {
         output: { kind: "cues" },
         args: [...map, "-c:s", "webvtt", "-f", "webvtt", ...send],
@@ -591,7 +634,9 @@ function subtitleSide(
 export function firstPacketTime(report: string): number | null {
   const base = /^#tb 0: (\d+)\/(\d+)/m.exec(report);
   const packet = /^0,\s*(-?\d+),/m.exec(report);
+
   if (!base || !packet) return null;
+
   return (Number(packet[1]) * Number(base[1])) / Number(base[2]);
 }
 

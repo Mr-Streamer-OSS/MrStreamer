@@ -15,6 +15,7 @@ export function hasModifier(event: KeyboardEvent): boolean {
 /** True while the user types into a field, so single-key shortcuts stay out of the way. */
 export function isTyping(event: KeyboardEvent): boolean {
   const target = event.target;
+
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 }
 
@@ -23,8 +24,10 @@ const FULL_SCREEN_MS = 2000;
 
 let fullScreen = false;
 const fullScreenListeners = new Set<() => void>();
+
 listen("window.fullScreen", (value) => {
   fullScreen = value;
+
   for (const listener of fullScreenListeners) listener();
 });
 
@@ -38,15 +41,18 @@ listen("window.fullScreen", (value) => {
  */
 export function windowFullScreen(wanted: boolean): Promise<void> {
   if (fullScreen === wanted) return Promise.resolve();
+
   return new Promise((resolve) => {
     const done = () => {
       fullScreenListeners.delete(heard);
       clearTimeout(timer);
       resolve();
     };
+
     const heard = () => {
       if (fullScreen === wanted) done();
     };
+
     const timer = setTimeout(done, FULL_SCREEN_MS);
     fullScreenListeners.add(heard);
   });
@@ -57,6 +63,7 @@ export function useWindowFullScreen(): boolean {
   return useSyncExternalStore(
     (onChange) => {
       fullScreenListeners.add(onChange);
+
       return () => fullScreenListeners.delete(onChange);
     },
     () => fullScreen,

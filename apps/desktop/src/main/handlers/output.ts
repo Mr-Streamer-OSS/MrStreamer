@@ -58,10 +58,12 @@ export function outputHandlers({
       frame,
     ) => {
       const token = analytics.admitPlayback("live", measurement, frame);
+
       const control =
         measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
           ? measurement.control
           : undefined;
+
       return observeOpen(
         coordination,
         () => analytics.playbackFailureObserver(token ?? undefined),
@@ -69,6 +71,7 @@ export function outputHandlers({
           Effect.gen(function* () {
             const channel = yield* library.channel(named);
             const variants = yield* streamsOf(settings, channel, variant);
+
             return yield* output.playChannel(ownedId(channel), {
               variants,
               audio: audio ?? null,
@@ -82,16 +85,19 @@ export function outputHandlers({
     },
     "output.openTitle": ({ title, since, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
+
       const control =
         measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
           ? measurement.control
           : undefined;
+
       return observeOpen(
         coordination,
         () => analytics.playbackFailureObserver(token ?? undefined),
         (turn) =>
           Effect.gen(function* () {
             const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+
             return yield* output.openTitle(title, url, since, {
               turn,
               measurement: control,
@@ -107,11 +113,14 @@ export function outputHandlers({
       frame,
     ) => {
       analytics.admitPlayback("vod", measurement, frame);
+
       const control =
         measurement && analytics.isPlaybackControlCurrent(measurement.control, frame)
           ? measurement.control
           : undefined;
+
       const failedBeforeLoad = analytics.receiverLoadFailureObserver(control, frame);
+
       return output.playTitle(sessionId, {
         measurement: control,
         onPreloadFailure: failedBeforeLoad,

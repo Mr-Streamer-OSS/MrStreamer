@@ -57,6 +57,7 @@ const Stored = lazy(() =>
     "rememberedLiveBrowse?": "unknown",
   }),
 );
+
 type Stored = Infer<typeof Stored>;
 
 export class Settings extends Context.Service<
@@ -104,6 +105,7 @@ export class Settings extends Context.Service<
   /** Reads the saved choice before the runtime exists, so startup errors use its language. */
   static async readInterfaceLanguage(dataDir: string): Promise<string | undefined> {
     const saved = await readJsonFile(join(dataDir, "preferences.json"), Stored());
+
     return saved?.interfaceLanguage;
   }
 
@@ -127,6 +129,7 @@ function make(dataDir: string, usage?: UsageObservers) {
         ...defaultPreferences,
         ...defaultSubscriptionPreferences,
       };
+
       return current;
     });
 
@@ -141,7 +144,9 @@ function make(dataDir: string, usage?: UsageObservers) {
         const changed = preferenceChanges(previous, next).map((key) => usage?.setting(key));
         yield* Effect.promise(() => writeJsonFile(path, next));
         current = next;
+
         for (const note of changed) note?.();
+
         return next;
       }).pipe(Effect.uninterruptible);
 
@@ -151,6 +156,7 @@ function make(dataDir: string, usage?: UsageObservers) {
     const saved = (subscriptionId: string) =>
       Effect.flatMap(subscriptions.saved, (all) => {
         const found = all.find((each) => each.id === subscriptionId);
+
         return found
           ? Effect.succeed(found)
           : Effect.fail(new Failed({ error: { kind: "no-subscription" } }));
@@ -174,6 +180,7 @@ function make(dataDir: string, usage?: UsageObservers) {
       Effect.gen(function* () {
         yield* Effect.promise(() => writeJsonFile(addedPath(subscription), next));
         added.set(subscription.id, next);
+
         return next;
       }).pipe(Effect.uninterruptible);
 
@@ -184,7 +191,9 @@ function make(dataDir: string, usage?: UsageObservers) {
           added.get(subscription.id) ??
           (await readJsonFile(addedPath(subscription), SubscriptionPreferences())) ??
           defaultSubscriptionPreferences;
+
         added.set(subscription.id, kept);
+
         return kept;
       });
 
@@ -196,34 +205,43 @@ function make(dataDir: string, usage?: UsageObservers) {
       Effect.gen(function* () {
         for (const subscription of saved) {
           const { lastCategoryId } = yield* leftAt(subscription);
+
           if (lastCategoryId !== null)
             return { subscriptionId: subscription.id, id: lastCategoryId };
         }
+
         return null;
       });
+
     const readBrowse = Effect.gen(function* () {
       const saved = yield* subscriptions.saved;
       const baseline = yield* legacy(saved);
       const raw = RememberedLiveBrowse()((yield* stored).rememberedLiveBrowse);
+
       if (!(raw instanceof type.errors) && sameBaseline(raw.legacy, baseline)) {
         // A topic and a list of the viewer's are anyone's, whichever subscriptions are saved.
         if ((raw.selection.kind === "topic" || raw.selection.kind === "custom") && saved.length > 0)
           return discoverySelection(raw.selection);
         const selection = raw.selection;
+
         if (
           selection.kind === "category" &&
           saved.some((each) => each.id === selection.category.subscriptionId)
         )
           return discoverySelection(selection);
       }
+
       return baseline
         ? { kind: "category" as const, category: baseline }
         : { kind: "all" as const };
     });
+
     const writeLeft = (subscription: SavedSubscription, lastCategoryId: string | null) =>
       Effect.gen(function* () {
         const previous = yield* leftAt(subscription);
+
         if (previous.lastCategoryId === lastCategoryId) return;
+
         if (subscription.original) yield* applied((file) => ({ ...file, lastCategoryId }));
         else {
           yield* saveAdded(subscription, { ...previous, lastCategoryId });
@@ -238,9 +256,12 @@ function make(dataDir: string, usage?: UsageObservers) {
           Effect.gen(function* () {
             const selection = discoverySelection(input);
             const all = yield* subscriptions.saved;
+
             if (all.length === 0 && selection.kind !== "all")
               return yield* new Failed({ error: { kind: "no-subscription" } });
+
             if (selection.kind === "category") yield* saved(selection.category.subscriptionId);
+
             // A topic or a list of the viewer's leaves the category each subscription opens on.
             if (selection.kind === "category" || selection.kind === "all") {
               for (const subscription of all)
@@ -252,6 +273,7 @@ function make(dataDir: string, usage?: UsageObservers) {
                     : null,
                 );
             }
+
             const baseline = yield* legacy(all);
             yield* applied(({ rememberedLiveBrowse: _old, ...file }) =>
               selection.kind === "all"
@@ -261,6 +283,7 @@ function make(dataDir: string, usage?: UsageObservers) {
                     rememberedLiveBrowse: { version: 1, selection, legacy: baseline },
                   },
             );
+
             return discoverySelection(selection);
           }),
         ),
@@ -285,6 +308,7 @@ function make(dataDir: string, usage?: UsageObservers) {
               )
             : Effect.gen(function* () {
                 const next = { ...(yield* ofAdded(subscription)), ...patch };
+
                 return yield* saveAdded(subscription, next);
               }),
         ),
@@ -293,18 +317,23 @@ function make(dataDir: string, usage?: UsageObservers) {
           Effect.gen(function* () {
             const before = (yield* stored).rememberedLiveBrowse;
             const selectionBeforeRemoval = yield* readBrowse;
+
             return one.withPermits(1)(
               Effect.gen(function* () {
                 const previous = yield* stored;
                 const raw = previous.rememberedLiveBrowse;
                 const record = RememberedLiveBrowse()(raw);
+
                 const remaining = (yield* subscriptions.saved).filter(
                   (each) => each.id !== subscription.id,
                 );
+
                 // Unknown future records survive both removal paths verbatim.
                 let rememberedLiveBrowse = raw;
+
                 if (!(record instanceof type.errors)) {
                   const selection = raw === before ? selectionBeforeRemoval : record.selection;
+
                   const valid =
                     remaining.length > 0 &&
                     (selection.kind === "topic" ||
@@ -314,10 +343,12 @@ function make(dataDir: string, usage?: UsageObservers) {
                           selection.kind === "category" &&
                           each.id === selection.category.subscriptionId,
                       ));
+
                   rememberedLiveBrowse = valid
                     ? { ...record, selection, legacy: yield* legacy(remaining) }
                     : undefined;
                 }
+
                 if (subscription.original || !(record instanceof type.errors)) {
                   yield* applied((file) => {
                     const { rememberedLiveBrowse: _remembered, ...kept } = subscription.original
@@ -327,12 +358,14 @@ function make(dataDir: string, usage?: UsageObservers) {
                           ...defined({ interfaceLanguage: file.interfaceLanguage }),
                         }
                       : file;
+
                     return {
                       ...kept,
                       ...defined({ rememberedLiveBrowse }),
                     };
                   });
                 }
+
                 added.delete(subscription.id);
               }),
             );
@@ -347,6 +380,7 @@ function make(dataDir: string, usage?: UsageObservers) {
       ),
       dropLegacyLists: Effect.gen(function* () {
         const { favouriteChannelIds, recentChannelIds } = yield* one.withPermits(1)(stored);
+
         if (favouriteChannelIds || recentChannelIds) {
           yield* change(({ favouriteChannelIds: _f, recentChannelIds: _r, ...kept }) => kept);
         }
@@ -376,6 +410,7 @@ function general({
 /** Normalize replies only. File reconstruction must keep unsupported raw values intact. */
 function effective(file: Stored): Preferences {
   const { nextEpisodeDelaySeconds, ...preferences } = general(file);
+
   return {
     ...preferences,
     nextEpisodeDelaySeconds:
@@ -426,6 +461,7 @@ function preferenceChanges(before: Stored, after: Stored) {
     ],
     ["home_rows", homeRows(before.homeRows), homeRows(after.homeRows)],
   ] as const;
+
   return keys.flatMap(([key, previous, next]) => (isDeepStrictEqual(previous, next) ? [] : [key]));
 }
 

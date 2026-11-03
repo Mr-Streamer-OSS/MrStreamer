@@ -10,9 +10,11 @@ import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { queries, syncOnDemand } from "../../src/renderer/src/lib/queries.ts";
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -21,6 +23,7 @@ afterEach(() => {
 
 it("shows a mapped series' current exact progress, then drops its bar when that file is replaced", async () => {
   const subscription = { ...SAVED, kind: "m3u" as const, playlistMapped: true, username: "" };
+
   const series: Title = {
     kind: "series",
     key: "series:m3u",
@@ -48,6 +51,7 @@ it("shows a mapped series' current exact progress, then drops its bar when that 
       },
     ],
   };
+
   ipc.always("subscription.list", [subscription]);
   ipc.always("library.categories", []);
   ipc.always("library.channels", []);
@@ -87,12 +91,15 @@ it("shows a mapped series' current exact progress, then drops its bar when that 
     stop();
     mounted.unmount();
   };
+
   await mounted.render(createElement(HomeScreen, { active: false }));
+
   const until = (check: () => void) =>
     vi.waitFor(async () => {
       await act(() => vi.advanceTimersByTimeAsync(10));
       check();
     });
+
   await until(() => expect(container.textContent).toContain("S2 E3"));
   expect(
     [...container.querySelectorAll<HTMLElement>("span[style]")].some(
@@ -115,6 +122,7 @@ it("shows a mapped series' current exact progress, then drops its bar when that 
 
 it("shows mapped titles without live channels or invented added dates, and opens their full list", async () => {
   const subscription = { ...SAVED, kind: "m3u" as const, playlistMapped: true, username: "" };
+
   const title: Title = {
     kind: "movie",
     key: "movie:exact",
@@ -135,6 +143,7 @@ it("shows mapped titles without live channels or invented added dates, and opens
     genres: [],
     versions: [{ subscriptionId: subscription.id, id: "exact", tags: [] }],
   };
+
   ipc.always("subscription.list", [subscription]);
   ipc.always("library.categories", []);
   ipc.always("library.channels", []);
@@ -164,9 +173,11 @@ it("shows mapped titles without live channels or invented added dates, and opens
   expect(navigation?.textContent).toContain("Series");
   expect(ipc.argsOf("ondemand.collection").every((query) => query.id === "all")).toBe(true);
   expect(ipc.argsOf("watchlist.list").filter((query) => query.home)).toHaveLength(1);
+
   const heading = [...container.querySelectorAll("h2")].find(
     (element) => element.textContent === "Movies",
   );
+
   const movies = heading?.closest("section")?.querySelector("button");
   expect(movies).toBeDefined();
   await act(async () => movies?.click());

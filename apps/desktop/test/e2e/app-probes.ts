@@ -29,6 +29,7 @@ type LinuxProcess = {
   cpuSeconds: number;
   name: string;
 };
+
 type Sample = {
   startedMs: number;
   endedMs: number;
@@ -59,6 +60,7 @@ export function cpuDelta(before: number | undefined, after: number | undefined, 
       reason: "Missing, non-finite or reset cumulative CPU counter",
     };
   const cpuSeconds = after - before;
+
   return {
     status: "supported" as const,
     cpuSeconds,
@@ -75,6 +77,7 @@ export function wakeupSupport(platform: string) {
       scope: "Electron processes only; excludes external descendants",
       limitation: "Shared API interval can be reset by another caller; retain raw interval samples",
     };
+
   return {
     status: "unsupported" as const,
     unit: "wakeups/s",
@@ -95,15 +98,19 @@ function descendants(pid: number): Sample["descendants"] {
       status: "unsupported",
       reason: "OS descendant inventory implemented for Linux /proc only",
     };
+
   try {
     const ticksPerSecond = Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }));
+
     if (!Number.isFinite(ticksPerSecond) || ticksPerSecond <= 0) throw new Error("Invalid CLK_TCK");
     const all: LinuxProcess[] = [];
+
     for (const name of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
       try {
         const stat = readFileSync(`/proc/${name}/stat`, "utf8");
         const end = stat.lastIndexOf(")");
         const fields = stat.slice(end + 2).split(" ");
+
         const item = {
           pid: Number(name),
           name: stat.slice(stat.indexOf("(") + 1, end),
@@ -111,6 +118,7 @@ function descendants(pid: number): Sample["descendants"] {
           startTicks: Number(fields[19]),
           cpuSeconds: (Number(fields[11]) + Number(fields[12])) / ticksPerSecond,
         };
+
         if (
           Object.values(item).some((value) => typeof value === "number" && !Number.isFinite(value))
         )
@@ -124,14 +132,20 @@ function descendants(pid: number): Sample["descendants"] {
           throw error;
       }
     }
+
     const owned = new Set([pid]);
+
     for (let size = 0; size !== owned.size;) {
       size = owned.size;
+
       for (const item of all) if (owned.has(item.parent)) owned.add(item.pid);
     }
+
     const processes = all.filter((item) => owned.has(item.pid));
+
     if (!processes.some((item) => item.pid === pid))
       throw new Error("Owned main disappeared from /proc");
+
     return { status: "supported", ticksPerSecond, processes };
   } catch (error) {
     return { status: "unsupported", reason: String(error) };
@@ -140,9 +154,11 @@ function descendants(pid: number): Sample["descendants"] {
 
 function bundleIdentity(executable: string, appDirectory: string | undefined) {
   const files: Record<string, string> = {};
+
   const hash = (path: string, name: string) => {
     files[name] = createHash("sha256").update(readFileSync(path)).digest("hex");
   };
+
   const tree = (path: string, prefix: string) => {
     for (const item of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
       a.name.localeCompare(b.name),
@@ -160,14 +176,18 @@ function bundleIdentity(executable: string, appDirectory: string | undefined) {
         );
     }
   };
+
   const runtimeRoot = realpathSync(
     process.platform === "darwin" ? dirname(dirname(dirname(executable))) : dirname(executable),
   );
+
   tree(runtimeRoot, "runtime");
+
   if (appDirectory) {
     hash(join(appDirectory, "package.json"), "app/package.json");
     tree(join(appDirectory, "out"), "app/out");
   }
+
   return {
     scope: appDirectory
       ? "Entire runtime directory plus app package.json and complete out tree; excludes node_modules"
@@ -178,30 +198,38 @@ function bundleIdentity(executable: string, appDirectory: string | undefined) {
 
 async function command<T>(page: Page, method: string, params: Record<string, unknown> = {}) {
   const reply = await page.send(method, params);
+
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
   return reply.result as T;
 }
 
 function summarize(samples: Sample[]) {
   const first = samples[0]!,
     last = samples.at(-1)!;
+
   const elapsedMs = last.startedMs - first.startedMs;
+
   const processes = first.metrics.map((before) => {
     const after = last.metrics.find(
       (item) => item.pid === before.pid && item.creationTime === before.creationTime,
     );
+
     const stable = samples.every((sample) =>
       sample.metrics.some(
         (item) => item.pid === before.pid && item.creationTime === before.creationTime,
       ),
     );
+
     const wakeups = wakeupSupport(process.platform);
+
     const rates = samples.slice(1).map((sample, index) => ({
       elapsedMs: sample.startedMs - samples[index]!.startedMs,
       rate: sample.metrics.find(
         (item) => item.pid === before.pid && item.creationTime === before.creationTime,
       )?.cpu.idleWakeupsPerSecond,
     }));
+
     return {
       wakeups:
         wakeups.status !== "supported"
@@ -234,6 +262,7 @@ function summarize(samples: Sample[]) {
       ),
     };
   });
+
   const os =
     first.descendants.status === "supported" && last.descendants.status === "supported"
       ? first.descendants.processes.map((before) => {
@@ -243,6 +272,7 @@ function summarize(samples: Sample[]) {
                   (item) => item.pid === before.pid && item.startTicks === before.startTicks,
                 )
               : undefined;
+
           return {
             pid: before.pid,
             name: before.name,
@@ -251,6 +281,7 @@ function summarize(samples: Sample[]) {
           };
         })
       : null;
+
   return {
     elapsedMs,
     processes,
@@ -278,6 +309,7 @@ export async function runAppProbes(options: {
 }) {
   const { main, page, app, output } = options;
   const actions: { at: string; name: string }[] = [];
+
   const windows: {
     state: string;
     requestedMs: number;
@@ -285,11 +317,13 @@ export async function runAppProbes(options: {
     summary?: ReturnType<typeof summarize>;
     boundary?: unknown;
   }[] = [];
+
   const calibration: unknown[] = [];
   const profiles: unknown[] = [];
   let steady: ReturnType<typeof steadyRecord> | undefined;
   let retention: ReturnType<typeof retentionRecord> | undefined;
   const identity = bundleIdentity(options.executable, options.appDirectory);
+
   const harnessIdentity = Object.fromEntries(
     ["measure-app.ts", "app-probes.ts", "app-attribution.ts", "app.ts"].map((file) => [
       file,
@@ -298,9 +332,11 @@ export async function runAppProbes(options: {
         .digest("hex"),
     ]),
   );
+
   let status = "running";
   let error: string | undefined;
   let processIdentity: unknown;
+
   const save = () =>
     writeFileSync(
       output,
@@ -339,14 +375,18 @@ export async function runAppProbes(options: {
         2,
       ),
     );
+
   const action = (name: string) => {
     actions.push({ at: new Date().toISOString(), name });
     save();
   };
+
   let expectedMain: number | undefined, expectedRenderer: number | undefined;
   let mainBirth: number | undefined, rendererBirth: number | undefined;
+
   const snapshot = async (): Promise<Sample> => {
     const startedMs = performance.now();
+
     const raw = await main.evaluate<
       Omit<Sample, "startedMs" | "endedMs" | "loadAverage" | "descendants">
     >(`(() => {
@@ -356,12 +396,14 @@ export async function runAppProbes(options: {
         window: { visible: w.isVisible(), minimized: w.isMinimized(), focused: w.isFocused(), url: w.webContents.getURL() },
         metrics: ${electron}.app.getAppMetrics() };
     })()`);
+
     if (
       raw.mainPid !== app.pid ||
       raw.mainPid !== expectedMain ||
       raw.rendererPid !== expectedRenderer
     )
       throw new Error("Main/renderer process identity changed");
+
     for (const [pid, birth] of [
       [raw.mainPid, mainBirth],
       [raw.rendererPid, rendererBirth],
@@ -369,6 +411,7 @@ export async function runAppProbes(options: {
       if (!raw.metrics.some((item) => item.pid === pid && item.creationTime === birth))
         throw new Error("Process creation identity changed");
     }
+
     return {
       ...raw,
       startedMs,
@@ -377,19 +420,23 @@ export async function runAppProbes(options: {
       endedMs: performance.now(),
     };
   };
+
   const click = async (text: string) => {
     if (text === "All channels" || text === "TEST | Formats and failures") {
       if (await revealFixtureList(page, text)) action(`Reveal fixture list ${text}`);
     }
+
     action(`Click ${text}`);
     await page.evaluate(
       `(() => { const buttons = [...document.querySelectorAll('button, [role=button]')]; const b = buttons.find(b => b.title === ${JSON.stringify(text)} || b.textContent.trim() === ${JSON.stringify(text)}) ?? buttons.find(b => b.textContent.trim().startsWith(${JSON.stringify(text)})); if (!b) throw new Error('Missing button ' + ${JSON.stringify(text)}); b.click(); })()`,
     );
   };
+
   const list = async () => {
     await click("Live TV");
     await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('main [data-index]')`));
   };
+
   const boundary = () =>
     page.evaluate<{
       visibility: string;
@@ -399,8 +446,10 @@ export async function runAppProbes(options: {
     }>(
       `({ visibility: document.visibilityState, watch: !!document.querySelector('[data-view="watch"]'), rows: document.querySelectorAll('main [data-index]').length, video: [...document.querySelectorAll('video')].map(v => ({ currentTime: v.currentTime, paused: v.paused, width: v.videoWidth })) })`,
     );
+
   try {
     const url = await page.evaluate<string>("location.href");
+
     if (
       !options.appDirectory ||
       !fileURLToPath(url).startsWith(join(resolve(options.appDirectory), "out", "renderer") + sep)
@@ -411,12 +460,14 @@ export async function runAppProbes(options: {
       if (!w) throw new Error('No matching BrowserWindow'); return { pid: process.pid, argv: process.argv,
         execPath: process.execPath, userData: ${electron}.app.getPath('userData'), versions: process.versions,
         rendererPid: w.webContents.getOSProcessId(), url: w.webContents.getURL(), metrics: ${electron}.app.getAppMetrics() }; })()`);
+
     const owned = processIdentity as {
       pid: number;
       rendererPid: number;
       userData: string;
       metrics: ProcessMetric[];
     };
+
     if (owned.pid !== app.pid || owned.userData !== options.profile)
       throw new Error("Inspector is not the owned profile/process");
     expectedMain = owned.pid;
@@ -425,12 +476,14 @@ export async function runAppProbes(options: {
     rendererBirth = owned.metrics.find((item) => item.pid === owned.rendererPid)?.creationTime;
     await snapshot();
     save();
+
     for (let run = 0; run < 3; run++) {
       const before = await snapshot();
       const after = await snapshot();
       calibration.push({ role: "observer", run, before, after, delta: summarize([before, after]) });
       save();
     }
+
     // A known busy pulse validates counter units and records snapshot cost. It cannot measure
     // host variance or establish an idle regression threshold, especially on a shared host.
     for (const [role, target] of [
@@ -439,9 +492,11 @@ export async function runAppProbes(options: {
     ] as const) {
       for (let run = 0; run < 3; run++) {
         const before = await snapshot();
+
         const pulse = await target.evaluate(
           `(() => { const start = performance.now(); while (performance.now() - start < 150) {} return performance.now() - start; })()`,
         );
+
         const after = await snapshot();
         calibration.push({
           role,
@@ -455,6 +510,7 @@ export async function runAppProbes(options: {
         save();
       }
     }
+
     await list();
     await click("All channels");
     await waitFor(() =>
@@ -462,8 +518,10 @@ export async function runAppProbes(options: {
         `document.querySelector('main h1')?.textContent === 'All channels' && document.querySelectorAll('main [data-index]').length > 5`,
       ),
     );
+
     if (options.idle) {
       await command(page, "Emulation.setFocusEmulationEnabled", { enabled: false });
+
       for (const state of ["visible", "covered", "hidden"] as const) {
         if (state === "covered") {
           await click("Watch");
@@ -471,10 +529,12 @@ export async function runAppProbes(options: {
             page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`),
           );
         }
+
         if (state === "hidden") await main.evaluate(`${windowExpression}.hide()`);
         // Let transitions settle before priming the cumulative and interval counters.
         await delay(2_000);
         const before = await boundary();
+
         if (
           before.watch !== (state !== "visible") ||
           before.rows === 0 ||
@@ -482,29 +542,36 @@ export async function runAppProbes(options: {
         )
           throw new Error(`Unexpected ${state} workload before CPU window`);
         action(`Begin ${state} 60-second CPU window`);
+
         const window: (typeof windows)[number] = {
           state,
           requestedMs: WINDOW_MS,
           samples: [],
           boundary: { before },
         };
+
         windows.push(window);
         window.samples.push(await snapshot());
         save();
         const start = window.samples[0]!.startedMs;
+
         for (let index = 1; index <= WINDOW_MS / SAMPLE_MS; index++) {
           const deadline = start + index * SAMPLE_MS;
+
           // Timers can fire just before their requested deadline after millisecond rounding.
           while (performance.now() < deadline)
             await delay(Math.max(1, deadline - performance.now()));
           const sample = await snapshot();
+
           if (sample.window.visible !== (state !== "hidden"))
             throw new Error(`Window visibility changed during ${state}`);
           window.samples.push(sample);
           save();
         }
+
         const after = await boundary();
         window.boundary = { before, after };
+
         if (
           after.watch !== before.watch ||
           after.rows === 0 ||
@@ -538,11 +605,13 @@ export async function runAppProbes(options: {
         save();
         action(`End ${state} CPU window`);
       }
+
       await main.evaluate(`${windowExpression}.show()`);
       await key(page, "Escape", 27);
       await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
       await list();
     }
+
     const attribution: AttributionContext = {
       page,
       main,
@@ -554,25 +623,31 @@ export async function runAppProbes(options: {
       list,
       metrics: async () => (await snapshot()).metrics,
     };
+
     if (options.steadyProfile) {
       await command(page, "Emulation.setFocusEmulationEnabled", { enabled: true });
       steady = steadyRecord();
       await steadyProfiles(attribution, steady);
     }
+
     if (options.queryRetention) {
       await command(page, "Emulation.setFocusEmulationEnabled", { enabled: true });
       retention = retentionRecord();
       await queryRetention(attribution, retention);
     }
+
     if (options.liveProfile) {
       await list();
+
       const targets = [
         ["main", main],
         ["renderer", page],
       ] as const;
+
       const started: (typeof targets)[number][] = [];
       let pathError: unknown;
       action("Profile Live TV list, category, grid, programme search, Watch and return");
+
       try {
         for (const target of targets) {
           await command(target[1], "Profiler.enable");
@@ -580,6 +655,7 @@ export async function runAppProbes(options: {
           await command(target[1], "Profiler.start");
           started.push(target);
         }
+
         await click("TEST | Formats and failures");
         await waitFor(() =>
           page.evaluate<boolean>(
@@ -590,11 +666,14 @@ export async function runAppProbes(options: {
         await waitFor(() =>
           page.evaluate<boolean>(`document.querySelectorAll('main [data-index]').length > 5`),
         );
+
         const scroll = async (selector: string) => {
           const start = await page.evaluate<number>(`${selector}.scrollTop`);
+
           const point = await page.evaluate<{ x: number; y: number }>(
             `(() => { const b = ${selector}.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
           );
+
           for (let index = 0; index < 30; index++) {
             await command(page, "Input.dispatchMouseEvent", {
               type: "mouseWheel",
@@ -604,9 +683,11 @@ export async function runAppProbes(options: {
             });
             await delay(16);
           }
+
           await waitFor(() => page.evaluate<boolean>(`${selector}.scrollTop > ${start}`));
           action(`Scroll reached ${await page.evaluate<number>(`${selector}.scrollTop`)}px`);
         };
+
         action("Wheel Live TV list");
         await scroll("document.querySelector('main [data-index]').parentElement.parentElement");
         action("Open and wheel guide grid");
@@ -659,9 +740,11 @@ export async function runAppProbes(options: {
       } catch (error) {
         pathError = error;
       }
+
       for (const [role, target] of started.reverse()) {
         try {
           const capture = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
+
           if (
             !capture.profile?.nodes?.length ||
             !capture.profile.samples?.length ||
@@ -698,9 +781,12 @@ export async function runAppProbes(options: {
           pathError ??= error;
         }
       }
+
       if (pathError) throw pathError;
     }
+
     await snapshot();
+
     if (
       JSON.stringify(identity) !==
       JSON.stringify(bundleIdentity(options.executable, options.appDirectory))

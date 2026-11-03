@@ -52,16 +52,19 @@ const tag = (field: number, wire: number) => field * 8 + wire;
 /** A fake receiver and an adapter that lists it. */
 async function setup(timings: Partial<CastTimings> = {}) {
   const receiver = await startFakeCastReceiver();
+
   const adapter = castAdapter({
     discovery: receiver.discovery,
     timings: { ...TIMINGS, ...timings },
   });
+
   const events: AdapterEvent[] = [];
   adapter.listen((event) => events.push(event));
   cleanups.push(async () => {
     await adapter.close();
     await receiver.close();
   });
+
   return { receiver, adapter, events };
 }
 
@@ -70,7 +73,9 @@ async function connected(timings: Partial<CastTimings> = {}) {
   const context = await setup(timings);
   const request = { kind: "receiver", id: context.receiver.receiver.id } as const;
   const connection = await context.adapter.connect(request, never);
+
   if (!connection) throw new Error("not connected");
+
   return { ...context, connection };
 }
 
@@ -81,6 +86,7 @@ function sendInParts(
   fields: CastFields,
 ) {
   const text = JSON.stringify(payload);
+
   const overhead = receiver.encode(
     {},
     {
@@ -90,9 +96,12 @@ function sendInParts(
       remainingLength: text.length,
     },
   ).length;
+
   const size = 65_535 - overhead - 4;
+
   for (let at = 0; at < text.length; at += size) {
     const end = Math.min(at + size, text.length);
+
     const part = receiver.encode(
       {},
       {
@@ -102,6 +111,7 @@ function sendInParts(
         remainingLength: text.length - end,
       },
     );
+
     expect(part.length).toBeLessThanOrEqual(65_535);
     receiver.frame(part);
   }
@@ -134,18 +144,23 @@ const failure = (call: Promise<unknown>) =>
  */
 async function settled(count: () => number): Promise<void> {
   let last = -1;
+
   const unchanged = () => {
     const before = last;
     last = count();
+
     return last === before;
   };
+
   await expect.poll(unchanged, { interval: 150 }).toBe(true);
 }
 
 const statuses = (events: readonly AdapterEvent[]) =>
   events.flatMap((event) => (event.type === "status" ? [event.status] : []));
+
 const states = (events: readonly AdapterEvent[]) =>
   statuses(events).map((status) => `${status.generation} ${status.state} ${status.position}`);
+
 const ofType = (events: readonly AdapterEvent[], type: AdapterEvent["type"]) =>
   events.filter((event) => event.type === type);
 
@@ -168,6 +183,7 @@ describe("Cast adapter", () => {
       .toEqual(["CONNECT receiver-0", `CONNECT ${receiver.app?.transportId}`]);
     // Every frame read back with protobufjs, byte for byte, as the fields a sender sets.
     expect(receiver.violations).toEqual([]);
+
     for (const message of receiver.received) {
       expect(message).toMatchObject({ protocolVersion: 0, sourceId: "sender-0", payloadType: 0 });
       expect(message.payloadBinary).toBeUndefined();
@@ -198,10 +214,12 @@ describe("Cast adapter", () => {
     await connection.load(film(1), never);
     const fields = { sourceId: "r".repeat(65_000), namespace: HEARTBEAT };
     const size = receiver.encode({ type: "PING" }, fields).length;
+
     const heartbeat = receiver.encode(
       { type: "PING" },
       { ...fields, sourceId: fields.sourceId + "r".repeat(65_535 - size) },
     );
+
     expect(heartbeat).toHaveLength(65_535);
 
     receiver.frame(heartbeat);
@@ -219,11 +237,13 @@ describe("Cast adapter", () => {
       const request = { kind: "receiver", id: receiver.receiver.id } as const;
       const connecting = adapter.connect(request, never);
       await expect.poll(() => receiver.requests("LAUNCH")).toHaveLength(1);
+
       const fields = {
         sourceId: "sender-0",
         destinationId: "r".repeat(65_000),
         namespace: CONNECTION,
       };
+
       const size = receiver.encode({ type: "CONNECT", origin: {} }, fields).length;
       const transportId = fields.destinationId + "r".repeat(65_535 - size);
       const sessionId = outcome === "too large" ? "s".repeat(65_536) : "owned-session";
@@ -238,6 +258,7 @@ describe("Cast adapter", () => {
         { sourceId: "receiver-0", namespace: RECEIVER },
       );
       const connection = await connecting;
+
       if (!connection) throw new Error("not connected");
       expect(await failure(connection.load(film(1), never))).toEqual({
         kind: "unavailable",
@@ -253,14 +274,17 @@ describe("Cast adapter", () => {
       };
       receiver.silent = outcome === "unanswered" || outcome === "explicit disconnect";
       const disconnecting = outcome === "explicit disconnect" ? connection.disconnect() : null;
+
       if (disconnecting) {
         await expect.poll(() => receiver.requests("STOP")).toMatchObject([{ sessionId }]);
       }
+
       sendInParts(
         receiver,
         { type: "MEDIA_STATUS", status: [receiver.media] },
         { sourceId: transportId, namespace: MEDIA },
       );
+
       if (disconnecting) {
         // Late media news during explicit teardown must not turn it into an automatic loss.
         await disconnecting;
@@ -271,9 +295,11 @@ describe("Cast adapter", () => {
           .poll(() => ofType(events, "lost"))
           .toEqual([{ type: "lost", failure: { kind: "unreachable" } }]);
       }
+
       await expect.poll(() => receiver.sockets.size).toBe(0);
       expect(receiver.connections).toBe(1);
       expect(await failure(connection.setVolume({ muted: true }))).toEqual({ kind: "unreachable" });
+
       if (outcome === "stopped") {
         expect(receiver.app).toBeNull();
         expect(receiver.media).toBeNull();
@@ -282,6 +308,7 @@ describe("Cast adapter", () => {
         // The receiver cannot be forced to stop, but no usable session or reconnect loop remains.
         expect(receiver.media?.playerState).toBe("PLAYING");
       }
+
       await connection.disconnect();
       expect(ofType(events, "lost")).toHaveLength(disconnecting ? 0 : 1);
       receiver.silent = false;
@@ -402,6 +429,7 @@ describe("Cast adapter", () => {
   it("loads a title at a position, held on its first picture", async () => {
     const { receiver, connection, events } = await connected();
     const title = "Amélie: Le Fabuleux Destin d'Amélie Poulain, version restaurée ".repeat(3);
+
     const media = film(1, {
       position: 42,
       paused: true,
@@ -828,6 +856,7 @@ describe("Cast adapter", () => {
   it("reads messages with fields and types a newer receiver adds", async () => {
     const { receiver, connection, events } = await connected();
     await connection.load(film(1), never);
+
     const status = (currentTime: number) => ({
       type: "MEDIA_STATUS",
       requestId: 0,
@@ -851,6 +880,7 @@ describe("Cast adapter", () => {
       .uint32(tag(19, 5))
       .fixed32(9)
       .finish();
+
     receiver.frame(
       Buffer.concat([
         receiver.encode(status(11), { continued: false, remainingLength: 0, protocolVersion: 3 }),
@@ -874,6 +904,7 @@ describe("Cast adapter", () => {
   it("puts together a message the receiver sends in parts", async () => {
     const { receiver, connection, events } = await connected();
     await connection.load(film(1), never);
+
     const whole = Buffer.from(
       JSON.stringify({
         type: "MEDIA_STATUS",
@@ -882,18 +913,22 @@ describe("Cast adapter", () => {
         note: "é".repeat(40),
       }),
     );
+
     // Cut where a receiver might, inside a two-byte character, so neither part is text on its
     // own. protobufjs writes the payload's bytes as they are, with `continued` and
     // `remaining_length` on the first part.
     const cut = whole.length - 41;
+
     const part = (bytes: Uint8Array, remaining: number | null) => {
       const writer = protobuf.Writer.create().uint32(tag(1, 0)).int32(0);
       writer.uint32(tag(2, 2)).string(receiver.app?.transportId ?? "");
       writer.uint32(tag(3, 2)).string("*").uint32(tag(4, 2)).string(MEDIA);
       writer.uint32(tag(5, 0)).int32(0).uint32(tag(6, 2)).bytes(bytes);
+
       if (remaining !== null) {
         writer.uint32(tag(8, 0)).bool(true).uint32(tag(9, 0)).uint32(remaining);
       }
+
       return writer.finish();
     };
 
@@ -943,9 +978,11 @@ describe("Cast adapter", () => {
 
     // A message in parts that never ends.
     await back();
+
     for (let part = 0; part < 6; part++) {
       receiver.send({}, { payloadUtf8: "x".repeat(60_000), continued: true });
     }
+
     await expect.poll(() => receiver.connections).toBe(8);
 
     // Each time the app was still there to take up again.
@@ -999,6 +1036,7 @@ function advertisement(
 ): { answers: dnsPacket.Answer[]; additionals: dnsPacket.Answer[] } {
   const instance = `${name}.${SERVICE}`;
   const host = `${name}.local`;
+
   return {
     answers: [{ type: "PTR", name: SERVICE, ttl: 120, data: instance }],
     additionals: [
@@ -1024,10 +1062,12 @@ async function responder(answer: (query: dnsPacket.DecodedPacket) => readonly Ui
   socket.on("message", (packet, from) => {
     const query = dnsPacket.decode(packet);
     queries.push(query);
+
     for (const reply of answer(query)) socket.send(reply, from.port, from.address);
   });
   await new Promise<void>((resolve) => socket.bind(0, "127.0.0.1", resolve));
   cleanups.push(() => new Promise((resolve) => socket.close(() => resolve())));
+
   return { port: socket.address().port, queries };
 }
 
@@ -1046,12 +1086,14 @@ function browsing(port: number, expiry = 10_000) {
     }),
     timings: TIMINGS,
   });
+
   const lists: (readonly Receiver[])[] = [];
   adapter.listen((event) => {
     if (event.type === "receivers") lists.push(event.receivers);
   });
   cleanups.push(() => adapter.close());
   adapter.scan(true);
+
   return { adapter, lists };
 }
 
@@ -1059,6 +1101,7 @@ describe("Cast discovery", () => {
   it("lists the receivers that show video, and connects to one it found", async () => {
     const receiver = await startFakeCastReceiver();
     cleanups.push(() => receiver.close());
+
     const { port, queries } = await responder(() => [
       response(
         advertisement(
@@ -1075,6 +1118,7 @@ describe("Cast discovery", () => {
       response(advertisement("TV-5", ["id=eeee5555", "fn=Far TV", "ca=4101"], 8009, "203.0.113.9")),
       response(advertisement("TV-6", ["id=ffff6666", "fn=Wired TV", "ca=4101"], 8009, "10.0.0.9")),
     ]);
+
     const { adapter, lists } = browsing(port);
 
     await expect
@@ -1102,6 +1146,7 @@ describe("Cast discovery", () => {
     const u16 = (value: number) => Buffer.from([value >> 8, value & 0xff]);
     const label = (text: string) => Buffer.from([Buffer.byteLength(text), ...Buffer.from(text)]);
     const pointer = (offset: number) => u16(0xc000 | offset);
+
     const record = (name: Buffer, type: number, data: Buffer) =>
       Buffer.concat([name, u16(type), u16(1), u16(0), u16(120), u16(data.length), data]);
 
@@ -1112,6 +1157,7 @@ describe("Cast discovery", () => {
       flags: dnsPacket.AUTHORITATIVE_ANSWER,
       questions: [{ name: SERVICE, type: "PTR" }],
     });
+
     const local = 12 + "_googlecast._tcp.".length;
     const instance = head.length + 2 + 10;
     const text = Buffer.concat([label("id=eeee5555"), label("fn=Café TV"), label("ca=4101")]);
@@ -1119,6 +1165,7 @@ describe("Cast discovery", () => {
     const srvData = Buffer.concat([u16(0), u16(0), u16(8009), label("host-5"), pointer(local)]);
     const srv = record(pointer(instance), 33, srvData);
     const host = instance + ptr.length - 12 + 2 + 10 + 6;
+
     const packet = Buffer.concat([
       head,
       ptr,
@@ -1126,6 +1173,7 @@ describe("Cast discovery", () => {
       record(pointer(instance), 16, text),
       record(pointer(host), 1, Buffer.from([127, 0, 0, 1])),
     ]);
+
     packet.writeUInt16BE(4, 6);
 
     // dns-packet follows the pointers to the names meant.
@@ -1163,17 +1211,20 @@ describe("Cast discovery", () => {
     const plain = response(bad("forward"));
     const name = plain.subarray(12, 12 + SERVICE.length + 2);
     const moved = plain.length - name.length + 2;
+
     const forward = Buffer.concat([
       plain.subarray(0, 12),
       Buffer.from([0xc0 | (moved >> 8), moved & 0xff]),
       plain.subarray(12 + name.length),
       name,
     ]);
+
     expect(() => dnsPacket.decode(forward)).toThrow("bad pointer");
     // A record that claims more bytes than the packet has, and a packet cut short.
     const long = Buffer.from(response(bad("long")));
     long.writeUInt16BE(0xffff, 12 + SERVICE.length + 2 + 8);
     const short = response(bad("short")).subarray(0, 60);
+
     // More records than any receiver sends, and more bytes than mDNS allows.
     const many = response(bad("many"), {
       answers: Array.from({ length: 120 }, (_, host) => ({
@@ -1183,10 +1234,13 @@ describe("Cast discovery", () => {
         data: "127.0.0.1",
       })),
     });
+
     const padding = "x".repeat(200);
+
     const large = response(
       advertisement("large", ["id=large", ...Array<string>(50).fill(padding)]),
     );
+
     expect(large.length).toBeGreaterThan(9000);
 
     const bogus = [loop, ahead, forward, long, short, many, large];
@@ -1202,14 +1256,17 @@ describe("Cast discovery", () => {
 
   it("asks for what a receiver left out of its answer", async () => {
     const whole = advertisement("TV-1", ["id=ffff6666", "fn=Sparse TV", "ca=4101"]);
+
     const { port, queries } = await responder((query) =>
       (query.questions ?? []).flatMap((asked) => {
         const answers = [...whole.answers, ...whole.additionals].filter(
           (record) => record.type === asked.type && record.name === asked.name,
         );
+
         return answers.length > 0 ? [response({ answers })] : [];
       }),
     );
+
     const { lists } = browsing(port);
 
     await expect
@@ -1227,9 +1284,11 @@ describe("Cast discovery", () => {
 
   it("drops a receiver that stopped answering, and asks nothing once the scan ends", async () => {
     let answering = true;
+
     const { port, queries } = await responder(() =>
       answering ? [response(advertisement("TV-1", ["id=gone", "fn=Gone TV", "ca=4101"]))] : [],
     );
+
     const { adapter, lists } = browsing(port, 200);
     await expect.poll(() => lists.at(-1)).toHaveLength(1);
 

@@ -33,6 +33,7 @@ function analytics(): Analytics {
     monotonic: () => performance.now(),
     uuid: randomUuid,
   });
+
   return owner;
 }
 
@@ -50,6 +51,7 @@ export function startTelemetry(): void {
   statistics.notePlayback(viewOf(shown));
   playbackState.subscribe(() => {
     const now = playbackState.get();
+
     // Watch opening from the tabs, not coming back to it from Picture in Picture.
     if (now.watch && !shown.watch && !shown.pip) statistics.noteFeature("player");
     shown = now;
@@ -87,10 +89,14 @@ let searching = false;
  */
 export function onTelemetryScreen(path: string): void {
   const now = featureOf(path);
+
   if (now !== "search") searching = false;
+
   const counts =
     now !== null && path !== feature?.path && (now !== feature?.feature || now === "details");
+
   feature = { path, feature: now };
+
   if (counts) analytics().noteFeature(now);
 }
 
@@ -100,6 +106,7 @@ export function onTelemetryScreen(path: string): void {
  */
 export function onSearchText(text: string): void {
   const typed = text.trim() !== "";
+
   if (typed && !searching) analytics().noteAction("search_used");
   searching = typed;
 }
@@ -109,11 +116,15 @@ const LEGAL: ReadonlySet<string | undefined> = new Set(["licences", "licence"]);
 function featureOf(path: string): IosFeature | null {
   if (path === "/") return "home";
   const [first, second] = path.split("/").slice(1);
+
   // Licences and a component's notices are Settings' own screens, on Home and every tab.
   if (LEGAL.has(first) || LEGAL.has(second)) return "settings";
+
   // Downloads and Settings open on whichever tab asked for them: /live/settings is Settings.
   if (second === "settings" || second === "downloads") return second;
+
   if (second === "provider") return null;
+
   switch (first) {
     case "live":
       return "live_tv";
@@ -142,12 +153,14 @@ function viewOf({ phase, watch, pip, external, muted }: Playback): PlaybackView 
 /** The build as app.json and the installed binary name it, and iOS's major version. */
 function build(): IosBuild {
   const major = Number.parseInt(String(Platform.Version), 10);
+
   const found = IosBuild()({
     app_version: Constants.expoConfig?.version ?? "unknown",
     app_build: Constants.platform?.ios?.buildNumber ?? "unknown",
     os: "ios",
     ...defined({ os_major: Number.isInteger(major) ? major : undefined }),
   });
+
   return found instanceof type.errors
     ? { app_version: "unknown", app_build: "unknown", os: "ios" }
     : found;
@@ -159,13 +172,16 @@ function build(): IosBuild {
  */
 function randomUuid(): string {
   const bytes = new Uint8Array(16);
+
   if (typeof globalThis.crypto?.getRandomValues === "function") {
     globalThis.crypto.getRandomValues(bytes);
   } else {
     for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
   }
+
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

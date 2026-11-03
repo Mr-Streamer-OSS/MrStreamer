@@ -56,6 +56,7 @@ export function DownloadsScreen() {
   // Drawn again in a new language where it stands; the queue and its order are left as they are.
   const locale = useLocale();
   const list = useDownloads();
+
   const sections = useMemo(
     () =>
       (
@@ -66,14 +67,17 @@ export function DownloadsScreen() {
       ).filter((section) => section.data.length > 0),
     [list.items],
   );
+
   // Those waiting their turn, in order: Move leaves out the first's up and the last's down.
   const line = useMemo(() => list.items.filter(waitingTurn), [list.items]);
+
   const storage = [
     list.bytes > 0 ? t("{size} on this device", { size: formatBytes(list.bytes) }) : null,
     list.free !== null ? t("{size} free", { size: formatBytes(list.free) }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <SectionList<Download, Section>
       style={styles.screen}
@@ -161,13 +165,16 @@ const Row = memo(function Row({
   const copy = onPhone(item);
   const actions = actionsOf(item, { first, last });
   const destructive = actions.find((action) => action.destructive);
+
   const sized = [
     copy && item.duration ? runtime(item.duration) : null,
     item.size ? formatBytes(item.size) : null,
   ];
+
   const facts = [episodeLine(item) ?? item.year, ...sized].filter(Boolean).join(" · ");
   const line = statusLine(item);
   const done = transferred(item);
+
   const watched =
     status.kind === "complete" &&
     item.progress &&
@@ -175,10 +182,12 @@ const Row = memo(function Row({
     !isFinished(item.progress.position, item.progress.duration)
       ? item.progress
       : null;
+
   const left = watched ? timeLeftOf({ ...watched, finished: false }) : null;
   const kept = copy && !item.subscription ? t("Provider removed, copy kept") : null;
   const red = status.kind === "failed" || status.kind === "missing";
   const primary = PRIMARY[status.kind];
+
   // One element for VoiceOver: "Paper Harbor, season 1 episode 3, The Tide Table, 42%, ...".
   const spoken = [
     item.name,
@@ -191,14 +200,19 @@ const Row = memo(function Row({
   ]
     .filter(Boolean)
     .join(", ");
+
   const act = (event: AccessibilityActionEvent) => {
     const { actionName } = event.nativeEvent;
+
     if (actionName === "activate") {
       if (status.kind === "complete") playDownload(item.id);
+
       return;
     }
+
     actions.find((action) => action.name === actionName)?.run();
   };
+
   return (
     <Swipe label={t(SWIPED[status.kind])} action={destructive} testID="download-swiped">
       <Pressable
@@ -270,6 +284,7 @@ const Row = memo(function Row({
 /** "season 1 episode 3", or "special 3", as VoiceOver says an episode. */
 function spokenEpisode({ title }: Download): string | null {
   if (title.kind !== "episode") return null;
+
   return title.season === 0
     ? t("special {episode}", { episode: title.episode })
     : t("season {season} episode {episode}", { season: title.season, episode: title.episode });
@@ -292,6 +307,7 @@ export function DownloadsLink({ onPress }: { onPress: () => void }) {
   useLocale();
   const { bytes } = useDownloads();
   const used = bytes > 0 ? formatBytes(bytes) : t("None");
+
   return (
     <Pressable
       accessibilityRole="button"

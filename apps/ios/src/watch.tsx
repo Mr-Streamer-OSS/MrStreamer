@@ -139,11 +139,14 @@ function shortcuts() {
     // Keyboards without Esc, as the iPad's Magic Keyboard, use ⌘. instead.
     { id: "dismiss", input: ".", command: true, title: t("Close") },
   ];
+
   const still = streaming.filter(
     (shortcut) => shortcut.id === "close" || shortcut.id === "dismiss",
   );
+
   return { streaming, still };
 }
+
 /** Whether one of Watch's sheets is open: its keys are the sheet's then, Esc and arrows included. */
 const sheet = store(false);
 
@@ -213,43 +216,55 @@ export function WatchLayer() {
   // again plays the same item anew), another item, another tab or none, and Watch going each
   // retire it, so a fallback acts only for the press, stream and tabs it was for.
   const waiting = useRef<{ timer?: ReturnType<typeof setTimeout> } | null>(null);
+
   const retire = () => {
     clearTimeout(waiting.current?.timer);
     waiting.current = null;
   };
+
   const item = phase.kind === "idle" ? null : phase.item;
   const failed = phase.kind === "failed";
   useEffect(() => retire, [watch, pip, item, failed, tab]);
   useEffect(() => {
     if (!tab) unsetAside();
   }, [tab]);
+
   const pictureCanTake =
     phase.kind === "playing" && !external && !onTv && isPictureInPictureSupported();
+
   const screens: readonly TabScreen[] = tab
     ? ["downloads", "settings"]
     : pictureCanTake
       ? ["downloads"]
       : [];
+
   const openScreen = (screen: TabScreen) => {
     retire();
+
     if (tabs) openOnTabs(tabs, screen);
     // Offline Downloads is usually the screen Watch opened over: then it only has to show.
     else if (pathname !== "/offline") router.push("/offline");
     const shown = view.current;
+
     if (!pictureCanTake || !shown) {
       if (tabs) setAside();
+
       return;
     }
+
     // Picture in Picture reports starting, which closes Watch over the screen just opened. If it
     // refuses, or doesn't start within a second, Watch is set aside instead of staying over it;
     // with no tabs to come back from, Watch stays as it was.
     const mine: { timer?: ReturnType<typeof setTimeout> } = {};
     waiting.current = mine;
+
     const unless = () => {
       if (waiting.current !== mine) return;
       waiting.current = null;
+
       if (tabs) setAside();
     };
+
     void shown.startPictureInPicture().then(() => {
       if (waiting.current === mine) mine.timer = setTimeout(unless, 1000);
     }, unless);
@@ -259,6 +274,7 @@ export function WatchLayer() {
   useEffect(() => startMediaControls(), []);
   useEffect(() => {
     onEndPictureInPicture(() => void view.current?.stopPictureInPicture());
+
     return () => onEndPictureInPicture(null);
   }, []);
   // A refused save of how far a title got, told by the system's alert, which stays over whatever
@@ -267,8 +283,10 @@ export function WatchLayer() {
     onProgressRefused(() =>
       Alert.alert(t("Couldn't save progress"), t("Your latest position could not be saved.")),
     );
+
     return () => onProgressRefused(null);
   }, []);
+
   // A return from Picture in Picture, answered once Watch has committed what it returns to: AVKit
   // then brings the picture back into a view on screen. The answer goes to the view that asked,
   // with the number its request carried, so a late answer can't complete a newer request.
@@ -279,25 +297,31 @@ export function WatchLayer() {
     readonly request: number;
     readonly item: Playing;
   } | null>(null);
+
   useEffect(() => {
     if (!restoring) return;
     setRestoring(null);
     const { from, request, item } = restoring;
     void from.finishPictureInPictureRestore(request, watch && playingItem(phase) === item);
   }, [restoring, watch, phase]);
+
   const restore = (request: number) => {
     const from = view.current;
+
     if (!from) return;
     const item = restoreFromPictureInPicture();
+
     if (item === null) void from.finishPictureInPictureRestore(request, false);
     else setRestoring({ from, request, item });
   };
+
   const frame = useWindowDimensions();
   const small = Math.min(frame.width, frame.height) < 700;
   const landscape = watch && phase.kind !== "idle" && !phase.item.live && small;
   useEffect(() => {
     if (!landscape) return;
     turn(() => lockAsync(OrientationLock.LANDSCAPE));
+
     // Closing gives the screens back the app's own rotation: iOS turns them as the phone is held.
     return () => turn(unlockAsync);
   }, [landscape]);
@@ -312,12 +336,14 @@ export function WatchLayer() {
   const counting = useUpNext() !== null;
   useEffect(() => {
     if (!counting) return;
+
     if (AppState.currentState === "active") setControls(true);
     else cancelUpNext();
   }, [counting]);
   useEffect(() => {
     if (!watch) return;
     const left = AppState.addEventListener("change", (now) => now !== "active" && cancelUpNext());
+
     return () => left.remove();
   }, [watch]);
 
@@ -335,6 +361,7 @@ export function WatchLayer() {
   );
 
   if (!watch && !pip) return null;
+
   return (
     <View
       style={[StyleSheet.absoluteFill, watch ? styles.layer : styles.hidden]}
@@ -397,6 +424,7 @@ export function WatchLayer() {
 
 /** Orientation changes, made in the order asked so a quick close and reopen can't swap them. */
 let turning = Promise.resolve();
+
 function turn(change: () => Promise<void>) {
   turning = turning.then(change).catch(() => undefined);
 }
@@ -426,6 +454,7 @@ function Controls({
   const { phase, tv } = usePlayback();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+
   if (phase.kind === "idle") return null;
   const wide = width >= 600;
   const edge = { left: insets.left + 16, right: insets.right + 16 };
@@ -433,6 +462,7 @@ function Controls({
   // The TV button stays while a TV is chosen or just stopped, so it can be left or chosen again.
   const tvButton = tvAvailable() && (streaming || tv.kind !== "off");
   const stopped = phase.kind === "failed" && tv.kind === "ended" ? tv.tv : null;
+
   return (
     <>
       <Glass style={[styles.circle, { top: insets.top + 12, left: edge.left }]}>
@@ -603,6 +633,7 @@ function playOn(tv: Tv) {
  */
 function OnTv({ top, bottom }: { top: number; bottom: number }) {
   const { tv, phase } = usePlayback();
+
   const shown =
     tv.kind === "on" && phase.kind !== "failed"
       ? { title: tv.tv.name, line: tvT("Keep Mr. Streamer open while it plays.") }
@@ -619,7 +650,9 @@ function OnTv({ top, bottom }: { top: number; bottom: number }) {
                     }),
           }
         : null;
+
   if (!shown) return null;
+
   return (
     <View pointerEvents="none" style={[styles.onTv, { top, bottom }]} testID="watch-on-tv">
       <SymbolView name="tv" size={44} tintColor={colors.text} weight="light" />
@@ -657,6 +690,7 @@ function TvSheet({ onClose }: { onClose: () => void }) {
   useShortcuts(keys, onClose);
   useEffect(() => {
     sheet.set(true);
+
     return () => sheet.set(false);
   }, []);
   // Look again stops looking and starts again.
@@ -669,29 +703,35 @@ function TvSheet({ onClose }: { onClose: () => void }) {
   const [quiet, setQuiet] = useState(false);
   useEffect(() => {
     setQuiet(false);
+
     if (!looking) return;
     const timer = setTimeout(() => setQuiet(true), QUIET_MS);
+
     return () => clearTimeout(timer);
   }, [looking, round]);
   const chosen = useRef<string | null>(null);
   useEffect(() => {
     if (tv.kind === "on" && tv.tv.id === chosen.current) onClose();
   }, [tv, onClose]);
+
   const choose = (to: Tv) => {
     chosen.current = to.id;
     playOn(to);
   };
+
   const again = () => setRound((count) => count + 1);
 
   const close = useRef(onClose);
   close.current = onClose;
   const [drag, setDrag] = useState(0);
+
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) => dy > 8 && dy > Math.abs(dx),
       onPanResponderMove: (_, { dy }) => setDrag(Math.max(0, dy)),
       onPanResponderRelease: (_, { dy, vy }) => {
         setDrag(0);
+
         if (dy > 80 || vy > 1) close.current();
       },
       onPanResponderTerminate: () => setDrag(0),
@@ -705,6 +745,7 @@ function TvSheet({ onClose }: { onClose: () => void }) {
   const others = connected ? found.filter((each) => each.id !== connected.id) : [];
   // The chooser keeps its height while it looks and lists, with the note at its foot.
   const listing = !connected && (looking ? !quiet : found.length > 0);
+
   const done = wide ? null : (
     <Pressable
       accessibilityRole="button"
@@ -715,7 +756,9 @@ function TvSheet({ onClose }: { onClose: () => void }) {
       <Text style={styles.doneLabel}>{tvT("Done")}</Text>
     </Pressable>
   );
+
   const popover = insets.top + 88;
+
   return (
     <View style={StyleSheet.absoluteFill}>
       <Pressable
@@ -873,9 +916,11 @@ function SheetMessage({ title, text, action }: { title: string; text: string; ac
 /** TVs to choose, each by its name and model; the one connecting says so. */
 function TvRows({ tvs, onChoose }: { tvs: readonly Tv[]; onChoose: (tv: Tv) => void }) {
   const { tv: route } = usePlayback();
+
   return tvs.map((each) => {
     const line =
       route.kind === "connecting" && route.tv.id === each.id ? tvT("Connecting") : each.model;
+
     return (
       <Pressable
         key={each.id}
@@ -908,6 +953,7 @@ function TvVolume() {
   const toLevel = (x: number) => Math.min(1, Math.max(0, x / width));
   const toLevelRef = useRef(toLevel);
   toLevelRef.current = toLevel;
+
   const responder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -921,8 +967,10 @@ function TvVolume() {
       onPanResponderTerminate: () => setDragged(null),
     }),
   ).current;
+
   if (!volume) return null;
   const level = dragged ?? (volume.muted ? 0 : volume.level);
+
   return (
     <View style={styles.volume}>
       <View style={styles.tvMark} accessibilityElementsHidden importantForAccessibility="no">
@@ -962,6 +1010,7 @@ function TvVolume() {
 function placeOf(item: Playing) {
   if (!item.past) return item.place;
   const day = dayLabel(localDay(item.past.start), Date.now());
+
   return `${item.place} · ${t("Catch-up")} · ${day} ${programmeRange(item.past)}`;
 }
 
@@ -973,8 +1022,10 @@ function StartOver({ item }: { item: Playing }) {
   const catalogue = useCatalogue();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(item.id) : undefined;
   const programme = useOnNow(channel);
+
   if (!channel || !programme || catchUpOf(channel, programme, Date.now()).kind !== "on")
     return null;
+
   return (
     <TextControl
       label={t("Play from start")}
@@ -994,11 +1045,13 @@ function useOnNow(channel: Channel | undefined) {
   const awake = useSyncExternalStore(guide.awake.subscribe, guide.awake.get);
   const [ended, setEnded] = useState(0);
   const revision = useSyncExternalStore(guide.listingRevision.subscribe, guide.listingRevision.get);
+
   const [read, setRead] = useState<{
     channel: Channel;
     revision: number;
     programme: Programme | null;
   } | null>(null);
+
   useEffect(() => {
     if (!channel || !awake) return;
     const controller = new AbortController();
@@ -1009,18 +1062,24 @@ function useOnNow(channel: Channel | undefined) {
       },
       () => undefined,
     );
+
     return () => controller.abort();
   }, [channel, snapshot, ended, revision, awake]);
+
   const programme =
     awake && read && read.channel === channel && read.revision === revision ? read.programme : null;
+
   useEffect(() => {
     if (!programme) return;
+
     const timer = setTimeout(
       () => setEnded((count) => count + 1),
       Math.min(programme.stop - Date.now(), 3_600_000),
     );
+
     return () => clearTimeout(timer);
   }, [programme]);
+
   return programme;
 }
 
@@ -1032,8 +1091,10 @@ function Star({ item }: { item: Playing }) {
   const catalogue = useCatalogue();
   const favourites = useFavouriteKeys();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(item.id) : undefined;
+
   if (!channel) return null;
   const favourite = favourites.has(channel.key);
+
   return (
     <IconButton
       symbol={favourite ? "star.fill" : "star"}
@@ -1063,14 +1124,17 @@ function LiveQuality({ item }: { item: Playing }) {
     [item],
   );
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(item.id) : undefined;
+
   const choose = () => {
     if (!channel) return;
     const mine = ++menu.current;
     const asked = request();
     const source = currentSource(channel.subscriptionId);
+
     const stands = () => {
       const { phase, watch } = playbackState.get();
       const latest = currentCatalogue();
+
       return (
         menu.current === mine &&
         asked.stands() &&
@@ -1082,6 +1146,7 @@ function LiveQuality({ item }: { item: Playing }) {
         latest.library.byKey.get(item.id) === channel
       );
     };
+
     if (!stands()) return;
     const choices = channelQuality(channel);
     showSheet(
@@ -1096,6 +1161,7 @@ function LiveQuality({ item }: { item: Playing }) {
                 : choice.quality
                   ? `${qualityNames[choice.quality]} · ${choice.name}`
                   : choice.name;
+
             return `${choice.saved ? "✓ " : ""}${name}${choice.playing ? ` · ${t("Playing")}` : ""}`;
           }),
           t("Cancel"),
@@ -1104,7 +1170,9 @@ function LiveQuality({ item }: { item: Playing }) {
       },
       (index) => {
         const picked = choices[index];
+
         if (!picked || !stands()) return;
+
         if (!chooseChannelQuality(channel, item.place, picked.variantId)) {
           Alert.alert(
             t("Couldn't save media preference"),
@@ -1114,6 +1182,7 @@ function LiveQuality({ item }: { item: Playing }) {
       },
     );
   };
+
   return <TextControl label={t("Quality")} onPress={choose} testID="watch-quality" />;
 }
 
@@ -1121,6 +1190,7 @@ function LiveQuality({ item }: { item: Playing }) {
 function Clock() {
   const seconds = Math.floor(usePlaybackClock());
   const minutes = Math.floor(seconds / 60);
+
   return (
     <View style={styles.clock}>
       <Text style={styles.time} testID="watch-time">
@@ -1139,6 +1209,7 @@ function clockOf(seconds: number): string {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const rest = String(total % 60).padStart(2, "0");
+
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
 }
 
@@ -1154,6 +1225,7 @@ function Scrubber() {
   const at = dragged ?? (Number.isFinite(position) ? position : 0);
   const fraction = length > 0 ? Math.min(1, Math.max(0, at / length)) : 0;
   const toTime = (x: number) => (Math.min(width, Math.max(0, x)) / width) * length;
+
   const responder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -1167,8 +1239,10 @@ function Scrubber() {
       onPanResponderTerminate: () => setDragged(null),
     }),
   ).current;
+
   const toTimeRef = useRef(toTime);
   toTimeRef.current = toTime;
+
   return (
     <View style={styles.clock}>
       <Text style={styles.time} testID="watch-time">
@@ -1223,28 +1297,34 @@ function TextButtons({ item }: { item: Playing }) {
     },
     [],
   );
+
   const choose = async (of: "audio" | "subtitles") => {
     const mine = ++menu.current;
     const asked = request();
     const playing = playingItem(playbackState.get().phase);
+
     // The same play still showing on Watch, though the controls may have hidden since.
     const plays = () =>
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === playing;
+
     const stands = () => menu.current === mine && plays();
     const unshown = of === "subtitles" ? unshownSubtitles() : null;
     const known = await trackChoices(of);
+
     if (!stands()) return;
     const choices = known ?? [];
     const none = choices.length === 0 || (choices.length === 1 && choices[0]?.kind === "off");
     const title = of === "subtitles" ? item.subtitles : undefined;
+
     const rows = title
       ? subtitleRows(title, choices, stands, plays)
       : choices.map((choice) => ({
           label: choice.selected ? `✓ ${choice.label}` : choice.label,
           run: () => void choice.choose(),
         }));
+
     const message = [
       known === null
         ? t("Not known yet. Try again in a moment.")
@@ -1263,6 +1343,7 @@ function TextButtons({ item }: { item: Playing }) {
     ]
       .filter(Boolean)
       .join("\n\n");
+
     showSheet(
       {
         title: t(of === "audio" ? "Audio" : "Subtitles"),
@@ -1275,8 +1356,10 @@ function TextButtons({ item }: { item: Playing }) {
       },
     );
   };
+
   // Keyed by the episode, so each countdown moves VoiceOver and is announced once.
   if (upNext) return <UpNextRow key={upNext.place} {...upNext} />;
+
   return (
     <View style={styles.textButtons}>
       {onTv ? null : (
@@ -1309,6 +1392,7 @@ function TextButtons({ item }: { item: Playing }) {
 
 /** "0.5×", "1×", "1.25×": a speed as the controls show it, written as numbers are in the language. */
 const speedLabel = (rate: number) => `${formatNumber(speedNumber(rate))}×`;
+
 /** A reported rate to two decimals at most, as 1.5 rather than 1.5000000596. */
 const speedNumber = (rate: number) => Number(rate.toFixed(2));
 
@@ -1326,23 +1410,28 @@ function TitleSpeed() {
     },
     [],
   );
+
   const choose = () => {
     const mine = ++menu.current;
     const asked = request();
     const playing = playingItem(playbackState.get().phase);
+
     const stands = () =>
       menu.current === mine &&
       asked.stands() &&
       playbackState.get().watch &&
       playingItem(playbackState.get().phase) === playing;
+
     if (!playing || !stands()) return;
     const now = playbackSpeed.get();
+
     const message =
       now === null
         ? t("Current speed not known yet.")
         : SPEEDS.some((speed) => speed === now)
           ? null
           : t("Playing at {speed}.", { speed: speedLabel(now) });
+
     showSheet(
       {
         title: t("Speed"),
@@ -1355,7 +1444,9 @@ function TitleSpeed() {
       },
       (index) => {
         const picked = SPEEDS[index];
+
         if (picked === undefined || !stands()) return;
+
         if (!setSpeed(picked)) {
           Alert.alert(
             t("Couldn't save media preference"),
@@ -1365,7 +1456,9 @@ function TitleSpeed() {
       },
     );
   };
+
   const other = rate !== null && rate !== 1 ? rate : null;
+
   return (
     <TextControl
       label={other === null ? t("Speed") : t("Speed {speed}", { speed: speedLabel(other) })}
@@ -1398,6 +1491,7 @@ function UpNextRow({ place, seconds }: UpNext) {
       t("Next episode, {place}, plays in {count} seconds.", { place: spokenPlace, count: from }),
     );
   }, [spokenPlace, from]);
+
   return (
     <View style={[styles.textButtons, styles.upNext]} testID="watch-up-next">
       <View
@@ -1457,6 +1551,7 @@ function subtitleRows(
 ): readonly Row[] {
   const kept = keptSubtitle(title);
   const showing = shownSubtitle()?.title === title;
+
   return [
     ...(showing && !choices.some((choice) => choice.kind === "off")
       ? [{ label: t("Off"), run: () => hideSubtitle(title) }]
@@ -1491,12 +1586,16 @@ function subtitleRows(
  */
 async function findOnline(title: SubtitleTitle, plays: () => boolean) {
   const found = await findSubtitles(title);
+
   if (!found || !plays()) return;
+
   if (found.kind === "failed") return serviceFailed(found.reason);
   const { results } = found;
+
   if (results.length === 0) {
     return Alert.alert(t("No subtitles found"), t("SubDL has none for this in your languages."));
   }
+
   showSheet(
     {
       title: t("Online subtitles"),
@@ -1506,6 +1605,7 @@ async function findOnline(title: SubtitleTitle, plays: () => boolean) {
     },
     (index) => {
       const picked = results[index];
+
       if (!picked || !plays()) return;
       void chooseSubtitle(title, picked.id).then((chosen) => {
         if (chosen?.kind === "failed" && plays()) serviceFailed(chosen.reason);
@@ -1560,12 +1660,15 @@ const FRAME_RATES = FPS.flatMap((from) =>
  */
 function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
   const showing = shownSubtitle();
+
   if (showing?.title !== title || !stands()) return;
   const { timing } = showing;
   const retime = (next: SubtitleTiming) => retimed(title, next) && adjustTiming(title, stands);
+
   const changed =
     timing.offset !== DEFAULT_SUBTITLE_TIMING.offset ||
     timing.speed !== DEFAULT_SUBTITLE_TIMING.speed;
+
   const rows: readonly Row[] = [
     ...STEPS.map((by) => ({
       label: stepLabel(by),
@@ -1575,8 +1678,10 @@ function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
     { label: t("Frame rate"), run: () => frameRate(title, stands) },
     ...(changed ? [{ label: t("Reset"), run: () => retime(DEFAULT_SUBTITLE_TIMING) }] : []),
   ];
+
   const seconds = formatDecimal(Math.abs(timing.offset), 1);
   const rate = FRAME_RATES.find(({ speed }) => speed === timing.speed);
+
   const message = [
     ...(timing.offset === 0
       ? []
@@ -1587,6 +1692,7 @@ function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
         ]),
     ...(rate ? [t("Frame rate {rate}", { rate: rate.label })] : []),
   ].join(" · ");
+
   showSheet(
     {
       title: t("Adjust timing"),
@@ -1606,6 +1712,7 @@ function adjustTiming(title: SubtitleTitle, stands: () => boolean) {
  */
 function frameRate(title: SubtitleTitle, stands: () => boolean) {
   const showing = shownSubtitle();
+
   if (showing?.title !== title || !stands()) return;
   const { timing } = showing;
   const choices = [{ label: t("Original"), speed: DEFAULT_SUBTITLE_TIMING.speed }, ...FRAME_RATES];
@@ -1621,7 +1728,9 @@ function frameRate(title: SubtitleTitle, stands: () => boolean) {
     },
     (index) => {
       const picked = choices[index];
+
       if (!stands()) return;
+
       if (
         picked &&
         picked.speed !== timing.speed &&
@@ -1637,6 +1746,7 @@ function frameRate(title: SubtitleTitle, stands: () => boolean) {
 function retimed(title: SubtitleTitle, timing: SubtitleTiming): boolean {
   if (retimeSubtitle(title, timing)) return true;
   Alert.alert(t("Couldn't change timing"), t("The previous timing is kept."));
+
   return false;
 }
 
@@ -1661,7 +1771,9 @@ const serviceFailed = (reason: SubtitleFailureReason | "not-saved") => {
  */
 function Cues({ item, bottom }: { item: Playing; bottom: number }) {
   const shown = useShownSubtitle();
+
   if (!shown || shown.title !== item.subtitles) return null;
+
   return <CueLines shown={shown} bottom={bottom} />;
 }
 
@@ -1670,8 +1782,10 @@ const cueSizes: Readonly<Record<SubtitleSize, number>> = { small: 16, medium: 20
 function CueLines({ shown, bottom }: { shown: ShownSubtitle; bottom: number }) {
   const text = useCueText(shown);
   const { subtitleSize } = useMediaPreferences();
+
   if (!text) return null;
   const fontSize = cueSizes[subtitleSize];
+
   return (
     <View pointerEvents="none" style={[styles.cues, { bottom }]}>
       <Text
@@ -1695,17 +1809,22 @@ function useCueText(shown: ShownSubtitle): string {
   const [text, setText] = useState("");
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const update = () => {
       const now = player().currentTime;
       setText(cuesAt(shown, now).map(plain).join("\n"));
       const next = nextCueChange(shown, now);
+
       if (!playing || next === null) return;
       const rate = player().playbackRate > 0 ? player().playbackRate : 1;
       timer = setTimeout(update, Math.max(20, ((next - now) / rate) * 1000));
     };
+
     update();
+
     return () => clearTimeout(timer);
   }, [shown, clock, playing]);
+
   return text;
 }
 
@@ -1726,6 +1845,7 @@ const plain = (text: string) =>
 /** A language's name in the app's language, like the rest of its copy; null when unknown. */
 function spoken(code: string | null) {
   const canonical = languageCode(code);
+
   return (canonical && formatLanguageName(canonical)) || code;
 }
 
@@ -1736,8 +1856,10 @@ function spoken(code: string | null) {
 function cantShow({ named, more }: UnshownSubtitles) {
   const tracks = named.map(({ language, format, forced }) => {
     const details = [format ?? t("unknown format"), ...(forced ? [t("forced")] : [])].join(", ");
+
     return `${spoken(language) ?? t("Unknown language")} (${details})`;
   });
+
   return more > 0
     ? t("Can't show here: {tracks} and {more} more.", { tracks: tracks.join(", "), more })
     : t("Can't show here: {tracks}.", { tracks: tracks.join(", ") });

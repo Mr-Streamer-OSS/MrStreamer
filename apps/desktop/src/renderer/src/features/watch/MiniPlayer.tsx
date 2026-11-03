@@ -30,6 +30,7 @@ export function MiniControls({
   children: ReactNode;
 }) {
   const closed = useClosed(failure);
+
   return (
     <>
       {/* The top of the picture moves the window, as a title bar would. */}
@@ -88,8 +89,10 @@ export function MiniPlayerButton({
 }) {
   const available = useMiniPlayer((state) => state.available);
   const remote = useOutput((state) => state.status.output.kind !== "local");
+
   if (!available) return null;
   const elsewhere = remote && outputs.receiver() !== null;
+
   const enter = () => {
     if (elsewhere) flash(t(MINI_NEEDS_PICTURE));
     else {
@@ -97,6 +100,7 @@ export function MiniPlayerButton({
       void miniPlayer.enter();
     }
   };
+
   if (inMenu) {
     return (
       <button
@@ -118,6 +122,7 @@ export function MiniPlayerButton({
       </button>
     );
   }
+
   return (
     <Tooltip label={elsewhere ? t(MINI_NEEDS_PICTURE) : t("Mini player")}>
       <Button

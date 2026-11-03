@@ -40,8 +40,10 @@ function holdingDetach() {
   const held = Promise.withResolvers<void>();
   player.detachObservedAsync.mockImplementationOnce(async (id) => {
     await held.promise;
+
     return detach(id);
   });
+
   return { release: () => held.resolve(), refuse: () => held.reject(new Error("Not detached")) };
 }
 
@@ -132,6 +134,7 @@ describe("the native queue's contract", { timeout: 40_000 }, () => {
         throw new Error("No space left on the device.");
       }
     };
+
     await expect(app.removeDownload(film.id)).rejects.toThrow();
     expect(doc().items).toEqual([
       expect.objectContaining({ id: film.id, removal: { version: 1, reason: "user" } }),
@@ -386,6 +389,7 @@ async function pausedWithResume(app: App, a: string, film: Download) {
   playFilm(app, a, otherMovie().id);
   await until(() => memory.played.at(-1)?.status != null, "the film");
   await until(() => nativeSecrets().includes(film.id), "the transfer's resume data");
+
   return background.resume.get(film.id)!;
 }
 
@@ -600,6 +604,7 @@ function asBuild14Completion(film: Download, intent?: "source-removed") {
   const row = stored.items.find((each: { id: string }) => each.id === film.id);
   delete row.transfer;
   Object.assign(row, { state: "queued", attempt: "a-build14", completedAt: null });
+
   if (intent) row.removal = { version: 1, reason: intent };
   new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(stored));
   background.legacyReceipts.push({
@@ -608,6 +613,7 @@ function asBuild14Completion(film: Download, intent?: "source-removed") {
     id: film.id,
     outcome: { kind: "complete", size, expected: size },
   });
+
   return size;
 }
 
@@ -619,6 +625,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       const { a, b } = await withProviders(app, true);
       const film = await app.addDownload(movieRef(a));
       await until(() => isComplete(app, film.id), "the copy");
+
       // Resumed: the subscription went and its removal was written down in an earlier run.
       if (intent === "resumed") await app.remove(a, { keepHistory: true });
       const size = asBuild14Completion(film, intent === "resumed" ? "source-removed" : undefined);
@@ -630,6 +637,7 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       // This launch has tried its receipt while downloads.json still refuses writes.
       await until(() => background.barrier.kind === "finished", "the foreground reconciliation");
       blocked.delete();
+
       if (intent === "fresh") await app.remove(a, { keepHistory: true });
       else await app.update(b!, { name: "Renamed" });
       await sleep(300);
@@ -664,12 +672,14 @@ describe("the native queue's boundaries", { timeout: 40_000 }, () => {
       app = await launch();
       await until(() => background.barrier.kind === "finished", "the foreground reconciliation");
       blocked.delete();
+
       if (how === "user") await app.removeDownload(film.id);
       else {
         const erased = await app.eraseDownloads(a, "demo-reset");
         expect(erased).toMatchObject({ removed: 1, kept: 0 });
         await expect(erased.cleanup).resolves.toBe("closed");
       }
+
       expect(doc().items).toEqual([]);
       expect(folder(film.id).exists).toBe(false);
       // Its receipt later finds no record: acknowledged, nothing comes back.

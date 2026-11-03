@@ -31,7 +31,9 @@ const Saved = lazy(() =>
     }).array(),
   }),
 );
+
 export type StoredList = Infer<typeof Saved>["lists"][number];
+
 export type StoredMember = StoredList["members"][number];
 
 /**
@@ -47,13 +49,16 @@ const UNREADABLE: Kept = { kind: "unreadable" };
 
 function readKept(): Kept {
   let read: unknown;
+
   try {
     read = readJsonStrictly(FILE);
   } catch {
     return UNREADABLE;
   }
+
   if (read === null) return { kind: "read", lists: [] };
   const parsed = Saved()(read);
+
   return parsed instanceof type.errors
     ? { kind: "foreign" }
     : { kind: "read", lists: parsed.lists };
@@ -63,13 +68,17 @@ function readKept(): Kept {
 let cached: Kept | null = null;
 export const keptNow = () => (cached ??= readKept());
 const listeners = new Set<() => void>();
+
 /** For `useSyncExternalStore` with `keptNow`. */
 export const subscribe = (listener: () => void) => {
   listeners.add(listener);
+
   return () => void listeners.delete(listener);
 };
+
 function keep(next: Kept) {
   cached = next;
+
   for (const listener of listeners) listener();
 }
 
@@ -77,6 +86,7 @@ function keep(next: Kept) {
 export function readAgain() {
   if (keptNow() !== UNREADABLE) return;
   const again = readKept();
+
   if (again !== UNREADABLE) keep(again);
 }
 
@@ -87,6 +97,7 @@ export function readAgain() {
 export function stored(): readonly StoredList[] {
   readAgain();
   const from = keptNow();
+
   if (from.kind === "read") return from.lists;
   throw new AppFailure({
     kind: "unexpected",
@@ -105,6 +116,7 @@ export function save(lists: readonly StoredList[]) {
     // A write cut short can leave the new lists under the temporary name, which a launch reads
     // when the file itself is gone.
     const shown = keptNow();
+
     try {
       if (shown.kind === "read") writeJson(FILE, { version: 1, lists: shown.lists });
     } catch {
@@ -118,8 +130,10 @@ export function save(lists: readonly StoredList[]) {
         }
       }
     }
+
     throw cause;
   }
+
   keep({ kind: "read", lists });
 }
 
@@ -129,6 +143,7 @@ export function save(lists: readonly StoredList[]) {
  */
 export function eraseListMembers(id: string): void {
   const lists = stored();
+
   if (!lists.some((list) => list.members.some((each) => each.subscriptionId === id))) return;
   save(
     lists.map((list) => ({

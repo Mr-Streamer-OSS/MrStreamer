@@ -4,11 +4,15 @@ import { expect, it } from "vitest";
 import { teletextPagePresent } from "../src/subtitles/teletext.ts";
 import { dvbPagePresent } from "../src/subtitles/dvb.ts";
 import { pesReader } from "../src/subtitles/transport.ts";
+
 const reader = pesReader();
+
 const fixture = readFileSync(
   join(import.meta.dirname, "../../../apps/desktop/test/fixtures/h264-subtitles.mpegts"),
 );
+
 const packets = [...reader.push(fixture), ...reader.end()];
+
 it("recognizes the fixture's declared teletext page, but rejects filler, other pages and truncated headers", () => {
   const page = packets.find((packet) => packet.pid === 0x300)!.payload;
   expect(teletextPagePresent(page, 888)).toBe(true);
@@ -21,6 +25,7 @@ it("recognizes the fixture's declared teletext page, but rejects filler, other p
   expect(teletextPagePresent(filler, null)).toBe(false);
   expect(teletextPagePresent(page.subarray(0, 30), 888)).toBe(false);
 });
+
 it("recognizes meaningful DVB page data and rejects clear pages, wrong pages and incomplete segments", () => {
   const pages = packets.flatMap((packet) => (packet.pid === 0x103 ? [packet.payload] : []));
   expect(pages.some((page) => dvbPagePresent(page, 1))).toBe(true);

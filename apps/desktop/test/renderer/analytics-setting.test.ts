@@ -11,9 +11,11 @@ import { PrivacySection } from "../../src/renderer/src/features/settings/General
 import { syncPreferences } from "../../src/renderer/src/lib/preferences.ts";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   setLanguage({ locale: "en-US", formats: "en-US" });
@@ -37,10 +39,13 @@ async function render(locale: Locale = "en-US", enabled = true) {
     detach();
     view.unmount();
   };
+
   const checkbox = [...container.querySelectorAll<HTMLElement>('[role="checkbox"]')].find(
     (element) => element.getAttribute("aria-label") === t("Share basic usage statistics"),
   );
+
   if (!checkbox) throw new Error("No statistics checkbox.");
+
   return { container, checkbox };
 }
 
@@ -55,9 +60,11 @@ describe("Settings statistics preference", () => {
         "Counts app use, the features you open, whether playback, downloads and update checks work, and how often the window stops unexpectedly. No viewing history or provider details.",
       ),
     );
+
     const link = container.querySelector<HTMLAnchorElement>(
       'a[href="https://mrstreamer.app/privacy"]',
     );
+
     expect(link?.textContent).toBe(t("Privacy policy"));
     const changed = ipc.hold("preferences.update");
     await act(() => checkbox.click());

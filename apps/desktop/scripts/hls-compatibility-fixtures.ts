@@ -3,7 +3,9 @@
 // synthetic subtitle clip. No provider media is used.
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+
 const root = join(import.meta.dirname, "../test/fixtures");
+
 for (const epoch of [0, 1]) {
   execFileSync(process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg", [
     "-v",

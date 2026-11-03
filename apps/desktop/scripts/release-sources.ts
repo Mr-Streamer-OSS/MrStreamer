@@ -33,27 +33,35 @@ export async function prepare(source: Source, folder: string): Promise<string> {
   // folder relative to this process would name another place.
   const path = resolve(folder, source.file);
   await mkdir(folder, { recursive: true });
+
   if ("url" in source) {
     await run("curl", ["-sSfL", "--retry", "4", "--retry-all-errors", "-o", path, source.url]);
     const found = await sha256(path);
+
     if (found !== source.sha256) {
       await rm(path);
       throw new Error(`${source.url} has SHA-256 ${found}, not the pinned ${source.sha256}.`);
     }
+
     return path;
   }
+
   const repository = await mkdtemp(join(tmpdir(), "mrstreamer-source-"));
+
   try {
     const git = (...args: string[]) => run("git", ["-C", repository, ...args]);
     await git("init", "-q");
     await git("fetch", "-q", "--depth", "1", source.git, source.commit);
     // Git checks what it fetched against the hash it asked for; this guards against a ref.
     const fetched = (await git("rev-parse", "FETCH_HEAD")).stdout.trim();
+
     if (fetched !== source.commit) {
       throw new Error(`${source.git} gave ${fetched}, not the pinned ${source.commit}.`);
     }
+
     const prefix = `${source.file.slice(0, -".tar.gz".length)}/`;
     await git("archive", "--format=tar.gz", `--prefix=${prefix}`, "-o", path, "FETCH_HEAD");
+
     return path;
   } finally {
     await rm(repository, { recursive: true, force: true });
@@ -63,13 +71,16 @@ export async function prepare(source: Source, folder: string): Promise<string> {
 export async function sha256(path: string): Promise<string> {
   const hash = createHash("sha256");
   await pipeline(createReadStream(path), hash);
+
   return hash.digest("hex");
 }
 
 if (import.meta.main) {
   const folder = process.argv[2];
+
   if (!folder) throw new Error("Usage: node scripts/release-sources.ts <folder>");
   const root = join(import.meta.dirname, "..");
+
   const { version } = type({ version: "string" }).assert(
     JSON.parse(await readFile(join(root, "package.json"), "utf8")),
   );
@@ -83,15 +94,19 @@ if (import.meta.main) {
   const manifest = NoticeManifest().assert(
     JSON.parse(await readFile(join(root, "out", "licences", "third-party.json"), "utf8")),
   );
+
   const files = await readdir(folder);
   const problems = linkProblems(manifest.notices, version, files);
+
   if (problems.length > 0) {
     throw new Error(
       `The notices and the sources of ${version} differ:\n${problems.map((problem) => `- ${problem}`).join("\n")}`,
     );
   }
+
   console.log(`The notices of ${version} link all ${files.length} sources, and nothing else.`);
   // For the workflow's publish job, which checks that each of these reached the release.
   const output = process.env["GITHUB_OUTPUT"];
+
   if (output) await appendFile(output, `files=${files.join(" ")}\n`);
 }

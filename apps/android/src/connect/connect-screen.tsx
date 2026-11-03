@@ -43,10 +43,13 @@ export function ConnectScreen({
   useEffect(() => () => attempt.current?.abort(), []);
   useEffect(() => {
     if (!onDone) return;
+
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       onDone();
+
       return true;
     });
+
     return () => back.remove();
   }, [onDone]);
 
@@ -57,8 +60,10 @@ export function ConnectScreen({
     setBusy(true);
     setFailure(null);
     const result = await owner.connect(login, controller.signal);
+
     if (controller.signal.aborted || result.kind === "cancelled") return;
     setBusy(false);
+
     if (result.kind === "connected") onConnected();
     else {
       setFailure({ error: result.error, http: result.http });
@@ -155,6 +160,7 @@ export function ConnectScreen({
   );
 
   const http = failure?.http;
+
   return (
     <View style={{ flex: 1 }}>
       <View

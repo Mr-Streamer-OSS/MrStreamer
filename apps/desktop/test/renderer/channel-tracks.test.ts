@@ -127,6 +127,7 @@ describe("picking subtitles", () => {
       forced: false,
       default: false,
     };
+
     rememberSubtitles(tracksOfA.subtitles[0]!);
     rememberSubtitles(captions);
     rememberSubtitles(null);

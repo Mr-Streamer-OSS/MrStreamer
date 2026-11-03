@@ -31,6 +31,7 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("react-native", async () => {
   const { createElement: h } = await import("react");
+
   type Props = {
     children?: ReactNode;
     accessibilityLabel?: string;
@@ -40,6 +41,7 @@ vi.mock("react-native", async () => {
     style?: { display?: string };
     ref?: unknown;
   };
+
   const view =
     (tag: string) =>
     ({
@@ -63,6 +65,7 @@ vi.mock("react-native", async () => {
         },
         children,
       );
+
   return {
     View: view("div"),
     ScrollView: view("div"),
@@ -83,35 +86,43 @@ vi.mock("react-native", async () => {
       children: ReactNode;
     }) => {
       scenario.modalBack = visible ? onRequestClose : null;
+
       return visible ? h("dialog", { open: true }, children) : null;
     },
     BackHandler: {
       addEventListener: (_: "hardwareBackPress", listener: () => boolean) => {
         scenario.back.push(listener);
+
         return { remove: () => scenario.back.splice(scenario.back.indexOf(listener), 1) };
       },
     },
     useWindowDimensions: () => ({ width: scenario.width, height: 900 }),
   };
 });
+
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createContext } = await import("react");
   const insets = { top: 24, bottom: 16, left: 0, right: 0 };
+
   return {
     SafeAreaInsetsContext: createContext(insets),
     SafeAreaProvider: ({ children }: { children: ReactNode }) => children,
     useSafeAreaInsets: () => insets,
   };
 });
+
 vi.mock("expo-router", async () => {
   const { createElement: h } = await import("react");
+
   /** The root stack: a section for each screen its guards let through. */
   const Stack = Object.assign(({ children }: { children: ReactNode }) => children, {
     Protected: ({ guard, children }: { guard: boolean; children: ReactNode }) =>
       guard ? children : null,
     Screen: ({ name }: { name: string }) => h("section", { "aria-label": name }),
   });
+
   return {
     router: {
       navigate: (href: string) => scenario.asked.push(`navigate ${href}`),
@@ -124,14 +135,20 @@ vi.mock("expo-router", async () => {
     ThemeProvider: ({ children }: { children: ReactNode }) => children,
   };
 });
+
 vi.mock("../src/bootstrap/sources.ts", () => ({
   sources: { state: null, restore: () => void scenario.asked.push("restore") },
 }));
+
 vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources }));
+
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
+
   type Bar = (props: object) => ReactElement;
+
   const Screen: (props: { name: string }) => null = () => null;
+
   /** The navigator on the destination showing, drawing only its bar. */
   const Tabs = ({
     tabBar,
@@ -143,9 +160,11 @@ vi.mock("expo-router/js-tabs", async () => {
     [key: string]: unknown;
   }) => {
     scenario.navigator = rest;
+
     const routes = Children.toArray(children)
       .filter(isValidElement<{ name: string }>)
       .map(({ props: { name } }) => ({ key: `${name}-key`, name }));
+
     return tabBar({
       state: { index: routes.findIndex(({ name }) => name === scenario.focused), routes },
       descriptors: {},
@@ -153,26 +172,34 @@ vi.mock("expo-router/js-tabs", async () => {
       emitter: {
         emit: ({ type, target }: { type: string; target: string }) => {
           scenario.asked.push(`${type} ${target}`);
+
           return { defaultPrevented: false };
         },
       },
       navigateToTab: (key: string) => scenario.asked.push(`show ${key}`),
     });
   };
+
   return { Tabs: Object.assign(Tabs, { Screen }) };
 });
 
 const window = new Window();
+
 Object.assign(globalThis, { window, document: window.document });
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const REACT_DOM = "react-dom/client";
+
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: object): { render(node: unknown): void; unmount(): void };
 };
 
 const { default: RootLayout } = await import("../src/app/_layout.tsx");
+
 const { default: DestinationsLayout, unstable_settings } =
   await import("../src/app/(tabs)/_layout.tsx");
+
 const { Screen } = await import("../src/navigation/screen.tsx");
 const { Sheet } = await import("../src/ui/sheet.tsx");
 
@@ -183,6 +210,7 @@ function show(node: ReactElement) {
   window.document.body.append(container);
   root = createRoot(container);
   act(() => root?.render(node));
+
   return container;
 }
 
@@ -191,6 +219,7 @@ const labels = (container: ReturnType<typeof show>, selector: string) =>
 
 function press(container: ReturnType<typeof show>, label: string) {
   const button = container.querySelector(`button[aria-label="${label}"]`);
+
   if (!(button instanceof window.HTMLButtonElement)) throw new Error(`No ${label}`);
   act(() => button.click());
 }
@@ -199,6 +228,7 @@ function press(container: ReturnType<typeof show>, label: string) {
 function pressBack() {
   let taken = false;
   act(() => void (taken = scenario.back.toReversed().some((listener) => listener())));
+
   return taken;
 }
 
@@ -209,6 +239,7 @@ beforeEach(() => {
   scenario.focused = unstable_settings.anchor;
   scenario.showing = true;
 });
+
 afterEach(() => {
   act(() => root?.unmount());
   window.document.body.innerHTML = "";
@@ -304,6 +335,7 @@ describe("a screen's detail pane", () => {
     content: createElement("p", { "aria-label": "Programme" }),
     onClose: () => void scenario.asked.push("close"),
   };
+
   const framed = (pushed = false) =>
     show(
       createElement(
@@ -312,10 +344,12 @@ describe("a screen's detail pane", () => {
         createElement("p", { "aria-label": "Guide" }),
       ),
     );
+
   const visible = (shown: ReturnType<typeof show>) =>
     labels(shown, "p").filter(
       (_, index) => !shown.querySelectorAll("p")[index]?.closest("[hidden]"),
     );
+
   const heading = (shown: ReturnType<typeof show>) =>
     shown.querySelector('[role="header"]')?.textContent;
 
@@ -358,6 +392,7 @@ describe("a sheet", () => {
         onClose: () => void scenario.asked.push("close"),
         children: createElement("p", { "aria-label": "Form" }),
       });
+
     const shown = show(sheet(true));
     expect(labels(shown, "dialog p")).toEqual(["Form"]);
     press(shown, "Close Add provider");

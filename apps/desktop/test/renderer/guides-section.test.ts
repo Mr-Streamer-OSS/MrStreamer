@@ -19,10 +19,12 @@ import { describeError } from "../../src/renderer/src/lib/errors.ts";
 import { syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 
 let unmount = () => {};
+
 afterEach(() => unmount());
 
 const HOUR = 60 * 60 * 1000;
 const now = Date.now();
+
 const ready: GuideSourceStatus = {
   id: "ready",
   origin: "https://iptv-epg.example",
@@ -36,6 +38,7 @@ const ready: GuideSourceStatus = {
     fetchedAt: now - 3 * HOUR,
   },
 };
+
 const downloading: GuideSourceStatus = {
   id: "downloading",
   origin: "https://epg.northsea.example",
@@ -43,6 +46,7 @@ const downloading: GuideSourceStatus = {
   locked: false,
   processing: { state: "downloading", bytes: 46 * 1024 * 1024, total: 82 * 1024 * 1024 },
 };
+
 const reading: GuideSourceStatus = {
   id: "reading",
   origin: "https://guide.bigtv.example",
@@ -50,6 +54,7 @@ const reading: GuideSourceStatus = {
   locked: false,
   processing: { state: "reading", programmes: 640, since: now - HOUR },
 };
+
 const failed: GuideSourceStatus = {
   id: "failed",
   origin: "http://xml.oldhost.example:8080",
@@ -76,12 +81,15 @@ async function section(sources: readonly GuideSourceStatus[]) {
     stop();
     view.unmount();
   };
+
   const settled = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 20)));
   await settled();
+
   /** Each row: its host, what it is doing, whether that is said as a failure, and its buttons. */
   const rows = () =>
     [...container.querySelectorAll("li")].map((row) => {
       const [host, state] = [...(row.firstElementChild?.children ?? [])];
+
       return {
         host: host?.textContent,
         state: state?.textContent,
@@ -91,26 +99,34 @@ async function section(sources: readonly GuideSourceStatus[]) {
         ),
       };
     });
+
   /** Presses the button called `label` from the keyboard: it has the focus first. */
   const click = async (label: string) => {
     const button = [...container.querySelectorAll("button")].find(
       (each) => (each.getAttribute("aria-label") ?? each.textContent?.trim()) === label,
     );
+
     if (!button) throw new Error(`No button ${label}`);
     button.focus();
     await act(async () => button.click());
     await settled();
   };
+
   /** What the keyboard is on, by its name. */
   const focused = () =>
     document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName;
+
   const field = () => container.querySelector("input");
+
   /** The field called `label`. */
   const input = (label: string) => {
     const found = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+
     if (!found) throw new Error(`No field ${label}`);
+
     return found;
   };
+
   const typeIn = async (into: HTMLInputElement | null, value: string) => {
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     await act(async () => {
@@ -118,7 +134,9 @@ async function section(sources: readonly GuideSourceStatus[]) {
       into?.dispatchEvent(new Event("input", { bubbles: true }));
     });
   };
+
   const type = (value: string) => typeIn(field(), value);
+
   /** Presses `key` in the field called `label`. */
   const press = async (label: string, key: string) => {
     await act(async () =>
@@ -128,6 +146,7 @@ async function section(sources: readonly GuideSourceStatus[]) {
     );
     await settled();
   };
+
   const submit = async () => {
     await act(async () =>
       container
@@ -136,6 +155,7 @@ async function section(sources: readonly GuideSourceStatus[]) {
     );
     await settled();
   };
+
   return { container, rows, click, focused, field, input, typeIn, type, press, submit, settled };
 }
 
@@ -209,6 +229,7 @@ describe("Settings > Guides", () => {
         processing: { state: "downloading", bytes: 31 * 1024 * 1024, total: null },
       },
     ]);
+
     expect(unknown.container.querySelector("li span span")).toBeNull();
     expect(unknown.rows()[0]?.state).toBe(`Downloading · ${formatBytes(31 * 1024 * 1024)} so far`);
   });
@@ -221,6 +242,7 @@ describe("Settings > Guides", () => {
     await type(address);
     await submit();
     expect(ipc.argsOf("guide.addSource")).toEqual([{ address, label: "" }]);
+
     const fresh: GuideSourceStatus = {
       id: "new",
       origin: "https://new.example.org",
@@ -228,6 +250,7 @@ describe("Settings > Guides", () => {
       locked: false,
       processing: { state: "downloading", bytes: 0, total: null },
     };
+
     ipc.always("guide.sources", [ready, fresh]);
     added.resolve(fresh);
     await settled();
@@ -266,11 +289,13 @@ describe("Settings > Guides", () => {
     const { rows, click } = await section([ready, failed]);
 
     expect(rows()[0]?.buttons).toContain("Move iptv-epg.example up");
+
     // At the ends, there is nowhere to go.
     const disabled = (label: string) =>
       [...document.querySelectorAll("button")].find(
         (each) => each.getAttribute("aria-label") === label,
       )?.disabled;
+
     expect(disabled("Move iptv-epg.example up")).toBe(true);
     expect(disabled("Move xml.oldhost.example:8080 down")).toBe(true);
 
@@ -293,11 +318,13 @@ describe("Settings > Guides", () => {
 
     ipc.hold("guide.removeSource").reject(disk);
     await click("Remove iptv-epg.example");
+
     const alerts = () =>
       [...container.querySelectorAll('li [role="alert"]')].map((each) => [
         each.closest("li")?.dataset["source"],
         each.textContent,
       ]);
+
     expect(alerts()).toEqual([["ready", describeError(disk)]]);
     expect(rows().map((each) => each.host)).toEqual([
       "iptv-epg.example",
@@ -347,16 +374,19 @@ describe("Settings > Guides", () => {
 
   describe("two guides from one host", () => {
     const host = "https://epg.example.net";
+
     const a: GuideSourceStatus = {
       ...ready,
       id: "3f9a0c11-5b2e-4d1a-9c3e-7a1b2c3d4e5f",
       origin: host,
     };
+
     const b: GuideSourceStatus = {
       ...ready,
       id: "c0712b44-8e1f-4a6b-b2c9-0d1e2f3a4b5c",
       origin: host,
     };
+
     /** Every button's name and each row's first line, all of which must differ. */
     const names = (rows: ReturnType<Awaited<ReturnType<typeof section>>["rows"]>) => [
       ...rows.map((each) => each.host),
@@ -395,6 +425,7 @@ describe("Settings > Guides", () => {
           ["epg.example.net 3f9a", "epg.example.net c071"],
         ],
       ];
+
       for (const [sources, firstLines] of cases) {
         const { rows } = await section(sources);
         expect(rows().map((each) => each.host)).toEqual(firstLines);
@@ -402,6 +433,7 @@ describe("Settings > Guides", () => {
         expect(rows()[0]?.buttons).toContain(`Move ${firstLines[0]} down`);
         unmount();
       }
+
       const { rows } = await section([{ ...a, label: "United Kingdom" }, b]);
       expect(rows().map((each) => [each.host, each.state])).toEqual([
         ["United Kingdom", expect.stringMatching(/^epg\.example\.net · Ready · /)],
@@ -429,6 +461,7 @@ describe("Settings > Guides", () => {
       ipc.answer("guide.renameSource", ({ id, label }) => {
         listed = listed.map((each) => (each.id === id ? { ...each, label: label || null } : each));
         ipc.always("guide.sources", listed);
+
         return listed.find((each) => each.id === id) ?? a;
       });
 

@@ -34,11 +34,13 @@ function listed(
       catchupDays: null,
     })),
   };
+
   return liveChannels(normalizeCatalogue(raw).streams).channels.map((channel) => ({
     subscriptionId,
     ...channel,
   }));
 }
+
 const vrt = (subscriptionId: string) =>
   listed(
     subscriptionId,
@@ -72,15 +74,18 @@ describe("display-only Live TV search groups", () => {
     expect(
       automaticSearchCopy(first, new Set([ownedKey(blue[1]!)]), [{ id: "green" }, { id: "blue" }]),
     ).toBe(blue[1]);
+
     const actual = automaticSearchCopy(first, new Set([ownedKey(blue[0]!)]), [
       { id: "green" },
       { id: "blue" },
     ]);
+
     expect(
       streamsToPlay(actual, { liveQuality: "hd", channelVariants: { "1": "2" } }).map(
         (stream) => stream.id,
       ),
     ).toEqual(["2"]);
+
     for (const copy of first.copies)
       for (const variant of copy.variants)
         expect(streamsToPlay(copy, { liveQuality: "fhd" }, variant.id)).toEqual([variant]);
@@ -107,6 +112,7 @@ describe("display-only Live TV search groups", () => {
       ...listed("a", ["BE | GENERAL"], [{ name: "BE | VRT 1 FHD", category: 0 }]),
       ...listed("b", ["BE | GENERAL HD"], [{ name: "BE | VRT 1 HD", category: 0 }]),
     ];
+
     expect(groupLiveSearch(channels)).toHaveLength(1);
     expect(
       groupLiveSearch(channels.map(({ searchIdentity: _identity, ...channel }) => channel)),
@@ -115,24 +121,30 @@ describe("display-only Live TV search groups", () => {
 
   it("a trusted guide supplies missing region and topic, but does not override country or guide conflicts", () => {
     const a = listed("a", ["General"], [{ name: "VRT 1", category: 0, guide: "VRT1.be" }]);
+
     const b = listed(
       "b",
       ["BE | SPORTS"],
       [{ name: "BE | VRT 1", category: 0, guide: "vrt 1 BE" }],
     );
+
     expect(groupLiveSearch([...a, ...b])).toHaveLength(1);
+
     const otherGuide = listed(
       "c",
       ["BE | SPORTS"],
       [{ name: "BE | VRT 1", category: 0, guide: "OtherFeed.be" }],
     );
+
     const unknownGuide = listed("d", ["BE | SPORTS"], [{ name: "BE | VRT 1", category: 0 }]);
     expect(groupLiveSearch([...b, ...unknownGuide, ...otherGuide])).toHaveLength(3);
+
     const otherCountry = listed(
       "c",
       ["NL | SPORTS"],
       [{ name: "NL | VRT 1", category: 0, guide: "VRT1.be" }],
     );
+
     expect(groupLiveSearch([...b, ...otherCountry])).toHaveLength(2);
   });
 
@@ -145,12 +157,15 @@ describe("display-only Live TV search groups", () => {
         { name: "VRT Canvas", category: 1, guide: "Shared.be" },
       ],
     );
+
     expect(bad.map((channel) => channel.searchIdentity?.guideId)).toEqual([null, null]);
+
     const conflict = listed(
       "b",
       ["BE | GENERAL", "NL | GENERAL"],
       [{ name: "VRT 1", category: 0, categories: [0, 1], guide: "VRT1.be" }],
     );
+
     expect(conflict[0]!.searchIdentity).toBeUndefined();
     expect(groupLiveSearch([...bad, ...conflict])).toHaveLength(3);
   });
@@ -161,6 +176,7 @@ describe("display-only Live TV search groups", () => {
       ["BE | VLAANDEREN", "BE | SPORTS"],
       [{ name: "BE | VRT 1", category: 0, categories: [0, 1] }],
     );
+
     const flemish = listed("b", ["BE | VLAANDEREN"], [{ name: "BE | VRT 1", category: 0 }]);
     const sport = listed("c", ["BE | SPORTS"], [{ name: "BE | VRT 1", category: 0 }]);
     expect(groupLiveSearch([...flemish, ...both])).toHaveLength(1);
@@ -175,11 +191,13 @@ describe("display-only Live TV search groups", () => {
       ["BE | GENERAL"],
       [{ name: "BE | VRT 1 HD", category: 0, guide: "VRT1.be@EastHD" }],
     );
+
     const west = listed(
       "b",
       ["BE | GENERAL"],
       [{ name: "BE | VRT 1 HD", category: 0, guide: "VRT1.be@WestHD" }],
     );
+
     expect(groupLiveSearch([...east, ...west])).toHaveLength(2);
   });
 

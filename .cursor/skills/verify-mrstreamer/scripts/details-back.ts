@@ -36,6 +36,7 @@ export function withSecondSeason(all: FakeTitles): FakeTitles {
     ...all,
     series: all.series.map((series) => {
       const first = series.seasons[0]?.[0];
+
       return series.id === B_SERIES && first
         ? { ...series, seasons: [series.seasons[0]!, [{ ...first, id: first.id + 1 }]] }
         : series;
@@ -49,22 +50,29 @@ const C = "Original 100004";
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const SHEET = `document.querySelector('[role=dialog]')`;
+
 /** The details' name, as the sheet is called. */
 const NAME = `(() => { const id = ${SHEET}?.getAttribute('aria-labelledby'); return id ? document.getElementById(id)?.textContent ?? null : null; })()`;
 const RELATED = `[...document.querySelectorAll('[role=dialog] [aria-label="Also in your subscriptions"] button')]`;
+
 const tile = (name: string) =>
   `${RELATED}.find(b => b.textContent.includes(${JSON.stringify(name)}))`;
+
 const BACK = named("[role=dialog] header button", "Back");
 const CLOSE = `document.querySelector('[role=dialog] button[aria-label="Close"]')`;
 const PLAY = `[...document.querySelectorAll('[role=dialog] button')].find(b => /^(Play|Resume)\\b/.test(b.textContent.trim()))`;
 const SCROLLER = `[...document.querySelectorAll('[role=dialog] div')].find(e => getComputedStyle(e).overflowY === 'auto')`;
 const season = (number: number) => named("[role=dialog] button[aria-pressed]", `Season ${number}`);
 const SETTINGS_PAGE = `document.querySelector('[data-view="settings"]')`;
+
 const ROW = (who: string) =>
   `[...document.querySelectorAll('[data-view="settings"] li')].find(r => r.querySelector('button')?.textContent.includes(${JSON.stringify(who)}))`;
+
 /** The only subscription's row, named by its address and login. */
 const ONLY = `[...document.querySelectorAll('[data-view="settings"] li')].find(r => r.querySelector('button')?.textContent.includes(' · '))`;
+
 /** The first poster of For you's first row, beside the row's All. */
 const POSTER = `[...document.querySelectorAll('section')].filter(s => s.querySelector('h2')).flatMap(s => [...s.querySelectorAll('button')]).find(b => !/^All\\b/.test(b.textContent.trim()))`;
 const ADULTS = `document.querySelector('[role="checkbox"][aria-label="For adults"]')`;
@@ -75,6 +83,7 @@ const expect = (value: boolean, message: string) => {
 
 export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture): Promise<void> {
   const name = () => d.evaluate<string | null>(NAME);
+
   /** Waits for a chosen poster's fixture metadata name before using it as an expected heading. */
   const metadataName = async (poster: string) => {
     let title: string | null = null;
@@ -83,10 +92,13 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
         `(${poster})?.querySelector('span.truncate')?.textContent ?? null`,
       );
       const id = /^(?:Original|Origineel|English) (\d+)$/.exec(title ?? "")?.[1];
+
       return !!id && title === tmdbName(Number(id), "en").name;
     });
+
     return title!;
   };
+
   /** Waits for the details of `title`, with their related titles settled. */
   const showing = async (title: string) => {
     await d.wait(async () => (await name()) === title);
@@ -96,14 +108,17 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
       ),
     );
   };
+
   const focused = () =>
     d.evaluate<string>(`(() => {
       const a = document.activeElement;
       if (!a || a === document.body) return 'body';
       return (a.getAttribute('aria-label') || a.textContent.trim()).slice(0, 60) + (a.closest('[role=dialog]') ? ' (sheet)' : ' (page)');
     })()`);
+
   const pressWith = async (key: string, code: string, keyCode: number, modifiers: number) => {
     d.action(`Press ${modifiers === 4 ? "Cmd+" : modifiers === 2 ? "Ctrl+" : ""}${key}`);
+
     for (const type of ["rawKeyDown", "keyUp"])
       await d.send("Input.dispatchKeyEvent", {
         type,
@@ -113,21 +128,27 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
         modifiers,
       });
   };
+
   /** Presses Tab until `target` has the keyboard, saying where it went when it never does. */
   const tabTo = async (label: string, target: string) => {
     const trail: string[] = [];
+
     for (let presses = 0; presses < 80; presses++) {
       if (await d.evaluate<boolean>(`document.activeElement === (${target})`)) return;
       trail.push(await focused());
       await d.key("Tab", 9);
     }
+
     throw new Error(`Tab never reached ${label}: ${trail.join(" > ")}`);
   };
+
   const back = async (to: string | null) => {
     await d.click(`Back${to ? ` to ${to}` : " to the page"}`, BACK);
+
     if (to) await showing(to);
     else await d.wait(async () => !(await d.exists(SHEET)));
   };
+
   /** Settings > Subscriptions, from the bar above the details or the page's. */
   const subscriptions = async () => {
     await d.click(
@@ -137,19 +158,24 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     await d.wait(() => d.exists(SETTINGS_PAGE));
     await d.click("Open Subscriptions", named("[data-view=settings] nav button", "Subscriptions"));
   };
+
   const openRow = async (who: string, row: string) => {
     for (let attempt = 1; ; attempt++) {
       await d.click(`Open ${who}'s row (attempt ${attempt})`, `(${row})?.querySelector('button')`);
+
       const opened = await d
         .wait(() => d.exists(`(${row})?.querySelector('[role=region]')`), 3000)
         .then(
           () => true,
           () => false,
         );
+
       if (opened) return;
+
       if (attempt === 3) throw new Error(`${who}'s row didn't open.`);
     }
   };
+
   const refreshBackup = async () => {
     await subscriptions();
     await openRow("Backup", ROW("Backup"));
@@ -158,6 +184,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     await d.wait(() => d.evaluate<boolean>(`!(${refresh})?.disabled`), 60_000);
     await leaveSettings();
   };
+
   const remove = async (who: string, row: string) => {
     await openRow(who, row);
     await d.click(
@@ -169,10 +196,12 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
       `[...(${row})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === "Remove")`,
     );
   };
+
   const leaveSettings = async () => {
     await d.click("Back from Settings", named('[data-view="settings"] header button', "Back"));
     await d.wait(async () => !(await d.exists(SETTINGS_PAGE)));
   };
+
   const adults = async (shown: boolean) => {
     await d.click(
       "Open Settings from the top bar",
@@ -190,6 +219,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     );
     await leaveSettings();
   };
+
   const openSeries = async (label: string, provider: string, tab = "All series") => {
     await d.click("Open Series", named("header button", "Series"));
     await d.click(`Open ${tab}`, named("nav button", tab));
@@ -198,10 +228,12 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
       `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(provider)}))`,
     );
   };
+
   const openFormats = async () => {
     await openSeries("TEST | Formats", "TEST | Formats");
     await showing(A);
   };
+
   /**
    * TEST | Formats, then English 100002 on Season 2 and scrolled, then Original 100004. The main
    * process keeps details it read, so only the first time asks the second provider for them.
@@ -221,6 +253,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     const scroll = await d.evaluate<number>(`${SCROLLER}.scrollTop`);
     await d.click(`Open related ${C}`, tile(C));
     await showing(C);
+
     return scroll;
   };
 
@@ -229,6 +262,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
   await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
   await d.click("Add the second fixture subscription", named("button", "Add subscription"));
   await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('form input').length === 4"));
+
   for (const [index, text] of ["Backup", fixture.otherUrl, "demo", "demo"].entries()) {
     await d.click(
       `Fill second fixture field ${index + 1}`,
@@ -236,6 +270,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     );
     await d.send("Input.insertText", { text });
   }
+
   await d.click("Connect the second fixture", "document.querySelector('form button[type=submit]')");
   await d.wait(() => d.exists(ROW("Backup")), 60_000);
   await d.key("Escape", 27);
@@ -249,11 +284,13 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
   );
   await d.capture("c-from-b");
   await back(B);
+
   const atB = await d.evaluate<{ season: boolean; scroll: number; focus: boolean }>(`({
     season: (${season(2)})?.getAttribute('aria-pressed') === 'true',
     scroll: ${SCROLLER}.scrollTop,
     focus: document.activeElement === (${tile(C)}),
   })`);
+
   d.observed["backToB"] = { ...atB, scrollBefore: scroll };
   await d.capture("back-to-b");
   expect(atB.season, `Back to ${B} lost Season 2.`);
@@ -353,10 +390,12 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
   await tabTo("Back above the details", BACK);
   await d.key("Enter", 13);
   await showing(first);
+
   const keyboardBack = await d.evaluate<{ focus: boolean; visible: boolean }>(`({
     focus: document.activeElement === (${related}),
     visible: document.activeElement?.matches(':focus-visible') ?? false,
   })`);
+
   d.observed["keyboardBack"] = { ...keyboardBack, first, second };
   await d.capture("keyboard-back");
   expect(keyboardBack.focus, `Keyboard Back left the keyboard on ${await focused()}.`);
@@ -369,10 +408,12 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
   await d.wait(async () => (await focused()).endsWith("(sheet)"));
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(SHEET)));
+
   const returned = await d.evaluate<{ poster: boolean; visible: boolean }>(`({
     poster: document.activeElement === (${POSTER}),
     visible: document.activeElement?.matches(':focus-visible') ?? false,
   })`);
+
   d.observed["escapeReturnsKeyboard"] = { ...returned, to: await focused() };
   await d.capture("escape-to-poster");
   expect(returned.poster, `Escape left the keyboard on ${await focused()}, not the poster.`);
@@ -399,6 +440,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     30_000,
   );
   await d.capture("connect-after-reset");
+
   for (const [index, value] of [fixture.providerUrl, "demo", "demo"].entries()) {
     await d.click(
       `Fill Connect field ${index + 1} again`,
@@ -406,6 +448,7 @@ export async function detailsBackScenario(d: Driver, fixture: DetailsBackFixture
     );
     await d.send("Input.insertText", { text: value });
   }
+
   await d.click("Connect again", "document.querySelector('form button[type=submit]')");
   await d.wait(
     () =>

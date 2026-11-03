@@ -36,22 +36,27 @@ export function diagnosticsLog(dataDir: string) {
       (file) => file.size,
       () => 0,
     );
+
     while (pending.length > 0) {
       let chunk = "";
       let bytes = 0;
       let taken = 0;
+
       for (const line of pending) {
         const length = Buffer.byteLength(line);
+
         if (size + bytes + length > MAX_BYTES && size + bytes > 0) break;
         chunk += line;
         bytes += length;
         taken++;
       }
+
       if (taken === 0) {
         await rename(path, join(dataDir, "diagnostics.1.log"));
         size = 0;
         continue;
       }
+
       pending = pending.slice(taken);
       await appendFile(path, chunk);
       size += bytes;
@@ -68,6 +73,7 @@ export function diagnosticsLog(dataDir: string) {
       })
       .finally(() => {
         writing = null;
+
         if (pending.length > 0) flush();
       });
   }

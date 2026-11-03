@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+
 /** 21:30 to 23:00 on 2 October 2026 in +02:00. */
 const START = Date.parse("2026-10-02T21:30:00+02:00");
 const STOP = START + 90 * MINUTE;
@@ -33,6 +34,7 @@ const set = (changes: Partial<KeptReminder> = {}): KeptReminder => ({
 });
 
 const zone = process.env["TZ"];
+
 afterEach(() => {
   if (zone === undefined) delete process.env["TZ"];
   else process.env["TZ"] = zone;
@@ -86,6 +88,7 @@ describe("programme reminders", () => {
       { id: "10", streams: ["10", "12"], name: "Eurosport", adult: true },
       undefined,
     );
+
     expect(found).toMatchObject({
       channel: "10",
       streams: ["10", "12", "11"],
@@ -102,6 +105,7 @@ describe("programme reminders", () => {
 
   it("follows its channel after it told or was missed, and keeps what it told", () => {
     const filed = { id: "10", streams: ["10", "12"], name: "Eurosport", adult: true };
+
     for (const state of [{ kind: "told", at: START }, { kind: "missed" }] as const) {
       const kept = set({ state });
       expect(relisted(kept, filed)).toEqual({
@@ -119,11 +123,13 @@ describe("programme reminders", () => {
   it("keeps one that told, was missed or went until the midnight ending its programme's day there", () => {
     // 25 October 2026 in Amsterdam: summer time ends at 03:00, so the day lasts 25 hours.
     process.env["TZ"] = "Europe/Amsterdam";
+
     const night = set({
       start: Date.parse("2026-10-25T01:00:00+02:00"),
       stop: Date.parse("2026-10-25T02:30:00+02:00"),
       state: { kind: "missed" },
     });
+
     const midnight = Date.parse("2026-10-26T00:00:00+01:00");
     expect(midnight - Date.parse("2026-10-25T00:00:00+02:00")).toBe(25 * HOUR);
     expect(keptUntil(night)).toBe(midnight);

@@ -23,6 +23,7 @@ interface Entry {
 
 const downloads = "apps/desktop/test/downloads.test.ts";
 const airplayKey = "apps/desktop/test/airplay-helper-key.test.ts";
+
 const testFiles = [
   "test/release.test.ts",
   "packages/core/test/guide.test.ts",
@@ -30,7 +31,9 @@ const testFiles = [
   downloads,
   airplayKey,
 ];
+
 const complete: readonly Entry[] = testFiles.map((file) => ({ file }));
+
 const replace = (entry: Entry): Entry[] =>
   complete.map((each) => (each.file === entry.file ? entry : each));
 
@@ -43,11 +46,13 @@ async function check(
   files: readonly string[] = testFiles,
 ): Promise<{ status: number | null; output: string }> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "mrstreamer-ci-results-")));
+
   try {
     for (const file of files) {
       mkdirSync(dirname(join(root, file)), { recursive: true });
       writeFileSync(join(root, file), "");
     }
+
     const text =
       typeof report === "string"
         ? report
@@ -62,12 +67,14 @@ async function check(
               })),
             })),
           });
+
     writeFileSync(join(root, "report.json"), text);
     const run = spawn(process.execPath, [cli, "report.json"], { cwd: root, timeout: 10_000 });
     let output = "";
     run.stdout.setEncoding("utf8").on("data", (text: string) => (output += text));
     run.stderr.setEncoding("utf8").on("data", (text: string) => (output += text));
     const [status] = (await once(run, "close")) as [number | null];
+
     return { status, output };
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -166,6 +173,7 @@ describe("CI's test report", { concurrent: true }, () => {
     const run = await check(replace({ file: airplayKey, tests: ["skipped"] }));
 
     expect(run.status).toBe(process.platform === "darwin" ? 1 : 0);
+
     if (process.platform !== "darwin")
       expect(run.output).toContain(`${airplayKey} skipped 1, which run on darwin alone.`);
   });

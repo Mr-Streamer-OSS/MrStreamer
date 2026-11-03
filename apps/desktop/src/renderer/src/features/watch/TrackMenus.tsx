@@ -91,6 +91,7 @@ export function TrackMenus({
           {subtitles.map((track) => {
             const chosen = track.id === subtitle?.id && track.page === subtitle.page;
             const elsewhere = shows !== null && !shows.includes(track.format);
+
             return (
               <Choice
                 key={`${track.id}:${track.page}`}
@@ -143,6 +144,7 @@ export function SoundChoices({
   onDone: () => void;
 }) {
   const playing = audioId ?? audio.find((track) => track.default)?.id ?? audio[0]?.id;
+
   return audio.map((track) => (
     <Choice
       key={track.id}
@@ -189,6 +191,7 @@ export function Menu({
   children: ReactNode;
 }) {
   const popup = useRef<HTMLDivElement>(null);
+
   return (
     <Popover.Root open={open} onOpenChange={onOpenChange} modal>
       <Tooltip label={label}>
@@ -224,6 +227,7 @@ export function Menu({
             finalFocus={(closeType) => closeType === "keyboard"}
             onKeyDown={(event) => {
               onKeyDown?.(event);
+
               if (!event.defaultPrevented) moveFocus(event);
             }}
             className={cn(
@@ -254,10 +258,13 @@ function chosenItem(popup: HTMLElement): HTMLElement | null {
 export function moveFocus(event: KeyboardEvent<HTMLElement>): void {
   if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select"))
     return;
+
   const items = [
     ...event.currentTarget.querySelectorAll<HTMLElement>("[data-item]:not(:disabled)"),
   ];
+
   const at = items.findIndex((item) => item === document.activeElement);
+
   const target =
     event.key === "ArrowDown"
       ? at < 0
@@ -270,6 +277,7 @@ export function moveFocus(event: KeyboardEvent<HTMLElement>): void {
           : event.key === "End"
             ? items.at(-1)
             : undefined;
+
   if (!target) return;
   event.preventDefault();
   target.focus();
@@ -278,6 +286,7 @@ export function moveFocus(event: KeyboardEvent<HTMLElement>): void {
 /** A line of small text at the foot of a menu, saying what its rows can't. */
 export function MenuNote({ children }: { children: ReactNode }) {
   if (!children) return null;
+
   return (
     <p className="px-2 pt-1.5 pb-1 text-[0.8125rem] leading-snug text-muted-foreground">
       {children}

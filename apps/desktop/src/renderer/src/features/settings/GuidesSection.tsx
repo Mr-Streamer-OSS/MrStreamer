@@ -47,23 +47,30 @@ export function GuidesSection() {
   useEffect(() => {
     const wanted = refocus.current;
     const root = section.current;
+
     if (!wanted || !root) return;
     refocus.current = null;
     const rows = [...root.querySelectorAll("li")];
+
     if (wanted.kind === "moved") {
       const row = rows.find((each) => each.dataset["source"] === wanted.id);
+
       const target =
         pressable(row?.querySelector(`[data-move="${wanted.by}"]`)) ??
         pressable(row?.querySelector(`[data-move="${-wanted.by}"]`));
+
       target?.focus();
+
       return;
     }
+
     const near = rows[wanted.at] ?? rows[wanted.at - 1];
     (pressable(near?.querySelector("[data-remove]")) ?? field.current)?.focus();
   }, [read]);
   const [address, setAddress] = useState("");
   const [label, setLabel] = useState("");
   const changed = () => client.invalidateQueries({ queryKey: ["guide"] });
+
   const add = useMutation({
     mutationFn: (sent: { address: string; label: string }) => call("guide.addSource", sent),
     // The address it was sent with isn't kept past the field: it can hold a key.
@@ -74,7 +81,9 @@ export function GuidesSection() {
       void changed();
     },
   });
+
   const typed = address.trim();
+
   return (
     <section ref={section}>
       <h2 className="mb-1 text-[0.9375rem] font-semibold">{t("Guides")}</h2>
@@ -100,6 +109,7 @@ export function GuidesSection() {
         className="mt-5 flex items-center gap-2"
         onSubmit={(event: FormEvent) => {
           event.preventDefault();
+
           if (typed && !add.isPending) add.mutate({ address: typed, label: label.trim() });
         }}
       >
@@ -180,20 +190,24 @@ function SourceRow({
   const client = useQueryClient();
   const renameButton = useRef<HTMLButtonElement>(null);
   const [renaming, setRenaming] = useState(false);
+
   const refresh = useMutation({
     mutationFn: () => call("guide.refreshSource", { id }),
     onSettled: onChange,
   });
+
   const move = useMutation({
     mutationFn: (by: -1 | 1) => call("guide.moveSource", { id, by }),
     onSuccess: (_, by) => onMoved(by),
     onSettled: onChange,
   });
+
   const remove = useMutation({
     mutationFn: () => call("guide.removeSource", { id }),
     onSuccess: onRemoved,
     onSettled: onChange,
   });
+
   const rename = useMutation({
     mutationFn: (label: string | null) => call("guide.renameSource", { id, label }),
     // Shown at once, before the list is read again.
@@ -203,6 +217,7 @@ function SourceRow({
       ),
     onSettled: onChange,
   });
+
   // Pressed again while it is under way, an action does nothing; it isn't disabled meanwhile,
   // which would leave the keyboard on a button that can't be pressed.
   const moving = (by: -1 | 1) => {
@@ -211,25 +226,31 @@ function SourceRow({
     rename.reset();
     move.mutate(by);
   };
+
   const removing = () => {
     if (remove.isPending) return;
     move.reset();
     rename.reset();
     remove.mutate();
   };
+
   /** Ends the rename, keeping `typed` unless it is null, and hands the keyboard back on `refocus`. */
   const renamed = (typed: string | null, refocus: boolean) => {
     setRenaming(false);
+
     if (refocus) renameButton.current?.focus();
     const label = typed?.trim() || null;
+
     if (typed === null || label === source.label) return;
     move.reset();
     remove.reset();
     rename.mutate(label);
   };
+
   const failure = move.error ?? remove.error ?? rename.error;
   const busy = processing.state === "downloading" || processing.state === "reading";
   const failed = processing.state === "failed" || source.locked;
+
   return (
     <li data-source={id} className="flex min-h-15 items-center gap-6 border-b border-white/8 py-2">
       <div className="min-w-0 flex-1">
@@ -354,11 +375,13 @@ function RenameField({
 }) {
   const [label, setLabel] = useState(source.label ?? "");
   const done = useRef(false);
+
   const finish = (typed: string | null, refocus: boolean) => {
     if (done.current) return;
     done.current = true;
     onDone(typed, refocus);
   };
+
   return (
     <Input
       value={label}
@@ -393,6 +416,7 @@ function RenameField({
 function stateOf(source: GuideSourceStatus, now: number): string {
   const { processing } = source;
   const kept = keptOf(processing);
+
   if (source.locked) {
     return [
       t("Needs its address again: add it once more"),
@@ -401,6 +425,7 @@ function stateOf(source: GuideSourceStatus, now: number): string {
       .filter(Boolean)
       .join(" · ");
   }
+
   switch (processing.state) {
     case "downloading":
       return processing.total === null

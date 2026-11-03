@@ -38,6 +38,7 @@ const SOURCES = {
   other: "referral",
   unknown: "unknown",
 } as const;
+
 type Source = keyof typeof SOURCES;
 
 /** The utm_source values a link may carry: where we post or link the site ourselves. */
@@ -63,10 +64,12 @@ const TAGGED_MEDIUMS = [
   "social",
   "referral",
 ] as const;
+
 type Medium = (typeof SOURCES)[Source] | (typeof TAGGED_MEDIUMS)[number];
 
 /** The utm_campaign values a link may carry. Anything else is "none". */
 const CAMPAIGNS = ["none", "release", "launch"] as const;
+
 type Campaign = (typeof CAMPAIGNS)[number];
 
 export interface Entry {
@@ -110,6 +113,7 @@ const pick = <Code extends string>(codes: readonly Code[], value: string | undef
 /** A tag's one value, lowercase. A missing or repeated tag has none. */
 function tag(params: URLSearchParams, name: string): string | undefined {
   const values = params.getAll(name);
+
   return values.length === 1 ? values[0]?.toLowerCase() : undefined;
 }
 
@@ -117,7 +121,9 @@ function tag(params: URLSearchParams, name: string): string | undefined {
 function tagged(search: string): Entry | undefined {
   const params = new URLSearchParams(search);
   const source = pick(TAGGED_SOURCES, tag(params, "utm_source"));
+
   if (!source) return undefined;
+
   return {
     entry_source: source,
     entry_medium: pick(TAGGED_MEDIUMS, tag(params, "utm_medium")) ?? SOURCES[source],
@@ -129,14 +135,18 @@ function tagged(search: string): Entry | undefined {
 function referred(referrer: string, origin: string): Source | "site" | undefined {
   if (!referrer) return undefined;
   let url: URL;
+
   try {
     url = new URL(referrer);
   } catch {
     return "other";
   }
+
   if (url.origin === origin || SITE_HOSTS.has(url.hostname)) return "site";
+
   if (url.protocol !== "https:" && url.protocol !== "http:") return "other";
   const host = url.hostname.replace(/\.$/, "");
+
   return HOSTS.find(([pattern]) => pattern.test(host))?.[1] ?? "other";
 }
 
@@ -148,11 +158,13 @@ const MEDIUMS: readonly Medium[] = [...Object.values(SOURCES), ...TAGGED_MEDIUMS
 function stored(): Entry | undefined {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
+
     if (typeof value !== "object" || value === null) return undefined;
     const codes: Partial<Record<keyof Entry, unknown>> = value;
     const entry_source = pick(Object.keys(SOURCES) as Source[], String(codes.entry_source));
     const entry_medium = pick(MEDIUMS, String(codes.entry_medium));
     const entry_campaign = pick(CAMPAIGNS, String(codes.entry_campaign));
+
     return entry_source && entry_medium && entry_campaign
       ? { entry_source, entry_medium, entry_campaign }
       : undefined;
@@ -167,11 +179,13 @@ function stored(): Entry | undefined {
  */
 export function enterPage(search: string, referrer: string, origin: string): Entry {
   const source = referred(referrer, origin);
+
   const entry: Entry =
     tagged(search) ??
     (source && source !== "site"
       ? { entry_source: source, entry_medium: SOURCES[source], entry_campaign: "none" }
       : (stored() ?? UNKNOWN));
+
   try {
     sessionStorage.setItem(ENTRY, JSON.stringify(entry));
   } catch {
@@ -179,6 +193,7 @@ export function enterPage(search: string, referrer: string, origin: string): Ent
     // mustn't outlive it.
     forgetEntry();
   }
+
   return entry;
 }
 

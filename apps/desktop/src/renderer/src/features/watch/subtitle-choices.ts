@@ -7,10 +7,12 @@ export const SUBTITLE_SIZES = [
   { value: "medium", short: "M", label: "Medium" },
   { value: "large", short: "L", label: "Large" },
 ] as const satisfies readonly Segment<SubtitleLook["size"]>[];
+
 export const SUBTITLE_BACKGROUNDS = [
   { value: "box", short: "Box", label: "Box" },
   { value: "shadow", short: "Shadow", label: "Shadow" },
 ] as const satisfies readonly Segment<SubtitleLook["background"]>[];
+
 export const SUBTITLE_POSITIONS = [
   { value: "low", short: "Low", label: "Low" },
   { value: "high", short: "Higher", label: "Higher" },

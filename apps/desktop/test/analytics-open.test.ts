@@ -17,19 +17,24 @@ import { holdableFetch, runtimeFor, tempDir, testSecrets } from "./support.ts";
 /** Records each observed open and the fixed failure code it reports, if any. */
 function observations() {
   const notes: string[] = [];
+
   const observe = () => {
     notes.push("started");
+
     return (failure: AnalyticsFailure) => notes.push(`failed ${failure}`);
   };
+
   return { observe, notes };
 }
 
 describe("observed playback requests", () => {
   it("preserves overlapping public channel results and reports no failure for the superseded open", async () => {
     const host = await startFakePlaylist();
+
     try {
       const holdable = holdableFetch();
       const dataDir = await tempDir();
+
       const layer = Playback.layer({ userAgent: "analytics-contract", ffmpeg: null }).pipe(
         Layer.provideMerge(PlaybackCoordination.layer),
         Layer.provideMerge(
@@ -40,11 +45,14 @@ describe("observed playback requests", () => {
           }),
         ),
       );
+
       const initial = runtimeFor(layer);
       const subscriptions = await initial.runPromise(Subscriptions);
+
       const { id: subscriptionId } = await initial.runPromise(
         subscriptions.add({ server: host.link, username: "", password: "" }),
       );
+
       await initial.dispose();
       // The restarted subscription resolves its playlist during the first public open.
       const runtime = runtimeFor(layer);
@@ -52,10 +60,12 @@ describe("observed playback requests", () => {
       const playback = await runtime.runPromise(Playback);
       const channel = { subscriptionId, id: PLAYLIST_CHANNELS.plain.id };
       const { observe, notes } = observations();
+
       const open = () =>
         observeOpen(coordination, observe, (turn) =>
           playback.open(channel, ["h264", "aac", "mp3", "opus"], { turn }),
         );
+
       const held = holdable.holdNext();
       const first = runtime.runPromiseExit(open());
       await held.arrived;
@@ -63,6 +73,7 @@ describe("observed playback requests", () => {
       held.release();
       const previous = await first;
       expect(Exit.isFailure(previous)).toBe(true);
+
       if (Exit.isFailure(previous))
         expect(Cause.findErrorOption(previous.cause)).toMatchObject({
           value: {
@@ -82,19 +93,24 @@ describe("observed playback requests", () => {
     const { observe, notes } = observations();
     const entered = Promise.withResolvers<void>();
     const held = Promise.withResolvers<void>();
+
     const receiver = runtime.runPromiseExit(
       observeOpen(coordination, observe, (turn) =>
         Effect.gen(function* () {
           entered.resolve();
           yield* Effect.promise(() => held.promise);
+
           return yield* coordination.inTurn(turn, Effect.succeed("receiver prepared"));
         }),
       ),
     );
+
     await entered.promise;
+
     const refusal = new Failed({
       error: { kind: "unexpected", detail: "A receiver has playback." },
     });
+
     const preview = await runtime.runPromiseExit(
       observeOpen(
         coordination,
@@ -103,13 +119,16 @@ describe("observed playback requests", () => {
         Effect.fail(refusal),
       ),
     );
+
     if (!Exit.isFailure(preview)) throw new Error("Preview was not refused.");
     const refused = Cause.findErrorOption(preview.cause);
+
     if (refused._tag !== "Some") throw new Error("No public preview error.");
     expect(refused.value).toBe(refusal);
     expect(notes).toEqual(["started"]);
     held.resolve();
     const prepared = await receiver;
+
     if (!Exit.isSuccess(prepared)) throw new Error("Preview superseded the receiver request.");
     expect(prepared.value).toBe("receiver prepared");
     expect(notes).toEqual(["started"]);
@@ -121,20 +140,24 @@ describe("observed playback requests", () => {
     const { observe, notes } = observations();
     const entered = Promise.withResolvers<void>();
     const held = Promise.withResolvers<void>();
+
     const opening = runtime.runPromiseExit(
       observeOpen(coordination, observe, (turn) =>
         Effect.gen(function* () {
           entered.resolve();
           yield* Effect.promise(() => held.promise);
+
           return yield* coordination.inTurn(turn, Effect.succeed("obsolete"));
         }),
       ),
     );
+
     await entered.promise;
     await runtime.runPromise(coordination.begin);
     held.resolve();
     expect(Exit.isFailure(await opening)).toBe(true);
     const waiting = Promise.withResolvers<void>();
+
     const cancelled = runtime.runFork(
       observeOpen(coordination, observe, () =>
         Effect.andThen(
@@ -143,10 +166,12 @@ describe("observed playback requests", () => {
         ),
       ),
     );
+
     await waiting.promise;
     await runtime.runPromise(Fiber.interrupt(cancelled));
     // Stop and cancellation are not failures.
     expect(notes).toEqual(["started", "started"]);
+
     const failures: readonly [AppError, string][] = [
       [{ kind: "stream", failure: { kind: "unavailable", status: 404 } }, "unavailable"],
       [{ kind: "stream", failure: { kind: "refused", status: 401 } }, "credentials"],
@@ -154,17 +179,22 @@ describe("observed playback requests", () => {
       [{ kind: "unreachable", server: "PRIVATE", detail: "PRIVATE" }, "network"],
       [{ kind: "unexpected", detail: "PRIVATE" }, "app"],
     ];
+
     for (const [error, code] of failures) {
       const failed = new Failed({ error });
+
       const result = await runtime.runPromiseExit(
         observeOpen(coordination, observe, () => Effect.fail(failed)),
       );
+
       if (!Exit.isFailure(result)) throw new Error("Open did not fail.");
       const publicError = Cause.findErrorOption(result.cause);
+
       if (publicError._tag !== "Some") throw new Error("No public open error.");
       expect(publicError.value).toBe(failed);
       expect(notes.at(-1)).toBe(`failed ${code}`);
     }
+
     expect(JSON.stringify(notes)).not.toContain("PRIVATE");
     const value = { sessionId: "kept" };
     expect(

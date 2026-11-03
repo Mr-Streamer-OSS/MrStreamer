@@ -55,6 +55,7 @@ export interface DownloadAction {
 /** "Paper Harbor · S1 E3", or the movie's name: how sheets and alerts name a download. */
 export function nameOf(download: Download): string {
   const { title } = download;
+
   return title.kind === "episode"
     ? `${download.name} · ${episodeLabel(title.season, title.episode)}`
     : download.name;
@@ -63,8 +64,10 @@ export function nameOf(download: Download): string {
 /** "S1 E3 · The Tide Table", or null for a movie. */
 export function episodeLine(download: Download): string | null {
   const { title } = download;
+
   if (title.kind !== "episode") return null;
   const label = episodeLabel(title.season, title.episode);
+
   return download.episodeName ? `${label} · ${download.episodeName}` : label;
 }
 
@@ -87,6 +90,7 @@ export function describeFailure(failure: DownloadFailure): string {
 /** How far a transfer is, from 0 to 1, when its size is known. */
 export function transferred(download: Download): number | null {
   const { status } = download;
+
   return status.kind === "transferring" && status.size ? status.received / status.size : null;
 }
 
@@ -101,6 +105,7 @@ const amount = (received: number, size: number | null) =>
 /** How a download stands, as Downloads says it under the facts; empty for a copy. */
 export function statusLine(download: Download): string {
   const { status } = download;
+
   switch (status.kind) {
     case "queued":
       return t("Queued");
@@ -114,11 +119,14 @@ export function statusLine(download: Download): string {
         : t("Paused");
     case "transferring": {
       const done = transferred(download);
+
       if (done === null || status.size === null) {
         return status.received > 0 ? formatBytes(status.received) : t("Starting");
       }
+
       const left =
         status.rate && status.rate > 0 ? (status.size - status.received) / status.rate : null;
+
       return [
         percentOf(done),
         amount(status.received, status.size),
@@ -128,6 +136,7 @@ export function statusLine(download: Download): string {
         .filter(Boolean)
         .join(" · ");
     }
+
     case "failed":
       return describeFailure(status.failure);
     case "complete":
@@ -140,6 +149,7 @@ export function statusLine(download: Download): string {
 /** The state in a word or two, as the details' facts and episode lines add it. */
 export function stateWord(download: Download): string {
   const { status } = download;
+
   switch (status.kind) {
     case "queued":
       return t("Queued");
@@ -149,10 +159,12 @@ export function stateWord(download: Download): string {
       return t("Paused");
     case "transferring": {
       const done = transferred(download);
+
       return done === null
         ? t("Downloading")
         : t("Downloading {percent}", { percent: percentOf(done) });
     }
+
     case "failed":
       return t("Download failed");
     case "complete":
@@ -166,6 +178,7 @@ export function stateWord(download: Download): string {
 function buttonLabel(download: Download | undefined): string {
   if (!download) return t("Download");
   const { status } = download;
+
   switch (status.kind) {
     case "queued":
       return t("Queued, download");
@@ -219,7 +232,9 @@ const unfinished = (download: Download | undefined): download is Download =>
  */
 function cancel(id: string) {
   const download = current(id);
+
   if (!unfinished(download)) return;
+
   if (download.status.kind !== "transferring") return remove(download);
   const name = nameOf(download);
   ask(
@@ -228,6 +243,7 @@ function cancel(id: string) {
     t("Keep downloading"),
     () => {
       const now = current(id);
+
       if (unfinished(now)) remove(now);
     },
   );
@@ -236,14 +252,19 @@ function cancel(id: string) {
 /** Deletes copy `id`: after asking while its file is there, at once when the file went. */
 function deleteCopy(id: string) {
   const download = current(id);
+
   if (download?.status.kind === "missing") return remove(download);
+
   if (download?.status.kind !== "complete") return;
   const name = nameOf(download);
+
   const title = download.size
     ? t("Delete the {size} copy of {name}?", { size: formatBytes(download.size), name })
     : t("Delete the copy of {name}?", { name });
+
   ask(title, t("Delete download"), t("Cancel"), () => {
     const now = current(id);
+
     if (now && !unfinished(now)) remove(now);
   });
 }
@@ -261,6 +282,7 @@ export interface Turn {
 /** Pause, or Resume once paused: at once, as neither loses what was downloaded. */
 function hold(download: Download): DownloadAction {
   const name = nameOf(download);
+
   return download.status.kind === "paused"
     ? {
         name: "Resume",
@@ -280,6 +302,7 @@ function hold(download: Download): DownloadAction {
 /** Moves a download waiting its turn a place earlier (-1) or later (1). */
 function move(download: Download, by: -1 | 1): DownloadAction {
   const name = nameOf(download);
+
   return {
     name: by < 0 ? `Move ${name} up` : `Move ${name} down`,
     label: by < 0 ? t("Move {name} up", { name }) : t("Move {name} down", { name }),
@@ -295,12 +318,14 @@ function move(download: Download, by: -1 | 1): DownloadAction {
  */
 export function actionsOf(download: Download, turn?: Turn): readonly DownloadAction[] {
   const { status } = download;
+
   const cancelling = {
     name: "Cancel download",
     label: t("Cancel download"),
     destructive: true,
     run: () => cancel(download.id),
   };
+
   switch (status.kind) {
     case "queued":
     case "waiting":
@@ -407,8 +432,10 @@ export function DownloadGlyph({
   size?: number;
 }) {
   const done = download ? transferred(download) : null;
+
   if (done !== null) return <Ring done={done} size={size + 2} />;
   const kind = download?.status.kind ?? "none";
+
   return (
     <SymbolView
       name={SYMBOLS[kind]}
@@ -435,6 +462,7 @@ export function Ring({
   stroke?: number;
 }) {
   const turn = Math.min(1, Math.max(0, done));
+
   const circle: ViewStyle = {
     position: "absolute",
     top: 0,
@@ -443,6 +471,7 @@ export function Ring({
     borderRadius: size / 2,
     borderWidth: stroke,
   };
+
   const half = (side: "left" | "right", degrees: number) => (
     <View style={[styles.half, { width: size / 2, height: size, [side]: 0 }]}>
       <View
@@ -455,6 +484,7 @@ export function Ring({
       />
     </View>
   );
+
   return (
     <View style={{ width: size, height: size }}>
       <View style={[circle, styles.track]} />
@@ -487,11 +517,14 @@ export function DownloadButton({
   testID?: string;
 }) {
   const download = useDownloadOf(ref);
+
   const press = () => {
     if (!download) return queue(ref, name);
+
     if (playsCopy && download.status.kind === "complete") return playDownload(download.id);
     showActions(download, actionsOf(download));
   };
+
   return (
     <Pressable
       accessibilityRole="button"

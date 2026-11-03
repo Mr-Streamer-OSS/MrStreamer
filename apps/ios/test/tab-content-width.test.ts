@@ -18,8 +18,10 @@ vi.mock("expo-router/native-tabs", () => {
     BottomAccessory: () => null,
     Trigger: Object.assign(() => null, { Icon: () => null, Label: () => null }),
   });
+
   return { NativeTabs };
 });
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined, dismiss: () => undefined, back: () => undefined },
   useNavigation: () => ({ dispatch: () => undefined }),
@@ -27,18 +29,27 @@ vi.mock("expo-router", () => ({
   usePathname: () => "/live",
   useSegments: () => ["(tabs)", "live"],
 }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => scenario.insets }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Settings: { get: () => ["en-US"] },
   useWindowDimensions: () => scenario.window,
 }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/accessory.tsx", () => ({ NowPlaying: () => null }));
+
 vi.mock("../src/tab-bar.ts", () => ({ useVirtualisedScreen: () => false }));
+
 vi.mock("../src/live-screen.tsx", () => ({ closeDetail: () => false }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({ phase: { kind: "idle" }, watch: false, pip: false, external: false }),
 }));
@@ -49,9 +60,11 @@ const { useListWidth } = await import("../src/ui.tsx");
 
 /** What a tab's screens get: their stack's content style and Live's list column. */
 let shown: { content: unknown; list: ReturnType<typeof useListWidth> } | null = null;
+
 function LiveStack() {
   const content = useTabScreenOptions("live")({ route: { name: "index" } }).contentStyle;
   shown = { content, list: useListWidth() };
+
   return null;
 }
 

@@ -25,7 +25,9 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", () => ({ Alert: { alert: () => undefined } }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () =>
     nativePlayer((source) => {
@@ -34,7 +36,9 @@ vi.mock("expo-video", () => ({
 }));
 
 vi.mock("expo-file-system", () => memoryFiles(memory));
+
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 /** What these tests use of the desktop tests' fake panel. */
@@ -44,14 +48,17 @@ interface FakeChannel {
   readonly categoryId: string;
   readonly guideId: string | null;
 }
+
 interface FakeProvider {
   readonly url: string;
   serveChannels(select: (all: readonly FakeChannel[]) => readonly FakeChannel[]): void;
   failCatalogue(status: number | null): void;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider, QUALITY_STREAM_IDS } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -62,6 +69,7 @@ const { startFakeProvider, QUALITY_STREAM_IDS } = (await import(FAKE_PROVIDER)) 
   }): Promise<FakeProvider>;
   QUALITY_STREAM_IDS: number;
 };
+
 /** The channel in Full HD, HD and SD, by its streams' ids. */
 const [FHD, HD, SD] = [0, 1, 2].map((at) => String(QUALITY_STREAM_IDS + at)) as [
   string,
@@ -71,6 +79,7 @@ const [FHD, HD, SD] = [0, 1, 2].map((at) => String(QUALITY_STREAM_IDS + at)) as 
 
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ username: "one", password: "one+Pw@1", channels: 40, titles: 4 }),
@@ -83,9 +92,11 @@ beforeAll(async () => {
     }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
+
 // The app's modules compile once, here, rather than within the first test's own time.
 beforeAll(async () => {
   await import("../src/account.ts");
@@ -110,18 +121,23 @@ async function launch() {
   const favourites = await import("../src/favourites.ts");
   const titles = await import("../src/titles.ts");
   await account.restore();
+
   // The account's names last: its `retry` is a subscription's.
   return { ...titles, ...viewing, ...favourites, ...account };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 /** The favourites as Live, Home and Watch read them now. */
 const listOf = (app: App) =>
   app.favouriteList(app.currentViewing(), app.currentCatalogue(), app.members());
+
 /** The keys of the favourites that open, in order. */
 const shown = (app: App) => listOf(app)?.shown.map(({ channel }) => channel.key) ?? [];
+
 const hidden = (app: App) =>
   listOf(app)?.hidden.map(({ subscriptionId, why, count }) => ({ subscriptionId, why, count }));
+
 /** The stream ids a subscription's record keeps as favourites, as viewing.json holds them. */
 const stored = (id: string): readonly string[] =>
   JSON.parse(memory.files.get("/documents/viewing.json") ?? "{}").accounts?.[id]?.state
@@ -130,13 +146,18 @@ const stored = (id: string): readonly string[] =>
 /** One of `subscriptionId`'s channels as Live lists it, by any of its streams' ids. */
 function channelOf(app: App, subscriptionId: string, id: string) {
   const now = app.currentCatalogue();
+
   const channel =
     now.kind === "ready" ? now.library.byKey.get(`${subscriptionId}:${id}`) : undefined;
+
   if (!channel) throw new Error(`No channel ${id} from ${subscriptionId}`);
+
   return channel;
 }
+
 const listsBoth = (app: App) => {
   const now = app.currentCatalogue();
+
   return now.kind === "ready" && now.library.labels.size === 2;
 };
 
@@ -145,8 +166,10 @@ async function twoProviders() {
   const app = await launch();
   const a = await app.add({ server: one.url, ...ONE });
   const b = await app.add({ server: two.url, ...TWO, name: "Cabin" });
+
   if (!a || !b) throw new Error("An add was cancelled");
   await until(() => listsBoth(app), "both channel lists");
+
   return { app, a, b };
 }
 
@@ -157,6 +180,7 @@ async function star(app: App, channel: OwnedId, favourite = true) {
 
 const libraryOf = (app: App) => {
   const now = app.currentCatalogue();
+
   return now.kind === "ready" ? now.library : null;
 };
 
@@ -180,6 +204,7 @@ async function relist(app: App, id: string, panel: FakeProvider, listed: (id: st
   panel.serveChannels((all) => all.filter((each) => listed(String(each.streamId))));
   await reloaded(app, id);
 }
+
 const without =
   (...ids: string[]) =>
   (id: string) =>
@@ -195,31 +220,39 @@ async function relistAs(
   panel.serveChannels(select);
   await reloaded(app, id);
 }
+
 /** A relaunch, once Live shows both providers' channels as saved on the phone, and the record. */
 async function relaunch(count = 2) {
   const app = await launch();
   await until(() => {
     const now = app.currentCatalogue();
+
     return (
       now.kind === "ready" && now.library.labels.size === count && app.currentViewing() !== null
     );
   }, "the saved lists");
   // The record is read again once the channels show.
   await new Promise((done) => setTimeout(done, 50));
+
   return app;
 }
+
 /** The panel's channels with stream 1001 another quality of the channel in three. */
 const withUhd = (all: readonly FakeChannel[]) => {
   const fhd = all.find((each) => String(each.streamId) === FHD);
+
   if (!fhd) throw new Error("No Full HD stream");
+
   return all.map((each) =>
     each.streamId === 1001
       ? { ...each, name: "BE | KWALITEIT 1 UHD", categoryId: fhd.categoryId, guideId: fhd.guideId }
       : each,
   );
 };
+
 /** viewing.json as written. */
 const file = () => JSON.parse(memory.files.get("/documents/viewing.json") ?? "{}");
+
 const ids = (app: App) =>
   app.currentViewing()?.favourites.map((each) => `${each.subscriptionId}:${each.id}`);
 
@@ -228,6 +261,7 @@ beforeEach(() => {
   memory.keychain.clear();
   memory.full.clear();
   memory.played.length = 0;
+
   for (const panel of [one, two]) {
     panel.serveChannels((all) => all);
     panel.failCatalogue(null);
@@ -319,6 +353,7 @@ describe("a provider listing its channels otherwise", () => {
     expect(shown(app)).toEqual([`${a}:1000`, `${b}:1000`]);
 
     const list = listOf(app);
+
     if (!list) throw new Error("No favourites");
     await app.reorderFavourites({
       original: list.original,
@@ -340,6 +375,7 @@ describe("a provider listing its channels otherwise", () => {
     await star(app, channelOf(app, b, "1000"));
     await until(() => shown(app).length === 2, "two favourites");
     const list = listOf(app);
+
     if (!list) throw new Error("No favourites");
     await star(app, channelOf(app, a, "1001"));
     await expect(
@@ -353,6 +389,7 @@ describe("a provider listing its channels otherwise", () => {
     // And one viewing.json won't take leaves the order as it was.
     memory.full.add("viewing.json");
     const now = listOf(app);
+
     if (!now) throw new Error("No favourites");
     await expect(
       app.reorderFavourites({
@@ -412,6 +449,7 @@ describe("a provider's favourites as it comes and goes", () => {
     expect(stored(a)).toEqual(["1000"]);
 
     const back = await app.add({ server: two.url, ...TWO });
+
     if (!back) throw new Error("The add was cancelled");
     await until(() => listsBoth(app), "both lists");
     expect(shown(app)).toEqual([`${a}:1000`]);
@@ -454,6 +492,7 @@ describe("a favourite's streams, remembered", () => {
     await relist(app, a, one, without(FHD));
     const absent = await relaunch();
     const list = absent.currentFavourites();
+
     if (!list) throw new Error("No favourites");
     expect(list.shown.map(({ channel }) => channel.key)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
     await absent.reorderFavourites({
@@ -481,6 +520,7 @@ describe("a favourite's streams, remembered", () => {
     await relist(app, b, two, without("1000"));
     const absent = await relaunch();
     const list = absent.currentFavourites();
+
     if (!list) throw new Error("No favourites");
     expect(list.shown.map(({ channel }) => channel.key)).toEqual([`${a}:${HD}`, `${b}:${FHD}`]);
     await absent.reorderFavourites({
@@ -521,6 +561,7 @@ describe("a favourite's streams, remembered", () => {
   it("follows the channels listed now when they split, and joins only what one channel lists", async () => {
     const { app, a } = await twoProviders();
     await star(app, channelOf(app, a, FHD));
+
     // HD becomes a channel of its own and SD goes.
     const split = (all: readonly FakeChannel[]) =>
       all.flatMap((each) =>
@@ -530,6 +571,7 @@ describe("a favourite's streams, remembered", () => {
             ? [{ ...each, name: "BE | ANDERS 2 HD" }]
             : [each],
       );
+
     await relistAs(app, a, one, split);
     expect(shown(app)).toEqual([`${a}:${FHD}`, `${a}:${HD}`]);
     expect(hidden(app)).toEqual([{ subscriptionId: a, why: "not-listed", count: null }]);
@@ -581,11 +623,14 @@ describe("a favourite's change, written", () => {
     await starring;
     await star(app, channelOf(app, a, "1000"));
     const list = app.currentFavourites();
+
     if (!list) throw new Error("No favourites");
+
     const moving = app.reorderFavourites({
       original: list.original,
       order: list.shown.map(({ saved }) => saved).toReversed(),
     });
+
     expect(stored(a)).toEqual(["1000", FHD, HD, SD]);
     await moving;
   });
@@ -598,6 +643,7 @@ describe("a favourite's change, written", () => {
     const before = memory.files.get("/documents/viewing.json");
     memory.full.add("viewing.json");
     const list = app.currentFavourites();
+
     if (!list) throw new Error("No favourites");
     let adding: Promise<void> | null = null;
     expect(() => (adding = app.setFavourite(channelOf(app, a, "1000"), true))).not.toThrow();
@@ -650,16 +696,22 @@ describe("a favourite's change, written", () => {
 async function episodeOf(app: App, a: string) {
   await until(() => app.titleLists().kind === "ready", "the title lists");
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No lists");
+
   for (const show of kindOf(lists.index, "series").titles) {
     const version = show.versions.find((each) => each.subscriptionId === a);
+
     if (!version) continue;
     const title = { ...show, subscriptionId: a, id: version.id };
     const details = await app.detailsOf(title);
+
     if (details.kind !== "series") continue;
     const episode: Episode | undefined = details.seasons.flatMap((season) => season.episodes)[0];
+
     if (episode) return { title, episode };
   }
+
   throw new Error("No series with an episode");
 }
 
@@ -671,16 +723,23 @@ describe("other writes of the record", () => {
     const memoryBefore = file().favouriteMembership;
     const { title, episode } = await episodeOf(app, a);
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No lists");
+
     const [first, second] = kindOf(lists.index, "movie").titles.filter((each) =>
       each.versions.some((version) => version.subscriptionId === a),
     );
+
     if (!first || !second) throw new Error("Too few movies");
+
     const versionOf = (movie: typeof first) => {
       const version = movie.versions.find((each) => each.subscriptionId === a);
+
       if (!version) throw new Error("No version of the first provider's");
+
       return { kind: "movie" as const, subscriptionId: a, id: version.id };
     };
+
     const mark = await app.markEpisode(
       {
         kind: "episode",
@@ -692,6 +751,7 @@ describe("other writes of the record", () => {
       },
       true,
     );
+
     await app.relist({ subscriptionId: a, id: title.id }, title);
     await app.recordProgress(versionOf(first), 300, 600, Date.now());
     await app.removeFromContinue(first);
@@ -788,11 +848,13 @@ describe("a stream a panel lists in two of its channels", () => {
         .map((each) => ({ ...each, categoryId: "16" })),
     ]);
     expect(channelOf(app, a, HD).id).not.toBe(channelOf(app, a, FHD).id);
+
     /** The memory as written, each cohort's ids in order: every id in one of them only. */
     const remembered = () =>
       (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) =>
         cohort.toSorted(),
       );
+
     expect(remembered()).toEqual([[FHD, HD, SD]]);
     // An ordinary write after keeps it as it is.
     await app.recordProgress({ kind: "movie", subscriptionId: a, id: "1" }, 300, 600, Date.now());
@@ -823,6 +885,7 @@ describe("a quality gone while another's row is listed twice", () => {
         ids.includes(String(each.streamId)) ? [{ ...each, categoryId }] : [],
       ),
     ];
+
   const remembered = (a: string) =>
     (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) => cohort.toSorted());
 
@@ -880,9 +943,11 @@ describe("a quality gone while another's row is listed twice", () => {
 
 describe("two channels of one id, one linking the others", () => {
   const UHD = "1001";
+
   /** The panel's channels in four qualities, without SD. */
   const usual = (all: readonly FakeChannel[]) =>
     withUhd(all).filter((each) => String(each.streamId) !== SD);
+
   /**
    * UHD's and FHD's rows in Kwaliteit, UHD's again and HD's in category 16, HD's again in 17,
    * SD gone: two channels named 1001, one sharing UHD with the first and HD with the third.
@@ -892,18 +957,23 @@ describe("two channels of one id, one linking the others", () => {
     const row = (id: string) => rows.find((each) => String(each.streamId) === id);
     const uhd = row(UHD);
     const hd = row(HD);
+
     if (!uhd || !hd) throw new Error("No UHD or HD row");
+
     return [
       ...rows.map((each) => (String(each.streamId) === HD ? { ...each, categoryId: "16" } : each)),
       { ...uhd, categoryId: "16" },
       { ...hd, categoryId: "17" },
     ];
   };
+
   // Sorted as strings: "1001" after "100002".
   const remembered = (a: string) =>
     (file().favouriteMembership?.accounts?.[a] ?? []).map((cohort: string[]) => cohort.toSorted());
+
   const streamsOf = (app: App, a: string, id: string) => {
     const channel = channelOf(app, a, id);
+
     return { id: channel.id, streams: channel.variants.map((each) => each.id).toSorted() };
   };
 
@@ -948,16 +1018,19 @@ describe("two channels of one id, one linking the others", () => {
 
 describe("a memory this build can't read, when a provider's history is deleted", () => {
   const registered = () => JSON.parse(memory.files.get("/documents/subscriptions.json") ?? "{}");
+
   const unreadable = (a: string, b: string) => [
     { version: 2, accounts: { [a]: [[FHD, HD, SD]], [b]: [[FHD, HD]] } },
     { version: 1, accounts: { [a]: [[FHD]], [b]: [[FHD, HD, SD]] } },
   ];
+
   /** viewing.json with `unread` as its memory, then a relaunch with both providers. */
   async function withUnread(unread: unknown) {
     memory.files.set(
       "/documents/viewing.json",
       JSON.stringify({ ...file(), favouriteMembership: unread }),
     );
+
     return relaunch();
   }
 

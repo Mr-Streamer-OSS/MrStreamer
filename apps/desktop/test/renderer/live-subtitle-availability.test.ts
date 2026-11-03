@@ -23,8 +23,10 @@ const engines = vi.hoisted(() => ({
     destroyed: boolean;
   }[],
 }));
+
 vi.mock("../../src/renderer/src/player/engine.ts", async (original) => {
   const real = await original<typeof import("../../src/renderer/src/player/engine.ts")>();
+
   return {
     ...real,
     createEngine: (): Engine => {
@@ -33,7 +35,9 @@ vi.mock("../../src/renderer/src/player/engine.ts", async (original) => {
         elapsed: 0,
         destroyed: false,
       };
+
       engines.opened.push(stream);
+
       return {
         name: "mpegts.js",
         started: engines.started ?? Promise.resolve(),
@@ -60,6 +64,7 @@ vi.mock("../../src/renderer/src/player/engine.ts", async (original) => {
     },
   };
 });
+
 const channel = (id: string): LiveChannel => ({
   subscriptionId: SUBSCRIPTION,
   id,
@@ -72,6 +77,7 @@ const channel = (id: string): LiveChannel => ({
   catchupDays: null,
   variants: [{ id, name: id, tags: [], quality: null }],
 });
+
 const tracks: ChannelTracks = {
   audio: [{ id: 201, language: "en", label: "English", default: true }],
   playing: 201,
@@ -87,6 +93,7 @@ const tracks: ChannelTracks = {
     },
   ],
 };
+
 /** A caption channel, as the main process lists one it found in the pictures. */
 const captions: SubtitleTrack = {
   id: 0x1ff0,
@@ -97,20 +104,27 @@ const captions: SubtitleTrack = {
   default: false,
   forced: false,
 };
+
 const fixture = readFileSync(join(import.meta.dirname, "../fixtures/h264-subtitles.mpegts"));
 const reader = pesReader();
 const packets = [...reader.push(fixture), ...reader.end()].filter((packet) => packet.pid === 0x300);
 const working = packets[0]!.payload;
+
 // The fixture's declared page 888 header becomes the broadcaster's time-filling page 8FF.
 const filler = working.slice();
+
 filler[7] = 0x57;
+
 filler[8] = 0x57;
+
 /** Lets the player's answers and the next timer through, on the fake clock when a test has one. */
 const settle = async () => {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
   else await new Promise((resolve) => setTimeout(resolve));
 };
+
 let unmount = () => {};
+
 async function open(id = "one", listed = tracks) {
   ipc.always("playback.tracks", listed);
   ipc.always("playback.open", {
@@ -121,12 +135,15 @@ async function open(id = "one", listed = tracks) {
   });
   player.play(channel(id));
   await settle();
+
   return engines.opened.at(-1)!;
 }
+
 function Controls() {
   const listed = usePlayer((state) => state.tracks);
   const subtitle = usePlayer((state) => state.subtitle);
   const [menu, setMenu] = useState<TrackMenu>(null);
+
   return createElement(
     "div",
     null,
@@ -144,24 +161,30 @@ function Controls() {
     createElement(Flash),
   );
 }
+
 async function mount() {
   const mounted = bareView();
   unmount = mounted.unmount;
   await mounted.render(createElement(Controls));
   await act(settle);
+
   return mounted.container;
 }
+
 beforeEach(() => {
   engines.started = null;
   player.reset();
   ipc.reset();
 });
+
 afterEach(() => {
   unmount();
   unmount = () => {};
+
   player.reset();
   vi.useRealTimers();
 });
+
 it("hides declared page 888 and makes C inert through repeated 8FF filler", async () => {
   const stream = await open();
   const controls = await mount();
@@ -174,6 +197,7 @@ it("hides declared page 888 and makes C inert through repeated 8FF filler", asyn
   expect(player.state().subtitle).toBeNull();
   expect(ipc.argsOf("preferences.update")).toEqual([]);
 });
+
 it("shows later page data once, keeps every proven track through silence, and resets on a channel change", async () => {
   const stream = await open();
   const controls = await mount();
@@ -204,6 +228,7 @@ it("shows later page data once, keeps every proven track through silence, and re
   expect(player.state().subtitle).toBeNull();
   expect(ipc.argsOf("playback.open")).toHaveLength(2);
 });
+
 it.each(["nl", "off"])(
   "applies remembered %s on first proof without flashing during normal tuning",
   async (subtitleLanguage) => {
@@ -220,6 +245,7 @@ it.each(["nl", "off"])(
     expect(ipc.argsOf("preferences.update")).toEqual([]);
   },
 );
+
 it("auto-enables the wanted language even on late proof, without suggesting C", async () => {
   ipc.prefer({ subtitleLanguage: "nl" });
   const stream = await open();
@@ -232,11 +258,14 @@ it("auto-enables the wanted language even on late proof, without suggesting C", 
   expect(player.state().subtitle?.language).toBe("nl");
   expect(controls.textContent).not.toContain("Subtitles available");
 });
+
 it("waits for meaningful DVB page data and keeps independent proven pages selectable", async () => {
   const reader = pesReader();
+
   const dvb = [...reader.push(fixture), ...reader.end()].find(
     (packet) => packet.pid === 0x103,
   )!.payload;
+
   const listed = {
     ...tracks,
     subtitles: [
@@ -244,6 +273,7 @@ it("waits for meaningful DVB page data and keeps independent proven pages select
       { ...tracks.subtitles[0]!, id: 0x103, page: 1, format: "picture" as const, label: "DVB" },
     ],
   };
+
   const stream = await open("dvb", listed);
   stream.packet(0x103, new Uint8Array([0x20, 0, 0x0f, 0x80, 0, 1, 0, 0]), 1);
   await settle();
@@ -262,17 +292,20 @@ it("waits for meaningful DVB page data and keeps independent proven pages select
   player.setSubtitle(listed.subtitles[0]!);
   expect(player.state().subtitle?.label).toBe("Nederlands");
 });
+
 it("accepts already-observed captions and ignores private data after Stop", async () => {
   const stream = await open("captions", {
     ...tracks,
     subtitles: [{ ...tracks.subtitles[0]!, format: "captions", page: 1 }],
   });
+
   expect(player.state().tracks?.subtitles).toHaveLength(1);
   player.stop();
   stream.packet(0x300, working, 1);
   await settle();
   expect(player.state().phase.kind).toBe("idle");
 });
+
 it("lists captions that begin long after the stream started, on the same stream and off until chosen", async () => {
   const stream = await open("late", { ...tracks, subtitles: [] });
   const controls = await mount();
@@ -297,6 +330,7 @@ it("lists captions that begin long after the stream started, on the same stream 
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
   expect(stream.destroyed).toBe(false);
 });
+
 it("keeps subtitles off through later captions for a viewer who turned them off", async () => {
   ipc.prefer({ subtitleLanguage: "nl" });
   const stream = await open();
@@ -313,6 +347,7 @@ it("keeps subtitles off through later captions for a viewer who turned them off"
   ]);
   expect(player.state().subtitle).toBeNull();
 });
+
 it("ignores a track change of a stream that closed, and after Stop", async () => {
   await open("first", { ...tracks, subtitles: [] });
   await open("second", { ...tracks, subtitles: [] });
@@ -327,6 +362,7 @@ it("ignores a track change of a stream that closed, and after Stop", async () =>
   await settle();
   expect(ipc.argsOf("playback.tracks")).toHaveLength(reads);
 });
+
 it("keeps captions found while the first track list was still on its way", async () => {
   const atStart = ipc.hold("playback.tracks");
   await open("race");
@@ -343,6 +379,7 @@ it("keeps captions found while the first track list was still on its way", async
   expect(ipc.argsOf("playback.tracks")).toHaveLength(2);
   expect(controls.querySelector('[aria-label="Subtitles"]')).not.toBeNull();
 });
+
 it("rejects a late preference answer and packet from a cancelled channel", async () => {
   const first = await open("first");
   const preference = ipc.hold("preferences.get");
@@ -365,6 +402,7 @@ it("draws the proving packet when the wanted language comes on", async () => {
   expect(player.state().subtitle?.page).toBe(888);
   expect(subtitleLayer.textContent).toContain("TELETEKST 888");
 });
+
 it("keeps one subtitle cue when MPEG-TS startup follows a retained selection's first packet", async () => {
   ipc.prefer({ subtitleLanguage: "nl" });
   const first = await open();
@@ -384,6 +422,7 @@ it("keeps one subtitle cue when MPEG-TS startup follows a retained selection's f
   expect(player.state().phase.kind).toBe("playing");
   expect(subtitleLayer.textContent).toBe(before);
 });
+
 it("retains proof through a same-channel reconnect, without accepting another declared page", async () => {
   const stream = await open();
   stream.packet(0x300, working, 1);
@@ -394,6 +433,7 @@ it("retains proof through a same-channel reconnect, without accepting another de
   });
   expect(player.state().tracks?.subtitles.map((track) => track.page)).toEqual([888]);
 });
+
 it("observes subtitle data that precedes the program-table answer", async () => {
   const listed = ipc.hold("playback.tracks");
   const stream = await open();
@@ -416,6 +456,7 @@ it("does not retain a preview hint for another channel or a later Flash view", a
   });
   expect(controls.textContent).not.toContain("Subtitles available");
 });
+
 it("removes the current hint on a channel switch", async () => {
   const stream = await open();
   const controls = await mount();
@@ -430,6 +471,7 @@ it("removes the current hint on a channel switch", async () => {
   });
   expect(controls.textContent).not.toContain("Subtitles available");
 });
+
 it("keeps receiver declarations available without observing or requesting subtitle data", async () => {
   const media = {
     generation: 1,
@@ -441,6 +483,7 @@ it("keeps receiver declarations available without observing or requesting subtit
     duration: null,
     subtitles: false,
   };
+
   ipc.always("playback.tracks", tracks);
   const tv = { id: "tv", kind: "cast" as const, name: "TV" };
   ipc.emit("output.changed", {
@@ -483,6 +526,7 @@ it("counts played time across reconnects before announcing first proof", async (
   });
   expect(controls.textContent).toContain("Subtitles available · C");
 });
+
 it("does not count another channel's playing time toward the late hint", async () => {
   const first = await open("first");
   const controls = await mount();
@@ -495,6 +539,7 @@ it("does not count another channel's playing time toward the late hint", async (
   });
   expect(controls.textContent).not.toContain("Subtitles available");
 });
+
 it("C chooses a current track when the previous stream's PID is absent", async () => {
   const caption = { ...tracks.subtitles[0]!, format: "captions" as const, page: 1 };
   await open("captions", { ...tracks, subtitles: [caption] });

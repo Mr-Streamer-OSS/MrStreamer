@@ -9,12 +9,15 @@ const keys = {
   subdl: { apiKey: "private-subdl-key" },
   opensubtitles: { apiKey: "private-open-key", username: "private-user", password: "private-pass" },
 };
+
 const signal = () => new AbortController().signal;
 const srt = "1\n00:00:10,000 --> 00:00:12,000\nHallo\n\n";
+
 const json = (data: unknown) =>
   new Response(JSON.stringify(data), {
     headers: { "content-type": "application/json" },
   });
+
 const candidate: SubtitleCandidate = {
   service: "subdl",
   url: "https://dl.subdl.com/subtitle/file.zip",
@@ -28,12 +31,15 @@ describe("online subtitle service ports", () => {
   it("SubDL searches by exact TMDB movie identity, normalizes service language names and downloads only a chosen result", async () => {
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
+
       if (url.hostname === "dl.subdl.com") {
         expect(new Headers(init?.headers).has("Api-Key")).toBe(false);
         expect(new Headers(init?.headers).has("Authorization")).toBe(false);
         expect(url.search).toBe("");
+
         return new Response(zipSync({ "movie.srt": strToU8(srt), "info.txt": strToU8("ignored") }));
       }
+
       expect(url.pathname).toBe("/api/v1/subtitles");
       expect(Object.fromEntries(url.searchParams)).toMatchObject({
         api_key: keys.subdl.apiKey,
@@ -44,6 +50,7 @@ describe("online subtitle service ports", () => {
       });
       expect(url.searchParams.has("file_name")).toBe(false);
       expect(url.searchParams.has("film_name")).toBe(false);
+
       return json({
         status: true,
         results: [{ tmdb_id: 123, type: "movie" }],
@@ -54,8 +61,10 @@ describe("online subtitle service ports", () => {
         ],
       });
     });
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     expect(request).not.toHaveBeenCalled();
+
     const results = await client.subdlSearch(
       keys.subdl,
       {
@@ -65,6 +74,7 @@ describe("online subtitle service ports", () => {
       },
       signal(),
     );
+
     expect(results.map(({ language }) => language)).toEqual(["nl", "en"]);
     expect(request).toHaveBeenCalledTimes(1);
     const downloaded = await client.download(results[0]!, keys, signal());
@@ -86,26 +96,32 @@ describe("online subtitle service ports", () => {
       { language: "EN", release_name: "Movie.SDH", url: "/subtitle/sdh.zip", hi: true },
       { language: "EN", release_name: "Movie.WEB", url: "/subtitle/web.zip", hi: false },
     ];
+
     const client = subtitleServiceClient({
       userAgent: "fixture",
       fetch: async (input) => {
         const hi = new URL(String(input)).searchParams.get("hi");
+
         return json({
           status: true,
           results: [{ tmdb_id: 123, type: "movie" }],
           subtitles: subtitles.filter((sub) => {
             if (hi === "1") return sub.hi;
+
             if (hi === "0") return !sub.hi;
+
             return true;
           }),
         });
       },
     });
+
     const results = await client.subdlSearch(
       keys.subdl,
       { kind: "movie", tmdbId: 123, languages: ["en"] },
       signal(),
     );
+
     expect(results.map(({ release, hearingImpaired }) => [release, hearingImpaired])).toEqual([
       ["Movie.SDH", true],
       ["Movie.WEB", false],
@@ -121,6 +137,7 @@ describe("online subtitle service ports", () => {
         season_number: "0",
         episode_number: "2",
       });
+
       return json({
         status: true,
         results: [{ tmdb_id: 456, type: "tv" }],
@@ -151,6 +168,7 @@ describe("online subtitle service ports", () => {
         ],
       });
     });
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     expect(
       await client.subdlSearch(
@@ -184,6 +202,7 @@ describe("online subtitle service ports", () => {
         subtitles: [{ language: "EN", url: "/subtitle/wrong.zip" }],
       }),
     );
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     expect(
       await client.subdlSearch(
@@ -206,12 +225,14 @@ describe("online subtitle service ports", () => {
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       const headers = new Headers(init?.headers);
+
       if (url.pathname === "/api/v1/subtitles") {
         expect(url.search).toBe(
           "?episode_number=2&languages=en%2Cnl&parent_tmdb_id=456&season_number=1&type=episode",
         );
         expect(headers.get("Api-Key")).toBe(keys.opensubtitles.apiKey);
         expect(headers.has("Authorization")).toBe(false);
+
         return json({
           data: [
             {
@@ -235,33 +256,42 @@ describe("online subtitle service ports", () => {
           ],
         });
       }
+
       if (url.pathname === "/api/v1/login") {
         expect(JSON.parse(String(init?.body))).toEqual({
           username: keys.opensubtitles.username,
           password: keys.opensubtitles.password,
         });
+
         return json({ token: "private-token", base_url: "vip-api.opensubtitles.com" });
       }
+
       if (url.pathname === "/api/v1/download") {
         expect(url.hostname).toBe("vip-api.opensubtitles.com");
         expect(headers.get("Authorization")).toBe("Bearer private-token");
         expect(JSON.parse(String(init?.body))).toEqual({ file_id: 10, sub_format: "srt" });
+
         return json({
           link: "https://www.opensubtitles.com/download/private-link",
           remaining: 3,
           reset_time_utc: "2026-10-09T00:00:00Z",
         });
       }
+
       expect(headers.has("Authorization")).toBe(false);
       expect(headers.has("Api-Key")).toBe(false);
+
       return new Response(srt);
     });
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
+
     const results = await client.openSearch(
       keys.opensubtitles,
       { kind: "episode", tmdbId: 456, season: 1, episode: 2, languages: ["nl", "en"] },
       signal(),
     );
+
     expect(results).toHaveLength(1);
     expect(request).toHaveBeenCalledTimes(1);
     const downloaded = await client.download(results[0]!, keys, signal());
@@ -276,6 +306,7 @@ describe("online subtitle service ports", () => {
       const request = vi.fn<typeof fetch>(
         async () => new Response("private-token private-pass", { status }),
       );
+
       const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
       await expect(
         client.openSearch(
@@ -297,8 +328,10 @@ describe("online subtitle service ports", () => {
   ])("refuses search redirects outside its original HTTPS origin: %s", async (location) => {
     const request = vi.fn<typeof fetch>(async (_input, init) => {
       expect(init?.redirect).toBe("manual");
+
       return new Response(null, { status: 302, headers: { location } });
     });
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     await expect(
       client.openSearch(
@@ -312,18 +345,22 @@ describe("online subtitle service ports", () => {
 
   it("follows up to two OpenSubtitles search redirects while keeping one request deadline", async () => {
     const calls: { url: string; signal: AbortSignal | null | undefined }[] = [];
+
     const request = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       calls.push({ url: url.href, signal: init?.signal });
       expect(init?.redirect).toBe("manual");
       expect(new Headers(init?.headers).get("Api-Key")).toBe(keys.opensubtitles.apiKey);
+
       if (calls.length < 3)
         return new Response(null, {
           status: 301,
           headers: { location: `/api/v1/subtitles?canonical=${calls.length}` },
         });
+
       return json({ data: [] });
     });
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
     expect(
       await client.openSearch(
@@ -345,6 +382,7 @@ describe("online subtitle service ports", () => {
       async () =>
         new Response(null, { status: 302, headers: { location: "/api/v1/subtitles?next=1" } }),
     );
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
     await expect(
       client.openSearch(
@@ -362,10 +400,13 @@ describe("online subtitle service ports", () => {
       const request = vi.fn<typeof fetch>(async (input, init) => {
         expect(init?.method).toBe("POST");
         expect(init?.redirect).toBe("manual");
+
         if (stage === "download" && new URL(String(input)).pathname.endsWith("/login"))
           return json({ token: "private-token", base_url: "api.opensubtitles.com" });
+
         return new Response(null, { status: 307, headers: { location: "/api/v1/redirect" } });
       });
+
       const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
       await expect(
         client.download({ ...candidate, service: "opensubtitles", fileId: 10 }, keys, signal()),
@@ -379,6 +420,7 @@ describe("online subtitle service ports", () => {
       expect(new URL(String(input)).search).toBe(
         "?languages=en%2Cpt-br%2Cpt-pt&tmdb_id=123&type=movie",
       );
+
       return json({
         data: ["pt-BR", "pt-PT", "en", "de"].map((language, index) => ({
           attributes: {
@@ -390,28 +432,35 @@ describe("online subtitle service ports", () => {
         })),
       });
     });
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
+
     const results = await client.openSearch(
       keys.opensubtitles,
       { kind: "movie", tmdbId: 123, languages: ["pt", "en"] },
       signal(),
     );
+
     expect(results.map(({ language }) => language)).toEqual(["pt-BR", "pt-PT", "en"]);
   });
 
   it("asks each service for Arabic by its own code and keeps UTF-8 Arabic text as written", async () => {
     // A BOM, joining letters, a trailing "!" and a mixed-direction line, as Arabic files have them.
     const arabic = "مرحبا بالعالم!\nالحلقة 2 من Night Harbour";
+
     const request = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
+
       if (url.hostname === "dl.subdl.com")
         return new Response(
           zipSync({
             "movie.ar.srt": strToU8(`\uFEFF1\n00:00:10,000 --> 00:00:12,000\n${arabic}\n\n`),
           }),
         );
+
       if (url.hostname === "api.subdl.com") {
         expect(url.searchParams.get("languages")).toBe("AR,EN");
+
         return json({
           status: true,
           results: [{ tmdb_id: 123, type: "movie" }],
@@ -421,7 +470,9 @@ describe("online subtitle service ports", () => {
           ],
         });
       }
+
       expect(url.search).toBe("?languages=ar%2Cen&tmdb_id=123&type=movie");
+
       return json({
         data: [
           {
@@ -435,6 +486,7 @@ describe("online subtitle service ports", () => {
         ],
       });
     });
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
     const query = { kind: "movie" as const, tmdbId: 123, languages: ["ar", "en"] };
 
@@ -451,25 +503,31 @@ describe("online subtitle service ports", () => {
 
   it("reads a Windows-1256 Arabic download from either service as its UTF-8 copy", async () => {
     const arabic = "مرحبا بالعالم!\nالحلقة 2 من Night Harbour";
+
     // Fixed Windows-1256 bytes generated with iconv, independently of the decoder under test.
     const legacy = Buffer.from(
       "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210ac7e1cde1dec9203220e3e4204e6967687420486172626f75720d0a",
       "hex",
     );
+
     const request = vi.fn<typeof fetch>(async (input) => {
       const url = new URL(String(input));
+
       if (url.pathname === "/api/v1/login")
         return json({ token: "private-token", base_url: "api.opensubtitles.com" });
+
       if (url.pathname === "/api/v1/download")
         return json({
           link: "https://www.opensubtitles.com/download/arabic",
           remaining: 3,
           reset_time_utc: "2026-10-09T00:00:00Z",
         });
+
       return new Response(
         url.hostname === "dl.subdl.com" ? zipSync({ "movie.ar.srt": legacy }) : legacy,
       );
     });
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
     const cues = [{ start: 10, end: 12, text: arabic }];
 
@@ -491,6 +549,7 @@ describe("online subtitle service ports", () => {
           }),
         ),
     );
+
     const client = subtitleServiceClient({ userAgent: "fixture", fetch: request });
     expect((await client.download(candidate, keys, signal())).subtitle.cues).toEqual([
       { start: 10, end: 12, text: "Hallo" },
@@ -505,8 +564,10 @@ describe("online subtitle service ports", () => {
       new Response(zipSync({ "large.srt": strToU8("x".repeat(11 * 1024 * 1024)) })),
       new Response("Not a subtitle file"),
     ];
+
     const request = vi.fn<typeof fetch>(async () => replies.shift()!);
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
+
     for (let i = 0; i < 5; i++)
       await expect(client.download(candidate, keys, signal())).rejects.toBeInstanceOf(Error);
     expect(request).toHaveBeenCalledTimes(5);
@@ -516,9 +577,11 @@ describe("online subtitle service ports", () => {
     const controller = new AbortController();
     let cancelled = false;
     let reading: (() => void) | undefined;
+
     const bodyRead = new Promise<void>((resolve) => {
       reading = resolve;
     });
+
     const request = vi.fn<typeof fetch>(
       async () =>
         new Response(
@@ -535,18 +598,21 @@ describe("online subtitle service ports", () => {
           }),
         ),
     );
+
     const client = subtitleServiceClient({ userAgent: "Mr. Streamer v0.0.9", fetch: request });
     const result = client.download(candidate, keys, controller.signal);
     await bodyRead;
     controller.abort(new DOMException("Viewer changed files", "AbortError"));
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
     expect(cancelled).toBe(true);
+
     const bad = subtitleServiceClient({
       userAgent: "Mr. Streamer v0.0.9",
       fetch: async () => {
         throw new Error("private-key private-password https://private.test/file");
       },
     });
+
     await expect(
       bad.openSearch(
         keys.opensubtitles,
@@ -558,10 +624,12 @@ describe("online subtitle service ports", () => {
 
   it("stops a compressed subtitle pack at the actual text limit even without sizes in its header", async () => {
     const chunks: Uint8Array[] = [];
+
     const zip = new Zip((error, chunk) => {
       if (error) throw error;
       chunks.push(chunk);
     });
+
     const file = new ZipDeflate("movie.srt");
     zip.add(file);
     file.push(strToU8("x".repeat(11 * 1024 * 1024)), true);
@@ -578,11 +646,13 @@ describe("online subtitle service ports", () => {
 describe("explicit title search fallback", () => {
   it("uses the title and year without guessing a TMDB id or sending a provider file name", async () => {
     const calls: URL[] = [];
+
     const client = subtitleServiceClient({
       userAgent: "fixture",
       fetch: async (input) => {
         const url = new URL(String(input));
         calls.push(url);
+
         if (url.hostname === "api.subdl.com")
           return json({
             status: true,
@@ -591,6 +661,7 @@ describe("explicit title search fallback", () => {
               { language: "EN", url: "/subtitle/fallback.srt", release_name: "Night.Harbour" },
             ],
           });
+
         return json({
           data: [
             {
@@ -605,6 +676,7 @@ describe("explicit title search fallback", () => {
         });
       },
     });
+
     const query = { kind: "movie" as const, title: "Night Harbour", year: 2019, languages: ["en"] };
     expect(await client.subdlSearch(keys.subdl, query, signal())).toHaveLength(1);
     expect(await client.openSearch(keys.opensubtitles, query, signal())).toHaveLength(1);
@@ -615,6 +687,7 @@ describe("explicit title search fallback", () => {
     expect(calls[1]!.search).toBe("?languages=en&query=night+harbour&type=movie&year=2019");
     await client.openSearch(keys.opensubtitles, { ...query, title: "  Night Harbour  " }, signal());
     expect(calls[2]!.search).toBe(calls[1]!.search);
+
     for (const url of calls) {
       expect(url.searchParams.has("tmdb_id")).toBe(false);
       expect(url.searchParams.has("file_name")).toBe(false);

@@ -55,7 +55,9 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => ({
     addListener: () => undefined,
@@ -64,44 +66,57 @@ vi.mock("expo-video", () => ({
     pause: () => undefined,
   }),
 }));
+
 vi.mock("expo-secure-store", () => ({
   ...keychain(() => memory.keychain),
   setItemAsync: async (key: string, value: string) => {
     const failure = key.startsWith("s.") ? memory.secretFailure : null;
+
     if (failure === "before") throw new Error("The Keychain refused the item");
+
     if (failure === "lost") {
       memory.keychain.delete(key);
       throw new Error("The Keychain refused the item");
     }
+
     memory.keychain.set(key, value);
+
     if (failure === "after") throw new Error("The Keychain refused the answer");
+
     if (memory.holdSecrets && key.startsWith("s.")) {
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
   },
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const DETAILS = new Set(["get_vod_info", "get_series_info"]);
 const LISTS = new Set(["get_live_streams", "get_vod_streams", "get_series"]);
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if (memory.tmdb && input.startsWith(memory.tmdb)) {
     const url = new URL(input);
     const language = url.searchParams.get("language") ?? "en";
     memory.translated.push({ path: url.pathname, language });
+
     const hold =
       memory.holdTranslated &&
       language === "nl" &&
       (url.searchParams.get("append_to_response") === "credits" ||
         url.pathname.includes("/season/"));
+
     const response = await passThrough(input, init);
+
     if (memory.holdAboutResponses && url.searchParams.get("append_to_response") === "credits") {
       await new Promise<void>((go) => memory.heldAboutResponses.push(go));
     }
+
     if (!hold) return response;
     const body = (await response.json()) as Record<string, unknown>;
     await new Promise<void>((go) => memory.heldTranslated.push(go));
+
     return Response.json(
       url.pathname.includes("/season/")
         ? {
@@ -114,22 +129,30 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
         : { ...body, overview: "OBSOLETE-NL" },
     );
   }
+
   const url = memory.aliases.reduce(
     (each, [alias, password]) =>
       each.replaceAll(encodeURIComponent(alias), encodeURIComponent(password)),
     input,
   );
+
   const action = new URL(url).searchParams.get("action") ?? "login";
   memory.requests.push(action);
+
   if (LISTS.has(action) && memory.holdLists) {
     await new Promise<void>((go) => memory.heldLists.push(go));
   }
+
   if (!DETAILS.has(action)) return passThrough(url, init);
+
   if (memory.holdDetails) await new Promise<void>((go) => memory.heldDetails.push(go));
+
   if (memory.failing && input.includes(memory.failing)) return new Response(null, { status: 503 });
   const response = await passThrough(url, init);
   const rewrite = memory.details;
+
   if (!rewrite || !response.ok) return response;
+
   return Response.json(rewrite((await response.json()) as Record<string, unknown>));
 });
 
@@ -143,12 +166,14 @@ interface FakeProvider {
   serveTitles(select: (all: FakeTitles) => FakeTitles): void;
   close(): Promise<void>;
 }
+
 interface FakeTitles {
   readonly series: readonly {
     readonly id: number;
     readonly seasons: readonly (readonly { readonly container: string }[])[];
   }[];
 }
+
 interface FakeTmdb {
   readonly url: string;
   aboutRequests(): number;
@@ -158,9 +183,11 @@ interface FakeTmdb {
   refuse(refused: boolean): void;
   close(): Promise<void>;
 }
+
 /** The fakes are typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
 const FAKE_TMDB = "../../desktop/test/fake-tmdb.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -169,34 +196,41 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
     readonly titles: number;
   }): Promise<FakeProvider>;
 };
+
 const { startFakeTmdb } = (await import(FAKE_TMDB)) as { startFakeTmdb(): Promise<FakeTmdb> };
 
 const ONE = { username: "canaryuser", password: "canary+Pw@1" };
 let panel: FakeProvider;
 let tmdb: FakeTmdb;
+
 beforeAll(async () => {
   [panel, tmdb] = await Promise.all([
     startFakeProvider({ ...ONE, channels: 4, titles: 12 }),
     startFakeTmdb(),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([panel.close(), tmdb.close()]);
 });
 
 const folder = join(native.root, "cache", "details");
+
 /** Every record saved, by its path under Caches/details. */
 function records(at = folder, under = ""): string[] {
   if (!existsSync(at)) return [];
+
   return readdirSync(at, { withFileTypes: true }).flatMap((entry) =>
     entry.isDirectory()
       ? records(join(at, entry.name), `${under}${entry.name}/`)
       : [`${under}${entry.name}`],
   );
 }
+
 const providerRecords = () => records().filter((path) => path.startsWith("providers/"));
 const textOf = (path: string) => readFileSync(join(folder, path), "utf8");
 const settle = (ms = 100) => new Promise((done) => setTimeout(done, ms));
+
 const detailsAskedSince = (from: number) =>
   memory.requests.slice(from).filter((action) => DETAILS.has(action)).length;
 
@@ -217,6 +251,7 @@ async function launch({ withTmdb = false } = {}) {
   const preferences = await import("../src/media-preferences.ts");
   const titles = await import("../src/titles.ts");
   await account.restore();
+
   return {
     ...titles,
     ...account,
@@ -226,28 +261,35 @@ async function launch({ withTmdb = false } = {}) {
     },
   };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 /** Waits for the movie and series lists, then answers the first of `kind` TMDB knows. */
 async function first(app: App, kind: "movie" | "series"): Promise<Title> {
   await until(() => app.titleLists().kind === "ready", "the movie and series lists");
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No lists");
   const found = kindOf(lists.index, kind).titles.find((title) => title.tmdbId && !title.adult);
+
   if (!found) throw new Error(`No ${kind}`);
+
   return found;
 }
 
 const seriesOf = (details: TitleDetails): SeriesDetails => {
   if (details.kind !== "series") throw new Error("Not a series");
+
   return details;
 };
 
 /** Adds the panel's account and waits for its lists. */
 async function added(app: App) {
   const id = await app.add({ server: panel.url, ...ONE });
+
   if (!id) throw new Error("The add was cancelled");
   await until(() => app.titleLists().kind === "ready", "the movie and series lists");
+
   return id;
 }
 
@@ -258,6 +300,7 @@ async function opened(app: App, title: Title) {
     () => providerRecords().some((path) => path.endsWith(`/${title.kind}.${title.id}.json`)),
     "the saved record",
   );
+
   return details;
 }
 
@@ -276,6 +319,7 @@ const episodePlots = (body: Record<string, unknown>, plot: string) => ({
     ),
   ),
 });
+
 const firstEpisodePlot = (details: TitleDetails) => seriesOf(details).seasons[0]?.episodes[0]?.plot;
 
 const plotOf = (body: Record<string, unknown>, plot: string) => ({
@@ -308,11 +352,14 @@ beforeEach(() => {
   tmdb.failSeasons(null);
   tmdb.refuse(false);
 });
+
 beforeEach(async () => {
   const { Directory, Paths } = await import("./native-files.ts");
+
   for (const each of [Paths.document, Paths.cache])
     new Directory(each).create({ idempotent: true });
 });
+
 afterEach(() => {
   for (const go of [
     ...memory.heldDetails.splice(0),
@@ -334,6 +381,7 @@ afterEach(() => {
 async function withSeries() {
   const app = await launch({ withTmdb: true });
   await added(app);
+
   return { app, series: await first(app, "series") };
 }
 
@@ -343,11 +391,13 @@ const NEW = "canaryNew9";
 describe("saved title language", () => {
   it("keeps an unlisted device language until changed, then cold-reads before indexing", async () => {
     const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
+
     const locale = vi
       .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
       .mockImplementation(function (this: Intl.DateTimeFormat) {
         return { ...resolved.call(this), locale: "ja-JP" };
       });
+
     try {
       let app = await launch();
       expect(app.language).toBe("ja");
@@ -371,8 +421,10 @@ describe("saved title language", () => {
     app.updateMediaPreferences("titleLanguage", "en");
     await added(app);
     const old = app.titleLists();
+
     if (old.kind !== "ready") throw new Error("No lists");
     const series = kindOf(old.index, "series").titles.find((title) => title.tmdbId === "90000");
+
     if (!series) throw new Error("No multilingual series");
     expect(series.id).toBe("79998");
     app.updateMediaPreferences("audio", { kind: "original" });
@@ -385,21 +437,26 @@ describe("saved title language", () => {
     const statePath = join(native.root, "documents", "state.json");
     const bytes = readFileSync(statePath, "utf8");
     const publications: string[] = [];
+
     const stop = app.onTitleLists(() => {
       for (const kind of ["movie", "series"] as const) {
         const list = app.titleLists();
         expect(list.kind).toBe("ready");
         expect(app.collectionsOf(kind)?.list("all").length).toBeGreaterThan(0);
       }
+
       publications.push(app.language);
     });
+
     expect(app.updateMediaPreferences("titleLanguage", "nl")).toBe(true);
     expect(app.titleLists()).toBe(old);
     await until(() => app.titleLists() !== old && app.titlesWorkedOut());
     stop();
     const now = app.titleLists();
+
     if (now.kind !== "ready") throw new Error("No replacement");
     const ranked = kindOf(now.index, "series").titles.find((title) => title.tmdbId === "90000");
+
     if (!ranked) throw new Error("Series lost");
     expect(ranked.id).toBe("80000");
     expect(storage.pickedVersion(ranked, storage.readState())).toEqual(picked);
@@ -412,10 +469,13 @@ describe("saved title language", () => {
     app.updateMediaPreferences("titleLanguage", "en");
     await added(app);
     const initial = app.titleLists();
+
     if (initial.kind !== "ready") throw new Error("No lists");
+
     const movie = kindOf(initial.index, "movie").titles.find(
       (title) => title.tmdbId && Number(title.tmdbId) % 3 !== 0 && Number(title.tmdbId) % 7 !== 0,
     );
+
     if (!movie?.tmdbId) throw new Error("No translated fixture movie");
     const expected = `Nederlands ${movie.tmdbId}`;
     app.updateMediaPreferences("titleLanguage", "nl");
@@ -437,6 +497,7 @@ describe("saved title language", () => {
     const details = seriesOf(await app.detailsOf(series));
     expect(details.plot).toContain("Origineel");
     const season = details.seasons[0];
+
     if (!season) throw new Error("No season");
     const episodes = await app.episodesOf(series, season);
     expect(episodes[0]?.title).toContain("Origineel");
@@ -449,14 +510,17 @@ describe("saved title language", () => {
     await added(app);
     const series = await first(app, "series");
     const season = seriesOf(await app.detailsOf(series)).seasons[0];
+
     if (!season) throw new Error("No season");
     app.updateMediaPreferences("titleLanguage", "nl");
     memory.holdTranslated = true;
     const callbacks: string[] = [];
     const oldDetails = app.detailsOf(series, (details) => callbacks.push(details.plot ?? ""));
+
     const oldEpisodes = app.episodesOf(series, season, (episodes) =>
       callbacks.push(...episodes.map((episode) => episode.title)),
     );
+
     await until(() => memory.heldTranslated.length >= 2, "old Dutch answers held");
     app.updateMediaPreferences("titleLanguage", "fr");
     await app.detailsOf(series);
@@ -465,6 +529,7 @@ describe("saved title language", () => {
     const latestDetails = await app.detailsOf(series);
     const latestEpisodes = await app.episodesOf(series, season);
     callbacks.length = 0;
+
     for (const release of memory.heldTranslated.splice(0)) release();
     expect((await oldDetails).plot).toBe(latestDetails.plot);
     expect(await oldEpisodes).toEqual(latestEpisodes);
@@ -486,16 +551,21 @@ describe("R77 source and language authority", () => {
     const from = memory.requests.length;
     let release = () => {};
     let held = false;
+
     const gate = new Promise<void>((done) => {
       release = done;
     });
+
     native.gate = (operation, file) => {
       if (operation === "text" && file.endsWith(`/series.${title.id}.json`)) {
         held = true;
+
         return gate;
       }
+
       return undefined;
     };
+
     const old = app.detailsOf(title);
     await until(() => held, "the source-owned saved record");
     app.updateMediaPreferences("titleLanguage", "nl");
@@ -524,6 +594,7 @@ describe("R77 source and language authority", () => {
     await until(() => app.members()[0]?.titles.kind === "ready", "replacement source lists");
     callbacks.length = 0;
     const oldResponse = memory.heldAboutResponses.shift();
+
     if (!oldResponse) throw new Error("No held old response");
     oldResponse();
     await until(() => memory.heldAboutResponses.length === 1, "retried current-language response");
@@ -533,12 +604,14 @@ describe("R77 source and language authority", () => {
       "fresh current-source callback",
     );
     memory.holdAboutResponses = false;
+
     for (const release of memory.heldAboutResponses.splice(0)) release();
     const current = await fresh;
     expect(firstEpisodePlot(current)).toBe("Current source episode.");
     expect(firstEpisodePlot(await obsolete)).toBe("Current source episode.");
     expect(callbacks.every((plot) => plot === "Current source episode.")).toBe(true);
     const cache = await import("../src/details-cache.ts");
+
     if (!series.tmdbId) throw new Error("No fixture TMDB id");
     await expect
       .poll(async () => (await cache.readAbout("series", series.tmdbId!, "nl"))?.value?.overview)
@@ -561,6 +634,7 @@ describe("details saved on the phone", () => {
     const shownMovie = await opened(app, movie);
     const shownSeries = seriesOf(await opened(app, series));
     const [season] = shownSeries.seasons;
+
     if (!season) throw new Error("No season");
     const episodes = await app.episodesOf(series, season);
     await until(() => records().some((path) => path.startsWith("tmdb/season.")), "the season");
@@ -576,6 +650,7 @@ describe("details saved on the phone", () => {
     const seriesAgain = await first(again, "series");
     expect(await again.detailsOf(movieAgain)).toMatchObject({ plot: shownMovie.plot });
     const seasonAgain = seriesOf(await again.detailsOf(seriesAgain)).seasons[0];
+
     if (!seasonAgain) throw new Error("No season");
     expect(seasonAgain.episodes.map((each) => each.id)).toEqual(
       season.episodes.map((each) => each.id),
@@ -655,6 +730,7 @@ describe("details saved on the phone", () => {
     expect(known.plot).toMatch(/^TMDB's story of/u);
 
     const [season] = known.seasons;
+
     if (!season) throw new Error("No season");
     tmdb.failSeasons(503);
     const plain = await app.episodesOf(series, season);
@@ -694,14 +770,19 @@ describe("details saved on the phone", () => {
 
     expect(providerRecords().some((path) => path.endsWith(`/movie.${movie.id}.json`))).toBe(false);
     const [saved] = providerRecords();
+
     if (!saved) throw new Error("Nothing saved");
+
     const record = JSON.parse(textOf(saved)) as {
       value: { episodes: { stillUrl: string | null }[] };
     };
+
     expect(record.value.episodes.length).toBeGreaterThan(0);
     expect(record.value.episodes.every((episode) => episode.stillUrl === null)).toBe(true);
+
     for (const path of records()) {
       const text = textOf(path);
+
       for (const canary of [ONE.username, ONE.password, encodeURIComponent(ONE.password)]) {
         expect(text).not.toContain(canary);
       }
@@ -729,6 +810,7 @@ describe("details while they are asked again", () => {
     expect(shown).toEqual(["Saved story."]);
 
     memory.holdDetails = false;
+
     for (const go of memory.heldDetails.splice(0)) go();
     expect(await reading).toMatchObject({ plot: "New story." });
   });
@@ -750,6 +832,7 @@ describe("details while they are asked again", () => {
     const start = Date.now();
     const { app, series } = await withSeries();
     const [season] = seriesOf(await opened(app, series)).seasons;
+
     if (!season) throw new Error("No season");
     const told = await app.episodesOf(series, season);
     await until(() => records().some((path) => path.startsWith("tmdb/season.")), "the season");
@@ -758,6 +841,7 @@ describe("details while they are asked again", () => {
     const later = await launch({ withTmdb: true });
     const again = await first(later, "series");
     const [now] = seriesOf(await later.detailsOf(again)).seasons;
+
     if (!now) throw new Error("No season");
     tmdb.failSeasons("hold");
     const asked = tmdb.seasonRequests().length;
@@ -778,6 +862,7 @@ describe("playback", () => {
     await added(app);
     const series = await first(app, "series");
     const [episode] = seriesOf(await opened(app, series)).seasons[0]?.episodes ?? [];
+
     if (!episode) throw new Error("No episode");
     const listed = panel.titles.series.find((each) => String(each.id) === series.id);
     const before = listed?.seasons[0]?.[0]?.container;
@@ -799,6 +884,7 @@ describe("playback", () => {
     const from = memory.requests.length;
     expect(seriesOf(shown).seasons[0]?.episodes[0]?.id).toBe(episode.id);
     expect(detailsAskedSince(from)).toBe(0);
+
     const ref = {
       kind: "episode" as const,
       subscriptionId: episode.subscriptionId,
@@ -807,6 +893,7 @@ describe("playback", () => {
       season: episode.season,
       episode: episode.number,
     };
+
     const file = await again.titleFile(ref, AbortSignal.timeout(5_000));
     expect(detailsAskedSince(from)).toBe(1);
     expect(file.url.endsWith(`.${other}`)).toBe(true);
@@ -831,6 +918,7 @@ describe("a login replaced or removed", () => {
     // The new login's read fails: only the old one's answer could show or be saved.
     memory.failing = encodeURIComponent(NEW);
     memory.holdDetails = false;
+
     for (const go of memory.heldDetails.splice(0)) go();
     await expect(reading).rejects.toBeDefined();
     await settle();
@@ -855,6 +943,7 @@ describe("a login replaced or removed", () => {
     await settle();
     memory.details = null;
     memory.holdDetails = false;
+
     for (const go of memory.heldDetails.splice(0)) go();
     const shown = seriesOf(await reading);
     expect(shown.plot).not.toBe("Old login's story.");
@@ -863,7 +952,9 @@ describe("a login replaced or removed", () => {
     expect(providerRecords().every((path) => !textOf(path).includes("Old login"))).toBe(true);
 
     const [episode] = shown.seasons[0]?.episodes ?? [];
+
     if (!episode) throw new Error("No episode");
+
     const file = await app.titleFile(
       {
         kind: "episode",
@@ -875,6 +966,7 @@ describe("a login replaced or removed", () => {
       },
       AbortSignal.timeout(5_000),
     );
+
     expect(file.url).toContain(encodeURIComponent(NEW));
     expect(file.url).not.toContain(encodeURIComponent(ONE.password));
 
@@ -917,6 +1009,7 @@ describe("a login replaced or removed", () => {
     expect(shown).toHaveLength(1);
 
     memory.holdSecrets = false;
+
     for (const go of memory.heldSecrets.splice(0)) go();
     await changing;
     expect(firstEpisodePlot(await reading)).toBe("New login's episode.");
@@ -943,7 +1036,9 @@ describe("a login replaced or removed", () => {
   /** The first episode of `series` as `app` lists it now, as Play asks for its file. */
   async function episodeFile(app: App, series: Title) {
     const [episode] = seriesOf(await app.detailsOf(series)).seasons[0]?.episodes ?? [];
+
     if (!episode) throw new Error("No episode");
+
     const ref = {
       kind: "episode" as const,
       subscriptionId: episode.subscriptionId,
@@ -952,6 +1047,7 @@ describe("a login replaced or removed", () => {
       season: episode.season,
       episode: episode.number,
     };
+
     return app.titleFile(ref, AbortSignal.timeout(5_000));
   }
 
@@ -963,10 +1059,12 @@ describe("a login replaced or removed", () => {
       await opened(app, series);
 
       memory.secretFailure = "before";
+
       const change =
         how === "added again"
           ? app.add({ server: panel.url, username: ONE.username, password: NEW })
           : app.update(id, { password: NEW });
+
       await expect(change).rejects.toMatchObject({ error: { kind: "keychain-refused" } });
       expect(memory.keychain.get(`s.${id}`)).toBe(ONE.password);
       expect(await app.detailsOf(series)).toMatchObject({ kind: "series" });
@@ -997,15 +1095,19 @@ describe("a login replaced or removed", () => {
       memory.heldLists.shift()?.();
       await settle();
       const last = { channels: expect.any(Array) };
+
       if (failure === "lost") {
         expect(member()).toMatchObject({
           needsSecret: true,
           live: { kind: "failed", error: { kind: "needs-secret" }, last },
         });
+
         return;
       }
+
       expect(member()?.live).toMatchObject({ kind: "loading", last });
       memory.holdLists = false;
+
       for (const go of memory.heldLists.splice(0)) go();
       await until(
         () => member()?.live.kind === "ready",
@@ -1073,6 +1175,7 @@ describe("a login replaced or removed", () => {
 
       await app.remove(id, { keepHistory });
       memory.holdDetails = false;
+
       for (const go of memory.heldDetails.splice(0)) go();
       await expect(late).rejects.toBeDefined();
       await settle();
@@ -1108,6 +1211,7 @@ describe("the records", () => {
       expect(
         (await cache.readSeason(series.tmdbId!, details.seasons[0]!.number, "en")) !== null,
       ).toBe(valid);
+
       if (!valid) expect(records()).toEqual([]);
     },
   );
@@ -1118,6 +1222,7 @@ describe("the records", () => {
     const movie = await first(app, "movie");
     await opened(app, movie);
     const [path] = providerRecords();
+
     if (!path) throw new Error("Nothing saved");
     writeFileSync(join(folder, path), "{not json");
 
@@ -1134,6 +1239,7 @@ describe("the records' budget", () => {
   const MIB = 1024 * 1024;
   const BUDGET = 64 * MIB;
   const tmdbFolder = join(folder, "tmdb");
+
   const aboutOf = (overview: string) => ({
     original: null,
     language: "en",
@@ -1145,23 +1251,29 @@ describe("the records' budget", () => {
     cast: [],
     directors: [],
   });
+
   const bytesOnDisk = () =>
     records().reduce((sum, path) => sum + statSync(join(folder, path)).size, 0);
+
   const saved = (name: string) => records().includes(`tmdb/about.movie.${name}.en.json`);
+
   /** The records' owner as a launch starts it. */
   async function owner() {
     vi.resetModules();
+
     return import("../src/details-cache.ts");
   }
 
   it("counts what a record takes in UTF-8", async () => {
     const { writeAbout } = await owner();
+
     for (let at = 0; at < 8; at++) {
       await writeAbout("movie", `a${at}`, "en", {
         at: Date.now(),
         value: aboutOf("a".repeat(7.5 * MIB)),
       });
     }
+
     await writeAbout("movie", "wide", "en", {
       at: Date.now(),
       value: aboutOf("界".repeat(2 * MIB)),
@@ -1187,11 +1299,13 @@ describe("the records' budget", () => {
   it("keeps to 2,048 records, written together too, the least recently written going first", async () => {
     mkdirSync(tmdbFolder, { recursive: true });
     const old = new Date(Date.now() - 60 * 60 * 1000);
+
     for (let at = 0; at < 2047; at++) {
       const path = join(tmdbFolder, `about.movie.seed${at}.en.json`);
       writeFileSync(path, "{}");
       utimesSync(path, old, old);
     }
+
     const { writeAbout } = await owner();
     await Promise.all(
       ["n0", "n1", "n2"].map((name) =>
@@ -1204,12 +1318,14 @@ describe("the records' budget", () => {
 
   it("never counts a deletion the disk refuses as room, and keeps the records as they are", async () => {
     const { writeAbout } = await owner();
+
     for (let at = 0; at < 8; at++) {
       await writeAbout("movie", `r${at}`, "en", {
         at: Date.now(),
         value: aboutOf("r".repeat(7.9 * MIB)),
       });
     }
+
     native.undeletable = () => true;
     await writeAbout("movie", "late", "en", {
       at: Date.now(),
@@ -1225,12 +1341,14 @@ describe("the records' budget", () => {
       operation === "move" ? Promise.reject(new Error("The move was refused")) : undefined;
     native.undeletable = (path) => path.endsWith(".next");
     const { writeAbout } = await owner();
+
     for (let at = 0; at < 9; at++) {
       await writeAbout("movie", `h${at}`, "en", {
         at: Date.now(),
         value: aboutOf("h".repeat(7.5 * MIB)),
       });
     }
+
     expect(bytesOnDisk()).toBeLessThanOrEqual(BUDGET);
 
     // Relaunched, with the disk still keeping them: a write that doesn't fit beside them isn't made.
@@ -1247,9 +1365,11 @@ describe("the records' budget", () => {
   it("keeps to 2,048 records when replacements can't be moved or deleted, and their facts readable", async () => {
     mkdirSync(tmdbFolder, { recursive: true });
     const record = JSON.stringify({ version: 1, at: Date.now(), value: aboutOf("kept") });
+
     for (let at = 0; at < 2048; at++) {
       writeFileSync(join(tmdbFolder, `about.movie.seed${at}.en.json`), record);
     }
+
     native.gate = (operation) =>
       operation === "move" ? Promise.reject(new Error("The move was refused")) : undefined;
     native.undeletable = () => true;

@@ -14,12 +14,15 @@ const SUB = "xtream-test";
 
 /** Each source the player was given, by its address, in order. */
 const sources: string[] = [];
+
 const fakePlayer = nativePlayer((source) => {
   sources.push(source.uri);
 });
 
 const pushed: string[] = [];
+
 type Answer<T> = { resolve: (value: T) => void; reject: (cause: unknown) => void };
+
 const held: {
   details: Array<Answer<SeriesDetails>>;
   standing: Array<(s: SeriesViewing) => void>;
@@ -30,13 +33,17 @@ const held: {
 } = { details: [], standing: [], unreadable: [], progress: [] };
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
+
 vi.mock("../src/account.ts", () => ({
   members: () => [{ entry: { id: "demo", kind: "xtream" } }],
 }));
+
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => pushed.push(href), navigate: () => undefined },
 }));
+
 vi.mock("../src/titles.ts", () => ({
   detailsOf: () =>
     new Promise<SeriesDetails>((resolve, reject) => held.details.push({ resolve, reject })),
@@ -45,12 +52,14 @@ vi.mock("../src/titles.ts", () => ({
   useMetadataVersion: () => 0,
   useTitleLists: () => ({ kind: "idle" }),
 }));
+
 /** The viewing record's saves of how far an episode got, as asked. */
 const saves = vi.hoisted(() => ({
   asked: [] as number[],
   answer: async () => undefined,
   finished: [] as number[],
 }));
+
 vi.mock("../src/viewing.ts", () => ({
   seriesViewing: () =>
     new Promise<SeriesViewing>((resolve, reject) => {
@@ -63,6 +72,7 @@ vi.mock("../src/viewing.ts", () => ({
     ),
   recordProgress: (_title: unknown, position: number) => {
     saves.asked.push(position);
+
     return saves.answer();
   },
   finishSeries: async (_versions: readonly unknown[], since: number) => {
@@ -73,6 +83,7 @@ vi.mock("../src/viewing.ts", () => ({
 
 const { failureOf, playEpisode, playMovie, resumeEpisode, resumeMovie } =
   await import("../src/play-title.ts");
+
 const {
   cancelUpNext,
   closeWatch,
@@ -89,6 +100,7 @@ const {
   stop,
   togglePause,
 } = await import("../src/playback.ts");
+
 const { resume } = await import("../src/resume.ts");
 
 function title(kind: Title["kind"], id: string, versions: readonly string[] = [id]): Title {
@@ -163,18 +175,22 @@ const progressAt = (kind: "movie" | "episode", id: string, position: number): Ti
 /** The next save of progress waits until the test calls what this returns; later ones don't. */
 function holdNextSave() {
   let answer: (refused?: unknown) => void = () => {};
+
   saves.answer = () => {
     saves.answer = async () => undefined;
+
     return new Promise<undefined>((done, fail) => {
       answer = (refused) => (refused === undefined ? done(undefined) : fail(refused));
     });
   };
+
   return (refused?: unknown) => answer(refused);
 }
 
 /** The player is ready and seeks to where the play starts; answers where that is. */
 function startsAt() {
   fakePlayer.ready();
+
   return fakePlayer.currentTime;
 }
 
@@ -224,6 +240,7 @@ beforeEach(() => {
   saves.answer = async () => undefined;
   onScreen("/");
 });
+
 afterEach(() => stop());
 
 describe("a series' resume", () => {
@@ -358,10 +375,13 @@ describe("Next episode", () => {
     fakePlayer.currentTime = 590;
     // The save Next asks for waits for the test; later ones answer at once.
     let saved = () => {};
+
     saves.answer = () => {
       saves.answer = async () => undefined;
+
       return new Promise<undefined>((done) => (saved = () => done(undefined)));
     };
+
     playNext();
     await settle();
     expect(saves.asked).toEqual([590]);
@@ -428,6 +448,7 @@ describe("an episode's end", () => {
   /** Three episodes of s1, for a next one the record can skip past. */
   const threeEpisodes = (): SeriesDetails => {
     const details = seriesDetails("s1");
+
     return {
       ...details,
       seasons: [{ ...details.seasons[0]!, episodes: [1, 2, 3].map((n) => episode("s1", n)) }],
@@ -507,11 +528,13 @@ describe("an episode's end", () => {
     "keeps the selected file's %s when another file was played later",
     async (_, marked, position, from) => {
       const details = seriesDetails("s1");
+
       const next: Episode = {
         ...episode("s1", 2),
         exactVersion: true,
         versions: ["s1e2", "another-file"].map((id) => ({ id, name: id, tags: [], duration: 600 })),
       };
+
       const own = progressAt("episode", "s1e2", 120);
       await ends(
         { ...details, seasons: [{ ...details.seasons[0]!, episodes: [episode("s1", 1), next] }] },
@@ -660,10 +683,12 @@ describe("an episode's end", () => {
     startsAt();
     fakePlayer.state(true);
     fakePlayer.currentTime = 595;
+
     if (earlier) {
       seekTo(595);
       vi.advanceTimersByTime(1_000);
     }
+
     act();
     fakePlayer.currentTime = 600;
     fakePlayer.observation({ kind: "ended" });
@@ -686,10 +711,12 @@ describe("an episode's end", () => {
     fakePlayer.observation({ kind: "ended" });
     fakePlayer.state(false);
     await settle();
+
     while (held.standing.length > 0) {
       held.standing.shift()?.(nothingPlayed);
       await settle();
     }
+
     expect(sources).toEqual(["file:episode:s1e1", "file:episode:s1e2"]);
   });
 
@@ -737,6 +764,7 @@ describe("an episode's end", () => {
     const { demoProvider } = await import("../src/demo.ts");
     const source = { revision: 1, provider: demoProvider(), login: ["viewer", "fixture"] };
     setSource(SUB, source);
+
     try {
       await ends(seriesDetails("s1"), 1);
       setSource(SUB, { ...source, revision: 2 });
@@ -760,6 +788,7 @@ describe("resuming right after Close", () => {
     fakePlayer.currentTime = position;
     const answer = holdNextSave();
     void closeWatch();
+
     return answer;
   }
 
@@ -868,6 +897,7 @@ it("keeps a personal reserved-id episode's finish after its login Source changes
   const { setSource, dropSource } = await import("../src/sources.ts");
   const { demoProvider } = await import("../src/demo.ts");
   const original = seriesDetails("s1");
+
   const details: SeriesDetails = {
     ...original,
     title: {
@@ -880,8 +910,10 @@ it("keeps a personal reserved-id episode's finish after its login Source changes
       episodes: season.episodes.map((episode) => ({ ...episode, subscriptionId: "demo" })),
     })),
   };
+
   const source = { revision: 1, provider: demoProvider(), login: ["viewer", "fixture"] };
   setSource("demo", source);
+
   try {
     const before = saves.finished.length;
     const last = details.seasons[0]!.episodes[1]!;

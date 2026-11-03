@@ -32,10 +32,13 @@ export function archiveVariants(
       detail: "The archive window ends at its start.",
     });
   }
+
   if (channel.catchupDays === null) throw new AppFailure({ kind: "catch-up", reason: "none" });
+
   const kept = channel.variants.filter((variant) =>
     archiveHolds(variant.catchupDays, window.start, now),
   );
+
   if (kept.length > 0) return kept;
   throw new AppFailure({ kind: "catch-up", reason: "outside", days: channel.catchupDays });
 }
@@ -56,6 +59,7 @@ export interface WallClock {
  */
 export function wallClock(time: number, timeZone: string | null): WallClock {
   let format: Intl.DateTimeFormat;
+
   const options: Intl.DateTimeFormatOptions = {
     year: "numeric",
     month: "2-digit",
@@ -65,14 +69,17 @@ export function wallClock(time: number, timeZone: string | null): WallClock {
     second: "2-digit",
     hourCycle: "h23",
   };
+
   try {
     format = new Intl.DateTimeFormat("en-US", { ...options, timeZone: timeZone ?? "UTC" });
   } catch {
     format = new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" });
   }
+
   const parts = Object.fromEntries(
     format.formatToParts(time).map((part) => [part.type, part.value]),
   );
+
   return {
     year: parts["year"] ?? "",
     month: parts["month"] ?? "",

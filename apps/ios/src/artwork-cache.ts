@@ -41,16 +41,21 @@ const REFRESH_MS = 30 * DAY;
 const UNUSED_MS = 60 * DAY;
 const TRANSFERS = 4;
 const TIMEOUT_MS = 15_000;
+
 /** How long an address that failed isn't asked for again. */
 const FAILED_MS = 5 * 60_000;
+
 /** How long after a change the index is written. */
 const SAVE_MS = 5_000;
+
 /** How stale a kept picture's last showing may be before showing it again rewrites the index. */
 const TOUCH_MS = 60 * 60_000;
+
 /** How many index rows are checked and written a task, and files deleted a task. */
 const WRITE_SLICE = 500;
 const DELETE_SLICE = 32;
 const VERSION = 1;
+
 /** A picture's file name, as `fresh` makes them. */
 const NAME = /^[a-z0-9]+-[a-z0-9]+$/;
 const INDEX = "index.json";
@@ -58,7 +63,9 @@ const PENDING_INDEX = "index.json.next";
 
 type Waiting =
   { readonly kind: "none" } | { readonly kind: "pending" } | { readonly kind: "failed" };
+
 type Kept = { readonly kind: "shown"; readonly uri: string };
+
 type ArtworkState = Waiting | Kept;
 
 /**
@@ -102,20 +109,27 @@ const kept = () => new Directory(Paths.cache, "artwork");
 const session = () => new Directory(Paths.cache, "artwork-session");
 
 let phase: "idle" | "loading" | "ready" = "idle";
+
 /** Every picture on disk by its address, least recently shown first. */
 const entries = new Map<string, Entry>();
+
 /** The bytes of `entries`. */
 let total = 0;
+
 /** Files of either folder not deleted yet, by address, with their bytes: they count too. */
 const stuck = new Map<string, number>();
 let stuckBytes = 0;
 const slots = new Map<string, Slot>();
+
 /** Addresses to fetch, in the order asked. */
 const queue = new Set<string>();
+
 /** Addresses being fetched, with the file each goes to. */
 const running = new Map<string, string>();
+
 /** When each address last failed. */
 const failures = new Map<string, number>();
+
 /** Rises with each login set or dropped: an address checked in an earlier one is checked again. */
 let generation = 0;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -133,6 +147,7 @@ const fileOf = ({ name, session: inSession }: Entry) =>
 function fetchable(url: string): boolean {
   if (url.length > URL_LENGTH) return false;
   const parsed = URL.parse(url);
+
   return (
     parsed !== null &&
     (parsed.protocol === "http:" || parsed.protocol === "https:") &&
@@ -147,14 +162,18 @@ const exposersOf = (url: string): readonly Source[] =>
 
 function failedLately(url: string): boolean {
   const at = failures.get(url);
+
   if (at === undefined) return false;
+
   if (Date.now() - at < FAILED_MS) return true;
   failures.delete(url);
+
   return false;
 }
 
 function fail(url: string) {
   failures.set(url, Date.now());
+
   // Oldest first: past a few thousand, the oldest are asked for again sooner.
   for (const old of failures.keys()) {
     if (failures.size <= MAX_FILES) break;
@@ -166,6 +185,7 @@ function fail(url: string) {
 function deleted(file: File): boolean {
   try {
     if (file.exists) file.delete();
+
     return true;
   } catch {
     return false;
@@ -178,10 +198,12 @@ function deleted(file: File): boolean {
  */
 function release(file: File): boolean {
   if (stuck.has(file.uri)) return false;
+
   if (deleted(file)) return true;
   const bytes = file.size;
   stuck.set(file.uri, bytes);
   stuckBytes += bytes;
+
   return false;
 }
 
@@ -192,6 +214,7 @@ function unstick(): boolean {
     stuck.delete(uri);
     stuckBytes -= bytes;
   }
+
   return stuck.size === 0;
 }
 
@@ -201,22 +224,31 @@ function unstick(): boolean {
  */
 function usable(url: string): Entry | undefined {
   const entry = entries.get(url);
+
   if (!entry) return undefined;
+
   if (!entry.shown) {
     const file = fileOf(entry);
+
     if (!file.exists || file.size !== entry.bytes) {
       forget(url, entry);
+
       return undefined;
     }
+
     entry.shown = { kind: "shown", uri: file.uri };
   }
+
   if (!entry.session && entry.checked !== generation) {
     if (exposersOf(url).length > 0) {
       forget(url, entry);
+
       return undefined;
     }
+
     entry.checked = generation;
   }
+
   return entry;
 }
 
@@ -224,13 +256,16 @@ function usable(url: string): Entry | undefined {
 function judge(url: string): ArtworkState {
   if (slots.get(url)?.blocked || !fetchable(url)) return FAILED;
   const shown = phase === "ready" ? usable(url)?.shown : null;
+
   if (shown) return shown;
+
   return failedLately(url) ? FAILED : PENDING;
 }
 
 function update(slot: Slot, state: ArtworkState) {
   if (slot.state === state) return;
   slot.state = state;
+
   for (const listener of slot.listeners) listener();
 }
 
@@ -238,13 +273,16 @@ function update(slot: Slot, state: ArtworkState) {
 function forget(url: string, entry: Entry): boolean {
   entries.delete(url);
   total -= entry.bytes;
+
   if (!entry.session) save();
+
   return release(fileOf(entry));
 }
 
 /** Moves the entry last in line; the index learns of it with the next write, or within an hour. */
 function touch(url: string, entry: Entry) {
   const now = Date.now();
+
   if (!entry.session && now - entry.usedAt > TOUCH_MS) save();
   entry.usedAt = now;
   entries.delete(url);
@@ -260,21 +298,29 @@ function evict(bytes = 0, files = 0): boolean {
   const over = () =>
     total + stuckBytes + running.size * MAX_FILE + bytes > MAX_BYTES ||
     entries.size + stuck.size + running.size + files > MAX_FILES;
+
   if (!over()) return true;
+
   if (!unstick()) return false;
+
   for (const [url, entry] of entries) {
     if (!over()) break;
+
     if (!slots.has(url) && !forget(url, entry)) break;
   }
+
   return !over();
 }
 
 /** Shows what `url` has now, and queues its fetch when it has nothing, or a picture to refresh. */
 function want(url: string, slot: Slot) {
   update(slot, judge(url));
+
   if (phase !== "ready" || slot.state === FAILED || running.has(url)) return;
   const entry = entries.get(url);
+
   if (entry && (entry.session || Date.now() - entry.fetchedAt < REFRESH_MS)) return;
+
   if (entry && failedLately(url)) return;
   queue.add(url);
   pump();
@@ -289,7 +335,9 @@ function pump() {
     if (running.size >= TRANSFERS) return;
     queue.delete(url);
     const slot = slots.get(url);
+
     if (!slot || running.has(url)) continue;
+
     if (evict(MAX_FILE, 1)) {
       void fetchArt(url, slot);
     } else if (!entries.has(url)) {
@@ -314,12 +362,14 @@ async function fetchArt(url: string, slot: Slot) {
   const file = new File(folder, fresh());
   running.set(url, file.name);
   let bytes: number | null = null;
+
   try {
     folder.create({ intermediates: true, idempotent: true });
     bytes = await fetchPicture(url, file, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_FILE });
   } catch {
     // Failed: nothing kept.
   }
+
   running.delete(url);
   settle(url, started, file, bytes);
   pump();
@@ -332,29 +382,41 @@ async function fetchArt(url: string, slot: Slot) {
 function settle(url: string, started: Started, file: File, bytes: number | null) {
   const current = signedIn();
   const gone = started.exposed.some((source) => !current.includes(source));
+
   const exposesNow =
     started.durable && started.generation !== generation && exposersOf(url).length > 0;
+
   const slot = slots.get(url);
+
   if (gone || exposesNow || bytes === null) {
     release(file);
+
     if (bytes === null && !gone) fail(url);
+
     if (slot) {
       if (gone) slot.blocked = true;
       slot.exposed = null;
       want(url, slot);
     }
+
     return;
   }
+
   const previous = entries.get(url);
+
   if (previous) forget(url, previous);
+
   if (!evict(bytes, 1)) {
     release(file);
+
     if (slot) {
       slot.blocked = true;
       update(slot, FAILED);
     }
+
     return;
   }
+
   const now = Date.now();
   entries.set(url, {
     name: file.name,
@@ -369,7 +431,9 @@ function settle(url: string, started: Started, file: File, bytes: number | null)
   });
   total += bytes;
   failures.delete(url);
+
   if (started.durable) save();
+
   if (slot) update(slot, judge(url));
 }
 
@@ -379,6 +443,7 @@ function save(delay = SAVE_MS) {
     if (delay >= SAVE_MS) return;
     clearTimeout(saveTimer);
   }
+
   saveTimer = setTimeout(() => {
     saveTimer = null;
     saving = saving.then(write);
@@ -393,32 +458,42 @@ async function write() {
   const at = generation;
   const all = [...entries];
   const rows: Row[] = [];
+
   for (let from = 0; from < all.length; from += WRITE_SLICE) {
     if (from > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+
     if (generation !== at) return;
+
     for (const [url, entry] of all.slice(from, from + WRITE_SLICE)) {
       if (entry.session || entries.get(url) !== entry) continue;
+
       if (entry.checked !== at) {
         if (exposersOf(url).length > 0) {
           forget(url, entry);
           continue;
         }
+
         entry.checked = at;
       }
+
       rows.push([url, entry.name, entry.bytes, entry.fetchedAt, entry.usedAt]);
     }
   }
+
   try {
     kept().create({ intermediates: true, idempotent: true });
     const pending = new File(kept(), PENDING_INDEX);
     pending.create({ overwrite: true });
     await pending.write(JSON.stringify({ version: VERSION, entries: rows }));
+
     // A login signed in while it was written may make a row give it away: it isn't put in place,
     // and the write the change asked for checks every row again.
     if (generation !== at) {
       deleted(pending);
+
       return;
     }
+
     await pending.move(new File(kept(), INDEX), { overwrite: true });
   } catch {
     // The next change writes it again; a launch without it starts over.
@@ -446,8 +521,10 @@ async function readIndex(): Promise<readonly Row[]> {
   for (const name of [INDEX, PENDING_INDEX]) {
     try {
       const file = new File(kept(), name);
+
       if (!file.exists) continue;
       const value: unknown = JSON.parse(await file.text());
+
       if (
         typeof value === "object" &&
         value !== null &&
@@ -462,16 +539,19 @@ async function readIndex(): Promise<readonly Row[]> {
       // Unreadable: try the other, then start again.
     }
   }
+
   return [];
 }
 
 async function load() {
   const rows = await readIndex();
   const now = Date.now();
+
   for (const [url, name, bytes, fetchedAt, usedAt] of rows) {
     // Unseen too long: left out, and its file to `adopt`.
     if (now - usedAt > UNUSED_MS) continue;
     const previous = entries.get(url);
+
     if (previous) total -= previous.bytes;
     entries.delete(url);
     entries.set(url, {
@@ -487,6 +567,7 @@ async function load() {
     });
     total += bytes;
   }
+
   // The index is checked against the logins signed in now, and written again without what gives
   // one away.
   if (rows.length > 0) save(0);
@@ -499,11 +580,14 @@ async function load() {
  */
 function adopt() {
   const known = new Set([INDEX, PENDING_INDEX, ...running.values()]);
+
   for (const entry of entries.values()) known.add(entry.name);
   const orphans: File[] = [];
+
   for (const folder of [kept(), session()]) {
     try {
       if (!folder.exists) continue;
+
       for (const each of folder.list()) {
         if (!(each instanceof File) || known.has(each.name) || stuck.has(each.uri)) continue;
         const bytes = each.size;
@@ -515,15 +599,19 @@ function adopt() {
       // Not listed: what it holds stays until a later launch.
     }
   }
+
   const step = () => {
     for (const file of orphans.splice(0, DELETE_SLICE)) {
       const bytes = stuck.get(file.uri);
+
       if (bytes === undefined || !deleted(file)) continue;
       stuck.delete(file.uri);
       stuckBytes -= bytes;
     }
+
     if (orphans.length > 0) setTimeout(step, 0);
   };
+
   step();
 }
 
@@ -534,19 +622,24 @@ function adopt() {
 function loginsChanged() {
   generation++;
   const current = signedIn();
+
   const went = (exposed: readonly Source[] | null) =>
     exposed?.some((source) => !current.includes(source)) ?? false;
+
   for (const [url, entry] of entries) {
     if (entry.session && went(entry.exposed)) forget(url, entry);
   }
+
   for (const [url, slot] of slots) {
     if (went(slot.exposed)) {
       slot.blocked = true;
       slot.exposed = null;
       queue.delete(url);
     }
+
     want(url, slot);
   }
+
   // The index on disk may hold an address that gives the new login away: written again at once.
   save(0);
 }
@@ -556,32 +649,41 @@ function start() {
   if (phase !== "idle") return;
   phase = "loading";
   onSignedIn(loginsChanged);
+
   const ready = () => {
     phase = "ready";
     adopt();
+
     for (const [url, slot] of slots) want(url, slot);
   };
+
   void load().then(ready, ready);
 }
 
 function watch(url: string, listener: () => void): () => void {
   start();
   let slot = slots.get(url);
+
   if (!slot) {
     slot = { state: PENDING, listeners: new Set(), exposed: null, blocked: false };
     slots.set(url, slot);
     slot.state = judge(url);
   }
+
   const own = slot;
   own.listeners.add(listener);
   const entry = phase === "ready" ? entries.get(url) : undefined;
+
   if (entry) touch(url, entry);
   want(url, own);
+
   return () => {
     own.listeners.delete(listener);
+
     if (own.listeners.size > 0 || slots.get(url) !== own) return;
     slots.delete(url);
     queue.delete(url);
+
     // What showed may now make room.
     if (phase === "ready") evict();
   };
@@ -592,10 +694,13 @@ const stateOf = (url: string): ArtworkState => slots.get(url)?.state ?? judge(ur
 /** The file of `url`, `uri`, won't draw: it goes, and the address is fetched again or fails. */
 function wontDraw(url: string, uri: string) {
   const entry = entries.get(url);
+
   if (!entry || entry.shown?.uri !== uri) return;
   forget(url, entry);
+
   if (entry.fresh) fail(url);
   const slot = slots.get(url);
+
   if (slot) want(url, slot);
 }
 
@@ -605,13 +710,16 @@ function wontDraw(url: string, uri: string) {
  */
 export function useArtwork(url: string | null): Picture {
   const remote = url !== null && !url.startsWith("file://") ? url : null;
+
   const subscribe = useCallback(
     (listener: () => void) => (remote === null ? () => undefined : watch(remote, listener)),
     [remote],
   );
+
   const state = useSyncExternalStore(subscribe, () => (remote === null ? NONE : stateOf(remote)));
   // The file that wouldn't draw here: a download's own stays failed, the cache's is replaced.
   const [broken, setBroken] = useState<string | null>(null);
+
   return useMemo((): Picture => {
     const picture = (uri: string): Picture =>
       uri === broken
@@ -621,10 +729,13 @@ export function useArtwork(url: string | null): Picture {
             uri,
             broke: () => {
               setBroken(uri);
+
               if (remote !== null) wontDraw(remote, uri);
             },
           };
+
     if (remote === null) return url === null ? NONE : picture(url);
+
     return state.kind === "shown" ? picture(state.uri) : state;
   }, [url, remote, state, broken]);
 }

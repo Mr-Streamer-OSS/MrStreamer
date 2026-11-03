@@ -54,6 +54,7 @@ const held = new Map<
   IpcMethod,
   { matches: (args: unknown) => boolean; answer: Promise<Result<unknown>> }[]
 >();
+
 const standing = new Map<IpcMethod, Result<unknown>>();
 const replies = new Map<IpcMethod, (args: unknown) => unknown>();
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -64,6 +65,7 @@ let preferenceRevision = 1;
 export const ipc = {
   snapshot(saved: Preferences): PreferenceSnapshot {
     preferences = saved;
+
     return { revision: ++preferenceRevision, preferences: saved };
   },
   /** The arguments of each call to `method` so far, which its contract allowed. */
@@ -79,6 +81,7 @@ export const ipc = {
       ...(held.get(method) ?? []),
       { matches: (args) => !matches || matches(args as IpcInput<M>), answer },
     ]);
+
     return {
       resolve: (value: IpcOutput<M>) => settle({ ok: true, value }),
       reject: (error: AppError) => settle({ ok: false, error }),
@@ -124,52 +127,69 @@ export const ipc = {
 
 /** Each method's input check, built once as the main process builds it, not again per call. */
 const checks = new Map<IpcMethod, (data: unknown) => unknown>();
+
 const checkOf = (method: IpcMethod) => {
   const known = checks.get(method);
+
   if (known) return known;
   const schema: () => (data: unknown) => unknown = ipcInputs[method];
   const check = schema();
   checks.set(method, check);
+
   return check;
 };
 
 const bridge = {
   invoke(method: IpcMethod, args?: unknown): Promise<Result<unknown>> {
     const input = checkOf(method)(args);
+
     if (input instanceof type.errors) {
       return Promise.resolve({
         ok: false,
         error: { kind: "invalid-input", detail: `${method}: ${input.summary}` },
       });
     }
+
     calls.push({ method, args });
     const pending = held.get(method);
     const next = pending?.findIndex((each) => each.matches(args)) ?? -1;
     const answer = next >= 0 ? pending?.splice(next, 1)[0] : undefined;
+
     if (answer) return answer.answer;
     const always = standing.get(method);
+
     if (always) return Promise.resolve(always);
     const reply = replies.get(method);
+
     if (reply) return Promise.resolve({ ok: true, value: reply(args) });
+
     if (method === "playback.diagnostic") return Promise.resolve({ ok: true, value: null });
+
     if (method.startsWith("analytics.")) return Promise.resolve({ ok: true, value: null });
+
     if (method === "viewing.episodes") {
       return Promise.resolve({ ok: true, value: { progress: [], marks: [], undoable: null } });
     }
+
     if (method === "preferences.get") {
       return Promise.resolve({ ok: true, value: { revision: preferenceRevision, preferences } });
     }
+
     if (method === "recordings.list") return Promise.resolve({ ok: true, value: [] });
+
     if (method === "recordings.schedules") return Promise.resolve({ ok: true, value: [] });
+
     if (method === "subscription.preferences") {
       return Promise.resolve({ ok: true, value: defaultSubscriptionPreferences });
     }
+
     return new Promise(() => {});
   },
   on(event: string, listener: (payload: unknown) => void) {
     const set = listeners.get(event) ?? new Set();
     set.add(listener);
     listeners.set(event, set);
+
     return () => set.delete(listener);
   },
 };
@@ -191,14 +211,18 @@ class StandInMediaSource extends EventTarget {
   }
   endOfStream(): void {}
 }
+
 Object.assign(globalThis, { MediaSource: StandInMediaSource });
+
 // Nor a MediaError, whose codes the player reads when the element reports an error. A test sends
 // that `error` event itself, for a stream that stops.
 Object.assign(globalThis, {
   MediaError: { MEDIA_ERR_NETWORK: 2, MEDIA_ERR_DECODE: 3, MEDIA_ERR_SRC_NOT_SUPPORTED: 4 },
 });
+
 // The element gets an address for it, as it would for a real one.
 const objectUrl = URL.createObjectURL.bind(URL);
+
 URL.createObjectURL = (object) =>
   object instanceof StandInMediaSource ? "blob:stand-in" : objectUrl(object);
 
@@ -218,6 +242,7 @@ export const fullScreen = {
   hold(what: "request" | "exit") {
     const answer = Promise.withResolvers<void>();
     fullScreenAnswers[what].push(answer.promise);
+
     return {
       grant: () => answer.resolve(),
       refuse: () => answer.reject(new TypeError("Refused.")),
@@ -231,6 +256,7 @@ export const fullScreen = {
     fullScreenAnswers.exit.length = 0;
   },
 };
+
 Object.defineProperties(document, {
   fullscreenElement: {
     configurable: true,
@@ -244,6 +270,7 @@ Object.defineProperties(document, {
     },
   },
 });
+
 Object.defineProperty(document.documentElement, "requestFullscreen", {
   configurable: true,
   value: async () => {
@@ -263,8 +290,11 @@ const inherited = Object.getOwnPropertyDescriptor(
   Object.getPrototypeOf(TextTrack.prototype),
   "mode",
 );
+
 const { get: readMode, set: writeMode } = inherited ?? {};
+
 if (!readMode || !writeMode) throw new Error("happy-dom's TextTrack base no longer holds mode.");
+
 Object.defineProperty(TextTrack.prototype, "mode", {
   configurable: true,
   get(this: TextTrack): TextTrackMode {
@@ -277,5 +307,7 @@ Object.defineProperty(TextTrack.prototype, "mode", {
 
 // The contract types each method's answer; the stand-in answers whatever the test gives.
 const api: BridgeApi = bridge as BridgeApi;
+
 Object.assign(window, { mrStreamer: api });
+
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

@@ -23,14 +23,17 @@ import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 const closers: (() => Promise<void>)[] = [];
+
 afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
+
 async function host() {
   let body = "";
   let status = 200;
   let requests = 0;
   let held: { arrived: () => void; release: Promise<void> } | null = null;
+
   const server = createServer(async (request, response) => {
     if (!request.url?.startsWith("/list")) return response.writeHead(404).end();
     requests++;
@@ -41,15 +44,19 @@ async function host() {
     await waiting?.release;
     response.writeHead(status).end(sent);
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   closers.push(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
   const list = (suffix = "one", extra = "") =>
     `#EXTM3U\n#EXTINF:-1 group-title="News",News\n${origin}/live.ts\n#EXTINF:-1 group-title="Films" tmdb-id="42",Film\n#EXTVLCOPT:http-user-agent=FilmAgent\n#EXTVLCOPT:http-referrer=${origin}/\n${origin}/${suffix}.mp4\n${extra}`;
+
   body = list();
+
   return {
     link: `${origin}/list?token=fake`,
     origin,
@@ -66,18 +73,22 @@ async function host() {
       const arrived = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       held = { arrived: arrived.resolve, release: release.promise };
+
       return { arrived: arrived.promise, release: release.resolve };
     },
   };
 }
+
 /** The app's services on `dir`, as a start of the app has them, on a test clock if asked. */
 async function started(dir: string, { testClock = false } = {}) {
   const services = mainLayer(testConfig(dir));
+
   const runtime = runtimeFor(
     testClock
       ? services.pipe(Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })))
       : services,
   );
+
   return {
     runtime,
     subscriptions: await promised(runtime, Subscriptions),
@@ -88,26 +99,34 @@ async function started(dir: string, { testClock = false } = {}) {
     watchlist: await promised(runtime, Watchlist),
   };
 }
+
 type App = Awaited<ReturnType<typeof started>>;
+
 /** Moves the app's test clock on a second at a time until `pending` settles. */
 async function passTime(runtime: App["runtime"], pending: Promise<unknown>): Promise<void> {
   let settled = false;
+
   const done = pending.finally(() => {
     settled = true;
   });
+
   while (!settled) {
     await runtime.runPromise(TestClock.adjust("1 second"));
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+
   await done;
 }
+
 const login = (link: string) => ({ server: link, username: "", password: "" });
 const films = playlistGroupId("Films");
+
 /** A playlist source at example.test that maps its Films group to movies. */
 const filmsSource = {
   link: "https://example.test/list",
   mapping: { version: 1 as const, groups: [{ group: films, mode: "movie" as const }] },
 };
+
 /** The first page of a kind's All. */
 const firstPage = (titles: App["titles"], kind: "movie" | "series" = "movie") =>
   titles.collection({ kind, id: "all", offset: 0, limit: 20 });
@@ -118,12 +137,14 @@ const firstPage = (titles: App["titles"], kind: "movie" | "series" = "movie") =>
  */
 async function savedWithFilms(app: App, providers: readonly Awaited<ReturnType<typeof host>>[]) {
   const saved = [];
+
   for (const provider of providers) {
     provider.set(provider.list().replace(' tmdb-id="42"', ""));
     const subscription = await app.subscriptions.add(login(provider.link));
     await app.subscriptions.mapPlaylist(subscription.id, films, "movie");
     saved.push(subscription);
   }
+
   return saved;
 }
 
@@ -141,9 +162,11 @@ describe("saved M3U movie mapping", () => {
     const app = await started(dir);
     const saved = await app.subscriptions.add(login(provider.link));
     const before = (await app.subscriptions.sources())[0]!;
+
     const failure = {
       error: { kind: "unexpected", detail: expect.stringContaining("10,000 groups") },
     };
+
     // A first pick is checked even without opening the mapping report or loading Live first.
     await expect(
       app.subscriptions.mapPlaylist(saved.id, playlistGroupId("News"), "movie"),
@@ -180,17 +203,21 @@ describe("saved M3U movie mapping", () => {
     "keeps unmapped Live lists after an empty or unconfirmed short %s refresh",
     async (mode) => {
       const provider = await host();
+
       const rows = Array.from(
         { length: 20 },
         (_, at) => `#EXTINF:-1 group-title="News",Channel ${at}\n${provider.origin}/${at}.ts`,
       );
+
       const full = `#EXTM3U\n${rows.join("\n")}\n`;
       provider.set(full);
       // The seconds before a short list is fetched again to confirm it pass on a test clock.
       const app = await started(await tempDir(), { testClock: true });
       const saved = await app.subscriptions.add(login(provider.link));
+
       const refresh = () =>
         mode === "combined" ? app.roster.refreshPlaylist(saved.id) : app.library.refresh(saved.id);
+
       await refresh();
       expect(await app.library.channels({})).toHaveLength(20);
       provider.set("#EXTM3U\n");
@@ -201,9 +228,11 @@ describe("saved M3U movie mapping", () => {
 
       provider.set(`#EXTM3U\n${rows.slice(0, 2).join("\n")}\n`);
       const held = provider.hold();
+
       const rejected = expect(refresh()).rejects.toMatchObject({
         error: { kind: "incomplete-catalogue", received: 2, previous: 20 },
       });
+
       await held.arrived;
       provider.set(full);
       held.release();
@@ -319,6 +348,7 @@ describe("saved M3U movie mapping", () => {
     const target = providers[2]!;
     const targetId = saved[2]!.id;
     const before = target.requests();
+
     try {
       const combined = app.roster.refreshPlaylist(targetId);
       await vi.waitFor(async () =>
@@ -336,6 +366,7 @@ describe("saved M3U movie mapping", () => {
       const asked = firstPage(app.titles);
       // The worker answers this status after the query's status read, while both slots are held.
       await app.titles.status();
+
       for (const request of held) request.release();
       await blockers;
       await combined;
@@ -361,6 +392,7 @@ describe("saved M3U movie mapping", () => {
     const bId = saved[1]!.id;
     const queuedId = saved[2]!.id;
     const targetId = saved[3]!.id;
+
     for (const id of [aId, bId, queuedId]) await app.titles.refresh(id);
     // Keep the mapping pick on the cached import while the title slots are occupied.
     await app.subscriptions.playlistGroups(targetId, "", 0, 10);
@@ -375,14 +407,19 @@ describe("saved M3U movie mapping", () => {
     const blockedQueued = Promise.allSettled([app.titles.refresh(queuedId)]);
     await app.titles.status();
     let staleFinished = false;
+
     const stale = Promise.allSettled([app.roster.refreshPlaylist(targetId)]).then((results) => {
       staleFinished = true;
+
       return results;
     });
+
     const liveStatus = async () =>
       (await app.library.status()).find((status) => status.subscriptionId === targetId);
+
     const work: Promise<unknown>[] = [blockedA, blockedB, independent, blockedQueued, stale];
     let heldIndependent: ReturnType<typeof target.hold> | undefined;
+
     try {
       await vi.waitFor(async () => expect((await liveStatus())?.channelCount).toBe(1));
       await app.subscriptions.mapPlaylist(targetId, playlistGroupId("News"), "skip");
@@ -452,6 +489,7 @@ describe("saved M3U movie mapping", () => {
       provider.set(provider.list().replace(' tmdb-id="42"', ""));
       const saved = await app.subscriptions.add(login(provider.link));
       await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+
       if (loaded) await app.roster.refreshPlaylist(saved.id);
       else await app.subscriptions.playlistGroups(saved.id, "", 0, 10);
       const before = provider.requests();
@@ -460,6 +498,7 @@ describe("saved M3U movie mapping", () => {
       await first.arrived;
       const work: Promise<unknown>[] = [older];
       let second: ReturnType<typeof provider.hold> | undefined;
+
       try {
         await app.subscriptions.mapPlaylist(saved.id, films, "skip");
         second = provider.hold();
@@ -493,6 +532,7 @@ describe("saved M3U movie mapping", () => {
       const provider = await host();
       const saved = await app.subscriptions.add(login(provider.link));
       await app.subscriptions.mapPlaylist(saved.id, films, "movie");
+
       if (loaded) await app.titles.refresh(saved.id);
       const source = await app.subscriptions.sourceOf(saved.id);
       const first = await source.provider.playlistImport!(undefined, true);
@@ -534,18 +574,21 @@ describe("saved M3U movie mapping", () => {
     const providers = await Promise.all(Array.from({ length: 5 }, () => host()));
     const saved = await savedWithFilms(app, providers);
     const held = providers.slice(0, 4).map((provider) => provider.hold());
+
     const blockers = [
       app.library.refresh(saved[0]!.id),
       app.library.refresh(saved[1]!.id),
       app.titles.refresh(saved[2]!.id),
       app.titles.refresh(saved[3]!.id),
     ];
+
     const stopped = Promise.allSettled(blockers);
     await Promise.all(held.map((request) => request.arrived));
     const target = providers[4]!;
     const targetId = saved[4]!.id;
     const before = target.requests();
     const reading = target.hold();
+
     try {
       const refreshed = Promise.allSettled([app.roster.refreshPlaylist(targetId)]);
       // Live gets a slot first, downloads one snapshot and publishes it, while both title slots
@@ -578,9 +621,11 @@ describe("saved M3U movie mapping", () => {
       ).toMatchObject({ url: `${target.origin}/one.mp4` });
     } finally {
       reading.release();
+
       for (const request of held) request.release();
       await stopped;
     }
+
     expect((await stopped).every((result) => result.status === "fulfilled")).toBe(true);
   }, 15_000);
 
@@ -605,8 +650,10 @@ describe("saved M3U movie mapping", () => {
     await app.titles.details("movie", oldMovie);
     const oldSeries = (await firstPage(app.titles, "series")).titles[0]!;
     const details = await app.titles.details("series", oldSeries);
+
     if (details.kind !== "series") throw new Error("No series");
     const episode = seriesEpisodeOrder(details)[0]!;
+
     const file = {
       kind: "episode" as const,
       subscriptionId: saved.id,
@@ -615,6 +662,7 @@ describe("saved M3U movie mapping", () => {
       season: episode.season,
       episode: episode.number,
     };
+
     await app.titles.file(file);
     provider.fail();
     await expect(app.roster.refreshPlaylist(saved.id)).rejects.toBeDefined();
@@ -637,10 +685,12 @@ describe("saved M3U movie mapping", () => {
 
   it("counts full omissions and provides bounded searchable group samples and pages", async () => {
     const provider = await host();
+
     const rows = Array.from(
       { length: 126 },
       (_, at) => `#EXTINF:-1 group-title="Shows",Unnumbered ${at}\n${provider.origin}/${at}.mp4`,
     );
+
     provider.set(`#EXTM3U\n${rows.join("\n")}\n`);
     const app = await started(await tempDir());
     const saved = await app.subscriptions.add(login(provider.link));
@@ -721,6 +771,7 @@ it.each(["/index.m3u", "/50%/index.m3u", "/50%25/index.m3u"])(
   "follows credential-free HTTPS to HTTP redirects with ordinary or malformed path %s for unmapped Live",
   async (path) => {
     const requests: string[] = [];
+
     const provider = playlistProvider(
       { link: `https://example.test${path}` },
       {
@@ -728,18 +779,23 @@ it.each(["/index.m3u", "/50%/index.m3u", "/50%25/index.m3u"])(
         fetch: async (input) => {
           const address = new URL(String(input));
           requests.push(address.href);
+
           if (address.protocol === "https:") {
             address.protocol = "http:";
+
             return new Response(null, { status: 302, headers: { location: address.href } });
           }
+
           if (address.pathname === path)
             return new Response(
               '#EXTM3U x-tvg-url="https://example.test/guide.xml"\n#EXTINF:-1,Live\nhttps://example.test/50%/index.m3u8\n',
             );
+
           return new Response("stream or guide");
         },
       },
     );
+
     expect(await provider.authenticate()).toMatchObject({ state: "active" });
     const catalogue = await provider.liveCatalogue();
     expect(catalogue.channels).toHaveLength(1);
@@ -748,6 +804,7 @@ it.each(["/index.m3u", "/50%/index.m3u", "/50%25/index.m3u"])(
     expect((await provider.request("https://example.test/50%/segment-0.ts")).ok).toBe(true);
     const guide = await provider.liveGuide();
     expect(guide.kind).toBe("document");
+
     if (guide.kind === "document") await guide.body.cancel();
     expect(requests).toContain(`http://example.test${path}`);
     expect(requests).toContain("http://example.test/50%/index.m3u8");
@@ -760,18 +817,21 @@ it.each([
   "https://player%:synthetic-password@example.test/film.mp4",
 ])("protects a file's userinfo even when its percent encoding is malformed", async (url) => {
   const requests: string[] = [];
+
   const provider = playlistProvider(filmsSource, {
     userAgent: "test",
     fetch: async (input) => {
       if (String(input) === "https://example.test/list")
         return new Response(`#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${url}\n`);
       requests.push(String(input));
+
       return new Response(null, {
         status: 302,
         headers: { location: url.replace("https:", "http:") },
       });
     },
   });
+
   await provider.onDemandCatalogue();
   await expect(provider.request(url)).rejects.toThrow("unencrypted");
   expect(requests).toHaveLength(1);
@@ -779,10 +839,12 @@ it.each([
 
 it("bounds playlist headers while retaining the last successful exact file", async () => {
   let body = '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\nhttps://example.test/film.mp4\n';
+
   const provider = playlistProvider(filmsSource, {
     userAgent: "test",
     fetch: async () => new Response(body),
   });
+
   const catalogue = await provider.onDemandCatalogue();
   const title = catalogue.movies[0]!;
   body = "#EXTM3U " + " ".repeat(65_536) + "\n";
@@ -796,21 +858,25 @@ it("bounds playlist headers while retaining the last successful exact file", asy
 
 it("resolves playlist files without probing and protects a file's own redirect credentials", async () => {
   const requests: string[] = [];
+
   const provider = playlistProvider(filmsSource, {
     userAgent: "test",
     fetch: async (input) => {
       const address = String(input);
       requests.push(address);
+
       if (address === "https://example.test/list")
         return new Response(
           '#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n#EXTVLCOPT:http-user-agent=FilmAgent\nhttps://example.test/film.mp4?token=synthetic-token\n',
         );
+
       return new Response(null, {
         status: 302,
         headers: { location: "http://example.test/film.mp4?token=synthetic-token" },
       });
     },
   });
+
   const catalogue = await provider.onDemandCatalogue();
   const file = await provider.titleFile("movie", catalogue.movies[0]!.id, "mp4");
   expect(requests).toEqual(["https://example.test/list"]);
@@ -822,6 +888,7 @@ it("resolves playlist files without probing and protects a file's own redirect c
 it("imports series files, resumes the selected exact version after reorder/startup, and leaves replacements unwatched", async () => {
   const provider = await host();
   const dir = await tempDir();
+
   const rows = [
     `#EXTINF:-1 group-title="Shows",Show S02E03\n${provider.origin}/a.mp4`,
     `#EXTINF:-1 group-title="Shows",Show S01E02\n${provider.origin}/b.mp4`,
@@ -829,6 +896,7 @@ it("imports series files, resumes the selected exact version after reorder/start
     `#EXTINF:-1 group-title="Shows",Show S02E03 4K\n#EXTVLCOPT:http-user-agent=AlternateAgent\n${provider.origin}/a.mp4`,
     `#EXTINF:-1 group-title="Shows",Show 1920x1080\n${provider.origin}/uncertain.mp4`,
   ];
+
   provider.set(`#EXTM3U\n${rows.join("\n")}\n`);
   const app = await started(dir);
   const saved = await app.subscriptions.add(login(provider.link));
@@ -838,6 +906,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   expect(all.total).toBe(1);
   const series = { subscriptionId: saved.id, id: all.titles[0]!.id };
   const details = await app.titles.details("series", series);
+
   if (details.kind !== "series") throw new Error("No series");
   const order = seriesEpisodeOrder(details);
   expect(order.map((episode) => `${episode.season}:${episode.number}`)).toEqual([
@@ -849,6 +918,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   const alternate = first.versions![1]!;
   expect(alternate).toMatchObject({ name: "Show S02E03 4K", container: "mp4", listedOrder: 3 });
   expect(alternate.observed).toBeUndefined();
+
   const exactFile = await app.titles.file({
     kind: "episode",
     subscriptionId: saved.id,
@@ -857,7 +927,9 @@ it("imports series files, resumes the selected exact version after reorder/start
     season: 2,
     episode: 3,
   });
+
   const [source] = await app.subscriptions.saved();
+
   if (!source) throw new Error("Expected source");
   const files = await promised(app.runtime, VerifiedFiles);
   await files.remember(source.key, source.fileRevision, {
@@ -871,6 +943,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   });
   const reads = provider.requests();
   const observed = await app.titles.details("series", series);
+
   if (observed.kind !== "series") throw new Error("Expected series");
   const observedVersions = seriesEpisodeOrder(observed)[0]!.versions!;
   expect(observedVersions[0]?.observed).toBeUndefined();
@@ -886,6 +959,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   expect((await app.titles.titles("series", [series]))[0]?.versions[0]?.episodeFiles).toContain(
     alternate.id,
   );
+
   const ref = {
     kind: "episode" as const,
     subscriptionId: saved.id,
@@ -894,6 +968,7 @@ it("imports series files, resumes the selected exact version after reorder/start
     season: 2,
     episode: 3,
   };
+
   expect(await app.titles.file(ref)).toMatchObject({
     url: `${provider.origin}/a.mp4`,
     headers: { "User-Agent": "AlternateAgent" },
@@ -915,6 +990,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   await app.runtime.dispose();
   const restarted = await started(dir);
   const again = await restarted.titles.details("series", series);
+
   if (again.kind !== "series") throw new Error("No series");
   const standing = await restarted.viewing.episodes(series);
   expect(
@@ -930,6 +1006,7 @@ it("imports series files, resumes the selected exact version after reorder/start
   );
   await restarted.titles.refresh(saved.id);
   const replacement = await restarted.titles.details("series", series);
+
   if (replacement.kind !== "series") throw new Error("No series");
   expect(continuation(replacement, standing.progress, standing.marks)?.resume).toBeUndefined();
   await restarted.viewing.relist(randomUUID(), series, seriesEpisodeSeasons(replacement));
@@ -940,12 +1017,14 @@ it("imports series files, resumes the selected exact version after reorder/start
     episode: 3,
     resume: null,
   });
+
   // Explicit marks are logical watched/unwatched decisions and follow source order.
   const marked = await replacementStart.viewing.markEpisode(
     randomUUID(),
     { ...ref, id: replacement.seasons[0]!.episodes[0]!.id },
     true,
   );
+
   expect(marked).toBeDefined();
   const viewed = await replacementStart.viewing.state();
   expect(viewed.marked[0]?.next).toMatchObject({ season: 1, episode: 2, resume: null });
@@ -956,6 +1035,7 @@ it.each([false, true])(
   async (mapped) => {
     const names = Array.from({ length: 33 }, (_, at) => `Group ${at}`);
     const address = `https://example.test/long.mp4?signature=${"x".repeat(5000)}`;
+
     const provider = playlistProvider(
       {
         link: "https://example.test/list",
@@ -986,6 +1066,7 @@ it.each([false, true])(
           ),
       },
     );
+
     if (mapped) {
       const catalogue = await provider.onDemandCatalogue();
       expect(catalogue.movies).toHaveLength(2);
@@ -1002,6 +1083,7 @@ it.each(["?token=synthetic-token", "?v=1"])(
   "keeps unmapped Live redirect policy for its own query %s",
   async (query) => {
     const url = `https://example.test/live.m3u8${query}`;
+
     const provider = playlistProvider(
       { link: "https://example.test/list" },
       {
@@ -1009,15 +1091,18 @@ it.each(["?token=synthetic-token", "?v=1"])(
         fetch: async (input) => {
           if (String(input) === "https://example.test/list")
             return new Response(`#EXTM3U\n#EXTINF:-1,Live\n${url}\n`);
+
           if (String(input).startsWith("https:"))
             return new Response(null, {
               status: 302,
               headers: { location: `http://example.test/1/live.m3u8${query}` },
             });
+
           return new Response("stream");
         },
       },
     );
+
     const catalogue = await provider.liveCatalogue();
     const stream = await provider.liveStream(catalogue.channels[0]!.id);
     expect((await provider.request(stream.url)).ok).toBe(true);

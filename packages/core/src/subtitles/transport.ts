@@ -22,13 +22,16 @@ export function pesReader(skip: (pid: number) => boolean = () => false) {
   function finish(pid: number): PesPacket | null {
     const parts = open.get(pid);
     open.delete(pid);
+
     if (!parts) return null;
     const pes = concat(parts);
+
     if (pes.length < 9 || pes[0] !== 0 || pes[1] !== 0 || pes[2] !== 1) return null;
     const headerEnd = 9 + pes[8]!;
     const pts = pes[7]! & 0x80 && pes.length >= 14 ? readPts(pes.subarray(9)) : null;
     const length = (pes[4]! << 8) | pes[5]!;
     const end = length > 0 ? Math.min(6 + length, pes.length) : pes.length;
+
     return { pid, pts, payload: pes.subarray(headerEnd, end) };
   }
 
@@ -37,32 +40,44 @@ export function pesReader(skip: (pid: number) => boolean = () => false) {
       const data = carry.length ? concat([carry, chunk]) : chunk;
       const out: PesPacket[] = [];
       let offset = 0;
+
       for (; offset + PACKET <= data.length; offset += PACKET) {
         if (data[offset] !== SYNC) {
           // Lost step: find the next packet boundary.
           const next = data.indexOf(SYNC, offset + 1);
+
           if (next < 0) {
             offset = data.length;
             break;
           }
+
           offset = next - PACKET;
           continue;
         }
+
         const packet = data.subarray(offset, offset + PACKET);
         const pid = ((packet[1]! & 0x1f) << 8) | packet[2]!;
+
         if (pid < 0x20 || pid === 0x1fff || skip(pid)) continue;
         const adaptation = (packet[3]! >> 4) & 0x03;
+
         if (adaptation === 0 || adaptation === 2) continue;
         const start = adaptation === 3 ? 5 + packet[4]! : 4;
+
         if (start >= PACKET) continue;
+
         if (packet[1]! & 0x40) {
           const done = finish(pid);
+
           if (done) out.push(done);
           open.set(pid, []);
         }
+
         open.get(pid)?.push(packet.slice(start));
       }
+
       carry = data.slice(offset);
+
       return out;
     },
     end(): PesPacket[] {
@@ -85,9 +100,11 @@ function readPts(bytes: Uint8Array): number {
 function concat(parts: readonly Uint8Array[]): Uint8Array {
   const joined = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
+
   for (const part of parts) {
     joined.set(part, at);
     at += part.length;
   }
+
   return joined;
 }

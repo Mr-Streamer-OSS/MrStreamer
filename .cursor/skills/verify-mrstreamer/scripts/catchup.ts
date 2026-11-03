@@ -45,6 +45,7 @@ function panelTime(time: number): string {
       .formatToParts(time)
       .map((part) => [part.type, part.value]),
   );
+
   return `${parts["year"]}-${parts["month"]}-${parts["day"]}:${parts["hour"]}-${parts["minute"]}`;
 }
 
@@ -59,15 +60,19 @@ const expect = (ok: boolean, message: string) => {
 export async function airedProgramme(d: Driver, category: string, channel: string) {
   const row = `[...document.querySelectorAll('[data-index]')].find(r => r.querySelector('[data-name]')?.textContent.includes(${JSON.stringify(channel)}))`;
   const lines = `[...(${row})?.querySelectorAll('.rounded-b-lg > div > button') ?? []]`;
+
   const playback = () =>
     d.evaluate<{ time: number; width: number; ended: boolean; audio: number; watching: boolean }>(
       video,
     );
+
   const nowPlaying = () =>
     d.evaluate<string>("document.querySelector('[data-view=watch]')?.innerText ?? ''");
+
   /** Moves the pointer over the picture, which shows Watch's fading controls for a while. */
   const wake = async () => {
     d.action("Move the pointer over the picture");
+
     for (const x of [600, 640]) {
       await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: 400 });
     }
@@ -92,11 +97,13 @@ export async function airedProgramme(d: Driver, category: string, channel: strin
     `(${row})?.querySelector('button[aria-label="Later programmes"]')`,
   );
   await d.wait(() => d.evaluate<boolean>(`${lines}.length > 1`));
+
   const day = await d.evaluate<{ time: string; title: string; onNow: boolean }[]>(
     `${lines}.map(line => ({ time: line.firstElementChild.textContent,
       title: line.children[1].firstElementChild.textContent,
       onNow: !!line.querySelector('.bg-white\\\\/20') }))`,
   );
+
   d.observed["schedule"] = day;
   const aired = day[0];
   expect(!!aired && !aired.onNow, "The rest of the day lists no programme that aired.");
@@ -112,6 +119,7 @@ export async function airedProgramme(d: Driver, category: string, channel: strin
       await d.click(`Play ${aired!.title}, which aired`, `${lines}[0]`);
       await d.wait(async () => {
         const v = await playback();
+
         return v.watching && v.time >= 1 && v.width > 0 && v.audio > 0;
       });
       d.observed["archivePlayback"] = await playback();
@@ -138,6 +146,7 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   await d.wait(async () => {
     if (fake.archiveRequests().length < 2) return false;
     const v = await playback();
+
     return v.time >= 1 && v.width > 0 && v.audio > 0;
   });
   d.observed["reconnectedPlayback"] = await playback();
@@ -161,13 +170,16 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
       { channel: { subscriptionId: channel.subscriptionId, id: channel.id }, from, until });
     return day.ok ? day.value : [];
   })()`);
+
   const programme = schedule.find((each) => each.title === aired.title);
   expect(!!programme, "The guide no longer lists the programme played.");
+
   const expected = {
     streamId: "1000",
     minutes: Math.ceil((programme!.stop - programme!.start) / 60_000),
     start: panelTime(programme!.start),
   };
+
   d.observed["archiveRequested"] = fake.archiveRequests();
   d.observed["archiveExpected"] = expected;
   expect(
@@ -188,6 +200,7 @@ export async function catchupScenario(d: Driver, fake: CatchupFake): Promise<voi
   );
   await d.wait(async () => {
     const v = await playback();
+
     return !v.ended && v.time >= 1 && v.width > 0;
   });
   d.observed["livePlayback"] = await playback();

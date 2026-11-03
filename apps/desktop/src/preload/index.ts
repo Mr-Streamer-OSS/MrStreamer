@@ -7,7 +7,9 @@ const api: BridgeApi = {
   on: (event, listener) => {
     const handler = (_event: IpcRendererEvent, payload: IpcEvents[typeof event]) =>
       listener(payload);
+
     ipcRenderer.on(event, handler);
+
     return () => {
       ipcRenderer.removeListener(event, handler);
     };

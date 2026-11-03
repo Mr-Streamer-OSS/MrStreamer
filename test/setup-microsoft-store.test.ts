@@ -48,6 +48,7 @@ case "$(stty -a)" in *" echo "*) typing=shown ;; *) typing=hidden ;; esac
 IFS= read -rs -t 0.3 -n 80 queued
 printf 'typing %s, queued [%s]\\n' "$typing" "$queued"
 `;
+
 const LEFT_AS_FOUND = "typing shown, queued []";
 
 /** The terminal a test types into. */
@@ -74,6 +75,7 @@ async function keyStage(play: (terminal: Terminal) => Promise<void>): Promise<Ou
   const checkout = join(folder, "checkout");
   const calls = join(folder, "calls");
   const stored = join(folder, "stored");
+
   // Nothing of whoever runs the tests: git finds the repository made here, and gh is the one above.
   const env = {
     PATH: `${join(folder, "bin")}:${process.env["PATH"]}`,
@@ -85,6 +87,7 @@ async function keyStage(play: (terminal: Terminal) => Promise<void>): Promise<Ou
     GH_CALLS: calls,
     GH_STORED: stored,
   };
+
   mkdirSync(join(folder, "bin"));
   writeFileSync(join(folder, "bin", "gh"), GH, { mode: 0o755 });
   // The wizard opens Partner Center with the first opener it finds. This one opens nothing.
@@ -97,32 +100,39 @@ async function keyStage(play: (terminal: Terminal) => Promise<void>): Promise<Ou
     cwd: checkout,
     env,
   });
+
   try {
     let screen = "";
     let seen = 0;
     let closed = false;
     script.stdout.setEncoding("utf8").on("data", (text: string) => (screen += text));
+
     const close = new Promise<void>((done) =>
       script.on("close", () => {
         closed = true;
         done();
       }),
     );
+
     await play({
       async shown(text) {
         const deadline = Date.now() + 10_000;
+
         while (!screen.includes(text, seen)) {
           if (closed || Date.now() > deadline) {
             throw new Error(`The wizard never showed "${text}":\n${screen.slice(seen)}`);
           }
+
           await sleep(10);
         }
+
         seen = screen.indexOf(text, seen) + text.length;
       },
       type: (keys) => script.stdin.write(keys),
     });
     await close;
     const local = join(checkout, ".local");
+
     return {
       screen,
       stored: existsSync(stored) ? readFileSync(stored, "utf8") : undefined,
@@ -168,6 +178,7 @@ describe.skipIf(!hasScript)("a key pasted into the setup wizard", { timeout: 30_
 
     expect(run.stored).toBeUndefined();
     expect(run.screen).toContain("Nothing was stored.");
+
     for (const key of [KEY, OTHER]) expect(run.screen).not.toContain(key);
     expect(run.screen).toContain(LEFT_AS_FOUND);
   });
@@ -187,6 +198,7 @@ describe.skipIf(!hasScript)("a key pasted into the setup wizard", { timeout: 30_
 
     expect(run.stored).toBeUndefined();
     expect(run.screen).toContain("Nothing was stored.");
+
     for (const key of [KEY, OTHER]) expect(run.screen).not.toContain(key);
     expect(run.screen).toContain(LEFT_AS_FOUND);
   });

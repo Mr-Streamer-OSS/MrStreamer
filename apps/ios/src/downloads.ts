@@ -108,21 +108,29 @@ import { defined } from "@mrstreamer/core/defined";
 // launch, then removed.
 
 const FILE = "downloads.json";
+
 /** Documents/downloads, which modules/downloads-folder keeps out of backups. */
 const ROOT = "downloads";
+
 /** How often transfer progress reaches the screens, at most. */
 const PROGRESS_MS = 250;
+
 /** How often a transfer's progress is written down. */
 const SAVE_MS = 5000;
+
 /** Unfinished authorizations the native queue may hold at once, paused ones aside. */
 const WINDOW = 32;
+
 /** How long removing a copy waits for its task and readers to close before its folder waits. */
 const CLOSE_MS = 10_000;
+
 /** How soon a first foreground held back by a pause that wasn't kept is tried again. */
 const HELD_BACK_MS = 5_000;
 const ARTWORK_MS = 20_000;
+
 /** A download's id: also its folder's name. */
 const ID = /^d-[a-z0-9-]+$/;
+
 /** NSURLErrorDomain codes that mean the iPhone has no connection at all. */
 const OFFLINE = new Set([-1009, -1018, -1020]);
 
@@ -190,8 +198,11 @@ const Stored = lazy(() =>
     "removal?": "unknown",
   }),
 );
+
 type Stored = Infer<typeof Stored>;
+
 const Continuation = lazy(() => type({ version: "1", title: RawTitleRef() }));
+
 /** The record's current authorization, and the last of its receipts' sequences taken in. */
 const Transfer = lazy(() =>
   type({
@@ -201,7 +212,9 @@ const Transfer = lazy(() =>
     appliedSequence: "number.integer >= 0",
   }),
 );
+
 type Transfer = Infer<typeof Transfer>;
+
 /**
  * The record's removal, written before its authorization is fenced: excluded from the queue,
  * finished by the next reconciliation when it is interrupted, never asked for again.
@@ -209,7 +222,9 @@ type Transfer = Infer<typeof Transfer>;
 const Removal = lazy(() =>
   type({ version: "1", reason: "'user' | 'source-removed' | 'replace-missing' | 'demo-reset'" }),
 );
+
 type Reason = Infer<typeof Removal>["reason"];
+
 /** Why a download stopped, of the kinds this module writes down. */
 type StoredFailure = NonNullable<Stored["failure"]>;
 
@@ -238,14 +253,19 @@ type Field<A> = A | undefined | "bad";
 function fieldOf<A>(parse: (value: unknown) => A | type.errors, value: unknown): Field<A> {
   if (value === undefined) return undefined;
   const parsed = parse(value);
+
   return parsed instanceof type.errors ? "bad" : parsed;
 }
+
 const transferOf = (record: Stored): Field<Transfer> => fieldOf(Transfer(), record.transfer);
+
 const removalOf = (record: Stored): Field<Infer<typeof Removal>> =>
   fieldOf(Removal(), record.removal);
+
 /** Its authorization, when it reads. */
 const boundOf = (record: Stored): Transfer | null => {
   const transfer = transferOf(record);
+
   return typeof transfer === "object" ? transfer : null;
 };
 
@@ -264,19 +284,25 @@ const list = store<DownloadList>(EMPTY);
 
 /** Every download, the queue first in the order it goes, then the copies, newest first. */
 export const useDownloads = () => useStore(list);
+
 /** The list as it stands, for owners outside React. */
 export const downloadList = () => list.get();
+
 /** Calls `listener` whenever the list changes. */
 export const onDownloads = (listener: () => void) => list.subscribe(listener);
 
 let doc: Doc = { items: [], forgetting: [], unreadable: [] };
+
 /** downloads.json read as this build writes it: only then are folders it doesn't name removed. */
 let trusted = false;
+
 /** downloads.json read as this build writes it, or absent: what it names is all there is. */
 let complete = false;
 let started = false;
+
 /** The app is in the foreground: only then are authorizations reserved. */
 let foreground = false;
+
 /**
  * Whether the native side's receipts are taken in. Until "ready", nothing is removed by the
  * queue's own reconciliation; "failed" is tried again in the foreground.
@@ -284,60 +310,82 @@ let foreground = false;
 let phase: "starting" | "ready" | "failed" = "starting";
 let firstReady = () => {};
 const ready = new Promise<void>((resolve) => (firstReady = resolve));
+
 /** This process's first foreground reconciliation: until done, no authorization is reserved. */
 let barrier: "pending" | "running" | "done" = "pending";
+
 /** Whether this process already tried to start a damaged native queue over: once at most. */
 let repairTried = false;
+
 /** Copies whose file was gone when last looked. */
 const missing = new Set<string>();
+
 /** Unfinished downloads that ended with their subscription since launch. */
 let ended = 0;
 let made = 0;
+
 /** Transfers under way, by authorization, as their progress and the native queue tell them. */
 const live = new Map<string, Live>();
+
 /** The native queue's authorizations, as last told. */
 let known = new Map<string, AuthorizationView>();
+
 /** Receipts heard before the downloads were ready, by receipt. */
 const early = new Map<string, ReceiptV2>();
+
 /** Receipts being taken in, by receipt: an event and a reconcile may bring the same one. */
 const taking = new Set<string>();
+
 /** A receipt the native side kept for a download, of this build or build 14. */
 type Fact = ReceiptV2 | LegacyReceipt;
+
 /**
  * Receipts the native side kept that couldn't be written down yet, by download, then by receipt
  * with its outcome's kind: nothing asks for such a download again, nor deletes its file, until
  * each is. Only an owed completion holds an automatic removal back.
  */
 const owed = new Map<string, Map<string, Fact["outcome"]["kind"]>>();
+
 /** Downloads whose earlier build's resume data couldn't be read: they wait for the next launch. */
 const held = new Set<string>();
+
 /** Removals under way, by download: one at a time for a record. */
 const removing = new Map<string, Promise<Removed>>();
+
 /** Folders of dropped records still waiting for their task or readers to close. */
 const closingFolders = new Set<string>();
+
 /** Bindings asked of the account owner and not yet settled, by exact login. */
 let binding = new WeakMap<Source, Promise<void>>();
+
 /** The queue's refill under way, and whether another was asked meanwhile. */
 let filling: Promise<void> | null = null;
 let refillAgain = false;
 
 const folderOf = (id: string) => new Directory(Paths.document, ROOT, id);
+
 /** A file type safe to name a file with; anything else is kept as "bin", as on the desktop. */
 const extensionOf = (container: string) =>
   /^[a-z0-9]{1,8}$/i.test(container) ? container.toLowerCase() : "bin";
+
 const mediaOf = (record: Stored) =>
   new File(folderOf(record.id), `media.${extensionOf(record.container)}`);
+
 const artworkOf = (id: string, artwork: "poster" | "wide") => new File(folderOf(id), artwork);
+
 /** An earlier build's Keychain item of a download's resume data. */
 const secretOf = (id: string) => `download:${id}`;
+
 /** What the player names a copy by. */
 const copyKey = (id: string) => `copy:${id}`;
 
 const find = (id: string) => doc.items.find((record) => record.id === id);
+
 const sameTitle = (record: Stored, ref: TitleRef) =>
   record.subscriptionId === ref.subscriptionId &&
   record.title.kind === ref.kind &&
   record.title.id === ref.id;
+
 /** A record nothing is removing, whose optional fields read: the queue may act on it. */
 const standing = (record: Stored) =>
   removalOf(record) === undefined && transferOf(record) !== "bad";
@@ -355,6 +403,7 @@ function commit(next: Doc) {
 /** Changes a download's record as it is now; one removed meanwhile stays removed. */
 function update(id: string, change: (record: Stored) => Stored, forget = false) {
   const record = find(id);
+
   if (!record) return;
   commit({
     ...doc,
@@ -366,21 +415,25 @@ function update(id: string, change: (record: Stored) => Stored, forget = false) 
 /** The record without its authorization, build 14's attempt or failure. */
 function unbound(record: Stored): Stored {
   const { transfer: _transfer, attempt: _attempt, failure: _failure, ...rest } = record;
+
   return rest;
 }
 
 function withoutFailure(record: Stored): Stored {
   const { failure: _failure, ...rest } = record;
+
   return rest;
 }
 
 function withoutPause(record: Stored): Stored {
   const { paused: _paused, ...rest } = record;
+
   return rest;
 }
 
 function withoutRemoval(record: Stored): Stored {
   const { removal: _removal, ...rest } = record;
+
   return rest;
 }
 
@@ -399,6 +452,7 @@ async function forget(id: string) {
   try {
     await transfers.forgetResume(id);
     await keychainSecrets.remove(secretOf(id));
+
     if (doc.forgetting.includes(id)) {
       commit({ ...doc, forgetting: doc.forgetting.filter((each) => each !== id) });
     }
@@ -410,20 +464,26 @@ async function forget(id: string) {
 /** An earlier build's resume data of a download; rejects when the Keychain won't answer. */
 async function readLegacy(id: string): Promise<Infer<typeof Legacy> | null> {
   const saved = await keychainSecrets.read(secretOf(id));
+
   if (!saved) return null;
+
   try {
     const parsed = Legacy()(JSON.parse(saved));
+
     if (!(parsed instanceof type.errors)) return parsed;
   } catch {
     // Not resume data: as good as none.
   }
+
   await keychainSecrets.remove(secretOf(id));
+
   return null;
 }
 
 function freeBytes(): number | null {
   try {
     const free = Paths.availableDiskSpace;
+
     return Number.isFinite(free) ? free : null;
   } catch {
     return null;
@@ -439,20 +499,26 @@ function freeBytes(): number | null {
 function borrowed(): ReadonlySet<string> {
   const { phase, closing } = playbackState.get();
   const busy = new Set(closing);
+
   if (phase.kind === "loading" || phase.kind === "playing" || phase.kind === "paused") {
     if (phase.item.subscriptionId !== null) busy.add(phase.item.subscriptionId);
   }
+
   return busy;
 }
 
 /** The transfer under way of `record`, if the native side says it is. */
 function transferring(record: Stored): Live | null {
   const bound = boundOf(record);
+
   if (!bound) return null;
   const heard = live.get(bound.authorization);
+
   if (heard) return heard;
   const view = known.get(bound.authorization);
+
   if (view?.state !== "active") return null;
+
   return {
     received: view.received ?? record.received,
     size: view.expected ?? record.size,
@@ -478,7 +544,9 @@ const unkept = new Set<string>();
 function pausedNow(record: Stored): boolean {
   if (record.state !== "queued" || record.paused !== true) return false;
   const bound = boundOf(record);
+
   if (transferring(record) === null || !bound) return true;
+
   return !unkept.has(bound.authorization) && known.get(bound.authorization)?.held !== false;
 }
 
@@ -489,6 +557,7 @@ function viewOf(
 ): Download {
   const name = names.get(record.subscriptionId);
   const moving = record.state === "queued" ? transferring(record) : null;
+
   return {
     id: record.id,
     title: record.title,
@@ -542,13 +611,17 @@ function view(): DownloadList {
   const names = new Map(members().map((member) => [member.entry.id, member.label]));
   const busy = borrowed();
   const visible = doc.items.filter((record) => !excludedDownload(record));
+
   // The transfer leads, as the native side runs it, wherever a Move that raced its start put it.
   const leads = (record: Stored) =>
     record.state === "queued" && !pausedNow(record) && transferring(record) !== null;
+
   const queue = visible.filter((record) => record.state !== "complete");
+
   const copies = visible
     .filter((record) => record.state === "complete")
     .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+
   return {
     items: [...queue.filter(leads), ...queue.filter((record) => !leads(record)), ...copies].map(
       (record) => viewOf(record, names, busy),
@@ -557,7 +630,9 @@ function view(): DownloadList {
     // Partial ones included: a waiting or paused one keeps the bytes it received.
     bytes: doc.items.reduce((sum, record) => {
       if (record.state === "complete") return sum + (record.size ?? 0);
+
       if (record.state !== "queued") return sum;
+
       return sum + (transferring(record)?.received ?? record.received);
     }, 0),
     free: freeBytes(),
@@ -566,12 +641,14 @@ function view(): DownloadList {
 }
 
 let telling: ReturnType<typeof setTimeout> | null = null;
+
 /** Tells the screens now. */
 function tell() {
   if (telling) clearTimeout(telling);
   telling = null;
   list.set(view());
 }
+
 /** Tells the screens of progress, a few times a second at most. */
 function tellSoon() {
   telling ??= setTimeout(tell, PROGRESS_MS);
@@ -580,6 +657,7 @@ function tellSoon() {
 /** Looks for copies whose file is gone. */
 function look() {
   missing.clear();
+
   for (const record of doc.items) {
     if (record.state === "complete" && !mediaOf(record).exists) missing.add(record.id);
   }
@@ -589,11 +667,14 @@ function look() {
 function moved(progress: Progress) {
   const record = find(progress.id);
   const bound = record && boundOf(record);
+
   if (!record || bound?.authorization !== progress.authorization || record.state !== "queued") {
     return;
   }
+
   const now = Date.now();
   const first = !live.has(progress.authorization);
+
   const seen = live.get(progress.authorization) ?? {
     received: progress.received,
     size: progress.expected,
@@ -602,23 +683,29 @@ function moved(progress: Progress) {
     measured: { at: now, received: progress.received },
     savedAt: now,
   };
+
   // Only first progress behind the saved bytes establishes a fresh start here; a process
   // relaunch can hear the same native transfer again. Native restart evidence always stands.
   seen.restarted ||=
     progress.restarted || (first && !progress.resumed && progress.received < record.received);
+
   if (now - seen.measured.at >= 1000) {
     const rate = ((progress.received - seen.measured.received) * 1000) / (now - seen.measured.at);
     seen.rate = rate >= 0 ? rate : null;
     seen.measured = { at: now, received: progress.received };
   }
+
   seen.received = progress.received;
   seen.size = progress.expected;
   live.set(progress.authorization, seen);
+
   // Its start is told at once: a short transfer may end before the next tick.
   if (first) tell();
   else tellSoon();
+
   if (now - seen.savedAt >= SAVE_MS) {
     seen.savedAt = now;
+
     try {
       update(record.id, (latest) => ({
         ...latest,
@@ -636,8 +723,10 @@ function moved(progress: Progress) {
 function heard(receipt: ReceiptV2) {
   if (phase !== "ready") {
     early.set(receipt.receipt, receipt);
+
     return;
   }
+
   void take(receipt, true)
     .catch(() => undefined)
     .finally(() => {
@@ -655,6 +744,7 @@ function heard(receipt: ReceiptV2) {
 async function take(receipt: ReceiptV2, heardLive: boolean): Promise<void> {
   if (taking.has(receipt.receipt)) return;
   taking.add(receipt.receipt);
+
   try {
     await written(receipt, reduce(receipt, heardLive));
     await transfers.acknowledge([receipt.receipt]).catch(() => undefined);
@@ -666,6 +756,7 @@ async function take(receipt: ReceiptV2, heardLive: boolean): Promise<void> {
 /** Settles as `work` does, keeping `fact` owed to its download while what it writes is refused. */
 async function written(fact: Fact, work: Promise<void>) {
   let refused = false;
+
   try {
     await work;
   } catch (cause) {
@@ -674,8 +765,10 @@ async function written(fact: Fact, work: Promise<void>) {
   } finally {
     // Read as it stands now: another receipt of the same download may have settled meanwhile.
     const pending = owed.get(fact.id) ?? new Map<string, Fact["outcome"]["kind"]>();
+
     if (refused) pending.set(fact.receipt, fact.outcome.kind);
     else pending.delete(fact.receipt);
+
     if (pending.size > 0) owed.set(fact.id, pending);
     else owed.delete(fact.id);
   }
@@ -684,35 +777,44 @@ async function written(fact: Fact, work: Promise<void>) {
 async function reduce(receipt: ReceiptV2, heardLive: boolean) {
   if (receipt.outcome.kind === "paused") {
     const view = known.get(receipt.authorization);
+
     if (view) known.set(receipt.authorization, { ...view, state: "paused" });
   } else known.delete(receipt.authorization);
   const transfer = live.get(receipt.authorization);
   live.delete(receipt.authorization);
   const record = find(receipt.id);
   const bound = record && boundOf(record);
+
   if (!record || bound?.authorization !== receipt.authorization) return;
+
   if (receipt.sequence <= bound.appliedSequence) return;
   // A removal under way, or one this receipt says was asked, is finished by its own path before
   // the receipt is acknowledged: a refused write leaves both for the next reconciliation.
   const removal = removalOf(record);
+
   if (
     receipt.outcome.kind === "cancelled" &&
     typeof removal !== "object" &&
     (restricting.has(record.id) || excludedDownload(record))
   ) {
     update(record.id, () => fenced(record));
+
     return;
   }
+
   if (receipt.outcome.kind === "cancelled" || typeof removal === "object") {
     await removeRecord(record.id, typeof removal === "object" ? removal.reason : "user", receipt);
+
     return;
   }
+
   const where = {
     ...record,
     received: receipt.received ?? transfer?.received ?? record.received,
     size: receipt.expected ?? transfer?.size ?? record.size,
     restarted: record.restarted || receipt.restarted || transfer?.restarted === true,
   };
+
   await apply(where, receipt.outcome, heardLive && foreground, {
     ...bound,
     appliedSequence: receipt.sequence,
@@ -725,9 +827,12 @@ async function reduce(receipt: ReceiptV2, heardLive: boolean) {
  */
 async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound: Transfer | null) {
   const { id } = record;
+
   const fail = (failure: StoredFailure) =>
     update(id, () => ({ ...unbound(record), state: "failed", failure }));
+
   const requeue = () => update(id, () => ({ ...unbound(record), state: "queued" }));
+
   switch (outcome.kind) {
     case "complete":
       if (!completeCopy(record, outcome)) return tell();
@@ -763,6 +868,7 @@ async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound
         const detail = OFFLINE.has(outcome.code) ? "You seem to be offline." : "";
         fail({ kind: "stream", failure: { kind: "network", detail } });
       }
+
       break;
     case "refresh":
       if (outcome.reason === "resume-unusable") {
@@ -779,11 +885,14 @@ async function apply(record: Stored, outcome: OutcomeV2, inFront: boolean, bound
         // The login it was authorized under is gone: asked again under the one signed in now.
         requeue();
       }
+
       break;
   }
+
   // Shown before the Keychain answers: until then a screen would still offer the transfer's
   // Cancel, and act on it, for what is now a copy or a failure.
   tell();
+
   if (outcome.kind === "complete") await forget(id);
 }
 
@@ -797,6 +906,7 @@ function completeCopy(
 ) {
   const media = mediaOf(record);
   const bytes = media.exists ? (media.size ?? 0) : 0;
+
   if (
     bytes <= 0 ||
     bytes !== outcome.size ||
@@ -811,8 +921,10 @@ function completeCopy(
         failure: { kind: "network", detail: "The file arrived incomplete." },
       },
     }));
+
     return false;
   }
+
   missing.delete(record.id);
   update(
     record.id,
@@ -825,6 +937,7 @@ function completeCopy(
     }),
     true,
   );
+
   return true;
 }
 
@@ -835,20 +948,24 @@ function completeCopy(
 async function takeLegacy(receipt: LegacyReceipt) {
   if (taking.has(receipt.receipt)) return;
   taking.add(receipt.receipt);
+
   try {
     const record = find(receipt.id);
     const { outcome } = receipt;
     const removal = record ? removalOf(record) : undefined;
+
     // A completion wins an automatic removal still waiting for it; an explicit one wins it.
     const automatic =
       typeof removal === "object" &&
       removal.reason === "source-removed" &&
       outcome.kind === "complete";
+
     const applies =
       record?.state === "queued" &&
       record.attempt === receipt.attempt &&
       transferOf(record) !== "bad" &&
       (removal === undefined || automatic);
+
     // A refused write keeps the copy's file and its receipt for the next try; a receipt that
     // doesn't apply is owed nothing more.
     await written(
@@ -881,6 +998,7 @@ async function applyFacts(facts: {
 }) {
   for (const receipt of facts.legacy) await takeLegacy(receipt).catch(() => undefined);
   const ordered = [...facts.receipts].toSorted((a, b) => a.sequence - b.sequence);
+
   for (const receipt of ordered) await take(receipt, false).catch(() => undefined);
 }
 
@@ -917,37 +1035,49 @@ const explicit = (reason: Reason) => reason !== "source-removed";
  */
 function removeRecord(id: string, reason: Reason, fact?: ReceiptV2): Promise<Removed> {
   const before = removing.get(id);
+
   const run = (before ?? Promise.resolve()).then(
     () => removeNow(id, reason, fact),
     () => removeNow(id, reason, fact),
   );
+
   const mine = run.finally(() => {
     if (removing.get(id) === mine) removing.delete(id);
   });
+
   removing.set(id, mine);
+
   return mine;
 }
 
 async function removeNow(id: string, asked: Reason, fact?: ReceiptV2): Promise<Removed> {
   const record = find(id);
+
   if (!record) return { kind: "gone" };
   const transfer = transferOf(record);
+
   if (transfer === "bad" && record.state !== "complete") {
     throw new AppFailure({
       kind: "unexpected",
       detail: "This download's record is damaged, so it can't be removed safely yet.",
     });
   }
+
   const now = removalOf(record);
+
   const reason =
     typeof now === "object" && !explicit(asked) && explicit(now.reason) ? now.reason : asked;
+
   if (typeof now !== "object" || now.reason !== reason) {
     update(id, (latest) => ({ ...latest, removal: { version: 1, reason } }));
     tell();
   }
+
   let complete = record.state === "complete";
+
   if (typeof transfer === "object") {
     const fence = await transfers.cancelAuthorization(transfer.authorization, "remove");
+
     // A completion committed before the fence wins an automatic removal.
     const done = [...fence.receipts, ...(fact ? [fact] : [])].find(
       (each) =>
@@ -955,20 +1085,27 @@ async function removeNow(id: string, asked: Reason, fact?: ReceiptV2): Promise<R
         each.outcome.kind === "complete" &&
         each.sequence > transfer.appliedSequence,
     );
+
     const latest = find(id);
+
     if (done?.outcome.kind === "complete" && latest && reason === "source-removed") {
       const { removal: _removal, ...kept } = latest;
       complete = completeCopy(kept, done.outcome);
     }
   }
+
   // Decided on the record as it stands now, after the fence's answer.
   const latest = find(id);
+
   if (!latest) return { kind: "gone" };
+
   if (reason === "source-removed" && (complete || latest.state === "complete")) {
     if (latest.removal !== undefined) update(id, withoutRemoval);
     tell();
+
     return { kind: "kept" };
   }
+
   if (reason === "source-removed" && owesCompletion(id, fact)) {
     // A completion kept for it that couldn't be written down yet wins an automatic removal: the
     // removal waits, its intent kept, until that receipt is written. Any other owed receipt is
@@ -978,16 +1115,20 @@ async function removeNow(id: string, asked: Reason, fact?: ReceiptV2): Promise<R
       detail: "This download's last result isn't written down yet.",
     });
   }
+
   drop(id);
+
   if (reason === "source-removed" && latest.state !== "complete") ended++;
   // Captured before Stop: every reader of the copy, the one playing, failed or still closing.
   const readers = playbackReaders(copyKey(id));
   const { phase } = playbackState.get();
+
   // Failed too, so its Try again can't open the copy again. Stop queues its last save at once;
   // its own promise also waits for reader closure, which `cleanup` follows instead.
   if (phase.kind !== "idle" && phase.item.id === copyKey(id)) void stop();
   const saved = progressSettled();
   tell();
+
   return { kind: "removed", saved, cleanup: clearFolder(id, readers) };
 }
 
@@ -1013,28 +1154,36 @@ function drop(id: string) {
 async function clearFolder(id: string, readers: readonly Promise<void>[]) {
   closingFolders.add(id);
   const closed = Promise.all([transfers.drainDownload(id), ...readers]);
+
   const deadline = new Promise<"deferred">((resolve) =>
     setTimeout(() => resolve("deferred"), CLOSE_MS),
   );
+
   const settled = await Promise.race([closed.then(() => "closed" as const), deadline]).catch(
     () => "deferred" as const,
   );
+
   if (settled === "deferred") {
     void closed.then(
       () => deleteFolder(id),
       () => undefined,
     );
+
     return "deferred";
   }
+
   await deleteFolder(id);
+
   return "closed";
 }
 
 async function deleteFolder(id: string) {
   if (find(id)) return;
   await forget(id);
+
   try {
     const folder = folderOf(id);
+
     if (folder.exists) folder.delete();
     closingFolders.delete(id);
   } catch {
@@ -1045,8 +1194,10 @@ async function deleteFolder(id: string) {
 /** Ends the unfinished downloads of subscriptions no longer saved; copies stay. */
 function endRemoved() {
   const roster = currentRoster();
+
   if (roster.kind !== "ready") return;
   const saved = new Set(roster.members.map((member) => member.entry.id));
+
   for (const record of doc.items) {
     if (record.state !== "complete" && !saved.has(record.subscriptionId)) {
       void removeRecord(record.id, "source-removed")
@@ -1089,6 +1240,7 @@ async function endRestricted() {
     const excluded = excludedDownload(record);
     exclusions.set(record.id, excluded);
     restricting.add(record.id);
+
     try {
       try {
         if (Boolean(record.excluded) !== excluded)
@@ -1096,6 +1248,7 @@ async function endRestricted() {
       } catch {
         // A refused classification write cannot keep an active native request authorised.
       }
+
       if (
         owed.has(record.id) ||
         !excluded ||
@@ -1104,8 +1257,10 @@ async function endRestricted() {
       )
         continue;
       const bound = boundOf(record);
+
       if (bound) {
         const fence = await transfers.cancelAuthorization(bound.authorization, "remove");
+
         for (const receipt of fence.receipts) {
           if (
             receipt.authorization === bound.authorization &&
@@ -1115,7 +1270,9 @@ async function endRestricted() {
           }
         }
       }
+
       const latest = find(record.id);
+
       if (latest && latest.state !== "complete" && standing(latest) && !owed.has(record.id))
         update(record.id, () => fenced(latest));
     } catch {
@@ -1130,6 +1287,7 @@ async function endRestricted() {
 async function finishRemovals() {
   for (const record of doc.items) {
     const removal = removalOf(record);
+
     if (typeof removal === "object") {
       await removeRecord(record.id, removal.reason).catch(() => undefined);
     }
@@ -1145,11 +1303,14 @@ function load() {
   const valid = parsed !== null && !(parsed instanceof type.errors);
   const items: Stored[] = [];
   const unreadable: object[] = [];
+
   for (const item of valid ? parsed.items : []) {
     const record = Stored()(item);
+
     if (record instanceof type.errors) unreadable.push(item);
     else items.push(record);
   }
+
   doc = { items, forgetting: valid ? parsed.forgetting : [], unreadable };
   trusted = valid;
   complete =
@@ -1157,12 +1318,14 @@ function load() {
     (read === null &&
       !new File(Paths.document, FILE).exists &&
       !new File(Paths.document, `${FILE}.next`).exists);
+
   for (const id of doc.forgetting) void forget(id);
 }
 
 /** Deletes folders no entry names, left by a removal that couldn't finish. */
 function sweep() {
   if (!trusted) return;
+
   // An entry this build can't read keeps its own; a folder a reader may still have stays.
   const named = new Set([
     ...doc.items.map((record) => record.id),
@@ -1171,9 +1334,12 @@ function sweep() {
     ),
     ...closingFolders,
   ]);
+
   try {
     const root = new Directory(Paths.document, ROOT);
+
     if (!root.exists) return;
+
     for (const entry of root.list()) {
       if (entry instanceof Directory && ID.test(entry.name) && !named.has(entry.name)) {
         entry.delete();
@@ -1188,6 +1354,7 @@ function sweep() {
 function rosterRead(): Promise<void> {
   return new Promise((resolve) => {
     if (currentRoster().kind === "ready") return resolve();
+
     const off = onRoster(() => {
       if (currentRoster().kind !== "ready") return;
       off();
@@ -1204,14 +1371,17 @@ function rosterRead(): Promise<void> {
 async function migrate() {
   for (const record of doc.items) {
     if (record.state === "complete" || doc.forgetting.includes(record.id)) continue;
+
     try {
       const saved = await readLegacy(record.id);
+
       if (!saved) continue;
       await transfers.importResume(record.id, saved.url, saved.resumeData);
     } catch {
       held.add(record.id);
       continue;
     }
+
     await keychainSecrets.remove(secretOf(record.id)).catch(() => undefined);
   }
 }
@@ -1243,6 +1413,7 @@ async function prepare() {
 /** Prepares the downloads, then, in the foreground, reconciles the first foreground. */
 function prepareThenGo(): Promise<void> {
   phase = "starting";
+
   return prepare()
     .then(drain)
     .then(
@@ -1256,6 +1427,7 @@ function prepareThenGo(): Promise<void> {
     )
     .finally(() => {
       tell();
+
       if (foreground) void firstForeground();
     });
 }
@@ -1267,6 +1439,7 @@ function knownSourceIds(snapshot: Snapshot): string[] {
     ...doc.items.map((record) => record.subscriptionId),
     ...snapshot.sources,
   ]);
+
   return [...ids].filter((id) => id.length > 0 && id.length <= 128);
 }
 
@@ -1281,15 +1454,20 @@ async function bindLogins(): Promise<void> {
     members().flatMap((member) => {
       const id = member.entry.id;
       const source = currentSource(id);
+
       if (!source || downloadGeneration(source) !== null) return [];
       const asked = binding.get(source);
+
       if (asked) return [asked];
+
       const work = bindDownloadSource(id, source).finally(() => {
         if (binding.get(source) === work) binding.delete(source);
         tell();
         refill();
       });
+
       binding.set(source, work);
+
       return [work];
     }),
   );
@@ -1307,22 +1485,29 @@ async function firstForeground(): Promise<void> {
   if (barrier === "done") {
     void bindLogins();
     refill();
+
     return;
   }
+
   if (barrier === "running" || phase !== "ready") return;
   barrier = "running";
+
   try {
     let snapshot = await transfers.reconcile("first-foreground");
     known = new Map(snapshot.authorizations.map((each) => [each.authorization, each]));
     await applyFacts(snapshot);
     let bound = false;
+
     if (snapshot.blocked === "corrupt" && !repairTried) {
       repairTried = true;
+
       const reset = await transfers.resetQueue({
         queueEpoch: snapshot.queueEpoch,
         knownSourceIds: knownSourceIds(snapshot),
       });
+
       await applyFacts(reset);
+
       // Every unfinished record's authorization was the old queue's: each is asked again.
       for (const record of doc.items) {
         if (record.state !== "complete" && record.transfer !== undefined) {
@@ -1332,6 +1517,7 @@ async function firstForeground(): Promise<void> {
           }));
         }
       }
+
       unbindDownloads();
       binding = new WeakMap();
       await bindLogins();
@@ -1340,13 +1526,19 @@ async function firstForeground(): Promise<void> {
       known = new Map(snapshot.authorizations.map((each) => [each.authorization, each]));
       await applyFacts(snapshot);
     }
+
     const token = snapshot.foregroundToken;
+
     if (token === null || ["corrupt", "locked", "recovering"].includes(snapshot.blocked)) {
       barrier = "pending";
+
       return;
     }
+
     await finishRemovals();
+
     if (!bound) await bindLogins();
+
     // Before anything new is admitted: a pause a relaunch interrupted is kept first, and the
     // barrier stays up until it is. A move is put in order too; one refused waits for a refill.
     if (!(await restoreHolds())) {
@@ -1356,15 +1548,18 @@ async function firstForeground(): Promise<void> {
       }, HELD_BACK_MS);
       throw new Error("A pause isn't kept yet.");
     }
+
     await arrange().catch(() => undefined);
     await transfers.finishForegroundReconcile(token);
     barrier = "done";
   } catch {
     barrier = "pending";
+
     return;
   } finally {
     tell();
   }
+
   refill();
 }
 
@@ -1382,15 +1577,19 @@ function goOn() {
 /** Fills the native queue's window in the foreground, one refill at a time. */
 function refill() {
   if (!foreground || barrier !== "done" || phase !== "ready") return;
+
   if (filling) {
     refillAgain = true;
+
     return;
   }
+
   filling = fill()
     .catch(() => undefined)
     .finally(() => {
       filling = null;
       tell();
+
       if (refillAgain) {
         refillAgain = false;
         refill();
@@ -1404,15 +1603,19 @@ async function fill() {
   known = new Map(snapshot.authorizations.map((each) => [each.authorization, each]));
   await applyFacts(snapshot);
   const names = new Set(doc.items.flatMap((record) => boundOf(record)?.authorization ?? []));
+
   for (const view of snapshot.authorizations) {
     // Reserved, then never written on a record: its record went or this app stopped between.
     if (view.state === "reserved" && !names.has(view.authorization)) {
       await transfers.cancelAuthorization(view.authorization, "abandon").catch(() => undefined);
     }
   }
+
   const pending = new Set(snapshot.receipts.map((receipt) => receipt.authorization));
+
   for (const record of doc.items) {
     const bound = boundOf(record);
+
     // An authorization the queue no longer has, with nothing owed for it: asked anew.
     if (
       bound &&
@@ -1424,13 +1627,17 @@ async function fill() {
       update(record.id, (latest) => ({ ...unbound(latest), state: "queued" }));
     }
   }
+
   await restoreHolds();
   // A paused one keeps its authorization outside the window, so pauses never starve the rest.
   let open = [...known.values()].filter((view) => view.state !== "terminal" && !view.held).length;
+
   for (const record of doc.items) {
     if (open >= WINDOW || !foreground) break;
+
     if (await authorize(record)) open++;
   }
+
   await arrange();
 }
 
@@ -1441,19 +1648,25 @@ async function fill() {
  */
 async function restoreHolds(): Promise<boolean> {
   let kept = true;
+
   for (const { id } of doc.items) {
     // As it stands now: a pause or Resume may have come while an earlier one was answered.
     const record = find(id);
+
     if (!record) continue;
     const bound = boundOf(record);
     const view = bound && known.get(bound.authorization);
     const paused = record.state === "queued" && record.paused === true;
+
     if (!bound || !view || view.state === "terminal") continue;
+
     if (view.held === paused) {
       unkept.delete(bound.authorization);
       continue;
     }
+
     if (paused) unkept.add(bound.authorization);
+
     try {
       await keepHold(bound.authorization, paused);
     } catch (cause) {
@@ -1461,6 +1674,7 @@ async function restoreHolds(): Promise<boolean> {
       if (refusalOf(cause) !== "obsolete") kept = false;
     }
   }
+
   return kept;
 }
 
@@ -1468,6 +1682,7 @@ async function restoreHolds(): Promise<boolean> {
 async function keepHold(authorization: string, held: boolean) {
   await transfers.holdAuthorization(authorization, held);
   const view = known.get(authorization);
+
   if (view) known.set(authorization, { ...view, held });
   unkept.delete(authorization);
   tell();
@@ -1478,6 +1693,7 @@ function arrange(): Promise<void> {
   return transfers.arrangeAuthorizations(
     doc.items.flatMap((record) => {
       const bound = record.state === "queued" ? boundOf(record) : null;
+
       return bound ? [bound.authorization] : [];
     }),
   );
@@ -1500,11 +1716,15 @@ async function authorize(record: Stored): Promise<boolean> {
   ) {
     return false;
   }
+
   const source = currentSource(record.subscriptionId);
   const generation = source ? downloadGeneration(source) : null;
+
   if (!source || generation === null) return false;
+
   const stands = () => {
     const latest = find(record.id);
+
     return (
       latest?.state === "queued" &&
       !latest.paused &&
@@ -1514,27 +1734,35 @@ async function authorize(record: Stored): Promise<boolean> {
       downloadGeneration(source) === generation
     );
   };
+
   const free = freeBytes();
   const needed = record.size === null ? null : record.size - record.received;
+
   if (needed !== null && free !== null && free < needed) {
     update(record.id, (latest) => ({
       ...latest,
       state: "failed",
       failure: { kind: "disk-full", needed },
     }));
+
     return false;
   }
+
   const ref = { ...record.title, subscriptionId: record.subscriptionId };
+
   const file = await (async () => {
     await listedIndex(ref.subscriptionId, AbortSignal.timeout(20_000));
     admitTitle(ref);
+
     const asked = await source.provider.titleFile(
       record.title.kind,
       record.title.id,
       record.container,
       AbortSignal.timeout(20_000),
     );
+
     admitTitle(ref);
+
     return asked;
   })().catch((cause: unknown) => {
     if (stands()) {
@@ -1545,10 +1773,13 @@ async function authorize(record: Stored): Promise<boolean> {
         failure: { kind: "app", error: { kind: "unexpected", detail } },
       }));
     }
+
     return null;
   });
+
   if (!file || !stands()) return false;
   let authorization: string;
+
   try {
     authorization = await transfers.reserve({
       id: record.id,
@@ -1562,27 +1793,35 @@ async function authorize(record: Stored): Promise<boolean> {
       unbindDownloads(source);
       void bindLogins();
     }
+
     return false;
   }
+
   const abandon = () =>
     transfers.cancelAuthorization(authorization, "abandon").then(
       () => false,
       () => false,
     );
+
   if (!stands()) return abandon();
+
   if (excludedDownload(record)) {
     await abandon();
     update(record.id, (latest) => fenced(latest));
+
     return false;
   }
+
   try {
     const folder = folderOf(record.id);
     folder.create({ intermediates: true, idempotent: true });
     // Left by an attempt never written down as complete: there is no proof it is whole.
     const media = mediaOf(record);
+
     if (media.exists) media.delete();
     update(record.id, (latest) => {
       const { attempt: _attempt, ...rest } = latest;
+
       return {
         ...rest,
         transfer: { version: 2, authorization, sourceGeneration: generation, appliedSequence: 0 },
@@ -1595,20 +1834,26 @@ async function authorize(record: Stored): Promise<boolean> {
       state: "failed",
       failure: { kind: "folder", detail: messageOf(cause) },
     }));
+
     return false;
   }
+
   tell();
+
   try {
     admitTitle(ref);
     await transfers.authorize(authorization, { url: file.url, headers: { ...file.headers } });
   } catch {
     // Never armed: retired, and the record asked again at the next refill.
     await abandon();
+
     if (boundOf(find(record.id) ?? record)?.authorization === authorization) {
       update(record.id, (latest) => ({ ...unbound(latest), state: "queued" }));
     }
+
     return false;
   }
+
   return true;
 }
 
@@ -1620,16 +1865,19 @@ async function authorize(record: Stored): Promise<boolean> {
 export function startDownloads(): void {
   if (started) return;
   started = true;
+
   try {
     load();
   } catch {
     // Shown empty; nothing is cleaned up.
   }
+
   connectDemoDownloads({ erase: eraseDownloads, ready });
   look();
   onAdmission({
     acquire: async (subscriptionId, lease) => {
       if (!transfers.available()) return;
+
       try {
         await transfers.acquirePlayback(subscriptionId, lease);
       } catch {
@@ -1651,12 +1899,15 @@ export function startDownloads(): void {
   foreground = AppState.currentState === "active";
   AppState.addEventListener("change", (state) => {
     const now = state === "active";
+
     if (now === foreground) return;
     foreground = now;
+
     // A transfer under way goes on in the background, and the native side starts the next.
     if (!foreground) return;
     look();
     tell();
+
     if (phase === "failed") void prepareThenGo();
     else void firstForeground();
   });
@@ -1668,6 +1919,7 @@ export function startDownloads(): void {
         .catch(() => undefined)
         .finally(tell);
     }
+
     tell();
     refill();
   });
@@ -1681,17 +1933,20 @@ export function startDownloads(): void {
 /** The download of exactly this movie or episode of this subscription, if there is one. */
 export function downloadOf(ref: TitleRef): Download | undefined {
   const record = doc.items.find((each) => sameTitle(each, ref));
+
   return record && list.get().items.find((item) => item.id === record.id);
 }
 
 /** The same, rendering again as it changes. */
 export function useDownloadOf(ref: TitleRef): Download | undefined {
   useStore(list);
+
   return downloadOf(ref);
 }
 
 /** Whether a caller still wants what it asked: by default, always. */
 type Stands = () => boolean;
+
 const always: Stands = () => true;
 
 /**
@@ -1706,19 +1961,25 @@ export type Retried = "queued" | "unchanged" | "stopped";
  */
 async function again(record: Stored, stands: Stands = always): Promise<Retried> {
   const ref: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
+
   if (excludedDownload(record)) throw new AppFailure({ kind: "title-not-found", titleId: ref.id });
+
   const container = await titleFile(ref, AbortSignal.timeout(20_000)).then(
     (file) => file.container,
     () => record.container,
   );
+
   // Lookup failure may retain its known container, but never grants catalogue admission.
   admitTitle(ref);
   const latest = find(record.id);
+
   if (latest?.state !== "failed" || !standing(latest)) return "unchanged";
+
   if (!stands()) return "stopped";
   update(record.id, () => ({ ...withoutPause(unbound(latest)), container, state: "queued" }));
   tell();
   refill();
+
   return "queued";
 }
 
@@ -1733,27 +1994,37 @@ async function again(record: Stored, stands: Stands = always): Promise<Retried> 
 export async function addDownload(ref: TitleRef): Promise<Download> {
   startDownloads();
   admitTitle(ref);
+
   const answer = async (known: Stored) => {
     if (known.state === "failed") await again(known);
     tell();
     const shown = list.get().items.find((item) => item.id === known.id);
+
     if (!shown) throw new AppFailure({ kind: "title-not-found", titleId: ref.id });
+
     return shown;
   };
+
   const known = doc.items.find((each) => sameTitle(each, ref));
+
   if (known && excludedDownload(known))
     throw new AppFailure({ kind: "title-not-found", titleId: ref.id });
+
   if (known) return answer(known);
   const source = sourceOf(ref.subscriptionId);
   const file = await titleFile(ref, AbortSignal.timeout(20_000));
   const kept = await aboutOf(ref, AbortSignal.timeout(20_000));
   admitTitle(ref);
+
   if (!savable(ref.subscriptionId, source)) {
     throw new AppFailure({ kind: "no-subscription" });
   }
+
   const added = doc.items.find((each) => sameTitle(each, ref));
+
   if (added) return answer(added);
   const { subscriptionId, ...title } = ref;
+
   const record: Stored = {
     id: newId(),
     subscriptionId,
@@ -1770,15 +2041,18 @@ export async function addDownload(ref: TitleRef): Promise<Download> {
     progress: null,
     ...defined({ continuation: kept.continuation }),
   };
+
   commit({ ...doc, items: [...doc.items, record] });
   void keepArtwork(record.id, kept.artwork);
   tell();
   refill();
+
   return viewOf(record, new Map(members().map((m) => [m.entry.id, m.label])), borrowed());
 }
 
 function newId(): string {
   let id: string;
+
   do id = `d-${Date.now().toString(36)}-${(++made).toString(36)}`;
   while (
     find(id) ||
@@ -1786,6 +2060,7 @@ function newId(): string {
     closingFolders.has(id) ||
     doc.unreadable.some((item) => "id" in item && item.id === id)
   );
+
   return id;
 }
 
@@ -1799,6 +2074,7 @@ function newId(): string {
 export async function removeDownload(id: string): Promise<void> {
   const removed = await removeRecord(id, "user");
   tell();
+
   if (removed.kind === "removed") await removed.cleanup;
   goOn();
 }
@@ -1838,17 +2114,22 @@ export async function eraseDownloads(
   const ids = doc.items
     .filter((record) => record.subscriptionId === subscriptionId)
     .map((r) => r.id);
+
   const unknown = doc.unreadable.some(
     (item) =>
       !("subscriptionId" in item) ||
       typeof item.subscriptionId !== "string" ||
       item.subscriptionId === subscriptionId,
   );
+
   const settled = await Promise.allSettled(ids.map((id) => removeRecord(id, reason)));
+
   const removed = settled.flatMap((each) =>
     each.status === "fulfilled" && each.value.kind === "removed" ? [each.value] : [],
   );
+
   tell();
+
   return {
     trusted: complete && !unknown,
     removed: removed.length,
@@ -1881,27 +2162,36 @@ export async function replaceMissingDownload(
   stands: Stands = always,
 ): Promise<Replaced> {
   const record = doc.items.find((each) => sameTitle(each, ref));
+
   if (record?.state !== "complete") return { kind: "unchanged" };
+
   if (mediaOf(record).exists) {
     missing.delete(record.id);
     tell();
+
     return { kind: "kept" };
   }
+
   if (playingItem(playbackState.get().phase)?.id === copyKey(record.id)) {
     throw new AppFailure({ kind: "unexpected", detail: "Stop playing this copy first." });
   }
+
   // Checked and removed in one go: nothing plays it in between.
   const removed = await removeRecord(record.id, "replace-missing");
   tell();
   const closed = removed.kind === "removed" ? await removed.cleanup : "closed";
+
   if (!stands()) return { kind: "stopped" };
+
   if (closed === "deferred") {
     throw new AppFailure({
       kind: "unexpected",
       detail: "The old copy is still closing. Try again.",
     });
   }
+
   if (doc.items.some((each) => sameTitle(each, ref))) return { kind: "unchanged" };
+
   // Asked at once: the login `addDownload` takes as it starts is the one `stands` just checked.
   return { kind: "replaced", download: await addDownload(ref) };
 }
@@ -1912,6 +2202,7 @@ export async function replaceMissingDownload(
  */
 export async function retryDownload(id: string, stands: Stands = always): Promise<Retried> {
   const record = find(id);
+
   return record?.state === "failed" && standing(record) ? again(record, stands) : "unchanged";
 }
 
@@ -1941,6 +2232,7 @@ const holdAsks = new Map<string, number>();
 function ask(id: string): () => boolean {
   const asked = (holdAsks.get(id) ?? 0) + 1;
   holdAsks.set(id, asked);
+
   return () => holdAsks.get(id) === asked;
 }
 
@@ -1959,15 +2251,19 @@ const pausing = new Set<string>();
  */
 export async function pauseDownload(id: string): Promise<Paused> {
   const record = find(id);
+
   if (!unfinished(record) || pausedNow(record)) return "unchanged";
   const bound = boundOf(record);
   const latest = ask(id);
   // Asked again for a pause an earlier answer left standing: a refusal leaves it to the refills.
   const fresh = record.paused !== true || pausing.has(id);
+
   if (fresh) pausing.add(id);
+
   if (bound) unkept.add(bound.authorization);
   update(id, (stored) => ({ ...stored, paused: true }));
   tell();
+
   try {
     if (bound) await keepHold(bound.authorization, true);
   } catch (cause) {
@@ -1982,12 +2278,16 @@ export async function pauseDownload(id: string): Promise<Paused> {
   } finally {
     if (latest()) pausing.delete(id);
   }
+
   goOn();
+
   const closed = await transfers.drainDownload(id).then(
     () => "closed" as const,
     () => "closing" as const,
   );
+
   tell();
+
   return closed;
 }
 
@@ -1998,12 +2298,14 @@ export async function pauseDownload(id: string): Promise<Paused> {
  */
 export async function resumeDownload(id: string): Promise<void> {
   const record = find(id);
+
   if (!unfinished(record) || !record.paused) return;
   const latest = ask(id);
   pausing.delete(id);
   update(id, withoutPause);
   tell();
   const bound = boundOf(record);
+
   try {
     if (bound) await transfers.holdAuthorization(bound.authorization, false);
   } catch (cause) {
@@ -2014,6 +2316,7 @@ export async function resumeDownload(id: string): Promise<void> {
       throw new AppFailure({ kind: "unexpected", detail: "The download couldn't be resumed." });
     }
   }
+
   goOn();
 }
 
@@ -2035,14 +2338,18 @@ let reorders = 0;
  */
 export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
   const record = find(id);
+
   if (!record || !waitingTurn(record)) return;
   const line = doc.items.filter(waitingTurn);
   const other = line[line.indexOf(record) + by];
+
   if (!other) return;
+
   // Swapped with its neighbour among those waiting, each as it stands then: every other row
   // keeps its own place.
   const swap = () => {
     const [mine, theirs] = [find(id), find(other.id)];
+
     if (!mine || !theirs) return;
     commit({
       ...doc,
@@ -2050,21 +2357,27 @@ export async function moveDownload(id: string, by: -1 | 1): Promise<void> {
     });
     tell();
   };
+
   swap();
   const moved = ++reorders;
+
   try {
     await arrange();
   } catch (cause) {
     if (unanswered(cause)) {
       goOn();
+
       return;
     }
+
     // Put back while both are still listed and no other Move came since. Otherwise the list
     // keeps it, and a refill orders the native queue as the list stands.
     if (!find(id) || !find(other.id) || reorders !== moved) {
       goOn();
+
       return;
     }
+
     swap();
     goOn();
     throw new AppFailure({ kind: "unexpected", detail: "The new order couldn't be kept." });
@@ -2089,6 +2402,7 @@ export function playDownload(id: string): void {
   const asked = request();
   void progressSettled().then(() => {
     const record = find(id);
+
     if (asked.stands() && playable(record)) playCopy(id, record);
   });
 }
@@ -2097,10 +2411,13 @@ export function playDownload(id: string): void {
 function nextCopy(record: Stored): Stored | undefined {
   if (record.title.kind !== "episode" || record.continuation === undefined) return;
   const edge = Continuation()(record.continuation);
+
   if (edge instanceof type.errors || edge.title.kind !== "episode") return;
+
   if (edge.title.seriesId !== record.title.seriesId || edge.title.id === record.title.id) return;
   const ref: TitleRef = { ...edge.title, subscriptionId: record.subscriptionId };
   const copy = doc.items.find((each) => sameTitle(each, ref));
+
   if (
     playable(copy) &&
     copy.title.kind === "episode" &&
@@ -2110,6 +2427,7 @@ function nextCopy(record: Stored): Stored | undefined {
   ) {
     try {
       const media = mediaOf(copy);
+
       if (media.exists && media.size === copy.size) return copy;
     } catch {
       // An unreadable successor cannot prevent this copy from playing.
@@ -2129,11 +2447,14 @@ const placeOf = ({ title, about }: Stored) =>
 function playCopy(id: string, record: Stored) {
   const media = mediaOf(record);
   const { about, title, progress } = record;
+
   /** The copy that goes on after this one, as both records stand now. */
   const after = () => {
     const latest = find(id);
+
     return latest && nextCopy(latest);
   };
+
   /**
    * The copy that goes on once this one's save ended and every earlier one settled; none when
    * the save was refused.
@@ -2141,9 +2462,12 @@ function playCopy(id: string, record: Stored) {
   const following = async (saved: Promise<Saved>) => {
     if (!(await saved).saved) return;
     await progressSettled();
+
     return after();
   };
+
   const since = Date.now();
+
   const item: Playing = {
     id: copyKey(id),
     subscriptionId: null,
@@ -2168,10 +2492,12 @@ function playCopy(id: string, record: Stored) {
       }),
     }),
   };
+
   const from =
     progress && !isFinished(progress.position, progress.duration)
       ? Math.max(0, progress.position - 5)
       : 0;
+
   void play(
     item,
     {
@@ -2184,6 +2510,7 @@ function playCopy(id: string, record: Stored) {
           tell();
           throw new AppFailure({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
         }
+
         return {
           url: media.uri,
           container: record.container,
@@ -2207,13 +2534,16 @@ function playCopy(id: string, record: Stored) {
       // isn't downloaded is never streamed instead.
       upNext: async (saved) => {
         const next = await following(saved);
+
         if (!next) return null;
+
         return {
           place: placeOf(next),
           stands: () => after()?.id === next.id,
           // That same copy as its record stands at zero, for where it was left.
           play: () => {
             const copy = after();
+
             if (copy?.id === next.id) playCopy(copy.id, copy);
           },
         };
@@ -2230,7 +2560,9 @@ function playCopy(id: string, record: Stored) {
  */
 async function keepProgress(id: string, position: number, duration: number, since: number) {
   const record = find(id);
+
   if (!record) return;
+
   const copy = (async () => {
     update(id, (latest) => ({
       ...latest,
@@ -2238,13 +2570,17 @@ async function keepProgress(id: string, position: number, duration: number, sinc
     }));
     tell();
   })();
+
   const { subscriptionId } = record;
+
   const viewed = members().some((member) => member.entry.id === subscriptionId)
     ? recordProgress({ ...record.title, subscriptionId }, position, duration, since)
     : undefined;
+
   const refused = (await Promise.allSettled([copy, viewed])).find(
     (ended): ended is PromiseRejectedResult => ended.status === "rejected",
   );
+
   if (refused) throw refused.reason;
 }
 
@@ -2255,10 +2591,13 @@ async function keepProgress(id: string, position: number, duration: number, sinc
 async function aboutOf(ref: TitleRef, signal: AbortSignal) {
   const index = await listedIndex(ref.subscriptionId, signal);
   const missingTitle = new AppFailure({ kind: "title-not-found", titleId: ref.id });
+
   if (ref.kind === "movie") {
     const title = titleOf(index, "movie", ref);
+
     if (!title) throw missingTitle;
     const details = await detailsOf({ ...title, subscriptionId: ref.subscriptionId, id: ref.id });
+
     return {
       continuation: undefined,
       about: {
@@ -2275,17 +2614,22 @@ async function aboutOf(ref: TitleRef, signal: AbortSignal) {
       },
     };
   }
+
   const version = { subscriptionId: ref.subscriptionId, id: ref.seriesId };
   const series = titleOf(index, "series", version);
+
   if (!series) throw missingTitle;
   const details = await detailsOf({ ...series, ...version });
   const seasons = details.kind === "series" ? details.seasons : [];
   const season = seasons.find((each) => each.number === ref.season);
   const told = season ? await episodesOf(series, season).catch(() => season.episodes) : [];
+
   const episode =
     told.find((each) => each.id === ref.id) ??
     seasons.flatMap((each) => each.episodes).find((each) => each.id === ref.id);
+
   const after = details.kind === "series" ? nextEpisode(details, ref) : null;
+
   return {
     continuation: after
       ? ({
@@ -2324,7 +2668,9 @@ async function keepArtwork(
 ) {
   for (const artwork of ["poster", "wide"] as const) {
     const url = urls[artwork];
+
     if (!url || !/^https?:\/\//.test(url) || !find(id)) continue;
+
     try {
       folderOf(id).create({ intermediates: true, idempotent: true });
       await fetchPicture(url, artworkOf(id, artwork), { timeoutMs: ARTWORK_MS });

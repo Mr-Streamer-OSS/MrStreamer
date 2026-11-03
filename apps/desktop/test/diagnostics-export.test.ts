@@ -10,11 +10,13 @@ import {
 } from "../src/main/platform/diagnostics-export.ts";
 
 const folders: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     folders.splice(0).map((folder) => rm(folder, { recursive: true, force: true })),
   );
 });
+
 const context: DiagnosticsContext = {
   version: "0.0.9",
   commit: "a".repeat(40),
@@ -26,12 +28,15 @@ const context: DiagnosticsContext = {
   acceleratedVideoDecodeDisabled: false,
   checked: { at: 1791378000000, failure: "busy" },
 };
+
 const entry = (extra: object = {}) =>
   JSON.stringify({ at: "2026-10-07T12:00:00.000Z", op: "start", ms: 30, outcome: "ok", ...extra }) +
   "\n";
+
 async function setup(build = context) {
   const folder = await mkdtemp(join(tmpdir(), "mrstreamer-export-"));
   folders.push(folder);
+
   return { folder, exporter: diagnosticsExporter(folder, async () => build) };
 }
 
@@ -43,6 +48,7 @@ describe("a local diagnostics export", () => {
       commit: "secret-token",
       platform: "secret-host",
     });
+
     await writeFile(
       join(folder, "diagnostics.1.log"),
       entry({
@@ -73,6 +79,7 @@ describe("a local diagnostics export", () => {
     );
     const report = await exporter.preview();
     expect(report.entries).toBe(4);
+
     for (const secret of [
       "provider-password",
       "secret-token",

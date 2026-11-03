@@ -8,6 +8,7 @@ import type { OwnedId } from "./subscription.ts";
 
 /** The ways the app sends playback to a receiver. */
 export const RECEIVER_KINDS = ["cast", "airplay"] as const;
+
 export type ReceiverKind = (typeof RECEIVER_KINDS)[number];
 
 export interface Receiver {

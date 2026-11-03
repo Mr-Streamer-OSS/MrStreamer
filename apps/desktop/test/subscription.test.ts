@@ -19,6 +19,7 @@ import {
 /** The subscription service on a data folder; `create` starts another, as after a restart. */
 async function subscriptions(fetchImpl: typeof fetch = fetch) {
   const dataDir = await tempDir();
+
   const create = (secrets: Secrets = testSecrets) =>
     promised(
       runtimeFor(
@@ -26,12 +27,14 @@ async function subscriptions(fetchImpl: typeof fetch = fetch) {
       ),
       Subscriptions,
     );
+
   return { dataDir, create, service: await create() };
 }
 
 /** A JSON file of the data folder, or null when it isn't there. */
 async function saved(dataDir: string, name: string): Promise<unknown> {
   const text = await readFile(join(dataDir, name), "utf8").catch(() => null);
+
   return text === null ? null : JSON.parse(text);
 }
 
@@ -58,12 +61,14 @@ function connectAs(
 async function only(service: Service) {
   const saved = await service.list();
   expect(saved.length).toBeLessThan(2);
+
   return saved[0] ?? null;
 }
 
 /** The source of the one saved subscription, or null while it has none. */
 async function onlySource(service: Service) {
   const [source = null] = await service.sources();
+
   return source;
 }
 
@@ -78,7 +83,9 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
     () => null,
     (cause: unknown) => cause,
   );
+
   if (!(error instanceof Failed)) throw new Error(`Expected a failure, got ${String(error)}`);
+
   return error.error;
 }
 
@@ -290,15 +297,18 @@ describe("subscriptions", () => {
 
     expect(await service.list()).toEqual([]);
     expect(await (await create()).list()).toEqual([]);
+
     // Nothing of the login is left in the folder, in any file.
     const left = await Promise.all(
       (await readdir(dataDir)).map((name) => readFile(join(dataDir, name), "utf8")),
     );
+
     for (const text of left) {
       expect(text).not.toContain(sealed);
       expect(text).not.toContain("s3cret-pass");
       expect(text).not.toContain(id);
     }
+
     await expect(service.sourceOf(id)).rejects.toMatchObject({
       error: { kind: "no-subscription" },
     });
@@ -435,13 +445,16 @@ describe("a profile other releases share", () => {
       await fakeProvider({ password: "first-pass" }),
       await fakeProvider({ password: "other-pass" }),
     ];
+
     const login = { server: first.url, username: "demo", password: "first-pass" };
     const { dataDir, create, service } = await subscriptions();
     const { id } = await service.add(login);
     // An entry this build can't read, as a later one may keep beside these.
     const later = { id: "added-later", server: "https://tv.example", sealedPassword: "c2VhbGVk" };
+
     const registry = async () =>
       (await saved(dataDir, "subscriptions.json")) as { subscriptions: unknown[] };
+
     await writeFile(
       join(dataDir, "subscriptions.json"),
       JSON.stringify({ version: 1, subscriptions: [later, ...(await registry()).subscriptions] }),
@@ -493,9 +506,12 @@ describe("several subscriptions", () => {
     username: "demo",
     password,
   });
+
   const folderOf = (dataDir: string, id: string) => join(dataDir, "subscriptions", id);
+
   const registryOf = async (dataDir: string) =>
     ((await saved(dataDir, "subscriptions.json")) as { subscriptions: unknown[] }).subscriptions;
+
   const ids = async (service: Service) => (await service.list()).map((each) => each.id);
 
   /** Two subscriptions saved one after the other: the original, and one added beside it. */
@@ -504,12 +520,15 @@ describe("several subscriptions", () => {
       await fakeProvider({ password: "first-pass" }),
       await fakeProvider({ password: "other-pass" }),
     ];
+
     const profile = await subscriptions(fetchImpl);
     const original = await profile.service.add(login(first, "first-pass"));
+
     const beside = await profile.service.add({
       ...login(second, "other-pass"),
       name: " Holiday house ",
     });
+
     return { ...profile, first, second, original, beside };
   }
 
@@ -542,10 +561,12 @@ describe("several subscriptions", () => {
         { id: beside.id, key: `${second.url}|demo`, name: "Holiday house" },
       ],
     });
+
     for (const secret of ["first-pass", "other-pass"]) {
       expect(registry).not.toContain(secret);
       expect(registry).not.toContain(testSecrets.seal(secret));
     }
+
     expect(await service.saved()).toMatchObject([
       { id: original.id, original: true, dir: dataDir, kind: "xtream" },
       { id: beside.id, original: false, dir: folderOf(dataDir, beside.id), kind: "xtream" },
@@ -660,10 +681,12 @@ describe("several subscriptions", () => {
     // What the viewer left it at, and a file a later build keeps beside it.
     await writeFile(join(folder, "preferences.json"), JSON.stringify({ lastChannelId: "2014" }));
     await writeFile(join(folder, "later.json"), "{}");
+
     const kept = async () =>
       Promise.all(
         (await readdir(folder)).sort().map(async (name) => [name, await saved(folder, name)]),
       );
+
     const before = await kept();
 
     await stableConnects(dataDir, login(second, "other-pass"));
@@ -747,10 +770,12 @@ describe("several subscriptions", () => {
   it("keeps every subscription when the keychain opens no secret, and repairs one at a time", async () => {
     const { create, original, beside } = await two();
     let opens = false;
+
     const locked = await create({
       seal: testSecrets.seal,
       open: (sealed) => {
         if (!opens) throw new AppFailure({ kind: "keychain-refused" });
+
         return testSecrets.open(sealed);
       },
     });
@@ -781,10 +806,12 @@ describe("several subscriptions", () => {
       const { create, service, second, original, beside } = await two(holdable.fetch);
 
       const held = holdable.holdNext();
+
       const repair =
         where === "on its row"
           ? service.update(beside.id, { secret: "other-pass" })
           : service.add(login(second, "other-pass"));
+
       await held.arrived;
       await service.remove(beside.id);
       held.release();

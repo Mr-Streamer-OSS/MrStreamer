@@ -16,21 +16,26 @@ const FILE = "language.json";
 /** The iPhone's preferred languages, best first, as iOS lists them for this app. */
 function systemTags(): readonly string[] {
   const preferred: unknown = Settings.get("AppleLanguages");
+
   const tags = Array.isArray(preferred)
     ? preferred.filter((tag): tag is string => typeof tag === "string")
     : [];
+
   return tags;
 }
 
 /** What Settings saved: a locale, "system", or a later release's value, which shows English. */
 function savedChoice(): string | undefined {
   const saved = readJson(FILE);
+
   const choice =
     typeof saved === "object" && saved !== null && "choice" in saved ? saved.choice : undefined;
+
   return typeof choice === "string" ? choice : undefined;
 }
 
 const language = store(resolveLanguage(savedChoice(), systemTags()));
+
 setLanguage(language.get());
 
 /** The interface language in effect, and what Settings chose. */
@@ -49,8 +54,10 @@ export function chooseLanguage(choice: LanguageChoice): boolean {
   } catch {
     // Read back below.
   }
+
   const next = resolveLanguage(savedChoice(), systemTags());
   setLanguage(next);
   language.set(next);
+
   return next.choice === choice;
 }

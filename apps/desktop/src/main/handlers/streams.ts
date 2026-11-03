@@ -22,6 +22,7 @@ export const streamsOf = (
       ...(yield* settings.get),
       ...(yield* settings.ofSubscription(channel.subscriptionId)),
     };
+
     const playable = archive
       ? {
           variants: yield* Effect.try({
@@ -30,8 +31,11 @@ export const streamsOf = (
           }),
         }
       : channel;
+
     const variants = streamsToPlay(playable, preferences, variant).map(({ id }) => id);
+
     if (variants.length > 0) return variants;
+
     return yield* new Failed({
       error: { kind: "channel-not-found", channelId: variant ?? channel.id },
     });

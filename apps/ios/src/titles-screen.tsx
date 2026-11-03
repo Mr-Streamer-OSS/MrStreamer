@@ -63,13 +63,17 @@ const browseChoices = store<ReadonlyMap<string, BrowseChoices>>(new Map());
 function useBrowseChoices(kind: TitleKind, id: CollectionId) {
   const key = `${kind}:${id}`;
   const choices = useStore(browseChoices).get(key) ?? DEFAULT_BROWSE;
+
   const change = (next: BrowseChoices) =>
     browseChoices.set((current) => {
       const updated = new Map(current);
+
       if (next === DEFAULT_BROWSE) updated.delete(key);
       else updated.set(key, next);
+
       return updated;
     });
+
   return { choices, change };
 }
 
@@ -84,6 +88,7 @@ function useTitlesStatus(kind: TitleKind, usableContent: boolean): Status | null
   // Its words are made here, so a new language makes them again.
   useLocale();
   const roster = useRoster();
+
   return libraryStatus(roster.kind === "ready" ? roster.members : [], {
     titles: true,
     usableContent,
@@ -99,6 +104,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
   const status = useTitlesStatus(kind, (made?.size("all") ?? 0) > 0);
   const chosen = useStore(places)[kind];
   useFixedTabBar(chosen === "all" || chosen === "4k");
+
   if (!made && (chosen === "all" || chosen === "4k")) {
     return (
       <Docked
@@ -127,6 +133,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
       </Docked>
     );
   }
+
   if (lists.kind === "failed") {
     return (
       // Like the loading and ready lists, recovery must clear the native header and tab bar.
@@ -142,6 +149,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
       </ScrollView>
     );
   }
+
   // Loading too while the lists' collections are first made.
   if (!made) {
     return (
@@ -162,6 +170,7 @@ export function TitlesHome({ kind }: { kind: TitleKind }) {
       </Docked>
     );
   }
+
   return (
     <Docked status={status}>
       <Browse made={made} kind={kind} />
@@ -182,7 +191,9 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     const last = (viewing?.recentTitles ?? viewing?.continueWatching ?? []).find(({ title }) =>
       kind === "movie" ? title.kind === "movie" : title.kind === "episode",
     );
+
     if (!last) return null;
+
     return last.title.kind === "movie" ? ownedId(last.title) : seriesOf(last.title);
   }, [viewing, kind]);
 
@@ -196,6 +207,7 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     }),
     [made],
   );
+
   const tabs = [
     { value: "for-you" as const, label: t("For you") },
     ...(has.new ? [{ value: "new" as const, label: t("New") }] : []),
@@ -204,9 +216,11 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     ...(has.fourK || chosen === "4k" ? [{ value: "4k" as const, label: "4K" }] : []),
     { value: "all" as const, label: t("All") },
   ];
+
   // Metadata-only tabs that emptied give way to For you; a chosen 4K grid keeps its controls.
   const tab = tabs.some((each) => each.value === chosen) ? chosen : "for-you";
   const grid = tab === "4k" || tab === "all";
+
   const rows = useMemo(
     () =>
       tab === "for-you" || tab === "new"
@@ -215,10 +229,12 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
     // Core names the rows in the interface language as they are made.
     [made, tab, like, locale],
   );
+
   const tiles = useMemo(
     () => (tab === "genres" || tab === "services" ? tilesOf(made, tab) : []),
     [made, tab],
   );
+
   // TitlesHome asks as Movies opens and as collections are made; the tab and lead are Browse's.
   useHolding(kind, [tab, like]);
   const choose = (next: Tab) => places.set((current) => ({ ...current, [kind]: next }));
@@ -236,6 +252,7 @@ function Browse({ made, kind }: { made: Collections; kind: TitleKind }) {
       />
     );
   }
+
   return (
     <ScrollView
       style={styles.screen}
@@ -285,6 +302,7 @@ function ForYou({
 }) {
   const continuing = useContinueWatching(kind);
   const featured = rows[0]?.titles[0] ?? null;
+
   return (
     <>
       {featured ? <Featured title={featured} /> : null}
@@ -294,6 +312,7 @@ function ForYou({
           titles={continuing.map((entry) => entry.title)}
           onPress={(title) => {
             const entry = continuing.find((each) => each.title.key === title.key);
+
             if (entry) resume(entry);
           }}
           lines={(title) => continuing.find((each) => each.title.key === title.key)?.line}
@@ -326,6 +345,7 @@ function ForYou({
 /** The first title of For you, wide, with its name and line. */
 function Featured({ title }: { title: Title }) {
   const line = [title.year, title.genres[0], title.rating?.toFixed(1)].filter(Boolean).join(" · ");
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -354,6 +374,7 @@ export function CollectionScreen({ kind, id }: { kind: TitleKind; id: Collection
   const lists = useTitleLists();
   const status = useTitlesStatus(kind, (made?.size("all") ?? 0) > 0);
   useFixedTabBar(true);
+
   return (
     <Docked
       status={
@@ -386,16 +407,20 @@ function CollectionGrid({
   const { choices, change } = useBrowseChoices(kind, id);
   const factsRevision = useFileFacts();
   const files = useMemo(() => filterFilesOf(kind), [kind, made, factsRevision]);
+
   const result = useMemo(
     () => (made ? browseCollection(made, id, choices, files) : null),
     [made, id, choices, files],
   );
+
   // A new login replaces the captured fence; unrelated renders keep the tile handler stable.
   const roster = useRoster();
+
   const selection = useMemo(
     () => (made ? collectionSelection(kind, made) : null),
     [kind, made, roster],
   );
+
   // A retained press from a replaced grid or a popped route must never open its old version.
   const current = useRef(result);
   const mounted = useRef(true);
@@ -404,10 +429,12 @@ function CollectionGrid({
   }, [result]);
   useEffect(() => {
     mounted.current = true;
+
     return () => {
       mounted.current = false;
     };
   }, []);
+
   const open = useCallback(
     (title: Title) => {
       if (!mounted.current || !result || current.current !== result || !selection?.(title)) return;
@@ -419,12 +446,14 @@ function CollectionGrid({
     },
     [result, selection, id, choices],
   );
+
   const heading = (
     <>
       {header ?? <Text style={styles.collectionName}>{made?.name(id) ?? t("Collection")}</Text>}
       <BrowseControls kind={kind} choices={choices} result={result} onChange={change} />
     </>
   );
+
   if (!result) {
     if (lists.kind === "failed" || lists.kind === "idle") {
       return (
@@ -451,8 +480,10 @@ function CollectionGrid({
         </ScrollView>
       );
     }
+
     return <PlaceholderGrid header={heading} />;
   }
+
   return (
     <PosterGrid
       titles={result.titles}

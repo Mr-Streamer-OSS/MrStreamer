@@ -34,16 +34,22 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** Stop at the first limit; a wait entered full drains below the second before reading again. */
 const AHEAD_S = { stop: 60, resume: 40 } as const;
+
 /** No picture within this long counts as a failed start. */
 const START_TIMEOUT_MS = 30_000;
+
 /** How long a run may send nothing at all. */
 const NOTHING_TIMEOUT_MS = 45_000;
+
 /** The proxy gets 30 s for subtitle recovery; allow its final answer another 5 s to arrive. */
 const SUBTITLE_WAIT_MS = 35_000;
+
 /** How often a run tells the proxy what it has buffered while its subtitles load. */
 const PROGRESS_MS = 500;
+
 /** A clock that stands still this long while playing, with nothing buffered, counts as broken. */
 const STALL_TIMEOUT_MS = 20_000;
+
 /** The start of a run is read into memory until its codecs are known; more is not a movie. */
 const HEAD_LIMIT = 16 * 1024 * 1024;
 
@@ -139,25 +145,32 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   let failureListener: ((error: TitleError) => void) | null = null;
   let pendingFailure: TitleError | null = null;
   let endedListener: (() => void) | null = null;
+
   let state: SubtitleState | null =
     run.subtitle === null ? null : { recovery: "loading", covered: false };
+
   let stateListener: ((state: SubtitleState | null) => void) | null = null;
   let subtitleWait: ReturnType<typeof setTimeout> | null = null;
+
   /** Says how the subtitles stand when that changed: recovery as given, coverage as it is now. */
   const report = (recovery: SubtitleRecovery | undefined = state?.recovery) => {
     if (!state || !recovery) return;
     const covered = subtitlesDue(video);
+
     if (state.recovery === recovery && state.covered === covered) return;
     state = { recovery, covered };
     stateListener?.(state);
   };
+
   const say = (recovery: SubtitleRecovery) => {
     if (recovery !== "loading" && subtitleWait !== null) {
       clearTimeout(subtitleWait);
       subtitleWait = null;
     }
+
     report(recovery);
   };
+
   /** The title second from which a track shows again after it had nothing for the start. */
   let showsFrom: number | null = null;
   /** Until the response identifies independent text, assume the feed needs packet history. */
@@ -166,12 +179,15 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   started.catch(() => {});
 
   let delivery: Pick<TitleError, "video" | "audio"> = {};
+
   const fail = (cause: TitleError) => {
     const error = { ...delivery, ...cause };
     observation.stop();
+
     if (finished) return;
     finished = true;
     stopWatching();
+
     if (!settled) {
       settled = true;
       reject(error);
@@ -188,15 +204,19 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /** When the run was asked for. */
   const waitingSince = Date.now();
   let lastReadAheadAt = waitingSince;
+
   const watchdog = setInterval(() => {
     const now = Date.now();
     const sinceCheck = now - lastCheckAt;
     lastCheckAt = now;
+
     if (from !== null && !video.paused && !video.seeking && video.currentTime > lastTime + 0.05) {
       // A jump or a faster playback rate cannot earn more stability than elapsed playing time.
       played += Math.min((video.currentTime - lastTime) * 1000, sinceCheck);
     }
+
     const waitingFrom = Math.max(waitingSince, lastReadAheadAt);
+
     // Nothing to show yet, paused or not: the provider answered and then stalled. Later than
     // the proxy's own wait for a run's start, whose answer says more.
     if (from === null && now - waitingFrom > NOTHING_TIMEOUT_MS) {
@@ -204,13 +224,17 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         kind: "network",
         detail: t("No picture within {seconds} s.", { seconds: NOTHING_TIMEOUT_MS / 1000 }),
       });
+
       return;
     }
+
     if (video.paused || video.seeking || video.currentTime > lastTime + 0.05) {
       lastTime = video.currentTime;
       lastProgressAt = now;
+
       return;
     }
+
     if (!settled && now - waitingFrom > START_TIMEOUT_MS) {
       fail({
         kind: "network",
@@ -220,6 +244,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       fail({ kind: "network", detail: t("The title stopped arriving.") });
     }
   }, 1000);
+
   const onError = () => {
     const error = video.error;
     fail({
@@ -232,27 +257,34 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       detail: error?.message || t("The title could not be decoded."),
     });
   };
+
   const onEnded = () => endedListener?.();
+
   // A seek can start and finish between watchdog ticks. Neither its jump nor its wait is played.
   const onSeek = () => {
     lastTime = video.currentTime;
     lastCheckAt = lastProgressAt = Date.now();
   };
+
   /** Resolves once the subtitle picture due where the run starts is drawn. */
   let drawnAtStart = Promise.resolve();
+
   // The clock moving on from where the run placed it is the start, as soon as it happens.
   const onTime = () => {
     if (from !== null && !settled && video.currentTime >= from + 0.1) {
       settled = true;
       void drawnAtStart.then(resolve);
     }
+
     if (showsFrom !== null && video.currentTime >= showsFrom) {
       showsFrom = null;
       say("recovered");
     } else report();
   };
+
   // Lines that come, go, or move with the timing, and seeks, change what is due without the clock.
   const stopFollowing = onSubtitlesChange(() => report());
+
   // While the subtitles load, the proxy reads the file for them only as far as the picture can
   // spare the provider, which what is buffered here tells it.
   const telling = setInterval(() => {
@@ -260,11 +292,13 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     const query = `only=progress&buffered=${ahead().toFixed(1)}&paused=${video.paused ? 1 : 0}`;
     void fetch(`${run.url}?${query}`, { signal: abort.signal }).catch(() => {});
   }, PROGRESS_MS);
+
   video.addEventListener("error", onError);
   video.addEventListener("ended", onEnded);
   video.addEventListener("timeupdate", onTime);
   video.addEventListener("seeking", onSeek);
   video.addEventListener("seeked", onSeek);
+
   function stopWatching() {
     if (subtitleWait !== null) clearTimeout(subtitleWait);
     subtitleWait = null;
@@ -281,6 +315,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   /** Seconds buffered beyond the position. */
   function ahead(): number {
     const ranges = video.buffered;
+
     for (let index = 0; index < ranges.length; index++) {
       if (
         ranges.start(index) <= video.currentTime + 0.5 &&
@@ -289,6 +324,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         return ranges.end(index) - video.currentTime;
       }
     }
+
     return 0;
   }
 
@@ -302,6 +338,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       if (!holding() && (video.paused || ahead() < AHEAD_S.stop)) return done();
       // Only a full buffer needs to drain to the lower threshold before reading again.
       const resumeAt = ahead() >= AHEAD_S.stop ? AHEAD_S.resume : AHEAD_S.stop;
+
       const check = () => {
         if (abort.signal.aborted || (!holding() && (video.paused || ahead() < resumeAt))) {
           clearInterval(rechecking);
@@ -312,6 +349,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
           done();
         }
       };
+
       // Eviction can lose a paused picture without a playback event to wake this wait.
       const rechecking = setInterval(check, 1000);
       video.addEventListener("timeupdate", check);
@@ -328,10 +366,12 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     new Promise<void>((done, failed) => {
       if (abort.signal.aborted) return failed(abort.signal.reason);
       const settled = new AbortController();
+
       const settle = (finish: () => void) => () => {
         settled.abort();
         finish();
       };
+
       target.addEventListener("updateend", settle(done), { signal: settled.signal });
       target.addEventListener(
         "error",
@@ -353,12 +393,15 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       try {
         target.appendBuffer(data as Uint8Array<ArrayBuffer>);
         await updated(target);
+
         return;
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "QuotaExceededError") || tries > 3) {
           throw error;
         }
+
         const behind = video.currentTime - 20;
+
         if (behind > 0) {
           target.remove(0, behind);
           await updated(target);
@@ -373,27 +416,37 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     await new Promise((opened) =>
       mediaSource.addEventListener("sourceopen", opened, { once: true }),
     );
+
     if (abort.signal.aborted) return;
     const query = new URLSearchParams({ start: run.start.toFixed(3) });
+
     if (run.audio !== null) query.set("audio", String(run.audio));
+
     if (run.subtitle !== null) query.set("subtitle", String(run.subtitle));
+
     if (run.convertSound) query.set("sound", "convert");
+
     if (run.rejectedCopy) query.set("picture", "convert");
+
     // Only fetch and body reads describe delivery failures. Parsing and MSE refusals below
     // belong to local media recovery, regardless of the exception's diagnostic text.
     const response = await fetch(`${run.url}?${query}`, { signal: abort.signal }).catch(
       networkFailure,
     );
+
     if (!response.ok || !response.body) {
       throw {
         kind: response.status === 415 ? "unsupported" : "network",
         detail: t("The title answered HTTP {status}.", { status: String(response.status) }),
       } satisfies EngineError;
     }
+
     const delivered = (name: string) => {
       const value = response.headers.get(name);
+
       return value === "copy" || value === "convert" || value === "none" ? value : undefined;
     };
+
     const videoDelivery = delivered("x-title-video");
     const audioDelivery = delivered("x-title-audio");
     delivery = {
@@ -408,22 +461,27 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     // The start is held until the tracks and the first fragment are known.
     let head = new Uint8Array(0);
     let start = readMp4Start(head);
+
     while (start.codecs === null || start.firstFragment === null) {
       const { value, done } = await reader.read().catch(networkFailure);
+
       if (done || head.length > HEAD_LIMIT) {
         throw {
           kind: "unsupported",
           detail: t("The title didn't start like a video."),
         } satisfies EngineError;
       }
+
       const joined = new Uint8Array(head.length + value.length);
       joined.set(head);
       joined.set(value, head.length);
       head = joined;
       start = readMp4Start(head);
     }
+
     codecs = start.codecs;
     const type = `video/mp4; codecs="${start.codecs}"`;
+
     if (!MediaSource.isTypeSupported(type)) {
       const videoRefused = start.codecs
         .split(",")
@@ -432,16 +490,19 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
             /^(?:avc|hev|hvc)/.test(codec.trim()) &&
             !MediaSource.isTypeSupported(`video/mp4; codecs="${codec.trim()}"`),
         );
+
       throw {
         kind: "unsupported",
         detail: t("This system can't play {codecs}.", { codecs: start.codecs }),
         ...defined({ rejectedTrack: videoRefused ? ("video" as const) : undefined }),
       } satisfies TitleError;
     }
+
     if (run.duration) mediaSource.duration = run.duration;
     buffer = mediaSource.addSourceBuffer(type);
     buffer.timestampOffset = pictureStart - start.firstFragment;
     await append(buffer, head);
+
     if (abort.signal.aborted) return;
     // The picture decodes from the keyframe before the start and shows from the start itself,
     // unless the file only allowed a later one.
@@ -453,6 +514,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     // is drawn without waiting for that.
     // A picture that can't be drawn doesn't hold the start back.
     drawnAtStart = (presenter?.drawNow() ?? drawnAtStart).catch(() => {});
+
     if (run.paused) {
       // Paused, the clock doesn't move: the run has started once the picture is there, with the
       // subtitles due on it.
@@ -470,13 +532,17 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     } else {
       void video.play().catch(() => {});
     }
+
     for (;;) {
       await room();
+
       if (abort.signal.aborted) return;
       const { value, done } = await reader.read().catch(networkFailure);
+
       if (done) break;
       await append(buffer, value);
     }
+
     if (mediaSource.readyState === "open" && !buffer.updating) mediaSource.endOfStream();
   }
 
@@ -495,11 +561,14 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       start: run.start.toFixed(3),
       subtitle: String(track),
     });
+
     if (run.page !== null) query.set("page", String(run.page));
     const response = await fetch(`${run.url}?${query}`, { signal: subtitlesSignal });
+
     if (!response.ok || !response.body) {
       throw new Error(`The subtitles answered HTTP ${response.status}.`);
     }
+
     const codec = response.headers.get("x-codec");
     const decoderFor = () => (isCodec(codec) ? subtitleDecoder(codec, run.page) : null);
     let decoder = decoderFor();
@@ -508,19 +577,24 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     let held: SubtitleChange[] | null = [];
     const text = new TextDecoder();
     let pending = "";
+
     for await (const chunk of response.body) {
       pending += text.decode(chunk, { stream: true });
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";
+
       for (const each of lines) {
         const line = readFeedLine(each);
+
         // The tracks are shared with the next run, which may have started already.
         if (!line || subtitlesSignal.aborted) continue;
+
         if ("unavailable" in line) {
           // Packet decoders can't build on an incomplete past. Independent text already read
           // stays unless the provider replaced the file it belongs to.
           held = null;
           decoder = decoderFor();
+
           if (decoding || line.unavailable === "changed") clearSubtitles(video);
           showsFrom = null;
           say("unavailable");
@@ -531,12 +605,15 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
             showsFrom = line.at;
             continue;
           }
+
           // What the last change before the position left on screen, and each one after it.
           const now = Math.max(run.start, video.currentTime);
           const last = held?.findLastIndex((change) => change.at <= now) ?? -1;
+
           for (const change of held?.slice(Math.max(0, last)) ?? []) {
             presenter?.show(change);
           }
+
           held = null;
           // Chromium says which cues are due only a moment after the position moves.
           void presenter?.drawNow().catch(() => {});
@@ -546,6 +623,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         } else {
           const data = Uint8Array.from(atob(line.data), (char) => char.charCodeAt(0));
           const change = decoder?.push(data, line.at);
+
           if (change && held) held.push(change);
           else if (change) {
             presenter?.show(change);
@@ -554,24 +632,28 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
         }
       }
     }
+
     throw new Error("The subtitles ended early.");
   }
 
   if (run.subtitle !== null) {
     subtitleWait = setTimeout(() => {
       if (subtitlesSignal.aborted || state?.recovery !== "loading") return;
+
       // End the wait for history. Independent text can keep showing and arriving; packet
       // decoders still need that history, so stop their read and clear their output.
       if (decoding) {
         subtitlesOff.abort();
         clearSubtitles(video);
       }
+
       showsFrom = null;
       say("unavailable");
     }, SUBTITLE_WAIT_MS);
     readSubtitles(run.subtitle).catch(() => {
       // Turned off or stopped with the run: nothing to say.
       if (subtitlesSignal.aborted) return;
+
       // The feed broke, and the picture plays on. What a decoder drew waits for an end that
       // won't come, so it goes; lines of text end by themselves.
       if (decoding) clearSubtitles(video);
@@ -595,6 +677,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     started,
     onFailure(listener) {
       failureListener = listener;
+
       if (pendingFailure) {
         listener(pendingFailure);
         pendingFailure = null;
@@ -611,13 +694,17 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     played: () => played,
     seekWithin(position) {
       const ranges = buffer?.buffered;
+
       if (!ranges) return false;
+
       for (let index = 0; index < ranges.length; index++) {
         if (position >= ranges.start(index) && position < ranges.end(index) - 0.5) {
           video.currentTime = position;
+
           return true;
         }
       }
+
       return false;
     },
     hideSubtitles() {
@@ -644,6 +731,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       observation.stop();
       stopWatching();
       abort.abort();
+
       if (!settled) reject({ kind: "network", detail: "Stopped." } satisfies EngineError);
       clearSubtitles(video);
       video.pause();

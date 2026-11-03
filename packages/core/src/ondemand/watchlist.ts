@@ -93,8 +93,11 @@ function gathered(title: Pick<TitleFacts, "tmdbId" | "adult">): boolean {
  */
 export function sameTitle(saved: Identity, title: Identity): boolean {
   if (saved.kind !== title.kind) return false;
+
   if (saved.tmdbId && saved.tmdbId !== title.tmdbId) return false;
+
   if (gathered(saved) && gathered(title)) return true;
+
   return saved.versionIds.some((id) => title.versionIds.includes(id));
 }
 
@@ -118,6 +121,7 @@ export function entriesOf(members: readonly SavedMember[]): SavedMember[][] {
       ? `${member.kind}:tmdb:${member.tmdbId}`
       : `${member.kind}:${ownedKey(member)}`,
   );
+
   return [...entries.values()].map((entry) => entry.toSorted(savedFirst));
 }
 
@@ -141,12 +145,16 @@ export function savedFirst(
 export function titleOf(catalogue: IndexedCatalogue, saved: SavedMember): Title | null {
   const { byId, byTmdbId } = kindOf(catalogue, saved.kind);
   const known = saved.tmdbId && !saved.adult ? byTmdbId().get(saved.tmdbId) : undefined;
+
   if (known) return known;
   const { subscriptionId } = saved;
+
   for (const id of saved.versionIds) {
     const title = byId.get(ownedKey({ subscriptionId, id }));
+
     if (title && sameTitle(saved, factsOf(title, subscriptionId))) return title;
   }
+
   return null;
 }
 
@@ -162,7 +170,9 @@ export function settled(
   facts: TitleFacts,
 ): { readonly kept: SavedTitle; readonly dropped: readonly string[] } | null {
   const [first, ...rest] = matches.toSorted(savedFirst);
+
   if (!first) return null;
+
   return {
     kept: {
       ...facts,

@@ -34,13 +34,16 @@ export function GuideRows({
   const client = useQueryClient();
   const sources = useQuery(queries.guideSources()).data ?? [];
   const name = subscriptionName(subscription);
+
   const refresh = useMutation({
     mutationFn: () => call("guide.refresh", { subscriptionId: subscription.id }),
     onSuccess: (status) => keepGuideStatus(client, status),
   });
+
   const now = Date.now();
   const failed = guide?.processing.state === "failed" ? guide.processing : null;
   const failure = refresh.error ? appError(refresh.error) : (failed?.reason ?? null);
+
   return (
     <>
       <Row label={t("Guide")} note={guide ? supplied(guide, sources) : t("not loaded yet")} wrap>
@@ -94,6 +97,7 @@ export function GuideRows({
 function supplied(guide: GuideStatus, sources: readonly GuideSourceStatus[]): string {
   if (guide.availability === "unknown" && guide.supplied.length === 0) return t("not loaded yet");
   const without = Math.max(0, guide.listed - guide.channels);
+
   return [
     guide.availability === "none" && t("none in this playlist"),
     ...guide.supplied.map(({ source, channels }) =>

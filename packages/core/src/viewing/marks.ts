@@ -45,9 +45,11 @@ export function seriesIdentity(series: OwnedId, title: Title | undefined): Serie
   const own = (title?.versions ?? []).flatMap(({ subscriptionId, id }) =>
     subscriptionId === series.subscriptionId ? [id] : [],
   );
+
   const tmdbId = title && !title.adult && own.includes(series.id) ? title.tmdbId : null;
   const versions = tmdbId ? own : [series.id];
   const key = tmdbId ? `tmdb:${tmdbId}` : `id:${series.id}`;
+
   return { key, keys: [...new Set([key, ...versions.map((id) => `id:${id}`)])], versions };
 }
 
@@ -108,8 +110,10 @@ export function marked(
   if (event.type === "series-listed") {
     return { ...state, versions: event.versions, listing: event.listing };
   }
+
   const { season, episode } = event.title;
   const others = state.marks.filter((each) => each.season !== season || each.episode !== episode);
+
   if (event.type === "episode-marked") {
     const mark: StoredMark = {
       series: event.series,
@@ -120,6 +124,7 @@ export function marked(
       at,
       revision: sequence,
     };
+
     return {
       ...state,
       marks: [...others, mark],
@@ -135,8 +140,11 @@ export function marked(
       changed: sequence,
     };
   }
+
   const { undo } = state;
+
   if (undo?.revision !== event.revision) return state;
+
   return {
     ...state,
     marks: [...others, ...(undo.prior ? [undo.prior] : [])],
@@ -162,10 +170,13 @@ export function leading(state: SeriesMarks): StoredMark | undefined {
  */
 export function standing(kept: readonly SeriesMarks[]): StoredMark[] {
   const latest = new Map<string, StoredMark>();
+
   for (const mark of kept.flatMap((each) => each.marks)) {
     const key = `${mark.season}:${mark.episode}`;
+
     if ((latest.get(key)?.revision ?? -Infinity) < mark.revision) latest.set(key, mark);
   }
+
   return [...latest.values()].toSorted((a, b) => a.revision - b.revision);
 }
 
@@ -180,6 +191,7 @@ export function undoable(
 ): StoredMark | null {
   const last = kept.toSorted((a, b) => b.changed - a.changed)[0];
   const mark = last?.marks.find((each) => each.revision === last.undo?.revision);
+
   return mark && !played.some((entry) => entry.since > mark.at) ? mark : null;
 }
 
@@ -196,17 +208,21 @@ export function goesOn(
     number,
     episodes: episodes.map((episode) => ({ season: number, number: episode })),
   }));
+
   const files = listing.some((season) => season.files !== undefined)
     ? new Set(listing.flatMap((season) => season.files ?? []))
     : null;
+
   // Exact playlist files also identify a source-ordered listing, including specials in place.
   const found = continuation(
     { seasons, ...defined({ episodeOrder: files ? ("source" as const) : undefined }) },
     files ? played.filter((entry) => files.has(entry.title.id)) : played,
     marks,
   );
+
   if (!found || found.replay) return null;
   const { episode, resume } = found;
+
   return {
     season: episode.season,
     episode: episode.number,

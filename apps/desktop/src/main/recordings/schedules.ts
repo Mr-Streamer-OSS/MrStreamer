@@ -20,6 +20,7 @@ export interface Occurrence {
 /** The plan's occurrence on the local day `day` falls on, for a slot recording that weekday. */
 function slotOn(plan: Extract<RecordingPlan, { kind: "slot" }>, day: Date): Occurrence | null {
   if (!plan.days.includes(day.getDay())) return null;
+
   const at = new Date(
     day.getFullYear(),
     day.getMonth(),
@@ -27,6 +28,7 @@ function slotOn(plan: Extract<RecordingPlan, { kind: "slot" }>, day: Date): Occu
     Math.floor(plan.at / 60),
     plan.at % 60,
   ).getTime();
+
   return {
     start: at - plan.padding.before * MINUTE_MS,
     stop: at + (plan.minutes + plan.padding.after) * MINUTE_MS,
@@ -44,10 +46,13 @@ export function occurrences(plan: RecordingPlan, from: number, to: number): Occu
       start: plan.start - plan.padding.before * MINUTE_MS,
       stop: plan.stop + plan.padding.after * MINUTE_MS,
     };
+
     return occurrence.stop > from && occurrence.start < to ? [occurrence] : [];
   }
+
   const found: Occurrence[] = [];
   const first = new Date(from - DAY_MS);
+
   // Noon steps from day to day: a day of 23 or 25 hours never skips or repeats one.
   for (
     let day = new Date(first.getFullYear(), first.getMonth(), first.getDate(), 12);
@@ -55,8 +60,10 @@ export function occurrences(plan: RecordingPlan, from: number, to: number): Occu
     day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1, 12)
   ) {
     const occurrence = slotOn(plan, day);
+
     if (occurrence && occurrence.stop > from && occurrence.start < to) found.push(occurrence);
   }
+
   return found;
 }
 
@@ -66,6 +73,7 @@ export function occurrences(plan: RecordingPlan, from: number, to: number): Occu
  */
 export function nextOccurrence(plan: RecordingPlan, now: number): Occurrence | null {
   const to = plan.kind === "programme" ? Infinity : now + 8 * DAY_MS;
+
   return occurrences(plan, now, to)[0] ?? null;
 }
 
@@ -92,5 +100,6 @@ export function conflictOf(
       each.holder.until > occurrence.start &&
       (each.start < occurrence.start || (each.start === occurrence.start && each.first)),
   );
+
   return holding.length >= limit ? holding.map((each) => each.holder) : [];
 }

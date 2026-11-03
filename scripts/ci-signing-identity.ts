@@ -44,6 +44,7 @@ const ascKey = (() => {
   const path = process.env["ASC_KEY_PATH"];
   const keyId = process.env["ASC_KEY_ID"];
   const issuer = process.env["ASC_ISSUER_ID"];
+
   return path && keyId && issuer ? { path, keyId, issuer } : null;
 })();
 
@@ -78,6 +79,7 @@ switch (positionals[0]) {
         `${attributes.displayName}  serial ${attributes.serialNumber}  expires ${attributes.expirationDate.slice(0, 10)}`,
       );
     }
+
     break;
   default:
     throw new Error("Usage: node scripts/ci-signing-identity.ts request|finish|status");
@@ -102,7 +104,9 @@ async function request(): Promise<void> {
       "/CN=Mr. Streamer release signing",
     ]);
   }
+
   const csrContent = readFileSync(REQUEST_FILE, "utf8");
+
   if (ascKey) {
     for (const certificateType of CERTIFICATE_TYPES) {
       try {
@@ -110,6 +114,7 @@ async function request(): Promise<void> {
           data: { type: "certificates", attributes: { certificateType, csrContent } },
         });
         console.log(`Apple issued a ${certificateType} certificate. Run: ${finishCommand()}`);
+
         return;
       } catch (error) {
         if (!(error instanceof ApiError)) throw error;
@@ -117,6 +122,7 @@ async function request(): Promise<void> {
       }
     }
   }
+
   console.log(
     [
       "",
@@ -135,20 +141,25 @@ async function finish(): Promise<void> {
   if (!existsSync(KEY_FILE))
     throw new Error(`No pending request in ${PENDING}; run request first.`);
   const key = createPrivateKey(readFileSync(KEY_FILE));
+
   const certificate = values.cer
     ? new X509Certificate(readFileSync(values.cer))
     : await issuedFor(key);
+
   if (!certificate) {
     throw new Error("Apple lists no Developer ID certificate for this request yet.");
   }
+
   if (!certificate.checkPrivateKey(key)) {
     throw new Error("That certificate belongs to a different key.");
   }
 
   // The runner's keychain needs the intermediate authority to trust the identity.
   const issuerUrl = /CA Issuers - URI:(\S+)/.exec(certificate.infoAccess ?? "")?.[1];
+
   if (!issuerUrl) throw new Error("The certificate names no issuing authority.");
   const issuer = new X509Certificate(Buffer.from(await (await fetch(issuerUrl)).arrayBuffer()));
+
   if (!certificate.verify(issuer.publicKey)) throw new Error(`${issuerUrl} did not sign it.`);
   writeFileSync(join(PENDING, "cert.pem"), certificate.toString());
   writeFileSync(join(PENDING, "issuer.pem"), issuer.toString());
@@ -191,6 +202,7 @@ async function finish(): Promise<void> {
     "--jq",
     ".nameWithOwner",
   ]).trim();
+
   const bundle = readFileSync(bundlePath).toString("base64");
   run("gh", ["secret", "set", "MAC_CERTIFICATE_P12", "--repo", repo], { input: bundle });
   run("gh", ["secret", "set", "MAC_CERTIFICATE_PASSWORD", "--repo", repo], { input: password });
@@ -202,12 +214,15 @@ async function finish(): Promise<void> {
 /** The team's Developer ID certificate whose public key matches the pending request. */
 async function issuedFor(key: KeyObject): Promise<X509Certificate | null> {
   const wanted = createPublicKey(key).export({ type: "spki", format: "der" });
+
   for (const { attributes } of await developerIdCertificates()) {
     const certificate = new X509Certificate(Buffer.from(attributes.certificateContent, "base64"));
+
     if (certificate.publicKey.export({ type: "spki", format: "der" }).equals(wanted)) {
       return certificate;
     }
   }
+
   return null;
 }
 
@@ -216,6 +231,7 @@ async function developerIdCertificates(): Promise<readonly ApiCertificate[]> {
     "GET",
     `/certificates?filter[certificateType]=${CERTIFICATE_TYPES.join(",")}&limit=200`,
   )) as { data: ApiCertificate[] };
+
   return found.data;
 }
 
@@ -225,13 +241,16 @@ async function api(method: string, path: string, body?: unknown): Promise<unknow
     headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" },
     ...defined({ body: body === undefined ? undefined : JSON.stringify(body) }),
   });
+
   const json = (await response.json().catch(() => null)) as {
     errors?: { detail?: string; title?: string }[];
   } | null;
+
   if (!response.ok) {
     const detail = json?.errors?.map((error) => error.detail ?? error.title).join("; ");
     throw new ApiError(response.status, detail || response.statusText);
   }
+
   return json;
 }
 
@@ -240,14 +259,17 @@ function token(): string {
   if (!ascKey) throw new Error("Set ASC_KEY_PATH, ASC_KEY_ID and ASC_ISSUER_ID for API calls.");
   const now = Math.floor(Date.now() / 1000);
   const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+
   const body = `${part({ alg: "ES256", kid: ascKey.keyId, typ: "JWT" })}.${part({
     iss: ascKey.issuer,
     iat: now,
     exp: now + 600,
     aud: "appstoreconnect-v1",
   })}`;
+
   const key = createPrivateKey(readFileSync(ascKey.path));
   const signature = sign("sha256", Buffer.from(body), { key, dsaEncoding: "ieee-p1363" });
+
   return `${body}.${signature.toString("base64url")}`;
 }
 

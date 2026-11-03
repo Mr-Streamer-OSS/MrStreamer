@@ -7,8 +7,10 @@ import { parseAst } from "vite";
 function object(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("Invalid ASAR manifest object");
+
   return value as Record<string, unknown>;
 }
+
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 async function packedMainScripts(resources: string, expectedAsarSha256: string) {
@@ -16,20 +18,26 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
     throw new Error("Exact resources path and verified ASAR hash required");
   const archive = join(resources, "app.asar");
   const bytes = await readFile(archive);
+
   if (digest(bytes) !== expectedAsarSha256) throw new Error("Actual worker ASAR hash changed");
+
   if (bytes.length < 16 || bytes.readUInt32LE(0) !== 4) throw new Error("Invalid ASAR header");
   const dataStart = 8 + bytes.readUInt32LE(4);
   const headerEnd = 16 + bytes.readUInt32LE(12);
+
   if (headerEnd > dataStart || dataStart > bytes.length)
     throw new Error("Invalid ASAR header bounds");
   const header: unknown = JSON.parse(bytes.subarray(16, headerEnd).toString());
   let files = object(object(header).files);
+
   for (const directory of ["out", "main"]) files = object(object(files[directory]).files);
+
   return {
     archive,
     files,
     read(name: string) {
       const record = object(files[name]);
+
       if (
         record.unpacked ||
         record.link ||
@@ -43,13 +51,16 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
       const offset = Number(record.offset);
       const begin = dataStart + offset;
       const end = begin + record.size;
+
       if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(end) || end > bytes.length)
         throw new Error("Invalid ASAR script bounds");
       const source = bytes.subarray(begin, end);
       const sha256 = digest(source);
       const integrity = object(record.integrity);
+
       if (integrity.algorithm !== "SHA256" || integrity.hash !== sha256)
         throw new Error("Actual ASAR script integrity mismatch");
+
       return { source, sha256 };
     },
   };
@@ -58,6 +69,7 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
 /** The main entry's integrity-checked bytes from the pinned installed ASAR, without launching it. */
 export async function installedMainScript(resources: string, expectedAsarSha256: string) {
   const packed = await packedMainScripts(resources, expectedAsarSha256);
+
   return packed.read("index.js");
 }
 
@@ -65,18 +77,24 @@ export async function installedMainScript(resources: string, expectedAsarSha256:
 export async function catalogueWorkerScripts(resources: string, expectedAsarSha256: string) {
   const packed = await packedMainScripts(resources, expectedAsarSha256);
   const { archive, files } = packed;
+
   const names = Object.keys(files).filter((name) =>
     /^catalogue-worker-[A-Za-z0-9_-]+\.js$/.test(name),
   );
+
   if (names.length !== 1) throw new Error("No unique actual packaged catalogue worker");
   const entry = names[0]!;
+
   const scripts: { name: string; url: string; bytes: number; sha256: string; imports: string[] }[] =
     [];
+
   const queue = [entry];
   const seen = new Set(queue);
+
   for (const name of queue) {
     const { source, sha256 } = packed.read(name);
     const imports: string[] = [];
+
     for (const statement of parseAst(source.toString()).body) {
       if (
         statement.type !== "ImportDeclaration" &&
@@ -85,17 +103,23 @@ export async function catalogueWorkerScripts(resources: string, expectedAsarSha2
       )
         continue;
       const literal = statement.source?.value;
+
       if (typeof literal !== "string") continue;
+
       if (!literal.startsWith(".")) continue;
+
       if (!/^\.\/[A-Za-z0-9_.-]+\.js$/.test(literal))
         throw new Error("Worker startup dependency must be an explicit sibling JS file");
       const dependency = literal.slice(2);
+
       if (!imports.includes(dependency)) imports.push(dependency);
+
       if (!seen.has(dependency)) {
         seen.add(dependency);
         queue.push(dependency);
       }
     }
+
     scripts.push({
       name,
       url: pathToFileURL(join(archive, "out", "main", name)).href,
@@ -104,6 +128,7 @@ export async function catalogueWorkerScripts(resources: string, expectedAsarSha2
       imports,
     });
   }
+
   return {
     archive: { path: archive, sha256: expectedAsarSha256 },
     expectedWorker: scripts[0]!.url,

@@ -18,9 +18,11 @@ import type { Driver } from "./language.ts";
 
 /** Three minutes of picture and sound with timestamps that never restart, made once by ffmpeg. */
 let long: Buffer | null = null;
+
 function longStream(): Buffer {
   if (long) return long;
   const path = join(tmpdir(), `mrstreamer-verify-long-${process.pid}.ts`);
+
   const made = spawnSync(process.env["MR_STREAMER_FFMPEG"] || "ffmpeg", [
     "-v",
     "error",
@@ -49,15 +51,18 @@ function longStream(): Buffer {
     "mpegts",
     path,
   ]);
+
   if (made.status !== 0) {
     rmSync(path, { force: true });
     throw new Error(`ffmpeg made no long stream: ${String(made.stderr)}`);
   }
+
   try {
     long = readFileSync(path);
   } finally {
     rmSync(path, { force: true });
   }
+
   return long;
 }
 
@@ -77,16 +82,20 @@ export function longStreams(
   // A tenth of a second at a time, a whole number of packets.
   const step = Math.ceil(stream.length / 1800 / 188) * 188;
   let offset = 0;
+
   const timer = setInterval(() => {
     out.write(stream.subarray(offset, offset + step));
     offset = offset + step >= stream.length ? 0 : offset + step;
   }, 100);
+
   signal.addEventListener("abort", () => clearInterval(timer), { once: true });
 }
 
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
+
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -257,10 +266,12 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
     () => d.evaluate<boolean>("(document.querySelector('video')?.currentTime ?? 0) >= 1"),
     60_000,
   );
+
   const playing = await d.evaluate<{ time: number; width: number; audio: number }>(
     `(() => { const v = document.querySelector('video');
     return { time: v.currentTime, width: v.videoWidth, audio: v.webkitAudioDecodedByteCount }; })()`,
   );
+
   expect(playing.width > 0 && playing.audio > 0, "No picture or sound", playing);
   d.observed["playing"] = playing;
   await d.capture("recording-playing");
@@ -298,6 +309,7 @@ const segmentsSent = (fixture: HlsFixture, from = 0) =>
     .slice(from)
     .flatMap((path) => {
       const found = /^\/media\/(?:t\d+\/)?(compatible|qualities-\w+)-(\d+)\.ts$/.exec(path);
+
       return found ? [`${found[1]} ${found[2]}`] : [];
     });
 
@@ -357,6 +369,7 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
   await d.click("Open Recording", recordingButton);
   await d.wait(() => d.exists(RECORDING));
   const FIXED = "Quality stays fixed while this records.";
+
   if (qualities) {
     // Watch holds one quality while the recording reads it, and the provider sends that one.
     await d.wait(() =>
@@ -378,6 +391,7 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
       "A stream of one quality said its quality is fixed",
     );
   }
+
   await d.key("Tab", 9);
   await d.key("Tab", 9);
   await d.wait(() =>

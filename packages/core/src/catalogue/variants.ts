@@ -60,18 +60,22 @@ export function liveChannels(streams: readonly NormalizedStream[]): LiveChannels
 /** `liveChannels`, pausing between slices of its streams (../steps.ts). */
 export function* liveChannelSteps(streams: readonly NormalizedStream[]): Steps<LiveChannels> {
   const due = pacer();
+
   const trusted = yield* trustedGuideIds(
     streams.flatMap((stream) =>
       stream.guideId ? [{ channel: stream, guideId: stream.guideId }] : [],
     ),
   );
+
   const alike = new Map<string, NormalizedStream[]>();
   const uncertain = new Set<NormalizedStream>();
+
   for (const stream of streams) {
     if (due()) yield;
     // Contradictory category/prefix metadata must not join or bridge otherwise distinct feeds.
     const country = /\.([a-z]{2})(?:@[^.@]*)?$/i.exec(trusted.get(stream.id) ?? "")?.[1];
     const guideRegion = country ? countryForCode(country) : null;
+
     if (
       stream.searchUncertain ||
       (guideRegion &&
@@ -82,29 +86,40 @@ export function* liveChannelSteps(streams: readonly NormalizedStream[]): Steps<L
       uncertain.add(stream);
       continue;
     }
+
     const key = `${identity(stream.title)}\n${stream.language ?? ""}`;
     const list = alike.get(key);
+
     if (list) list.push(stream);
     else alike.set(key, [stream]);
   }
+
   // A stream's region is its name's or category's, else the country of its guide id: VRT1.be.
   const regionOf = (stream: NormalizedStream): string[] => {
     const country = /\.([a-z]{2})(?:@[^.@]*)?$/i.exec(trusted.get(stream.id) ?? "")?.[1];
     const region = stream.region ?? (country ? countryForCode(country) : null);
+
     return region ? [region] : [];
   };
+
   const together = new Map<NormalizedStream, readonly NormalizedStream[]>();
+
   for (const candidates of alike.values()) {
     // Most streams are a channel of their own.
     if (candidates.length === 1) continue;
+
     if (due()) yield;
+
     for (const regional of yield* partition(candidates, regionOf)) {
       for (const group of yield* partition(regional, (stream) => stream.topics)) {
         const guideIds = new Set<string>();
+
         for (const stream of group) {
           if (due()) yield;
+
           for (const id of guideChannel(trusted.get(stream.id))) guideIds.add(id);
         }
+
         for (const part of guideIds.size > 1 ? group.map((stream) => [stream]) : [group]) {
           for (const stream of part) {
             if (due()) yield;
@@ -117,26 +132,35 @@ export function* liveChannelSteps(streams: readonly NormalizedStream[]): Steps<L
 
   const channels: ListedChannel[] = [];
   const guideIds = new Map<string, readonly string[]>();
+
   for (const stream of streams) {
     if (due()) yield;
     const group = together.get(stream) ?? [stream];
+
     if (group[0] !== stream) continue;
+
     const searchIdentity = uncertain.has(stream)
       ? undefined
       : yield* searchIdentityOf(group, trusted);
+
     const channel = {
       ...(yield* joined(stream, group)),
       ...defined({ searchIdentity }),
     };
+
     channels.push(channel);
     const spellings = new Set<string>();
+
     for (const each of group) {
       if (due()) yield;
       const spelling = trusted.get(each.id);
+
       if (spelling !== undefined) spellings.add(spelling);
     }
+
     if (spellings.size > 0) guideIds.set(channel.id, [...spellings]);
   }
+
   return { channels, guideIds };
 }
 
@@ -149,6 +173,7 @@ function* searchIdentityOf(
   trusted: ReadonlyMap<string, string>,
 ): Steps<LiveSearchIdentity | undefined> {
   const first = streams[0];
+
   if (!first) return;
   const due = pacer();
   const title = identity(first.title);
@@ -156,8 +181,10 @@ function* searchIdentityOf(
   const guides = new Set<string>();
   /** The topics every stream that has any agrees on, in the first such stream's order. */
   let topics: string[] | null = null;
+
   for (const stream of streams) {
     if (due()) yield;
+
     // Catch-up and regional/category labels can disappear from a cleaned display title.
     if (
       stream.searchUncertain ||
@@ -166,8 +193,11 @@ function* searchIdentityOf(
       stream.language !== first.language
     )
       return;
+
     if (stream.region !== null) regions.add(stream.region);
+
     for (const guide of guideChannel(trusted.get(stream.id))) guides.add(guide);
+
     if (stream.topics.length > 0) {
       topics =
         topics === null
@@ -175,7 +205,9 @@ function* searchIdentityOf(
           : topics.filter((topic) => stream.topics.includes(topic));
     }
   }
+
   if (regions.size > 1 || guides.size > 1) return;
+
   return {
     title,
     language: first.language,
@@ -192,21 +224,29 @@ function* searchIdentityOf(
  */
 export function qualityOf(tags: readonly string[]): Quality | null {
   if (tags.length === 0) return null;
+
   const lines = new Set(
     tags.flatMap((tag): Quality[] => {
       const count = Number(/^(\d{3,4})p$/.exec(tag)?.[1]);
+
       if (!count) return [];
+
       return [count >= 2160 ? "uhd" : count >= 1080 ? "fhd" : count >= 720 ? "hd" : "sd"];
     }),
   );
+
   const named = new Set(tags.flatMap((tag) => RESOLUTIONS[tag] ?? []));
   const [measured, ...more] = lines;
+
   if (more.length > 0) return null;
+
   if (!measured) return named.size === 1 ? ([...named][0] ?? null) : null;
+
   // "HD" also stands for high definition in general, which Full HD is.
   const fits = [...named].every(
     (quality) => quality === measured || (quality === "hd" && measured === "fhd"),
   );
+
   return fits ? measured : null;
 }
 
@@ -224,16 +264,22 @@ export function streamsToPlay(
 ): readonly ChannelVariant[] {
   if (asked !== undefined) {
     const variant = channel.variants.find(({ id }) => id === asked);
+
     return variant ? [variant] : [];
   }
+
   const chosen = chosenVariant(channel, preferences.channelVariants);
+
   if (chosen) return [chosen];
   const preferred = QUALITIES.indexOf(preferences.liveQuality ?? DEFAULT_LIVE_QUALITY);
+
   const rank = ({ quality }: ChannelVariant) => {
     if (quality === null) return 2 * QUALITIES.length;
     const lower = QUALITIES.indexOf(quality) - preferred;
+
     return lower >= 0 ? lower : QUALITIES.length - lower;
   };
+
   return channel.variants.toSorted((a, b) => rank(a) - rank(b)).slice(0, AUTO_TRIES);
 }
 
@@ -248,8 +294,10 @@ export function chosenVariant(
 ): ChannelVariant | null {
   for (const { id } of channel.variants) {
     const chosen = channel.variants.find((variant) => variant.id === choices?.[id]);
+
     if (chosen) return chosen;
   }
+
   return null;
 }
 
@@ -278,58 +326,78 @@ function* partition(
 ): Steps<(readonly NormalizedStream[])[]> {
   if (streams.length === 1) return [streams];
   const due = pacer();
+
   type Group = { keys: Set<string>; streams: Set<NormalizedStream> };
+
   /** In the order they were made, one that takes others in counting as new. */
   const groups = new Set<Group>();
   const groupByKey = new Map<string, Group>();
   const unsaid: NormalizedStream[] = [];
+
   for (const stream of streams) {
     if (due()) yield;
     const keys = keysOf(stream);
+
     if (keys.length === 0) {
       unsaid.push(stream);
       continue;
     }
+
     const joining = new Set(keys.flatMap((key) => groupByKey.get(key) ?? []));
+
     // The largest of them takes the stream and the others in, so a group a thousand streams of
     // one channel join one by one isn't copied each time.
     const group = [...joining].reduce<Group>(
       (largest, each) => (each.streams.size > largest.streams.size ? each : largest),
       { keys: new Set(), streams: new Set() },
     );
+
     for (const key of keys) {
       group.keys.add(key);
       groupByKey.set(key, group);
     }
+
     group.streams.add(stream);
+
     for (const other of joining) {
       groups.delete(other);
+
       if (other === group) continue;
+
       for (const key of other.keys) {
         group.keys.add(key);
         groupByKey.set(key, group);
       }
+
       for (const each of other.streams) {
         if (due()) yield;
         group.streams.add(each);
       }
     }
+
     groups.add(group);
   }
+
   const [only, ...more] = groups;
+
   if (only && more.length === 0) for (const stream of unsaid) only.streams.add(stream);
   else if (unsaid.length > 0) groups.add({ keys: new Set(), streams: new Set(unsaid) });
   // In the provider's order, which the first stream of each group keeps.
   const groupOf = new Map<NormalizedStream, NormalizedStream[]>();
+
   const listed = [...groups].map((group) => {
     const members: NormalizedStream[] = [];
+
     for (const stream of group.streams) groupOf.set(stream, members);
+
     return members;
   });
+
   for (const stream of streams) {
     if (due()) yield;
     groupOf.get(stream)?.push(stream);
   }
+
   return listed;
 }
 
@@ -343,6 +411,7 @@ function* partition(
  */
 function guideChannel(guideId: string | undefined): string[] {
   if (!guideId) return [];
+
   return [
     guideId
       .replace(/@(.*?)(?:SD|HD|FHD|UHD|4K)?$/i, (_, feed: string) => feed && `@${feed}`)
@@ -363,11 +432,13 @@ function* joined(
   const categoryIds = new Set<string>();
   const variants: ChannelVariant[] = [];
   let catchupDays = 0;
+
   for (const stream of group) {
     if (due()) yield;
     id = lower(id, stream.id);
     tags = tags.filter((tag) => stream.tags.includes(tag));
     logoUrl ??= stream.logoUrl || null;
+
     for (const categoryId of stream.categoryIds) categoryIds.add(categoryId);
     variants.push({
       id: stream.id,
@@ -378,6 +449,7 @@ function* joined(
     });
     catchupDays = Math.max(catchupDays, stream.catchupDays ?? 0);
   }
+
   return {
     id,
     name: first.name,
@@ -394,5 +466,6 @@ function* joined(
 /** The lower of two stream ids: by number when both are numbers, as Xtream's are. */
 function lower(a: string, b: string): string {
   const numbers = /^\d+$/.test(a) && /^\d+$/.test(b);
+
   return (numbers ? Number(b) < Number(a) : b < a) ? b : a;
 }

@@ -5,12 +5,14 @@ const REPORT_WAIT_MS = 2000;
 export function arrives(sent: Promise<unknown>): Promise<unknown> {
   const { promise: late, resolve } = Promise.withResolvers<void>();
   const timer = setTimeout(resolve, REPORT_WAIT_MS);
+
   return Promise.race([sent, late]).finally(() => clearTimeout(timer));
 }
 
 /** What `promise` resolves with, or null once `signal` aborts, whichever comes first. */
 export function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | null> {
   if (signal.aborted) return Promise.resolve(null);
+
   return new Promise((resolve) => {
     const aborted = () => resolve(null);
     signal.addEventListener("abort", aborted, { once: true });
@@ -39,6 +41,7 @@ export function until(
       signal.removeEventListener("abort", look);
       resolve();
     };
+
     changed.add(look);
     signal.addEventListener("abort", look, { once: true });
     look();

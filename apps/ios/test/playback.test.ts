@@ -18,39 +18,55 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 // native player, files, secrets and the provider adapter are ports. It plays the channel's
 // streams that keep it, from its start, with a length, and never stands in for the channel live.
 const opened: string[] = [];
+
 const port = nativePlayer((source) => {
   opened.push(source.uri);
 });
+
 let provider: Provider;
 const keychain = new Map<string, string>();
+
 // What the guide says is on now on any channel: the native guide is a port too.
 let onNow: Programme | null = null;
 let listingGate: Promise<void> | null = null;
 let listingReads = 0;
+
 vi.mock("../src/guide.ts", async (original) => {
   const actual = await original<typeof import("../src/guide.ts")>();
+
   const listings = async (keys: readonly string[]) => {
     listingReads++;
+
     if (listingGate) await listingGate;
+
     return new Map(keys.map((key) => [key, { now: onNow, next: null }]));
   };
+
   return { ...actual, guide: { ...actual.guide, listings } };
 });
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-secure-store", () => keychainStore(() => keychain));
+
 vi.mock("@mrstreamer/core/xtream", async () => ({
   ...(await vi.importActual<typeof import("@mrstreamer/core/xtream")>("@mrstreamer/core/xtream")),
   xtreamProvider: () => provider,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => port,
   VideoView: () => null,
   VideoAirPlayButton: () => null,
   isPictureInPictureSupported: () => false,
 }));
+
 // Watch's system sheets, kept to read and pick from.
 const sheets: Array<{
   title?: string;
@@ -58,16 +74,20 @@ const sheets: Array<{
   options: readonly string[];
   pick: (index: number) => void;
 }> = [];
+
 // What VoiceOver was told, in order.
 const announced: string[] = [];
+
 // Who listens for the app leaving the foreground.
 const appState = vi.hoisted(() => new Set<(state: string) => void>());
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   AppState: {
     currentState: "active",
     addEventListener: (_: "change", listener: (state: string) => void) => {
       appState.add(listener);
+
       return { remove: () => appState.delete(listener) };
     },
   },
@@ -85,36 +105,48 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined }, usePathname: () => "/live" }));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => ({ tab: "live" }),
   openOnTabs: () => undefined,
 }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, onPress }: { testID?: string; onPress: () => void }) =>
       createElement("button", { "data-testid": testID, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
+
 // The native format module: each session serves its playlist at once, naming `unshown` as the
 // subtitle tracks it can't carry, and closes when asked.
 type Unshown = { language: string | null; format: string | null; forced: boolean };
+
 let unshown: { named: Unshown[]; more: number } = { named: [], more: 0 };
 const closeSession = new Map<string, () => void>();
+
 // The keyboard's shortcuts Watch offers, pressed by their key.
 const keys = { offered: [] as { id: string; input: string }[], press: (_id: string) => {} };
+
 // The system's Now Playing as the native media controls module holds it, and its commands.
 type NowPlaying = {
   session: number;
@@ -128,15 +160,18 @@ type NowPlaying = {
   seekable: boolean;
   next: boolean;
 };
+
 type MediaCommand = { session: number } & (
   | { command: "play" | "pause" | "toggle" | "next" }
   | { command: "skip"; seconds: number }
   | { command: "seek"; position: number }
 );
+
 const system = {
   shown: null as NowPlaying | null,
   command: (_command: MediaCommand) => {},
 };
+
 Object.assign(globalThis, {
   expo: {
     modules: {
@@ -146,6 +181,7 @@ Object.assign(globalThis, {
         },
         addListener: (_event: "command", listener: (event: { id: string }) => void) => {
           keys.press = (id) => listener({ id });
+
           return { remove: () => (keys.press = () => {}) };
         },
       },
@@ -158,6 +194,7 @@ Object.assign(globalThis, {
         },
         addListener: (_event: "command", listener: (command: MediaCommand) => void) => {
           system.command = listener;
+
           return { remove: () => (system.command = () => {}) };
         },
       },
@@ -194,17 +231,22 @@ let liveStream: ReturnType<typeof vi.fn<Provider["liveStream"]>>;
 let archiveStream: ReturnType<typeof vi.fn<Provider["archiveStream"]>>;
 let container = document.createElement("div");
 let unmount = () => {};
+
 const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
+
 async function until(ready: () => boolean) {
   for (let i = 0; i < 500 && !ready(); i++) {
     if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(10);
     else await new Promise((done) => setTimeout(done, 10));
   }
+
   expect(ready()).toBe(true);
 }
+
 const phase = () => playback.playbackState.get().phase;
+
 const fromStart = () =>
   [...container.querySelectorAll("button")].find(
     (button) => button.getAttribute("data-testid") === "watch-from-start",
@@ -241,23 +283,28 @@ async function connect(days: readonly (number | null)[]) {
       ],
     }),
   };
+
   const id = await account.add({
     server: "http://catchup.example",
     username: "fixture",
     password: "fixture-pass",
   });
+
   if (!id) throw new Error("No saved account");
   await until(() => {
     const now = account.currentCatalogue();
+
     return now.kind === "ready" && now.library.byKey.has(`${id}:10`);
   });
   const now = account.currentCatalogue();
   const found = now.kind === "ready" ? now.library.byKey.get(`${id}:10`) : undefined;
+
   if (!found) throw new Error("No channel");
   channel = found;
   preferences.updateMediaPreferences("liveQuality", "fhd");
   preferences.updateChannelPick(channel, null);
 }
+
 /** Recordings that start `seconds` before the programme asked for, as on the minute before. */
 function earlier(seconds: number) {
   archiveStream.mockImplementation(async (id, window) => ({
@@ -266,12 +313,14 @@ function earlier(seconds: number) {
     start: window.start - seconds * 1000,
   }));
 }
+
 /** A programme that started `ago` and lasts an hour. */
 const aired = (ago: number) => ({
   title: "Morning Tide",
   start: Date.now() - ago,
   stop: Date.now() - ago + HOUR,
 });
+
 async function play(programme: { title: string; start: number; stop: number }) {
   await React.act(async () => {
     account.playChannel(channel, "News", { watch: true, programme });
@@ -284,6 +333,7 @@ beforeAll(async () => {
   mkdirSync(join(native.root, "documents"));
   await account.restore();
 });
+
 beforeEach(() => {
   liveStream = vi.fn(async (id: string) => ({ url: `live:${id}`, format: "hls" as const }));
   archiveStream = vi.fn(async (id: string, window: ArchiveWindow) => ({
@@ -305,11 +355,13 @@ beforeEach(() => {
   unmount = () => React.act(() => root.unmount());
   React.act(() => root.render(React.createElement(WatchLayer)));
 });
+
 afterEach(async () => {
   vi.useRealTimers();
   unmount();
   await playback.stop();
   await tick();
+
   // Cases that play no channel connect none.
   if (channel) await account.remove(channel.subscriptionId, { keepHistory: true });
 });
@@ -564,6 +616,7 @@ describe("a programme from catch-up", () => {
     const held = Promise.withResolvers<void>();
     listingGate = held.promise;
     const before = listingReads;
+
     try {
       await React.act(async () => {
         guide.background();
@@ -615,10 +668,13 @@ describe("a programme from catch-up", () => {
     listingGate = held.promise;
     const before = listingReads;
     const refreshing = Promise.withResolvers<void>();
+
     const request = vi.spyOn(provider, "liveGuideRequest").mockImplementation(async () => {
       await refreshing.promise;
+
       return { kind: "none" };
     });
+
     try {
       await React.act(async () => {
         // Foreground repeats the status/minute read without changing the guide contents.
@@ -643,9 +699,11 @@ describe("a programme from catch-up", () => {
     "hides the old start-over action after a %s",
     async (change) => {
       await connect([3, 3, 3]);
+
       if (change === "programme end")
         vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
       onNow = { ...aired(HOUR / 4), description: null, title: "Previous bulletin" };
+
       if (change === "programme end") onNow = { ...onNow, stop: Date.now() + 1000 };
       await React.act(async () => {
         account.playChannel(channel, "News", { watch: true });
@@ -659,6 +717,7 @@ describe("a programme from catch-up", () => {
       const before = listingReads;
       const next = { ...aired(HOUR / 60), description: null, title: "Updated bulletin" };
       onNow = next;
+
       try {
         await React.act(async () => {
           if (change === "guide change") guide.configure(new Map(), new Map());
@@ -698,6 +757,7 @@ describe("a programme from catch-up", () => {
           held.resolve();
           await tick();
         });
+
         if (change === "programme end") vi.useRealTimers();
       }
     },
@@ -721,6 +781,7 @@ describe("sound and subtitles in Watch", () => {
     [...container.querySelectorAll("button")].find(
       (each) => each.getAttribute("data-testid") === id,
     ) ?? null;
+
   /**
    * What the stream playing offers, as the native player reads it for this attempt: the main
    * sound, selected, and an audio description, under the native ids `ids` names.
@@ -777,6 +838,7 @@ describe("sound and subtitles in Watch", () => {
       ...groups,
     };
   }
+
   async function open(id: "watch-audio" | "watch-subtitles") {
     const before = sheets.length;
     await React.act(async () => {
@@ -784,8 +846,10 @@ describe("sound and subtitles in Watch", () => {
       await tick();
     });
     await until(() => sheets.length > before);
+
     return sheets.at(-1)!;
   }
+
   async function watchLive(days: number | null = null) {
     await connect([days, days, days]);
     port.selectObservedTrackAsync.mockImplementation(async (_expected, _revision, choice) => {
@@ -794,6 +858,7 @@ describe("sound and subtitles in Watch", () => {
           choice.kind === "audio"
             ? { ...port.tracks, selectedAudioId: choice.track.id }
             : { ...port.tracks, selectedSubtitleId: choice.track?.id ?? null };
+
       return { kind: "requested" };
     });
     await React.act(async () => {
@@ -802,6 +867,7 @@ describe("sound and subtitles in Watch", () => {
     });
     await until(() => opened.length === 1);
   }
+
   afterEach(() => {
     // Watch holds the keyboard while a sheet shows, past its unmount, until the sheet answers.
     for (const sheet of sheets) sheet.pick(sheet.options.length - 1);
@@ -943,6 +1009,7 @@ describe("sound and subtitles in Watch", () => {
       ],
       more: 2,
     };
+
     const film = {
       id: "film",
       subscriptionId: null,
@@ -952,6 +1019,7 @@ describe("sound and subtitles in Watch", () => {
       next: false,
       versions: false,
     };
+
     const file = { url: "http://panel/film.mkv", container: "mkv" as const };
     await React.act(async () => {
       playback.play(
@@ -963,8 +1031,10 @@ describe("sound and subtitles in Watch", () => {
     });
     await until(() => opened.length === 1);
     offer();
+
     const cantShow =
       "Can't show here: English (PGS), Dutch (DVD, forced), Unknown language (unknown format) and 2 more.";
+
     const subtitles = await open("watch-subtitles");
     expect(subtitles.options).toEqual(["✓ Off", "Dutch", "Cancel"]);
     expect(subtitles.message).toBe(cantShow);
@@ -997,8 +1067,10 @@ describe("sound and subtitles in Watch", () => {
     });
     expect((await open("watch-audio")).options[1]).toBe("✓ English · Audio description");
     const now = account.currentCatalogue();
+
     const weather =
       now.kind === "ready" ? now.library.byKey.get(`${channel.subscriptionId}:20`) : undefined;
+
     if (!weather) throw new Error("No second channel");
     port.selectObservedTrackAsync.mockClear();
     await React.act(async () => {
@@ -1049,6 +1121,7 @@ describe("an episode's end in Watch", () => {
   /** What the countdown or Next episode played. */
   const played: string[] = [];
   const byTestId = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+
   const press = (id: string) =>
     React.act(async () => {
       [...container.querySelectorAll("button")]
@@ -1056,18 +1129,22 @@ describe("an episode's end in Watch", () => {
         ?.click();
       await tick();
     });
+
   const key = (input: string) =>
     React.act(async () => {
       const shortcut = keys.offered.find((each) => each.input === input);
+
       if (!shortcut) throw new Error(`No ${input} offered`);
       keys.press(shortcut.id);
       await tick();
     });
+
   const seconds = (ms: number) =>
     React.act(async () => {
       vi.advanceTimersByTime(ms);
       await tick();
     });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     played.length = 0;
@@ -1190,21 +1267,25 @@ describe("an episode's end in Watch", () => {
   it("counts nothing down for an end that comes while the app is away", async () => {
     const { AppState } = await import("react-native");
     AppState.currentState = "background";
+
     try {
       await ends();
       await seconds(20_000);
     } finally {
       AppState.currentState = "active";
     }
+
     expect(byTestId("watch-up-next")).toBeNull();
     expect(played).toEqual([]);
   });
 
   it("counts nothing down once the app left while it asked which episode goes on", async () => {
     let answer = () => {};
+
     await ends(() => new Promise((resolve) => (answer = () => resolve(third))));
     await React.act(async () => {
       for (const listener of appState) listener("background");
+
       for (const listener of appState) listener("active");
       answer();
       await tick();
@@ -1230,6 +1311,7 @@ describe("an episode's end in Watch", () => {
 
 describe("the system's Now Playing and remote commands", () => {
   const nexts: string[] = [];
+
   const movie = {
     id: "sub-1:m1",
     subscriptionId: null,
@@ -1239,12 +1321,14 @@ describe("the system's Now Playing and remote commands", () => {
     next: true,
     versions: false,
   };
+
   /** Sends `command` for what the system shows, or for `session` when given. */
   const send = (command: DistributiveOmit<MediaCommand, "session">, session?: number) =>
     React.act(async () => {
       system.command({ ...command, session: session ?? system.shown!.session });
       await tick();
     });
+
   /** An episode with one after it plays in Watch, or in Home's preview when `watch` is false. */
   async function watchEpisode(watch = true) {
     await React.act(async () => {
@@ -1263,9 +1347,11 @@ describe("the system's Now Playing and remote commands", () => {
       await tick();
     });
   }
+
   beforeEach(() => {
     nexts.length = 0;
   });
+
   /** Forgets what the player was asked so far, as playing asks it to pause and play. */
   const asked = () => {
     port.play.mockClear();
@@ -1421,6 +1507,7 @@ describe("speed in Watch", () => {
     [...container.querySelectorAll("button")].find(
       (each) => each.getAttribute("data-testid") === id,
     ) ?? null;
+
   async function watchMovie() {
     await React.act(async () => {
       await playback.play(
@@ -1445,6 +1532,7 @@ describe("speed in Watch", () => {
       await tick();
     });
   }
+
   async function openSpeed() {
     const before = sheets.length;
     await React.act(async () => {
@@ -1452,8 +1540,10 @@ describe("speed in Watch", () => {
       await tick();
     });
     await until(() => sheets.length > before);
+
     return sheets.at(-1)!;
   }
+
   afterEach(() => {
     for (const sheet of sheets) sheet.pick(sheet.options.length - 1);
     preferences.updateMediaPreferences("titleSpeed", 1);
@@ -1468,9 +1558,11 @@ describe("speed in Watch", () => {
       await tick();
     });
     expect(port.playbackRate).toBe(1.5);
+
     const saved = JSON.parse(
       readFileSync(join(native.root, "documents/media-preferences.json"), "utf8"),
     );
+
     expect(saved.titleSpeed).toBe(1.5);
     // Until the player reports it, the tick stays on what it last said it plays at.
     expect((await openSpeed()).options[2]).toBe("✓ 1×");

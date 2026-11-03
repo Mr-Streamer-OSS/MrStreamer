@@ -23,6 +23,7 @@ const Metric = type({
   samples: "number[]",
   "budget?": { limit: "number", outcome: "'pass' | 'warning'", basis: "'max' | 'median'" },
 });
+
 const Calibration = type({
   method: "string",
   knownDelayMs: "number",
@@ -30,6 +31,7 @@ const Calibration = type({
   observationErrorMs: "number",
   overheadMs: "number",
 });
+
 const Result = type({
   schemaVersion: "1",
   tool: "string",
@@ -60,13 +62,17 @@ const Result = type({
   metrics: { "[string]": Metric },
   checks: { "[string]": "boolean" },
 });
+
 export type Measurement = typeof Result.infer;
+
 export type MetricSamples = typeof Metric.infer;
 
 export function positiveCount(value: string, name: string, maximum: number): number {
   const count = Number(value);
+
   if (!Number.isInteger(count) || count < 1 || count > maximum)
     throw new Error(`${name} must be an integer from 1 to ${maximum}`);
+
   return count;
 }
 
@@ -88,22 +94,28 @@ export function environment(
       return "unavailable";
     }
   };
+
   const main = options.appDirectory ? resolve(options.appDirectory, "out/main/index.js") : "";
   const builtCheckout = !!main && existsSync(main);
+
   const buildMode = builtCheckout
     ? "built-checkout"
     : options.executable
       ? "packaged"
       : "node-source";
+
   const fixtureFfmpeg =
     command(process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg", ["-version"]).split("\n")[0] ??
     "unavailable";
+
   const resources = options.executable
     ? platform() === "darwin"
       ? resolve(dirname(options.executable), "../Resources")
       : join(dirname(options.executable), "resources")
     : "";
+
   const bundled = join(resources, "ffmpeg", platform() === "win32" ? "ffmpeg.exe" : "ffmpeg");
+
   const playerFfmpeg = !options.executable
     ? "not-used"
     : process.env["MR_STREAMER_FFMPEG"] || builtCheckout
@@ -111,7 +123,9 @@ export function environment(
       : existsSync(bundled)
         ? (command(bundled, ["-version"]).split("\n")[0] ?? "unavailable")
         : "unavailable";
+
   const sourceState = command("git", ["status", "--porcelain"]);
+
   return {
     recordedAt: new Date().toISOString(),
     platform: `${platform()} ${release()}`,
@@ -163,6 +177,7 @@ export function median(samples: readonly number[]): number {
     throw new Error("Instrumentation requires nonempty finite samples");
   const sorted = samples.toSorted((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
+
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
@@ -173,6 +188,7 @@ export function metric(
   basis: "max" | "median" = "max",
 ): MetricSamples {
   const value = basis === "max" ? Math.max(...samples) : median(samples);
+
   return {
     unit,
     samples,
@@ -191,6 +207,7 @@ export function metric(
 
 export function validateMeasurement(input: unknown): Measurement {
   const result = Result.assert(input);
+
   const searchRuns =
     result.tool === "app" && result.workload["warmSearchRunsPerQuery"]
       ? positiveCount(
@@ -199,6 +216,7 @@ export function validateMeasurement(input: unknown): Measurement {
           100,
         )
       : 0;
+
   const appMetrics = searchRuns
     ? {
         ...APP_METRICS,
@@ -207,6 +225,7 @@ export function validateMeasurement(input: unknown): Measurement {
           : APP_SEARCH_METRICS),
       }
     : APP_METRICS;
+
   const expected =
     result.tool === "app"
       ? {
@@ -220,26 +239,34 @@ export function validateMeasurement(input: unknown): Measurement {
         : result.tool === "viewing"
           ? VIEWING_METRICS
           : null;
+
   if (!expected) throw new Error("Unknown measurement tool");
+
   if (
     JSON.stringify(Object.keys(result.metrics).sort()) !==
     JSON.stringify(Object.keys(expected).sort())
   )
     throw new Error("Instrumentation requires complete metric sets");
+
   for (const [name, unit] of Object.entries(expected))
     if (result.metrics[name]?.unit !== unit) throw new Error(`Incorrect metric unit: ${name}`);
   const subscriptions = positiveCount(String(result.workload["subscriptions"]), "subscriptions", 4);
+
   if (result.tool === "app") {
     const runs = positiveCount(String(result.workload["runs"]), "runs", 20);
+
     for (const name of ["time to picture", "channel switch"]) {
       const pictures =
         result.observations?.filter((observation) => observation["name"] === name) ?? [];
+
       if (pictures.length !== runs)
         throw new Error(`Incomplete moving picture observations: ${name}`);
+
       for (const picture of pictures) {
         const previous = picture["previousTime"],
           current = picture["currentTime"],
           width = picture["videoWidth"];
+
         if (
           typeof previous !== "number" ||
           typeof current !== "number" ||
@@ -254,6 +281,7 @@ export function validateMeasurement(input: unknown): Measurement {
           throw new Error(`Invalid moving picture observation: ${name}`);
       }
     }
+
     for (const [name, measure] of Object.entries(result.metrics)) {
       const count =
         name === "installed size (MB)" || name === "streams opened, Home to Watch (count)"
@@ -261,9 +289,12 @@ export function validateMeasurement(input: unknown): Measurement {
           : name in APP_SEARCH_METRICS || name in APP_UNCACHED_SEARCH_METRICS
             ? searchRuns
             : runs;
+
       if (measure.samples.length !== count) throw new Error(`Incomplete samples: ${name}`);
     }
+
     if (!result.calibration?.length) throw new Error("Missing renderer calibration");
+
     for (const sample of result.calibration)
       if (
         [
@@ -275,8 +306,10 @@ export function validateMeasurement(input: unknown): Measurement {
       )
         throw new Error("Invalid renderer calibration");
   }
+
   if (result.tool === "guide" || result.tool === "viewing") {
     const counts = result.tool === "guide" ? GUIDE_SAMPLE_COUNTS : VIEWING_SAMPLE_COUNTS;
+
     for (const [name, measure] of Object.entries(result.metrics)) {
       const expectedCount =
         name === "time to ready per subscription"
@@ -284,20 +317,24 @@ export function validateMeasurement(input: unknown): Measurement {
             ? 1
             : subscriptions
           : counts[name];
+
       if (measure.samples.length !== expectedCount) throw new Error(`Incomplete samples: ${name}`);
     }
   }
+
   if (result.tool === "guide") {
     const channels = positiveCount(
       String(result.workload["guideChannels"]),
       "guideChannels",
       50000,
     );
+
     const programmes = positiveCount(
       String(result.workload["programmesPerChannel"]),
       "programmesPerChannel",
       GENERATED_GUIDE_PER_CHANNEL,
     );
+
     if (
       result.workload["source"] === "synthetic" &&
       channels * programmes > GENERATED_GUIDE_PROGRAMMES
@@ -308,27 +345,34 @@ export function validateMeasurement(input: unknown): Measurement {
       "documentBytes",
       Number.MAX_SAFE_INTEGER,
     );
+
     if (
       result.workload["screenChannels"] !== 60 ||
       result.workload["channelsPerSubscription"] !== 13000
     )
       throw new Error("Invalid guide workload");
     positiveCount(String(result.workload["mappedChannels"]), "mappedChannels", 300);
+
     for (const [name, limit] of Object.entries(GUIDE_BUDGETS)) {
       const budget = result.metrics[name]!.budget;
+
       if (budget?.limit !== limit || budget.basis !== "max")
         throw new Error(`Incorrect guide budget: ${name}`);
     }
+
     if (result.metrics["download and index"]!.budget)
       throw new Error("Aggregate guide refresh has no per-subscription budget");
   }
+
   if (result.tool === "viewing") {
     const events = positiveCount(String(result.workload["inputEvents"]), "inputEvents", 1000000);
+
     const recorded = positiveCount(
       String(result.workload["recordedEvents"]),
       "recordedEvents",
       events + 2000,
     );
+
     if (
       recorded < 1000 ||
       result.workload["samples"] !== 1000 ||
@@ -339,6 +383,7 @@ export function validateMeasurement(input: unknown): Measurement {
     )
       throw new Error("Invalid viewing workload");
   }
+
   const requiredChecks =
     result.tool === "app"
       ? ["completeMetrics", "movingPicture"]
@@ -347,11 +392,14 @@ export function validateMeasurement(input: unknown): Measurement {
           ? ["localDocumentLoaded"]
           : ["searchReturnsProgrammes", "listSearchReturnsChannels", "mappingsAvailable"]
         : ["rebuiltListsMatch", "rebuiltOrderMatches"];
+
   for (const check of requiredChecks)
     if (result.checks[check] !== true) throw new Error(`Invalid instrumentation: ${check}`);
+
   for (const values of [result.workload, result.conditions])
     if (Object.values(values).some((value) => typeof value === "number" && !Number.isFinite(value)))
       throw new Error("Non-finite measurement metadata");
+
   if (
     !Number.isInteger(result.environment.logicalCpus) ||
     result.environment.logicalCpus < 1 ||
@@ -359,11 +407,13 @@ export function validateMeasurement(input: unknown): Measurement {
     result.environment.loadAverage.some((value) => !Number.isFinite(value) || value < 0)
   )
     throw new Error("Invalid environment metadata");
+
   if (
     result.environment.fixtureFfmpeg !== undefined &&
     result.environment.fixtureFfmpeg !== result.environment.ffmpeg
   )
     throw new Error("Fixture FFmpeg alias mismatch");
+
   for (const observation of result.observations ?? [])
     if (
       Object.values(observation).some(
@@ -371,33 +421,44 @@ export function validateMeasurement(input: unknown): Measurement {
       )
     )
       throw new Error("Non-finite observation metadata");
+
   if (result.tool === "app" && !(Number(result.conditions["timingResolutionMs"]) > 0))
     throw new Error("Missing timing resolution");
+
   for (const [name, measure] of Object.entries(result.metrics)) {
     median(measure.samples);
+
     if (measure.samples.some((sample) => sample < 0)) throw new Error(`Negative sample: ${name}`);
+
     if (measure.unit === "count" && measure.samples.some((sample) => !Number.isInteger(sample)))
       throw new Error(`Non-integer count sample: ${name}`);
+
     if (measure.budget && (!Number.isFinite(measure.budget.limit) || measure.budget.limit <= 0))
       throw new Error(`Invalid budget: ${name}`);
+
     if (measure.budget) {
       const value =
         measure.budget.basis === "max" ? Math.max(...measure.samples) : median(measure.samples);
+
       if (measure.budget.outcome !== (value < measure.budget.limit ? "pass" : "warning"))
         throw new Error(`Incorrect budget outcome: ${name}`);
     }
   }
+
   for (const [name, passed] of Object.entries(result.checks))
     if (!passed) throw new Error(`Invalid instrumentation: ${name}`);
+
   return result;
 }
 
 /** Prepare the requested destination before creating a fixture, profile or expensive workload. */
 export function prepareMeasurementOutput(path: string): void {
   const directory = dirname(resolve(path));
+
   try {
     mkdirSync(directory, { recursive: true });
     accessSync(directory, constants.W_OK);
+
     if (existsSync(path)) {
       accessSync(path, constants.W_OK);
       const descriptor = openSync(path, "r+");
@@ -414,6 +475,7 @@ export function prepareMeasurementOutput(path: string): void {
 
 export function saveMeasurement(path: string | undefined, result: Measurement): void {
   validateMeasurement(result);
+
   if (path) writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`);
 }
 
@@ -426,12 +488,14 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
   const after = candidate.map(validateMeasurement);
   const first = before[0]!;
   const names = Object.keys(first.metrics).sort();
+
   for (const run of [...before, ...after]) {
     if (
       run.tool !== first.tool ||
       JSON.stringify(Object.keys(run.metrics).sort()) !== JSON.stringify(names)
     )
       throw new Error("Comparison requires identical metric sets and tools");
+
     for (const field of [
       "platform",
       "cpu",
@@ -443,19 +507,24 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
     ] as const)
       if (run.environment[field] !== first.environment[field])
         throw new Error(`Comparison requires identical environment: ${field}`);
+
     for (const name of names) {
       if (run.metrics[name]!.unit !== first.metrics[name]!.unit)
         throw new Error(`Comparison requires identical units: ${name}`);
+
       if (run.metrics[name]!.samples.length !== first.metrics[name]!.samples.length)
         throw new Error(`Comparison requires identical sample counts: ${name}`);
     }
+
     for (const field of ["workload", "conditions"] as const) {
       const entries = (value: Measurement[typeof field]) =>
         JSON.stringify(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
+
       if (entries(run[field]) !== entries(first[field]))
         throw new Error(`Comparison requires identical ${field}`);
     }
   }
+
   const noiseMs = Math.max(
     20,
     ...[...before, ...after].map((run) =>
@@ -465,36 +534,45 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
       ),
     ),
   );
+
   return names.map((name) => {
     const unit = first.metrics[name]!.unit;
     const a = before.flatMap((run) => run.metrics[name]!.samples);
     const b = after.flatMap((run) => run.metrics[name]!.samples);
+
     const baselineMedian = median(a),
       candidateMedian = median(b);
+
     const absoluteDelta = candidateMedian - baselineMedian;
     const relativeDelta = baselineMedian === 0 ? null : absoluteDelta / baselineMedian;
     const noise = unit === "ms" ? noiseMs : unit === "MB" ? 10 : 0;
     // Observed separation is conservative with few samples. Report all ranges, including outliers.
     const observedRangeGap = Math.min(...b) - Math.max(...a);
+
     const withinBuildSpread = Math.max(
       Math.max(...a) - Math.min(...a),
       Math.max(...b) - Math.min(...b),
     );
+
     const spread = (values: number[]) => ({
       min: Math.min(...values),
       max: Math.max(...values),
       samples: values.length,
     });
+
     const insufficientSamples =
       a.length < MINIMUM_COMPARISON_SAMPLES || b.length < MINIMUM_COMPARISON_SAMPLES;
+
     const warning =
       observedRangeGap > noise &&
       (unit === "count" ? absoluteDelta > 0 : relativeDelta === null || relativeDelta > 0.1);
+
     const outcome: "warning" | "inconclusive" | "pass" = warning
       ? "warning"
       : insufficientSamples
         ? "inconclusive"
         : "pass";
+
     return {
       name,
       unit,
@@ -521,7 +599,9 @@ export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
 /** Valid instrumentation can still be inconclusive; observed warnings survive small samples. */
 export function comparisonVerdict(comparison: ReturnType<typeof compareMeasurements>) {
   if (comparison.some((measure) => measure.outcome === "warning")) return "warning";
+
   if (comparison.some((measure) => measure.insufficientSamples)) return "inconclusive";
+
   return "pass";
 }
 
@@ -564,8 +644,10 @@ export function electronVersion(executable: string): string {
 
 /** The most programmes a generated guide has: about what a guide may unpack to, 2 GiB. */
 const GENERATED_GUIDE_PROGRAMMES = 4_000_000;
+
 /** The most programmes a generated guide channel has: two days of one-minute programmes. */
 const GENERATED_GUIDE_PER_CHANNEL = 2 * 24 * 60;
+
 const GUIDE_METRICS = {
   "longest stall while idle": "ms",
   "download and index": "ms",
@@ -587,6 +669,7 @@ const GUIDE_METRICS = {
   "resident memory added": "MB",
   "peak resident memory added while indexing": "MB",
 } as const;
+
 const VIEWING_METRICS = {
   watch: "ms",
   favourite: "ms",
@@ -622,6 +705,7 @@ const GUIDE_SAMPLE_COUNTS: Record<string, number> = {
   "resident memory added": 1,
   "peak resident memory added while indexing": 1,
 };
+
 const GUIDE_BUDGETS = {
   "longest stall while downloading": 50,
   "longest stall while reading": 50,
@@ -632,6 +716,7 @@ const GUIDE_BUDGETS = {
   "memory held by guide": 80,
   "resident memory added": 150,
 };
+
 const VIEWING_SAMPLE_COUNTS: Record<string, number> = {
   watch: 1000,
   favourite: 1000,

@@ -19,8 +19,10 @@ const saved: SavedSubtitle = {
     ],
   },
 };
+
 /** Lets the player and main's answers catch up, on the fake clock every test runs on. */
 const settle = () => vi.advanceTimersByTimeAsync(20);
+
 const english: SubtitleTrack = {
   id: 3,
   page: null,
@@ -30,13 +32,16 @@ const english: SubtitleTrack = {
   forced: false,
   default: false,
 };
+
 function shown() {
   return subtitleLayer.querySelector("[data-subtitle-text]")?.textContent ?? "";
 }
+
 function at(position: number) {
   player.element.currentTime = position;
   player.element.dispatchEvent(new Event("seeked"));
 }
+
 async function open(
   preferred: Parameters<typeof ipc.prefer>[0] = {},
   subtitles: readonly SubtitleTrack[] = [english],
@@ -49,6 +54,7 @@ async function open(
   const pictureCalls: string[] = [];
   vi.stubGlobal("fetch", async (input: string) => {
     pictureCalls.push(input);
+
     return new Response(new ReadableStream());
   });
   ipc.always("playback.openTitle", {
@@ -71,16 +77,20 @@ async function open(
     0,
   );
   await settle();
+
   return { pictureCalls, restore };
 }
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   titlePlayer.close();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
 describe("a downloaded subtitle on the movie picture", () => {
   it("starts the picture while local restore waits, then applies drift and offset without another picture request", async () => {
     const { pictureCalls: calls } = await open();

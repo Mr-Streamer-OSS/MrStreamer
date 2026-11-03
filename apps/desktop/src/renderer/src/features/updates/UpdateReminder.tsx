@@ -37,6 +37,7 @@ export function UpdateReminder() {
     statusRead: { refetch },
     downloadVersion,
   } = useUpdates();
+
   const reminder = useUi((state) => state.updateReminder);
   const free = useUi(browsing);
   const blocked = useUi(covered);
@@ -45,6 +46,7 @@ export function UpdateReminder() {
   // The service names only the release on offer, so a due reminder is always downloadable.
   const due = status?.reminder?.version ?? null;
   const returnFocus = useRef<Element | null>(null);
+
   const recordDisplay = useCallback(
     (node: HTMLElement | null) => {
       if (node && version) {
@@ -59,10 +61,12 @@ export function UpdateReminder() {
   useEffect(() => {
     if (reminder !== null || !due || !free) return;
     useUi.setState({ updateReminder: "asking" });
+
     const settle = (next: Ui["updateReminder"]) =>
       useUi.setState((state) =>
         state.updateReminder === "asking" ? { updateReminder: next } : {},
       );
+
     call("updates.showReminder", { version: due }).then(
       async (allowed) => {
         if (allowed) settle({ allowed: due });
@@ -78,6 +82,7 @@ export function UpdateReminder() {
   // Permission belongs to one version. Changed or withdrawn offers must be validated again.
   useEffect(() => {
     if (typeof reminder !== "object" || reminder === null || !("allowed" in reminder)) return;
+
     if (due !== reminder.allowed) useUi.setState({ updateReminder: null });
     else if (free) useUi.setState({ updateReminder: { kept: due }, updateDialog: "reminder" });
   }, [reminder, due, free]);
@@ -98,6 +103,7 @@ export function UpdateReminder() {
   if (!status || !version) return null;
   const notes = status.offer?.version === version ? noteItems(status.offer.notes) : [];
   const close = () => useUi.setState({ updateDialog: null });
+
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && close()}>
       <Dialog.Portal>
@@ -107,9 +113,11 @@ export function UpdateReminder() {
           data-update-reminder
           finalFocus={() => {
             const focused = document.activeElement;
+
             if (focused && focused !== document.body && !focused.closest("[data-update-reminder]"))
               return false;
             const previous = returnFocus.current;
+
             // Playback may have removed the opener before the deferred reminder appeared.
             return previous instanceof HTMLElement &&
               previous !== document.body &&

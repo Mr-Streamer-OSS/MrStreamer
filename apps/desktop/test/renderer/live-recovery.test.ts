@@ -82,13 +82,16 @@ let sessions = 0;
 
 const wait = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
 const text = () => container.textContent ?? "";
+
 /** The streams asked for so far. */
 const asked = () => ipc.argsOf("playback.open");
+
 /** What the failed or reconnecting channel offers, in order, besides closing its message. */
 const offered = () =>
   [
     ...container.querySelectorAll("[data-playback-state] button:not([aria-label='Close message'])"),
   ].map((each) => each.textContent);
+
 /** What a screen reader is told. */
 const announced = () => container.querySelector(".sr-only[role=status]")?.textContent ?? "";
 
@@ -96,7 +99,9 @@ function button(label: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!found) throw new Error(`No ${label} button in "${text()}"`);
+
   return found;
 }
 
@@ -108,6 +113,7 @@ async function key(name: string, target: EventTarget = window): Promise<boolean>
   await act(async () => {
     target.dispatchEvent(event);
   });
+
   return event.defaultPrevented;
 }
 
@@ -117,6 +123,7 @@ async function key(name: string, target: EventTarget = window): Promise<boolean>
  */
 function nextStream(format: StreamFormat = "hls"): () => Promise<void> {
   const held = ipc.hold("playback.open");
+
   return () =>
     act(async () => {
       const sessionId = `s${++sessions}`;
@@ -182,12 +189,16 @@ async function playing(seconds: number, channel = vrt): Promise<void> {
 /** Whether no stream was asked for while the one before it was still open. */
 function oneAtATime(): boolean {
   let open = 0;
+
   for (const method of ipc.methods()) {
     if (method === "playback.close") open--;
+
     if (method !== "playback.open") continue;
+
     if (open > 0) return false;
     open++;
   }
+
   return true;
 }
 
@@ -205,6 +216,7 @@ afterEach(async () => {
   });
   await unmount();
   unmount = () => {};
+
   vi.useRealTimers();
 });
 
@@ -220,6 +232,7 @@ describe("a channel that breaks off", () => {
     ipc.always("playback.playing", null);
     await converted();
     ipc.refuse("playback.open", { kind: "stream", failure: DROPPED });
+
     for (const [index, delay] of WAITS.entries()) {
       expect(player.state().phase).toMatchObject({ kind: "reconnecting", attempt: index + 1 });
       const count = asked().length;
@@ -229,6 +242,7 @@ describe("a channel that breaks off", () => {
       expect(asked()).toHaveLength(count + 1);
       expect(asked().at(-1)).toMatchObject({ repair: true });
     }
+
     expect(player.state().phase).toMatchObject({ kind: "failed", problem: { kind: "network" } });
     await wait(60_000);
     expect(asked()).toHaveLength(6);
@@ -259,6 +273,7 @@ describe("a channel that breaks off", () => {
       await plays(5);
       expect(player.state().phase.kind).toBe("playing");
     }
+
     await stops(DROPPED);
 
     expect(text()).toContain("Keeps dropping");
@@ -303,6 +318,7 @@ describe("a channel that breaks off", () => {
     expect(announced()).toBe("");
 
     const reconnecting = "Reconnecting. VRT 1's stream isn't arriving.";
+
     for (const delay of WAITS) {
       const starts = nextStream();
       await stops(DROPPED);
@@ -311,6 +327,7 @@ describe("a channel that breaks off", () => {
       expect(announced()).toBe(reconnecting);
       await starts();
     }
+
     await stops(DROPPED);
 
     expect(text()).toContain("Lost the stream");
@@ -338,6 +355,7 @@ describe("a channel that never starts", () => {
       await wait(1);
       expect(asked()).toHaveLength(before + 1);
     }
+
     await starts();
     await stops(DROPPED, tried({ vrt: DROPPED, "vrt-hd": DROPPED, "vrt-sd": DROPPED }));
 
@@ -364,6 +382,7 @@ describe("a channel that never starts", () => {
       await wait(21_000);
       await wait(delay);
     }
+
     await starts();
     ipc.hold("playback.failure").resolve(null);
     ipc.hold("playback.playing").resolve(tried({}, "vrt"));
@@ -378,12 +397,14 @@ describe("a channel that never starts", () => {
   it("starts afresh with Retry, on the same channel", async () => {
     let starts = nextStream();
     await watching();
+
     for (const delay of WAITS) {
       await starts();
       starts = nextStream();
       await stops(DROPPED);
       await wait(delay);
     }
+
     await starts();
     await stops(DROPPED);
 
@@ -463,6 +484,7 @@ describe("what a failure shows", () => {
         "The stream could not be converted. http://demo:hunter2@panel.example:8080/1.ts: Invalid data",
     });
     expect(text()).toContain("Can't play this stream");
+
     for (const leaked of ["hunter2", "panel.example", "Invalid data", "converted"]) {
       expect(text()).not.toContain(leaked);
     }

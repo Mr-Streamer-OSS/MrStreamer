@@ -42,18 +42,22 @@ describe("downloads", { timeout: 30_000 }, () => {
     const watchlist = await import("../src/watchlist.ts");
     const lists = app.titleLists();
     const live = app.currentCatalogue();
+
     if (lists.kind !== "ready" || live.kind !== "ready") throw new Error("No lists");
     const { kindOf } = await import("@mrstreamer/core/ondemand/catalogue");
     const film = app.titleOf(lists.index, "movie", movieRef(a))!;
+
     const series = app.titleOf(lists.index, "series", {
       subscriptionId: a,
       id: String(episode().series.id),
     })!;
+
     const ordinary = kindOf(lists.index, "movie").titles.find((title) =>
       title.versions.every(
         (version) => ![String(movie().id), String(otherMovie().id)].includes(version.id),
       ),
     )!;
+
     const channel = live.library.channels[0]!;
     watchlist.saveTitle(film);
     watchlist.saveTitle(series);
@@ -61,11 +65,13 @@ describe("downloads", { timeout: 30_000 }, () => {
     const copy = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, copy.id), "the personal copy");
     const originalCopy = mediaFile(copy.id)!;
+
     const ordinaryCopy = await app.addDownload({
       kind: "movie",
       subscriptionId: a,
       id: ordinary.id,
     });
+
     await until(() => isComplete(app, ordinaryCopy.id), "the permitted personal copy");
     memory.restricted = {
       movies: [String(movie().id), String(otherMovie().id)],
@@ -76,6 +82,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     app.reloadChannels(a);
     await until(() => {
       const titles = app.titleLists();
+
       return (
         titles.kind === "ready" &&
         app.titlesWorkedOut() &&
@@ -111,8 +118,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     app.playChannel(channel, "Live", { watch: true });
     expect(app.playbackState.get().phase.kind).toBe("idle");
     expect(one.fileRequests()).toBe(requests);
+
     const shownWatchlist = () => {
       const lists = app.titleLists();
+
       return watchlist.watchlistRows(
         watchlist.currentWatchlist(),
         {
@@ -124,6 +133,7 @@ describe("downloads", { timeout: 30_000 }, () => {
         "newest",
       );
     };
+
     expect(shownWatchlist().map((row) => row.name)).toEqual([ordinary.title]);
     app = await launch();
     await until(
@@ -132,6 +142,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     );
     const restoredWatchlist = await import("../src/watchlist.ts");
     const restored = app.titleLists();
+
     if (restored.kind !== "ready") throw new Error("No restored lists");
     expect(
       restoredWatchlist
@@ -216,6 +227,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
     memory.details = { arrived: arrived.resolve, released: released.promise };
+
     const reading = app.titleFile(
       {
         kind: "episode",
@@ -227,7 +239,9 @@ describe("downloads", { timeout: 30_000 }, () => {
       },
       AbortSignal.timeout(20_000),
     );
+
     const rejected = expect(reading).rejects.toMatchObject({ error: { kind: "title-not-found" } });
+
     try {
       await arrived.promise;
       memory.restricted = { movies: [], series: [String(series.id)], channel: "" };
@@ -240,6 +254,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       memory.details = null;
       released.resolve();
     }
+
     await rejected;
     await expect(app.titleFile(movieRef(a), AbortSignal.timeout(1000))).resolves.toHaveProperty(
       "url",
@@ -251,6 +266,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const app = await launch();
     const { a } = await withProviders(app);
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No lists");
     const watchlist = await import("../src/watchlist.ts");
     const film = app.titleOf(lists.index, "movie", movieRef(a))!;
@@ -265,7 +281,9 @@ describe("downloads", { timeout: 30_000 }, () => {
       )
         throw new Error("Storage refused");
     };
+
     memory.restricted = { movies: [String(movie().id)], series: [], channel: "" };
+
     try {
       app.reloadTitles(a);
       await until(
@@ -274,6 +292,7 @@ describe("downloads", { timeout: 30_000 }, () => {
         "catalogue invalidation and native fence",
       );
       const current = app.titleLists();
+
       if (current.kind !== "ready") throw new Error("No refreshed lists");
       expect(app.titleOf(current.index, "movie", movieRef(a))).toBeUndefined();
       expect(app.downloadList().items.some((item) => item.id === copy.id)).toBe(false);
@@ -287,6 +306,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     } finally {
       native.sync = null;
     }
+
     app.reloadTitles(a);
     await until(() => background.receipts.length === 0, "the retained fence receipt");
     const ordinary = await app.addDownload(movieRef(a, otherMovie().id));
@@ -303,12 +323,14 @@ describe("downloads", { timeout: 30_000 }, () => {
       const copy = await app.addDownload(movieRef(a));
       await until(() => (receivedOf(app, copy.id) ?? 0) > 0, "the partial download");
       appGoes("background");
+
       if (race === "missed native notification") background.die();
       else
         native.sync = (operation, path) => {
           if (operation === "write" && path.endsWith("downloads.json.next"))
             throw new Error("Storage refused");
         };
+
       await until(() => native.open === 0 && mediaFile(copy.id) !== undefined, "native completion");
       const media = mediaFile(copy.id)!;
       const requests = one.fileRequests();
@@ -339,6 +361,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const copy = await app.addDownload(ref);
     await until(() => isComplete(app, copy.id), "the saved copy");
     const subtitles = await import("../src/downloaded-subtitles.ts");
+
     // Kept while the version itself played, as choosing a result does.
     const version = subtitles.subtitleTitle({
       subscriptionId: a,
@@ -347,6 +370,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       title: "Movie",
       year: null,
     });
+
     subtitles.playSubtitles(version);
     expect(
       subtitles.showDownloaded(version, {
@@ -362,8 +386,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     const asked: string[] = [];
     vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) => {
       asked.push(String(input instanceof Request ? input.url : input));
+
       return before(input, init);
     });
+
     try {
       app.playDownload(copy.id);
       await until(() => memory.played.length > 0, "the copy to open");
@@ -381,6 +407,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     } finally {
       vi.stubGlobal("fetch", before);
     }
+
     // A copy saved before its TMDB id was kept still plays, and asks by its name.
     const disk = new DiskFile(native.root, "documents", "downloads.json");
     disk.writeSync(
@@ -405,6 +432,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const app = await installedApp();
     const { a } = await withProviders(app);
     const { series, first } = episode();
+
     const copy = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -413,6 +441,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => isComplete(app, copy.id), "the saved episode");
     // Read back after a relaunch. The play carries its identity whether or not this build's player
     // opens the MKV file.
@@ -439,11 +468,13 @@ describe("downloads", { timeout: 30_000 }, () => {
     const copy = await app.addDownload(movieRef(a));
     await until(() => isComplete(app, copy.id), "the saved copy");
     const disk = new DiskFile(native.root, "documents", "downloads.json");
+
     const stored: unknown = JSON.parse(disk.textSync(), (key, value: unknown) =>
       key === "about" && typeof value === "object" && value !== null
         ? { ...value, originalLanguage: "fr" }
         : value,
     );
+
     disk.writeSync(JSON.stringify(stored));
     app = await launch();
     const preferences = await import("../src/media-preferences.ts");
@@ -451,8 +482,10 @@ describe("downloads", { timeout: 30_000 }, () => {
     app.playDownload(copy.id);
     await until(() => memory.played.length === 1, "the copy to open");
     const player = memory.player;
+
     if (!player) throw new Error("No player");
     const identity = player.identity();
+
     const tracks = {
       ...identity,
       revision: 1,
@@ -474,8 +507,10 @@ describe("downloads", { timeout: 30_000 }, () => {
       selectedSubtitleId: null,
       subtitleOffAllowed: false,
     };
+
     player.selectObservedTrackAsync.mockImplementation(async (_item, _revision, choice) => {
       const current = player.tracks;
+
       if (!current) throw new Error("No native snapshot");
       player.tracks = {
         ...current,
@@ -483,6 +518,7 @@ describe("downloads", { timeout: 30_000 }, () => {
           ? { selectedAudioId: choice.track.id }
           : { selectedSubtitleId: choice.track?.id ?? null }),
       };
+
       return { kind: "requested" };
     });
     const files = one.fileRequests();
@@ -507,6 +543,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
     memory.details = { arrived: arrived.resolve, released: released.promise };
+
     // The episode's lookup is under way as the second provider goes.
     const asked = app.addDownload({
       kind: "episode",
@@ -516,6 +553,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await arrived.promise;
     await app.remove(b!, { keepHistory: true });
     expect(app.titleLists().kind).toBe("loading");
@@ -536,6 +574,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     const { series, first } = episode();
     const film = await app.addDownload(movieRef(a));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -544,6 +583,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     expect(film.subscription?.id).toBe(a);
     await until(() => isComplete(app, film.id) && isComplete(app, show.id), "both copies");
     expect(one.mostFilesAtOnce()).toBe(1);
@@ -554,9 +594,11 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(listed.items.find((item) => item.id === show.id)?.episodeName).not.toBeNull();
     // Nothing kept on disk names the address, the username or the password; nor the Keychain.
     const stored = everythingStored();
+
     for (const secret of [ONE.password, encodeURIComponent(ONE.password), `/${ONE.username}/`]) {
       expect(stored).not.toContain(secret);
     }
+
     expect(stored).not.toContain("/movie/");
     expect(downloadSecrets()).toEqual([]);
     expect(doc().forgetting).toEqual([]);
@@ -566,18 +608,23 @@ describe("downloads", { timeout: 30_000 }, () => {
     await install();
     // The panel's pictures are on image.example: served here, its backdrops refused.
     const online = globalThis.fetch;
+
     const pictures = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
+
       if (url.hostname !== "image.example") return online(input, init);
+
       return Promise.resolve(
         url.pathname.startsWith("/b/")
           ? new Response("gone", { status: 404 })
           : new Response(`picture ${url.pathname}`),
       );
     });
+
     // What this test starts, it ends, passing or not, before its spy goes.
     let app: App | null = null;
     let film: { readonly id: string } | null = null;
+
     try {
       const started = await launch();
       app = started;
@@ -621,10 +668,12 @@ describe("downloads", { timeout: 30_000 }, () => {
     const app = await installedApp();
     const { a, b } = await withProviders(app, true);
     one.stallMovieFile(movie().id, 20_000, 30_000);
+
     const [first, second] = await Promise.all([
       app.addDownload(movieRef(a)),
       app.addDownload(movieRef(a)),
     ]);
+
     expect(second.id).toBe(first.id);
     const theirs = await app.addDownload(movieRef(b!));
     expect(theirs.id).not.toBe(first.id);

@@ -18,6 +18,7 @@ export function ChannelLogo({
 }) {
   const [failed, setFailed] = useState(false);
   const box = cn("h-8 w-12 flex-none", className);
+
   if (channel.logoUrl && !failed) {
     return (
       <img
@@ -30,7 +31,9 @@ export function ChannelLogo({
       />
     );
   }
+
   const hue = hueOf(channel.title);
+
   if (plain) {
     return (
       <span
@@ -41,6 +44,7 @@ export function ChannelLogo({
       </span>
     );
   }
+
   return (
     <span
       className={cn(
@@ -58,12 +62,15 @@ export function ChannelLogo({
 export function initials(title: string): string {
   const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const [first = title, second] = words;
+
   return (second ? `${first[0] ?? ""}${second[0] ?? ""}` : first.slice(0, 2)).toUpperCase();
 }
 
 /** A stable hue for a name, used to tint tiles when there is no artwork. */
 export function hueOf(text: string): number {
   let hash = 0;
+
   for (const char of text) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 360;
+
   return hash;
 }

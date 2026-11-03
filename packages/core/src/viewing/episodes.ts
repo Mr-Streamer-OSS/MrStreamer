@@ -62,43 +62,56 @@ const numbers = (season: number, episode: number) => `${season}:${episode}`;
 /** The later of two, by `time`. */
 function latest<A>(items: readonly A[], time: (item: A) => number): A | undefined {
   let found: A | undefined;
+
   for (const item of items) if (!found || time(item) > time(found)) found = item;
+
   return found;
 }
 
 /** What a subscription recorded of a series, by episode. */
 function recorded<P extends Played>(progress: readonly P[], marks: readonly EpisodeMark[]) {
   const plays = new Map<string, P[]>();
+
   for (const entry of progress) {
     if (entry.title.kind !== "episode") continue;
     const key = numbers(entry.title.season, entry.title.episode);
     const list = plays.get(key);
+
     if (list) list.push(entry);
     else plays.set(key, [entry]);
   }
+
   const marked = new Map(marks.map((mark) => [numbers(mark.season, mark.episode), mark]));
+
   /** The play that says how an episode stands: its latest, of those begun after its mark. */
   const playOf = (season: number, episode: number, files?: ReadonlySet<string>): P | undefined => {
     const mark = marked.get(numbers(season, episode));
+
     const counted = (plays.get(numbers(season, episode)) ?? []).filter(
       (entry) => (!mark || entry.since > mark.at) && (!files || files.has(entry.title.id)),
     );
+
     return latest(counted, (entry) => entry.at);
   };
+
   const stateOf = (
     season: number,
     episode: number,
     files?: ReadonlySet<string>,
   ): EpisodeState<P> => {
     const play = playOf(season, episode, files);
+
     if (play) {
       if (play.finished) return { kind: "watched" };
+
       return play.position > 0 ? { kind: "partial", progress: play } : { kind: "unwatched" };
     }
+
     return marked.get(numbers(season, episode))?.watched
       ? { kind: "watched" }
       : { kind: "unwatched" };
   };
+
   /**
    * What the viewer did last among the episodes `within` holds: the latest mark there, or the
    * latest play of one of them begun after it.
@@ -108,6 +121,7 @@ function recorded<P extends Played>(progress: readonly P[], marks: readonly Epis
       marks.filter((each) => within(each.season)),
       (each) => each.revision,
     );
+
     const play = latest(
       progress.filter(
         ({ title, since }) =>
@@ -115,9 +129,12 @@ function recorded<P extends Played>(progress: readonly P[], marks: readonly Epis
       ),
       (entry) => entry.at,
     );
+
     if (play?.title.kind === "episode") return play.title;
+
     return mark;
   };
+
   return { stateOf, lastIn };
 }
 
@@ -127,6 +144,7 @@ export function episodeStates<P extends Played>(
   marks: readonly EpisodeMark[],
 ): (episode: Listed) => EpisodeState<P> {
   const { stateOf } = recorded(progress, marks);
+
   return (episode) =>
     stateOf(
       episode.season,
@@ -150,8 +168,11 @@ function listedAs<E extends Listed>(
           (each) =>
             each.id === named.id || each.versions?.some((version) => version.id === named.id),
         );
+
   if (byFile) return byFile.id === named.id ? byFile : { ...byFile, id: named.id };
+
   if (exact && named.id !== undefined) return undefined;
+
   return episodes.find((each) => each.season === named.season && each.number === named.episode);
 }
 
@@ -161,12 +182,14 @@ function currentProgress<E extends Listed, P extends Played>(
   progress: readonly P[],
 ): readonly P[] {
   if (!series.exactVersions) return progress;
+
   const ids = new Set(
     seriesEpisodeOrder(series).flatMap((episode) => [
       episode.id ?? "",
       ...(episode.versions?.map((file) => file.id) ?? []),
     ]),
   );
+
   return progress.filter((entry) => ids.has(entry.title.id));
 }
 
@@ -193,32 +216,42 @@ export function continuation<E extends Listed, P extends Played>(
   const sourceOrder = series.episodeOrder !== undefined;
   const main = sourceOrder ? all : numbered.length > 0 ? numbered : specials;
   const [first] = main;
+
   if (!first) return null;
   const { stateOf, lastIn } = recorded(currentProgress(series, progress), marks);
   const watched = (episode: E) => stateOf(episode.season, episode.number).kind === "watched";
+
   /** Where `group` goes on from the episode the viewer was last at in it. */
   const onward = (group: readonly E[], last: Numbered | undefined): Continuation<E, P> | null => {
     const at = last && listedAs(group, last, series.exactVersions);
+
     if (at && !watched(at)) {
       const state = stateOf(at.season, at.number);
+
       return {
         episode: at,
         resume: state.kind === "partial" ? state.progress : undefined,
         replay: false,
       };
     }
+
     const place = at
       ? group.findIndex((each) => each.season === at.season && each.number === at.number)
       : -1;
+
     const next =
       group.slice(place + 1).find((each) => !watched(each)) ??
       group.slice(0, Math.max(place, 0)).find((each) => !watched(each));
+
     return next ? { episode: next, resume: undefined, replay: false } : null;
   };
+
   const last = lastIn(() => true);
+
   // A special the series lists no more leads nowhere among them.
   const inSpecials =
     !sourceOrder && main === numbered && last?.season === 0 && !!listedAs(specials, last);
+
   return (
     (inSpecials ? onward(specials, last) : null) ??
     onward(main, inSpecials ? lastIn((season) => season > 0) : last) ?? {
@@ -243,7 +276,9 @@ export function finishes<E extends Listed, P extends Played>(
   marks: readonly EpisodeMark[],
 ): boolean {
   const { id = "", season, episode, since } = current;
+
   if (series.exactVersions && !listedAs(seriesEpisodeOrder(series), current, true)) return false;
+
   const watched: Played = {
     title: { kind: "episode", id, seriesId: "", season, episode },
     position: 0,
@@ -251,6 +286,7 @@ export function finishes<E extends Listed, P extends Played>(
     at: Infinity,
     since,
   };
+
   return continuation<E, Played>(series, [...progress, watched], marks)?.replay === true;
 }
 
@@ -270,9 +306,12 @@ export function nextUnwatched<E extends Listed, P extends Played>(
   const group = seriesEpisodeOrder(series).filter(
     (each) => series.episodeOrder !== undefined || (each.season === 0) === (current.season === 0),
   );
+
   const at = listedAs(group, current, series.exactVersions);
+
   if (!at) return undefined;
   const { stateOf } = recorded(currentProgress(series, progress), marks);
+
   return (
     group
       .slice(group.findIndex((each) => each.season === at.season && each.number === at.number) + 1)

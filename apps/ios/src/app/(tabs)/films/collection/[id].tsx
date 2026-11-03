@@ -8,6 +8,7 @@ import { Message } from "../../../../ui.tsx";
 export default function FilmsCollection() {
   useLocale();
   const { id } = useLocalSearchParams<{ id: string }>();
+
   return isCollectionId(id) ? (
     <CollectionScreen kind="movie" id={id} />
   ) : (

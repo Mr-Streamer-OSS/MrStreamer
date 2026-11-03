@@ -22,36 +22,48 @@ export function* trustedGuideIds(
    * placeholder id can hold thousands of channels of one name, which are decided once.
    */
   const byGuideId = new Map<string, { names: string[][]; keeps: Map<string, boolean> }>();
+
   for (const { channel, guideId } of claims) {
     if (due()) yield;
     const shared = byGuideId.get(guideId);
+
     if (shared) shared.names.push(words(channel.title));
     else byGuideId.set(guideId, { names: [words(channel.title)], keeps: new Map() });
   }
+
   const trusted = new Map<string, string>();
+
   for (const { channel, guideId } of claims) {
     if (due()) yield;
     const shared = byGuideId.get(guideId);
+
     if (!shared) continue;
     const name = words(channel.title);
     const said = name.join(" ");
     let keeps = shared.keeps.get(said);
+
     if (keeps === undefined) {
       keeps = alike(name, idWords(guideId));
+
       if (!keeps) {
         // Else only when every name under the id is alike, compared a slice at a time.
         keeps = true;
+
         for (const other of shared.names) {
           if (due()) yield;
+
           if (alike(other, name)) continue;
           keeps = false;
           break;
         }
       }
+
       shared.keeps.set(said, keeps);
     }
+
     if (keeps) trusted.set(channel.id, guideId);
   }
+
   return trusted;
 }
 
@@ -65,10 +77,12 @@ function words(text: string): string[] {
  */
 function idWords(guideId: string): string[] {
   const base = guideId.replace(/\.[a-z]{2,3}$/i, "").replaceAll("+", " plus ");
+
   const split = base.replace(
     /(?<=\p{Ll})(?=\p{Lu})|(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})|(?<=\p{Lu})(?=\p{Lu}\p{Ll})/gu,
     " ",
   );
+
   return words(split);
 }
 
@@ -86,20 +100,26 @@ function alike(a: readonly string[], b: readonly string[]): boolean {
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   const joinedShort = short.join("");
   const joinedLong = long.join("");
+
   if (Math.min(joinedShort.length, joinedLong.length) >= MIN_JOINED) {
     if (joinedLong.includes(joinedShort) || joinedShort.includes(joinedLong)) return true;
   }
+
   let at = 0;
+
   for (const word of short) {
     while (at < long.length && !begins(long[at] ?? "", word)) at++;
+
     if (at === long.length) return false;
     at++;
   }
+
   return true;
 }
 
 /** Numbers match whole; other words may be the start of a longer word, from two letters. */
 function begins(word: string, start: string): boolean {
   if (word === start) return true;
+
   return !/^\d+$/.test(start) && start.length >= 2 && word.startsWith(start);
 }

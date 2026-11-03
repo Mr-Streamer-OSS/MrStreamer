@@ -28,6 +28,7 @@ const scenario = vi.hoisted(() => ({
 
 const stores = await vi.hoisted(async () => {
   const { store } = await import("../src/store.ts");
+
   return {
     links: store<readonly GuideLink[]>([]),
     mappings: store<ReadonlyMap<string, string>>(new Map()),
@@ -36,7 +37,9 @@ const stores = await vi.hoisted(async () => {
 });
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ channel: scenario.channel }),
   useNavigation: () => ({ setOptions: () => undefined }),
@@ -45,6 +48,7 @@ vi.mock("expo-router", () => ({
     back: () => scenario.calls.push("back"),
   },
 }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -61,12 +65,15 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => null,
   tabHref: (tab: string, screen: string) => (tab === "(home)" ? `/${screen}` : `/${tab}/${screen}`),
 }));
+
 vi.mock("../src/account.ts", async () => {
   const { useStore } = await import("../src/store.ts");
+
   const members = () => [
     ...scenario.secrets.map(({ id, kind, label }) => ({
       entry: { id, kind },
@@ -85,6 +92,7 @@ vi.mock("../src/account.ts", async () => {
         ]
       : []),
   ];
+
   return {
     useRoster: () => ({ kind: "ready", members: members() }),
     retryChannels: () => {
@@ -110,10 +118,12 @@ vi.mock("../src/account.ts", async () => {
           },
   };
 });
+
 vi.mock("../src/guide-sources.ts", async () => {
   const { useStore } = await import("../src/store.ts");
   const { links, mappings } = stores;
   const log = (call: string) => scenario.calls.push(call);
+
   return {
     GUIDE_LIMIT: 8,
     MAPPING_MAX: 512,
@@ -122,17 +132,20 @@ vi.mock("../src/guide-sources.ts", async () => {
       useMappings: () => useStore(mappings),
       async add(link: string, name: string) {
         log(`add ${name}`);
+
         if (scenario.refusal) return scenario.refusal;
         const url = new URL(link);
         links.set((now) => [
           ...now,
           { id: "xmltv-new", origin: url.origin, name: name || null, locked: false },
         ]);
+
         return null;
       },
       async replace(id: string, link: string) {
         // The link's host, so the log holds no secret.
         log(`replace ${id} ${URL.parse(link)?.host ?? "?"}`);
+
         return scenario.refusal;
       },
       async remove(id: string) {
@@ -143,11 +156,13 @@ vi.mock("../src/guide-sources.ts", async () => {
       },
       async map(key: string, id: string | null) {
         log(`map ${key} ${id}`);
+
         return scenario.refusal;
       },
     },
   };
 });
+
 vi.mock("../src/guide.ts", () => ({
   guide: {
     subscribe: () => () => undefined,
@@ -172,11 +187,13 @@ const SECRET = "https://epg.example.com/guide.xml?token=s3cret";
 const AT = new Date(2026, 9, 29, 10, 12).getTime();
 
 let unmount = () => {};
+
 beforeEach(() => {
   stores.links.set([]);
   stores.mappings.set(new Map());
   stores.failed.set(false);
 });
+
 afterEach(() => {
   unmount();
   scenario.sheet = null;
@@ -197,6 +214,7 @@ async function render(element: React.ReactElement) {
   await React.act(async () => root.render(element));
   unmount = () => React.act(() => root.unmount());
   const find = (id: string) => container.querySelector(`[data-testid="${id}"]`);
+
   return {
     container,
     text: (id: string) => find(id)?.textContent ?? null,
@@ -280,11 +298,13 @@ it("removes a guide only once Remove is confirmed", async () => {
 it("refreshes a guide, and gives it a new link through the same form, refusals inline", async () => {
   stores.links.set([{ id: "xmltv-a", origin: "https://a.example", name: "Sport", locked: false }]);
   const screen = await render(React.createElement(GuidesScreen));
+
   const pick = async (action: string) => {
     await screen.press("guides-xmltv-a");
     const sheet = scenario.sheet!;
     await React.act(async () => sheet.pick(sheet.options.indexOf(action)));
   };
+
   await pick("Refresh");
   expect(scenario.calls).toEqual(["refresh xmltv-a"]);
 
@@ -348,9 +368,11 @@ it("shows a failed catalogue beside saved mappings and retries its channels", as
   expect(screen.container.textContent).not.toContain("Loading channels");
   expect(screen.label("guide-map-home:1")).not.toBeNull();
   expect(screen.label("guide-map-home:7")).toBeNull();
+
   const again = [...screen.container.querySelectorAll("button")].find(
     (button) => button.textContent === "Try again",
   );
+
   expect(again).toBeDefined();
   await React.act(async () => {
     again!.dispatchEvent(new Event("click", { bubbles: true }));
@@ -383,9 +405,11 @@ it("offers both secret entry and retry when different providers need them", asyn
   stores.failed.set(true);
   scenario.secrets = [{ id: "locked", kind: "xtream", label: "Living room" }];
   const screen = await render(React.createElement(GuideMapScreen));
+
   const labels = [...screen.container.querySelectorAll("button")].map(
     (button) => button.textContent,
   );
+
   expect(labels).toContain("Enter password for Living room");
   expect(labels).toContain("Try again");
 });

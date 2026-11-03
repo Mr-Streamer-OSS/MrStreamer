@@ -45,39 +45,50 @@ export interface GuideHost {
 
 export async function startGuideHost(): Promise<GuideHost> {
   const asked: ReturnType<GuideHost["requests"]>[number][] = [];
+
   const routes = new Map<
     string,
     { readonly answer: Answer; readonly options: Parameters<GuideHost["serve"]>[2] }
   >();
+
   let held: { readonly arrived: () => void; readonly released: Promise<void> } | null = null;
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://host");
     asked.push({ path: url.pathname, search: url.search, headers: request.headers });
+
     const respond = () => {
       const route = routes.get(url.pathname);
+
       if (!route) return void response.writeHead(404).end();
       const { answer, options = {} } = route;
+
       if (typeof answer === "number") return void response.writeHead(answer).end();
+
       if (typeof answer === "object" && "redirect" in answer) {
         return void response.writeHead(302, { Location: answer.redirect }).end();
       }
+
       const bytes = Buffer.from(answer);
       response.writeHead(200, options.headers);
       const size = options.pieceBytes ?? bytes.length;
       let offset = 0;
+
       const next = () => {
         if (offset >= bytes.length) return void response.end();
         response.write(bytes.subarray(offset, offset + size));
         offset += size;
         setImmediate(next);
       };
+
       next();
     };
+
     if (!held) return respond();
     held.arrived();
     void held.released.then(respond);
   });
+
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -92,6 +103,7 @@ export async function startGuideHost(): Promise<GuideHost> {
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
       held = { arrived: arrived.resolve, released: released.promise };
+
       return {
         arrived: arrived.promise,
         release() {

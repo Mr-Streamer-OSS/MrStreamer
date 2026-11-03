@@ -16,6 +16,7 @@ function parkingSpot(): HTMLDivElement {
       "position:fixed;left:-2px;top:-2px;width:1px;height:1px;overflow:hidden;pointer-events:none";
     document.body.append(parking);
   }
+
   return parking;
 }
 
@@ -24,11 +25,13 @@ function move(parent: Element, node: Element): void {
   if (parent.isConnected && node.isConnected) {
     try {
       parent.moveBefore(node, null);
+
       return;
     } catch {
       // Falls back to a plain move below.
     }
   }
+
   parent.append(node);
 }
 
@@ -44,12 +47,14 @@ export function Picture({
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const container = box.current;
+
     if (!active || !container) return;
     const video = player.element;
     video.style.objectFit = fit;
     move(container, video);
     // Subtitles stay over the picture.
     move(container, subtitleLayer);
+
     // Runs before React removes this element, so the video leaves while still in the document.
     return () => {
       if (video.parentElement !== container) return;
@@ -57,5 +62,6 @@ export function Picture({
       move(parkingSpot(), subtitleLayer);
     };
   }, [active, fit]);
+
   return <div ref={box} {...props} />;
 }

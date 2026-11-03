@@ -23,6 +23,7 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -34,26 +35,33 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined, back: () => undefined },
   useIsFocused: () => true,
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
+
 vi.mock("../src/account.ts", () => ({
   onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -66,11 +74,14 @@ vi.mock("../src/account.ts", () => ({
   retryChannels: () => undefined,
   reloadAllChannels: () => undefined,
 }));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => ({}) }));
+
 vi.mock("../src/playback.ts", async (original) => ({
   channelStatus: (await original<typeof import("../src/playback.ts")>()).channelStatus,
   usePlayback: () => ({ phase: scenario.phase, watch: false }),
 }));
+
 vi.mock("../src/storage.ts", () => ({
   useSavedState: () => scenario.saved,
   writeState: (change: (state: Partial<SavedState>) => Partial<SavedState>) => {
@@ -91,6 +102,7 @@ const channel = (id: string, name: string, categoryIds: string[]): ProviderChann
   guideId: null,
   catchupDays: null,
 });
+
 const home: LiveCatalogue = {
   categories: [
     { id: "1", name: "NL | News" },
@@ -104,6 +116,7 @@ const home: LiveCatalogue = {
     channel("13", "BE | Sporza", ["3"]),
   ],
 };
+
 const library = buildLibrary([{ subscriptionId: "a", label: "Home", catalogue: home }]);
 
 const member = (id: string, label: string, live: Member["live"]): Member => ({
@@ -114,6 +127,7 @@ const member = (id: string, label: string, live: Member["live"]): Member => ({
   live,
   titles: { kind: "idle" },
 });
+
 const listed: Member["live"] = {
   kind: "ready",
   value: home,
@@ -124,25 +138,32 @@ const listed: Member["live"] = {
 
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function open(node: React.ReactNode) {
   container = document.createElement("div");
   root = createRoot(container);
   React.act(() => root!.render(node));
 }
+
 const speak = (locale: Locale) => React.act(() => setLanguage({ locale, formats: locale }));
 const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`);
 const text = (testID?: string) => (testID ? find(testID) : container)?.textContent ?? "";
+
 const labels = () =>
   [...container.querySelectorAll("[aria-label]")].map((each) => each.getAttribute("aria-label"));
+
 function press(testID: string) {
   const button = find(testID) as { click(): void } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
+
 function type(query: string) {
   const field = find("discover-field") as {
     dispatchEvent(event: unknown): void;
   } | null;
+
   if (!field) throw new Error("No field on screen");
   React.act(() => {
     // React reads the new value through the field's own setter.
@@ -163,6 +184,7 @@ beforeEach(() => {
     sheet: null,
   });
 });
+
 afterEach(() => {
   if (root) React.act(() => root!.unmount());
   root = null;
@@ -234,11 +256,13 @@ it("counts channels and says what it can't find in Spanish, quoting the search a
 
 it("writes the status line in German, naming its providers as a German list", () => {
   speak("de-DE");
+
   const failed = {
     kind: "failed",
     error: { kind: "unexpected", detail: "offline" },
     since: 0,
   } as const;
+
   const status = (members: Member[]) =>
     libraryStatus(members, {
       channels: true,
@@ -246,16 +270,19 @@ it("writes the status line in German, naming its providers as a German list", ()
       retry: () => undefined,
       settings: () => undefined,
     });
+
   const loading = status([
     member("b", "Harbor", { kind: "idle" }),
     member("c", "Pier", { kind: "idle" }),
   ]);
+
   expect(loading?.text).toBe("Sender von Harbor und Pier werden geladen.");
 
   const stale = status([
     member("b", "Harbor", { ...failed, last: home }),
     member("c", "Pier", { ...failed, last: home }),
   ]);
+
   expect(stale?.text).toBe(
     "Sender von Harbor und Pier konnten nicht aktualisiert werden. Die letzten Listen werden angezeigt.",
   );

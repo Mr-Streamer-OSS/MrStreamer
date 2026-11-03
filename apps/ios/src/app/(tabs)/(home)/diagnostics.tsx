@@ -21,6 +21,7 @@ export default function Diagnostics() {
       void Share.share({ message: text }).catch(() =>
         Alert.alert(t("Couldn't share diagnostics"), t("Try again.")),
       );
+
     navigation.setOptions({
       title: t("Diagnostics"),
       // Only Share: what the top bar offers elsewhere would leave the text unshared.
@@ -34,6 +35,7 @@ export default function Diagnostics() {
       ],
     } satisfies NativeStackNavigationOptions);
   }, [navigation, text, locale]);
+
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       <Text style={styles.intro}>

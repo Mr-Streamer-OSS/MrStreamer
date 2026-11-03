@@ -54,8 +54,10 @@ function Screen() {
   useEffect(() => {
     if (!subscriptions.data?.length) {
       setRestored(false);
+
       return;
     }
+
     if (restored || remembered.isPending) return;
     useUi.setState({ list: remembered.data ?? { kind: "all" } });
     setRestored(true);
@@ -70,11 +72,13 @@ function Screen() {
     subscriptions.isSuccess && !subscriptions.data.some(hasTitles),
     updateOffer,
   );
+
   // Downloads and Recordings stand alone without one: Connect opens them, and Add subscription
   // goes back.
   const offline = useUi((state) =>
     state.view === "downloads" || state.view === "recordings" ? state.view : null,
   );
+
   // The login form replaces everything, and a receiver's controls with it: what it plays ends.
   useEffect(() => {
     if (connect) outputs.stop();
@@ -87,6 +91,7 @@ function Screen() {
   useEffect(() => syncRecordings(client), [client]);
 
   if (subscriptions.isPending || preferences.isPending) return null;
+
   if (subscriptions.isError) {
     return (
       <p className="p-10 text-sm text-destructive">
@@ -94,9 +99,12 @@ function Screen() {
       </p>
     );
   }
+
   if (connect) return offline ? <Offline page={offline} /> : <ConnectScreen />;
+
   // The first Home read belongs to restored discovery, not the temporary default All list.
   if (!restored) return null;
+
   return <Shell liveOnly={!subscriptions.data.some(hasTitles)} />;
 }
 
@@ -125,6 +133,7 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
   useEffect(() => {
     const leaving = new AbortController();
     void showReceiverPlayback(client, leaving.signal).catch(() => {});
+
     return () => leaving.abort();
   }, [client]);
   // Watch and a playing title play sound, at the viewer's volume; the page underneath goes back to
@@ -145,16 +154,20 @@ function Shell({ liveOnly }: { liveOnly: boolean }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (!hasModifier(event)) return;
+
       if (event.key === "k") useUi.setState((state) => ({ searchOpen: !state.searchOpen }));
       else if (event.key === ",") useUi.setState({ settings: "general", searchOpen: false });
       else return;
       event.preventDefault();
     }
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const pageActive = !covered && !details && !savedEntry;
+
   return (
     <>
       <div
@@ -215,6 +228,7 @@ function Offline({ page }: { page: "downloads" | "recordings" }) {
   const playingTitle = useUi((state) => state.playingTitle);
   useEffect(() => player.setAudible(playingTitle), [playingTitle]);
   useEffect(() => () => titlePlayer.close(), []);
+
   return (
     <>
       <div className={cn("h-full", playingTitle && "invisible")} inert={playingTitle || undefined}>
@@ -227,6 +241,7 @@ function Offline({ page }: { page: "downloads" | "recordings" }) {
 
 function subscribeVisibility(onChange: () => void): () => void {
   document.addEventListener("visibilitychange", onChange);
+
   return () => document.removeEventListener("visibilitychange", onChange);
 }
 
@@ -257,6 +272,7 @@ function usePreview(covered: boolean, view: View): void {
     subscribeVisibility,
     () => document.visibilityState === "visible",
   );
+
   const playing = usePlayer((state) => state.channel);
   const audible = usePlayer((state) => state.audible);
   const failed = usePlayer((state) => state.phase.kind === "failed");
@@ -269,11 +285,15 @@ function usePreview(covered: boolean, view: View): void {
   const here = useOutput((state) => state.status.output.kind === "local");
   useEffect(() => {
     if (covered || !here) return;
+
     if (!previews) {
       player.setAudible(false);
+
       if (!failed) player.suspend();
+
       return;
     }
+
     if (!visible) {
       if (!audible && !failed) player.suspend();
     } else if (channel) player.preview(channel);

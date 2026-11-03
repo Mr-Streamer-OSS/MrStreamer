@@ -112,11 +112,15 @@ const Storage = lazy(() =>
 export async function readStorage(path: string): Promise<KeptStorage | null> {
   const read = await readOurs(path, (data) => {
     const parsed = Storage()(data);
+
     if (parsed instanceof type.errors) return null;
     const { version, ...kept } = parsed;
+
     return { version, items: [kept] };
   });
+
   if (read.kind === "refused") return null;
+
   return read.items[0] ?? { keepFree: DEFAULT_KEEP_FREE, space: null };
 }
 
@@ -167,16 +171,21 @@ async function readOurs<A>(
   parse: (data: unknown) => { readonly version: number; readonly items: readonly A[] } | null,
 ): Promise<Read<A>> {
   let text: string;
+
   try {
     text = await readFile(path, "utf8");
   } catch (cause) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
       return { kind: "read", items: [] };
+
     return { kind: "refused" };
   }
+
   try {
     const parsed = parse(JSON.parse(text));
+
     if (!parsed || parsed.version !== VERSION) return { kind: "refused" };
+
     return { kind: "read", items: parsed.items };
   } catch {
     return { kind: "refused" };
@@ -187,6 +196,7 @@ async function readOurs<A>(
 export function readRecordings(path: string): Promise<Read<StoredRecording>> {
   return readOurs(path, (data) => {
     const parsed = File()(data);
+
     return parsed instanceof type.errors
       ? null
       : { version: parsed.version, items: parsed.recordings };
@@ -197,6 +207,7 @@ export function readRecordings(path: string): Promise<Read<StoredRecording>> {
 export function readSchedules(path: string): Promise<Read<KeptSchedule>> {
   return readOurs(path, (data) => {
     const parsed = Schedules()(data);
+
     return parsed instanceof type.errors
       ? null
       : { version: parsed.version, items: parsed.schedules };
@@ -223,18 +234,22 @@ export function recordingFileName(title: string, channelName: string, start: num
   const at = new Date(start);
   const two = (value: number) => String(value).padStart(2, "0");
   const when = `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}.${two(at.getMinutes())}`;
+
   const clean = (text: string) =>
     text
       // oxlint-disable-next-line no-control-regex -- control characters are what this removes
       .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+
   const words = [...new Set([clean(title), clean(channelName)].filter(Boolean))].join(" - ");
   // File systems count a name's bytes, at most 255: the words keep 150 of them, in whole characters.
   let kept = "";
+
   for (const character of words) {
     if (Buffer.byteLength(kept + character) > 150) break;
     kept += character;
   }
+
   return `${`${kept.trim()} - ${when}`.replace(/^[. -]+/, "")}.ts`;
 }

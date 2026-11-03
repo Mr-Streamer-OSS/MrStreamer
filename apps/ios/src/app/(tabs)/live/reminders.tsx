@@ -11,5 +11,6 @@ export default function LiveReminders() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: t("Reminders") });
   }, [navigation, locale]);
+
   return <RemindersScreen />;
 }

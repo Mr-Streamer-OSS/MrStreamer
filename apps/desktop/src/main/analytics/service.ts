@@ -38,6 +38,7 @@ import { defined } from "@mrstreamer/core/defined";
 const IO_MS = 1500;
 const QUIT_MS = 500;
 const ATTEMPTS = 3;
+
 /** Captures per minute. Human actions stay far below it; a runaway producer loses the rest. */
 const RATE_LIMIT = 60;
 
@@ -144,6 +145,7 @@ export class Analytics {
     this.store = options.store ?? analyticsStore(options.dataDir);
     this.transport = options.transport;
     const properties = BuildProperties()(options.properties);
+
     // No raw values in errors or diagnostics, including invalid version strings.
     if (properties instanceof type.errors) throw new Error("Invalid analytics build properties.");
     this.properties = properties;
@@ -176,6 +178,7 @@ export class Analytics {
   async settings(): Promise<AnalyticsSettings> {
     // Reading consent never waits behind capture/outbox writes or a network retry.
     await this.initialized;
+
     return {
       enabled: this.record?.enabled ?? false,
       transport:
@@ -194,6 +197,7 @@ export class Analytics {
       this.invalidatePlayback();
       this.directRetry.clear();
     }
+
     this.paused = true;
     const revision = ++this.revision;
     this.incoming = [];
@@ -205,6 +209,7 @@ export class Analytics {
     this.clearWindow();
     this.request?.abort();
     this.clearRetry();
+
     const changed = this.exclusive(async () => {
       if (!this.available || !this.record || this.closing)
         throw new Error("Analytics preference could not be saved.");
@@ -218,6 +223,7 @@ export class Analytics {
           lifecycle: enabled && lifecycle ? lifecycle : undefined,
         }),
       });
+
       // The consent commit is independent of both the bounded caller and later recovery.
       // Publication reads current owners, so queued choices cannot replay an obsolete value.
       if (this.consentChanged && !this.closing)
@@ -226,6 +232,7 @@ export class Analytics {
             if (!this.closing) return this.consentChanged?.();
           })
           .catch(() => {});
+
       if (this.revision === revision) this.paused = !enabled;
       // A preference requested during load paused startup recovery. Resume it only after the
       // latest enabled preference is durable, so opt-out/re-enable cannot revive cleared work.
@@ -234,8 +241,10 @@ export class Analytics {
       this.playbackReset?.();
       this.observe();
       this.pump();
+
       return this.settings();
     });
+
     // The requested preference stays queued if loading takes longer. Opt-out remains paused
     // synchronously and will clear persisted work when the serializer becomes available.
     return deadline(changed, IO_MS).catch(() => {
@@ -247,6 +256,7 @@ export class Analytics {
     if (!this.recoveryPending || !this.canCapture() || this.closing || !this.record) return;
     this.recoveryPending = false;
     const block = this.record.summaries;
+
     if (!block) return;
     const recovered = block.unfinished?.event;
     await this.save({
@@ -267,8 +277,10 @@ export class Analytics {
   setForeground(on: boolean): void {
     if (this.closing) return;
     this.foreground = on;
+
     if (this.dayTimer) clearInterval(this.dayTimer);
     this.dayTimer = undefined;
+
     if (on) {
       this.observe();
       this.dayTimer = setInterval(() => this.observe(), 60_000);
@@ -290,6 +302,7 @@ export class Analytics {
   actionObserver(action: AnalyticsAction): () => void {
     const consent = this.revision;
     const enabled = this.canCapture();
+
     return () => {
       if (enabled && consent === this.revision) this.noteAction(action);
     };
@@ -298,6 +311,7 @@ export class Analytics {
   settingObserver(setting: AnalyticsSetting): () => void {
     const consent = this.revision;
     const enabled = this.canCapture();
+
     return () => {
       if (enabled && consent === this.revision) this.noteSetting(setting);
     };
@@ -326,6 +340,7 @@ export class Analytics {
   ): (outcome: OperationOutcome, failure?: AnalyticsFailure) => void {
     const consent = this.revision;
     const enabled = this.transport !== null && this.canCapture() && !this.closing;
+
     return (outcome, failure = "app") => {
       if (!enabled || consent !== this.revision) return;
       this.capture(event, outcome === "failed" ? { outcome, error_type: failure } : { outcome });
@@ -340,29 +355,37 @@ export class Analytics {
   ): string | null {
     if (!hint || !frame || this.closing) return null;
     const prior = this.intent;
+
     if (prior && (prior.frame !== frame || hint.order < prior.order)) return null;
     const fresh = !prior || hint.order > prior.order;
+
     if (!fresh && (prior.control !== hint.control || prior.kind !== kind || prior.ended))
       return null;
+
     const intent: PlaybackIntent = fresh
       ? { control: hint.control, order: hint.order, kind, frame, ended: false }
       : prior;
+
     this.intent = intent;
+
     if (fresh && (!hint.ongoing || this.run?.kind !== kind)) {
       this.beginPlayback(kind, hint.ongoing);
     } else if (!this.run) {
       // Recollection after a consent reset belongs to the current continuation.
       this.beginPlayback(kind, fresh ? hint.ongoing : true);
     }
+
     if (this.run?.kind !== kind) return null;
     intent.remoteControl = this.run.remoteControl ?? null;
     this.run.intent = intent;
+
     return this.run.token;
   }
 
   /** Acceptance remains meaningful while consent is off and no run has been minted. */
   isPlaybackControlCurrent(control: string, frame: string | null): boolean {
     const intent = this.intent;
+
     return !!intent && !intent.ended && intent.frame === frame && intent.control === control;
   }
 
@@ -375,6 +398,7 @@ export class Analytics {
 
   endControlledPlayback(control: string, frame: string | null): void {
     const token = this.controlledPlayback(control, frame);
+
     if (token) this.endPlayback(token);
     else if (this.intent && this.isPlaybackControlCurrent(control, frame)) this.intent.ended = true;
   }
@@ -390,6 +414,7 @@ export class Analytics {
     intent?: PlaybackIntent,
   ): string | null {
     this.finishRun();
+
     if (!this.transport || !this.canCapture() || this.closing) return null;
     const token = randomUUID();
     this.run = {
@@ -404,6 +429,7 @@ export class Analytics {
       summary: null,
       ...defined({ remoteControl, intent }),
     };
+
     return token;
   }
 
@@ -423,16 +449,19 @@ export class Analytics {
     this.settlePlayback();
     this.checkpointPlayback();
     this.clearBindingListener();
+
     if (closed?.aborted) return null;
     const binding = randomUUID();
     this.lastClosedBinding = null;
     this.binding = { token: binding, output, sequence: -1, state: null };
     this.interval = null;
+
     if (closed) {
       const listener = () => this.stopPlaybackBinding(binding);
       this.bindingClosed = { signal: closed, listener };
       closed.addEventListener("abort", listener, { once: true });
     }
+
     return binding;
   }
 
@@ -455,9 +484,11 @@ export class Analytics {
     const changed = this.binding.state !== state;
     this.binding.sequence = sequence;
     this.binding.state = state;
+
     if (state === "playing" && this.run.eligible) {
       if (!this.run.started) {
         this.run.started = true;
+
         if (this.record?.installationId && this.admit(this.playRate)) {
           this.run.reported = true;
           this.run.summary = {
@@ -477,11 +508,13 @@ export class Analytics {
           this.checkpointPlayback();
         }
       }
+
       this.run.incident = false;
       const mono = this.monotonic();
       this.interval = { mono, until: mono + (this.binding.output === "local" ? 5000 : 15000) };
     } else {
       this.interval = null;
+
       if (
         changed &&
         (state === "paused" || state === "stopped") &&
@@ -494,6 +527,7 @@ export class Analytics {
   setPlaybackEligible(token: string, eligible: boolean): void {
     if (this.run?.token !== token) return;
     this.settlePlayback();
+
     if (this.run.eligible !== eligible) this.checkpointPlayback();
     this.run.eligible = eligible;
     this.interval = null;
@@ -507,7 +541,9 @@ export class Analytics {
     diagnostic?: PlaybackDiagnostic,
   ): void {
     const context = PlaybackDiagnostic()(diagnostic ?? {});
+
     if (context instanceof type.errors) return;
+
     if (
       this.run?.token !== token ||
       (binding === null
@@ -529,6 +565,7 @@ export class Analytics {
 
   endPlayback(token: string): void {
     if (this.run?.token !== token) return;
+
     if (this.run.intent) this.run.intent.ended = true;
     this.finishRun();
   }
@@ -546,6 +583,7 @@ export class Analytics {
   /** A local run ends with its renderer. Receiver playback continues under main ownership. */
   rendererGone(): void {
     this.intent = null;
+
     if (this.binding?.output !== "remote") this.finishRun();
   }
 
@@ -561,6 +599,7 @@ export class Analytics {
       this.intent?.kind === kind && this.intent.control === control && !this.intent.ended
         ? this.intent
         : undefined;
+
     let token =
       this.run?.kind === kind &&
       (this.run.token === control ||
@@ -568,23 +607,31 @@ export class Analytics {
         (requested && this.run.intent === requested))
         ? this.run.token
         : null;
+
     const authorized = token !== null || requested !== undefined;
+
     if (requested) requested.remoteControl = control;
+
     if (token && this.run) {
       this.run.remoteControl = control;
+
       if (this.run.intent) this.run.intent.remoteControl = control;
     }
+
     let binding: string | null = token ? this.bindPlayback(token, "remote") : null;
     let intent = requested ?? this.run?.intent;
     let sequence = 0;
     let active = true;
+
     return {
       state: (state: AnalyticsPlaybackState) => {
         // Consent changes require a fresh trusted observation, with no historical start.
         if (!active || !authorized) return;
+
         if (!this.run) {
           if (this.intent?.remoteControl === control && this.intent.kind === kind)
             intent = this.intent;
+
           if (intent && (intent.ended || (this.intent && this.intent !== intent))) return;
           token = this.beginPlayback(
             kind,
@@ -594,6 +641,7 @@ export class Analytics {
           );
           binding = token ? this.bindPlayback(token, "remote") : null;
         }
+
         if (token && binding) this.notePlaybackState(token, binding, ++sequence, state);
       },
       failure: (failure: AnalyticsFailure, diagnostic?: PlaybackDiagnostic) => {
@@ -602,12 +650,14 @@ export class Analytics {
       },
       stop: () => {
         active = false;
+
         if (binding) this.stopPlaybackBinding(binding);
       },
       // Only while this load still owns the run's binding: a newer load, run or reset keeps its own.
       end: () => {
         if (!active) return;
         active = false;
+
         if (token && binding && this.binding?.token === binding) this.endPlayback(token);
         else if (binding) this.stopPlaybackBinding(binding);
       },
@@ -623,6 +673,7 @@ export class Analytics {
       control && (this.run?.token === control || this.run?.remoteControl === control)
         ? this.run.token
         : null;
+
     return (failure, diagnostic) => {
       if (token) this.notePlaybackFailure(token, null, failure, diagnostic);
     };
@@ -634,6 +685,7 @@ export class Analytics {
     frame: string | null,
   ): (failure: AnalyticsFailure, diagnostic?: PlaybackDiagnostic) => void {
     const token = control ? this.controlledPlayback(control, frame) : null;
+
     return (failure, diagnostic) => {
       if (!token || !control || this.controlledPlayback(control, frame) !== token) return;
       // An earlier receiver load may still own the binding until this load takes its place.
@@ -661,6 +713,7 @@ export class Analytics {
   private finishRun(): void {
     this.settlePlayback();
     const run = this.run;
+
     if (run?.reported && run.summary && this.canCapture()) {
       this.summariesIncoming.push({
         ...run.summary,
@@ -676,11 +729,13 @@ export class Analytics {
       this.journalDirty = true;
       this.flush();
     }
+
     this.invalidatePlayback();
   }
 
   private checkpointPlayback(): void {
     const run = this.run;
+
     if (!run?.summary || !this.canCapture()) return;
     run.checkpointMs = run.watchMs;
     this.journal = {
@@ -705,10 +760,12 @@ export class Analytics {
    */
   private settlePlayback(): void {
     const interval = this.interval;
+
     if (!interval || !this.run || !this.canCapture() || this.closing) return;
     const mono = this.monotonic();
     this.run.watchMs += Math.max(0, Math.min(mono, interval.until) - interval.mono);
     this.interval = mono >= interval.until ? null : { mono, until: interval.until };
+
     if (this.run.watchMs - this.run.checkpointMs >= WINDOW_MS) this.checkpointPlayback();
   }
 
@@ -721,6 +778,7 @@ export class Analytics {
     properties: EventProperties<Name>,
   ): boolean {
     if (!this.transport || !this.canCapture() || this.closing || !this.record) return false;
+
     if (!this.admit(this.rate)) return false;
     this.incoming.push({
       uuid: randomUUID(),
@@ -732,6 +790,7 @@ export class Analytics {
       },
     });
     this.flush();
+
     return true;
   }
 
@@ -746,12 +805,15 @@ export class Analytics {
 
   private admit(budget: { start: number; count: number }): boolean {
     const now = this.monotonic();
+
     if (now - budget.start >= 60_000) {
       budget.start = now;
       budget.count = 0;
     }
+
     if (budget.count >= RATE_LIMIT) return false;
     budget.count++;
+
     return true;
   }
 
@@ -789,9 +851,12 @@ export class Analytics {
       this.sealRequested = false;
       const record = this.record;
       const id = record?.installationId;
+
       if (!record || !id || !this.canCapture()) return;
+
       const queued = unsent.flatMap((item) => {
         const allowed = CaptureEvent()({ ...item, distinct_id: id });
+
         return allowed instanceof type.errors ||
           allowed.event === "usage_window" ||
           allowed.event === "stream_summary" ||
@@ -799,23 +864,28 @@ export class Analytics {
           ? []
           : [{ event: allowed, attempts: 0 }];
       });
+
       let block = record.summaries ?? emptySummaries(id);
       let fragment = block.usage;
       const pending = [...block.pending];
+
       const sealUsage = () => {
         if (fragment) pending.push(queuedDurable(fragment));
         fragment = null;
       };
+
       // Facts carry the envelope captured by their caller, including several changes in one burst.
       for (const fact of usage) {
         const start = Math.floor(Date.parse(fact.timestamp) / WINDOW_MS) * WINDOW_MS;
         const timestamp = new Date(start).toISOString();
+
         if (
           fragment &&
           (fragment.timestamp !== timestamp ||
             fragment.properties.update_channel !== fact.properties.update_channel)
         )
           sealUsage();
+
         if (!fragment)
           fragment = {
             uuid: randomUUID(),
@@ -833,6 +903,7 @@ export class Analytics {
         const counts = fragment.properties.counts;
         counts[fact.key] = Math.min(Number.MAX_SAFE_INTEGER, (counts[fact.key] ?? 0) + 1);
       }
+
       if (seal || (fragment && Date.now() >= Date.parse(fragment.properties.window_end)))
         sealUsage();
       block = {
@@ -841,6 +912,7 @@ export class Analytics {
         pending: [...pending, ...summaries.map(queuedDurable)],
         unfinished: journalDirty ? journal : block.unfinished,
       };
+
       if (queued.length || usage.length || summaries.length || journalDirty || seal)
         await this.save({ ...record, pending: [...record.pending, ...queued], summaries: block });
     })
@@ -875,8 +947,10 @@ export class Analytics {
     this.clearWindow();
     this.closing = true;
     this.foreground = false;
+
     if (this.dayTimer) clearInterval(this.dayTimer);
     this.clearRetry();
+
     try {
       await deadline(
         (async () => {
@@ -884,6 +958,7 @@ export class Analytics {
           await this.exclusive(async () => {});
           // Drain due work within the quit allowance; persisted retry backoffs still apply.
           this.pump();
+
           while (this.sending) await this.sending;
         })(),
         QUIT_MS,
@@ -915,10 +990,12 @@ export class Analytics {
       const pending = [...record.pending];
       const lifecycle = { ...(record.lifecycle ?? emptyLifecycle(installationId)) };
       const baseline = lifecycle.baseline;
+
       const versionChanged =
         !baseline ||
         baseline.app_version !== properties.app_version ||
         baseline.build_channel !== properties.build_channel;
+
       if (versionChanged) {
         const event: VersionObservation = {
           uuid: randomUUID(),
@@ -939,14 +1016,18 @@ export class Analytics {
                     !record.firstSeen && this.freshSession ? "new_profile" : "unknown_history",
                 },
         };
+
         lifecycle.pending = [...lifecycle.pending, queuedDurable(event)];
         lifecycle.baseline = {
           app_version: properties.app_version,
           build_channel: properties.build_channel,
         };
       }
+
       const newDay = record.lastDay === null || day > record.lastDay;
+
       if (!versionChanged && !newDay) return;
+
       if (!record.firstSeen) {
         pending.push({
           event: {
@@ -959,6 +1040,7 @@ export class Analytics {
           attempts: 0,
         });
       }
+
       if (newDay)
         pending.push({
           event: {
@@ -990,8 +1072,10 @@ export class Analytics {
   private pump(): void {
     if (this.sending || !this.transport || !this.canCapture() || !this.record) return;
     this.clearRetry();
+
     const expired = (event: CaptureEvent) =>
       Date.now() - Date.parse(event.timestamp) > SUMMARY_TTL_MS;
+
     if (
       this.record.pending.some(
         (item) =>
@@ -1040,9 +1124,12 @@ export class Analytics {
           this.sending = undefined;
           this.pump();
         });
+
       return;
     }
+
     const now = Date.now();
+
     const directDue = (item: AnalyticsRecord["pending"][number]) =>
       isLegacyLifecycle(item.event)
         ? Date.parse(
@@ -1050,20 +1137,26 @@ export class Analytics {
               ?.nextAttemptAt ?? item.event.timestamp,
           )
         : (this.directRetry.get(item.event.uuid) ?? now);
+
     const direct = this.record.pending.find((item) => directDue(item) <= now);
+
     const version = this.record.lifecycle?.pending.find(
       (item) => Date.parse(item.nextAttemptAt) <= now,
     );
+
     const summary = this.record.summaries?.pending.find(
       (item) => Date.parse(item.nextAttemptAt) <= now,
     );
+
     const chosen = direct ?? version ?? summary;
+
     if (!chosen) {
       const times = [
         ...this.record.pending.map(directDue),
         ...(this.record.lifecycle?.pending.map((item) => Date.parse(item.nextAttemptAt)) ?? []),
         ...(this.record.summaries?.pending.map((item) => Date.parse(item.nextAttemptAt)) ?? []),
       ];
+
       if (times.length && !this.closing) {
         this.retryTimer = setTimeout(
           () => {
@@ -1074,8 +1167,10 @@ export class Analytics {
         );
         this.retryTimer.unref();
       }
+
       return;
     }
+
     const revision = this.revision;
     const sent = chosen.event;
     const optional = direct ? null : version ? "lifecycle" : "summaries";
@@ -1084,8 +1179,10 @@ export class Analytics {
       await this.exclusive(async () => {
         if (!this.canCapture() || this.revision !== revision || !this.record) return;
         const record = this.record;
+
         if (optional) {
           const block = record[optional];
+
           if (!block || !block.pending.some((item) => item.event.uuid === sent.uuid)) return;
           await this.save({
             ...record,
@@ -1110,23 +1207,29 @@ export class Analytics {
             }),
           });
         }
+
         reserved = true;
       });
+
       if (!reserved || !this.canCapture() || this.revision !== revision || !this.transport) return;
       const controller = new AbortController();
       this.request = controller;
       let result: Awaited<ReturnType<CaptureTransport["send"]>>;
+
       try {
         result = await deadline(this.transport.send(sent, controller.signal), 1100);
       } catch {
         controller.abort();
         result = "retry";
       }
+
       await this.exclusive(async () => {
         if (!this.canCapture() || this.revision !== revision || !this.record) return;
         const record = this.record;
+
         if (optional) {
           const block = record[optional];
+
           if (!block) return;
           await this.save({
             ...record,
@@ -1135,16 +1238,20 @@ export class Analytics {
               pending: block.pending.flatMap((item) => {
                 if (item.event.uuid !== sent.uuid) return [item];
                 const next = retryAfter(item, result);
+
                 return next ? [next] : [];
               }),
             },
           });
         } else {
           const attempted = record.pending.find((item) => item.event.uuid === sent.uuid);
+
           if (!attempted) return;
+
           if (isLegacyLifecycle(sent)) {
             const block = record.lifecycle ?? emptyLifecycle(sent.distinct_id);
             const retry = block.legacyRetries.find((item) => item.uuid === sent.uuid);
+
             const next = retryAfter(
               {
                 ...attempted,
@@ -1153,6 +1260,7 @@ export class Analytics {
               },
               result,
             );
+
             await this.save({
               ...record,
               pending: record.pending.flatMap((item) =>
@@ -1181,6 +1289,7 @@ export class Analytics {
           } else {
             const retry =
               (result === "retry" || result === "not_sent") && attempted.attempts < ATTEMPTS;
+
             if (retry) this.directRetry.set(sent.uuid, Date.now() + 2000);
             else {
               this.directRetry.delete(sent.uuid);
@@ -1207,6 +1316,7 @@ export class Analytics {
       () => {},
       () => {},
     );
+
     return result;
   }
 
@@ -1217,6 +1327,7 @@ export class Analytics {
       this.record = record;
       // Retry deadlines belong only to direct work that survived the durable save.
       const pending = new Set(record.pending.map((item) => item.event.uuid));
+
       for (const uuid of this.directRetry.keys()) {
         if (!pending.has(uuid)) this.directRetry.delete(uuid);
       }
@@ -1269,8 +1380,10 @@ function retryAfter<Item extends { attempts: number; failures: number; nextAttem
   result: Awaited<ReturnType<CaptureTransport["send"]>>,
 ): Item | null {
   const attempts = item.attempts - (result === "not_sent" ? 1 : 0);
+
   if ((result !== "retry" && result !== "not_sent") || attempts >= ATTEMPTS) return null;
   const failures = Math.min(2147483647, item.failures + 1);
+
   return {
     ...item,
     attempts,
@@ -1285,18 +1398,21 @@ function retryAfter<Item extends { attempts: number; failures: number; nextAttem
 function bounded(record: AnalyticsRecord): AnalyticsRecord {
   const pending = record.pending.filter((item) => item.attempts <= ATTEMPTS);
   const block = record.summaries;
+
   const summaries =
     block?.pending.filter(
       (item) =>
         item.attempts <= ATTEMPTS &&
         Date.now() - Date.parse(item.event.timestamp) <= SUMMARY_TTL_MS,
     ) ?? [];
+
   const versions =
     record.lifecycle?.pending.filter(
       (item) =>
         item.attempts <= ATTEMPTS &&
         Date.now() - Date.parse(item.event.timestamp) <= SUMMARY_TTL_MS,
     ) ?? [];
+
   const result = {
     ...record,
     pending,
@@ -1313,7 +1429,9 @@ function bounded(record: AnalyticsRecord): AnalyticsRecord {
         : undefined,
     }),
   };
+
   const openSlots = Number(!!block?.usage) + Number(!!block?.unfinished);
+
   // Open owners reserve slots: evicting their snapshots would let a later checkpoint revive
   // discarded work. Sealed summaries and older version observations lose before direct work.
   while (
@@ -1324,24 +1442,31 @@ function bounded(record: AnalyticsRecord): AnalyticsRecord {
       summaries.shift();
       continue;
     }
+
     if (versions.length > 1) {
       versions.shift();
       continue;
     }
+
     const index = pending.findIndex((item) => item.event.event !== "installation_observed");
+
     if (index < 0) {
       if (versions.length) {
         versions.shift();
         continue;
       }
+
       break;
     }
+
     pending.splice(index, 1);
+
     if (result.lifecycle)
       result.lifecycle.legacyRetries = result.lifecycle.legacyRetries.filter((retry) =>
         pending.some((item) => item.event.uuid === retry.uuid),
       );
   }
+
   // Even a malformed oversized build envelope cannot escape the byte bound. If preserving the
   // first observation leaves no valid eviction, fail closed through the existing save owner.
   if (
@@ -1349,12 +1474,14 @@ function bounded(record: AnalyticsRecord): AnalyticsRecord {
     Buffer.byteLength(JSON.stringify(result)) > OUTBOX_BYTES
   )
     throw new Error("Analytics state exceeds its work budget.");
+
   return result;
 }
 
 /** All owner waits have a deadline even when an injected or operating-system port never settles. */
 async function deadline<A>(work: Promise<A>, ms: number): Promise<A> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     return await Promise.race([
       work,

@@ -15,15 +15,19 @@ import { mkdir, open, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 
 const PACKET = 188;
+
 /** About four seconds of an 8 Mbit/s stream, in whole packets. */
 export const PIECE_BYTES = PACKET * 22_000;
+
 /**
  * Bytes every capture's files may take together: thirty minutes of a 9 Mbit/s stream, the
  * product's rewind target for one channel. Fewer minutes are kept of a richer stream.
  */
 export const TEMPORARY_BYTES = 2 * 1024 ** 3;
+
 /** Full pieces that may wait in memory for the disk. */
 const MEMORY_PIECES = 2;
+
 /** What a read answers at most, so a reader far behind never holds a whole piece. */
 const READ_BYTES = 256 * 1024;
 
@@ -80,6 +84,7 @@ export function historyStore(budget: HistoryBudget) {
    * the disk, also once their history closed.
    */
   let leaving = 0;
+
   // A crash leaves the last run's pieces behind: they belong to no capture now.
   const ready = rm(budget.folder, { recursive: true, force: true })
     .then(() => mkdir(budget.folder, { recursive: true }))
@@ -89,16 +94,20 @@ export function historyStore(budget: HistoryBudget) {
     );
 
   const used = () => [...histories].reduce((sum, each) => sum + each.disk, leaving);
+
   /**
    * Evicts the oldest piece on disk among every history, settling once its file is gone; null
    * when there is none.
    */
   const evictOldest = () => {
     let oldest: { history: HistoryState; piece: Piece } | null = null;
+
     for (const history of histories) {
       const piece = history.pieces.find((each) => each.file !== null);
+
       if (piece && (!oldest || piece.at < oldest.piece.at)) oldest = { history, piece };
     }
+
     return oldest ? oldest.history.evictThrough(oldest.piece) : null;
   };
 
@@ -113,32 +122,42 @@ export function historyStore(budget: HistoryBudget) {
   /** Writes one piece; a failure keeps that history in memory only from then on. */
   const write = async (state: HistoryState, piece: Piece) => {
     if (!(await ready)) state.broken = true;
+
     if (state.broken || state.closed || !piece.chunks || state.passed(piece)) return;
+
     if (!state.made) {
       state.made = await mkdir(state.folder).then(
         () => true,
         () => false,
       );
+
       if (!state.made) return state.dropDisk();
     }
+
     const free = await statfs(state.folder).then(
       (stats) => stats.bavail * stats.bsize,
       () => null,
     );
+
     // Kept free for recordings and the system: this piece stays in memory until it goes.
     if (free !== null && free - piece.bytes < budget.keepFree) return;
+
     // The files it evicts are gone before this one is written: the disk never holds more.
     while (used() + piece.bytes > budget.bytes) {
       const evicted = evictOldest();
+
       if (!evicted) break;
       await evicted;
     }
+
     // Read by every reader meanwhile, it needs no file.
     if (used() + piece.bytes > budget.bytes || !piece.chunks || state.closed || state.passed(piece))
       return;
     const file = join(state.folder, `${piece.offset}.ts`);
+
     try {
       const handle = await open(file, "wx");
+
       try {
         await handle.writev(piece.chunks);
       } finally {
@@ -146,8 +165,10 @@ export function historyStore(budget: HistoryBudget) {
       }
     } catch {
       await discard(file, piece.bytes);
+
       return state.dropDisk();
     }
+
     // Evicted or closed while it was written.
     if (!piece.chunks || state.closed) return discard(file, piece.bytes);
     piece.chunks = null;
@@ -165,6 +186,7 @@ export function historyStore(budget: HistoryBudget) {
       current = { state: next.state, done };
       await done;
     }
+
     current = null;
   };
 
@@ -179,11 +201,14 @@ export function historyStore(budget: HistoryBudget) {
       (bytes) => (leaving += bytes),
       needed,
     );
+
     histories.add(state);
     state.sealed = (piece) => {
       queue = [...queue.filter((each) => each.piece.chunks), { state, piece }];
+
       if (!current) void drain();
     };
+
     return {
       end: () => state.end,
       append: (chunk) => state.append(chunk),
@@ -196,7 +221,9 @@ export function historyStore(budget: HistoryBudget) {
         await state.close();
         histories.delete(state);
         queue = queue.filter((each) => each.state !== state);
+
         if (current?.state === state) await current.done;
+
         if (state.made) await rm(state.folder, { recursive: true, force: true }).catch(() => {});
       },
     };
@@ -241,6 +268,7 @@ class HistoryState {
   passed(piece: Piece): boolean {
     if (this.needed() < piece.offset + piece.bytes) return false;
     void this.evictThrough(piece);
+
     return true;
   }
 
@@ -251,19 +279,24 @@ class HistoryState {
   append(chunk: Uint8Array) {
     if (this.closed || this.done) return;
     let rest = chunk;
+
     while (rest.length > 0) {
       let current = this.pieces.at(-1);
+
       if (!current?.chunks || current.file || current.bytes >= this.pieceBytes) {
         current = { offset: this.end, at: Date.now(), bytes: 0, chunks: [], file: null };
         this.pieces.push(current);
       }
+
       const take = Math.min(rest.length, this.pieceBytes - current.bytes);
       current.chunks!.push(rest.subarray(0, take));
       current.bytes += take;
       this.end += take;
       rest = rest.subarray(take);
+
       if (current.bytes >= this.pieceBytes) this.seal(current);
     }
+
     this.wake();
   }
 
@@ -273,12 +306,16 @@ class HistoryState {
    */
   private seal(piece: Piece) {
     if (this.passed(piece)) return;
+
     const passed = this.pieces.findLast(
       (each) => each !== piece && each.offset + each.bytes <= this.needed(),
     );
+
     if (passed) void this.evictThrough(passed);
     const waiting = this.pieces.filter((each) => each.chunks && each.bytes >= this.pieceBytes);
+
     if (waiting.length > MEMORY_PIECES) void this.evictThrough(waiting[0]!);
+
     if (!this.broken) this.sealed(piece);
   }
 
@@ -289,8 +326,10 @@ class HistoryState {
   evictThrough(piece: Piece): Promise<void> {
     const index = this.pieces.indexOf(piece);
     const removals: Promise<void>[] = [];
+
     for (const gone of this.pieces.splice(0, index + 1)) {
       gone.chunks = null;
+
       if (gone.file) {
         const { bytes } = gone;
         this.disk -= bytes;
@@ -305,6 +344,7 @@ class HistoryState {
         gone.file = null;
       }
     }
+
     return Promise.all(removals).then(() => {});
   }
 
@@ -313,33 +353,44 @@ class HistoryState {
     this.broken = true;
     const kept = this.pieces.filter((each) => each.chunks);
     const last = this.pieces.findLast((each) => !each.chunks);
+
     if (last) void this.evictThrough(last);
     const waiting = kept.filter((each) => each.bytes >= this.pieceBytes);
+
     if (waiting.length > MEMORY_PIECES) void this.evictThrough(waiting.at(-MEMORY_PIECES - 1)!);
   }
 
   async read(offset: number): Promise<HistoryRead> {
     if (this.closed || offset < this.start()) return "evicted";
+
     if (offset >= this.end) return "ahead";
     const piece = this.pieces.findLast((each) => each.offset <= offset)!;
     const within = offset - piece.offset;
+
     if (piece.chunks) {
       let at = 0;
+
       for (const chunk of piece.chunks) {
         if (within < at + chunk.length) {
           return chunk.subarray(within - at, Math.min(chunk.length, within - at + READ_BYTES));
         }
+
         at += chunk.length;
       }
+
       return "ahead";
     }
+
     if (!piece.file) return "evicted";
     const size = Math.min(READ_BYTES, piece.bytes - within);
+
     try {
       const handle = await open(piece.file, "r");
+
       try {
         const buffer = new Uint8Array(size);
         const { bytesRead } = await handle.read(buffer, 0, size, within);
+
         if (bytesRead > 0) return buffer.subarray(0, bytesRead);
       } finally {
         await handle.close();
@@ -347,17 +398,20 @@ class HistoryState {
     } catch {
       // Evicted while it was opened.
     }
+
     return "evicted";
   }
 
   arrived(offset: number, signal: AbortSignal) {
     if (offset < this.end || this.done || this.closed || signal.aborted) return Promise.resolve();
+
     return new Promise<void>((resolve) => {
       const done = () => {
         this.waiters.delete(done);
         signal.removeEventListener("abort", done);
         resolve();
       };
+
       this.waiters.add(done);
       signal.addEventListener("abort", done, { once: true });
     });
@@ -376,6 +430,7 @@ class HistoryState {
     this.closed = true;
     const last = this.pieces.at(-1);
     this.wake();
+
     return last ? this.evictThrough(last) : Promise.resolve();
   }
 

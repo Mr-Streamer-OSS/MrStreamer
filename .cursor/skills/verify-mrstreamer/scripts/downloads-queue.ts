@@ -41,22 +41,27 @@ const driver = (page: Page, base: BaseDriver) => {
         return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, paused: v?.paused ?? true,
           title: !!document.querySelector('[data-view=title]') };
       })()`);
+
   const listed = () =>
     page.evaluate<Listed[]>(
       "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
     );
+
   /** The download rows in the order the page draws them. */
   const rows = () =>
     page.evaluate<string[]>(
       "[...document.querySelectorAll('[data-download]')].map(r => r.dataset.download)",
     );
+
   /** What has the keyboard: its aria-label, else its words. */
   const focused = () =>
     page.evaluate<string | null>(
       "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null",
     );
+
   return { ...base, video, listed, rows, focused };
 };
+
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsQueue(
@@ -64,6 +69,7 @@ export async function runDownloadsQueue(
   previous?: string,
 ) {
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
+
   const steps = async ({
     start,
     quit,
@@ -77,51 +83,72 @@ export async function runDownloadsQueue(
 
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
     const poster = (words: string) =>
       `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(words)}))`;
+
     const row = (id: string) => `document.querySelector('[data-download="${id}"]')`;
+
     const inRow = (id: string, words: string) =>
       `[...(${row(id)})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
     const hold = (id: string) => `(${row(id)})?.querySelector('[data-hold]')`;
     const arrow = (id: string, by: -1 | 1) => `(${row(id)})?.querySelector('[data-move="${by}"]')`;
+
     const notice = () =>
       `document.querySelector(${JSON.stringify(`header [aria-label^="${t("Downloads, {status}", { status: "" })}"]`)})`;
+
     const statuses = async (d: Driver) =>
       Object.fromEntries((await d.listed()).map((item) => [item.id, item.status]));
+
     const statusOf = async (d: Driver, id: string) =>
       (await d.listed()).find((item) => item.id === id)?.status;
+
     const openDownloads = async (d: Driver) => {
       await d.click("Open Downloads", button("header button", t("Downloads")));
       await d.wait(() =>
         d.exists(`document.querySelector('h1')?.textContent === ${JSON.stringify(t("Downloads"))}`),
       );
     };
+
     const movies = ownedProvider.titles.movies;
+
     const named = (words: string) => {
       const found = movies.find((each) => each.name.startsWith(words));
+
       if (!found) throw new Error(`No movie ${words}`);
+
       return found;
     };
+
     const missing = named("TEST | Missing file");
     const first = named("TEST | Two sound tracks and subtitles (MULTI)");
     const second = named("TEST | Old AVI");
     const third = named("TEST | Long subtitles");
+
     const idOf = async (d: Driver, movieId: number) => {
       const found = (await d.listed()).find((item) => item.title.id === String(movieId));
+
       if (!found) throw new Error(`No download of movie ${movieId}`);
+
       return found.id;
     };
+
     /** A copy's file in the run's profile, by its SHA-256: an observation of the disk. */
     const copyDigest = async (id: string) => {
       const folder = join(profile!, "downloads", id);
+
       const media = (await readdir(folder)).find(
         (name) => name.startsWith("media.") && !name.endsWith(".part"),
       );
+
       if (!media) return null;
+
       return createHash("sha256")
         .update(await readFile(join(folder, media)))
         .digest("hex");
     };
+
     const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
     // 1. Connect, then queue four movies from their details: the first fails at once, the next
@@ -133,6 +160,7 @@ export async function runDownloadsQueue(
     await online.wait(() =>
       online.page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
     );
+
     for (const [index, value] of [ownedProvider.url, "demo", "demo"].entries()) {
       await online.click(
         `Fill Connect field ${index + 1}`,
@@ -140,9 +168,11 @@ export async function runDownloadsQueue(
       );
       await online.page.send("Input.insertText", { text: value });
     }
+
     await online.click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await online.wait(() => online.exists("document.querySelector('header')"));
     injectedFailure("downloads-queue");
+
     const queue = async (movie: { readonly name: string }, words: string, until: string) => {
       await online.click("Open Movies", button("header button", t("Movies")));
       await online.click("Open All movies", button("nav button", t("All movies")));
@@ -154,20 +184,24 @@ export async function runDownloadsQueue(
       await online.wait(async () => (await online.text('[role="dialog"]')).includes(until), 60_000);
       await online.key("Escape", 27);
     };
+
     await queue(missing, "the missing-file movie", t("Retry"));
     await queue(first, "the two-sound-track movie", "%");
     await queue(second, "the AVI movie", t("Queued"));
     await queue(third, "the long-subtitles movie", t("Queued"));
     await openDownloads(online);
+
     const [d, a, b, c] = [
       await idOf(online, missing.id),
       await idOf(online, first.id),
       await idOf(online, second.id),
       await idOf(online, third.id),
     ];
+
     observed["ids"] = { failing: d, first: a, second: b, third: c };
     await online.wait(async () => (await statusOf(online, a))?.received === 200_000);
     await online.capture("queue-transferring");
+
     if ((await online.rows()).join() !== [a, b, c, d].join())
       throw new Error(`The queue isn't drawn in its order: ${await online.rows()}`);
 
@@ -195,6 +229,7 @@ export async function runDownloadsQueue(
       (await online.text(`[data-download="${a}"]`)).includes(t("Paused")),
     );
     await online.wait(async () => (await statusOf(online, b))?.received === 30_000);
+
     const pausedTransfer = {
       status: await statusOf(online, a),
       row: await online.text(`[data-download="${a}"]`),
@@ -203,7 +238,9 @@ export async function runDownloadsQueue(
       rows: await online.rows(),
       mostFilesAtOnce: ownedProvider.mostFilesAtOnce(),
     };
+
     observed["pausedTransfer"] = pausedTransfer;
+
     if (!pausedTransfer.keyboardOnItsRow || pausedTransfer.keyboard !== t("Resume download"))
       throw new Error(`The keyboard left the paused row: ${JSON.stringify(pausedTransfer)}`);
     await online.capture("transfer-paused-from-keyboard");
@@ -219,6 +256,7 @@ export async function runDownloadsQueue(
       .finally(async () => {
         observed["keyboardLog"] = await keyboardLog().catch(() => null);
       });
+
     const moved = {
       rows: await online.rows(),
       keyboard: await online.focused(),
@@ -226,7 +264,9 @@ export async function runDownloadsQueue(
       transfer: await statusOf(online, b),
       newFileRequests: ownedProvider.fileRequests() - asked,
     };
+
     observed["movedFromKeyboard"] = moved;
+
     if (moved.transfer?.kind !== "transferring" || moved.newFileRequests !== 0)
       throw new Error(`The move stopped the transfer: ${JSON.stringify(moved)}`);
     await online.capture("moved-from-keyboard");
@@ -236,6 +276,7 @@ export async function runDownloadsQueue(
     await online.click("Pause all", button("button", t("Pause all")));
     await online.wait(async () => {
       const now = await statuses(online);
+
       return [a, b, c].every((id) => now[id]?.kind === "paused") && now[d]?.kind === "failed";
     });
     await online.wait(async () => ownedProvider.activeStreams() === 0, 5000);
@@ -269,15 +310,19 @@ export async function runDownloadsQueue(
     );
     await online.wait(async () => {
       const v = await online.video();
+
       return v.title && !v.paused && v.width > 0 && v.time > 1;
     }, 45_000);
     await online.wait(async () => (await statusOf(online, c))?.kind === "waiting");
+
     const whilePlaying = {
       statuses: await statuses(online),
       mostFilesAtOnce: ownedProvider.mostFilesAtOnce(),
       playback: await online.video(),
     };
+
     observed["whilePlaying"] = whilePlaying;
+
     if (![a, b].every((id) => whilePlaying.statuses[id]?.kind === "paused"))
       throw new Error(`Playback changed a pause: ${JSON.stringify(whilePlaying)}`);
     await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 300 });
@@ -289,15 +334,19 @@ export async function runDownloadsQueue(
     await online.wait(async () => !(await online.video()).title);
     await online.wait(async () => {
       const status = await statusOf(online, c);
+
       return status?.kind === "transferring" && status.received === 60_000;
     });
     // Given back, the connection goes to the resumed one only, however long it waits.
     await delay(2000, undefined, { signal: abort.signal });
+
     const afterPlayback = {
       statuses: await statuses(online),
       mostFilesAtOnce: ownedProvider.mostFilesAtOnce(),
     };
+
     observed["afterPlayback"] = afterPlayback;
+
     if (
       ![a, b].every((id) => afterPlayback.statuses[id]?.kind === "paused") ||
       afterPlayback.mostFilesAtOnce !== 1
@@ -327,6 +376,7 @@ export async function runDownloadsQueue(
       );
       await older.wait(async () => {
         const v = await older.video();
+
         return v.title && !v.paused && v.width > 0 && v.time > 3;
       }, 45_000);
       await older.key("Escape", 27);
@@ -356,14 +406,18 @@ export async function runDownloadsQueue(
     await openDownloads(again);
     await again.wait(async () => {
       const status = await statusOf(again, c);
+
       return status?.kind === "transferring" && status.received === 80_000;
     }, 60_000);
     const restarted = { statuses: await statuses(again), rows: await again.rows() };
     observed["afterRestart"] = restarted;
+
     if (restarted.statuses[b]?.kind !== "paused")
       throw new Error(`The second one lost its pause: ${JSON.stringify(restarted)}`);
+
     if (!previous && restarted.statuses[a]?.kind !== "paused")
       throw new Error(`The first one lost its pause: ${JSON.stringify(restarted)}`);
+
     if (restarted.rows.indexOf(c) > restarted.rows.indexOf(b))
       throw new Error(`The order wasn't kept: ${JSON.stringify(restarted)}`);
     await again.capture("after-restart");
@@ -371,14 +425,17 @@ export async function runDownloadsQueue(
     // 7. Cancel the transfer with the pointer: its row and partial file go.
     await again.click("Cancel the transfer", inRow(c, t("Cancel")));
     await again.wait(async () => !(await again.exists(row(c))));
+
     const cancelledFolder = await stat(join(profile, "downloads", c)).then(
       () => "kept",
       () => "gone",
     );
+
     observed["cancelled"] = {
       folder: cancelledFolder,
       listed: (await again.listed()).some((item) => item.id === c),
     };
+
     if (cancelledFolder !== "gone") throw new Error("Cancel kept the partial file.");
 
     // 8. The provider replaced the second one's file: resumed from the keyboard, it starts again
@@ -398,6 +455,7 @@ export async function runDownloadsQueue(
       copy: await copyDigest(b),
       replacement: digest(replacement),
     };
+
     if ((observed["changedFile"] as { copy: string | null }).copy !== digest(replacement))
       throw new Error("The resumed copy isn't the provider's new file.");
 
@@ -406,6 +464,7 @@ export async function runDownloadsQueue(
       ownedProvider.stallMovieFile(first.id, Number.MAX_SAFE_INTEGER, 0);
       await again.click("Resume the first one", hold(a));
     }
+
     await again.wait(async () => (await statusOf(again, a))?.kind === "complete", 60_000);
     await again.wait(async () => (await statusOf(again, d))?.kind === "failed", 60_000);
     await again.click("Delete the failed one", inRow(d, t("Delete")));
@@ -417,15 +476,18 @@ export async function runDownloadsQueue(
       mostFilesAtOnce: ownedProvider.mostFilesAtOnce(),
     };
     await again.capture("final");
+
     if (
       (observed["final"] as { firstCopy: string | null }).firstCopy !==
       digest(fixture(first.fixture!))
     )
       throw new Error("The first copy isn't the provider's file.");
+
     if (ownedProvider.mostFilesAtOnce() !== 1)
       throw new Error("The provider sent two files at once.");
     await quit("again");
   };
+
   await ownedRun(
     {
       build,
@@ -476,9 +538,12 @@ export async function pictureServer(): Promise<Server> {
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk2PH/PwAFTgKWx2D3tQAAAABJRU5ErkJggg==",
     "base64",
   );
+
   const server = createServer((_request, response) =>
     response.writeHead(200, { "Content-Type": "image/png" }).end(png),
   );
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
   return server;
 }

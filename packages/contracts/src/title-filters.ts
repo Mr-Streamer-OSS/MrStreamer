@@ -3,6 +3,7 @@ import { type } from "arktype";
 import { lazy, type Infer } from "./lazy.ts";
 
 export const QUALITY_HINTS = ["4k", "full-hd", "hd", "sd", "unknown"] as const;
+
 export type QualityHint = (typeof QUALITY_HINTS)[number];
 
 export const TitleFilters = lazy(() =>
@@ -15,6 +16,7 @@ export const TitleFilters = lazy(() =>
     },
   }),
 );
+
 export type TitleFilters = Infer<typeof TitleFilters>;
 
 export interface FilterOptions {

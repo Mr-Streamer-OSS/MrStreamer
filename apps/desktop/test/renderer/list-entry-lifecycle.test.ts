@@ -35,6 +35,7 @@ const own = (id: string): OwnedId => ({ subscriptionId: "one", id });
 
 /** A provider's categories in one country: News holds channels 1 and 2, Sport channel 3. */
 const HOLDS: Record<string, readonly string[]> = { news: ["1", "2"], sport: ["3"] };
+
 const category = (id: string, title: string): Category => ({
   ...own(id),
   members: [own(id)],
@@ -43,6 +44,7 @@ const category = (id: string, title: string): Category => ({
   title,
   channelCount: HOLDS[id]?.length ?? 0,
 });
+
 const CATEGORIES = [category("news", "News"), category("sport", "Sport")];
 
 const channel = (id: string): LiveChannel => ({
@@ -75,6 +77,7 @@ const list = (id: string, name: string, ids: readonly string[], revision = 2): C
   members: ids.map((each) => ({ member: `${id}-${each}`, kind: "listed", channel: own(each) })),
   away: 0,
 });
+
 const ALPHA = list("alpha", "Alpha", ["1", "2"]);
 const BETA = list("beta", "Beta", ["3", "1"]);
 
@@ -87,9 +90,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   player.reset();
@@ -122,6 +127,7 @@ async function livePage(
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await client.fetchQuery(queries.preferences());
   let stored = lists;
+
   const viewing: Viewing = {
     favourites: [],
     recent: [],
@@ -129,6 +135,7 @@ async function livePage(
     marked: [],
     sequence: 1,
   };
+
   client.setQueryData(["subscriptions"], [subscription]);
   client.setQueryData(queries.categories().queryKey, CATEGORIES);
   client.setQueryData(
@@ -151,22 +158,27 @@ async function livePage(
   ipc.always("library.searchGroups", []);
   ipc.answer("customLists.get", () => stored);
   ipc.always("viewing.get", viewing);
+
   if (app) {
     // The window reads these itself, and remembers the list shown.
     ipc.always("subscription.list", [subscription]);
     ipc.always("library.categories", CATEGORIES);
     ipc.always("ondemand.status", { lists: [], metadata: null });
+
     if (shown.kind === "custom") ipc.always("liveBrowse.get", { kind: "custom", id: shown.id });
   }
+
   if (settings) {
     client.setQueryData(["guide", "status"], []);
     client.setQueryData(["ondemand", "status"], { lists: [], metadata: null });
   }
+
   const stopLists = syncCustomLists(client);
   const mounted = queryView(client);
   const { container } = mounted;
   const besideView = queryView(client);
   const beside = besideView.container;
+
   if (settings) await besideView.render(createElement(SubscriptionSection));
   await mounted.render(
     app
@@ -178,29 +190,35 @@ async function livePage(
     mounted.unmount();
     besideView.unmount();
   };
+
   await settled();
 
   const button = (label: string, within: ParentNode = container) => {
     const buttons = [...within.querySelectorAll("button")];
+
     return (
       buttons.find((each) => each.getAttribute("aria-label") === label) ??
       buttons.find((each) => each.textContent?.trim().startsWith(label))
     );
   };
+
   const press = (target: Element | null | undefined, what: string) =>
     act(async () => {
       if (!target) throw new Error(`No ${what}.`);
       target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
+
   /**
    * Chooses `item` in the open menu, which shows outside the page, as a pointer does: over it,
    * which makes it the menu's item, then a click.
    */
   const choose = async (item: string) => {
     await settled();
+
     const target = [...document.querySelectorAll('[role^="menuitem"]')].find(
       (each) => each.textContent?.trim() === item,
     );
+
     await act(async () => {
       target?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, movementX: 1 }));
     });
@@ -208,7 +226,9 @@ async function livePage(
     await press(target, `menu item "${item}"`);
     await settled();
   };
+
   const rail = () => container.querySelector('[role="navigation"]')!;
+
   return {
     /** Stores `lists` as the main process would after a change, for the lists' next read. */
     store: (lists: readonly CustomList[]) => {
@@ -263,6 +283,7 @@ async function livePage(
     /** Ticks or clears each of `lists` in a row's lists menu, one after the other, then closes it. */
     tick: async (row: string, lists: readonly string[]) => {
       await press(button(`Lists for ${row}`), `lists menu of ${row}`);
+
       for (const name of lists) await choose(name);
       await act(async () => {
         document
@@ -274,6 +295,7 @@ async function livePage(
     /** The line under the filters for a change that failed, if one shows: its words and button. */
     alert: () => {
       const line = container.querySelector('main p[role="alert"]');
+
       return line
         ? `${line.firstElementChild?.textContent} ${line.lastElementChild?.textContent}`
         : null;
@@ -696,6 +718,7 @@ describe("leaving Live TV while the delete of its list is out", () => {
     expect(useUi.getState().view).toBe("home");
     await page.open("Live TV");
     expect(page.heading()).toBe("Alpha");
+
     return { page, removed };
   }
 
@@ -831,14 +854,17 @@ describe("a saved order's answer, and lists newer than it", () => {
     await page.click("Move Channel 1 down");
     const arranged = ipc.hold("customLists.arrange");
     await page.click("Save");
+
     const reading = ipc.hold(
       "library.browse",
       (query) =>
         query.scope.kind === "channels" &&
         query.scope.channels.map((each) => each.id).join() === "2,1",
     );
+
     await act(async () => arranged.resolve(answer));
     await settled();
+
     return () => act(async () => reading.resolve(browseResult([channel("2"), channel("1")])));
   }
 
@@ -865,6 +891,7 @@ describe("a saved order's answer, and lists newer than it", () => {
     const away = { ...ALPHA, away: 1 };
     const page = await livePage({ kind: "custom", id: "alpha" }, [away, BETA], { settings: true });
     expect(page.text()).toContain("from a subscription that isn't saved");
+
     const read = await savedOrder(page, [
       { ...list("alpha", "Alpha", ["2", "1"], 3), away: 1 },
       BETA,
@@ -878,6 +905,7 @@ describe("a saved order's answer, and lists newer than it", () => {
       name: "Backup",
       username: "two",
     };
+
     const back = list("alpha", "Alpha", ["2", "1"], 3);
     ipc.always("subscription.list", [subscription, two]);
     page.store([

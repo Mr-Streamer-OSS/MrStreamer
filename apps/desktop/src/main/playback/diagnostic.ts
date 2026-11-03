@@ -12,6 +12,7 @@ export function liveDiagnostic(
   audio: number | null,
 ): PlaybackDiagnostic {
   const sound = layout?.audio.find((track) => track.pid === audio) ?? layout?.audio[0];
+
   return {
     ...diagnosticCodecs(layout?.video?.codec ?? null, sound?.codec ?? null),
     diagnostic_container: layout ? "mpegts" : "unknown",
@@ -30,6 +31,7 @@ export function titleDiagnostic(
   const video = probe?.video?.name;
   // These source codecs always convert. They are not browser capability literals.
   const software = video === "vp8" || video === "vp9" || video === "av1" ? video : null;
+
   return {
     ...diagnosticCodecs(probe?.video?.codec ?? null, sound?.codec ?? null),
     ...defined({ diagnostic_video_codec: software ?? undefined }),
@@ -50,6 +52,8 @@ export function lastLine(
   start?: number | null,
 ): string {
   const line = errors.trim().split("\n").at(-1);
+
   if (line) return line;
+
   return `ffmpeg ended with ${signal ?? code ?? "no exit"}${start === null ? ", before the picture started" : ""}.`;
 }

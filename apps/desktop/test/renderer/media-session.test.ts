@@ -15,6 +15,7 @@ import type { OutputStatus, RemoteMedia } from "@mrstreamer/contracts/output";
 
 /** Stands in for Chromium's session, keeping what the page set. */
 const handlers = new Map<MediaSessionAction, MediaSessionActionHandler>();
+
 const session = {
   metadata: null as { title: string; artist: string } | null,
   playbackState: "none" as MediaSessionPlaybackState,
@@ -24,7 +25,9 @@ const session = {
   },
   setPositionState() {},
 };
+
 Object.defineProperty(navigator, "mediaSession", { value: session, configurable: true });
+
 Object.assign(globalThis, {
   MediaMetadata: class {
     constructor(init: { title: string; artist: string }) {
@@ -32,8 +35,10 @@ Object.assign(globalThis, {
     }
   },
 });
+
 const { useLiveSession, useTitleSession } =
   await import("../../src/renderer/src/player/media-session.ts");
+
 const { player } = await import("../../src/renderer/src/player/player.ts");
 const { titlePlayer } = await import("../../src/renderer/src/player/title-player.ts");
 
@@ -52,6 +57,7 @@ const channel = (title: string): LiveChannel => ({
 
 function Watch({ channel }: { channel: LiveChannel }) {
   useLiveSession(channel);
+
   return null;
 }
 
@@ -60,6 +66,7 @@ describe("the system's media controls", () => {
     ipc.reset();
     const root = createRoot(document.createElement("div"));
     const client = new QueryClient();
+
     const render = (...channels: LiveChannel[]) =>
       act(() =>
         root.render(
@@ -87,6 +94,7 @@ describe("the system's media controls", () => {
     ipc.reset();
     const tv = { id: "tv", kind: "cast", name: "Living Room TV" } as const;
     const title = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" } as const;
+
     const media = (state: RemoteMedia["state"]): RemoteMedia => ({
       generation: 1,
       sessionId: "r1",
@@ -97,6 +105,7 @@ describe("the system's media controls", () => {
       duration: 3600,
       subtitles: false,
     });
+
     const said = (state: RemoteMedia["state"]): OutputStatus => ({
       offers: ["cast"],
       airplayRoutes: null,
@@ -104,6 +113,7 @@ describe("the system's media controls", () => {
       receivers: [tv],
       output: { kind: "receiver", receiver: tv, volume: null, failure: null, media: media(state) },
     });
+
     const root = createRoot(document.createElement("div"));
     await act(() => root.render(createElement(Title)));
     await act(async () => {
@@ -156,6 +166,7 @@ describe("the system's media controls", () => {
     ipc.reset();
     const tv = { id: "tv", kind: "cast", name: "Living Room TV" } as const;
     const arena = channel("Arena 1");
+
     const media = (state: RemoteMedia["state"]): RemoteMedia => ({
       generation: 4,
       sessionId: "r4",
@@ -166,6 +177,7 @@ describe("the system's media controls", () => {
       duration: null,
       subtitles: false,
     });
+
     const said = (state: RemoteMedia["state"] | null) =>
       act(async () =>
         ipc.emit("output.changed", {
@@ -182,6 +194,7 @@ describe("the system's media controls", () => {
           },
         }),
       );
+
     await said(null);
     const loaded = ipc.hold("output.playChannel");
     const root = createRoot(document.createElement("div"));
@@ -258,5 +271,6 @@ describe("the system's media controls", () => {
 
 function Title() {
   useTitleSession();
+
   return null;
 }

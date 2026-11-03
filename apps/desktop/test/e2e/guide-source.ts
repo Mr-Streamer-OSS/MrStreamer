@@ -45,38 +45,48 @@ import {
 } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) throw new Error("Usage: node test/e2e/guide-source.ts <app executable> [-- args]");
 
 /** A channel that plays a picture, which the provider's guide and the other one both list. */
 const CHANNEL = { id: "1000", name: "TEST | H.264 + AAC", guideId: "aac.test" };
+
 /** A guide channel no channel of the provider names: one to map to by hand. */
 const SPARE = { id: "canalnord.ex", name: "Canal Nord" };
 
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
 const provider = await startFakeProvider({ channels: 300, live: true });
 const host = await startGuideHost();
+
 /** A guide whose every programme is called after `label` and its channel, an hour each. */
 function guide(label: string): string {
   const stamp = (at: number) =>
     `${new Date(at).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
   const hour = 60 * 60 * 1000;
   const first = Math.floor(Date.now() / hour) * hour - hour;
+
   const channels = [
     { id: CHANNEL.guideId, name: "AAC" },
     SPARE,
     { id: "canalnordsport.ex", name: "Canal Nord Sport" },
   ];
+
   const listed = channels.map(
     ({ id, name }) => `<channel id="${id}"><display-name>${name}</display-name></channel>`,
   );
+
   const programmes = channels.flatMap(({ id, name }) =>
     Array.from({ length: 24 }, (_, slot) => {
       const start = first + slot * hour;
+
       return `<programme start="${stamp(start)}" stop="${stamp(start + hour)}" channel="${id}"><title>${label} ${name}</title></programme>`;
     }),
   );
+
   return `<?xml version="1.0"?><tv>${listed.join("")}${programmes.join("")}</tv>`;
 }
+
 host.serve("/guide.xml", guide("Elsewhere"));
 
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
@@ -84,6 +94,7 @@ let port = randomPort();
 let app = launch(executable, rest, { port, profile });
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, problems: readonly string[]): void {
   console.log(
@@ -96,7 +107,9 @@ const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
+
   if (!result.ok) throw new Error(`${method}: ${JSON.stringify(result.error)}`);
+
   return result.value;
 };
 
@@ -127,16 +140,20 @@ const type = (page: Page, expression: string, text: string) =>
 /** The one subscription's guide, as Settings is told. */
 const status = async (page: Page) => {
   const [only] = await invoke<GuideStatus[]>(page, "guide.status");
+
   if (!only) throw new Error("No subscription is saved");
+
   return only;
 };
 
 /** The programme a channel of the subscription shows as on now, by its title. */
 async function nowOn(page: Page, subscriptionId: string, id: string): Promise<string | undefined> {
   const channel = { subscriptionId, id };
+
   const listings = await invoke<Record<string, Listing>>(page, "guide.listings", {
     channels: [channel],
   });
+
   return listings[ownedKey(channel)]?.now?.title;
 }
 
@@ -202,6 +219,7 @@ try {
   await login(page, provider);
   await play(page);
   const requests = provider.streamRequests();
+
   /**
    * What became of the stream that plays: nothing, while the provider still holds the one
    * connection it opened for it and was asked for no other.
@@ -212,6 +230,7 @@ try {
       ? []
       : [`the stream was asked for ${provider.streamRequests() - requests} more times`]),
   ];
+
   await openSubscriptions(page);
   await waitFor(async () => (await status(page)).fetchedAt !== null, 60_000);
   const { subscriptionId } = await status(page);
@@ -238,17 +257,22 @@ try {
       async () => (await shown(page, "main")).includes(`${hostName}\nReady`),
       10_000,
     ).catch(async () => problems.push(`the row says "${await shown(page, "main")}"`));
+
     const field = await page.evaluate<string>(
       `document.querySelector('input[aria-label="Address of an XMLTV guide"]').value`,
     );
+
     if (field !== "") problems.push("the field still holds the address");
     // Nothing of the address but its host: not in the window, and not in what is told or kept.
     const told = `${await shown(page)}\n${JSON.stringify(await sources(page))}`;
     const kept = readFileSync(join(profile, "guides", "sources.json"), "utf8");
+
     for (const secret of [GUIDE_KEY, "guide.xml?"]) {
       if (told.includes(secret)) problems.push(`the window was told "${secret}"`);
+
       if (kept.includes(secret)) problems.push(`sources.json holds "${secret}"`);
     }
+
     if (host.requests().length !== 1)
       problems.push(`the host was asked ${host.requests().length} times`);
     problems.push(...stream());
@@ -272,6 +296,7 @@ try {
     await click(page, `document.querySelector('[aria-label^="Map channels of"]')`);
     const sheet = '[role="dialog"]';
     await waitFor(async () => (await shown(page, sheet)).includes("no id match"), 20_000);
+
     const without = await invoke<MapChannelPage>(page, "guide.mapChannels", {
       subscriptionId,
       filter: "without",
@@ -279,7 +304,9 @@ try {
       offset: 0,
       limit: 1,
     });
+
     const [picked] = without.channels;
+
     if (!picked) throw new Error("Every channel has programmes");
     // The first channel is picked. The guides' channels are searched, and one of the source's
     // mapped, by the keys.
@@ -309,6 +336,7 @@ try {
       20_000,
     ).catch(() => problems.push("the channel doesn't say what it is mapped to"));
     const title = await nowOn(page, subscriptionId, picked.id);
+
     if (title !== `Elsewhere ${SPARE.name}`) problems.push(`${picked.title} shows "${title}"`);
     problems.push(...stream());
     await click(page, buttonNamed("Done"));
@@ -328,12 +356,15 @@ try {
     await waitFor(async () => (await shown(page, "main")).includes(line), 30_000).catch(() =>
       failures.push("no line says why the download failed"),
     );
+
     if (!(await shown(page, "main")).includes("stay in use")) {
       failures.push("nothing says its last download stays in use");
     }
+
     if ((await nowOn(page, subscriptionId, picked.id)) !== `Elsewhere ${SPARE.name}`) {
       failures.push("the listings changed");
     }
+
     if (provider.guideRequests() !== asked) failures.push("the provider's guide was asked for");
     report("A download that fails keeps the source's guide and says why", failures);
 
@@ -350,15 +381,20 @@ try {
     const restarted = await status(page);
     const [source] = await sources(page);
     const after: string[] = [];
+
     if (source?.origin !== host.origin)
       after.push(`the sources are ${JSON.stringify(await sources(page))}`);
+
     if (source?.processing.state !== "failed") {
       after.push(`the source is ${JSON.stringify(source?.processing)}`);
     }
+
     if (restarted.mapped !== 1) after.push(`${restarted.mapped} channels are mapped`);
+
     if ((await nowOn(page, subscriptionId, picked.id)) !== `Elsewhere ${SPARE.name}`) {
       after.push("the mapped channel lost its programmes");
     }
+
     if (host.requests().length !== hostAsked) after.push("the guide's host was asked again");
     report("A restart keeps the source, the mapping, the listings and the failure", after);
 
@@ -368,20 +404,26 @@ try {
     await waitFor(async () => (await sources(page)).length === 0, 10_000).catch(() =>
       gone.push("the source stayed"),
     );
+
     if ((await nowOn(page, subscriptionId, picked.id)) !== undefined) {
       gone.push("the channel that was mapped to it still shows programmes");
     }
+
     if ((await status(page)).unresolved !== 1)
       gone.push("its mapping doesn't say it leads nowhere");
+
     if (!own(await nowOn(page, subscriptionId, CHANNEL.id))) gone.push("the own guide changed");
+
     // The source's index goes once nothing reads it: a few seconds at most.
     for (let waited = 0; sourceFiles().join() !== "sources.json" && waited < 5000; waited += 100) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+
     if (sourceFiles().join() !== "sources.json")
       gone.push(`the profile keeps ${sourceFiles().join(", ")}`);
     report("Removing the source drops what it downloaded, and its mapping leads nowhere", gone);
   }
+
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -392,4 +434,5 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);

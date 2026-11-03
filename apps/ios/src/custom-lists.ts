@@ -89,12 +89,15 @@ const memberOf = (channel: Channel): StoredMember => ({
 /** The channel a stored one is now, by the first of its streams its subscription lists, and that stream. */
 function resolve(library: Catalogue, stored: StoredMember) {
   if (library.kind !== "ready") return null;
+
   for (const via of stored.streams) {
     const channel = library.library.byKey.get(
       ownedKey({ subscriptionId: stored.subscriptionId, id: via }),
     );
+
     if (channel) return { channel, via };
   }
+
   return null;
 }
 
@@ -105,13 +108,17 @@ function shownOf(list: StoredList, catalogue: Catalogue, saved: readonly Member[
   const entries: ListEntry[] = [];
   const seen = new Set<string>();
   let away = 0;
+
   for (const stored of list.members) {
     const owner = byId.get(stored.subscriptionId);
+
     if (!owner) {
       away++;
       continue;
     }
+
     const found = owner.needsSecret ? null : resolve(catalogue, stored);
+
     if (found) {
       // Two of its channels the provider joined since show as one.
       if (seen.has(found.channel.key)) continue;
@@ -119,6 +126,7 @@ function shownOf(list: StoredList, catalogue: Catalogue, saved: readonly Member[
       entries.push({ kind: "listed", member: stored.member, channel: found.channel });
       continue;
     }
+
     const why: Unavailable = owner.needsSecret
       ? "needs-secret"
       : shown.has(stored.subscriptionId)
@@ -126,6 +134,7 @@ function shownOf(list: StoredList, catalogue: Catalogue, saved: readonly Member[
         : owner.live.kind === "failed"
           ? "failed"
           : "loading";
+
     entries.push({
       kind: "unavailable",
       member: stored.member,
@@ -134,6 +143,7 @@ function shownOf(list: StoredList, catalogue: Catalogue, saved: readonly Member[
       why,
     });
   }
+
   return { id: list.id, name: list.name, revision: list.revision, entries, away };
 }
 
@@ -145,6 +155,7 @@ export function useChannelLists(): readonly ChannelList[] {
   const from = useSyncExternalStore(subscribe, keptNow);
   const catalogue = useCatalogue();
   const roster = useRoster();
+
   return useMemo(
     () => listsOf(from, catalogue, roster.kind === "ready" ? roster.members : []),
     [from, catalogue, roster],
@@ -158,7 +169,9 @@ export function useChannelLists(): readonly ChannelList[] {
 export function listsHolding(channel: Channel): ReadonlySet<string> {
   const from = keptNow();
   const catalogue = currentCatalogue();
+
   if (from.kind !== "read") return new Set();
+
   return new Set(
     from.lists.flatMap((list) =>
       list.members.some(
@@ -186,8 +199,10 @@ function changeList(
 ): void {
   const lists = stored();
   const list = lists.find((each) => each.id === id);
+
   if (!list) throw new AppFailure({ kind: "no-list" });
   const next = change(list, lists);
+
   if (next !== list) save(lists.map((each) => (each === list ? next : each)));
 }
 
@@ -201,16 +216,20 @@ const withMembers = (list: StoredList, members: StoredMember[]): StoredList => (
 /** `name` trimmed, once it is 1 to 60 characters and no other list is called it, apart from case and accents. */
 function nameOf(lists: readonly StoredList[], name: string, except?: string): string {
   const trimmed = name.trim();
+
   if (trimmed.length === 0 || trimmed.length > CUSTOM_LIST_NAME_MAX) {
     throw new AppFailure({
       kind: "invalid-input",
       detail: `A list's name has 1 to ${CUSTOM_LIST_NAME_MAX} characters.`,
     });
   }
+
   const folded = normalize(trimmed);
+
   if (lists.some((list) => list.id !== except && normalize(list.name) === folded)) {
     throw new AppFailure({ kind: "list-name-taken" });
   }
+
   return trimmed;
 }
 
@@ -221,6 +240,7 @@ function nameOf(lists: readonly StoredList[], name: string, except?: string): st
  */
 function listedChannel(channel: Channel): Channel {
   const now = listedNow(channel, currentCatalogue(), members());
+
   if (now.kind === "listed") return now.channel;
   throw new AppFailure(
     now.kind === "removed"
@@ -238,6 +258,7 @@ export function createList(name: string, first?: Channel): string {
   const members = first ? [memberOf(listedChannel(first))] : [];
   const id = newId();
   save([...lists, { id, name: named, revision: 0, members }]);
+
   return id;
 }
 
@@ -249,6 +270,7 @@ export function renameList(id: string, name: string): void {
 /** Deletes list `id` and every channel it holds. Deleting one already gone changes nothing. */
 export function deleteList(id: string): void {
   const lists = stored();
+
   if (!lists.some((list) => list.id === id)) return;
   save(lists.filter((list) => list.id !== id));
 }
@@ -261,11 +283,14 @@ export function deleteList(id: string): void {
 export function setMember(id: string, channel: Channel, member: boolean): void {
   const now = listedChannel(channel);
   const catalogue = currentCatalogue();
+
   const same = (stored: StoredMember) =>
     stored.subscriptionId === now.subscriptionId &&
     resolve(catalogue, stored)?.channel.key === now.key;
+
   changeList(id, (list) => {
     if (list.members.some(same) === member) return list;
+
     return withMembers(
       list,
       member ? [...list.members, memberOf(now)] : list.members.filter((each) => !same(each)),
@@ -281,18 +306,22 @@ function withTwins(list: StoredList, ids: Iterable<string>): ReadonlySet<string>
   const named = new Set(ids);
   const catalogue = currentCatalogue();
   const saved = members();
+
   // Only a channel the list opens hides its twins; those that don't open show each on its own.
   const keys = new Set(
     shownOf(list, catalogue, saved).entries.flatMap((entry) =>
       entry.kind === "listed" && named.has(entry.member) ? [entry.channel.key] : [],
     ),
   );
+
   const opens = new Set(saved.flatMap((member) => (member.needsSecret ? [] : [member.entry.id])));
+
   return new Set(
     list.members.flatMap((each) => {
       const key = opens.has(each.subscriptionId)
         ? resolve(catalogue, each)?.channel.key
         : undefined;
+
       return named.has(each.member) || (key !== undefined && keys.has(key)) ? [each.member] : [];
     }),
   );
@@ -303,6 +332,7 @@ export function removeMember(id: string, member: string): void {
   changeList(id, (list) => {
     const out = withTwins(list, [member]);
     const members = list.members.filter((each) => !out.has(each.member));
+
     return members.length === list.members.length ? list : withMembers(list, members);
   });
 }
@@ -325,11 +355,13 @@ export function arrangeList(
     shown.entries.flatMap((entry) =>
       entry.kind === "listed" ? [`${entry.member} ${entry.channel.key}`] : [],
     );
+
   const sorted = (ids: Iterable<string>) => [...ids].sort().join("\n");
   const out = new Set(removed);
   changeList(from.id, (list) => {
     const now = shownOf(list, currentCatalogue(), members());
     const kept = now.entries.flatMap((entry) => (out.has(entry.member) ? [] : [entry.member]));
+
     if (
       list.revision !== from.revision ||
       opened(now).join("\n") !== opened(from).join("\n") ||
@@ -338,22 +370,28 @@ export function arrangeList(
     ) {
       throw new AppFailure({ kind: "list-changed" });
     }
+
     const gone = withTwins(list, removed);
     const shown = new Set(now.entries.map((entry) => entry.member));
+
     // A twin the list hides goes with the channel it shows as, right after it.
     const twins = new Map(
       order.map((id) => [id, [...withTwins(list, [id])].filter((twin) => !shown.has(twin))]),
     );
+
     const hidden = new Set([...twins.values()].flat());
     const moved = new Set(order);
     const byMember = new Map(list.members.map((each) => [each.member, each]));
     const next = order.values();
+
     return withMembers(
       list,
       list.members.flatMap((each) => {
         if (gone.has(each.member) || hidden.has(each.member)) return [];
+
         if (!moved.has(each.member)) return [each];
         const id = next.next().value!;
+
         return [id, ...twins.get(id)!].map((member) => byMember.get(member)!);
       }),
     );
@@ -368,12 +406,14 @@ export function arrangeList(
  */
 function align(catalogue: Catalogue, roster: Roster) {
   const from = keptNow();
+
   if (from.kind !== "read" || roster.kind !== "ready") return;
   const saved = new Set(roster.members.map((member) => member.entry.id));
   // Read only once a list holds a subscription the roster doesn't, and taken whole from the
   // registry as it stands: one saved there, as when it is being added again, or removed with its
   // history kept, keeps its channels. While the registry doesn't read, every list keeps them all.
   let registry: ReadonlySet<string> | null | undefined;
+
   const kept = (id: string) => {
     if (registry === undefined) {
       const file = readRegistry();
@@ -385,28 +425,39 @@ function align(catalogue: Catalogue, roster: Roster) {
           ])
         : null;
     }
+
     return registry === null || registry.has(id);
   };
+
   let changed = false;
+
   const lists = from.lists.map((list) => ({
     ...list,
     members: list.members.flatMap((stored): StoredMember[] => {
       if (!saved.has(stored.subscriptionId)) {
         if (kept(stored.subscriptionId)) return [stored];
         changed = true;
+
         return [];
       }
+
       const found = resolve(catalogue, stored);
+
       if (!found) return [stored];
       const streams = [...new Set([found.via, ...streamsOf(found.channel), ...stored.streams])];
+
       if (streams.join("\n") === stored.streams.join("\n") && found.channel.title === stored.name) {
         return [stored];
       }
+
       changed = true;
+
       return [{ ...stored, streams, name: found.channel.title }];
     }),
   }));
+
   if (!changed) return;
+
   try {
     save(lists);
   } catch {
@@ -421,8 +472,11 @@ const aligned = () => {
   readAgain();
   align(currentCatalogue(), currentRoster());
 };
+
 onRoster(aligned);
+
 onCatalogue(aligned);
+
 AppState.addEventListener("change", (state) => {
   if (state === "active") readAgain();
 });

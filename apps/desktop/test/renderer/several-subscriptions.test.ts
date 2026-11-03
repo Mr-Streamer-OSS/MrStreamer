@@ -30,6 +30,7 @@ const subscription = (id: string, name: string): SubscriptionSummary => ({
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
   needsSecret: false,
 });
+
 const northline = subscription("northline", "Northline");
 const holiday = subscription("holiday", "Holiday house");
 
@@ -43,9 +44,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -114,6 +117,7 @@ async function liveTv(statuses: readonly CatalogueStatus[]) {
   await mounted.render(createElement(GuidePage, { active: true }));
   unmount = mounted.unmount;
   await settled();
+
   return {
     container,
     /** Each channel's row as the viewer reads it, top to bottom. */
@@ -139,6 +143,7 @@ describe("Live TV with several subscriptions", () => {
 
   it("says whose channels couldn't be fetched, shows the others, and retries that one alone", async () => {
     const failedAt = new Date().setHours(14, 2, 0, 0);
+
     const page = await liveTv([
       loaded(northline, 2),
       {
@@ -207,12 +212,14 @@ async function filmSheet(played: readonly TitleProgress[], picks: Record<string,
   const progress = ipc.hold("viewing.progress");
   const client = new QueryClient();
   client.setQueryData(["subscriptions"], [northline, holiday]);
+
   for (const { id } of [northline, holiday]) {
     client.setQueryData(queries.subscriptionPreferences(id).queryKey, {
       ...defaultSubscriptionPreferences,
       ...defined({ titleVersions: picks[id] ? { "movie:603": picks[id] } : undefined }),
     });
   }
+
   const mounted = queryView(client);
   await mounted.render(
     createElement(DetailsView, {
@@ -225,16 +232,20 @@ async function filmSheet(played: readonly TitleProgress[], picks: Record<string,
   await act(async () => progress.resolve(played));
   await settled();
   const [asked] = ipc.argsOf("ondemand.details").slice(-1);
+
   const version = film.versions.find(
     (each) => each.subscriptionId === asked?.version.subscriptionId,
   );
+
   if (!version) throw new Error("The sheet asked for no version's details.");
   await act(async () => opened.resolve(detailsOf(version)));
   await settled();
+
   const button = (label: string) =>
     [...document.body.querySelectorAll("button")].find(
       (each) => each.textContent?.trim() === label || each.getAttribute("aria-label") === label,
     );
+
   return { asked: asked?.version, button, text: () => document.body.textContent ?? "" };
 }
 
@@ -248,9 +259,11 @@ describe("a film two subscriptions list", () => {
 
     await act(async () => sheet.button("Versions")?.click());
     await settled();
+
     const offered = [...document.body.querySelectorAll('[role="menuitemradio"]')].map(
       (item) => item.textContent ?? "",
     );
+
     expect(offered).toHaveLength(3);
     expect(offered[0]).toContain("Automatic");
     expect(
@@ -268,6 +281,7 @@ describe("a film two subscriptions list", () => {
       at: 1,
       since: 1,
     });
+
     // Stopped halfway in the first's file, and the viewer picked the second's version since.
     const other = await filmSheet([halfway(northline, "91001")], { [holiday.id]: "91000" });
     expect(other.asked).toEqual({ subscriptionId: holiday.id, id: "91000" });
@@ -286,10 +300,12 @@ describe("a film two subscriptions list", () => {
 
     await act(async () => sheet.button("Versions")?.click());
     await settled();
+
     const theirs = [...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
       (item) =>
         item.textContent?.includes("Holiday house") && !item.textContent.includes("Automatic"),
     );
+
     await act(async () => theirs?.click());
     await settled();
 

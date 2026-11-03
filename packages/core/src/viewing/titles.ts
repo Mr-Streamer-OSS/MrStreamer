@@ -10,6 +10,7 @@ export const STARTED_SECONDS = 120;
 
 /** The share at the end that counts as the credits: watching into it finishes the title. */
 const CREDITS_SHARE = 0.05;
+
 /** Short titles still leave this much at the end. */
 const MIN_CREDITS_SECONDS = 30;
 
@@ -35,6 +36,7 @@ export interface TitleRow extends RawProgress {
 /** Whether a position is in the credits, or past the end. */
 export function isFinished(position: number, duration: number): boolean {
   const credits = Math.max(duration * CREDITS_SHARE, MIN_CREDITS_SECONDS);
+
   return duration > 0 && position >= duration - credits;
 }
 
@@ -55,6 +57,7 @@ export function accepted(
   markedAt: number | null,
 ): boolean {
   const older = row !== undefined && since < row.since && at >= row.at;
+
   return !older && !(markedAt !== null && since <= markedAt);
 }
 
@@ -74,6 +77,7 @@ export function progressed(
   removedAt: number | null,
 ): TitleRow {
   const { title, position, duration, since } = checkpoint;
+
   return {
     title,
     position: Math.max(0, Math.min(position, duration)),
@@ -97,6 +101,7 @@ export function removalScope(title: RawTitleRef): string {
  */
 export function removedKeys(title: RawTitleRef, rows: readonly TitleRow[]): string[] {
   if (title.kind === "movie") return [titleKey(title)];
+
   return rows.flatMap((row) =>
     row.title.kind === "episode" && row.title.seriesId === title.seriesId
       ? [titleKey(row.title)]
@@ -114,19 +119,25 @@ export function continueWatching(rows: readonly TitleRow[]): RawProgress[] {
   /** Series with an episode watched past its start, so a few seconds of a pilot don't count. */
   const started = new Set<string>();
   const movies: TitleRow[] = [];
+
   for (const row of rows) {
     if (row.title.kind === "movie") {
       if (!row.hidden && !row.finished && row.position >= STARTED_SECONDS) movies.push(row);
       continue;
     }
+
     const { seriesId } = row.title;
+
     if (row.finished || row.position >= STARTED_SECONDS) started.add(seriesId);
     const latest = latestPerSeries.get(seriesId);
+
     if (!latest || row.at > latest.at) latestPerSeries.set(seriesId, row);
   }
+
   const series = [...latestPerSeries.values()].filter(
     (row) => !row.hidden && row.title.kind === "episode" && started.has(row.title.seriesId),
   );
+
   return [...movies, ...series]
     .sort((a, b) => b.at - a.at)
     .slice(0, CONTINUE_OFFERED)

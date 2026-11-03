@@ -72,6 +72,7 @@ const views = new Set<AbortSignal>();
  */
 function listAnchor() {
   const box = document.querySelector("[data-output]")?.getBoundingClientRect();
+
   return box
     ? { x: box.x, y: box.y, width: box.width, height: box.height }
     : { x: window.innerWidth / 2, y: window.innerHeight / 2, width: 0, height: 0 };
@@ -90,10 +91,12 @@ function take(status: OutputStatus): void {
     connectingSince: connecting ? (state.connectingSince ?? Date.now()) : null,
     connectingFrom: connecting ? (state.connectingFrom ?? receiverOf(before.output)) : null,
   }));
+
   for (const listener of listeners) listener(status, before);
 }
 
 listen("output.changed", take);
+
 void call("output.status")
   .then(take)
   .catch(() => {});
@@ -102,6 +105,7 @@ void call("output.status")
 function refused(receiver: Pick<Receiver, "id" | "kind" | "name">) {
   return (cause: unknown) => {
     const error = appError(cause);
+
     if (error.kind !== "output") return;
     store.setState({ refused: { receiver, failure: error.failure, at: Date.now() } });
   };
@@ -133,9 +137,11 @@ export function where(receiver: Pick<Receiver, "kind" | "name"> | null): string 
  */
 export function usePreviewWaits(): string | null {
   const output = useOutput((state) => state.status.output);
+
   if (output.kind !== "receiver" && output.kind !== "lost") return null;
   const busy = output.kind === "receiver" && output.media !== null;
   const receiver = receiverName(output.receiver);
+
   return busy
     ? t("Preview waits while {receiver} plays", { receiver })
     : t("Preview waits while {receiver} is connected", { receiver });
@@ -144,6 +150,7 @@ export function usePreviewWaits(): string | null {
 /** Where `media` is now, in seconds into its title: the receiver's last word, moved on while it plays. */
 export function positionOf(media: RemoteMedia, now = Date.now()): number {
   const moved = media.state === "playing" ? Math.max(0, (now - media.at) / 1000) : 0;
+
   return Math.min(media.position + moved, media.duration ?? Infinity);
 }
 
@@ -161,11 +168,13 @@ export const outputs = {
   /** What the receiver plays, as it last confirmed; null when it plays nothing. */
   media(): RemoteMedia | null {
     const { output } = store.getState().status;
+
     return output.kind === "receiver" ? output.media : null;
   },
   /** Hears every change, with what was before. Returns the unsubscribe function. */
   subscribe(listener: (now: OutputStatus, before: OutputStatus) => void): () => void {
     listeners.add(listener);
+
     return () => listeners.delete(listener);
   },
   /**
@@ -174,7 +183,9 @@ export const outputs = {
    */
   choose(): void {
     const { offers } = store.getState().status;
+
     if (offers.length === 0) return;
+
     if (offers.every((kind) => kind === "airplay")) outputs.pick();
     else outputs.list(true);
   },
@@ -218,7 +229,9 @@ export const outputs = {
   /** Connects again to the receiver whose connection broke. */
   reconnect(): void {
     const receiver = outputs.receiver();
+
     if (!receiver) return;
+
     if (receiver.kind === "airplay") outputs.pick();
     // By the receiver lost, whose name a refusal keeps, also when the list no longer shows it.
     else connect(receiver);
@@ -231,6 +244,7 @@ export const outputs = {
   /** Ends what the receiver plays, whichever view started it, and keeps the receiver. */
   stop(): void {
     const media = outputs.media();
+
     if (!media) return;
     void call("output.command", { generation: media.generation, command: "stop" }).catch(() => {});
   },

@@ -41,6 +41,7 @@ const driver = (page: Page, base: BaseDriver) => {
           audio: v?.webkitAudioDecodedByteCount ?? 0, paused: v?.paused ?? true,
           title: !!document.querySelector('[data-view=title]') };
       })()`);
+
   /** Main's list, read as the window reads it: an observation, never a change. */
   const listed = () =>
     page.evaluate<
@@ -54,8 +55,10 @@ const driver = (page: Page, base: BaseDriver) => {
         title: { kind: "movie" | "episode"; id: string };
       }[]
     >("window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])");
+
   return { ...base, video, listed };
 };
+
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloads(
@@ -64,6 +67,7 @@ export async function runDownloads(
 ) {
   // The text expected below, in the language the app shows.
   setLanguage({ locale, formats: locale });
+
   const steps = async ({
     start,
     quit,
@@ -79,14 +83,19 @@ export async function runDownloads(
   }: Run<Driver>) => {
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
     const labelled = (label: string) =>
       `document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})`;
+
     const poster = (words: string) =>
       `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(words)}))`;
+
     const row = (id: string) => `document.querySelector('[data-download="${id}"]')`;
+
     /** The top bar's notice in `scope`'s bar: Downloads beside Search, named with how they stand. */
     const notice = (scope = "header") =>
       `document.querySelector(${JSON.stringify(`${scope} [aria-label^="${t("Downloads, {status}", { status: "" })}"]`)})`;
+
     /** The bar as it is laid out: the pages' names, and each Downloads control beside Search. */
     const barOf = (d: Driver) =>
       d.page.evaluate<{
@@ -120,26 +129,36 @@ export async function runDownloads(
               current: b.getAttribute('aria-current'), width: b.getBoundingClientRect().width })),
         };
       })()`);
+
     const noticeSays = (d: Driver, scope?: string) =>
       d.page.evaluate<string | null>(`(${notice(scope)})?.textContent.trim() ?? null`);
+
     const onDownloadsPage = (d: Driver) =>
       d.exists(`document.querySelector('h1')?.textContent === ${JSON.stringify(t("Downloads"))}`);
+
     const notices: Record<string, unknown> = {};
     observed["notice"] = notices;
+
     type Bar = Awaited<ReturnType<typeof barOf>>;
+
     /** Fails the run where the bar cuts a page's name or a control, or says other than `says`. */
     const fits = (where: string, bar: Bar, says?: (label: string) => boolean) => {
       if (bar.clipped || bar.overflows)
         throw new Error(`The bar doesn't fit ${where}: ${JSON.stringify(bar)}`);
+
       if (says && !(bar.downloads.length === 1 && says(bar.downloads[0]!.label ?? "")))
         throw new Error(
           `The bar doesn't say how the downloads stand ${where}: ${JSON.stringify(bar)}`,
         );
+
       return bar;
     };
+
     const named = (status: string) => (label: string) =>
       label === t("Downloads, {status}", { status });
+
     const percent = (label: string) => /\d/.test(label);
+
     /** Lays the window out `width` CSS px wide, as a narrow or zoomed window has it, or as it is. */
     const layOut = async (d: Driver, width: number | null) => {
       if (width === null) await d.page.send("Emulation.clearDeviceMetricsOverride");
@@ -158,6 +177,7 @@ export async function runDownloads(
         at: now(),
       });
     };
+
     /** The bar once it stopped folding: the same read twice, a few frames apart. */
     const settledBar = async (d: Driver) => {
       let bar = await barOf(d);
@@ -166,31 +186,39 @@ export async function runDownloads(
         const next = await barOf(d);
         const same = JSON.stringify(next) === JSON.stringify(bar);
         bar = next;
+
         return same;
       });
+
       return bar;
     };
+
     /**
      * The bar at the window's least width and at 760 CSS px, below it: each must fit every page's
      * name and say how the downloads stand. Then the window's own width again, with every name.
      */
     const atWidths = async (d: Driver, name: string, says: (label: string) => boolean) => {
       const bars: Record<number, Bar> = {};
+
       for (const width of [960, 760]) {
         await layOut(d, width);
         bars[width] = fits(`${name} at ${width} CSS px`, await settledBar(d), says);
         await d.capture(`notice-${name}-${width}`);
       }
+
       await layOut(d, null);
       await d.wait(async () => (await barOf(d)).pages.includes(t("Downloads")));
       notices[`${name}AtWidths`] = bars;
     };
+
     /** The id of the download of a provider's title, as main lists it. */
     const idOf = async (d: Driver, kind: "movie" | "episode", id?: number) => {
       const found = (await d.listed()).find(
         (item) => item.title.kind === kind && (id === undefined || item.title.id === String(id)),
       );
+
       if (!found) throw new Error(`No download of ${kind} ${id ?? ""}`);
+
       return found.id;
     };
 
@@ -199,6 +227,7 @@ export async function runDownloads(
       await d.click(label, `(${row(id)})?.querySelector('button')`);
       await d.wait(async () => {
         const v = await d.video();
+
         return v.title && !v.paused && v.width > 0 && v.time > 0.5;
       }, 45_000);
     };
@@ -208,6 +237,7 @@ export async function runDownloads(
     await online.wait(() =>
       online.page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
     );
+
     for (const [index, value] of [provider.url, "demo", "demo"].entries()) {
       await online.click(
         `Fill Connect field ${index + 1}`,
@@ -215,6 +245,7 @@ export async function runDownloads(
       );
       await online.page.send("Input.insertText", { text: value });
     }
+
     await online.click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await online.wait(() => online.exists("document.querySelector('header')"));
     // Every word the visible notice says, as the window draws it: an observation, never a change.
@@ -259,6 +290,7 @@ export async function runDownloads(
     const slow = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Long subtitles"),
     )!;
+
     provider.stallMovieFile(slow.id, 40_000, 20_000);
     await online.click("Open Movies", button("header button", t("Movies")));
     await online.click("Open All movies", button("nav button", t("All movies")));
@@ -281,11 +313,14 @@ export async function runDownloads(
     );
     await online.wait(async () => {
       const v = await online.video();
+
       return v.title && !v.paused && v.width > 0 && v.time > 1;
     }, 45_000);
+
     const waiting = (await online.listed()).find(
       (item) => item.name.includes("Long") || item.status.kind === "waiting",
     );
+
     observed["preemption"] = {
       downloadStatusWhilePlaying: waiting?.status.kind ?? null,
       mostProviderFilesAtOnce: provider.mostFilesAtOnce(),
@@ -293,14 +328,17 @@ export async function runDownloads(
       playback: await online.video(),
     };
     await online.capture("playing-while-download-waits");
+
     if (waiting?.status.kind !== "waiting")
       throw new Error("The download didn't wait for playback.");
+
     if (provider.mostFilesAtOnce() !== 1) throw new Error("The provider saw two files at once.");
     // Over the title, its bar's notice says the download waits. Space on it, reached with Tab,
     // presses it rather than pausing the title: it leaves the title as Back does, saving where
     // it got to, and opens Downloads, with nothing of the title or its details left over it.
     const titleBar = "[data-view=title] header";
     await online.wait(async () => (await noticeSays(online, titleBar)) === t("Waiting"));
+
     const wake = async () => {
       await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 300 });
       await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 420, y: 320 });
@@ -310,12 +348,15 @@ export async function runDownloads(
       // The bar fades in over 300 ms.
       await delay(400, undefined, { signal: abort.signal });
     };
+
     await wake();
     await online.capture("notice-waiting-over-title");
     await wake();
+
     const indexed = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Index at the end"),
     )!;
+
     /**
      * What main saved of how far the playing title got: an observation, never a change. A title
      * playing saves every minute, so a position saved before then was saved as it was left.
@@ -324,6 +365,7 @@ export async function runDownloads(
       online.page.evaluate<{ position: number } | null>(
         `window.mrStreamer.invoke('viewing.progress', { movies: [${JSON.stringify({ subscriptionId: waiting.subscription?.id, id: String(indexed.id) })}] }).then(r => r.ok ? (r.value[0] ?? null) : null)`,
       );
+
     await online.tabTo("Tab to the notice over the playing title", notice(titleBar));
     const before = await saved();
     const pressedOn = await online.video();
@@ -340,7 +382,9 @@ export async function runDownloads(
       saved: progress,
       bar: await barOf(online),
     };
+
     if (pressedOn.paused) throw new Error("The title was paused before its notice was pressed.");
+
     if (before || !progress || progress.position < pressedOn.time - 1)
       throw new Error(`Leaving the title didn't save where it got to: ${JSON.stringify(progress)}`);
     await online.capture("notice-opened-downloads-from-title");
@@ -352,6 +396,7 @@ export async function runDownloads(
       item.name,
       item.status.kind,
     ]);
+
     if (provider.mostFilesAtOnce() !== 1) throw new Error("The provider saw two files at once.");
 
     // Home's muted preview of a channel is playback too: a download held by the provider waits
@@ -360,6 +405,7 @@ export async function runDownloads(
     const recording = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Broadcast recording"),
     )!;
+
     provider.stallMovieFile(recording.id, 30_000, 120_000);
     await online.click("Open Movies", button("header button", t("Movies")));
     await online.click("Open All movies", button("nav button", t("All movies")));
@@ -370,6 +416,7 @@ export async function runDownloads(
     );
     await online.wait(async () => (await online.text('[role="dialog"]')).includes("%"));
     await online.key("Escape", 27);
+
     const search = async (words: string, label: string) => {
       await online.click("Open global Search", labelled(t("Search")));
       actions.push({ action: `Search ${words}`, at: now() });
@@ -381,9 +428,11 @@ export async function runDownloads(
       );
       await online.key("Enter", 13);
     };
+
     await search("TEST | H.264 + AAC", "H.264 + AAC");
     await online.wait(async () => {
       const v = await online.video();
+
       return (await online.exists("document.querySelector('[data-view=watch]')")) && v.time > 0.5;
     }, 45_000);
     // Watch's bar says the download waits for the channel, as the title's did.
@@ -395,11 +444,13 @@ export async function runDownloads(
     await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 400, y: 300 });
     await delay(400, undefined, { signal: abort.signal });
     await online.capture("notice-waiting-over-watch");
+
     // Enter on it, reached with Tab, presses it rather than opening the channels: Watch closes
     // over Downloads, no page that previews, so the channel lets the provider's connection go
     // and the download takes it on.
     const recordingStatus = async () =>
       (await online.listed()).find((item) => item.title.id === String(recording.id))?.status.kind;
+
     // The request that takes the download on starts where the held one stopped, past its hold:
     // held again further on, so it is still under way once Home's preview wants the connection.
     provider.stallMovieFile(recording.id, 60_000, 120_000);
@@ -412,9 +463,11 @@ export async function runDownloads(
         (await onDownloadsPage(online)),
     );
     await online.wait(async () => (await recordingStatus()) === "transferring", 45_000);
+
     const recordingRow = row(
       (await online.listed()).find((item) => item.title.id === String(recording.id))!.id,
     );
+
     await online.wait(async () =>
       /\d\s?%/.test(await online.page.evaluate<string>(`(${recordingRow})?.innerText ?? ""`)),
     );
@@ -432,10 +485,12 @@ export async function runDownloads(
     await online.wait(async () => (await noticeSays(online)) === t("Waiting"));
     await atWidths(online, "waiting", named(t("Waiting")));
     await search("Broadcast recording", "Broadcast recording");
+
     const waitingControl = button(
       '[role="dialog"] button',
       `${t("Waiting for playback")} · ${t("Cancel")}`,
     );
+
     await online.wait(() => online.exists(waitingControl));
     observed["waitingBehindPreview"] = {
       status: await recordingStatus(),
@@ -468,9 +523,11 @@ export async function runDownloads(
     );
     await online.wait(async () => provider!.fileRequests() > retried);
     await online.key("Escape", 27);
+
     const held = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Index with a gap"),
     )!;
+
     provider.stallMovieFile(held.id, 30_000, 60_000);
     await online.click("Open the index-with-a-gap movie", poster("Index with a gap"));
     // Download stopped is all the bar has to say, with Back in the pages' place over the details.
@@ -485,12 +542,15 @@ export async function runDownloads(
     // Find the fold itself, keeping the same no-clipping assertion at every width.
     const stoppedBesideBack: Record<number, Bar> = {};
     notices["stoppedBesideBack"] = stoppedBesideBack;
+
     for (; narrow >= 320; narrow -= 20) {
       await layOut(online, narrow);
       arrowAlone = fits(`stopped at ${narrow} CSS px`, await settledBar(online), stopped);
       stoppedBesideBack[narrow] = arrowAlone;
+
       if (arrowAlone.downloads[0]!.text === "") break;
     }
+
     if (arrowAlone.downloads[0]!.text !== "")
       throw new Error("Download stopped never folded beside Back within 960 to 320 CSS px.");
     await online.capture(`notice-stopped-arrow-${narrow}`);
@@ -500,6 +560,7 @@ export async function runDownloads(
     );
     await online.wait(async () => percent(labelOf(await barOf(online))));
     const shorter = fits(`transferring at ${narrow} CSS px`, await settledBar(online), percent);
+
     if (shorter.downloads[0]!.text === "")
       throw new Error(`The percentage stayed behind the arrow at ${narrow} CSS px, where it fits.`);
     notices["stoppedToTransferring"] = {
@@ -522,12 +583,14 @@ export async function runDownloads(
     await online.wait(async () => (await noticeSays(online)) === null);
     notices["wideOnDownloads"] = await barOf(online);
     await online.capture("notice-hidden-on-downloads");
+
     // Narrower than the pages' names need: Downloads folds beside Search as one button, marked
     // on its page and named with the notice's words, its arrow alone where the other names need
     // the room. The window's least width is 960, so the narrower layout is emulated, as a zoomed
     // window or longer page names give it.
     const folded = async (current: boolean) => {
       const bar = await barOf(online);
+
       return (
         !bar.pages.includes(t("Downloads")) &&
         bar.downloads.length === 1 &&
@@ -535,19 +598,23 @@ export async function runDownloads(
         percent(bar.downloads[0]!.label ?? "")
       );
     };
+
     // Header copy changes how many CSS pixels the pages need. Find the actual fold while
     // still requiring its current-page marker, percentage label and keyboard behavior below.
     // The bar folds a frame or more after the resize, so each width is read once it has settled;
     // read sooner, a slow runner steps past the fold to a width where no names fit.
     let foldedWidth: number | undefined;
+
     for (let width = 760; width >= 520; width -= 20) {
       await layOut(online, width);
       await settledBar(online);
+
       if (await folded(true)) {
         foldedWidth = width;
         break;
       }
     }
+
     if (foldedWidth === undefined)
       throw new Error("Downloads did not fold within the emulated width bounds.");
     notices["foldedWidth"] = foldedWidth;
@@ -569,41 +636,53 @@ export async function runDownloads(
     );
     await online.capture("downloads-queue-and-copies");
     const heldId = await idOf(online, "movie", held.id);
+
     const missingId = await idOf(
       online,
       "movie",
       provider.titles.movies.find((each) => each.name.startsWith("TEST | Missing file"))!.id,
     );
+
     // Among the pages, the folded Downloads button keeps the keyboard as its words go and come
     // back. At the narrowest width where it says the percentage, so Download stopped won't fit:
     // Tab to it, cancel the transfer from its row with the pointer, which leaves Download stopped
     // to its arrow. On Movies, Tab to it again, widen and narrow the window. On hover the arrow
     // says the words. Enter on it then opens Downloads.
     let narrowest = 0;
+
     for (let width = 960; width > 520; width -= 20) {
       await layOut(online, width);
       const says = (await settledBar(online)).downloads[0]?.text;
+
       if (says) narrowest = width;
       else if (says === "") break;
     }
+
     if (!narrowest) throw new Error("The folded Downloads never said the percentage.");
     await layOut(online, narrowest);
     await online.wait(async () => {
       const bar = await barOf(online);
+
       return percent(labelOf(bar)) && bar.downloads[0]!.text !== "";
     });
     await online.tabTo("Tab to the folded Downloads saying the percentage", notice());
     await online.page.evaluate("void (window.__focusedNotice = document.activeElement)");
+
     const kept = async (where: string, bar: Bar, words: boolean) => {
       fits(where, bar, stopped);
+
       if ((bar.downloads[0]!.text !== "") !== words)
         throw new Error(`The notice ${words ? "kept its arrow" : "kept its words"} ${where}.`);
+
       const focus = await online.page.evaluate<{ same: boolean; active: string | null }>(
         "({ same: document.activeElement === window.__focusedNotice && window.__focusedNotice.isConnected, active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? null })",
       );
+
       if (!focus.same) throw new Error(`The notice lost the keyboard ${where}: ${focus.active}`);
+
       return { ...bar, focus: focus.active };
     };
+
     const focused: Record<string, unknown> = { width: narrowest };
     notices["focusAcrossFolds"] = focused;
     await online.click(
@@ -629,10 +708,12 @@ export async function runDownloads(
       await settledBar(online),
       false,
     );
+
     const centre = await online.page.evaluate<{ x: number; y: number }>(`(() => {
       const box = (${notice()}).getBoundingClientRect();
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     })()`);
+
     actions.push({ action: "Point at the notice's arrow", at: now() });
     await online.page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...centre });
     const tip = `[...document.querySelectorAll('[data-side]')].find(e => !e.closest('header') && e.checkVisibility() && e.textContent.trim() === ${JSON.stringify(t("Download stopped"))})`;
@@ -670,6 +751,7 @@ export async function runDownloads(
     await online.click("Open Settings", labelled(t("Settings")));
     await online.wait(() => online.exists(notice()));
     const overSettings: Record<number, Bar> = {};
+
     for (const width of new Set([960, 520, narrow])) {
       await layOut(online, width);
       overSettings[width] = fits(
@@ -679,7 +761,9 @@ export async function runDownloads(
       );
       await online.capture(`notice-stopped-over-settings-${width}`);
     }
+
     notices["stoppedOverSettings"] = overSettings;
+
     if (overSettings[narrow]!.downloads[0]!.text !== "")
       throw new Error("The notice kept its words where Back had no room for them.");
     await layOut(online, null);
@@ -715,19 +799,23 @@ export async function runDownloads(
     await offline.click("Open Downloads", button("header button", t("Downloads")));
     // The movie, the episode, and the movie that waited for playback.
     await offline.wait(async () => (await offline.listed()).length === 3);
+
     // Their pictures come from this computer, with the picture server gone.
     const posters = () =>
       offline.page.evaluate<number>(
         "[...document.querySelectorAll('img')].filter(i => i.src.startsWith('mrstreamer:') && i.complete && i.naturalWidth > 0).length",
       );
+
     await offline.wait(async () => (await posters()) === 3);
     observed["offlineArtworkLoaded"] = await posters();
     await offline.capture("downloads-offline");
+
     const movieId = await idOf(
       offline,
       "movie",
       provider.titles.movies.find((each) => each.name.startsWith("TEST | Two sound tracks"))!.id,
     );
+
     const episodeId = await idOf(offline, "episode");
     const playedFrom = Date.now();
     const requestsFrom = windowRequests.length;
@@ -739,9 +827,11 @@ export async function runDownloads(
     await offline.wait(async () => !(await offline.video()).paused);
     observed["seek"] = { from: beforeSeek, to: (await offline.video()).time };
     await offline.click("Open Sound", labelled(t("Sound")));
+
     const sounds = await offline.page.evaluate<string[]>(
       "[...document.querySelectorAll('[role=dialog] [role=menuitemradio], [role=dialog] button[aria-pressed]')].map(b => b.textContent.trim())",
     );
+
     observed["soundTracks"] = sounds;
     await offline.click(
       "Choose the other sound track",
@@ -749,6 +839,7 @@ export async function runDownloads(
     );
     await offline.wait(async () => {
       const v = await offline.video();
+
       return !v.paused && v.audio > 0 && v.time > 1;
     }, 45_000);
     observed["afterTrackChange"] = await offline.video();
@@ -759,6 +850,7 @@ export async function runDownloads(
     // The 20-second movie is all credits: resume and subtitles go by the 150-second one.
     const longId = await idOf(offline, "movie", slow.id);
     await watchOffline(offline, longId, "Watch the long-subtitles movie offline");
+
     for (let skip = 0; skip < 4; skip++) await offline.key("ArrowRight", 39);
     await offline.click("Open Subtitles", labelled(t("Subtitles")));
     await offline.click(
@@ -768,6 +860,7 @@ export async function runDownloads(
     await offline.click("Close Subtitles", labelled(t("Close subtitles")));
     await offline.wait(async () => {
       const v = await offline.video();
+
       return !v.paused && v.time >= 40;
     }, 45_000);
     await offline.wait(
@@ -795,27 +888,34 @@ export async function runDownloads(
     const leftAt = (await offline.video()).time;
     await offline.key("Escape", 27);
     await offline.wait(async () => !(await offline.video()).title);
+
     // Main keeps where it was left: Watch offline goes from there at once, as the page hears of
     // it only a moment later.
     const longProgress = async () =>
       (await offline.listed()).find((item) => item.id === longId)?.progress;
+
     await offline.wait(async () => ((await longProgress())?.position ?? 0) >= leftAt - 2);
     const keptAtLeave = await longProgress();
+
     const shownAtResume = await offline.page.evaluate<string | null>(
       `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
     );
+
     await watchOffline(offline, longId, "Resume the long-subtitles movie offline");
     const resumedAt = (await offline.video()).time;
     observed["resume"] = { leftAt, kept: keptAtLeave, shownAtResume, resumedAt };
+
     if (resumedAt < leftAt - 8) throw new Error("The copy didn't resume where it was left.");
     await offline.key("Escape", 27);
     await offline.wait(async () => !(await offline.video()).title);
     // The page shows where it was left too.
     await offline.wait(async () => {
       const progress = await longProgress();
+
       const shown = await offline.page.evaluate<string | null>(
         `(${row(longId)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
       );
+
       return (
         !!progress && shown === `${Math.round((progress.position / progress.duration) * 100)}%`
       );
@@ -827,29 +927,36 @@ export async function runDownloads(
     await offline.click("Open Settings", labelled(t("Settings")));
     await offline.click("Open Subscriptions", button("nav button", t("Subscriptions")));
     const subscriptionRow = `[...document.querySelectorAll('li')].find(r => r.querySelector('button')?.textContent.includes(' · '))`;
+
     for (let attempt = 1; ; attempt++) {
       await offline.click(
         `Open the subscription (attempt ${attempt})`,
         `(${subscriptionRow})?.querySelector('button')`,
       );
+
       const opened = await offline
         .wait(() => offline.exists(`(${subscriptionRow})?.querySelector('[role=region]')`), 3000)
         .then(
           () => true,
           () => false,
         );
+
       if (opened) break;
+
       if (attempt === 3) throw new Error("The subscription's row didn't open.");
     }
+
     const [removeBefore, removeAfter] = t("Remove {name}", { name: "\n" }).split("\n");
     await offline.click(
       "Ask to remove it",
       `[...(${subscriptionRow})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim().startsWith(${JSON.stringify(removeBefore?.trim() ?? "")}) && b.textContent.trim().endsWith(${JSON.stringify(removeAfter?.trim() ?? "")}))`,
     );
+
     // The question after the subscription's name, which the fixture chose.
     const question = t("Remove {name}, and the lists loaded with it, from this device?", {
       name: "\n",
     }).split("\n");
+
     await offline.wait(async () => (await offline.text()).includes(question.at(-1) ?? ""));
     await offline.capture("remove-subscription-question");
     // In the row: the page under Settings has buttons of the same name in some languages, as
@@ -898,6 +1005,7 @@ export async function runDownloads(
     // viewer returns to hears so from main, before anything here asks for the list again.
     const copyFolder = join(profile, "downloads", movieId);
     const media = (await readdir(copyFolder)).find((name) => name.startsWith("media."));
+
     if (!media) throw new Error("The movie's copy has no file to remove.");
     await rm(join(copyFolder, media));
     actions.push({ action: "Remove the movie copy's file from the run's profile", at: now() });
@@ -908,12 +1016,15 @@ export async function runDownloads(
     await alone.wait(async () => (await alone.text()).includes(t("Download missing")));
     await alone.capture("copy-missing-player");
     await alone.click("Back from the missing copy", button("button", t("Back")));
+
     const rowSays = () =>
       alone.page.evaluate<{ text: string; watchOffline: boolean } | null>(
         `(() => { const r = ${row(movieId)}; return r && { text: r.textContent, watchOffline: [...r.querySelectorAll('button')].some(b => b.textContent.trim() === ${JSON.stringify(t("Watch offline"))}) }; })()`,
       );
+
     await alone.wait(async () => {
       const says = await rowSays();
+
       return (
         !!says &&
         says.text.includes(t("The file is no longer on this computer.")) &&
@@ -931,6 +1042,7 @@ export async function runDownloads(
 
     for (const name of ["offlinePlayback", "playbackWithoutSubscription"]) {
       const seen = observed[name] as ReturnType<typeof during>;
+
       if (seen.main.length > 0 || seen.window.length > 0)
         throw new Error(`${name} reached beyond the app's loopback proxy: ${JSON.stringify(seen)}`);
     }
@@ -938,8 +1050,10 @@ export async function runDownloads(
     /** What main and the window asked of the network between two moments, but the proxy's own. */
     function during(from: number, until: number, requestsFrom: number) {
       const lines = readLines(networkLog).filter((line) => line.at >= from && line.at <= until);
+
       const local = (url: string) =>
         /^(mrstreamer:|data:|blob:|file:|http:\/\/127\.0\.0\.1:\d+\/(title|source)\/)/.test(url);
+
       return {
         main: lines.filter((line) => line.kind !== "ipc"),
         window: windowRequests
@@ -950,6 +1064,7 @@ export async function runDownloads(
       };
     }
   };
+
   await ownedRun(
     {
       build,
@@ -986,11 +1101,14 @@ async function pictureServer(): Promise<Server> {
     const [r, g, b] = createHash("sha256")
       .update(request.url ?? "/")
       .digest();
+
     response
       .writeHead(200, { "Content-Type": "image/png" })
       .end(solidPng(300, 450, [r! / 2 + 40, g! / 2 + 40, b! / 2 + 40]));
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
   return server;
 }
 
@@ -1002,15 +1120,19 @@ function solidPng(width: number, height: number, rgb: readonly number[]): Buffer
     length.writeUInt32BE(data.length);
     const crc = Buffer.alloc(4);
     crc.writeUInt32BE(crc32(body));
+
     return Buffer.concat([length, body, crc]);
   };
+
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header.set([8, 2, 0, 0, 0], 8);
   const line = Buffer.alloc(1 + width * 3);
+
   for (let x = 0; x < width; x++) line.set(rgb.map(Math.round), 1 + x * 3);
   const pixels = Buffer.concat(Array.from({ length: height }, () => line));
+
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),

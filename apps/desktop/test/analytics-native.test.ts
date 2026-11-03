@@ -10,6 +10,7 @@ import { analyticsOptions } from "./e2e/analytics-options.ts";
 import { reconcileBodies } from "./e2e/analytics-native.ts";
 
 const sha = "a".repeat(40);
+
 describe("native telemetry verification CLI", () => {
   it("requires independent installed version/source pins without changing source workload defaults", () => {
     expect(analyticsOptions([])).toMatchObject({ native: false, volume: false, rollover: false });
@@ -59,6 +60,7 @@ describe("native telemetry verification CLI", () => {
   it("retains a failed proof for a missing executable and starts a relative executable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "analytics-cli-contract-"));
     const entry = fileURLToPath(new URL("./e2e/analytics-app.ts", import.meta.url));
+
     try {
       for (const [relative, native] of [
         ["missing.AppImage", false],
@@ -72,6 +74,7 @@ describe("native telemetry verification CLI", () => {
             { mode: 0o700 },
           );
         const output = join(directory, relative + (native ? "-native" : "") + "-evidence");
+
         const child = spawn(
           process.execPath,
           [
@@ -87,6 +90,7 @@ describe("native telemetry verification CLI", () => {
             stdio: "pipe",
           },
         );
+
         child.stdout.resume();
         child.stderr.resume();
         const [code] = await once(child, "exit");
@@ -95,6 +99,7 @@ describe("native telemetry verification CLI", () => {
           status: "failed",
           cleanup: { appExited: true, fixturesClosed: true, broadcastsExited: true },
         });
+
         if (native) {
           const proof = JSON.parse(await readFile(join(output, "proof.json"), "utf8"));
           expect(proof.error).toContain("code 42");
@@ -102,6 +107,7 @@ describe("native telemetry verification CLI", () => {
             expect.stringContaining("Native quit was not graceful"),
           ]);
         }
+
         if (relative === "present.AppImage")
           expect(await readFile(join(output, "electron.log"), "utf8")).toContain(
             "owned-launch-marker",
@@ -134,20 +140,24 @@ describe("native telemetry verification CLI", () => {
     );
   });
 });
+
 describe("Windows retry acceptance CLI", () => {
   it("requires the real Windows platform for its real-handle case", () => {
     const args = ["--native-telemetry", "--native-case=windows-retry"];
+
     if (process.platform === "win32")
       expect(analyticsOptions(args)).toMatchObject({ nativeCase: "windows-retry" });
     else expect(() => analyticsOptions(args)).toThrow("requires actual Windows");
   });
 });
+
 describe("ambiguous native HTTP delivery reconciliation", () => {
   const body = JSON.stringify({
     uuid: "play",
     timestamp: "2026-10-18T12:00:00Z",
     properties: { watch_duration_seconds: 8 },
   });
+
   it("counts byte-identical retries once while retaining the actual number of transmissions", () => {
     expect(reconcileBodies([body, body, body])).toEqual({ deliveries: 3, logicalEvents: 1 });
     expect(reconcileBodies([body, JSON.stringify({ uuid: "next" })])).toEqual({
@@ -170,11 +180,14 @@ describe("native acceptance shutdown", () => {
     const start = async (script: string) => {
       const child = spawn(process.execPath, ["-e", script], { stdio: ["pipe", "pipe", "pipe"] });
       await once(child.stdout!, "data");
+
       return child;
     };
+
     const graceful = await start(
       "process.stdin.resume();process.stdin.on('end',()=>process.exit(0));console.log('ready')",
     );
+
     expect(
       await closeNative(
         graceful,

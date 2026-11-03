@@ -18,6 +18,7 @@ export const iosActions = [
   "playlist_removed",
   "playlist_refreshed",
 ] as const satisfies readonly AnalyticsAction[];
+
 export type IosAction = (typeof iosActions)[number];
 
 /**
@@ -35,6 +36,7 @@ export const iosFeatures = [
   "player",
   "details",
 ] as const satisfies readonly AnalyticsFeature[];
+
 export type IosFeature = (typeof iosFeatures)[number];
 
 /** Which build sends, and the iOS major version. No model, locale or other device detail. */
@@ -46,6 +48,7 @@ export const IosBuild = lazy(() =>
     "os_major?": "13 <= number.integer <= 99",
   }).onUndeclaredKey("delete"),
 );
+
 export type IosBuild = Infer<typeof IosBuild>;
 
 /** One playback run can't outlast a month; a longer value is a clock or ownership defect. */
@@ -56,6 +59,7 @@ const Common = lazy(() =>
     .merge({ $process_person_profile: "false", $geoip_disable: "true" })
     .onUndeclaredKey("delete"),
 );
+
 type CommonProperties = Infer<typeof Common>;
 
 const Day = /^\d{4}-\d{2}-\d{2}$/;
@@ -121,8 +125,11 @@ export const CaptureEvent = lazy(() =>
       ),
     ),
 );
+
 export type CaptureEvent = Infer<typeof CaptureEvent>;
+
 export type CaptureName = CaptureEvent["event"];
+
 export type CaptureOf<Name extends CaptureName> = CaptureEvent & { event: Name };
 
 /** An event's own properties, by name, before the common build dimensions are added. */
@@ -135,6 +142,7 @@ export type EventProperties<Name extends CaptureName> =
 
 /** Bounded so a long time offline or a runaway producer can't grow the file. */
 export const OUTBOX_LIMIT = 64;
+
 /** Sends per event, across launches. */
 export const ATTEMPTS = 3;
 
@@ -156,4 +164,5 @@ export const AnalyticsRecord = lazy(() =>
     unfinished: CaptureEvent().or("null"),
   }).onUndeclaredKey("delete"),
 );
+
 export type AnalyticsRecord = Infer<typeof AnalyticsRecord>;

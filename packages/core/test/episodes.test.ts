@@ -47,6 +47,7 @@ const mark = (season: number, episode: number, watched: boolean, at: number): Ep
 /** Where the series goes on, in few words: the episode, where it resumes, and whether it replays. */
 function goesOn(plays: ReturnType<typeof play>[], marks: EpisodeMark[] = []) {
   const found = continuation(series, plays, marks);
+
   return (
     found && {
       episode: found.episode.id,
@@ -66,6 +67,7 @@ describe("how an episode stands", () => {
 
   it("loses its resume point once marked unwatched, and its check once it was finished", () => {
     const halfway = play(1, 1, 5, { position: 900 });
+
     const stateOf = episodeStates(
       [halfway, play(1, 2, 6)],
       [mark(1, 1, false, 10), mark(1, 2, false, 11)],
@@ -221,6 +223,7 @@ describe("a series watched to its end", () => {
     .flatMap((season) => season.episodes)
     .slice(0, -1)
     .map((episode, at) => play(episode.season, episode.number, at + 1));
+
   const last = { id: "s2e3", season: 2, episode: 3, since: 50 };
 
   it("is finished by the play that watches the last episode left, and by no other", () => {
@@ -270,6 +273,7 @@ describe("which checkpoints count", () => {
 
 describe("what a series' marks are kept under", () => {
   const version = (subscriptionId: string, id: string) => ({ subscriptionId, id, tags: [] });
+
   const title = (changes: Partial<Title>): Title => ({
     kind: "series",
     key: "series:tmdb:90000",
@@ -291,6 +295,7 @@ describe("what a series' marks are kept under", () => {
     versions: [version("a", "nl"), version("a", "en"), version("b", "nl")],
     ...changes,
   });
+
   const named = { subscriptionId: "a", id: "en" };
 
   it("is its TMDB id, with every version its own subscription lists and no other's", () => {

@@ -32,10 +32,13 @@ const mark = join(repository, "apps/desktop/assets/brand/mark.svg");
 
 /** Widths of the whole window, up to the capture's own. */
 const WIDTHS = [960, 1440, 1920, 2560];
+
 /** Pixels in a capture for each of the window's points. */
 const SCALE = 2;
+
 /** The five captures, each the whole window in points (1280 × 800). */
 const MASTERS = ["home", "live-tv", "tv-guide", "library", "watching"] as const;
+
 /**
  * The iPhone captures, each the whole screen at the simulator's own pixels, held the way index.html
  * shows it: Watching sideways, the rest upright.
@@ -47,14 +50,18 @@ const IPHONES = {
   "iphone-library": "portrait",
   "iphone-watching": "landscape",
 } as const;
+
 /**
  * The iPhone screen the page is laid out for, in points: index.html gives every iPhone picture
  * this shape (804 × 1748, or 1608 × 740 for landscape Watching), so a capture must have it too.
  */
 const IPHONE_SCREEN = { width: 402, height: 874 };
+
 /** Widths of an iPhone screen: as wide as it shows beside the window, and twice that. */
 const IPHONE_WIDTHS = [402, 804];
+
 type Master = (typeof MASTERS)[number];
+
 interface Cut {
   readonly master: Master;
   readonly left: number;
@@ -62,6 +69,7 @@ interface Cut {
   readonly width: number;
   readonly height: number;
 }
+
 /**
  * The parts of the windows the page shows close up, in points: what each section is about, at a
  * size that stays readable in a narrow column.
@@ -80,6 +88,7 @@ const CUTS: Readonly<Record<string, Cut>> = {
 };
 
 rmSync(out, { recursive: true, force: true });
+
 mkdirSync(out, { recursive: true });
 
 const webp = { quality: 88, effort: 5 };
@@ -89,23 +98,28 @@ function checkedCapture(name: string): Buffer {
   const file = `marketing-${name}.png`;
   const bytes = readFileSync(join(assets, file));
   const recorded = manifest.captures.find((capture) => capture.file === file);
+
   if (
     !recorded ||
     recorded.bytes !== bytes.length ||
     recorded.sha256 !== createHash("sha256").update(bytes).digest("hex")
   )
     throw new Error(`${file} differs from its capture manifest; regenerate captures together.`);
+
   return bytes;
 }
 
 /** A capture, checked against its manifest entry, as sharp reads it. */
 const captures = new Map<Master, Sharp>();
+
 for (const name of MASTERS) {
   const capture = sharp(checkedCapture(name));
   const size = await capture.metadata();
+
   if (size.width !== 2560 || size.height !== 1600 || size.format !== "png")
     throw new Error(`${name} must be the lossless 2560 × 1600 PNG master.`);
   captures.set(name, capture);
+
   for (const width of WIDTHS) {
     await capture
       .clone()
@@ -114,16 +128,19 @@ for (const name of MASTERS) {
       .toFile(join(out, `${name}-${width}.webp`));
   }
 }
+
 for (const [name, held] of Object.entries(IPHONES)) {
   const capture = sharp(checkedCapture(name));
   const size = await capture.metadata();
   const { format, width = 0, height = 0 } = size;
   const landscape = held === "landscape";
   const [long, short] = landscape ? [width, height] : [height, width];
+
   if (format !== "png" || long * IPHONE_SCREEN.width !== short * IPHONE_SCREEN.height)
     throw new Error(
       `${name} must be a lossless ${held} PNG of the whole ${IPHONE_SCREEN.width} × ${IPHONE_SCREEN.height}-point iPhone screen.`,
     );
+
   // A landscape screen is as tall as a portrait one is wide, so it is twice as wide again.
   for (const width of landscape ? IPHONE_WIDTHS.map((each) => each * 2) : IPHONE_WIDTHS) {
     await capture
@@ -133,11 +150,15 @@ for (const [name, held] of Object.entries(IPHONES)) {
       .toFile(join(out, `${name}-${width}.webp`));
   }
 }
+
 const captureOf = (name: Master): Sharp => {
   const capture = captures.get(name);
+
   if (!capture) throw new Error(`No capture for ${name}.`);
+
   return capture;
 };
+
 /** The pixels of a cut, as the master holds them. */
 const cutOf = ({ master, left, top, width, height }: Cut): Sharp =>
   captureOf(master)
@@ -148,6 +169,7 @@ const cutOf = ({ master, left, top, width, height }: Cut): Sharp =>
       width: width * SCALE,
       height: height * SCALE,
     });
+
 for (const [name, cut] of Object.entries(CUTS)) {
   for (const width of [cut.width, cut.width * SCALE]) {
     await cutOf(cut)
@@ -159,15 +181,19 @@ for (const [name, cut] of Object.entries(CUTS)) {
 
 // The mark is white: on black with rounded corners it shows on any tab bar or home screen.
 copyFileSync(mark, join(out, "mark.svg"));
+
 const favicon =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">` +
   `<rect width="100" height="100" rx="22" fill="#000"/>` +
   `<image x="14" y="14" width="72" height="72" href="data:image/svg+xml;base64,${readFileSync(mark).toString("base64")}"/></svg>`;
+
 writeFileSync(join(out, "favicon.svg"), favicon);
+
 await sharp(Buffer.from(favicon), { density: 300 })
   .resize(48)
   .png()
   .toFile(join(out, "favicon-48.png"));
+
 // Square: iOS rounds the corners itself.
 await sharp(Buffer.from(favicon.replace('rx="22"', 'rx="0"')), { density: 600 })
   .resize(180)
@@ -183,14 +209,17 @@ async function framed(
 ): Promise<{ readonly input: Buffer; readonly height: number }> {
   const resized = await picture.resize({ width }).png().toBuffer();
   const { height = 0 } = await sharp(resized).metadata();
+
   const rounded = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
       `<rect width="${width}" height="${height}" rx="${radius}"/></svg>`,
   );
+
   const frame = Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
       `<rect x=".5" y=".5" width="${width - 1}" height="${height - 1}" rx="${radius}" fill="none" stroke="${stroke}"/></svg>`,
   );
+
   const input = await sharp(resized)
     .composite([
       { input: rounded, blend: "dest-in" },
@@ -198,12 +227,14 @@ async function framed(
     ])
     .png()
     .toBuffer();
+
   return { input, height };
 }
 
 // The complete Home window on black, keeping its recommendation and permanent actions visible.
 const SOCIAL = { width: 1200, height: 630, window: 848, top: 96, radius: 16 };
 const home = await framed(captureOf("home").clone(), SOCIAL.window, SOCIAL.radius, "#333");
+
 await sharp({
   create: { width: SOCIAL.width, height: SOCIAL.height, channels: 3, background: "#000" },
 })
@@ -235,6 +266,7 @@ if (process.argv.includes("--readme")) {
   // scheme rather than its own theme, and GitCafe drops <picture> for its fallback image.
   const white = '<g transform="translate(0 3)" fill="#fff">';
   const source = readFileSync(mark, "utf8");
+
   if (!source.includes(white)) throw new Error("mark.svg no longer paints its shape white.");
   writeFileSync(
     join(assets, "readme-mark.svg"),
@@ -247,17 +279,21 @@ if (process.argv.includes("--readme")) {
   const POSTER = { width: 1400, height: 900, window: 1120, radius: 10 };
   const PHONE = { width: 300, bezel: 9, left: 1060, top: 210 };
   const screenWidth = PHONE.width - 2 * PHONE.bezel;
+
   const screen = await sharp(checkedCapture("iphone-home"))
     .resize({ width: screenWidth })
     .png()
     .toBuffer();
+
   const { height: screenHeight = 0 } = await sharp(screen).metadata();
   const phoneHeight = screenHeight + 2 * PHONE.bezel;
+
   const rounded = (width: number, height: number, radius: number, fill: string) =>
     Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
         `<rect width="${width}" height="${height}" rx="${radius}" fill="${fill}"/></svg>`,
     );
+
   // The screen with the iPhone's rounded corners, in a dark bezel the shape of the phone.
   const phone = await sharp(rounded(PHONE.width, phoneHeight, 50, "#1c1c1e"))
     .composite([
@@ -272,6 +308,7 @@ if (process.argv.includes("--readme")) {
     ])
     .png()
     .toBuffer();
+
   const layers = [
     {
       ...(await framed(captureOf("home").clone(), POSTER.window, POSTER.radius, "#3a3a3a")),
@@ -280,6 +317,7 @@ if (process.argv.includes("--readme")) {
     },
     { input: phone, left: PHONE.left, top: PHONE.top },
   ];
+
   await sharp({
     create: { width: POSTER.width, height: POSTER.height, channels: 3, background: "#000" },
   })

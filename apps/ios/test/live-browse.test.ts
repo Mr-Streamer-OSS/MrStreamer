@@ -29,6 +29,7 @@ const scenario = vi.hoisted(() => ({
 
 // ui.tsx keeps its pictures with artwork-cache.ts: over the files stand-in here.
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -40,26 +41,33 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => scenario.did.push(`push ${href}`) },
   useIsFocused: () => true,
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
+
 vi.mock("../src/account.ts", () => ({
   onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -73,11 +81,14 @@ vi.mock("../src/account.ts", () => ({
   retryChannels: () => undefined,
   reloadAllChannels: () => undefined,
 }));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => ({}) }));
+
 vi.mock("../src/playback.ts", async (original) => ({
   channelStatus: (await original<typeof import("../src/playback.ts")>()).channelStatus,
   usePlayback: () => ({ phase: scenario.phase, watch: false }),
 }));
+
 vi.mock("../src/storage.ts", () => ({
   useSavedState: () => scenario.saved,
   writeState: (change: (state: Partial<SavedState>) => Partial<SavedState>) => {
@@ -113,6 +124,7 @@ const home: LiveCatalogue = {
     channel("13", "Loose", []),
   ],
 };
+
 // The second panel numbers its channels as the first does.
 const cabin: LiveCatalogue = {
   categories: [
@@ -125,10 +137,12 @@ const cabin: LiveCatalogue = {
     channel("12", "NL | Zappelin", ["2"]),
   ],
 };
+
 const both = buildLibrary([
   { subscriptionId: "a", label: "Home", catalogue: home },
   { subscriptionId: "b", label: "Cabin", catalogue: cabin },
 ]);
+
 /** The library once a refresh found Home's Belgian category gone. */
 const withoutBelgium = buildLibrary([
   {
@@ -165,9 +179,11 @@ const ready = (library: Library): Catalogue => ({ kind: "ready", library, failin
 let container: ReturnType<typeof document.createElement>;
 let root: Root;
 let unmount = () => {};
+
 function draw(node: React.ReactNode) {
   React.act(() => root.render(node));
 }
+
 function open(node: React.ReactNode = React.createElement(LiveHome)) {
   unmount();
   container = document.createElement("div");
@@ -178,35 +194,44 @@ function open(node: React.ReactNode = React.createElement(LiveHome)) {
     unmount = () => {};
   };
 }
+
 const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`);
 const has = (testID: string) => find(testID) !== null;
 const count = (prefix: string) => container.querySelectorAll(`[data-testid^="${prefix}"]`).length;
 const text = (testID?: string) => (testID ? find(testID) : container)?.textContent ?? "";
+
 const rows = () =>
   [...container.querySelectorAll('[data-testid^="channel-"]')].map((row) =>
     row.getAttribute("data-testid")?.slice("channel-".length),
   );
+
 function press(testID: string) {
   const button = find(testID) as { click(): void } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
+
 const labels = () =>
   [...container.querySelectorAll("button[aria-label]")].map(
     (button) => button.getAttribute("aria-label") ?? "",
   );
+
 function pressLabel(label: string) {
   const button = container.querySelector(`button[aria-label="${label}"]`) as {
     click(): void;
   } | null;
+
   if (!button) throw new Error(`No ${label} on screen`);
   React.act(() => button.click());
 }
+
 /** Opens the country sheet and picks `option`. */
 function country(option: string) {
   press("live-country");
   const sheet = scenario.sheet;
   const index = sheet?.options.findIndex((each) => each.replace("✓ ", "") === option) ?? -1;
+
   if (!sheet || index < 0) throw new Error(`No ${option} in the sheet`);
   React.act(() => sheet.choose(index));
 }
@@ -222,6 +247,7 @@ beforeEach(() => {
     sheet: null,
   });
 });
+
 // Back to every country's All for the next test, as the viewer would set it.
 afterEach(() => {
   scenario.catalogue = ready(both);
@@ -267,6 +293,7 @@ describe("For you", () => {
 
   it("says how the channel it marks stands: connecting, paused or playing", () => {
     scenario.saved = { recentChannels: ["a:10"] };
+
     const item = {
       id: "a:10",
       subscriptionId: "a",
@@ -276,6 +303,7 @@ describe("For you", () => {
       next: false,
       versions: false,
     };
+
     const shown = (kind: "loading" | "paused" | "playing") => {
       scenario.phase = { kind, item };
       open();
@@ -283,22 +311,28 @@ describe("For you", () => {
       const lead = text("live-lead");
       const tile = text("live-tile-a:10");
       press("tab-all");
+
       return { lead, tile, row: text("channel-a:10") };
     };
+
     const words = ["Connecting", "Paused", "Playing"];
+
     for (const [kind, word] of [
       ["loading", "Connecting"],
       ["paused", "Paused"],
       ["playing", "Playing"],
     ] as const) {
       const { lead, tile, row } = shown(kind);
+
       for (const line of [lead, tile, row]) {
         expect(line).toContain(word);
+
         for (const other of words.filter((each) => each !== word)) {
           expect(line).not.toContain(other);
         }
       }
     }
+
     // Another channel keeps its place.
     expect(text("channel-b:10")).toContain("Netherlands · News · Cabin");
   });
@@ -365,6 +399,7 @@ describe("the country", () => {
       press("live-country-clear");
       expect(has(shown)).toBe(true);
     }
+
     expect(scenario.did).toEqual([]);
   });
 

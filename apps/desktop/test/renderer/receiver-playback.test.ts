@@ -98,6 +98,7 @@ const channel = (id: string): LiveChannel => ({
   catchupDays: null,
   variants: [{ id, name: `NL | ${id}`, tags: [], quality: null }],
 });
+
 const channelItem: RemoteItem = {
   kind: "channel",
   channel: { subscriptionId: SUBSCRIPTION, id: "a" },
@@ -123,6 +124,7 @@ const movie: Title = {
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id: "m1", tags: ["EN"] }],
 };
+
 const movieRef: TitleRef = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" };
 const movieItem: RemoteItem = { kind: "title", title: movieRef };
 
@@ -161,6 +163,7 @@ const series: SeriesDetails = {
     },
   ],
 };
+
 const episodeRef: TitleRef = {
   kind: "episode",
   subscriptionId: SUBSCRIPTION,
@@ -169,6 +172,7 @@ const episodeRef: TitleRef = {
   season: 1,
   episode: 1,
 };
+
 const episodeItem: RemoteItem = { kind: "title", title: episodeRef };
 
 /** What the main process says of the title load `generation` plays, an hour long. */
@@ -195,6 +199,7 @@ let unmount = () => {};
 const emit = (now: OutputStatus) => act(async () => ipc.emit("output.changed", now));
 const wait = (ms = 0) => act(async () => vi.advanceTimersByTimeAsync(ms));
 const text = () => container.textContent ?? "";
+
 /** What the receiver was told about what it plays. */
 const commands = () => ipc.argsOf("output.command");
 
@@ -202,7 +207,9 @@ function press(label: string): Promise<void> {
   const button = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!button) throw new Error(`No ${label} button in "${text()}"`);
+
   return act(async () => button.click());
 }
 
@@ -243,6 +250,7 @@ beforeEach(() => {
 afterEach(async () => {
   await unmount();
   unmount = () => {};
+
   titlePlayer.close();
   player.reset();
   await emit(HERE);
@@ -341,6 +349,7 @@ describe("a movie a receiver plays as the window opens", () => {
     const lists = ipc.hold("ondemand.titles");
     await open(connected(said(1, movieItem, "playing", 120, 3600)));
     await act(async () => playing.resolve(file));
+
     return lists;
   }
 
@@ -432,6 +441,7 @@ describe("an episode a receiver plays as the window opens", () => {
       await wait();
 
       expect(useUi.getState().playingTitle).toBe(listed);
+
       if (listed) {
         expect(titlePlayer.state()).toMatchObject({
           now: { title: ref },

@@ -46,6 +46,7 @@ export function recordingHandlers({
       Effect.gen(function* () {
         if (!named || named.subscriptionId !== subscriptionId)
           return yield* recordings.connections(subscriptionId);
+
         // A channel that can't be looked up still gets the count, without sharing.
         const of = yield* library.channel(named).pipe(
           Effect.flatMap((channel) =>
@@ -56,12 +57,14 @@ export function recordingHandlers({
           ),
           Effect.orElseSucceed(() => undefined),
         );
+
         return yield* recordings.connections(subscriptionId, of);
       }),
     "recordings.start": ({ channel: named, variant, stop, stopPlaying }) =>
       Effect.gen(function* () {
         const channel = yield* library.channel(named);
         const variants = yield* streamsOf(settings, channel, variant);
+
         return yield* recordings.start(ownedId(channel), stop, {
           variants,
           stopPlaying: stopPlaying ?? false,
@@ -80,6 +83,7 @@ export function recordingHandlers({
     "recordings.chooseFolder": () =>
       Effect.gen(function* () {
         const { folder } = yield* recordings.storage;
+
         const chosen = yield* Effect.tryPromise({
           try: () => chooseFolder(folder),
           catch: () =>
@@ -87,6 +91,7 @@ export function recordingHandlers({
               error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
             }),
         });
+
         return chosen ? yield* recordings.setFolder(chosen) : yield* recordings.storage;
       }),
     "recordings.openFolder": () =>
@@ -99,6 +104,7 @@ export function recordingHandlers({
               error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
             }),
         });
+
         return null;
       }),
   };

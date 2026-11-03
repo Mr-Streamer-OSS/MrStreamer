@@ -8,6 +8,7 @@ export function guideFixture() {
   const calls: string[] = [];
   const refused = new Set<string>();
   const cancelled = new Set<string>();
+
   const control = {
     calls,
     refused,
@@ -31,10 +32,12 @@ export function guideFixture() {
     }),
     forget: async (_id: string) => true,
   };
+
   const native: GuideNative = {
     async restore(ids, kept) {
       calls.push(`restore:${ids.join(",")}`);
       const restored = [];
+
       for (const [key, activation] of activations) {
         if (ids.includes(key) && !revoked.has(key)) restored.push(key);
         // Kept on disk unread, under a lease no one holds.
@@ -42,6 +45,7 @@ export function guideFixture() {
           activations.set(key, { ...activation, lease: `l${++next}` });
         else activations.delete(key);
       }
+
       return restored.map((subscriptionId) => ({
         subscriptionId,
         activation: activations.get(subscriptionId)!,
@@ -49,12 +53,16 @@ export function guideFixture() {
     },
     async attach(id, revision) {
       calls.push(`attach:${id}:${revision}`);
+
       if (revoked.has(id)) throw new Error("disk");
+
       const activation = {
         lease: `l${++next}`,
         generation: activations.get(id)?.generation ?? null,
       };
+
       activations.set(id, activation);
+
       return activation;
     },
     revoke(id) {
@@ -63,13 +71,16 @@ export function guideFixture() {
     },
     async forget(id) {
       calls.push(`forget:${id}`);
+
       if (refused.has(id) || !(await control.forget(id))) return false;
       activations.delete(id);
       revoked.delete(id);
+
       return true;
     },
     begin(lease, job) {
       calls.push(`begin:${job}`);
+
       return [...activations].some(
         ([id, activation]) => !revoked.has(id) && activation.lease === lease,
       );
@@ -86,8 +97,10 @@ export function guideFixture() {
         fetchedAt: Date.now(),
         until: Date.now() + 86400_000,
       };
+
       for (const [key, activation] of activations)
         if (activation.lease === lease) activations.set(key, { ...activation, generation });
+
       return { kind: "ok", value: generation };
     },
     async query() {
@@ -100,10 +113,14 @@ export function guideFixture() {
       return control.search();
     },
   };
+
   return { native, control };
 }
 
 const host: { expo?: { modules?: { Guide?: GuideNative } } } = globalThis;
+
 host.expo ??= {};
+
 host.expo.modules ??= {};
+
 host.expo.modules.Guide ??= guideFixture().native;

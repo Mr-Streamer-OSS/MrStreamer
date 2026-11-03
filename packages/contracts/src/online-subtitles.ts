@@ -3,6 +3,7 @@ import { type } from "arktype";
 import { lazy, type Infer } from "./lazy.ts";
 
 export const SUBTITLE_SERVICES = ["subdl", "opensubtitles"] as const;
+
 export type SubtitleService = (typeof SUBTITLE_SERVICES)[number];
 
 export const SubtitleTiming = lazy(() =>
@@ -12,7 +13,9 @@ export const SubtitleTiming = lazy(() =>
     speed: "0.9 <= number <= 1.1",
   }),
 );
+
 export type SubtitleTiming = Infer<typeof SubtitleTiming>;
+
 export const DEFAULT_SUBTITLE_TIMING: SubtitleTiming = { offset: 0, speed: 1 };
 
 export const OnlineSubtitlePreferences = lazy(() =>
@@ -22,6 +25,7 @@ export const OnlineSubtitlePreferences = lazy(() =>
     service: "'both' | 'subdl' | 'opensubtitles'",
   }),
 );
+
 export type OnlineSubtitlePreferences = Infer<typeof OnlineSubtitlePreferences>;
 
 export interface OnlineSubtitleSettings extends OnlineSubtitlePreferences {
@@ -99,6 +103,7 @@ export const DownloadedSubtitle = lazy(() =>
       .narrow((cues) => cues.reduce((size, cue) => size + cue.text.length, 0) <= 10 * 1024 * 1024),
   }),
 );
+
 export type DownloadedSubtitle = Infer<typeof DownloadedSubtitle>;
 
 export const SavedSubtitle = lazy(() =>
@@ -115,4 +120,5 @@ export const SavedSubtitle = lazy(() =>
     subtitle: DownloadedSubtitle().or("null"),
   }),
 );
+
 export type SavedSubtitle = Infer<typeof SavedSubtitle>;

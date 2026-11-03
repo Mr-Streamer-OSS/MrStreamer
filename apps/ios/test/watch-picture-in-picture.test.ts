@@ -27,6 +27,7 @@ interface NativeView {
   /** Picture in Picture ended, after a return or closed. */
   stopped(): void;
 }
+
 type Answer = { view: number; request: number; restored: boolean };
 
 const native = vi.hoisted(() => ({
@@ -67,14 +68,18 @@ const native = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/downloads.ts", () => ({ useDownloads: () => native.downloads }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", async () => {
   const { Component } = await import("react");
+
   type Props = {
     onPictureInPictureStart?: () => void;
     onPictureInPictureStop?: () => void;
     onPictureInPictureRestore?: (event: { nativeEvent: { request: number } }) => void;
   };
+
   class VideoView extends Component<Props> implements NativeView {
     readonly id = ++native.made;
     private requests = 0;
@@ -92,7 +97,9 @@ vi.mock("expo-video", async () => {
       this.waiting = request;
       const before = native.calls.length;
       this.props.onPictureInPictureRestore?.({ nativeEvent: { request } });
+
       if (native.calls.length > before) native.answeredInHandler = true;
+
       return request;
     }
     start() {
@@ -110,6 +117,7 @@ vi.mock("expo-video", async () => {
     }
     async startPictureInPicture() {
       if (native.held !== null) await new Promise<void>((answer) => (native.held = answer));
+
       if (native.pictureInPicture.starts) this.start();
     }
     async stopPictureInPicture() {}
@@ -124,6 +132,7 @@ vi.mock("expo-video", async () => {
       return null;
     }
   }
+
   return {
     VideoView,
     VideoAirPlayButton: () => null,
@@ -132,6 +141,7 @@ vi.mock("expo-video", async () => {
       const port = nativePlayer(() => {
         native.player.push("replace");
       });
+
       port.duration = 0;
       port.play.mockImplementation(() => {
         native.player.push("play");
@@ -140,10 +150,12 @@ vi.mock("expo-video", async () => {
         native.player.push("pause");
       });
       native.port = port;
+
       return port;
     },
   };
 });
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -156,14 +168,17 @@ vi.mock("react-native", async () => ({
   },
   Alert: { alert: (title: string, message: string) => void native.alerts.push([title, message]) },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({
   router: {
     push: (href: string) => void native.pushed.push(href),
@@ -172,18 +187,25 @@ vi.mock("expo-router", () => ({
   useRootNavigationState: () => native.root,
   usePathname: () => native.pathname,
 }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   type Props = { testID?: string; onPress: () => void };
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, onPress }: Props) =>
       createElement("button", { "data-testid": testID, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("../src/account.ts", () => ({
   useCatalogue: () => native.catalogue,
   currentCatalogue: () => native.catalogue,
@@ -194,6 +216,7 @@ vi.mock("../src/account.ts", () => ({
 
 const { closeWatch, openWatch, play, playbackState, player, retry, stop, togglePause } =
   await import("../src/playback.ts");
+
 const { WatchLayer } = await import("../src/watch.tsx");
 
 const movie = (id: string): Playing => ({
@@ -205,19 +228,24 @@ const movie = (id: string): Playing => ({
   next: false,
   versions: false,
 });
+
 const open = async () => ({ url: "file:fixture", container: "mp4" });
 const inWatch = { watch: true, login: [] } as const;
 const { act } = React;
 
 /** The player fails, as AVPlayer reports. */
 const failure = () => native.port?.failure();
+
 /** Watch's answers reach the native view, in the order Watch sent them. */
 function deliver() {
   while (native.calls.length) native.calls.shift()?.();
 }
+
 function shown(): NativeView {
   const view = native.views.at(-1);
+
   if (!view) throw new Error("No VideoView on screen");
+
   return view;
 }
 
@@ -226,13 +254,17 @@ const tabsOnLive = {
   name: "(tabs)",
   state: { index: 1, routes: [{ name: "(home)" }, { name: "live" }] },
 };
+
 const onLive = { index: 0, routes: [tabsOnLive] };
+
 /** No provider saved: Connect, and offline Downloads over it, where copies play. */
 const offline = { index: 1, routes: [{ name: "connect" }, { name: "offline" }] };
 
 let unmount = () => {};
+
 beforeEach(() => {
   stop();
+
   if (native.port) native.port.tracks = null;
   Object.assign(native, {
     views: [],
@@ -251,6 +283,7 @@ beforeEach(() => {
     downloads: { items: [], series: {}, bytes: 0, free: null, ended: 0 },
   });
 });
+
 afterEach(() => unmount());
 
 /** Watch plays `item`, then moves it to Picture in Picture as the native view reports. */
@@ -270,6 +303,7 @@ async function inPictureInPicture(item: Playing) {
   const view = shown();
   act(() => view.start());
   expect(playbackState.get()).toMatchObject({ watch: false, pip: true });
+
   return view;
 }
 
@@ -390,7 +424,9 @@ async function watching(item: Playing, opens = open, { playing = true } = {}) {
       inWatch,
     ),
   );
+
   if (playing) started();
+
   return {
     /** Draws Watch again, as navigation's state changing does. */
     rerender: () => act(() => root.render(React.createElement(WatchLayer))),
@@ -399,11 +435,13 @@ async function watching(item: Playing, opens = open, { playing = true } = {}) {
         const button = container.querySelector(`[data-testid="${testID}"]`) as {
           click(): void;
         } | null;
+
         if (!button) throw new Error(`No ${testID} in Watch`);
         button.click();
       }),
   };
 }
+
 /** The player reports it plays, or stopped playing. */
 const started = (isPlaying = true) => act(() => native.port?.state(isPlaying));
 const channel = (id: string): Playing => ({ ...movie(id), title: "A channel", live: true });
@@ -443,6 +481,7 @@ describe("Downloads and Settings from Watch", () => {
 
   it("sets Watch aside when Picture in Picture doesn't start", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       const watch = await watching(movie("1"));
@@ -459,6 +498,7 @@ describe("Downloads and Settings from Watch", () => {
 
   it("keeps Watch open when the viewer brings it back before the fallback's second", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture.supported = true;
       const watch = await watching(movie("1"));
@@ -477,6 +517,7 @@ describe("Downloads and Settings from Watch", () => {
 
   it("drops the fallback once Watch closes or another title plays in it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       const closed = await watching(movie("1"));
@@ -517,10 +558,13 @@ describe("Downloads and Settings from Watch", () => {
 
   it("brings a channel back live rather than from where it paused", async () => {
     let opened = 0;
+
     const opens = async () => {
       opened++;
+
       return { url: "file:live", container: "m3u8" };
     };
+
     const watch = await watching(channel("9"), opens);
     await watch.press("watch-settings");
     started(false);
@@ -561,9 +605,11 @@ describe("Close", () => {
   it("says when the position it saved was refused, with Watch gone and after Stop", async () => {
     const refused = { cause: new Error("/private/var/mobile/viewing.json: disk full") };
     let refuse = true;
+
     const progress = async () => {
       if (refuse) throw refused.cause;
     };
+
     const root = createRoot(window.document.createElement("div"));
     act(() => root.render(React.createElement(WatchLayer)));
     unmount = () => act(() => root.unmount());
@@ -643,6 +689,7 @@ describe("Watch with no provider saved", () => {
 
   it("stays in Watch when Picture in Picture doesn't start", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       const watch = await watching(movie("copy"));
@@ -670,6 +717,7 @@ describe("Watch's Downloads and Settings, then the viewer's own choices", () => 
 
   it("doesn't set aside Try again's stream for a press before it failed", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       const watch = await watching(movie("1"));
@@ -690,6 +738,7 @@ describe("Watch's Downloads and Settings, then the viewer's own choices", () => 
 
   it("ignores Picture in Picture's late answer to a press before the failure", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       native.held = () => undefined;
@@ -723,10 +772,13 @@ describe("Watch's Downloads and Settings, then the viewer's own choices", () => 
 
   it("doesn't open a channel paused from the accessory again when Watch comes back", async () => {
     let opened = 0;
+
     const opens = async () => {
       opened++;
+
       return { url: "file:live", container: "m3u8" };
     };
+
     const watch = await watching(channel("9"), opens);
     await watch.press("watch-settings");
     started(false);
@@ -743,6 +795,7 @@ describe("Watch's Downloads and Settings, then the viewer's own choices", () => 
 describe("Watch set aside when the tabs go", () => {
   /** A downloaded copy: no subscription, so removing the last provider keeps it. */
   const copy = (): Playing => ({ ...movie("copy"), subscriptionId: null });
+
   /** The last provider removed: the root guard leaves Connect, without the tabs or accessory. */
   const providersGone = () => {
     native.root = { index: 0, routes: [{ name: "connect" }] };
@@ -788,6 +841,7 @@ describe("Watch set aside when the tabs go", () => {
 
   it("drops a fallback waiting for Picture in Picture once the tabs go", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       native.pictureInPicture = { supported: true, starts: false };
       const watch = await watching(copy());
@@ -828,10 +882,13 @@ describe("the star of the channel playing", () => {
       },
     },
   ]);
+
   const [listed] = library.channels;
+
   if (!listed) throw new Error("No channel listed");
   const live: Playing = { ...channel(listed.id), id: listed.key };
   const saved = () => (viewing.currentViewing()?.favourites ?? []).map((each) => each.id);
+
   /** Resolves once the record shows `ids` as the favourites. */
   async function shows(ids: readonly string[]) {
     for (let waited = 0; JSON.stringify(saved()) !== JSON.stringify(ids); waited += 10) {
@@ -876,6 +933,7 @@ describe("Watch's asynchronous track menus", () => {
   it("queries native facts on opening and hands back the exact record", async () => {
     const watch = await watching(movie("1"));
     const port = native.port!;
+
     const track = {
       ...port.identity(),
       id: "0",
@@ -885,6 +943,7 @@ describe("Watch's asynchronous track menus", () => {
       isDefault: true,
       label: "Native display name",
     };
+
     port.tracks = {
       ...port.identity(),
       revision: 1,
@@ -952,6 +1011,7 @@ describe("Watch's asynchronous track menus", () => {
 it("does not describe a real lone subtitle as missing when Off is forbidden", async () => {
   const watch = await watching(movie("subtitle"));
   const port = native.port!;
+
   const track = {
     ...port.identity(),
     id: "0",
@@ -962,6 +1022,7 @@ it("does not describe a real lone subtitle as missing when Off is forbidden", as
     forcedOnly: false,
     label: "Off",
   };
+
   port.tracks = {
     ...port.identity(),
     revision: 1,
@@ -988,6 +1049,7 @@ describe("Watch's keyboard shortcuts", () => {
           },
           addListener: (_event: "command", listener: (event: { id: string }) => void) => {
             keys.press = (id) => listener({ id });
+
             return { remove: () => (keys.press = () => {}) };
           },
         },
@@ -999,9 +1061,11 @@ describe("Watch's keyboard shortcuts", () => {
     for (const sheet of native.sheets) sheet.pick(sheet.options.length - 1);
   });
   const inputs = () => keys.offered.map((shortcut) => shortcut.input);
+
   const press = (input: string) =>
     act(() => {
       const shortcut = keys.offered.find((each) => each.input === input);
+
       if (!shortcut) throw new Error(`No ${input} offered`);
       keys.press(shortcut.id);
     });

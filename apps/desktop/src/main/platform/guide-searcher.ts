@@ -73,6 +73,7 @@ export function guideSearcherLayer(
         const endWorker = () => {
           if (ending) return ending;
           const was = worker;
+
           if (!was) return Promise.resolve();
           worker = null;
           ending = was
@@ -84,18 +85,23 @@ export function guideSearcherLayer(
             .finally(() => {
               ending = null;
             });
+
           return ending;
         };
+
         /**
          * Ends the worker, and once it has ended, fails the search it had then: no other, also
          * when several stop it together.
          */
         const stop = async (cause: Error) => {
           const done = current;
+
           if (done) clearTimeout(done.overdue);
           await endWorker();
+
           if (done) finish(done, cause);
         };
+
         /** Settles `done`, while it is the search under way, and gives the worker the next. */
         const finish = (done: NonNullable<typeof current>, reply: GuideSearchReply | Error) => {
           if (current !== done) return;
@@ -105,7 +111,9 @@ export function guideSearcherLayer(
           done.asked.settle(reply);
           pump();
         };
+
         const stopCurrent = () => void stop(new Error("The guide's search was stopped."));
+
         /** The worker, started when none runs. */
         const running = () => {
           if (worker) return worker;
@@ -115,26 +123,35 @@ export function guideSearcherLayer(
             if (worker === started && current?.asked.request.id === reply.id)
               finish(current, reply);
           });
+
           const stopped = (cause: Error) => {
             if (worker !== started) return;
             worker = null;
+
             if (current) finish(current, cause);
           };
+
           started.on("error", stopped);
           started.on("exit", (code) =>
             stopped(new Error(`The guide's search stopped with ${code}.`)),
           );
           worker = started;
+
           return started;
         };
+
         const pump = () => {
           if (current || quitting) return;
           const asked = queue.shift();
+
           if (!asked) return;
+
           if (asked.signal.aborted) {
             asked.settle(new Error("The guide's search was stopped."));
+
             return pump();
           }
+
           current = {
             asked,
             overdue: setTimeout(
@@ -145,6 +162,7 @@ export function guideSearcherLayer(
           asked.signal.addEventListener("abort", stopCurrent, { once: true });
           running().postMessage(asked.request);
         };
+
         /** Asks the worker, answering with what `pick` takes of its reply. */
         const ask = <A>(
           request: GuideSearchRequest,
@@ -157,12 +175,15 @@ export function guideSearcherLayer(
               signal,
               settle: (reply) => {
                 if (reply instanceof Error) return reject(reply);
+
                 if (reply.kind === "failed") return reject(new AppFailure(reply.error));
                 const found = pick(reply);
+
                 if (found === undefined) reject(new Error("The guide's search answered another."));
                 else resolve(found);
               },
             };
+
             if (quitting) return asked.settle(new Error("The app is quitting."));
             queue.push(asked);
             // Stopped while it waits its turn: it leaves the queue at once.
@@ -170,6 +191,7 @@ export function guideSearcherLayer(
               "abort",
               () => {
                 const at = queue.indexOf(asked);
+
                 if (at < 0) return;
                 queue.splice(at, 1);
                 asked.settle(new Error("The guide's search was stopped."));
@@ -178,6 +200,7 @@ export function guideSearcherLayer(
             );
             pump();
           });
+
         return {
           first: (search: FirstSearch, signal: AbortSignal) =>
             ask({ id: next++, kind: "first", search }, signal, (reply) =>
@@ -189,6 +212,7 @@ export function guideSearcherLayer(
             ),
           quit: async () => {
             quitting = true;
+
             for (const asked of queue.splice(0)) asked.settle(new Error("The app is quitting."));
             await stop(new Error("The app is quitting."));
           },

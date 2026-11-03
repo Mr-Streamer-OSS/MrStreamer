@@ -17,6 +17,7 @@ export function VolumeControl({ compact = false }: { compact?: boolean }) {
   const output = useOutput((state) => state.status.output);
   const remote = output.kind === "receiver" || output.kind === "lost";
   const receiver = output.kind === "receiver" ? output.volume : null;
+
   if (remote && !receiver) {
     return (
       <span className="px-1 text-[0.8125rem] text-muted-foreground">
@@ -24,8 +25,10 @@ export function VolumeControl({ compact = false }: { compact?: boolean }) {
       </span>
     );
   }
+
   const volume = receiver?.level ?? local;
   const muted = receiver?.muted ?? localMuted;
+
   return (
     <div className="flex items-center gap-3">
       <Tooltip label={muted ? t("Unmute") : t("Mute")}>

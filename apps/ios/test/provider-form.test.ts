@@ -18,7 +18,9 @@ interface Asked {
   readonly succeed: () => void;
   readonly fail: (cause: unknown) => void;
 }
+
 const asked: Asked[] = [];
+
 const held =
   (call: Asked["call"]) =>
   (...args: unknown[]) =>
@@ -28,10 +30,13 @@ const held =
     });
 
 vi.mock("../src/account.ts", () => ({ add: held("add"), update: held("update") }));
+
 // ui.tsx keeps its pictures with artwork-cache.ts: over the files stand-in here.
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 // Channel rows draw their star with an SF Symbol.
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
 
 const { ProviderForm } = await import("../src/provider-form.tsx");
@@ -52,6 +57,7 @@ const saved: Member = {
 };
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   setLanguage(resolveLanguage("en-US", []));
@@ -64,6 +70,7 @@ function mount(mode: Parameters<typeof ProviderForm>[0]["mode"]) {
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(ProviderForm, { mode, onDone: done })));
   unmount = () => React.act(() => root.unmount());
+
   return {
     done,
     leave: () => unmount(),
@@ -72,6 +79,7 @@ function mount(mode: Parameters<typeof ProviderForm>[0]["mode"]) {
         const input = container.querySelector(
           `[data-testid="provider-${name}"]`,
         ) as HTMLInputElement;
+
         const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")!.set!;
         setter.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));

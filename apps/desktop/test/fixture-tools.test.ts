@@ -16,6 +16,7 @@ it("prepares byte-identical host fixture tools outside WindowsApps without modif
   await writeFile(join(installed, "ffprobe.exe"), probeTool);
   const tools = fixtureTools(join(installed, "ffmpeg.exe"), scratch);
   expect(tools.copiedFromWindowsApps).toBe(true);
+
   for (const [name, bytes] of [
     ["ffmpeg", videoTool],
     ["ffprobe", probeTool],
@@ -26,6 +27,7 @@ it("prepares byte-identical host fixture tools outside WindowsApps without modif
     expect(await readFile(tools.source[name])).toEqual(bytes);
     expect(tools.sha256[name]).toBe(createHash("sha256").update(bytes).digest("hex"));
   }
+
   await rm(scratch, { recursive: true });
   expect(await readFile(tools.source.ffmpeg)).toEqual(videoTool);
   expect(await readFile(tools.source.ffprobe)).toEqual(probeTool);

@@ -62,9 +62,12 @@ const scenario = vi.hoisted(() => ({
 vi.mock("react-native", async () => {
   const { createElement, useEffect } = await import("react");
   const { reactNative } = await import("./react-native.ts");
+
   type Props = { children?: React.ReactNode; testID?: string };
+
   const box = ({ children, testID }: Props) =>
     createElement("div", { "data-testid": testID }, children);
+
   /** A view, which lays out once, as a phone's area under the search field. */
   const View = ({
     children,
@@ -78,20 +81,26 @@ vi.mock("react-native", async () => {
     useEffect(() => {
       onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } });
     }, []);
+
     const width = (Array.isArray(style) ? style.find((part) => part?.width !== undefined) : style)
       ?.width;
+
     return createElement("div", { "data-testid": testID, "data-width": width }, children);
   };
+
   type Style = { maxHeight?: number } | undefined;
+
   /** A scroll view, which shows the most height it may take. */
   const ScrollView = ({ children, testID, style }: Props & { style?: Style }) =>
     createElement("div", { "data-testid": testID, "data-max-height": style?.maxHeight }, children);
+
   return {
     ...reactNative,
     View,
     ScrollView,
     Pressable: (props: Parameters<typeof reactNative.Pressable>[0]) => {
       if (props.testID && props.onPress) scenario.presses.set(props.testID, props.onPress);
+
       return reactNative.Pressable(props);
     },
     Animated: {
@@ -113,6 +122,7 @@ vi.mock("react-native", async () => {
         listener: (event: { endCoordinates: { screenY: number } }) => void,
       ) => {
         scenario.keyboard.set(event, listener);
+
         return { remove: () => scenario.keyboard.delete(event) };
       },
       scheduleLayoutAnimation: () => undefined,
@@ -120,6 +130,7 @@ vi.mock("react-native", async () => {
     useWindowDimensions: () => ({ width: 390, height: 844, fontScale: scenario.fontScale }),
   };
 });
+
 vi.mock("expo-router", () => ({
   router: {
     back: () => scenario.did.push("back"),
@@ -144,11 +155,15 @@ vi.mock("expo-router", () => ({
     ],
   }),
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/downloads.ts", () => ({ useDownloads: () => scenario.downloads }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   useRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -166,6 +181,7 @@ vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   onRoster: (listener: () => void) => {
     scenario.roster.add(listener);
+
     return () => scenario.roster.delete(listener);
   },
   shownOf: (titles: { kind: string; value?: unknown; last?: unknown }) =>
@@ -174,16 +190,19 @@ vi.mock("../src/account.ts", () => ({
   onReadingSaved: () => () => undefined,
   onSavable: () => () => undefined,
 }));
+
 vi.mock("expo-file-system", () => ({
   File: class {},
   Directory: class {},
   Paths: { cache: "/c" },
 }));
+
 vi.mock("../src/sources.ts", () => ({
   currentSource: (id: string) =>
     scenario.sources.has(id) ? { revision: scenario.sources.get(id) } : undefined,
   onSignedIn: (listener: () => void) => {
     scenario.signedIn.add(listener);
+
     return () => scenario.signedIn.delete(listener);
   },
   sourceOf: (id: string) => {
@@ -191,12 +210,14 @@ vi.mock("../src/sources.ts", () => ({
     throw new Error(`${id} isn't signed in`);
   },
 }));
+
 // The guide owner's public reads; guide.test.ts proves them against the native guide.
 vi.mock("../src/guide.ts", () => {
   return {
     guide: {
       subscribe: (listener: () => void) => {
         scenario.guideListeners.add(listener);
+
         return () => scenario.guideListeners.delete(listener);
       },
       getSnapshot: () => scenario.guideSnapshot,
@@ -208,18 +229,23 @@ vi.mock("../src/guide.ts", () => {
     },
   };
 });
+
 vi.mock("../src/viewing.ts", () => ({ serveViewing: () => undefined }));
+
 vi.mock("../src/watchlist.ts", () => ({
   alignWatchlist: () => undefined,
   serveWatchlist: () => undefined,
 }));
+
 vi.mock("@mrstreamer/core/metadata/store", () => ({
   metadataStore: (deps: { onChange: (change: { content: boolean }) => void }) => {
     scenario.notify = deps.onChange;
+
     return {
       get: () => null,
       name: (_kind: string, id: string) => {
         const name = scenario.tmdbNames.get(id);
+
         return name ? { name, original: null } : null;
       },
       searchName: () => "",
@@ -231,18 +257,21 @@ vi.mock("@mrstreamer/core/metadata/store", () => ({
     };
   },
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: (title: Title) => {
     scenario.opened.push(title);
     scenario.did.push(`details ${title.kind} ${title.id}`);
   },
 }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({
     phase: { kind: "idle" },
     watch: React.useSyncExternalStore(
       (listener) => {
         scenario.watchers.add(listener);
+
         return () => scenario.watchers.delete(listener);
       },
       () => scenario.watching,
@@ -250,8 +279,10 @@ vi.mock("../src/playback.ts", () => ({
   }),
   channelStatus: () => null,
 }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     useReduceMotion: () => false,
     useMotionAllowed: () => false,
@@ -272,10 +303,14 @@ vi.mock("../src/glass.tsx", async () => {
       ),
   };
 });
+
 vi.mock("../src/telemetry/index.ts", () => ({ onSearchText: () => undefined }));
+
 vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#A1A1A6", fill: "#1C1C1E", line: "#2C2C2E" },
     useRowHeight: () => 60,
@@ -284,6 +319,7 @@ vi.mock("../src/ui.tsx", async () => {
     Message: ({ text }: { text: string }) => createElement("p", null, text),
     ChannelRow: ({ channel, onPress }: { channel: Channel; onPress: (c: Channel) => void }) => {
       scenario.presses.set(`channel-${channel.key}`, () => onPress(channel));
+
       return createElement(
         "button",
         { "data-testid": `channel-${channel.key}`, onClick: () => onPress(channel) },
@@ -292,6 +328,7 @@ vi.mock("../src/ui.tsx", async () => {
     },
     TextButton: ({ label, onPress }: { label: string; onPress: () => void }) => {
       scenario.presses.set(`text-${label}`, onPress);
+
       return createElement("button", { "data-testid": `text-${label}`, onClick: onPress }, label);
     },
   };
@@ -343,6 +380,7 @@ const liveLists: LiveCatalogue = {
     catchupDays: null,
   })),
 };
+
 const emptyLive: LiveCatalogue = { categories: [], channels: [] };
 
 const member = (
@@ -373,6 +411,7 @@ async function subscriptions(members: Member[]) {
       if (!titlesWorkedOut()) throw new Error("Still indexing");
     });
   });
+
   if (activeRoot) {
     React.act(() => render());
     await settled();
@@ -383,6 +422,7 @@ const channels = [
   { key: "a:1", title: "NPO 1" },
   { key: "a:2", title: "BBC One" },
 ] as Channel[];
+
 const libraryFields: Partial<Library> = {
   regions: [{ name: "Netherlands", channels, shelves: [] }],
   channels,
@@ -390,6 +430,7 @@ const libraryFields: Partial<Library> = {
   placeOf: new Map(),
   labels: new Map(),
 };
+
 const library = libraryFields as Library;
 const ready: Catalogue = { kind: "ready", library, failing: [] };
 
@@ -397,6 +438,7 @@ let container: ReturnType<typeof document.createElement>;
 let activeRoot = false;
 let render = () => {};
 let unmount = () => {};
+
 function startOpen() {
   container = document.createElement("div");
   const root = createRoot(container);
@@ -408,7 +450,9 @@ function startOpen() {
     activeRoot = false;
   };
 }
+
 const field = () => container.querySelector('[data-testid="search-field"]') as HTMLInputElement;
+
 function startType(text: string) {
   React.act(() => {
     const input = field();
@@ -416,35 +460,44 @@ function startType(text: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
+
 function startPress(testID: string) {
   const button = container.querySelector(`[data-testid="${testID}"]`) as {
     click(): void;
   } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
+
 /** Wait for query work, including React's publication, without pretending DOM is native paint. */
 async function settled() {
   for (let attempt = 0; attempt < 100; attempt++) {
     await React.act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
+
     if (!text().includes("Searching.")) return;
   }
+
   throw new Error("Search did not settle");
 }
+
 async function open() {
   startOpen();
   await settled();
 }
+
 async function type(text: string) {
   startType(text);
   await settled();
 }
+
 async function press(testID: string) {
   startPress(testID);
   await settled();
 }
+
 const text = () => container.textContent ?? "";
 
 beforeEach(async () => {
@@ -470,6 +523,7 @@ beforeEach(async () => {
   await subscriptions([]);
   await subscriptions([member("a", "Northwind", {}, duneOnly())]);
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -541,8 +595,10 @@ describe("Search over the tabs", () => {
     ]);
     await open();
     await type("npo");
+
     const loading =
       "Movies and series still loading, 1 of 2 providers. Movies, series and channels searched.";
+
     expect(text()).toContain(loading);
     expect(text()).toContain("NPO 1");
     // What Northwind lists is searched meanwhile.
@@ -572,20 +628,26 @@ describe("Search over the tabs", () => {
       ),
       member("b", "Southwind", { needsSecret: true }),
     ]);
+
   /** The keyboard covering the bottom of an 844-point window from `top` down, or going away. */
   const keyboardTo = (top: number) =>
     React.act(() =>
       scenario.keyboard.get("keyboardWillChangeFrame")?.({ endCoordinates: { screenY: top } }),
     );
+
   const keyboardDown = () =>
     React.act(() =>
       scenario.keyboard.get("keyboardWillHide")?.({ endCoordinates: { screenY: 844 } }),
     );
+
   const statusLine = () => container.querySelector('[data-testid="status-line"]');
+
   /** Where the line is: at the bottom with the most height it may take, or leading the results. */
   const placed = () => {
     const line = statusLine();
+
     if (!line) return null;
+
     return container.querySelector('[data-testid="search-list"]')!.contains(line)
       ? "results"
       : `bottom ${line.getAttribute("data-max-height")}`;
@@ -820,6 +882,7 @@ describe("Search over the tabs", () => {
       member: scenario.members[0]!,
     };
     setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+
     try {
       await open();
       await type("zzq");
@@ -834,18 +897,21 @@ describe("Search over the tabs", () => {
   });
 
   const failure = { kind: "unexpected", detail: "" } as const;
+
   const failedLive = (last: LiveCatalogue | null = liveLists, since = 0): Member["live"] => ({
     kind: "failed",
     error: failure,
     last,
     since,
   });
+
   const failedTitles = (last: OnDemandCatalogue | null = duneOnly()): Member["titles"] => ({
     kind: "failed",
     error: failure,
     last,
     since: 0,
   });
+
   const notice = () => container.querySelector('[data-testid="dismiss-provider-notice"]');
 
   it("keeps inline recovery for globally filtered-empty channels and published title collections", async () => {
@@ -853,6 +919,7 @@ describe("Search over the tabs", () => {
       categories: [{ id: "adult", name: "Adult" }],
       channels: [{ ...liveLists.channels[0]!, categoryIds: ["adult"] }],
     };
+
     const hidden = { ...titled("movie", "hidden", "Restricted", 1)[0]!, adult: true };
     const rawTitles = lists([hidden], [{ ...hidden, container: null }]);
     const derived = buildLibrary([{ subscriptionId: "a", label: "Northwind", catalogue: rawLive }]);
@@ -874,12 +941,14 @@ describe("Search over the tabs", () => {
     "keeps compact notices with usable %s collections even when the query has no matches",
     async (kind) => {
       const visible = titled(kind, "visible", "Dune", 1);
+
       const hidden = [
         {
           ...titled(kind === "movie" ? "series" : "movie", "hidden", "Restricted", 1)[0]!,
           adult: true,
         },
       ];
+
       const raw = kind === "movie" ? lists(visible, hidden) : lists(hidden, visible);
       await subscriptions([
         member("a", "Northwind", { live: failedLive(emptyLive), titles: failedTitles(raw) }),
@@ -1009,6 +1078,7 @@ describe("Search over the tabs", () => {
     await open();
     await type("dune");
     await press("dismiss-provider-notice");
+
     const readyLive: Member["live"] = {
       kind: "ready",
       value: liveLists,
@@ -1016,6 +1086,7 @@ describe("Search over the tabs", () => {
       fetchedAt: 1,
       took: 1,
     };
+
     // Recovering channels alone leaves the title failure acknowledged.
     await subscriptions([member("a", "Northwind", { live: readyLive, titles: failedTitles() })]);
     expect(notice()).toBeNull();
@@ -1095,18 +1166,24 @@ describe("Every movie and series that matches", () => {
   const shownIds = (kind: TitleKind) =>
     [...container.querySelectorAll('[data-testid^="search-title-"]')].flatMap((row) => {
       const id = row.getAttribute("data-testid")!.slice("search-title-".length);
+
       return id.startsWith(kind === "movie" ? "m" : "s") ? [id] : [];
     });
+
   /** The ids "`prefix`1" to "`prefix``count`". */
   const ids = (prefix: string, count: number, from = 1) =>
     Array.from({ length: count }, (_, at) => `${prefix}${from + at}`);
+
   const name = { movie: ["Movies", "movie", "movies"], series: ["Series", "series", "series"] };
+
   const moreOf = (kind: TitleKind, count: number) =>
     `text-Show ${count} more ${count === 1 ? name[kind][1] : name[kind][2]}`;
+
   /** The Show more buttons of `kind` on screen, whatever count they offer. */
   const moreButtons = (kind: TitleKind) =>
     [...container.querySelectorAll('[data-testid^="text-Show "]')].flatMap((button) => {
       const testID = button.getAttribute("data-testid")!;
+
       return (kind === "series" ? testID.endsWith(" series") : / movies?$/.test(testID))
         ? [testID]
         : [];
@@ -1125,30 +1202,37 @@ describe("Every movie and series that matches", () => {
       ]);
       await open();
       await type("ocean");
+
       for (const [kind, prefix] of [
         ["movie", "m"],
         ["series", "s"],
       ] as const) {
         // Showing every movie first leaves the series as they were, at 20.
         let showing = Math.min(20, count);
+
         for (;;) {
           expect(shownIds(kind)).toEqual(ids(prefix, showing));
           const header = name[kind][0];
+
           if (count === 0) expect(text()).not.toContain(`${header} ·`);
           else if (showing < count) expect(text()).toContain(`${header} · ${showing} of ${count}`);
           else {
             expect(text()).toContain(`${header} · ${count}`);
             expect(text()).not.toContain(`${header} · ${count} of`);
           }
+
           const left = count - showing;
           // One Show more while any are left, for the next 20 or the few left; none after.
           expect(moreButtons(kind)).toEqual(left === 0 ? [] : [moreOf(kind, Math.min(20, left))]);
+
           if (left === 0) break;
           await press(moreOf(kind, Math.min(20, left)));
           showing += Math.min(20, left);
         }
       }
+
       if (count === 0) expect(text()).toContain('Nothing named "ocean".');
+
       // The last of them, ranked last, is there to open.
       if (count > 0) {
         await press(`search-title-m${count}`);
@@ -1236,6 +1320,7 @@ describe("Every movie and series that matches", () => {
   it("says what it found in a new language, keeping the text, what shows and Show more", async () => {
     await searchOcean();
     await press(moreOf("movie", 20));
+
     try {
       React.act(() => setLanguage({ locale: "fr-FR", formats: "fr-FR" }));
       await settled();
@@ -1257,12 +1342,14 @@ describe("Every movie and series that matches", () => {
     // Northwind lists 125 movies; Southwind 30 newer than all of them, ranked first.
     const northwind = titled("movie", "m", "Ocean", 125);
     const southwind = titled("movie", "mb", "Ocean deep", 30, -31);
+
     // A movie no provider calls Ocean, but TMDB does: newer than Northwind's, older than
     // Southwind's.
     const renamed: ProviderTitle = {
       ...titled("movie", "mz", "Zee", 1, -1)[0]!,
       tmdbId: "900",
     };
+
     await subscriptions([
       member("a", "Northwind", {}, lists([renamed, ...northwind])),
       member("b", "Southwind", {}, lists(southwind)),
@@ -1320,12 +1407,14 @@ describe("Same-query Search continuity", () => {
       for (const listener of [...scenario.roster]) listener();
       render();
     });
+
     for (let attempt = 0; !titlesWorkedOut(); attempt++) {
       if (attempt === 100) throw new Error("Replacement lists did not settle");
       await React.act(async () => {
         vi.runOnlyPendingTimers();
       });
     }
+
     React.act(render);
   }
 
@@ -1502,7 +1591,9 @@ describe("Programmes in Search", () => {
     { key: "a:1", title: "NPO 1", subscriptionId: "a", tags: [], logoUrl: null },
     { key: "b:7", title: "BBC One", subscriptionId: "b", tags: [], logoUrl: null },
   ];
+
   const guideChannels = guideChannelsFields as Channel[];
+
   const twoProvidersFields: Partial<Library> = {
     regions: [],
     channels: guideChannels,
@@ -1513,18 +1604,22 @@ describe("Programmes in Search", () => {
       ["b", "Southwind"],
     ]),
   };
+
   const twoProviders = twoProvidersFields as Library;
   // A whole minute an hour ahead: the programme is always still to come, so its detail offers
   // Watch live rather than catch-up, whatever day the suite runs.
   const at = Math.ceil(Date.now() / 60_000) * 60_000 + 3_600_000;
+
   const programme = (title: string, detail: string): FoundProgramme => ({
     key: "b:7",
     programme: { start: at, stop: at + 1_800_000, title, detail },
   });
+
   /** A search answer held until `release`. */
   const held = () => {
     let release = (_found: FoundProgramme[]) => {};
     const answer = new Promise<FoundProgramme[]>((resolve) => (release = resolve));
+
     return { answer, release };
   };
 
@@ -1540,8 +1635,10 @@ describe("Programmes in Search", () => {
     const searched: (readonly string[])[] = [];
     scenario.search = async (text, keys) => {
       searched.push(keys);
+
       return text === "news" ? [programme("News at Six", "six")] : [];
     };
+
     await open();
     await type("news");
     expect(searched.at(-1)).toEqual(["a:1", "b:7"]);
@@ -1556,6 +1653,7 @@ describe("Programmes in Search", () => {
     const tomorrow = localDay(Date.now(), 1).from + 12 * 60 * 60_000;
     scenario.search = async (text) => {
       if (text === "film") throw new Error("unavailable");
+
       return [
         {
           key: "b:7",
@@ -1563,6 +1661,7 @@ describe("Programmes in Search", () => {
         },
       ];
     };
+
     await open();
     await type("late");
     expect(text()).toContain(dayLabel(localDay(tomorrow), Date.now()));
@@ -1648,20 +1747,24 @@ describe("Programmes in Search", () => {
         title: "News at Six",
         description: "Headlines",
       };
+
       const answers = [
         [programme("News at Six", "six")],
         change === "renewed token" ? [programme("News at Six", "six-again")] : [],
       ];
+
       scenario.search = async () => answers.shift() ?? [];
       scenario.details.set("six", news);
       await open();
       await type("news");
       await press(`search-programme-b:7-${at}`);
+
       if (change === "renewed token") {
         // Its first token withdrawn, as on return from the background.
         scenario.details.delete("six");
         scenario.details.set("six-again", news);
       }
+
       reread();
       await settled();
       expect(container.querySelector('[data-testid="guide-programme"]')?.textContent).toContain(
@@ -1687,6 +1790,7 @@ describe("Programmes in Search", () => {
 
       const next = held();
       scenario.search = () => next.answer;
+
       try {
         if (change === "provider replacement") {
           scenario.sources.set("b", 2);
@@ -1704,10 +1808,12 @@ describe("Programmes in Search", () => {
           };
           React.act(render);
         }
+
         expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
       } finally {
         await React.act(async () => next.release([programme("News at Seven", "seven")]));
       }
+
       await settled();
       expect(container.querySelector('[data-testid="guide-programme"]')).toBeNull();
       expect(text()).toContain("News at Seven");
@@ -1731,6 +1837,7 @@ describe("Programmes in Search", () => {
       const late = held();
       scenario.search = (text) => (text === "news" ? late.answer : Promise.resolve([]));
       startType("news");
+
       if (change === "new text") await type("weather");
       else startPress("text-Cancel");
       await React.act(async () => {

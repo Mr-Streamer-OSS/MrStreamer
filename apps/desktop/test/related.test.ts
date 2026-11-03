@@ -17,6 +17,7 @@ import {
 } from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
+
 afterEach(async () => {
   await tmdb?.close();
   tmdb = null;
@@ -39,19 +40,23 @@ describe("related titles from available subscriptions", { timeout: 20_000 }, () 
     await service.refresh(one.id);
     await service.refresh(two.id);
     const before = [provider.titleListRequests(), other.titleListRequests()];
+
     const seeds = [
       seed,
       { ...seed, version: { subscriptionId: one.id, id: "90001" } },
       { ...seed, version: { subscriptionId: two.id, id: "90000" } },
     ];
+
     const result = await service.recommendations([...seeds, ...seeds]);
     expect(result.length).toBeGreaterThan(0);
     expect(result.length).toBeLessThanOrEqual(12);
     expect(new Set(result.map(({ title }) => title.key)).size).toBe(result.length);
+
     const watched = await service.titles(
       "movie",
       seeds.map((seed) => seed.version),
     );
+
     expect(
       result.every(
         ({ title, seed, reason }) =>
@@ -96,8 +101,10 @@ describe("related titles from available subscriptions", { timeout: 20_000 }, () 
     const subscriptions = await promised(runtime, Subscriptions);
     const service = await promised(runtime, OnDemand);
     const roster = await promised(runtime, Roster);
+
     const add = (server: string) =>
       subscriptions.add({ server, username: "demo", password: "demo" });
+
     const own = await add(provider.url);
     await add(unopened.url);
     const version = { subscriptionId: own.id, id: "90000" };
@@ -131,13 +138,17 @@ describe("related titles from available subscriptions", { timeout: 20_000 }, () 
     const dataDir = await tempDir();
     const provider = await fakeProvider({ titles: 24 });
     const other = await fakeProvider({ titles: 24, second: true });
+
     const runtime = runtimeFor(
       mainLayer({ ...testConfig(dataDir), tmdbKey: "fixture-key", tmdbApi: tmdb.url }),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     const service = await promised(runtime, OnDemand);
+
     const add = (server: string) =>
       subscriptions.add({ server, username: "demo", password: "demo" });
+
     const own = await add(provider.url);
     const second = await add(other.url);
     await service.refresh(own.id);
@@ -172,11 +183,14 @@ describe("related titles from available subscriptions", { timeout: 20_000 }, () 
     tmdb.holdAbout(true);
     let playlistRequests = 0;
     let fileRequests = 0;
+
     const server = createServer((request, response) => {
       if (request.url !== "/list") {
         fileRequests++;
+
         return response.writeHead(404).end();
       }
+
       playlistRequests++;
       response.end(`#EXTM3U
 #EXTINF:-1 group-title="Films" tmdb-id="42",Quiet Harbour
@@ -185,11 +199,15 @@ http://127.0.0.1/movie.mp4
 http://127.0.0.1/neighbour.mp4
 `);
     });
+
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
     try {
       const address = server.address();
+
       if (!address || typeof address === "string") throw new Error("No fixture port");
       const provider = await fakeProvider({ titles: 24 });
+
       const runtime = runtimeFor(
         mainLayer({
           ...testConfig(await tempDir()),
@@ -197,14 +215,17 @@ http://127.0.0.1/neighbour.mp4
           tmdbApi: tmdb.url,
         }),
       );
+
       const subscriptions = await promised(runtime, Subscriptions);
       const service = await promised(runtime, OnDemand);
       const roster = await promised(runtime, Roster);
+
       const own = await subscriptions.add({
         server: `http://127.0.0.1:${address.port}/list`,
         username: "",
         password: "",
       });
+
       await subscriptions.mapPlaylist(own.id, playlistGroupId("Films"), "movie");
       const other = await subscriptions.add(demoLogin(provider));
       await roster.refreshPlaylist(own.id);
@@ -217,9 +238,11 @@ http://127.0.0.1/neighbour.mp4
         },
         { timeout: 10_000 },
       );
+
       const opened = (
         await service.collection({ kind: "movie", id: "all", offset: 0, limit: 100 })
       ).titles.find((title) => title.subscriptionId === own.id && title.tmdbId === "42")!;
+
       expect(opened.genres).toEqual([]);
       const home = await service.recommendations([{ kind: "movie", version: opened }]);
       expect(home).toMatchObject([{ seed: opened.title, reason: "Same category" }]);
@@ -239,6 +262,7 @@ http://127.0.0.1/neighbour.mp4
           id: opened.id,
         }),
       );
+
       const requests = [
         playlistRequests,
         provider.titleListRequests(),
@@ -248,6 +272,7 @@ http://127.0.0.1/neighbour.mp4
         tmdb.aboutRequests(),
         fileRequests,
       ];
+
       const found = await service.related("movie", opened);
       expect(found.basis).toBe("Drama · Dutch");
       expect(
@@ -279,6 +304,7 @@ http://127.0.0.1/neighbour.mp4
     const service = await promised(runtime, OnDemand);
     const own = await subscriptions.add(demoLogin(provider));
     const rows = provider.titles.movies;
+
     const set = (match: number) =>
       provider.serveTitles(() => ({
         ...provider.titles,
@@ -293,6 +319,7 @@ http://127.0.0.1/neighbour.mp4
                 : `Desert ${row.id}`,
         })),
       }));
+
     set(90001);
     await service.refresh(own.id);
     const version = { subscriptionId: own.id, id: "90000" };

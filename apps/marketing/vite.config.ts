@@ -13,6 +13,7 @@ import { newestStable, stableReleases, type Release } from "./scripts/releases.t
 import { siteAnalyticsConfiguration } from "./scripts/site-analytics.ts";
 
 const root = import.meta.dirname;
+
 const addresses = new Map(
   PAGES.flatMap(({ address, file }) =>
     address === "/"
@@ -23,14 +24,17 @@ const addresses = new Map(
         ],
   ),
 );
+
 const MISSING = "404.html";
 const HTML_ALIAS = /\.html\/?$/i;
 const systemScript = `<script>{const os=(${systemOf})(navigator);if(os)document.documentElement.dataset.os=os}</script>`;
+
 interface DownloadResult {
   readonly downloads: Downloads | null;
   /** Fresh history proves release eligibility even when no stable release remains. */
   readonly verifiedAt?: number;
 }
+
 let downloads: Promise<DownloadResult> | undefined;
 let releases: Promise<Release[] | null> | undefined;
 
@@ -44,15 +48,18 @@ async function resolveDownloads(): Promise<DownloadResult> {
       ? `Download links: ${found.version}, every installer.`
       : `::warning::Download links: ${found ? `GitHub didn't answer for ${found.version}'s ${missing.join(", ")}` : "no current stable release could be verified"}. The Releases page is linked instead.`,
   );
+
   return verifiedAt === undefined ? { downloads: found } : { downloads: found, verifiedAt };
 }
 
 async function resolveReleases(): Promise<Release[] | null> {
   const found = await stableReleases();
+
   if (!found)
     console.warn(
       "::warning::Release history unavailable. The page links to GitHub Releases instead.",
     );
+
   return found;
 }
 
@@ -61,6 +68,7 @@ function pages(read: (file: string) => string | Promise<string>): Connect.NextHa
   return async (req, res, next) => {
     const path = (req.url ?? "/").split("?")[0] ?? "/";
     const file = addresses.get(path);
+
     try {
       const html = await read(file ?? MISSING);
       res.statusCode = file ? 200 : 404;
@@ -74,12 +82,14 @@ function pages(read: (file: string) => string | Promise<string>): Connect.NextHa
 
 export default defineConfig(({ command }) => {
   const analytics = siteAnalyticsConfiguration(process.env, command === "build");
+
   // Names only the origin; the key is never printed.
   if (analytics) console.log(`Website analytics: ${new URL(analytics.endpoint).origin}.`);
   else if (command === "build" && process.env["MR_STREAMER_SITE_ANALYTICS_RELEASE_BUILD"] === "1")
     console.warn(
       "::warning::Website analytics: no valid EU host and public project key, so the site sends nothing.",
     );
+
   return config(analytics);
 });
 
@@ -105,23 +115,30 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
         async handler(html, context) {
           const file = context.path.replace(/^\//, "");
           const page = PAGES.find((page) => page.file === file);
+
           const needsDownloads =
             page?.address === "/" || page?.address === "/about" || page?.address === "/download";
+
           const resolved = needsDownloads ? await (downloads ??= resolveDownloads()) : null;
           const found = resolved?.downloads ?? null;
+
           const history =
             page?.address === "/releases" ? await (releases ??= resolveReleases()) : null;
+
           const rendered = page && page.address !== "/" ? renderPage(file, found, history) : html;
           const withSystem = writePackages(rendered).replace("<!-- system -->", () => systemScript);
+
           return writeDownloads(withSystem, found, resolved?.verifiedAt);
         },
       },
       generateBundle() {
         const urlList = [...new Set(PAGES.map(({ address }) => SITE + address))];
+
         const revision = execFileSync("git", ["rev-parse", "HEAD"], {
           cwd: root,
           encoding: "utf8",
         }).trim();
+
         this.emitFile({ type: "asset", fileName: `${INDEXNOW_KEY}.txt`, source: INDEXNOW_KEY });
         this.emitFile({
           type: "asset",
@@ -150,12 +167,16 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
         server.watcher.on("change", (path) => {
           if (path.startsWith(join(root, "../../docs/"))) server.ws.send({ type: "full-reload" });
         });
+
         const answer = pages((file) =>
           server.transformIndexHtml(`/${file}`, readFileSync(join(root, file), "utf8")),
         );
+
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
+
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
+
           // Vite's own /@ paths may be encoded; any other encoded address answers 404, as on Vercel.
           return addresses.has(path) ||
             HTML_ALIAS.test(path) ||
@@ -163,6 +184,7 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
             ? answer(req, res, next)
             : next();
         });
+
         return () => server.middlewares.use(answer);
       },
       configurePreviewServer(server) {
@@ -171,7 +193,9 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
         // decoded paths, so only an unencoded address with a file extension reaches them.
         server.middlewares.use((req, res, next) => {
           const path = req.url?.split("?")[0] ?? "/";
+
           if (path === "/llms.txt") res.setHeader("Content-Type", "text/plain; charset=utf-8");
+
           return addresses.has(path) ||
             HTML_ALIAS.test(path) ||
             !path.includes(".") ||
@@ -179,6 +203,7 @@ const config = (analytics: SiteCapture | null): UserConfig => ({
             ? answer(req, res, next)
             : next();
         });
+
         return () => server.middlewares.use(answer);
       },
     },

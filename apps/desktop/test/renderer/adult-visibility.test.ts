@@ -47,13 +47,16 @@ const movie = (name: string, adult = false): Title => ({
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id: name, tags: [] }],
 });
+
 const page = (name: string, titles: readonly Title[]): TitlePage & { name: string } => ({
   name,
   total: titles.length,
   titles,
 });
+
 /** What the lists hold for adults while Settings shows them. */
 const FOR_ADULTS = page("For adults", [movie("Night Reel", true), movie("Late Reel", true)]);
+
 /** And while it hides them, as the main process answers. */
 const NONE_FOR_ADULTS = page("For adults", []);
 const isAdultPage = (args: IpcInput<"ondemand.collection">) => args.id === "adult";
@@ -65,9 +68,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -109,34 +114,45 @@ async function mount() {
   const stopOnDemand = syncOnDemand(client);
   const view = queryView(client);
   const { container } = view;
+
   const show = (open: boolean) =>
     view.render(open ? createElement(TitlesPage, { kind: "movie", active: true }) : null);
+
   cleanup = () => {
     stopOnDemand();
     stopPreferences();
     view.unmount();
   };
+
   await show(true);
+
   const tabs = () =>
     [...container.querySelectorAll("nav button")].map((button) => button.textContent);
+
   const click = async (label: string) => {
     await until(() => expect(tabs()).toContain(label));
+
     const button = [...container.querySelectorAll("nav button")].find(
       (each) => each.textContent === label,
     );
+
     await act(async () => (button as HTMLButtonElement).click());
   };
+
   /** What a viewer could read on the page: the tab names, then everything else. */
   const shows = () => container.textContent ?? "";
+
   /** Settings commits hiding titles for adults; the main process answers without them since. */
   const hide = () => {
     ipc.answer("ondemand.collection", (args) =>
       isAdultPage(args) ? NONE_FOR_ADULTS : page("All", [movie("Daylight")]),
     );
+
     return act(async () =>
       ipc.emit("preferences.changed", ipc.snapshot({ ...defaultPreferences, adultTitles: false })),
     );
   };
+
   return { show, tabs, click, shows, hide };
 }
 
@@ -201,12 +217,14 @@ describe("after a refresh marks a listed title for adults", () => {
   /** Listed for everyone until the refresh, which marks it for adults. */
   const LATER = movie("Later Reel");
   const DAYLIGHT = movie("Daylight");
+
   /** What `ondemand.updated` says of lists fetched at `fetchedAt`. */
   const updated = (fetchedAt: number, markedForAdults?: true): OnDemandUpdate => ({
     lists: [{ subscriptionId: SUBSCRIPTION, movies: 3, series: 0, fetchedAt, failure: null }],
     metadata: null,
     ...defined({ markedForAdults }),
   });
+
   const saved = (title: Title): WatchlistEntry => ({
     subscriptionId: SUBSCRIPTION,
     id: title.id,
@@ -219,8 +237,10 @@ describe("after a refresh marks a listed title for adults", () => {
     sources: [SUBSCRIPTION],
     listed: true,
   });
+
   const recommended = (titles: readonly Title[]) =>
     titles.map((title) => ({ title, seed: "Seed Reel", reason: "Drama" }));
+
   const asPage = (titles: readonly Title[]) => page("All", titles);
   const isAll = (args: IpcInput<"ondemand.collection">) => args.id === "all";
 
@@ -271,24 +291,30 @@ describe("after a refresh marks a listed title for adults", () => {
     acceptPreferences(client, ipc.snapshot(defaultPreferences));
     const mounted = queryView(client);
     const { container } = mounted;
+
     const render = (view: ReactElement | null) =>
       mounted.render(createElement(TooltipProvider, null, view));
+
     cleanup = () => {
       for (const stop of stops) stop();
       mounted.unmount();
       useUi.setState({ searchOpen: false, searchFrom: "" });
     };
+
     const press = async (label: string) => {
       await until(() =>
         expect([...container.querySelectorAll("button")].map((b) => b.textContent)).toContain(
           label,
         ),
       );
+
       const button = [...container.querySelectorAll("button")].find(
         (each) => each.textContent === label,
       );
+
       await act(async () => (button as HTMLButtonElement).click());
     };
+
     const type = async (label: string, text: string) => {
       await until(() =>
         expect(container.querySelector(`input[aria-label="${label}"]`)).not.toBeNull(),
@@ -300,12 +326,15 @@ describe("after a refresh marks a listed title for adults", () => {
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });
     };
+
     const titlesPage = createElement(TitlesPage, { kind: "movie", active: true });
+
     const views: Record<(typeof VIEWS)[number], Browse> = {
       "Home recommendations": {
         answer: (titles) => ipc.always("ondemand.recommendations", recommended(titles)),
         hold: () => {
           const held = ipc.hold("ondemand.recommendations");
+
           return { resolve: (titles) => held.resolve(recommended(titles)) };
         },
         open: () => render(createElement(HomeScreen, { active: true })),
@@ -318,10 +347,12 @@ describe("after a refresh marks a listed title for adults", () => {
           ),
         hold: () => {
           const held = ipc.hold("ondemand.collection", isAll);
+
           return { resolve: (titles) => held.resolve(asPage(titles)) };
         },
         open: async (first) => {
           await render(titlesPage);
+
           if (first) await press("All movies");
         },
         close: () => render(null),
@@ -330,10 +361,12 @@ describe("after a refresh marks a listed title for adults", () => {
         answer: (titles) => ipc.always("ondemand.searchKind", { titles, total: titles.length }),
         hold: () => {
           const held = ipc.hold("ondemand.searchKind");
+
           return { resolve: (titles) => held.resolve({ titles, total: titles.length }) };
         },
         open: async (first) => {
           await render(titlesPage);
+
           if (!first) return;
           await press("For you");
           await type("Search movies", "Reel");
@@ -345,6 +378,7 @@ describe("after a refresh marks a listed title for adults", () => {
           ipc.always("watchlist.list", { total: titles.length, entries: titles.map(saved) }),
         hold: () => {
           const held = ipc.hold("watchlist.list", (query) => query.limit !== 1);
+
           return {
             resolve: (titles) => held.resolve({ total: titles.length, entries: titles.map(saved) }),
           };
@@ -356,6 +390,7 @@ describe("after a refresh marks a listed title for adults", () => {
         answer: (titles) => ipc.always("ondemand.search", { movies: titles, series: [] }),
         hold: () => {
           const held = ipc.hold("ondemand.search");
+
           return { resolve: (titles) => held.resolve({ movies: titles, series: [] }) };
         },
         open: async () => {
@@ -365,7 +400,9 @@ describe("after a refresh marks a listed title for adults", () => {
         close: () => act(async () => useUi.setState({ searchOpen: false, searchFrom: "" })),
       },
     };
+
     const emit = (update: OnDemandUpdate) => act(async () => ipc.emit("ondemand.updated", update));
+
     // The palette opens in a portal, outside the container.
     return { ...views[name], shows: () => document.body.textContent ?? "", emit };
   }
@@ -425,6 +462,7 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
   const LATER = movie("Later Reel");
   const DAYLIGHT = movie("Daylight");
   const EVENING = movie("Evening Reel");
+
   const played = (title: Title, at: number): TitleProgress => ({
     title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: title.id },
     position: 600,
@@ -433,6 +471,7 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
     at,
     since: at,
   });
+
   const record = (titles: readonly Title[], sequence: number): Viewing => ({
     favourites: [],
     recent: [],
@@ -440,10 +479,12 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
     marked: [],
     sequence,
   });
+
   const ordinary: OnDemandUpdate = {
     lists: [{ subscriptionId: SUBSCRIPTION, movies: 3, series: 0, fetchedAt: 1, failure: null }],
     metadata: null,
   };
+
   const marked: OnDemandUpdate = { ...ordinary, markedForAdults: true };
 
   /** Home with two films to continue; `refresh` has the lists mark Later Reel for adults. */
@@ -458,17 +499,21 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
     ipc.always("ondemand.collection", page("All", []));
     ipc.always("watchlist.list", { total: 0, entries: [] });
     ipc.always("viewing.get", record([LATER, DAYLIGHT], 1));
+
     const answer = ({ versions }: IpcInput<"ondemand.titles">) =>
       versions.flatMap((version) => listed.get(version.id) ?? []);
+
     ipc.answer("ondemand.titles", answer);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
+
     const stops = [
       syncPreferences(client, () => {}),
       syncOnDemand(client),
       syncWatchlist(client),
       syncViewing(client),
     ];
+
     acceptPreferences(client, ipc.snapshot(defaultPreferences));
     const view = queryView(client);
     const { container } = view;
@@ -476,6 +521,7 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
       for (const stop of stops) stop();
       view.unmount();
     };
+
     /** Home open or not, and in view or covered, as by Watch or a playing title. */
     const show = (open: boolean, visible = true) =>
       view.render(
@@ -489,17 +535,22 @@ describe("Continue watching, after a refresh marks a title in it for adults", ()
           ),
         ),
       );
+
     const refresh = () => {
       listed.set(LATER.id, { ...LATER, adult: true });
+
       return act(async () => ipc.emit("ondemand.updated", marked));
     };
+
     /** Holds the next title lookup, answered as the lists say then. */
     const hold = () => {
       const held = ipc.hold("ondemand.titles");
+
       return {
         resolve: (titles: readonly Title[]) => act(async () => held.resolve(titles)),
       };
     };
+
     return { container, show, refresh, hold, listed };
   }
 

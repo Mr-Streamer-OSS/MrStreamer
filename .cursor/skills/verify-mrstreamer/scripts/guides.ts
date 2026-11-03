@@ -24,6 +24,7 @@ export const sourcedGuideId = (name: string): string | undefined =>
   Object.values(SOURCED).find((each) => each.name === name)?.guideId;
 
 const SLOT = 30 * 60 * 1000;
+
 const stamp = (at: number) =>
   `${new Date(at).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
 
@@ -36,8 +37,10 @@ function xmltv(label: string, ids: readonly string[], filler: number): string {
   const first = Math.floor(Date.now() / SLOT) * SLOT - 4 * SLOT;
   const all = [...ids, ...Array.from({ length: filler }, (_, at) => `${label}-${at}.filler`)];
   const parts = ['<?xml version="1.0" encoding="utf-8"?><tv>'];
+
   for (const id of all)
     parts.push(`<channel id="${id}"><display-name>${id}</display-name></channel>`);
+
   for (const id of all) {
     for (let slot = 0; slot < 52; slot++) {
       const start = first + slot * SLOT;
@@ -46,7 +49,9 @@ function xmltv(label: string, ids: readonly string[], filler: number): string {
       );
     }
   }
+
   parts.push("</tv>");
+
   return parts.join("\n");
 }
 
@@ -85,15 +90,19 @@ export async function guidesScenario(
   hosts: { readonly north: GuideHost; readonly south: GuideHost },
 ): Promise<void> {
   const hostName = (host: GuideHost) => new URL(host.origin).host;
+
   const byText = (selector: string, text: string) =>
     `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
   const field = `document.querySelector('input[aria-label="Address of an XMLTV guide"]')`;
+
   // Read-only: what the rows are drawn from.
   const sources = () =>
     d.evaluate<Source[]>(`(async () => {
       const read = await window.mrStreamer.invoke('guide.sources');
       return read.ok ? read.value : [];
     })()`);
+
   /** Each row of Settings > Guides as drawn: its host, its state line, and whether it is red. */
   const rows = () =>
     d.evaluate<{ host: string; state: string; failing: boolean }[]>(
@@ -103,6 +112,7 @@ export async function guidesScenario(
           failing: state?.className.includes('text-destructive') ?? false };
       })`,
     );
+
   const width = async (pixels: number) => {
     d.action(`Size the page ${pixels} px wide`);
     await d.send("Emulation.setDeviceMetricsOverride", {
@@ -128,22 +138,27 @@ export async function guidesScenario(
     /** What the row said right after each capture, which the screenshot may show instead. */
     const captured: { shot: string; shown: string }[] = [];
     const deadline = Date.now() + 60_000;
+
     for (;;) {
       const row = (await rows()).find((each) => each.host === hostName(host));
       const state = row?.state.split(" ")[0] ?? "";
+
       if (row && lines.at(-1) !== row.state) lines.push(row.state);
       // Each state once, and a download once it says how much of how much.
       const shot = row?.state.includes(" of ") ? "Downloading-size" : state;
+
       if (row && !seen.includes(shot)) {
         seen.push(shot);
         await d.capture(`guides-${name.toLowerCase()}-${shot.toLowerCase()}`);
         const after = (await rows()).find((each) => each.host === hostName(host))?.state ?? "";
         captured.push({ shot, shown: after });
       }
+
       if (state === "Ready") break;
       expect(Date.now() < deadline, `${name} never became ready`, lines);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+
     d.observed[`${name.toLowerCase()}States`] = lines;
     d.observed[`${name.toLowerCase()}Captures`] = captured;
     expect(
@@ -152,11 +167,13 @@ export async function guidesScenario(
       lines,
     );
     expect((await d.evaluate<string>(`${field}.value`)) === "", "The field kept the address");
+
     return lines;
   };
 
   /** A channel's name as Live TV's rows draw it, without the "TEST | " its category shares. */
   const drawn = (name: string) => name.replace(/^TEST \| /, "");
+
   /**
    * Live TV's rows of the sourced channels and the provider's own: what each shows on now, read
    * once each row draws what `expected` says. Rows arrive before their listings, and a changed
@@ -166,40 +183,49 @@ export async function guidesScenario(
     // Settings lies over the app with a header of its own: its Back is the last.
     const back =
       "[...document.querySelectorAll('header button')].findLast(b => b.textContent.trim() === 'Back')";
+
     if (await d.exists(back)) await d.click("Leave Settings", back);
     await d.click("Open Live TV", byText("header button", "Live TV"));
     const category = `[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('TEST | Formats'))`;
     // The topic rail lists provider categories under Provider lists, unless it is still open.
     const providerLists = `[...document.querySelectorAll('[role=navigation] button')].find(b => b.title === 'Provider lists')`;
     await d.wait(async () => (await d.exists(category)) || (await d.exists(providerLists)));
+
     if (!(await d.exists(category))) await d.click("Open Provider lists", providerLists);
     await d.click("Open TEST | Formats and failures", category);
+
     const names = [
       "TEST | H.264 + AAC",
       SOURCED.north.name,
       SOURCED.south.name,
       SOURCED.shared.name,
     ];
+
     const read = () =>
       d.evaluate<Record<string, string>>(`Object.fromEntries(
         [...document.querySelectorAll('[data-index]')].map(row => [
           row.querySelector('[data-name]')?.textContent.trim() ?? '',
           row.innerText,
         ]))`);
+
     await d.wait(async () => {
       const shown = await read();
       d.observed["liveTvSeen"] = shown;
+
       return (
         names.every((name) => drawn(name) in shown) &&
         Object.entries(expected).every(([name, want]) => {
           const text = shown[drawn(name)] ?? "";
+
           return typeof want === "string" ? text.includes(want) : want.test(text);
         })
       );
     });
     const shown = await read();
+
     return (name: string) => shown[drawn(name)] ?? "";
   };
+
   const openGuides = async () => {
     await d.click("Open Settings", "document.querySelector('button[aria-label=Settings]')");
     await d.click("Open Guides", byText("nav button", "Guides"));
@@ -245,6 +271,7 @@ export async function guidesScenario(
     [SOURCED.south.name]: "South south.src",
     [SOURCED.shared.name]: "North shared.src",
   });
+
   d.observed["liveTvBefore"] = Object.fromEntries(
     [SOURCED.north, SOURCED.south, SOURCED.shared].map(({ name }) => [name, now(name)]),
   );

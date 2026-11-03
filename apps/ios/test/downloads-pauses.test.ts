@@ -127,6 +127,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       background.faults.ledger = false;
       const grant = [...background.grants.values()].find((each) => each.id === film.id);
       expect(grant?.held).toBe(false);
+
       if (how === "back in the foreground") appGoes("background");
       await sleep(500);
       expect(native.open).toBe(1);
@@ -216,6 +217,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     expect(statusOf(app, film.id)).toMatchObject({ kind: "paused", received: 20_000 });
     const endings = native.held;
     native.held = null;
+
     for (const ending of endings) ending();
     await expect(pausing).resolves.toBe("closed");
   });
@@ -232,6 +234,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const film = await app.addDownload(movieRef(a));
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
     await app.resumeDownload(next.id);
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -240,6 +243,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => background.open(show.id).length === 1, "the last one authorized");
     const { transfers } = await import("../src/download-task.ts");
     const hold = vi.spyOn(transfers, "holdAuthorization");
@@ -315,9 +319,11 @@ describe("downloads", { timeout: 30_000 }, () => {
     const { transfers } = await import("../src/download-task.ts");
     const hold = vi.spyOn(transfers, "holdAuthorization");
     onTestFinished(() => hold.mockRestore());
+
     const refuse = async () => {
       throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
     };
+
     hold.mockImplementationOnce(async () => Promise.reject(busy()));
     // The refill after it is refused too, so the pause isn't kept.
     hold.mockImplementationOnce(refuse);
@@ -346,6 +352,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     background.die();
     new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(written));
     const command = bridge.holdAuthorization.bind(bridge);
+
     const hold = vi
       .spyOn(bridge, "holdAuthorization")
       .mockImplementation(async (authorization, held) =>
@@ -355,6 +362,7 @@ describe("downloads", { timeout: 30_000 }, () => {
             )
           : command(authorization, held),
       );
+
     onTestFinished(() => hold.mockRestore());
     app = await launch();
     await until(() => isComplete(app, film.id), "the film, under way before the launch");
@@ -371,6 +379,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(movie().id, 20_000, 60_000);
     const film = await app.addDownload(movieRef(a));
     await app.addDownload(movieRef(a, otherMovie().id));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -379,10 +388,13 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
     await until(() => background.open(show.id).length === 1, "the last one authorized");
+
     const unavailable = () =>
       Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
+
     const held = () => [...background.grants.values()].find((grant) => grant.id === film.id)?.held;
     const hold = vi.spyOn(bridge, "holdAuthorization");
     const arrange = vi.spyOn(bridge, "arrangeAuthorizations");
@@ -417,6 +429,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(movie().id, 20_000, 2_000);
     await app.addDownload(movieRef(a));
     const next = await app.addDownload(movieRef(a, otherMovie().id));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -425,6 +438,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => background.open(show.id).length === 1, "the last one authorized");
     // The process ends between the next one's pause on its record and its native hold.
     const written = doc();
@@ -434,6 +448,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     // Refused once, under the next launch's first-foreground barrier.
     let refused = false;
     const command = bridge.holdAuthorization.bind(bridge);
+
     const hold = vi
       .spyOn(bridge, "holdAuthorization")
       .mockImplementation(async (authorization, held) => {
@@ -441,6 +456,7 @@ describe("downloads", { timeout: 30_000 }, () => {
         refused = true;
         throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
       });
+
     onTestFinished(() => hold.mockRestore());
     app = await launch();
     await until(() => refused, "the hold to be refused");
@@ -459,11 +475,13 @@ describe("downloads", { timeout: 30_000 }, () => {
     // Refused once, under the next launch's first-foreground barrier.
     let refused = false;
     const command = bridge.arrangeAuthorizations.bind(bridge);
+
     const arrange = vi.spyOn(bridge, "arrangeAuthorizations").mockImplementation(async (ids) => {
       if (refused || background.barrier.kind !== "installed") return command(ids);
       refused = true;
       throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
     });
+
     onTestFinished(() => arrange.mockRestore());
     one.stallMovieFile(movie().id, 0, 0);
     app = await launch();
@@ -500,6 +518,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       one.stallMovieFile(movie().id, 30_000, 3_000);
       const film = await app.addDownload(movieRef(a));
       const other = await app.addDownload(movieRef(a, otherMovie().id));
+
       const show = await app.addDownload({
         kind: "episode",
         subscriptionId: a,
@@ -508,14 +527,17 @@ describe("downloads", { timeout: 30_000 }, () => {
         season: 1,
         episode: first.number ?? 1,
       });
+
       await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
       await until(() => background.open(show.id).length === 1, "the last one authorized");
+
       if (answered !== "at once") {
         const command = bridge.arrangeAuthorizations.bind(bridge);
         const arrange = vi.spyOn(bridge, "arrangeAuthorizations");
         onTestFinished(() => arrange.mockRestore());
         arrange.mockImplementationOnce(unanswered(answered, command));
       }
+
       await app.moveDownload(show.id, -1);
       expect(app.downloadList().items.map((item) => item.id)).toEqual([film.id, show.id, other.id]);
       await sleep(500);
@@ -540,6 +562,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(movie().id, 30_000, 60_000);
     const film = await app.addDownload(movieRef(a));
     const other = await app.addDownload(movieRef(a, otherMovie().id));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -548,18 +571,21 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => receivedOf(app, film.id) === 30_000, "the transfer to stall");
     await until(() => background.open(show.id).length === 1, "the last one authorized");
     // The first order asked is refused, once the two after it were kept.
     const refusal = Promise.withResolvers<void>();
     const command = bridge.arrangeAuthorizations.bind(bridge);
     let asked = false;
+
     const arrange = vi.spyOn(bridge, "arrangeAuthorizations").mockImplementation(async (ids) => {
       if (asked) return command(ids);
       asked = true;
       await refusal.promise;
       throw Object.assign(new Error("refused"), { code: "ERR_DOWNLOADS_UNAVAILABLE" });
     });
+
     onTestFinished(() => {
       refusal.resolve();
       arrange.mockRestore();
@@ -582,6 +608,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(otherMovie().id, 5_000, 60_000);
     const paused = await app.addDownload(movieRef(a));
     const running = await app.addDownload(movieRef(a, otherMovie().id));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -590,6 +617,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => receivedOf(app, paused.id) === 20_000, "the first transfer to stall");
     await app.pauseDownload(paused.id);
     await until(() => receivedOf(app, running.id) === 5_000, "the next transfer to stall");
@@ -610,6 +638,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(otherMovie().id, 5_000, 60_000);
     const paused = await app.addDownload(movieRef(a));
     const started = await app.addDownload(movieRef(a, otherMovie().id));
+
     const show = await app.addDownload({
       kind: "episode",
       subscriptionId: a,
@@ -618,6 +647,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       season: 1,
       episode: first.number ?? 1,
     });
+
     await until(() => background.open(show.id).length === 1, "the last one authorized");
     await until(() => receivedOf(app, paused.id) === 20_000, "the first transfer to stall");
     await app.pauseDownload(paused.id);

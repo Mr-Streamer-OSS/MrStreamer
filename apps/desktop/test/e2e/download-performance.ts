@@ -27,17 +27,23 @@ const { values } = parseArgs({
     output: { type: "string" },
   },
 });
+
 if (!values["app-dir"] || !values.executable || !values.output || !values.revision)
   throw new Error(
     "Required: --app-dir DIR --executable PATH --revision SHA --output NEW_DIRECTORY",
   );
+
 const appDir = resolve(values["app-dir"]);
 const executable = resolve(values.executable);
 const output = resolve(values.output);
+
 await mkdir(output); // Refuse to overwrite evidence, including failed runs.
+
 const profile = await mkdtemp(join(tmpdir(), "mrstreamer-native-download-"));
 const clip = join(profile, "seed.mp4");
+
 await writeFile(clip, fixture("title-h264-aac.mp4"));
+
 const results: Record<string, unknown> = {
   revision: values.revision,
   appDir,
@@ -62,6 +68,7 @@ const results: Record<string, unknown> = {
       "CDP send to observed scroll / subsequent RAF is not physical paint latency. Performance metrics are renderer main-thread task time; CPU profile samples attribute JS. React instrumentation counts root commits only, not per-component duration.",
   },
 };
+
 let app: ChildProcess | undefined;
 let page: Page | undefined;
 let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
@@ -72,41 +79,52 @@ const trace: unknown[] = [];
 let profiling = false;
 let tracing = false;
 let traceComplete = false;
+
 const watchdog = setTimeout(() => {
   logs.push("Ten minute deadline\n");
   app?.kill("SIGTERM");
 }, 600_000);
+
 let failure: unknown;
+
 const signals = () => {
   failure = new Error("Interrupted");
   app?.kill("SIGTERM");
 };
+
 process.once("SIGINT", signals);
+
 process.once("SIGTERM", signals);
 
 async function manifest(directory: string): Promise<Record<string, string>> {
   const hashes: Record<string, string> = {};
+
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const name = join(directory, entry.name);
+
     if (entry.isDirectory()) Object.assign(hashes, await manifest(name));
     else
       hashes[name] = createHash("sha256")
         .update(await readFile(name))
         .digest("hex");
   }
+
   return hashes;
 }
 
 async function checked(method: string, params: Record<string, unknown> = {}) {
   assert(page);
   const reply = await page.send(method, params);
+
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
   return reply.result;
 }
 
 async function start() {
   const port = await freePort();
   const started = performance.now();
+
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
@@ -121,6 +139,7 @@ async function start() {
         ].includes(name),
     ),
   );
+
   app = spawn(
     executable,
     [
@@ -145,6 +164,7 @@ async function start() {
       },
     },
   );
+
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
   page = await connect(port, "page", { app, pollMs: 10 });
@@ -165,6 +185,7 @@ async function start() {
     () => page!.evaluate<boolean>("!!document.querySelector('header, form input')"),
     30000,
   );
+
   return { pid: app.pid, port, url, startedToReadyMs: performance.now() - started };
 }
 
@@ -177,26 +198,33 @@ async function quit() {
 
 const button = (scope: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(scope)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
 const poster = (text: string) =>
   `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(text)}))`;
+
 async function click(element: string) {
   await waitFor(() => page!.evaluate<boolean>(`!!(${element})`), 15000);
   await page!.evaluate(`(${element}).scrollIntoView({block:'nearest'})`);
+
   const point = await page!.evaluate<{ x: number; y: number }>(
     `(() => { const b=(${element}).getBoundingClientRect(); return {x:b.x+b.width/2,y:b.y+b.height/2}; })()`,
   );
+
   for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
     await checked("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
 }
+
 async function capture(name: string) {
   const shot = (await checked("Page.captureScreenshot", { format: "png" })) as { data: string };
   await writeFile(join(output, `${name}.png`), Buffer.from(shot.data, "base64"));
 }
+
 async function list() {
   return page!.evaluate<DownloadList>(
     "window.mrStreamer.invoke('downloads.list').then(r=>{if(!r.ok)throw Error(JSON.stringify(r));return r.value})",
   );
 }
+
 async function openSeries() {
   await click(button("header button", "Series"));
   await click(button("nav button", "All series"));
@@ -205,6 +233,7 @@ async function openSeries() {
   // this navigation preparation is outside the measured details-open window.
   await delay(1000);
 }
+
 async function details() {
   const start = performance.now();
   await click(poster("Long-running"));
@@ -215,8 +244,10 @@ async function details() {
       ),
     15000,
   );
+
   return performance.now() - start;
 }
+
 async function identity() {
   return page!.evaluate<{ rows: string[]; seasons: string[]; versions: string[] }>(`(() => {
     const d=document.querySelector('[role=dialog]');
@@ -225,13 +256,17 @@ async function identity() {
       versions:[...d.querySelectorAll('[aria-label*="version" i]')].map(b=>b.getAttribute('aria-label')+':'+b.textContent) };
   })()`);
 }
+
 async function catalogueIdentity() {
   const subscriptionId = (await list()).items[0]?.subscription?.id;
   assert(subscriptionId);
+
   const details = await page!.evaluate<SeriesDetails>(`window.mrStreamer.invoke('ondemand.details',
     {kind:'series',version:{id:'70000',subscriptionId:${JSON.stringify(subscriptionId)}}})
     .then(r=>{if(!r.ok)throw Error(JSON.stringify(r));return r.value})`);
+
   assert.equal(details.seasons.length, 20);
+
   const ordered = details.seasons.flatMap((s) =>
     s.episodes.map((e) => ({
       subscriptionId: e.subscriptionId,
@@ -240,17 +275,21 @@ async function catalogueIdentity() {
       number: e.number,
     })),
   );
+
   assert.equal(ordered.length, 520);
   assert.deepEqual(
     ordered.map((e) => e.id),
     Array.from({ length: 520 }, (_, i) => String(7000000 + i)),
   );
+
   return { ordered, versions: details.title.versions };
 }
+
 async function metrics() {
   const reply = (await checked("Performance.getMetrics")) as {
     metrics: { name: string; value: number }[];
   };
+
   return Object.fromEntries(reply.metrics.map((m) => [m.name, m.value]));
 }
 
@@ -273,10 +312,12 @@ try {
     () => page!.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
     15000,
   );
+
   for (const [index, text] of [proxy.url, "demo", "demo"].entries()) {
     await click(`document.querySelectorAll('form input')[${index}]`);
     await checked("Input.insertText", { text });
   }
+
   await click("document.querySelector('form button[type=submit]')");
   await waitFor(() => page!.evaluate<boolean>("!!document.querySelector('header')"), 30000);
   await openSeries();
@@ -330,11 +371,13 @@ try {
   );
   const content: { sample: number; warmup: boolean; cdpTo26RowsMs: number }[] = [];
   results["content"] = content;
+
   for (let index = 0; index < 35; index++) {
     content.push({ sample: index - 4, warmup: index < 5, cdpTo26RowsMs: await details() });
     await key(page!, "Escape", 27);
     await waitFor(() => page!.evaluate<boolean>("!document.querySelector('[role=dialog]')"), 5000);
   }
+
   results["contentTransferAfter"] = (await list()).items.find(
     (i) => i.status.kind === "transferring",
   );
@@ -383,8 +426,10 @@ try {
   tracing = true;
   const samples: Record<string, unknown>[] = [];
   results["scroll"] = samples;
+
   for (let index = 0; index < 35; index++) {
     const prior = await metrics();
+
     const armed = await page!.evaluate<{
       top: number;
       max: number;
@@ -403,6 +448,7 @@ try {
       return {top:s.scrollTop,max:s.scrollHeight-s.clientHeight,x:b.x+b.width*.7,y:Math.min(b.bottom-40,b.y+150),
         events:window.__events.length,commits:window.__rootCommits.length,at:performance.now()};
     })()`);
+
     const sentEpochMs = Date.now();
     await checked("Input.dispatchMouseEvent", {
       type: "mouseWheel",
@@ -413,6 +459,7 @@ try {
     });
     await delay(350);
     const after = await metrics();
+
     const observed = await page!.evaluate<{
       input: { top: number; observedTop?: number; scroll: number | null; raf: number | null };
       events: unknown[];
@@ -421,6 +468,7 @@ try {
     }>(
       `({input:window.__inputSample,events:window.__events.slice(${armed.events}),commits:window.__rootCommits.length-${armed.commits},epochOffset:performance.timeOrigin})`,
     );
+
     const sample = {
       sample: index - 4,
       warmup: index < 5,
@@ -440,6 +488,7 @@ try {
       taskMs: ((after["TaskDuration"] ?? NaN) - (prior["TaskDuration"] ?? NaN)) * 1000,
       scriptMs: ((after["ScriptDuration"] ?? NaN) - (prior["ScriptDuration"] ?? NaN)) * 1000,
     };
+
     samples.push(sample);
     assert(
       observed.input.scroll !== null &&
@@ -448,6 +497,7 @@ try {
       "Wheel must cause native scroll and subsequent RAF",
     );
   }
+
   const cpu = (await checked("Profiler.stop")) as { profile: unknown };
   profiling = false;
   await writeFile(join(output, "renderer.cpuprofile"), JSON.stringify(cpu.profile));
@@ -470,11 +520,13 @@ try {
     beforeCatalogue,
     "All 520 ordered exact files and version choices must remain unchanged",
   );
+
   const events = (
     results["nativeObservation"] as {
       events: { advancing: { received: number; id: string }[]; count: number; complete: number }[];
     }
   ).events;
+
   assert(
     events.length >= 30 &&
       events.every(
@@ -512,18 +564,24 @@ try {
   );
   const positive: unknown[] = [];
   results["positiveControl"] = positive;
+
   for (let i = 0; i < 2; i++) {
     await delay(1800);
+
     const own = (await list()).items.find(
       (d) => d.title.kind === "episode" && d.title.id === "7000000",
     );
+
     assert(own?.status.kind === "transferring");
+
     const shown = await page!.evaluate<{ cancel: boolean; text: string }>(
       `({cancel:!!document.querySelector('[aria-label="Cancel download of S1 E1"]'),text:document.querySelector('[role=dialog]').innerText})`,
     );
+
     assert(shown.cancel && /Downloading \d+%/.test(shown.text));
     positive.push({ status: own.status, shown });
   }
+
   assert.notDeepEqual(positive[0], positive[1]);
   await capture("matching-progress");
   results["transferBoundary"] = proxy.observed();
@@ -538,11 +596,13 @@ try {
   failure = error;
   results["status"] = "failed";
   results["failure"] = error instanceof Error ? error.stack : String(error);
+
   if (page) {
     if (profiling) {
       const cpu = await checked("Profiler.stop").catch(String);
       await writeFile(join(output, "failed-renderer-profile.json"), JSON.stringify(cpu));
     }
+
     if (tracing) {
       await checked("Tracing.end").catch(() => {});
       await waitFor(async () => traceComplete, 5000).catch(() => {});
@@ -551,6 +611,7 @@ try {
         JSON.stringify({ traceEvents: trace }),
       );
     }
+
     results["failedNativeObservation"] = await page
       .evaluate("({events:window.__events,frames:window.__frames})")
       .catch(String);
@@ -565,6 +626,7 @@ try {
   process.removeListener("SIGINT", signals);
   process.removeListener("SIGTERM", signals);
   const cleanup: string[] = [];
+
   try {
     await quit();
     cleanup.push("Owned Electron exited");
@@ -574,6 +636,7 @@ try {
     failure ??= error;
     cleanup.push(`FAILED ${String(error)}`);
   }
+
   for (const boundary of [proxy, provider, tmdb]) {
     try {
       await boundary?.close();
@@ -582,13 +645,17 @@ try {
       cleanup.push(`FAILED ${String(error)}`);
     }
   }
+
   results["cleanup"] = cleanup;
+
   if (failure) results["status"] = "failed";
   results["conditionsEnd"] = { load: loadavg(), at: new Date().toISOString() };
   await writeFile(join(output, "raw.json"), JSON.stringify(results, null, 2));
   await writeFile(join(output, "electron.log"), logs.join(""));
 }
+
 console.log(`${failure ? "FAIL" : "PASS"} ${output}`);
+
 if (failure) {
   console.error(failure);
   process.exitCode = 1;

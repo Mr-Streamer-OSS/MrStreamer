@@ -14,6 +14,7 @@ const [FHD, HD, SD] = [0, 1, 2].map((at) => String(QUALITY_STREAM_IDS + at)) as 
   string,
   string,
 ];
+
 const login = { username: "fixture", password: "fixture-pass" };
 
 describe("the channel list controls", () => {
@@ -27,16 +28,21 @@ describe("the channel list controls", () => {
 
   const control = (method: string, route: string) => {
     const answered = lists.control(method, new URL(route, "http://control.test"));
+
     if (!answered) throw new Error(`no route ${route}`);
+
     return answered;
   };
+
   /** The streams of the channel in three qualities, as the app groups the list it reads now. */
   async function qualities() {
     const catalogue = await xtreamProvider(
       { server: provider.url, ...login },
       { userAgent: "fixture" },
     ).liveCatalogue();
+
     const { channels } = liveChannels(normalizeCatalogue(catalogue).streams);
+
     return channels
       .filter((channel) => channel.variants.some((variant) => [FHD, HD, SD].includes(variant.id)))
       .map((channel) => ({ id: channel.id, streams: channel.variants.map(({ id }) => id) }));

@@ -106,6 +106,7 @@ import {
 
 const PAGE_ROWS = 10;
 const NO_CHANNELS: readonly LiveChannel[] = [];
+
 /** The keys the grid takes while it has the keyboard. */
 const GRID_KEYS = new Set([
   "ArrowUp",
@@ -154,13 +155,17 @@ export function GuidePage({ active }: { active: boolean }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const client = useQueryClient();
   const customLists = useQuery(queries.customLists());
+
   const customList =
     list.kind === "custom" ? customLists.data?.find((each) => each.id === list.id) : undefined;
+
   /** Changes made from rows and menus, and the last of them that failed, for Retry. */
   const listChange = useListChanges();
   /** What a list's header shows in its place: a field to rename it, or Delete's question. */
   const [editing, setEditing] = useState<{ id: string; kind: "rename" | "delete" } | null>(null);
+
   if (editing && editing.id !== customList?.id) setEditing(null);
+
   /**
    * Ends `which` if it is still the one open. A rename or delete can be answered after the viewer
    * chose another list, or opened another field, even for the same list: that one stays.
@@ -176,14 +181,17 @@ export function GuidePage({ active }: { active: boolean }) {
   const previousSchedule = useRef<string | null>(null);
   useEffect(() => {
     const shown = expandedKey;
+
     if (active && shown && shown !== previousSchedule.current)
       void call("analytics.action", "epg_opened").catch(() => {});
     previousSchedule.current = shown;
   }, [active, expandedKey]);
 
   const lastCategoryTitle = useRef<string>("");
+
   if (list.kind === "category" && categoryMap.has(ownedKey(list.category)))
     lastCategoryTitle.current = listTitle(list, categoryMap, customLists.data);
+
   if (customList) lastCategoryTitle.current = customList.name;
   const [removedCategory, setRemovedCategory] = useState<string | null>(null);
 
@@ -192,11 +200,15 @@ export function GuidePage({ active }: { active: boolean }) {
   // of the viewer's goes when it is deleted.
   useEffect(() => {
     const known = list.kind === "category" ? categories.data : customLists.data;
+
     if ((list.kind !== "category" && list.kind !== "custom") || !known) {
       if (list.kind !== "all") setRemovedCategory(null);
+
       return;
     }
+
     const resolved = resolveDiscovery(list, categories.data, customLists.data);
+
     if (resolved.kind === "all") {
       const quietly = list.kind === "custom" && deletedHere(client, list.id);
       setRemovedCategory(quietly ? null : lastCategoryTitle.current || t("Current category"));
@@ -222,14 +234,17 @@ export function GuidePage({ active }: { active: boolean }) {
   // search, unless the search itself moved there.
   const key = listKey(list);
   const [typed, setTyped] = useState({ key, text: "" });
+
   if (typed.key !== key) setTyped({ key, text: "" });
   const text = typed.key === key ? typed.text : "";
   const rawSearch = useRef(text);
   rawSearch.current = text;
+
   const setText = (text: string) => {
     rawSearch.current = text;
     setTyped({ key, text });
   };
+
   const search = useListSearch(channels, text);
   const searching = text.trim() !== "";
   const canUseSearch = () => search.actionable && rawSearch.current === text;
@@ -242,14 +257,17 @@ export function GuidePage({ active }: { active: boolean }) {
   // The rows are the list's, or what a search found of them, or the favourites as arranged.
   const [searchFocus, setSearchFocus] = useState(0);
   const [expandedCopies, setExpandedCopies] = useState<ReadonlySet<string>>(new Set());
+
   const searchRows = useMemo(
     () => (search.groups ? searchChannelRows(search.groups, expandedCopies, search.matches) : null),
     [search.groups, expandedCopies, search.matches],
   );
+
   const rows = useMemo(
     () => draft?.order ?? searchRows?.map((row) => row.channel) ?? search.channels,
     [draft?.order, searchRows, search.channels],
   );
+
   // The grid's rows: what a search found, each channel once, as the copy Enter plays in the list.
   const gridRows = useMemo(
     () =>
@@ -257,9 +275,12 @@ export function GuidePage({ active }: { active: boolean }) {
       search.channels,
     [search.groups, search.channels, favourites, subscriptions],
   );
+
   const toggleCopies = (key: string) => {
     const index = searchRows?.findIndex((row) => row.group.key === key && !row.copy) ?? -1;
+
     if (index >= 0) setChosen({ index, channel: rows[index] ?? null, searchKey: key });
+
     if (
       expandedCopies.has(key) &&
       searchRows?.[index]?.group.copies.some((copy) => ownedKey(copy) === expandedKey)
@@ -267,20 +288,27 @@ export function GuidePage({ active }: { active: boolean }) {
       setExpandedKey(null);
     setExpandedCopies((current) => {
       const next = new Set(current);
+
       if (next.has(key)) next.delete(key);
       else next.add(key);
+
       return next;
     });
   };
+
   const playRow = (index: number) => {
     if (!canUseSearch()) return;
     const row = searchRows?.[index];
+
     const channel =
       row && !row.copy ? automaticSearchCopy(row.group, favourites, subscriptions) : rows[index];
+
     if (channel) watchLive(channel);
   };
+
   // Reorder was asked for while a search hides favourites, which it never clears by itself.
   const [refused, setRefused] = useState(false);
+
   if (refused && (text.trim() === "" || !ordered)) setRefused(false);
 
   // The selection keeps to its channel when the rows change under it, as a search's do while
@@ -293,16 +321,19 @@ export function GuidePage({ active }: { active: boolean }) {
     index: 0,
     channel: null,
   });
+
   const byKey =
     searchRows && chosen.searchKey
       ? searchRows.findIndex((row) => row.key === chosen.searchKey)
       : -1;
+
   const kept =
     byKey !== -1
       ? byKey
       : chosen.channel === null || sameOwned(rows[chosen.index], chosen.channel)
         ? chosen.index
         : rows.findIndex((channel) => sameOwned(channel, chosen.channel));
+
   const selected = draft
     ? Math.max(
         rows.findIndex((channel) => sameOwned(channel, draft.focus.channel)),
@@ -314,6 +345,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const reorderButton = useRef<HTMLButtonElement>(null);
   /** Where the focus was when ordering began, to put it back: on Reorder, or nowhere in the page. */
   const entered = useRef<"button" | "page" | null>(null);
+
   const begin = () => {
     numberEntry.cancel();
     setExpandedKey(null);
@@ -321,12 +353,15 @@ export function GuidePage({ active }: { active: boolean }) {
     entered.current = document.activeElement === reorderButton.current ? "button" : "page";
     order.start(rows[selected] ?? null);
   };
+
   /** Starts ordering the favourites, or asks for a search to be cleared first. */
   const reorder = () => {
     if (!order.available || draft || liveView === "grid") return;
+
     if (text.trim() !== "") setRefused(true);
     else begin();
   };
+
   // Once the order is saved or cancelled, the selection is the channel that had the keys, and
   // the focus is back where it was before.
   const moved = draft?.focus.channel ?? null;
@@ -335,14 +370,18 @@ export function GuidePage({ active }: { active: boolean }) {
   useLayoutEffect(() => {
     if (moved !== null) {
       left.current = moved;
+
       return;
     }
+
     const from = entered.current;
     entered.current = null;
+
     if (from === null) return;
     const channel = left.current;
     setChosen((current) => ({ ...current, channel }));
     const focused = document.activeElement;
+
     if (from === "button") reorderButton.current?.focus();
     else if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
   }, [movedKey]);
@@ -361,12 +400,14 @@ export function GuidePage({ active }: { active: boolean }) {
     if (!loaded || initializedSelection.current === selectionScope) return;
     initializedSelection.current = selectionScope;
     const playing = player.current();
+
     const index = Math.max(
       rows.findIndex((channel, at) =>
         rowPlays(channel, searchRows?.[at], playing ? ownedKey(playing) : null),
       ),
       0,
     );
+
     setChosen({ index: searching ? 0 : index, channel: searching ? null : (rows[index] ?? null) });
     setExpandedKey(null);
     setExpandedCopies(new Set());
@@ -374,10 +415,12 @@ export function GuidePage({ active }: { active: boolean }) {
 
   // A filter keeps the exact selected channel, or selects the first remaining row.
   const filtersKey = JSON.stringify(list.filters ?? EMPTY_LIVE_FILTERS);
+
   const filterChoice = useRef<{ key: string; channel: OwnedId | null }>({
     key: filtersKey,
     channel: null,
   });
+
   if (filterChoice.current.key !== filtersKey)
     filterChoice.current = {
       key: filtersKey,
@@ -388,11 +431,14 @@ export function GuidePage({ active }: { active: boolean }) {
     if (!loaded || appliedFilters.current === filtersKey) return;
     appliedFilters.current = filtersKey;
     const channel = filterChoice.current.channel;
+
     const index = Math.max(
       0,
       rows.findIndex((each) => sameOwned(each, channel)),
     );
+
     setChosen({ index, channel: rows[index] ?? null });
+
     if (liveView === "grid" && !gridRows.some((each) => sameOwned(each, channel)))
       grid.current?.key("Home");
   }, [loaded, filtersKey, rows, gridRows, liveView]);
@@ -400,12 +446,14 @@ export function GuidePage({ active }: { active: boolean }) {
   useLayoutEffect(() => {
     if (!searching || !search.actionable || chosen.channel !== null || rows.length === 0) return;
     const playing = player.current();
+
     const index = Math.max(
       rows.findIndex((channel, at) =>
         rowPlays(channel, searchRows?.[at], playing ? ownedKey(playing) : null),
       ),
       0,
     );
+
     setChosen({ index, channel: rows[index]!, searchKey: searchRows?.[index]?.key });
   }, [searching, search.actionable, chosen.channel, rows, searchRows]);
 
@@ -413,6 +461,7 @@ export function GuidePage({ active }: { active: boolean }) {
   useEffect(() => {
     if (!active) return;
     useUi.setState({ searchFrom: text.trim() });
+
     return () => useUi.setState({ searchFrom: "" });
   }, [active, text]);
 
@@ -442,6 +491,7 @@ export function GuidePage({ active }: { active: boolean }) {
     toggleView,
     creating,
   });
+
   state.current = {
     picker,
     focus,
@@ -469,10 +519,13 @@ export function GuidePage({ active }: { active: boolean }) {
 
   useEffect(() => {
     if (!active) return;
+
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
+
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
+
       if (
         ui.searchOpen ||
         ui.settings ||
@@ -484,14 +537,18 @@ export function GuidePage({ active }: { active: boolean }) {
       )
         return;
       const now = state.current;
+
       if (!now.canUseSearch() && ["Enter", " ", "ArrowRight", "ArrowLeft", "f"].includes(event.key))
         return;
+
       // An order being made has the keys to itself: nothing plays, stars or opens meanwhile.
       if (now.order.draft) return orderKey(event, now.order);
       const { toggle, toggleFavourite, showList } = now;
       const channel = now.rows[now.selected];
+
       const step = (value: number, delta: number, length: number) =>
         Math.min(Math.max(value + delta, 0), Math.max(length - 1, 0));
+
       const select = (index: number) => {
         setChosen({
           index,
@@ -510,11 +567,14 @@ export function GuidePage({ active }: { active: boolean }) {
         event.target.closest("button, a[href], select")
       )
         return;
+
       if (/^[0-9]$/.test(event.key)) {
         numberEntry.type(event.key);
         event.preventDefault();
+
         return;
       }
+
       // The grid has the keys that move and watch while it shows; a typed number is still the
       // page's to commit.
       if (now.liveView === "grid" && now.focus === "channels" && GRID_KEYS.has(event.key)) {
@@ -522,16 +582,21 @@ export function GuidePage({ active }: { active: boolean }) {
           event.key === "Enter" && (event.repeat || numberEntry.commit())
             ? "handled"
             : (grid.current?.key(event.key) ?? "ignored");
+
         if (done === "lists") {
           setFocus("lists");
           const focused = document.activeElement;
+
           if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
         }
+
         if (done !== "ignored") {
           event.preventDefault();
+
           return;
         }
       }
+
       switch (event.key) {
         case "ArrowUp":
         case "ArrowDown":
@@ -539,25 +604,32 @@ export function GuidePage({ active }: { active: boolean }) {
         case "PageDown": {
           const direction = event.key === "ArrowDown" || event.key === "PageDown" ? 1 : -1;
           const distance = event.key.startsWith("Page") ? PAGE_ROWS : 1;
+
           if (now.focus === "channels") {
             select(step(now.selected, direction * distance, now.rows.length));
           } else setEntry(step(now.entry, direction * distance, now.entries.length));
           break;
         }
+
         case "Home":
         case "End": {
           const last = event.key === "End";
+
           if (now.focus === "channels") select(last ? Math.max(now.rows.length - 1, 0) : 0);
           else setEntry(last ? Math.max(now.entries.length - 1, 0) : 0);
           break;
         }
+
         case "Enter": {
           if (event.repeat) break;
+
           if (numberEntry.commit()) break;
+
           if (now.focus === "channels") {
             if (channel) now.playRow(now.selected);
           } else {
             const picked = now.entries[now.entry];
+
             if (picked?.kind === "group") toggle(picked.group);
             else if (picked?.kind === "new") now.creating.start();
             else if (picked) {
@@ -565,10 +637,13 @@ export function GuidePage({ active }: { active: boolean }) {
               setFocus("channels");
             }
           }
+
           break;
         }
+
         case "ArrowRight":
           setSearchFocus((asked) => asked + 1);
+
           if (now.focus === "lists") setFocus("channels");
           else if (
             now.searchRows?.[now.selected] &&
@@ -576,11 +651,13 @@ export function GuidePage({ active }: { active: boolean }) {
             now.searchRows[now.selected]!.group.copies.length > 1
           ) {
             const row = now.searchRows[now.selected]!;
+
             if (!now.expandedCopies.has(row.group.key)) now.toggleCopies(row.group.key);
           } else if (channel) setExpandedKey(ownedKey(channel));
           break;
         case "ArrowLeft": {
           const row = now.searchRows?.[now.selected];
+
           if (now.focus === "channels" && channel && now.expandedKey === ownedKey(channel)) {
             setExpandedKey(null);
           } else if (now.focus === "channels" && row && now.expandedCopies.has(row.group.key)) {
@@ -593,10 +670,12 @@ export function GuidePage({ active }: { active: boolean }) {
           } else if (now.focus === "channels") {
             setFocus("lists");
             const focused = document.activeElement;
+
             if (focused instanceof HTMLElement && page.current?.contains(focused)) focused.blur();
           } else now.picker.back();
           break;
         }
+
         case "Backspace":
           if (numberEntry.active()) numberEntry.cancel();
           else if (now.focus === "lists") now.picker.back();
@@ -621,14 +700,18 @@ export function GuidePage({ active }: { active: boolean }) {
         case "S": {
           if (now.liveView === "grid") {
             const shown = grid.current?.channel();
+
             if (shown) toggleFavourite(shown);
             break;
           }
+
           const row = now.searchRows?.[now.selected];
+
           if (channel && (!row || row.copy || row.group.copies.length === 1))
             toggleFavourite(channel);
           break;
         }
+
         case "g":
         case "G":
           now.toggleView();
@@ -640,9 +723,12 @@ export function GuidePage({ active }: { active: boolean }) {
         default:
           return;
       }
+
       event.preventDefault();
     }
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, [active]);
 
@@ -653,6 +739,7 @@ export function GuidePage({ active }: { active: boolean }) {
   const changed = draft?.status === "changed" || draft?.status === "reading";
   const subscriptionNames = new Map(subscriptions.map((each) => [each.id, subscriptionName(each)]));
   const filters = list.filters ?? EMPTY_LIVE_FILTERS;
+
   // What a list keeps that its subscription no longer lists has no country or language to
   // filter by, and nothing to search: it shows with the list as it is, or by subscription.
   const unlisted: readonly UnlistedChannel[] =
@@ -671,18 +758,22 @@ export function GuidePage({ active }: { active: boolean }) {
             : [],
         )
       : [];
+
   const lists = customLists.data ?? [];
   const position = customList ? lists.indexOf(customList) : -1;
+
   /** Moves the list one place among the viewer's lists. */
   const moveList = (by: -1 | 1) => {
     const ids = lists.map((each) => each.id);
     const to = position + by;
     const [here, there] = [ids[position], ids[to]];
+
     if (position < 0 || here === undefined || there === undefined) return;
     ids[position] = there;
     ids[to] = here;
     void listChange.run(() => call("customLists.order", { order: ids }));
   };
+
   const viewSwitch = (
     <Button
       title={liveView === "grid" ? t("List (G)") : t("Guide (G)")}
@@ -692,6 +783,7 @@ export function GuidePage({ active }: { active: boolean }) {
       {liveView === "grid" ? t("List") : t("Guide")}
     </Button>
   );
+
   return (
     // Until an order being saved is answered, the page takes no input: nothing leaves it.
     <div ref={page} className="flex h-full flex-col" inert={waiting ? true : undefined}>
@@ -827,6 +919,7 @@ export function GuidePage({ active }: { active: boolean }) {
                   finish(editing);
                   // Only the list still on screen gives way to All channels.
                   const gone = { kind: "custom", id: customList.id } as const;
+
                   if (sameList(useUi.getState().list, gone)) showList({ kind: "all" });
                 }}
               />
@@ -1012,13 +1105,16 @@ function SourceNotices() {
   const subscriptions = useSubscriptions();
   const statuses = useQuery(queries.libraryStatus()).data;
   const now = useNow();
+
   const failing = (subscriptions.length > 1 ? (statuses ?? []) : []).flatMap((status) => {
     const subscription = subscriptions.find((each) => each.id === status.subscriptionId);
     const { failure } = status;
+
     return subscription && failure && !subscription.needsSecret
       ? [{ ...status, failure, name: subscriptionName(subscription) }]
       : [];
   });
+
   return (
     <div aria-live="polite">
       {failing.map(({ subscriptionId, name, failure, failedAt, fetchedAt }) => (
@@ -1072,6 +1168,7 @@ function ListSearch({
       onKeyDown={(event) => {
         // Enter that ends a composition, as for Japanese, is the text's.
         if (event.nativeEvent.isComposing) return;
+
         if (event.key === "Escape") onChange("");
         else if (event.key !== "ArrowDown" && event.key !== "Enter") return;
         event.currentTarget.blur();
@@ -1113,6 +1210,7 @@ function NothingFound({
   onSearchAll: (() => void) | null;
 }) {
   const link = "text-white underline-offset-4 hover:underline";
+
   return (
     <div className="px-9 text-sm text-muted-foreground">
       <p>
@@ -1154,12 +1252,16 @@ function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNo
   const archive = usePlayer((state) => state.archive);
   const audible = usePlayer((state) => state.audible && !state.muted);
   const waits = usePreviewWaits();
+
   const listing = useQuery(queries.listings(channel ? [channel] : [])).data?.[
     channel ? ownedKey(channel) : ""
   ];
+
   const now = useNow();
+
   if (!channel) return null;
   const current = archive ? null : (listing?.now ?? null);
+
   return (
     <section className="flex items-end gap-6 px-9 pt-5 pb-4">
       <div className="relative aspect-video w-[18rem] flex-none overflow-hidden rounded-xl bg-white/5">
@@ -1220,6 +1322,7 @@ function useLiveView(): [LiveView, (view: LiveView) => void, string | null] {
   const [pendingView, setPendingView] = useState<{ value: LiveView } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latestView = useRef<object | null>(null);
+
   const set = (liveView: LiveView) => {
     const draft = { value: liveView };
     latestView.current = draft;
@@ -1231,5 +1334,6 @@ function useLiveView(): [LiveView, (view: LiveView) => void, string | null] {
       })
       .finally(() => setPendingView((current) => (current === draft ? null : current)));
   };
+
   return [pendingView?.value ?? saved, set, error];
 }

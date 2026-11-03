@@ -10,6 +10,7 @@ import { browseCollection, DEFAULT_BROWSE } from "../src/title-browse.ts";
 describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => {
   it("uses public collection defaults, all supported orders and stable catalogue ties", () => {
     const { made } = browseFixture(kind);
+
     for (const id of [
       "all",
       "4k",
@@ -23,12 +24,14 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
       expect(browseCollection(made, id, DEFAULT_BROWSE).titles).toEqual(
         made.list(id, collectionSort(id)),
       );
+
       for (const sort of ["added", "popular", "rating", "title"] as const) {
         expect(browseCollection(made, id, { sort, filters: {} }).titles).toEqual(
           made.list(id, sort),
         );
       }
     }
+
     expect(
       browseCollection(made, "all", { sort: "title", filters: {} }).titles.map((title) => title.id),
     ).toEqual(["en-hd", "en-4k", "tie", "unknown"]);
@@ -65,9 +68,11 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
 
   it("keeps unknown declarations truthful and never borrows a non-4K language version", () => {
     const { made } = browseFixture(kind);
+
     const unknown = browseCollection(made, "all", {
       filters: { quality: "unknown", language: "unknown" },
     });
+
     expect(unknown.titles.map((title) => title.id)).toEqual(["unknown", "tie"]);
     const english = browseCollection(made, "4k", { filters: { language: "en" } });
     expect(english.titles.map((title) => title.id)).toEqual(["en-4k"]);
@@ -76,13 +81,17 @@ describe.each(["movie", "series"] as const)("%s collection browsing", (kind) => 
 
   it("counts found tracks for the one file they were found in, beside its declared hints", () => {
     const { made, index } = browseFixture(kind);
+
     const found = (id: string, audio: string): [string, readonly FilterFile[]] => {
       const key = ownedKey({ subscriptionId: "a", id });
+
       const tags = kindOf(index, kind)
         .byId.get(key)
         ?.versions.find((each) => each.id === id)?.tags;
+
       return [key, [{ tags: tags ?? [], tracks: { audio: [audio], subtitles: ["nl"] } }]];
     };
+
     // English sound was found in the Dutch 4K version only.
     const files = new Map([found("nl-4k", "en")]);
     const englishSound = { kind: "audio", language: "en" } as const;

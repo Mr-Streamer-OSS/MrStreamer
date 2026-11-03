@@ -49,11 +49,13 @@ export function subtitleTitle(version: {
 }): SubtitleTitle {
   const tmdbId =
     version.tmdbId && /^[1-9]\d{0,9}$/.test(version.tmdbId) ? Number(version.tmdbId) : null;
+
   const known = {
     ...(tmdbId !== null ? { tmdbId } : { title: version.title }),
     // A series' year is when it began, which no episode search needs.
     ...defined({ year: version.year !== null && !version.episode ? version.year : undefined }),
   };
+
   return {
     subscriptionId: version.subscriptionId,
     version: `${version.episode ? "episode" : "movie"}|${version.id}`,
@@ -90,14 +92,17 @@ const shownOf = (title: SubtitleTitle, { subtitle, timing }: Kept): ShownSubtitl
 });
 
 const shown = store<ShownSubtitle | null>(null);
+
 /** The downloaded subtitle showing over what plays, for Watch to draw; null for none. */
 export const useShownSubtitle = (): ShownSubtitle | null => useStore(shown);
+
 /** The same, for the playback owner. */
 export const shownSubtitle = (): ShownSubtitle | null => shown.get();
 export const onShownSubtitle = (listener: () => void): (() => void) => shown.subscribe(listener);
 
 /** The play subtitles are asked for now; null while no movie or episode plays. */
 let playing: SubtitleTitle | null = null;
+
 /**
  * Aborted once another play begins, or the viewer chose subtitles anew for this one, ending a
  * search or download asked before.
@@ -134,8 +139,10 @@ export function playOf(title: SubtitleTitle): AbortSignal | null {
 export function keptSubtitle(title: SubtitleTitle): ShownSubtitle | null {
   if (title !== playing) return null;
   const showing = shown.get();
+
   if (showing?.title === title) return showing;
   const kept = keptOf(title);
+
   return kept && shownOf(title, kept);
 }
 
@@ -143,10 +150,13 @@ export function keptSubtitle(title: SubtitleTitle): ShownSubtitle | null {
 export function showKeptSubtitle(title: SubtitleTitle): boolean {
   if (title !== playing) return false;
   const kept = keptOf(title);
+
   if (!kept) return false;
+
   if (!kept.shown && !keep(title, { ...kept, shown: true })) return false;
   renew();
   shown.set(shownOf(title, kept));
+
   return true;
 }
 
@@ -163,8 +173,10 @@ export function endSubtitleWork(title: SubtitleTitle) {
 export function hideSubtitle(title: SubtitleTitle) {
   if (title !== playing) return;
   renew();
+
   if (shown.get()?.title !== title) return;
   const kept = keptOf(title);
+
   if (kept?.shown) keep(title, { ...kept, shown: false });
   shown.set(null);
 }
@@ -175,11 +187,15 @@ export function hideSubtitle(title: SubtitleTitle) {
  */
 export function retimeSubtitle(title: SubtitleTitle, timing: SubtitleTiming): boolean {
   const showing = shown.get();
+
   if (title !== playing || showing?.title !== title) return false;
   const checked = SubtitleTiming()(timing);
+
   if (checked instanceof type.errors) return false;
+
   if (!keep(title, { shown: true, timing: checked, subtitle: showing.subtitle })) return false;
   shown.set({ ...showing, timing: checked });
+
   return true;
 }
 
@@ -189,6 +205,7 @@ export function retimeSubtitle(title: SubtitleTitle, timing: SubtitleTiming): bo
  */
 export function cuesAt({ subtitle, timing }: ShownSubtitle, seconds: number): readonly string[] {
   const at = (seconds - timing.offset) / timing.speed;
+
   return subtitle.cues.filter((cue) => cue.start <= at && at < cue.end).map((cue) => cue.text);
 }
 
@@ -199,10 +216,12 @@ export function cuesAt({ subtitle, timing }: ShownSubtitle, seconds: number): re
 export function nextCueChange({ subtitle, timing }: ShownSubtitle, seconds: number): number | null {
   const at = (seconds - timing.offset) / timing.speed;
   let next = Infinity;
+
   for (const cue of subtitle.cues) {
     if (cue.start > at) next = Math.min(next, cue.start);
     else if (cue.end > at) next = Math.min(next, cue.end);
   }
+
   return Number.isFinite(next) ? next * timing.speed + timing.offset : null;
 }
 
@@ -213,8 +232,10 @@ export function nextCueChange({ subtitle, timing }: ShownSubtitle, seconds: numb
 export function showDownloaded(title: SubtitleTitle, subtitle: DownloadedSubtitle): boolean {
   if (title !== playing) return false;
   const kept = { shown: true, timing: DEFAULT_SUBTITLE_TIMING, subtitle };
+
   if (!keep(title, kept)) return false;
   shown.set(shownOf(title, kept));
+
   return true;
 }
 
@@ -228,12 +249,15 @@ const KEPT_FILES = 100;
 /** Letters, digits and "-" as they are; every other UTF-16 unit "_" and four hex digits. */
 const encoded = (text: string) =>
   text.replace(/[^A-Za-z0-9-]/g, (unit) => `_${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
 const nameOf = (title: SubtitleTitle) =>
   `${FOLDER}/${encoded(title.subscriptionId)}.${encoded(title.version)}.json`;
 
 function keptOf(title: SubtitleTitle): Kept | null {
   const saved = SavedSubtitle()(readJson(nameOf(title)));
+
   if (saved instanceof type.errors || !saved.subtitle) return null;
+
   return { shown: saved.shown ?? true, timing: saved.timing, subtitle: saved.subtitle };
 }
 
@@ -242,6 +266,7 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
   const folder = new Directory(Paths.document, FOLDER);
   const file = new File(Paths.document, nameOf(title));
   let before: string | null = null;
+
   try {
     if (!folder.exists) folder.create();
     before = file.exists ? file.textSync() : null;
@@ -251,7 +276,9 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
     // and the move that refused may already have deleted the file: what it held goes back.
     try {
       const pending = new File(Paths.document, `${nameOf(title)}.next`);
+
       if (pending.exists) pending.delete();
+
       if (before !== null && !file.exists) {
         file.create();
         file.writeSync(before);
@@ -259,17 +286,22 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
     } catch {
       // The disk refused that too.
     }
+
     return false;
   }
+
   try {
     const files = folder
       .list()
       .filter((each): each is File => each instanceof File && each.name.endsWith(".json"));
+
     const oldest = files.toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0));
+
     for (const file of oldest.slice(0, Math.max(0, files.length - KEPT_FILES))) file.delete();
   } catch {
     // Kept anyway; the next write tries again.
   }
+
   return true;
 }
 
@@ -281,10 +313,13 @@ export function eraseSubtitles(id: string) {
   // A download under way for a copy of it, which plays on without its provider, can't keep it again.
   if (playing?.subscriptionId === id) renew();
   const folder = new Directory(Paths.document, FOLDER);
+
   if (!folder.exists) return;
   const prefix = `${encoded(id)}.`;
+
   for (const each of folder.list()) {
     if (each instanceof File && each.name.startsWith(prefix)) each.delete();
   }
+
   if (shown.get()?.title.subscriptionId === id) shown.set(null);
 }

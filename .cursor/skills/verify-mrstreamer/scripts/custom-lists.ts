@@ -16,20 +16,26 @@ import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const PICKER = `document.querySelector('[role=navigation][aria-label="Channel categories"]')`;
+
 /** A list's entry in Live TV's lists, by its name. */
 const rail = (title: string) =>
   `${PICKER}?.querySelector('button[title=${JSON.stringify(title)}]')`;
+
 const NEW_LIST = `[...${PICKER}.querySelectorAll('[data-entry]')].find(e => e.textContent.trim() === 'New list')`;
 const LIST_FIELD = `${PICKER}?.querySelector('input[aria-label="List name"]')`;
+
 /** A channel's row in Live TV's list, by the provider's name of its first stream. */
 const row = (name: string) =>
   `[...document.querySelectorAll('main [data-index]')].find(r => r.querySelector('[data-name=${JSON.stringify(name)}]'))`;
+
 /** The row names Live TV's list shows, in order. */
 const ROWS = `[...document.querySelectorAll('main [data-index]')].sort((a, b) => a.dataset.index - b.dataset.index).map(r => r.querySelector('[data-name]')?.dataset.name)`;
 const HEADING = "document.querySelector('main h1')?.textContent";
 const SETTINGS = "document.querySelector('header button[aria-pressed]')";
 const MENU = "document.querySelector('[role=menu]')";
+
 const check = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
@@ -52,6 +58,7 @@ export async function addBackup(d: Driver, url: string, label = "Add second fixt
   await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
   await d.click(label, named("button", "Add subscription"));
   await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('form input').length === 4"));
+
   for (const [index, text] of ["Backup", url, "demo", "demo"].entries()) {
     await d.click(
       `Fill second fixture field ${index + 1}`,
@@ -59,6 +66,7 @@ export async function addBackup(d: Driver, url: string, label = "Add second fixt
     );
     await d.send("Input.insertText", { text });
   }
+
   await d.click("Connect second fixture", "document.querySelector('form button[type=submit]')");
   await d.wait(() =>
     d.evaluate<boolean>(
@@ -88,6 +96,7 @@ export async function makeList(d: Driver, name: string) {
 export async function rowMenu(d: Driver, name: string, search: string) {
   const field = `document.querySelector('main input[aria-label^="Search "]')`;
   const typed = await d.evaluate<string>(`${field}?.value ?? ''`);
+
   if (typed !== search) {
     if (typed !== "")
       await d.click(
@@ -97,6 +106,7 @@ export async function rowMenu(d: Driver, name: string, search: string) {
     await d.click("Search the list", field);
     await d.send("Input.insertText", { text: search });
   }
+
   await d.wait(() => d.exists(row(name)));
   await d.click(
     `Lists menu of ${name}`,
@@ -110,6 +120,7 @@ export async function tick(d: Driver, list: string, member: boolean) {
   const item = named("[role=menuitemcheckbox]", list);
   await d.wait(() => d.exists(item));
   const was = await d.evaluate<string>(`${item}.getAttribute('aria-checked')`);
+
   if ((was === "true") !== member) await d.click(`${member ? "Tick" : "Clear"} ${list}`, item);
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(MENU)));
@@ -131,6 +142,7 @@ export async function withWriteLock(
   const db = new DatabaseSync(join(d.profile, "mrstreamer.db"), { timeout: 10_000 });
   let locked = false;
   let failure: { readonly cause: unknown } | null = null;
+
   try {
     db.exec("begin exclusive");
     locked = true;
@@ -139,17 +151,21 @@ export async function withWriteLock(
   } catch (cause) {
     failure = { cause };
   }
+
   try {
     if (locked) db.exec("rollback");
   } catch (cause) {
     failure ??= { cause };
   }
+
   try {
     db.close();
   } catch (cause) {
     failure ??= { cause };
   }
+
   if (locked) d.action("Harness lets the write lock go");
+
   if (failure) throw failure.cause;
 }
 
@@ -176,14 +192,18 @@ export async function customListsScenario(
   await d.click("Back to All channels", rail("All channels"));
   await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "All channels");
   await d.key("ArrowLeft", 37);
+
   const highlighted = () =>
     d.evaluate<string | null>(`${PICKER}.querySelector('.ring-2')?.textContent.trim() ?? null`);
+
   // The lists' keys start on their first entry: Down, one entry at a time, to New list.
   await d.wait(async () => (await highlighted()) !== null);
+
   for (let step = 0; step < 6 && (await highlighted()) !== "New list"; step++) {
     await d.key("ArrowDown", 40);
     await d.evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(true)))");
   }
+
   d.observed["keyboardHighlight"] = await highlighted();
   check(d.observed["keyboardHighlight"] === "New list", "Down didn't reach New list");
   await d.key("Enter", 13);
@@ -212,9 +232,11 @@ export async function customListsScenario(
   d.observed["focusAfterEscape"] = await d.evaluate<string>(
     "document.activeElement?.textContent.trim() ?? ''",
   );
+
   const listsAfterTaken = await d.evaluate<unknown>(
     "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>l.name):null;})()",
   );
+
   check(
     JSON.stringify(listsAfterTaken) === JSON.stringify(["Late sport", "Kids weekend"]),
     "A taken name made a list",
@@ -265,9 +287,11 @@ export async function customListsScenario(
   // The same channels in the guide grid, in the same order.
   await d.key("g", 71);
   await d.wait(() => d.exists("document.querySelector('[role=grid][aria-label=Guide]')"));
+
   const grid = await d.evaluate<string[]>(
     "[...document.querySelectorAll('[role=grid] [role=rowheader]')].map(e => e.title)",
   );
+
   d.observed["gridRows"] = grid;
   check(JSON.stringify(grid) === JSON.stringify(members), "The guide grid shows other channels");
   await d.capture("list-guide-grid");
@@ -438,6 +462,7 @@ export async function customListsScenario(
   d.observed["focusAfterFailedCreate"] = await d.evaluate<boolean>(
     `document.activeElement === ${LIST_FIELD}`,
   );
+
   if (!d.observed["focusAfterFailedCreate"])
     await d.click("Back to the New list field", LIST_FIELD);
   await d.key("Enter", 13);
@@ -495,16 +520,20 @@ export async function customListsScenario(
     d.evaluate<{ name: string; revision: number; channels: string[] }[]>(
       "(async()=>{const r=await window.mrStreamer.invoke('customLists.get');return r.ok?r.value.map(l=>({name:l.name,revision:l.revision,channels:l.members.map(m=>m.channel?.id??m.kind)})):[];})()",
     );
+
   const favourites = () =>
     d.evaluate<unknown>(
       "(async()=>{const r=await window.mrStreamer.invoke('viewing.get');return r.ok?r.value.favourites:null;})()",
     );
+
   const lateSports = async () => (await saved()).find((list) => list.name === "Late sports");
   await openList(d, "All channels");
+
   for (const name of [FIRST, SECOND]) {
     await rowMenu(d, name, "H.264 + AAC");
     await tick(d, "Kids weekend", true);
   }
+
   await d.click(
     "Clear the list search",
     "document.querySelector('main button[aria-label=\"Clear search\"]')",
@@ -533,6 +562,7 @@ export async function customListsScenario(
     JSON.stringify(await shownRows(d)) === JSON.stringify([FIRST, SECOND]),
     "Late sports doesn't show its saved order",
   );
+
   // The same from Favourites, starred in Late sports' order: its draft ends when Late sports is
   // chosen, and Late sports' own Save changes Late sports alone.
   for (const name of [FIRST, SECOND])
@@ -570,6 +600,7 @@ export async function customListsScenario(
   // which stays on screen: Escape makes no list, and Enter makes one with that row's channel.
   const listed = async () =>
     (await saved()).map((list) => [list.name, list.channels.length] as const);
+
   const newListFromRow = async (name: string) => {
     await d.click(
       `Lists menu of ${name}`,
@@ -579,8 +610,10 @@ export async function customListsScenario(
     await d.click(`New list for ${name}`, named("[role=menu] [role=menuitem]", "New list"));
     await d.wait(() => d.exists(`document.activeElement === ${LIST_FIELD}`));
   };
+
   const entries = () =>
     d.evaluate<string[]>(`[...${PICKER}.querySelectorAll('[data-entry]')].map(e => e.title)`);
+
   const openQuality = async () => {
     await d.click("Open Provider lists", rail("Provider lists"));
     await d.click("Open Belgium", rail("Belgium"));
@@ -588,13 +621,17 @@ export async function customListsScenario(
     check(quality !== undefined, "Belgium lists no Kwaliteit");
     await d.click(`Open ${quality}`, rail(quality!));
     await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "Kwaliteit");
+
     return quality!;
   };
+
   const quality = await openQuality();
   await d.wait(() => d.exists("document.querySelector('main [data-index=\"0\"] [data-name]')"));
+
   const firstRow = await d.evaluate<string>(
     "document.querySelector('main [data-index=\"0\"] [data-name]')?.dataset.name ?? ''",
   );
+
   const listsBefore = await listed();
   await newListFromRow(firstRow);
   const fromCategory = { heading: await d.evaluate<string | undefined>(HEADING) };
@@ -633,10 +670,12 @@ export async function customListsScenario(
   await d.send("Input.insertText", { text: "kwal" });
   await d.wait(async () => !(await entries()).includes("Late sports"));
   await newListFromRow(FIRST);
+
   const fromFind = {
     heading: await d.evaluate<string | undefined>(HEADING),
     find: await d.evaluate<string>(`${find}.value`),
   };
+
   d.observed["fieldFromFind"] = fromFind;
   check(
     fromFind.heading === "Late sports" && fromFind.find === "",
@@ -662,6 +701,7 @@ async function draftFirstDown(d: Driver, list: string) {
   await d.wait(() => d.exists(DRAFT));
   await d.key("Home", 36);
   d.action(`Press Alt+ArrowDown in ${list}'s draft`);
+
   for (const type of ["rawKeyDown", "keyUp"])
     await d.send("Input.dispatchKeyEvent", {
       type,
@@ -673,9 +713,11 @@ async function draftFirstDown(d: Driver, list: string) {
 
 /** The first provider's channel in Full HD, HD and SD, by its Full HD stream's name and id. */
 const QUALITY = "BE | KWALITEIT 1 FHD";
+
 /** The same channel once the provider no longer lists its Full HD stream. */
 const QUALITY_HD = "BE | KWALITEIT 1 HD";
 const DROPPED = "TEST | HEVC + AAC";
+
 /** For adults: flagged in an ordinary category, and in a category named for adults. */
 const AFTER_HOURS = "AFTER HOURS";
 const LATE_SHOW = "LATE SHOW";
@@ -688,6 +730,7 @@ async function adults(d: Driver, on: boolean) {
   await d.click("Open Movies and series settings", named("nav button", "Movies and series"));
   const toggle = "document.querySelector('[role=checkbox][aria-label=\"For adults\"]')";
   await d.wait(() => d.exists(toggle));
+
   if ((await d.evaluate<string>(`${toggle}.getAttribute('aria-checked')`)) !== String(on))
     await d.click(`${on ? "Show" : "Hide"} channels for adults`, toggle);
   await d.wait(() =>
@@ -703,11 +746,14 @@ async function refreshChannels(d: Driver, index: number) {
   await d.click("Open Settings to refresh channels", SETTINGS);
   await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
   const item = `${SUBSCRIPTION_ROWS}[${index}]`;
+
   if (!(await d.exists(`${item}.querySelector('button[aria-label="Refresh channels"]')`)))
     await d.click(`Open subscription ${index + 1}`, `${item}.querySelector('button')`);
+
   const stamp = await d.evaluate<number>(
     `(async () => { const r = await window.mrStreamer.invoke('library.status'); return r.ok ? r.value[${index}].fetchedAt : 0; })()`,
   );
+
   await d.click(
     `Refresh subscription ${index + 1}`,
     `${item}.querySelector('button[aria-label="Refresh channels"]')`,
@@ -729,19 +775,24 @@ async function refreshChannels(d: Driver, index: number) {
 async function interfaceLanguage(d: Driver, from: Locale, to: Locale | "system") {
   const select = `document.querySelector('main section select:has(option[value="en-US"])')`;
   await d.click("Open Settings for the interface language", SETTINGS);
+
   if (!(await d.exists(select)))
     await d.click("Open General settings", named("nav button", translate(from, "General")));
   await d.wait(() => d.exists(select));
+
   const name =
     to === "system"
       ? await d.evaluate<string>(`${select}.options[0].textContent`)
       : LANGUAGE_NAMES[to];
+
   d.action(`Pick ${name} with the keyboard`);
   await d.evaluate(`${select}.focus()`);
+
   for (const char of name) {
     await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
     await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
   }
+
   const lang = to === "system" ? "en-US" : to;
   await d.wait(() =>
     d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(lang)}`),
@@ -765,16 +816,19 @@ async function removalQuestion(d: Driver, locale: Locale) {
   d.action("Size the page as the smallest window, 960 × 600");
   await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
   const item = `${SUBSCRIPTION_ROWS}[1]`;
+
   const label = translate(
     locale,
     "Also delete favourites, watchlist, history, progress and channels in lists",
   );
+
   await d.evaluate(
     `${item}.querySelector('[role=checkbox]').closest('label').scrollIntoView({ block: "center" })`,
   );
   await d.evaluate(
     "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
   );
+
   const seen = await d.evaluate<{
     label: string;
     lines: number;
@@ -807,6 +861,7 @@ async function removalQuestion(d: Driver, locale: Locale) {
       }),
     };
   })()`);
+
   d.observed[`removalQuestion:${locale}`] = seen;
   check(seen.label === label, `The Also delete label in ${locale} reads otherwise`);
   check(
@@ -829,6 +884,7 @@ async function removeBackup(
   await d.click("Open Settings to remove a subscription", SETTINGS);
   await d.click("Open Subscriptions", named("nav button", translate(locale, "Subscriptions")));
   const item = `${SUBSCRIPTION_ROWS}[1]`;
+
   if (!(await d.exists(`${item}.querySelector('[role=region]')`)))
     await d.click("Open the second subscription", `${item}.querySelector('button')`);
   const ask = translate(locale, "Remove {name}", { name: "Backup" });
@@ -837,6 +893,7 @@ async function removeBackup(
     `[...${item}.querySelectorAll('button')].find(e => e.textContent.trim() === ${JSON.stringify(ask)})`,
   );
   await removalQuestion(d, locale);
+
   if (keep) {
     await d.click(
       "Keep it",
@@ -855,6 +912,7 @@ async function removeBackup(
       ),
     );
   }
+
   await d.send("Emulation.clearDeviceMetricsOverride");
   await d.wait(() => d.evaluate<boolean>("innerWidth > 960"));
   await d.key("Escape", 27);
@@ -884,6 +942,7 @@ export async function customListSourcesScenario(
   await d.wait(() => d.exists(PICKER));
   await makeList(d, "Mixed");
   await openList(d, "All channels");
+
   for (const [name, search] of [
     [FIRST, "H.264 + AAC"],
     [QUALITY, "Kwaliteit"],
@@ -896,6 +955,7 @@ export async function customListSourcesScenario(
     await rowMenu(d, name, search);
     await tick(d, "Mixed", true);
   }
+
   await d.click(
     "Clear the list search",
     "document.querySelector('main button[aria-label=\"Clear search\"]')",
@@ -997,10 +1057,12 @@ export async function customListSourcesScenario(
   await d.capture("sources-erased");
   // Diagnostic only, not a user path: what the file keeps of the erased account.
   const db = new DatabaseSync(join(d.profile, "mrstreamer.db"), { readOnly: true });
+
   try {
     const kept = db
       .prepare("select account, count(*) as n from custom_list_members group by account")
       .all();
+
     d.observed["diagnosticMembersByAccount"] = kept.map((each) => ({
       account: String(each["account"]).includes("|demo") ? "fixture account" : "other",
       backup: String(each["account"]).startsWith(fixture.otherUrl),

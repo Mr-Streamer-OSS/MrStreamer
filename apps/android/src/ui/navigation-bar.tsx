@@ -131,6 +131,7 @@ function Item({
   placement: "bar" | "rail";
 }) {
   const { focused, handlers } = useKeyboardFocus();
+
   return (
     <Pressable
       accessibilityRole="tab"

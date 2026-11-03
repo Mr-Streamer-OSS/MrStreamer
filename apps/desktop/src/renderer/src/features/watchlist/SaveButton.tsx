@@ -24,6 +24,7 @@ export function SaveButton({ state }: { state: SaveToggle }) {
 /** Why the button still says what it said: the change wasn't stored. Pressing it again retries. */
 export function SaveError({ state }: { state: SaveToggle }) {
   if (!state.failed) return null;
+
   return (
     <p className="mt-3 text-sm text-destructive">
       {state.failed === "save" ? t("Couldn't save. Try again.") : t("Couldn't remove. Try again.")}

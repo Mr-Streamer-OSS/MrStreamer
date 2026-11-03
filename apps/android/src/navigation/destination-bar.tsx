@@ -21,15 +21,21 @@ export function DestinationBar({
   layout,
 }: BottomTabBarProps & { layout: NavigationLayout }) {
   const focused = state.routes[state.index];
+
   const selected =
     DESTINATIONS.find(({ route }) => route === focused?.name)?.route ?? START_DESTINATION;
+
   const onSelect = (route: DestinationRoute) => {
     const target = state.routes.find(({ name }) => name === route);
+
     if (!target) return;
     const event = emitter.emit({ type: "tabPress", target: target.key, canPreventDefault: true });
+
     if (target.key !== focused?.key && !event.defaultPrevented) navigateToTab(target.key);
   };
+
   const props = { destinations: DESTINATIONS, selected, onSelect, insets };
+
   return layout === "rail" ? (
     <NavigationRail {...props} onOpen={(screen) => router.navigate(hrefOn(selected, screen))} />
   ) : (

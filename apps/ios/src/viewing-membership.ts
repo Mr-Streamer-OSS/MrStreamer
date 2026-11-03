@@ -43,17 +43,22 @@ const Version1 = lazy(() => type({ version: "1", accounts: type.Record("string",
 export function readMembership(value: unknown): ReadMembership {
   if (value === undefined) return { kind: "none" };
   const parsed = Version1()(value);
+
   if (parsed instanceof type.errors) return { kind: "kept", value };
+
   for (const cohorts of Object.values(parsed.accounts)) {
     const seen = new Set<string>();
+
     for (const cohort of cohorts) {
       if (cohort.length < 2) return { kind: "kept", value };
+
       for (const id of cohort) {
         if (seen.has(id)) return { kind: "kept", value };
         seen.add(id);
       }
     }
   }
+
   return { kind: "read", membership: parsed.accounts };
 }
 
@@ -77,6 +82,7 @@ const idsOf = (channel: LiveChannel) => [
  */
 function lower(a: string, b: string): string {
   const numbers = /^\d+$/.test(a) && /^\d+$/.test(b);
+
   return (numbers ? Number(b) < Number(a) : b < a) ? b : a;
 }
 
@@ -94,19 +100,25 @@ function reconcileAccount(
   const channelOf = (id: string) => channels.get(ownedKey({ subscriptionId, id }));
   // Each channel listed now that one of these ids is in, by its id, with the ids it takes in.
   const joined = new Map<string, Set<string>>();
+
   const join = (channel: LiveChannel, ids: Iterable<string>) => {
     const group = joined.get(channel.id) ?? new Set(idsOf(channel));
+
     for (const id of ids) group.add(id);
     joined.set(channel.id, group);
   };
+
   const next: Cohort[] = [];
+
   for (const cohort of kept) {
     const hits = new Map(
       cohort.flatMap((id) => {
         const channel = channelOf(id);
+
         return channel ? [[channel.id, channel] as const] : [];
       }),
     );
+
     if (hits.size === 0) next.push(cohort);
     // Its streams listed are one channel's, listed once or in channels sharing its streams: the
     // others are that channel's too. Asked of every channel found, two of one id included, as
@@ -116,12 +128,16 @@ function reconcileAccount(
     // Split between channels: listed ids follow theirs, the others go on their own.
     else for (const channel of hits.values()) join(channel, []);
   }
+
   // A favourite's channel with several streams is a cohort of its own.
   for (const id of starred) {
     const channel = channelOf(id);
+
     if (channel) join(channel, []);
   }
+
   const backed = new Set(starred);
+
   return disjoint([...next, ...[...joined.values()].map((group) => [...group])]).filter(
     (cohort) => cohort.length > 1 && cohort.some((id) => backed.has(id)),
   );
@@ -133,12 +149,16 @@ function reconcileAccount(
  */
 function connected(channels: readonly LiveChannel[]): boolean {
   const [first, ...rest] = channels;
+
   if (!first) return false;
   const reached = new Set(idsOf(first));
   let left = rest;
+
   for (;;) {
     const joining = left.filter((channel) => idsOf(channel).some((id) => reached.has(id)));
+
     if (joining.length === 0) return left.length === 0;
+
     for (const channel of joining) for (const id of idsOf(channel)) reached.add(id);
     left = left.filter((channel) => !joining.includes(channel));
   }
@@ -151,11 +171,13 @@ function connected(channels: readonly LiveChannel[]): boolean {
  */
 function disjoint(cohorts: readonly Cohort[]): Cohort[] {
   const groups: Set<string>[] = [];
+
   for (const cohort of cohorts) {
     const sharing = groups.filter((group) => cohort.some((id) => group.has(id)));
     const union = new Set([...sharing.flatMap((group) => [...group]), ...cohort]);
     groups.splice(0, groups.length, ...groups.filter((group) => !sharing.includes(group)), union);
   }
+
   return groups.map((group) => [...group]);
 }
 
@@ -169,10 +191,13 @@ export function reconcile(
   channels: ChannelsNow,
 ): Membership {
   const next: Record<string, readonly Cohort[]> = {};
+
   for (const [account, starred] of favourites) {
     const cohorts = reconcileAccount(account, membership[account] ?? [], starred, channels);
+
     if (cohorts.length > 0) next[account] = cohorts;
   }
+
   return next;
 }
 
@@ -193,26 +218,35 @@ export function favouriteOf(
 ): (streamId: string) => FavouriteGroup | undefined {
   const cohortOf = new Map(cohorts.flatMap((cohort) => cohort.map((id) => [id, cohort] as const)));
   const channelOf = (id: string) => channels.get(ownedKey({ subscriptionId, id }));
+
   return (streamId) => {
     const cohort = cohortOf.get(streamId) ?? [streamId];
     const own = channelOf(streamId);
+
     const listed = new Map(
       cohort.flatMap((id) => {
         const channel = channelOf(id);
+
         return channel ? [[channel.id, channel] as const] : [];
       }),
     );
+
     const [only, ...more] = listed.values();
     const channel = own ?? (more.length === 0 ? only : undefined);
+
     if (channel) {
       // The cohort's streams no other channel lists now go with it.
       const others = cohort.filter((id) => {
         const listedIn = channelOf(id);
+
         return !listedIn || listedIn.id === channel.id;
       });
+
       return { id: channel.id, streamIds: [...new Set([...idsOf(channel), ...others])] };
     }
+
     if (listed.size > 0 || cohort.length < 2) return undefined;
+
     return { id: cohort.reduce(lower), streamIds: cohort };
   };
 }

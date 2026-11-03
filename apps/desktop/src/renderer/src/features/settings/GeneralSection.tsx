@@ -62,10 +62,12 @@ function PreferenceRow<K extends keyof Preferences>({
   const read = useQuery(queries.preferences());
   const writing = useRef(false);
   const fieldBusy = useIsMutating({ mutationKey: ["settings", field] }) > 0;
+
   const update = useMutation({
     mutationKey: ["settings", field],
     mutationFn: async (value: Preferences[K]) => {
       const look = value as Preferences["subtitleLook"];
+
       if (field === "subtitleLook" && lookField && look) {
         await updateSubtitleLook({ [lookField]: look[lookField] }, { client });
       } else {
@@ -79,12 +81,14 @@ function PreferenceRow<K extends keyof Preferences>({
       if (field === "adultTitles" && value === false) useUi.setState({ savedEntry: null });
     },
   });
+
   // A timed-out consent call can still commit. Only the accepted value matching this
   // mutation's boolean intent makes its save error obsolete.
   const consentSaved =
     field === "analyticsEnabled" &&
     typeof update.variables === "boolean" &&
     read.data?.analyticsEnabled === update.variables;
+
   const change = (value: Preferences[K]) => {
     if (
       !read.data ||
@@ -97,6 +101,7 @@ function PreferenceRow<K extends keyof Preferences>({
     writing.current = true;
     update.mutate(value);
   };
+
   return (
     <div>
       <fieldset
@@ -123,17 +128,20 @@ export function GeneralSection() {
   const client = useQueryClient();
   const language = useQuery(queries.language());
   const writing = useRef(false);
+
   const update = useMutation({
     mutationFn: (choice: LanguageChoice) => changeLanguage(client, choice),
     onSettled: () => {
       writing.current = false;
     },
   });
+
   const choose = (choice: LanguageChoice) => {
     if (writing.current || update.isPending) return;
     writing.current = true;
     update.mutate(choice);
   };
+
   return (
     <Section title={t("General")}>
       <Row id="interface-language" label={t("Interface language")}>
@@ -201,6 +209,7 @@ export function PlaybackSection() {
       <PreferenceRow id="audio" field="audioLanguage" label={t("Audio in")}>
         {(saved, change) => {
           const value = saved?.audioLanguage ?? saved?.titleLanguage ?? DEFAULT_TITLE_LANGUAGE;
+
           return (
             <Select
               label={t("Audio in")}
@@ -248,14 +257,18 @@ export function PlaybackSection() {
 export function LiveSettingsSection() {
   const client = useQueryClient();
   const subscriptions = useSubscriptionPreferences("always");
+
   const picked = [...(subscriptions ?? [])].filter(
     ([, saved]) => Object.keys(saved.channelVariants ?? {}).length > 0,
   );
+
   const count = picked.reduce(
     (sum, [, saved]) => sum + Object.keys(saved.channelVariants ?? {}).length,
     0,
   );
+
   const writing = useRef(false);
+
   const reset = useMutation({
     mutationFn: async () => {
       // Wait for every result, including partial success. Retry reads only overrides still present.
@@ -264,18 +277,22 @@ export function LiveSettingsSection() {
           updateSubscriptionPreferences(client, subscriptionId, { channelVariants: {} }),
         ),
       );
+
       const failure = results.find((result) => result.status === "rejected");
+
       if (failure?.status === "rejected") throw failure.reason;
     },
     onSettled: () => {
       writing.current = false;
     },
   });
+
   const resetQualities = () => {
     if (count === 0 || writing.current || reset.isPending) return;
     writing.current = true;
     reset.mutate();
   };
+
   return (
     <Section title={t("Live TV")}>
       <PreferenceRow
@@ -351,6 +368,7 @@ export function SubtitlesSettingsSection() {
         <PreferenceRow id="subtitle-language" field="subtitleLanguage" label={t("Subtitles")}>
           {(saved, change) => {
             const value = saved?.subtitleLanguage ?? FORCED;
+
             return (
               <Select
                 label={t("Subtitles")}
@@ -370,6 +388,7 @@ export function SubtitlesSettingsSection() {
         <PreferenceRow id="subtitle-size" field="subtitleLook" lookField="size" label={t("Size")}>
           {(saved, change) => {
             const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+
             return (
               <Select
                 label={t("Size")}
@@ -391,6 +410,7 @@ export function SubtitlesSettingsSection() {
         >
           {(saved, change) => {
             const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+
             return (
               <Select
                 label={t("Background")}
@@ -412,6 +432,7 @@ export function SubtitlesSettingsSection() {
         >
           {(saved, change) => {
             const look = saved?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK;
+
             return (
               <Select
                 label={t("Position")}
@@ -479,16 +500,20 @@ function EpisodeDelay({
   useEffect(() => {
     if (!editing.current) setValue(String(seconds));
   }, [seconds]);
+
   const commit = (input: HTMLInputElement) => {
     const next = input.valueAsNumber;
     const changed = editing.current;
     editing.current = false;
     setValue(String(seconds));
+
     if (changed && Number.isInteger(next)) {
       const bounded = Math.max(0, Math.min(60, next));
+
       if (bounded !== seconds) onChange(bounded);
     }
   };
+
   return (
     <Input
       aria-label={t("Next episode delay")}
@@ -546,7 +571,9 @@ function languages(current: string): { value: string; label: string }[] {
     value: language.code,
     label: language.name,
   }));
+
   const other = current !== ORIGINAL_SOUND && current !== "off" && current !== FORCED;
+
   return other && !listed.some((option) => option.value === current)
     ? [...listed, { value: current, label: languageName(current) ?? current }]
     : listed;
@@ -558,6 +585,7 @@ function Tmdb() {
   const status = useQuery(queries.onDemandStatus());
   const [editing, setEditing] = useState(false);
   const [key, setKey] = useState("");
+
   const update = useMutation({
     mutationFn: (tmdbKey: string) => updatePreferences({ tmdbKey }, client),
     onSuccess: () => {
@@ -565,11 +593,14 @@ function Tmdb() {
       setEditing(false);
     },
   });
+
   const save = (tmdbKey: string) => {
     if (!preferences.data || update.isPending) return;
     update.mutate(tmdbKey);
   };
+
   const metadata = status.data?.metadata;
+
   const progress = !metadata
     ? t("no key")
     : metadata.refused
@@ -577,6 +608,7 @@ function Tmdb() {
       : metadata.known < metadata.wanted
         ? t("{known} of {wanted} titles", { known: metadata.known, wanted: metadata.wanted })
         : t("{count} titles", { count: metadata.known });
+
   return (
     <div data-setting="tmdb">
       <Row
@@ -612,6 +644,7 @@ function Tmdb() {
           className="flex flex-wrap gap-3 border-b border-white/8 py-3"
           onSubmit={(event) => {
             event.preventDefault();
+
             if (key.trim()) save(key.trim());
           }}
         >

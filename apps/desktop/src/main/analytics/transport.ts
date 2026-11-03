@@ -4,6 +4,7 @@ import { type } from "arktype";
 import { CaptureEvent, usageKeys } from "./model.ts";
 
 type CaptureResult = "accepted" | "retry" | "not_sent" | "discard";
+
 export interface CaptureTransport {
   readonly kind: "local" | "production";
   send(event: CaptureEvent, signal: AbortSignal): Promise<CaptureResult>;
@@ -26,6 +27,7 @@ export function analyticsTransport(options: {
 }): CaptureTransport | null {
   if (options.localEndpoint !== undefined)
     return options.isolated ? localCapture(options.localEndpoint) : null;
+
   if (
     !options.releaseBuild ||
     !options.packaged ||
@@ -35,11 +37,13 @@ export function analyticsTransport(options: {
   )
     return null;
   const { endpoint, projectToken } = options.production;
+
   if (
     !["https://us.i.posthog.com/i/v0/e/", "https://eu.i.posthog.com/i/v0/e/"].includes(endpoint) ||
     !/^phc_[A-Za-z0-9_-]+$/.test(projectToken)
   )
     return null;
+
   return capture(new URL(endpoint), projectToken, "production");
 }
 
@@ -49,8 +53,10 @@ export function analyticsTransport(options: {
  */
 export function localCapture(endpoint: string): CaptureTransport | null {
   let url: URL;
+
   try {
     url = new URL(endpoint);
+
     if (
       url.protocol !== "http:" ||
       !["127.0.0.1", "[::1]"].includes(url.hostname) ||
@@ -65,16 +71,20 @@ export function localCapture(endpoint: string): CaptureTransport | null {
   } catch {
     return null;
   }
+
   return capture(url, "mrstreamer-local-verification", "local");
 }
 
 function capture(url: URL, projectToken: string, kind: CaptureTransport["kind"]): CaptureTransport {
   const sendRequest = url.protocol === "https:" ? httpsRequest : request;
+
   return {
     kind,
     async send(event, signal) {
       const allowed = CaptureEvent()(event);
+
       if (allowed instanceof type.errors || signal.aborted) return "discard";
+
       // Reconstruct the boundary even after validation. No caller-owned object is spread here.
       const properties = {
         app_version: allowed.properties.app_version,
@@ -88,6 +98,7 @@ function capture(url: URL, projectToken: string, kind: CaptureTransport["kind"])
         $geoip_disable: true,
         ...ownProperties(allowed),
       };
+
       const body = JSON.stringify({
         api_key: projectToken,
         event: allowed.event,
@@ -96,6 +107,7 @@ function capture(url: URL, projectToken: string, kind: CaptureTransport["kind"])
         timestamp: allowed.timestamp,
         properties,
       });
+
       return new Promise((resolve) => {
         const req = sendRequest(
           url,
@@ -121,10 +133,12 @@ function capture(url: URL, projectToken: string, kind: CaptureTransport["kind"])
             );
           },
         );
+
         const timeout = setTimeout(
           () => req.destroy(new Error("Analytics request deadline.")),
           1000,
         );
+
         req.once("close", () => clearTimeout(timeout));
         // Do not hand a body to the transport until connect/TLS completes. A failure before
         // this callback is provably pre-body; every later failure is ambiguous and spends a try.
@@ -135,6 +149,7 @@ function capture(url: URL, projectToken: string, kind: CaptureTransport["kind"])
             possibleTransmission = true;
             req.end(body);
           };
+
           socket.once(url.protocol === "https:" ? "secureConnect" : "connect", send);
         });
         req.once("error", () => resolve(possibleTransmission ? "retry" : "not_sent"));
@@ -153,6 +168,7 @@ function ownProperties(event: CaptureEvent) {
         counts: Object.fromEntries(
           usageKeys.flatMap((key) => {
             const count = event.properties.counts[key];
+
             return count === undefined ? [] : [[key, count]];
           }),
         ),

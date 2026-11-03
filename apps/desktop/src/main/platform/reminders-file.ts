@@ -52,41 +52,53 @@ const Entry = lazy(() =>
 /** Reads reminders.json at `path`. A file that isn't there holds no reminders. */
 export async function readReminders(path: string): Promise<ReadReminders> {
   let text: string;
+
   try {
     text = await readFile(path, "utf8");
   } catch (cause) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT")
       return { kind: "read", file: { reminders: [], unread: new Map() } };
+
     return { kind: "refused", reason: "unreadable" };
   }
+
   let data: unknown;
+
   try {
     data = JSON.parse(text);
   } catch {
     return { kind: "refused", reason: "unreadable" };
   }
+
   const head = Head()(data);
+
   if (head instanceof type.errors || head.version < VERSION)
     return { kind: "refused", reason: "unreadable" };
+
   if (head.version > VERSION) return { kind: "refused", reason: "newer" };
   const reminders: KeptReminder[] = [];
   const unread = new Map<string, unknown[]>();
+
   for (const [subscriptionId, entries] of Object.entries(head.subscriptions ?? {})) {
     for (const entry of entries) {
       const parsed = Entry()(entry);
+
       if (parsed instanceof type.errors)
         unread.set(subscriptionId, [...(unread.get(subscriptionId) ?? []), entry]);
       else reminders.push({ ...parsed, subscriptionId });
     }
   }
+
   return { kind: "read", file: { reminders, unread } };
 }
 
 /** Writes `file` to `path` whole, or leaves the file before it as it was. */
 export async function writeReminders(path: string, file: RemindersFile): Promise<void> {
   const subscriptions = new Map<string, unknown[]>();
+
   for (const { subscriptionId, ...entry } of file.reminders)
     subscriptions.set(subscriptionId, [...(subscriptions.get(subscriptionId) ?? []), entry]);
+
   for (const [subscriptionId, entries] of file.unread)
     subscriptions.set(subscriptionId, [...(subscriptions.get(subscriptionId) ?? []), ...entries]);
   await writeJsonFile(path, { version: VERSION, subscriptions: Object.fromEntries(subscriptions) });

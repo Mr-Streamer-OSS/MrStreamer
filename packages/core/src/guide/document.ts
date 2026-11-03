@@ -24,45 +24,58 @@ export async function* xmltvDocument(
   const source = body[Symbol.asyncIterator]();
   const first: Uint8Array[] = [];
   let had = 0;
+
   while (had < 2) {
     const next = await source.next();
+
     if (next.done) break;
     first.push(next.value);
     had += next.value.byteLength;
   }
+
   const head = Buffer.concat(first);
+
   const whole: AsyncIterable<Uint8Array> = {
     [Symbol.asyncIterator]: () => {
       let started = false;
+
       return {
         next: async () => {
           if (started) return source.next();
           started = true;
+
           return head.length > 0 ? { done: false, value: head } : source.next();
         },
         return: async () => {
           await source.return?.();
+
           return { done: true, value: undefined };
         },
       };
     },
   };
+
   const unpacked = head[0] === 0x1f && head[1] === 0x8b ? inflated(whole) : whole;
   let total = 0;
   let pieces: Uint8Array[] = [];
   let size = 0;
+
   for await (const chunk of unpacked) {
     total += chunk.byteLength;
+
     if (total > maxBytes) {
       throw new AppFailure({ kind: "guide", failure: { kind: "too-large", limit: "bytes" } });
     }
+
     pieces.push(chunk);
     size += chunk.byteLength;
+
     if (size < PIECE_BYTES) continue;
     yield pieces.length === 1 ? chunk : Buffer.concat(pieces);
     pieces = [];
     size = 0;
   }
+
   if (size > 0) yield Buffer.concat(pieces);
 }
 
@@ -71,6 +84,7 @@ async function* inflated(packed: AsyncIterable<Uint8Array>): AsyncGenerator<Uint
   const gunzip = createGunzip({ chunkSize: PIECE_BYTES });
   // Whoever reads the unpacked bytes hears how either side ended: reading throws it.
   pipeline(Readable.from(packed, { objectMode: false }), gunzip, () => {});
+
   try {
     for await (const chunk of gunzip) {
       const bytes: Buffer = chunk;
@@ -81,6 +95,7 @@ async function* inflated(packed: AsyncIterable<Uint8Array>): AsyncGenerator<Uint
     if (cause instanceof Error && "code" in cause && String(cause.code).startsWith("Z_")) {
       throw new AppFailure({ kind: "guide", failure: { kind: "incomplete" } });
     }
+
     throw cause;
   }
 }

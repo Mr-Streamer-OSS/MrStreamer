@@ -14,9 +14,11 @@
  */
 export function lazy<A>(build: () => A): () => A {
   let built: { readonly value: A } | null = null;
+
   return function get(_unused?: never) {
     if (arguments.length > 0)
       throw new TypeError("A lazy schema was used as a value: call it, as `Schema()`.");
+
     return (built ??= { value: build() }).value;
   };
 }

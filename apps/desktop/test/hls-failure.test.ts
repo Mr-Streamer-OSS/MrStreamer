@@ -7,6 +7,7 @@ import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 const dispose: (() => Promise<unknown>)[] = [];
+
 afterEach(async () => {
   for (const close of dispose.splice(0).reverse()) await close();
 });
@@ -16,6 +17,7 @@ async function app(secure = false) {
   const host = await startFakePlaylist();
   dispose.push(() => host.close());
   const responses = new Map<string, () => Response | Promise<Response>>();
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: null }).pipe(
       Layer.provide(PlaybackCoordination.layer),
@@ -28,11 +30,14 @@ async function app(secure = false) {
             fetch: async (input, init) => {
               const url = new URL(String(input));
               const reply = responses.get(url.pathname.split("/").at(-1)!);
+
               if (reply) return reply();
+
               const answer = await fetch(
                 secure ? `${host.origin}${url.pathname}${url.search}` : input,
                 init,
               );
+
               return secure && url.pathname === "/playlist.m3u"
                 ? new Response(
                     (await answer.text()).replaceAll(host.origin, "https://playlist.test"),
@@ -46,29 +51,37 @@ async function app(secure = false) {
       ),
     ),
   );
+
   dispose.push(() => runtime.dispose());
   const subscriptions = await promised(runtime, Subscriptions);
+
   const { id: subscriptionId } = await subscriptions.add({
     server: secure ? host.link.replace(host.origin, "https://playlist.test") : host.link,
     username: "",
     password: "",
   });
+
   const playback = await promised(runtime, Playback);
+
   const session = await playback.open({ subscriptionId, id: PLAYLIST_CHANNELS.tracks.id }, [
     "h264",
     "aac",
   ]);
+
   const master = await (await fetch(session.url)).text();
   const video = master.split("\n").find((line) => line.trim() && !line.startsWith("#"))!;
   const audio = /NAME="English".*URI="([^"]+)"/.exec(master)![1]!;
+
   const segments = (await (await fetch(video)).text())
     .split("\n")
     .filter((line) => line.trim() && !line.startsWith("#"));
+
   const failure = (url: string | null) =>
     playback.failure(session.sessionId, {
       kind: "hls",
       requestId: url ? new URL(url).pathname : null,
     });
+
   return { playback, session, responses, video, audio, segments, failure };
 }
 
@@ -99,9 +112,11 @@ it.each([403, 404])(
     const entered = Promise.withResolvers<void>();
     responses.set("video-0.mpegts", () => {
       entered.resolve();
+
       return old.promise;
     });
     const pending = fetch(segments[0]!);
+
     try {
       await entered.promise;
       responses.delete("video-0.mpegts");
@@ -121,9 +136,11 @@ it("does not let an older successful HLS response erase a newer refusal", async 
   const entered = Promise.withResolvers<void>();
   responses.set("video-0.mpegts", () => {
     entered.resolve();
+
     return old.promise;
   });
   const pending = fetch(segments[0]!);
+
   try {
     await entered.promise;
     responses.set("video-0.mpegts", () => new Response(null, { status: 403 }));
@@ -141,6 +158,7 @@ it("keeps a root manifest refusal selectable while rejecting subtitle, foreign a
   responses.set("master.m3u8", () => new Response(null, { status: 403 }));
   expect((await fetch(session.url)).status).toBe(403);
   expect(await failure(session.url)).toEqual({ kind: "refused", status: 403 });
+
   for (const requestId of [
     "/stream/other.m3u8",
     new URL(session.url).pathname.replace(".m3u8", "/zzzzzz"),
@@ -206,9 +224,11 @@ it("keeps current failures through unrelated discovery that expires old segment 
         ].join("\n"),
       ),
   );
+
   const current = (await (await fetch(video)).text())
     .split("\n")
     .filter((line) => line.trim() && !line.startsWith("#"));
+
   expect(await failure(segments[0]!)).toEqual({ kind: "unavailable", status: 404 });
   expect((await fetch(segments[0]!)).status).toBe(410);
   expect(await failure(segments[0]!)).toBeNull();
@@ -227,9 +247,11 @@ it("does not lend a previous attempt's HTTP cause to a pending HLS retry", async
   const entered = Promise.withResolvers<void>();
   responses.set("video-0.mpegts", () => {
     entered.resolve();
+
     return reply.promise;
   });
   const pending = fetch(url);
+
   try {
     await entered.promise;
     // hls.js may time out or abort this attempt before the proxy receives any HTTP answer.
@@ -238,5 +260,6 @@ it("does not lend a previous attempt's HTTP cause to a pending HLS retry", async
     reply.resolve(new Response(null, { status: 503 }));
     await pending;
   }
+
   expect(await failure(url)).toEqual({ kind: "provider-error", status: 503 });
 });

@@ -37,6 +37,7 @@ const PREBUILT: readonly Pod[] = [
 
 /** Every project a test wrote: one test can write several. */
 const roots: string[] = [];
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -46,6 +47,7 @@ function project(pods: readonly Pod[], missing: readonly string[] = []) {
   const root = mkdtempSync(join(tmpdir(), "native-pods-"));
   roots.push(root);
   const ios = join(root, "ios");
+
   for (const [name, version] of [
     ["react-native", RN],
     ["react-native-screens", "4.29.0"],
@@ -56,12 +58,15 @@ function project(pods: readonly Pod[], missing: readonly string[] = []) {
       JSON.stringify({ name, version }),
     );
   }
+
   for (const [name, , source] of pods) {
     if (!source || missing.includes(name) || source.startsWith(app)) continue;
     const path = join(ios, source);
     mkdirSync(source.endsWith(".podspec") ? dirname(path) : path, { recursive: true });
+
     if (source.endsWith(".podspec")) writeFileSync(path, "");
   }
+
   const lock = [
     "PODS:",
     ...pods.map(([name, version]) => `  - ${name} (${version})`),
@@ -75,8 +80,10 @@ function project(pods: readonly Pod[], missing: readonly string[] = []) {
     "",
     "COCOAPODS: 1.16.2",
   ].join("\n");
+
   mkdirSync(ios, { recursive: true });
   writeFileSync(join(ios, "Podfile.lock"), lock);
+
   return podProblems(join(ios, "Podfile.lock"), licences, manifest);
 }
 

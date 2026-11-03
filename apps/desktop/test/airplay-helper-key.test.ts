@@ -17,6 +17,7 @@ describe.skipIf(process.platform !== "darwin")("the AirPlay helper's cache key",
     },
   );
   cpSync(join(desktop, "native/airplay"), join(copy, "native/airplay"), { recursive: true });
+
   const key = () =>
     execFileSync(join(copy, "scripts/build-airplay-helper.sh"), ["--key", "mac-arm64"], {
       encoding: "utf8",
@@ -30,6 +31,7 @@ describe.skipIf(process.platform !== "darwin")("the AirPlay helper's cache key",
     expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(key()).toBe(first);
     const seen = new Set([first]);
+
     for (const file of [
       "native/airplay/Player.swift",
       "native/airplay/Info.plist",
@@ -38,6 +40,7 @@ describe.skipIf(process.platform !== "darwin")("the AirPlay helper's cache key",
       appendFileSync(join(copy, file), "\n");
       seen.add(key());
     }
+
     expect(seen.size).toBe(4);
   });
 });

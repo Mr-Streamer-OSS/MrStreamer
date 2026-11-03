@@ -45,18 +45,22 @@ export function ListPicker({
   const [made, setMade] = useState<string | null>(null);
   useEffect(() => {
     if (made === null) return;
+
     const index = entries.findIndex(
       (each) => each.kind === "list" && each.list.kind === "custom" && each.list.id === made,
     );
+
     if (index < 0) return;
     setMade(null);
     setEntry(index);
     box.current?.querySelector<HTMLElement>(`[data-entry="${index}"]`)?.focus();
   }, [made, entries]);
+
   const back = () => {
     restore.current = true;
     picker.back();
   };
+
   useEffect(() => {
     if (!restore.current) return;
     restore.current = false;
@@ -66,8 +70,10 @@ export function ListPicker({
     if (highlight === null) return;
     box.current?.querySelector(`[data-entry="${highlight}"]`)?.scrollIntoView({ block: "nearest" });
   }, [highlight, entries]);
+
   const pick = (index: number) => {
     const picked = entries[index];
+
     if (picked?.kind === "group") {
       restore.current = true;
       openGroup(picked.group);
@@ -75,10 +81,12 @@ export function ListPicker({
       creating?.start();
     } else if (picked) {
       const focused = document.activeElement;
+
       if (focused instanceof HTMLElement && box.current?.contains(focused)) focused.blur();
       onPick(picked.list);
     }
   };
+
   return (
     <div
       ref={box}
@@ -88,27 +96,37 @@ export function ListPicker({
       onFocus={onFocus}
       onKeyDown={(event) => {
         if (event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+
         const control =
           event.target instanceof HTMLButtonElement && !event.target.closest("[data-entry]");
+
         if (control && (event.key === "Enter" || event.key === " ")) {
           event.stopPropagation();
+
           return;
         }
+
         const typing = event.target instanceof HTMLInputElement;
+
         if (typing && event.key !== "ArrowDown" && event.key !== "Enter" && event.key !== "Escape")
           return;
+
         const index = Number(
           (event.target as HTMLElement).closest("[data-entry]")?.getAttribute("data-entry") ??
             entry,
         );
+
         if (!typing && event.key === "ArrowRight") {
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           onChannels();
           event.preventDefault();
           event.stopPropagation();
+
           return;
         }
+
         let next: number | undefined;
+
         if (event.key === "ArrowDown")
           next = typing || control ? 0 : Math.min(index + 1, entries.length - 1);
         else if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
@@ -126,6 +144,7 @@ export function ListPicker({
         else return;
         event.preventDefault();
         event.stopPropagation();
+
         if (next !== undefined && next >= 0) {
           setEntry(next);
           box.current?.querySelector<HTMLButtonElement>(`[data-entry="${next}"]`)?.focus();
@@ -178,6 +197,7 @@ export function ListPicker({
         )}
         {entries.map((item, index) => {
           const apart = group === null && query.trim() === "" && item.apart;
+
           if (item.kind === "new")
             return creating?.open ? (
               <NewListField
@@ -204,12 +224,14 @@ export function ListPicker({
               </button>
             );
           const current = item.kind === "list" && sameList(item.list, selected);
+
           const title =
             item.kind === "group"
               ? item.group === PROVIDER_LISTS
                 ? t("Provider lists")
                 : item.group
               : [item.title, item.context].filter(Boolean).join(" · ");
+
           return (
             <Fragment key={item.kind === "group" ? `g:${item.group}` : listKey(item.list)}>
               <button
@@ -282,16 +304,19 @@ function NewListField({
   className?: string;
 }) {
   const { state } = creating;
+
   const failure =
     state.status === "failed"
       ? state.error.kind === "list-name-taken"
         ? t("Another list has this name.")
         : t("Couldn't save.")
       : null;
+
   const confirm = () =>
     void creating.confirm().then((id) => {
       if (id) onMade(id);
     });
+
   return (
     <div className={cn("py-0.5", className)}>
       <Input
@@ -311,6 +336,7 @@ function NewListField({
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
+
           if (event.key === "Enter") confirm();
           else if (event.key === "Escape") {
             creating.cancel();

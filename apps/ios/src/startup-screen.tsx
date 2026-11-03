@@ -11,6 +11,7 @@ import { colors } from "./ui.tsx";
 
 /** As app.json's expo-splash-screen `imageWidth`: the picture's side, in points. */
 const SIZE = 240;
+
 /** How long opening may take before the line says so. */
 const SAYS_AFTER = 1_000;
 
@@ -27,12 +28,14 @@ export function StartupScreen() {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setSlow(true), SAYS_AFTER);
+
     return () => {
       clearTimeout(timer);
       // Gone before its picture loaded: iOS's goes with it.
       SplashScreen.hide();
     };
   }, []);
+
   return (
     <View style={styles.screen} accessibilityViewIsModal>
       <Image

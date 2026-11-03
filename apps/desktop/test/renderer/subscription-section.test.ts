@@ -21,6 +21,7 @@ import { clockTime, pastTime } from "../../src/renderer/src/lib/format.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   player.reset();
@@ -28,9 +29,11 @@ afterEach(() => {
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** The day Northline runs to, as this machine writes a date. */
 const EXPIRES = "2027-03-12T00:00:00.000Z";
 const expiry = formatDate(Date.parse(EXPIRES), "date");
+
 const account = (expiresAt: string | null = null): SubscriptionSummary["account"] => ({
   state: "active",
   expiresAt,
@@ -47,6 +50,7 @@ const northline: SubscriptionSummary = {
   account: account(EXPIRES),
   needsSecret: false,
 };
+
 const holiday: SubscriptionSummary = {
   kind: "xtream",
   id: "holiday",
@@ -56,6 +60,7 @@ const holiday: SubscriptionSummary = {
   account: account(new Date(Date.now() + 12 * DAY_MS - 60_000).toISOString()),
   needsSecret: false,
 };
+
 const playlist: SubscriptionSummary = {
   kind: "m3u",
   id: "openlist",
@@ -101,6 +106,7 @@ const settled = () =>
     if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(20);
     else await new Promise<void>((resolve) => setTimeout(resolve, 20));
   });
+
 /** Runs the tests of a describe block on a fake clock, so settling waits for no real time. */
 const onTestClock = () => {
   beforeEach(() => {
@@ -126,6 +132,7 @@ async function section(
   const client = new QueryClient();
   client.setQueryData(["subscriptions"], subscriptions);
   client.setQueryData(["guide", "status"], loaded.guides ?? []);
+
   if (loaded.sources) client.setQueryData(["guide", "sources"], loaded.sources);
   client.setQueryData(
     ["library", "status"],
@@ -137,13 +144,16 @@ async function section(
   await mounted.render(createElement(SubscriptionSection));
   unmount = mounted.unmount;
   const rows = () => [...container.querySelectorAll("li")];
+
   /** The row of the subscription listed as `name`: its line, its buttons and what stands under it. */
   const row = (name: string) => {
     const found = rows().find((each) =>
       each.querySelector("button")?.textContent?.startsWith(name),
     );
+
     if (!found) throw new Error(`No row for ${name}`);
     const [toggle, ...buttons] = [...(found.firstElementChild?.querySelectorAll("button") ?? [])];
+
     return {
       element: found,
       line: toggle?.textContent ?? "",
@@ -153,24 +163,29 @@ async function section(
       failure: found.querySelector("[aria-live] p")?.textContent ?? null,
     };
   };
+
   const button = (text: string, within: Element = container) =>
     [...within.querySelectorAll("button")].find((each) => each.textContent?.trim() === text);
+
   const click = async (element: Element | null | undefined) => {
     await act(async () => (element as HTMLElement | null | undefined)?.click());
     await settled();
   };
+
   /** Types into the fields of the form that is open, in order. */
   const type = async (values: readonly string[]) => {
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     await act(async () =>
       container.querySelectorAll("form input").forEach((input, index) => {
         const value = values[index];
+
         if (value === undefined) return;
         setValue?.call(input, value);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }),
     );
   };
+
   const submit = async () => {
     await act(async () =>
       container
@@ -179,6 +194,7 @@ async function section(
     );
     await settled();
   };
+
   /**
    * The Guide row: its name and the line under it, as "Guide · …", its Refresh, and the line
    * under the row that says why a download failed.
@@ -186,6 +202,7 @@ async function section(
   const guideRow = () => {
     const refresh = container.querySelector('[aria-label^="Refresh guide of"]');
     const line = refresh?.parentElement?.parentElement;
+
     return {
       refresh,
       text: [...(line?.firstElementChild?.childNodes ?? [])]
@@ -194,9 +211,11 @@ async function section(
       failure: line?.nextElementSibling?.querySelector("p")?.textContent ?? null,
     };
   };
+
   /** What the form that is open says, announces and offers. */
   const form = () => {
     const open = container.querySelector("form");
+
     return {
       open: open !== null,
       text: open?.textContent ?? "",
@@ -209,6 +228,7 @@ async function section(
       })),
     };
   };
+
   return { container, client, rows, row, button, click, type, submit, guideRow, form };
 }
 
@@ -278,6 +298,7 @@ describe("the list of subscriptions", () => {
 
   it("says which one's stream plays", async () => {
     const { row } = await section([northline, holiday]);
+
     const channel: LiveChannel = {
       subscriptionId: holiday.id,
       id: "2014",
@@ -299,6 +320,7 @@ describe("the list of subscriptions", () => {
 
   it("says under its row when one hasn't answered, since when, and tries it alone", async () => {
     const failedAt = new Date().setHours(14, 2, 0, 0);
+
     const { row, button, click } = await section([northline, holiday], {
       catalogues: [
         catalogueOf(northline),
@@ -442,6 +464,7 @@ describe("adding a subscription", () => {
     async ({ link, typed, since, sent }) => {
       const { button, click, type, submit, container } = await section([northline]);
       await click(button("Add subscription"));
+
       if (link) await click(button("Use an M3U link"));
       await type(typed);
       const first = ipc.hold("subscription.add");
@@ -706,6 +729,7 @@ describe("the Guide row of a playlist", () => {
 describe("a subscription's guide", () => {
   const HOUR = 60 * 60 * 1000;
   const ORIGIN = "https://guide.example.org";
+
   /** Holiday house: 25 channels from its own guide, 9 from a source, 3 without. */
   const combined = guideOf(holiday, {
     listed: 37,
@@ -726,6 +750,7 @@ describe("a subscription's guide", () => {
       fetchedAt: Date.now() - 2 * HOUR,
     },
   });
+
   const single = (guide: GuideStatus, subscription = holiday) =>
     section([subscription], { guides: [{ ...guide, subscriptionId: subscription.id }] });
 
@@ -746,6 +771,7 @@ describe("a subscription's guide", () => {
 
   it("names each source as Settings > Guides does", async () => {
     const supplying = "c0712b44-8e1f-4a6b-b2c9-0d1e2f3a4b5c";
+
     const listed = (id: string, label: string | null): GuideSourceStatus => ({
       id,
       origin: ORIGIN,
@@ -753,6 +779,7 @@ describe("a subscription's guide", () => {
       locked: false,
       processing: { state: "empty" },
     });
+
     const guides = [
       {
         ...combined,
@@ -763,11 +790,13 @@ describe("a subscription's guide", () => {
         ],
       },
     ];
+
     // Another of the same host, which supplies nothing here, tells it apart all the same.
     const { guideRow } = await section([holiday], {
       guides,
       sources: [listed("3f9a0c11-5b2e-4d1a-9c3e-7a1b2c3d4e5f", null), listed(supplying, null)],
     });
+
     expect(guideRow().text).toBe("Guide · 25 own · 9 guide.example.org c071 · 3 without");
     unmount();
 
@@ -775,12 +804,14 @@ describe("a subscription's guide", () => {
       guides,
       sources: [listed(supplying, "United Kingdom")],
     });
+
     expect(renamed.guideRow().text).toBe("Guide · 25 own · 9 United Kingdom · 3 without");
   });
 
   it("says why its own guide's download failed, since when, and from when the listings are, and tries again alone", async () => {
     const since = Date.now() - 3 * HOUR;
     const kept = Date.now() - 30 * HOUR;
+
     const { guideRow, click } = await single({
       ...combined,
       processing: {

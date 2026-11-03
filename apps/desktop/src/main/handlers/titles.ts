@@ -26,6 +26,7 @@ export function titleHandlers({
     "ondemand.refresh": ({ subscriptionId }) =>
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
+
         return source.kind === "m3u"
           ? (yield* roster.refreshPlaylist(subscriptionId)).titles
           : yield* onDemand.refresh(subscriptionId);

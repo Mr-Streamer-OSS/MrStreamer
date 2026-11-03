@@ -76,8 +76,10 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** How often the window hears how a transfer goes, at most. */
 const CHANGES_MS = 250;
+
 /** How often a transfer's progress is written down, so a restart goes on from about there. */
 const SAVE_MS = 5000;
+
 /** The most a picture kept for a download may be. */
 const ARTWORK_BYTES = 8 * 1024 * 1024;
 const ARTWORK_MS = 20_000;
@@ -186,12 +188,15 @@ function make(deps: DownloadsDeps) {
     const changes = yield* PubSub.sliding<DownloadList>(4);
 
     const folderOf = (id: string) => join(root, id);
+
     const mediaOf = (record: StoredDownload) =>
       join(folderOf(record.id), `media.${extensionOf(record.container)}`);
+
     const partOf = (record: StoredDownload) => `${mediaOf(record)}.part`;
 
     const records = new Map<string, StoredDownload>();
     const loaded = yield* Effect.result(store.list);
+
     // Without its table nothing can be queued or listed either: each call says so, as the store
     // says it then, in the interface language of that moment. A read that works later still fails:
     // nothing on disk was checked against the table at the start.
@@ -199,10 +204,13 @@ function make(deps: DownloadsDeps) {
       loaded._tag === "Failure"
         ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
         : null;
+
     if (loaded._tag === "Failure") {
       yield* Effect.logWarning("[downloads] can't be read", loaded.failure.error);
     }
+
     const inventory = loaded._tag === "Success" ? loaded.success : null;
+
     for (const record of inventory?.records ?? []) records.set(record.id, record);
     /** Copies whose file is gone, as last looked: looked at again as the window asks for the list. */
     const missing = new Set<string>();
@@ -218,31 +226,39 @@ function make(deps: DownloadsDeps) {
       Effect.runSync(store.put(record));
       records.set(record.id, record);
     };
+
     /** Changes a download's record as it is now; one removed meanwhile stays removed. */
     const update = (id: string, change: (latest: StoredDownload) => StoredDownload) => {
       const latest = records.get(id);
+
       if (latest) write(change(latest));
     };
+
     /** Writes several records in one transaction and keeps them: all of them, or none. */
     const writeAll = (changed: readonly StoredDownload[]) => {
       if (changed.length === 0) return;
       Effect.runSync(store.putMany(changed));
+
       for (const record of changed) records.set(record.id, record);
     };
 
     /** A download's place in the queue: its own, or when it was added, as an older build kept it. */
     const placeOf = (record: StoredDownload) => record.order ?? record.addedAt;
+
     /** The unfinished downloads in queue order; one placed alike keeps the order it was read in. */
     const unfinished = () =>
       [...records.values()]
         .filter((record) => record.state !== "complete")
         .toSorted((a, b) => placeOf(a) - placeOf(b));
+
     /** The place after every unfinished download's: where a new one goes. */
     const lastPlace = () => {
       let last = 0;
+
       for (const record of records.values()) {
         if (record.state !== "complete") last = Math.max(last, placeOf(record));
       }
+
       return last + 1;
     };
 
@@ -254,16 +270,19 @@ function make(deps: DownloadsDeps) {
         (yield* Effect.promise(() => disk.size(mediaOf(record)))) === record.size
       ) {
         const { pausedAt: _pausedAt, order: _order, ...rest } = record;
+
         const complete: StoredDownload = {
           ...rest,
           state: "complete",
           received: record.size,
           completedAt: Date.now(),
         };
+
         yield* store.put(complete).pipe(Effect.ignore);
         records.set(record.id, complete);
       }
     }
+
     // Folders no row names: left by a deletion that couldn't finish, or a download that went.
     // Only a database read whole tells them; a row this build can't read still names its own.
     if (inventory) {
@@ -280,10 +299,12 @@ function make(deps: DownloadsDeps) {
 
     const lookForMissing = () => {
       missing.clear();
+
       for (const record of records.values()) {
         if (record.state === "complete" && !existsSync(mediaOf(record))) missing.add(record.id);
       }
     };
+
     lookForMissing();
 
     /**
@@ -292,13 +313,16 @@ function make(deps: DownloadsDeps) {
      * TMDB id splits it: a provider that gives a series' id to another series gives another key.
      */
     const seriesKeys = new Map<string, string>();
+
     const seriesKeyOf = (record: StoredDownload): string | null => {
       if (!record.series || record.title.kind !== "episode") return null;
       const version = JSON.stringify([record.account, record.title.seriesId, record.series.tmdb]);
       const known = seriesKeys.get(version);
+
       if (known) return known;
       const made = randomUUID();
       seriesKeys.set(version, made);
+
       return made;
     };
 
@@ -306,6 +330,7 @@ function make(deps: DownloadsDeps) {
     const accounts = Effect.gen(function* () {
       const [saved, listed] = yield* Effect.all([subscriptions.saved, subscriptions.list]);
       const names = new Map(listed.map((each) => [each.id, each.name ?? hostOf(each.server)]));
+
       return new Map(
         saved.map((each) => [each.key, { id: each.id, name: names.get(each.id) ?? "" }]),
       );
@@ -366,13 +391,16 @@ function make(deps: DownloadsDeps) {
     /** What each series of the downloads listed, by its key: as its latest queued one read it. */
     const seriesOf = (all: readonly StoredDownload[]) => {
       const latest = new Map<string, { readonly addedAt: number; readonly series: SeriesKept }>();
+
       for (const record of all) {
         const key = seriesKeyOf(record);
         const before = key ? latest.get(key) : undefined;
+
         if (key && record.series && (!before || record.addedAt >= before.addedAt)) {
           latest.set(key, { addedAt: record.addedAt, series: record.series });
         }
       }
+
       return Object.fromEntries(
         [...latest].map(([key, { series }]): [string, DownloadSeries] => [
           key,
@@ -387,15 +415,20 @@ function make(deps: DownloadsDeps) {
       const all = [...records.values()];
       // The transfer leads, then those waiting their turn in their order, then the failed ones.
       const queue = unfinished();
+
       const leads = (record: StoredDownload) =>
         record.state === "queued" && record.id === active?.id;
+
       const copies = all
         .filter((record) => record.state === "complete")
         .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+
       const free = yield* Effect.promise(async () => {
         await mkdir(root, { recursive: true }).catch(() => {});
+
         return disk.free(root);
       });
+
       return {
         items: [
           ...queue.filter(leads),
@@ -417,6 +450,7 @@ function make(deps: DownloadsDeps) {
     /** Whether a list is being made to tell, and whether anything changed since it began. */
     let viewing = false;
     let stale = false;
+
     /**
      * Tells the window, once the changes of the next moment are in. One list is made at a time,
      * so one that waits on the disk can't arrive after a later one; what changes while it is made
@@ -424,7 +458,9 @@ function make(deps: DownloadsDeps) {
      */
     const tell = () => {
       if (closing) return;
+
       if (viewing) stale = true;
+
       if (telling || viewing) return;
       telling = setTimeout(() => {
         telling = undefined;
@@ -436,6 +472,7 @@ function make(deps: DownloadsDeps) {
           )
           .finally(() => {
             viewing = false;
+
             if (stale) {
               stale = false;
               tell();
@@ -466,44 +503,59 @@ function make(deps: DownloadsDeps) {
      */
     let picking = false;
     let again = false;
+
     const next = async (): Promise<void> => {
       if (picking) {
         again = true;
+
         return;
       }
+
       picking = true;
+
       try {
         // Subscriptions that lent nothing in this choice: something of theirs plays. Woken
         // meanwhile, as when playback stopped, the queue forgets them: they may lend now.
         const refused = new Set<string>();
+
         for (;;) {
           if (active || closing) return;
+
           if (again) refused.clear();
           again = false;
           const chosen = firstAllowed(await Effect.runPromise(coordination.busy), refused);
+
           if (!chosen) {
             if (!again) return;
             continue;
           }
+
           const lent = await Effect.runPromise(coordination.lend(chosen.subscriptionId));
+
           if (!lent) {
             refused.add(chosen.subscriptionId);
             continue;
           }
+
           const busy = await Effect.runPromise(coordination.busy);
+
           if (again) refused.clear();
           // Read only now: the app may have begun to close while the lease was asked for.
           const first = closing ? undefined : firstAllowed(busy, refused);
+
           if (first?.subscriptionId === chosen.subscriptionId) {
             start(first, lent);
+
             return;
           }
+
           lent.release();
         }
       } finally {
         picking = false;
       }
     };
+
     const wake = () => void next();
 
     /** Transfers `record` on the connection playback lent it. */
@@ -511,6 +563,7 @@ function make(deps: DownloadsDeps) {
       const finished = deps.observeTransfer?.();
       const controller = new AbortController();
       let outcome: TransferOutcome = { kind: "stopped" };
+
       const transferring: Active = {
         id: record.id,
         controller,
@@ -522,6 +575,7 @@ function make(deps: DownloadsDeps) {
         over: Promise.resolve(),
         settled: Promise.resolve(null),
       };
+
       active = transferring;
       tell();
       transferring.over = transferOf(
@@ -542,9 +596,11 @@ function make(deps: DownloadsDeps) {
       transferring.settled = transferring.over
         .then(async () => {
           const failure = await settle(record.id, transferring, outcome);
+
           if (failure === "stopped") finished?.("interrupted");
           else if (failure) finished?.("failed", downloadFailure(failure));
           else finished?.(outcome.kind === "stopped" ? "interrupted" : "success");
+
           return null;
         })
         .catch((cause) => {
@@ -553,6 +609,7 @@ function make(deps: DownloadsDeps) {
           const failure = cause instanceof Failed ? cause : failedWith(cause);
           // Failed as far as this run knows, so the queue doesn't take it again and again.
           const latest = records.get(record.id);
+
           if (latest?.state === "queued") {
             records.set(record.id, {
               ...latest,
@@ -560,6 +617,7 @@ function make(deps: DownloadsDeps) {
               failure: { kind: "app", error: failure.error },
             });
           }
+
           return failure;
         })
         .finally(() => {
@@ -576,6 +634,7 @@ function make(deps: DownloadsDeps) {
       signal: AbortSignal,
     ): Promise<TransferOutcome> => {
       const title: TitleRef = { ...record.title, subscriptionId: record.subscriptionId };
+
       // Stopped while the file is looked up, nothing is asked of the provider's file. A lookup a
       // catalogue refresh overtook is asked once more, of the catalogue that refresh accepted.
       const resolved = await Effect.runPromise(
@@ -587,30 +646,38 @@ function make(deps: DownloadsDeps) {
         ]).pipe(Effect.result),
         { signal },
       ).catch(() => null);
+
       if (!resolved || signal.aborted) return { kind: "stopped" };
+
       if (resolved._tag === "Failure") {
         return { kind: "failed", failure: { kind: "app", error: resolved.failure.error } };
       }
+
       const [source, file] = resolved.success;
+
       // A file looked up, first or renewed, under a login that replaced the one read here fails as
       // a replaced login does.
       if (file.revision !== source.revision) {
         return { kind: "failed", failure: { kind: "app", error: subscriptionChanged() } };
       }
+
       // The file the bytes are of: its listing and login, which its saved subtitles are kept by.
       update(record.id, (latest) => ({
         ...latest,
         listingKey: file.listingKey,
         sourceStamp: source.fileRevision,
       }));
+
       try {
         await mkdir(folderOf(record.id), { recursive: true });
       } catch (cause) {
         return { kind: "failed", failure: { kind: "folder", detail: messageOf(cause) } };
       }
+
       if (signal.aborted) return { kind: "stopped" };
       let savedAt = performance.now();
       let measured = { at: performance.now(), received: record.received };
+
       return transfer({
         url: file.url,
         headers: file.headers ?? {},
@@ -623,19 +690,23 @@ function make(deps: DownloadsDeps) {
         progress: ({ received, size, restarted }) => {
           if (active !== transferring) return;
           const now = performance.now();
+
           if (now - measured.at >= 1000) {
             const rate = ((received - measured.received) * 1000) / (now - measured.at);
             transferring.rate = rate >= 0 ? rate : null;
             measured = { at: now, received };
           }
+
           const again = restarted !== transferring.restarted;
           transferring.received = received;
           transferring.size = size;
           transferring.restarted = restarted;
           tell();
+
           // How far it got goes down now and then; what the partial is of, as `identify` says.
           if (again || now - savedAt >= SAVE_MS) {
             savedAt = now;
+
             try {
               update(record.id, (latest) => ({ ...latest, received, size, restarted }));
             } catch {
@@ -646,6 +717,7 @@ function make(deps: DownloadsDeps) {
         // Throws when it can't be written down, before the transfer touches the partial.
         identify: (identity) => {
           transferring.identity = identity;
+
           if (sameIdentity(records.get(record.id)?.identity ?? null, identity)) return;
           const { received, size, restarted } = transferring;
           update(record.id, (latest) => ({ ...latest, received, size, identity, restarted }));
@@ -660,30 +732,39 @@ function make(deps: DownloadsDeps) {
       outcome: TransferOutcome,
     ): Promise<DownloadFailure | "stopped" | undefined> => {
       const record = records.get(id);
+
       // Removed meanwhile: its files are the removal's.
       if (!record) return "stopped";
       const { received, size, identity, restarted } = transferring;
       const where = { ...record, received, size, identity, restarted };
+
       if (outcome.kind === "stopped") {
         update(id, () => where);
+
         return;
       }
+
       if (outcome.kind === "failed") {
         update(id, () => ({ ...where, state: "failed", failure: outcome.failure }));
+
         return outcome.failure;
       }
+
       try {
         await rename(partOf(record), mediaOf(record));
       } catch (cause) {
         const failure: DownloadFailure = { kind: "folder", detail: messageOf(cause) };
         update(id, () => ({ ...where, state: "failed", failure }));
+
         return failure;
       }
+
       // What was saved for the exact bytes it was made from comes with the copy. Saved for other
       // bytes, or without proof of which, it stays the provider file's.
       const source = await Effect.runPromise(
         subscriptions.sourceOf(record.subscriptionId).pipe(Effect.option),
       );
+
       if (source._tag === "Some" && outcome.identity && records.has(id)) {
         await Effect.runPromise(
           savedSubtitles
@@ -701,11 +782,13 @@ function make(deps: DownloadsDeps) {
             .pipe(Effect.ignore),
         );
       }
+
       if (!records.has(id)) return "stopped";
       missing.delete(id);
       // A copy has no place in the queue, and a pause asked for as it finished pauses nothing.
       update(id, (latest) => {
         const { failure: _failure, pausedAt: _pausedAt, order: _order, ...rest } = latest;
+
         return {
           ...rest,
           state: "complete",
@@ -726,6 +809,7 @@ function make(deps: DownloadsDeps) {
     const stopPaused = async (transferring: Active) => {
       transferring.controller.abort();
       const failure = await transferring.settled;
+
       if (failure) throw failure;
     };
 
@@ -735,15 +819,18 @@ function make(deps: DownloadsDeps) {
      */
     const removeOne = async (id: string) => {
       const record = records.get(id);
+
       if (!record) return;
       Effect.runSync(store.remove(id));
       records.delete(id);
       missing.delete(id);
       const transferring = active?.id === id ? active : null;
+
       if (transferring) {
         transferring.controller.abort();
         await transferring.settled;
       }
+
       await Effect.runPromise(playback.closeCopy(id));
       await Effect.runPromise(
         savedSubtitles.forget(subtitlesOfCopy(id, record.title)).pipe(Effect.ignore),
@@ -767,6 +854,7 @@ function make(deps: DownloadsDeps) {
         closing = true;
         clearTimeout(telling);
         const stopping = active;
+
         if (!stopping) return;
         stopping.controller.abort();
         await stopping.settled;
@@ -790,6 +878,7 @@ function make(deps: DownloadsDeps) {
       list: Effect.suspend(() => {
         if (unloaded) return unloaded;
         lookForMissing();
+
         return view;
       }),
 
@@ -798,6 +887,7 @@ function make(deps: DownloadsDeps) {
           if (unloaded) return yield* unloaded;
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           const { subscriptionId, ...raw } = title;
+
           const knownOf = () =>
             [...records.values()].find(
               (record) =>
@@ -805,6 +895,7 @@ function make(deps: DownloadsDeps) {
                 record.title.kind === raw.kind &&
                 record.title.id === raw.id,
             );
+
           const answer = (known: StoredDownload) =>
             Effect.gen(function* () {
               if (known.state === "failed") {
@@ -817,14 +908,19 @@ function make(deps: DownloadsDeps) {
                 tell();
                 wake();
               }
+
               const owners = yield* accounts;
+
               return downloadOf(records.get(known.id) ?? known, owners, yield* coordination.busy);
             });
+
           const known = knownOf();
+
           if (known) return yield* answer(known);
           // Asked first: a title its provider doesn't list now isn't queued.
           const file = yield* onDemand.file(title);
           const kept = yield* aboutOf(raw, subscriptionId);
+
           // Both took a while. A subscription removed or logged in anew meanwhile had its unfinished
           // downloads ended without this one (a removal ends them again once it is gone, after
           // this look), and the same title may have been added meanwhile: that one is the answer.
@@ -832,8 +928,11 @@ function make(deps: DownloadsDeps) {
           if (!(yield* subscriptions.stands(source))) {
             return yield* new Failed({ error: { kind: "no-subscription" } });
           }
+
           const added = knownOf();
+
           if (added) return yield* answer(added);
+
           const record: StoredDownload = {
             id: randomUUID(),
             account: source.key,
@@ -855,6 +954,7 @@ function make(deps: DownloadsDeps) {
             completedAt: null,
             progress: null,
           };
+
           yield* attempt(async () => write(record));
           yield* Effect.forkIn(
             Effect.promise(() => keepArtwork(record.id, kept.artwork)),
@@ -862,6 +962,7 @@ function make(deps: DownloadsDeps) {
           );
           tell();
           wake();
+
           return downloadOf(record, yield* accounts, yield* coordination.busy);
         }),
 
@@ -875,7 +976,9 @@ function make(deps: DownloadsDeps) {
       retry: (id: string) =>
         attempt(async () => {
           const record = records.get(id);
+
           if (!record) throw notFound();
+
           if (record.state !== "failed") return;
           // Retry asks for the transfer, so a pause an older build kept through the failure goes.
           const { failure: _failure, pausedAt: _pausedAt, ...rest } = record;
@@ -887,19 +990,25 @@ function make(deps: DownloadsDeps) {
       pause: (id: string) =>
         attempt(async () => {
           const record = records.get(id);
+
           if (!record) throw notFound();
+
           if (record.state !== "queued") return;
+
           if (record.pausedAt === undefined) {
             write({ ...record, pausedAt: Date.now() });
             tell();
           }
+
           if (active?.id === id) await stopPaused(active);
         }),
 
       resume: (id: string) =>
         attempt(async () => {
           const record = records.get(id);
+
           if (!record) throw notFound();
+
           if (record.state !== "queued" || record.pausedAt === undefined) return;
           const { pausedAt: _pausedAt, ...rest } = record;
           write(rest);
@@ -917,6 +1026,7 @@ function make(deps: DownloadsDeps) {
           ),
         );
         tell();
+
         if (active && records.get(active.id)?.pausedAt !== undefined) await stopPaused(active);
       }),
 
@@ -933,11 +1043,13 @@ function make(deps: DownloadsDeps) {
       move: (id: string, by: -1 | 1) =>
         attempt(async () => {
           const record = records.get(id);
+
           if (!record) throw notFound();
           const queue = unfinished();
           const waiting = queue.filter((each) => each.state === "queued" && each.id !== active?.id);
           const from = waiting.indexOf(record);
           const other = waiting[from + by];
+
           if (from < 0 || !other) return;
           // Swapped in the whole queue, then every unfinished download given its place from 1, so
           // two an older build added at the same moment swap too, and the rest keep their order.
@@ -953,6 +1065,7 @@ function make(deps: DownloadsDeps) {
       recordProgress: (id: string, position: number, duration: number) =>
         attempt(async () => {
           const record = records.get(id);
+
           if (record?.state !== "complete") throw notFound();
           write({
             ...record,
@@ -964,17 +1077,20 @@ function make(deps: DownloadsDeps) {
       copy: (id: string) =>
         Effect.suspend(() => {
           const record = records.get(id);
+
           if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
             if (record?.state === "complete" && !missing.has(id)) {
               missing.add(id);
               tell();
             }
+
             return Effect.fail(
               new Failed({
                 error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
               }),
             );
           }
+
           return Effect.succeed({
             id: record.id,
             path: mediaOf(record),
@@ -991,6 +1107,7 @@ function make(deps: DownloadsDeps) {
         Effect.sync(() => {
           const record = records.get(id);
           const type = record?.about[artwork];
+
           return record && type ? { path: join(folderOf(record.id), artwork), type } : null;
         }),
 
@@ -999,7 +1116,9 @@ function make(deps: DownloadsDeps) {
           const gone = [...records.values()].filter(
             (record) => record.subscriptionId === subscriptionId && record.state !== "complete",
           );
+
           if (gone.length === 0) return;
+
           for (const record of gone) await removeOne(record.id).catch(() => {});
           ended += gone.length;
           tell();
@@ -1018,6 +1137,7 @@ function make(deps: DownloadsDeps) {
       return Effect.gen(function* () {
         if (title.kind === "movie") {
           const details = yield* onDemand.details("movie", { subscriptionId, id: title.id });
+
           return {
             about: {
               name: details.title.title,
@@ -1032,15 +1152,19 @@ function make(deps: DownloadsDeps) {
             },
           };
         }
+
         const series = yield* onDemand.details("series", { subscriptionId, id: title.seriesId });
+
         const season = yield* onDemand
           .season({ subscriptionId, id: title.seriesId }, title.season)
           .pipe(Effect.orElseSucceed((): readonly EpisodeDetails[] => []));
+
         const episode =
           season.find((each) => each.id === title.id) ??
           (series.kind === "series"
             ? series.seasons.flatMap((each) => each.episodes).find((each) => each.id === title.id)
             : undefined);
+
         return {
           about: {
             name: series.title.title,
@@ -1079,11 +1203,15 @@ function make(deps: DownloadsDeps) {
       urls: { readonly poster: string | null; readonly wide: string | null },
     ): Promise<void> {
       const kept: Partial<Record<DownloadArtwork, string>> = {};
+
       for (const artwork of ["poster", "wide"] as const) {
         const url = urls[artwork];
+
         if (!url || !/^https?:\/\//.test(url)) continue;
         const picture = await fetchPicture(url).catch(() => null);
+
         if (!picture || !records.has(id)) continue;
+
         try {
           await mkdir(folderOf(id), { recursive: true });
           await writeFile(join(folderOf(id), artwork), picture.bytes);
@@ -1092,7 +1220,9 @@ function make(deps: DownloadsDeps) {
           // Without it, the copy shows its name.
         }
       }
+
       if (Object.keys(kept).length === 0) return;
+
       try {
         update(id, (latest) => ({
           ...latest,
@@ -1101,6 +1231,7 @@ function make(deps: DownloadsDeps) {
       } catch {
         // Fetched again by nothing: the copy shows its name.
       }
+
       tell();
     }
 
@@ -1111,18 +1242,25 @@ function make(deps: DownloadsDeps) {
         headers: { "User-Agent": deps.userAgent },
         signal: AbortSignal.timeout(ARTWORK_MS),
       });
+
       const type = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+
       if (!response.ok || !type.startsWith("image/") || !response.body) {
         void response.body?.cancel().catch(() => {});
+
         return null;
       }
+
       const parts: Uint8Array[] = [];
       let length = 0;
+
       for await (const part of response.body) {
         length += part.length;
+
         if (length > ARTWORK_BYTES) return null;
         parts.push(part);
       }
+
       return { bytes: Buffer.concat(parts), type };
     }
   });

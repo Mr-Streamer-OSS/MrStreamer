@@ -22,13 +22,16 @@ export async function segmentsOf(
   let start = 0;
   let length = 0;
   const segments: TvSegment[] = [];
+
   for (const line of text.split("\n")) {
     const info = /^#EXTINF:([\d.]+)/.exec(line);
+
     if (info) length = Number(info[1]);
     else if (line && !line.startsWith("#")) {
       segments.push({ start, length, url: new URL(line.trim(), list).href });
       start += length;
     }
   }
+
   return segments;
 }

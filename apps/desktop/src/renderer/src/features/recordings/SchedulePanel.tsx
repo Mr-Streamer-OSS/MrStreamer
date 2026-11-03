@@ -58,19 +58,24 @@ export function SchedulePanel({
 }) {
   const client = useQueryClient();
   const now = useNow();
+
   const [repeat, setRepeat] = useState<Repeat>(() => {
     const saved = schedule ? repeatOf(schedule.plan) : "once";
+
     return saved === "once" && !basis.programme ? "day" : saved;
   });
+
   const [padding, setPadding] = useState<RecordingPadding>(
     schedule?.plan.padding ?? DEFAULT_PADDING,
   );
+
   // Each side's padding takes what the other leaves of the room a recording has, the end's first.
   const room = paddingRoom(planOf(basis, repeat, { before: 0, after: 0 }));
   const after = Math.min(padding.after, room);
   const fitted = { before: Math.min(padding.before, room - after), after };
   const plan = planOf(basis, repeat, fitted);
   const preview = useQuery({ ...planQuery(plan, schedule?.id), placeholderData: keepPreviousData });
+
   const save = useMutation({
     mutationFn: () =>
       call("recordings.schedule", { plan, ...defined({ id: schedule ? schedule.id : undefined }) }),
@@ -83,6 +88,7 @@ export function SchedulePanel({
       onDone();
     },
   });
+
   const cancel = useMutation({
     mutationFn: (id: string) => call("recordings.cancel", { id }),
     onSuccess: (_, id) => {
@@ -98,6 +104,7 @@ export function SchedulePanel({
     { repeat: "day", label: weekdays(basis.days) },
     { repeat: "every", label: t("Every day") },
   ];
+
   const panel = useRef<HTMLDivElement>(null);
   const chosen = useRef<HTMLButtonElement>(null);
   // Opened under a programme near the window's foot, it scrolls up into view whole.
@@ -110,6 +117,7 @@ export function SchedulePanel({
   const status = preview.data?.status;
   const held = status?.kind === "conflict" || status?.kind === "waiting";
   const failure = save.error ?? cancel.error ?? preview.error;
+
   return (
     <div
       ref={panel}
@@ -117,15 +125,19 @@ export function SchedulePanel({
       aria-label={t("Schedule {title}", { title: basis.title })}
       onKeyDown={(event) => {
         if (event.metaKey || event.ctrlKey || event.altKey) return;
+
         if (event.key === "Escape" && onEscape) {
           event.preventDefault();
           event.stopPropagation();
+
           return onEscape();
         }
+
         const pressed =
           (event.key === "Enter" || event.key === " ") &&
           event.target instanceof Element &&
           event.target.closest("button");
+
         if (event.key !== "Escape" && event.key !== "Tab" && !pressed) event.preventDefault();
       }}
       // Scrolled into view, it clears the grid's sticky times.
@@ -140,9 +152,11 @@ export function SchedulePanel({
             className="flex items-center gap-0.5"
             onKeyDown={(event) => {
               const by = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+
               if (by === undefined) return;
               const index = repeats.findIndex((each) => each.repeat === repeat);
               const next = repeats[(index + by + repeats.length) % repeats.length];
+
               if (!next) return;
               setRepeat(next.repeat);
               event.currentTarget
@@ -152,6 +166,7 @@ export function SchedulePanel({
           >
             {repeats.map((each) => {
               const on = each.repeat === repeat;
+
               return (
                 <button
                   key={each.repeat}
@@ -264,6 +279,7 @@ function Stepper({
   onChange: (value: number) => void;
 }) {
   const set = (next: number) => onChange(Math.min(Math.max(next, 0), max));
+
   const step = (event: KeyboardEvent) => {
     const by = {
       ArrowUp: 1,
@@ -273,12 +289,15 @@ function Stepper({
       PageUp: 10,
       PageDown: -10,
     }[event.key];
+
     if (event.key === "Home") set(0);
     else if (event.key === "End") set(max);
     else if (by !== undefined) set(value + by);
   };
+
   const round =
     "flex size-6 flex-none items-center justify-center rounded-full bg-white/10 text-[0.9375rem] leading-none hover:bg-white/16 disabled:opacity-40";
+
   return (
     <div className="flex items-center gap-2">
       <span className="text-muted-foreground">{label}</span>
@@ -332,7 +351,9 @@ function Standing({
   now: number;
 }) {
   const { plan, next, status } = schedule;
+
   if (!next) return <p>{t("It has no time to come.")}</p>;
+
   // "Today 23:28" once, "Fridays 23:28" or "Every day 23:28" as it repeats.
   const when =
     plan.kind === "programme"
@@ -341,11 +362,13 @@ function Standing({
           day: repeatOf(plan) === "every" ? t("Every day") : weekdays(plan.days),
           time: formatDate(next.start, "time"),
         });
+
   const span = t("{when} to {end} on {channel}.", {
     when,
     end: formatDate(next.stop, "time"),
     channel: channelName,
   });
+
   switch (status.kind) {
     case "planned":
       return <p>{`${span} ${t("A connection is free then.")}`}</p>;
@@ -385,6 +408,7 @@ function Holders({ holders }: { holders: readonly ConnectionHolder[] }) {
     <ul className="flex flex-col gap-0.5">
       {holders.map((holder, at) => {
         const { what, until } = holderText(holder);
+
         return (
           <li key={at} className="flex items-center gap-2">
             <span aria-hidden className="flex w-3 flex-none justify-center">

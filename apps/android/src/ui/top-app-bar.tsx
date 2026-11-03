@@ -37,6 +37,7 @@ export function TopAppBar({
   }, [focusTitle, title]);
   const bar = layout === "bar";
   const margin = bar ? 16 : 24;
+
   return (
     <View
       style={{

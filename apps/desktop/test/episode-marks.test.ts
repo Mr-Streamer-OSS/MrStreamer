@@ -41,17 +41,22 @@ const FILES: Readonly<Record<string, string>> = {
 async function marksApp({ both = false } = {}) {
   vi.useFakeTimers({ toFake: ["Date"] });
   onTestFinished(() => void vi.useRealTimers());
+
   const moveOn = () => {
     vi.setSystemTime(Date.now() + 60_000);
+
     return Date.now();
   };
+
   const dataDir = await tempDir();
   const [first, second] = [await fakeProvider(), await fakeProvider({ second: true })];
   let running: { dispose(): Promise<void> } | null = null;
+
   const start = async () => {
     await running?.dispose();
     const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
     running = runtime;
+
     return {
       viewing: await promised(runtime, ViewingRecord),
       subscriptions: await promised(runtime, Subscriptions),
@@ -59,19 +64,23 @@ async function marksApp({ both = false } = {}) {
       onDemand: await promised(runtime, OnDemand),
     };
   };
+
   const app = await start();
   const login = (server: string) => ({ server, username: "demo", password: "demo" });
   const a = (await app.subscriptions.add(login(first.url))).id;
   const b = both ? (await app.subscriptions.add(login(second.url))).id : "not-saved";
+
   /** Runs `use` on the database through a connection of its own, as another build's would be. */
   const database = <A>(use: (db: DatabaseSync) => A): A => {
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
     try {
       return use(db);
     } finally {
       db.close();
     }
   };
+
   return { ...app, start, dataDir, first, second, a, b, login, moveOn, database };
 }
 
@@ -162,6 +171,7 @@ describe("marking an episode", () => {
       moveOn();
       await mark(viewing, episode(a, season, number), true);
     }
+
     expect(await goesOn(viewing)).toEqual([[NL, "2:2"]]);
     moveOn();
     await mark(viewing, episode(a, 2, 2), true);
@@ -240,8 +250,10 @@ describe("marking an episode", () => {
     const { viewing, a, database, moveOn } = await marksApp();
     await play(viewing, episode(a, 1, 1), 900);
     const before = [await viewing.state(), await viewing.episodes(of(a, NL))];
+
     const events = () =>
       database((db) => db.prepare("select count(*) as rows from events").get()?.["rows"]);
+
     const written = events();
     moveOn();
     // The disk gives out at the last thing a mark writes: the mark itself.
@@ -453,10 +465,12 @@ describe("a mark and what plays", () => {
     const began = Date.now();
     await play(viewing, episode(a, 2, 2), 600, began);
     let last = null;
+
     for (const [season, number] of ALL_BUT_LAST) {
       moveOn();
       last = await mark(viewing, episode(a, season, number), true);
     }
+
     expect(await goesOn(viewing)).toEqual([[NL, "2:2"]]);
 
     moveOn();
@@ -473,10 +487,12 @@ describe("a mark and what plays", () => {
   it("gives way to a play begun after it, whose end takes the series out of Continue watching", async () => {
     const { viewing, a, moveOn } = await marksApp();
     let marked = null;
+
     for (const [season, number] of ALL_BUT_LAST) {
       marked = await mark(viewing, episode(a, season, number), true);
       moveOn();
     }
+
     const began = Date.now();
 
     await play(viewing, episode(a, 2, 2), 2690, began);
@@ -502,6 +518,7 @@ describe("a mark and what plays", () => {
       series: all.series.map((each) => {
         const [season = []] = each.seasons;
         const [file] = season;
+
         return String(each.id) === ALONE && file
           ? { ...each, seasons: [[...season, { ...file, id: 800_012 }]] }
           : each;
@@ -604,6 +621,7 @@ describe("what a mark is kept by", () => {
       ...all,
       series: all.series.map((each) => {
         const id = tmdb[String(each.id)];
+
         return id === undefined
           ? each
           : { ...each, tmdb: id, ...defined({ name: name || undefined }) };
@@ -691,6 +709,7 @@ describe("what a mark is kept by", () => {
     const { viewing, roster, onDemand, a, b, first, login, moveOn } = await marksApp({
       both: true,
     });
+
     // Both list the series under one TMDB id, with the same series and episode ids.
     const mine = await mark(viewing, episode(a, 1, 1), true);
     expect(await viewing.episodes(of(b, NL))).toEqual({ progress: [], marks: [], undoable: null });
@@ -762,6 +781,7 @@ describe("marks on disk", { timeout: 20_000 }, () => {
       { number: 1, episodes: [1, 2, 3].map((number) => ({ id: "", season: 1, number })) },
       { number: 2, episodes: [{ id: "", season: 2, number: 1 }] },
     ]);
+
     return last;
   }
 
@@ -780,6 +800,7 @@ describe("marks on disk", { timeout: 20_000 }, () => {
     // Every episode it lists now is watched but the first, which was marked unwatched.
     expect(await goesOn(viewing)).toEqual([[NL, "1:1"]]);
     expect(before[1]).toMatchObject({ progress: [{ position: 900 }, { position: 2690 }] });
+
     /** The marks of the series once its latest mark was taken back: as they were before it. */
     const undone = [
       { season: 1, episode: 1, watched: false },
@@ -843,9 +864,11 @@ describe("marks on disk", { timeout: 20_000 }, () => {
     // from them, and nothing of the tables it never heard of.
     database((db) => {
       db.exec("pragma secure_delete = on");
+
       for (const table of ["events", "state", "titles"]) {
         db.prepare(`delete from ${table} where account = ?`).run(key);
       }
+
       db.exec("pragma wal_checkpoint(truncate)");
     });
 
@@ -854,6 +877,7 @@ describe("marks on disk", { timeout: 20_000 }, () => {
     expect(await returned.episodes(of(a, NL))).toEqual({ progress: [], marks: [], undoable: null });
     expect((await returned.state()).marked.map(({ series }) => series)).toEqual([of(b, NL)]);
     expect((await returned.episodes(of(b, NL))).marks).toEqual([kept]);
+
     const file = Buffer.concat(
       await Promise.all(
         ["mrstreamer.db", "mrstreamer.db-wal"].map((name) =>
@@ -861,6 +885,7 @@ describe("marks on disk", { timeout: 20_000 }, () => {
         ),
       ),
     );
+
     expect(key).not.toBe("");
     expect(file.includes(key)).toBe(false);
   });
@@ -885,6 +910,7 @@ describe("marks on disk", { timeout: 20_000 }, () => {
         ),
       ),
     );
+
     expect(key).not.toBe("");
     expect(file.includes(key)).toBe(false);
     // Nor does a rebuild from the events bring any of it back.

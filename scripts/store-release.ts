@@ -182,28 +182,37 @@ export async function storeGate(
   },
 ): Promise<string | null> {
   const action = ACTIONS.find((known) => known === request.action);
+
   if (!action) throw new Error(`"${request.action}" is not preflight, status or submit.`);
+
   if (action === "submit" && request.enabled !== "true") {
     const off = `Microsoft Store submissions are off: the repository variable STORE_AUTOMATION_ENABLED isn't "true".`;
+
     if (request.releaseRun) return off;
     throw new Error(`${off} docs/maintainers/microsoft-store.md#setting-up turns them on.`);
   }
+
   if (request.ref !== `refs/heads/${github.defaultBranch}`) {
     throw new Error(`Run the Store job from ${github.defaultBranch}, not ${request.ref}.`);
   }
+
   const branches = await github.environment(STORE_ENVIRONMENT);
+
   if (branches === null) {
     throw new Error(
       `The ${STORE_ENVIRONMENT} environment doesn't exist. scripts/setup-microsoft-store.sh creates it for ${github.defaultBranch} alone; a job that named it first would create it open to every branch.`,
     );
   }
+
   if (typeof branches === "string" || branches.join() !== github.defaultBranch) {
     const allowed =
       typeof branches === "string" ? `${branches} branches` : branches.join(", ") || "nothing";
+
     throw new Error(
       `The ${STORE_ENVIRONMENT} environment allows ${allowed}. It must allow ${github.defaultBranch} alone, or another branch's workflow could read the Store credential.`,
     );
   }
+
   return null;
 }
 
@@ -222,29 +231,38 @@ export async function storeRelease(
   },
 ): Promise<StoreRelease> {
   const parsed = parseVersion(request.version);
+
   if (!parsed || parsed.nightly || formatVersion(parsed) !== request.version) {
     throw new Error(
       `"${request.version}" is not a stable version such as 0.0.5. Only stable releases go to the Store.`,
     );
   }
+
   const tag = `v${request.version}`;
   const release = await github.release(tag);
+
   if (!release) throw new Error(`No published release is tagged ${tag}.`);
+
   if (release.draft || release.prerelease || !release.publishedAt) {
     throw new Error(
       `${tag} is a draft or a pre-release. Only a published stable release goes to the Store.`,
     );
   }
+
   const commit = await github.commitOf(tag);
+
   if (request.sha && request.sha !== commit) {
     throw new Error(`${tag} points at ${commit}, not at ${request.sha}, which this run built.`);
   }
+
   const history = await github.compare(commit, github.defaultBranch);
+
   if (history !== "ahead" && history !== "identical") {
     throw new Error(
       `${tag} points at ${commit}, which ${github.defaultBranch} does not contain (${history}).`,
     );
   }
+
   return {
     version: request.version,
     tag,
@@ -259,17 +277,23 @@ export async function storeRelease(
 async function packageRun(github: GitHub, version: string, given?: number): Promise<number> {
   if (given !== undefined) {
     const problem = releaseRunProblem(github, await github.run(given));
+
     if (problem)
       throw new Error(`Run ${given} ${problem}, so its package doesn't go to the Store.`);
+
     return given;
   }
+
   const name = artifactName(version);
+
   const kept = (await github.artifacts(name))
     .filter((artifact) => !artifact.expired)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
   for (const { runId } of kept) {
     if (runId !== null && !releaseRunProblem(github, await github.run(runId))) return runId;
   }
+
   throw new Error(
     kept.length === 0
       ? `No run holds the artifact ${name} any more: release runs keep it for 90 days. A later stable release brings a new package.`
@@ -284,11 +308,16 @@ async function packageRun(github: GitHub, version: string, given?: number): Prom
  */
 function releaseRunProblem(github: GitHub, run: WorkflowRun | null): string | null {
   if (!run) return "doesn't exist";
+
   // GitHub adds the ref to the path of some runs.
   if (run.path.replace(/@.*$/, "") !== RELEASE_WORKFLOW) return `ran ${run.path}`;
+
   if (run.event !== "workflow_dispatch") return `was started by ${run.event}`;
+
   if (run.branch !== github.defaultBranch) return `ran on ${run.branch ?? "no branch"}`;
+
   if (run.headRepository !== github.repository) return "ran another repository's code";
+
   return null;
 }
 
@@ -309,11 +338,14 @@ export interface PackageManifest {
 /** The fields of `xml`, a manifest as electron-builder's appx target writes it. */
 export function readManifest(xml: string): PackageManifest {
   const element = (name: string) => new RegExp(`<${name}\\b[^>]*>`).exec(xml)?.[0] ?? "";
+
   // electron-builder writes the publisher in single quotes and the other attributes in double.
   const attribute = (from: string, name: string) =>
     new RegExp(`\\s${name}=(["'])(.*?)\\1`).exec(from)?.[2];
+
   const text = (name: string) => new RegExp(`<${name}>([^<]+)</${name}>`).exec(xml)?.[1];
   const identity = element("Identity");
+
   return {
     identityName: attribute(identity, "Name"),
     publisher: attribute(identity, "Publisher"),
@@ -341,6 +373,7 @@ function checkIdentity(manifest: PackageManifest, packageVersion: string): Packa
   differs("The package's publisher", manifest.publisher, STORE_APP.publisher);
   differs("The package's architecture", manifest.architecture, STORE_APP.architecture);
   differs("The package's version", manifest.version, packageVersion);
+
   return manifest;
 }
 
@@ -369,6 +402,7 @@ export function packageRecord(
   differs("The application id", manifest.applicationId, STORE_APP.applicationId);
   differs("The package's name", manifest.displayName, STORE_NAME);
   differs("The Start entry's name", manifest.startName, STORE_NAME);
+
   return {
     version: request.version,
     packageVersion: version,
@@ -390,9 +424,11 @@ export function verifyPackage(
   expected?: string | undefined,
 ): StorePackage {
   const path = join(dir, packageFile(release.version));
+
   if (!existsSync(path)) throw new Error(`The artifact holds no ${packageFile(release.version)}.`);
   const bytes = readFileSync(path);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
+
   if (expected !== undefined) differs("The checksum the build job reported", expected, sha256);
 
   if (!existsSync(`${path}.json`)) throw new Error("The artifact holds no record of the package.");
@@ -405,8 +441,10 @@ export function verifyPackage(
   differs("The record's checksum", recorded["sha256"], sha256);
 
   const xml = readZipEntry(bytes, "AppxManifest.xml")?.toString("utf8");
+
   if (!xml) throw new Error("The package has no manifest with an identity.");
   const { displayName } = checkIdentity(readManifest(xml), release.packageVersion);
+
   if (!displayName) throw new Error("The package's manifest names no app.");
 
   return {
@@ -425,13 +463,18 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 /** The release file `release` wrote, with the package once `verify` added it. */
 export function readStoreRelease(path: string): StoreRelease {
   const file: unknown = JSON.parse(readFileSync(path, "utf8"));
+
   const text = (from: unknown, key: string) => {
     const value = isRecord(from) ? from[key] : undefined;
+
     if (typeof value !== "string") throw new Error(`${path} names no ${key}.`);
+
     return value;
   };
+
   const checked = isRecord(file) ? file["package"] : undefined;
   const run = isRecord(file) ? file["run"] : undefined;
+
   return {
     version: text(file, "version"),
     tag: text(file, "tag"),
@@ -453,13 +496,16 @@ export function readStoreRelease(path: string): StoreRelease {
 /** The repository the workflow runs in, read through gh. */
 function github(): GitHub {
   const repository = process.env["GITHUB_REPOSITORY"] ?? "";
+
   if (!repository) throw new Error("GITHUB_REPOSITORY doesn't name the repository.");
+
   const api = (path: string, jq: string, paginate = false) =>
     execFileSync(
       "gh",
       ["api", ...(paginate ? ["--paginate"] : []), `repos/${repository}${path}`, "--jq", jq],
       { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     ).trim();
+
   /** `read`'s answer, or null when GitHub has nothing at that address. */
   const found = <Value>(read: () => Value): Value | null => {
     try {
@@ -467,10 +513,12 @@ function github(): GitHub {
     } catch (error) {
       const missing =
         error instanceof Error && "stderr" in error && String(error.stderr).includes("HTTP 404");
+
       if (missing) return null;
       throw error;
     }
   };
+
   return {
     repository,
     defaultBranch: api("", ".default_branch"),
@@ -520,8 +568,11 @@ function github(): GitHub {
           '.deployment_branch_policy | if . == null then "any" elif .protected_branches then "protected" else "listed" end',
         ),
       );
+
       if (policy === null) return null;
+
       if (policy === "any" || policy === "protected") return policy;
+
       return api(
         `/environments/${name}/deployment-branch-policies?per_page=100`,
         '.branch_policies[] | if .type == "tag" then "tag:" + .name else .name end',
@@ -537,11 +588,13 @@ function output(values: Record<string, string>): void {
   const lines = Object.entries(values).map(([key, value]) => `${key}=${value}`);
   console.log(lines.join("\n"));
   const file = process.env["GITHUB_OUTPUT"];
+
   if (file) appendFileSync(file, `${lines.join("\n")}\n`);
 }
 
 function summary(markdown: string): void {
   const file = process.env["GITHUB_STEP_SUMMARY"];
+
   if (file) appendFileSync(file, `${markdown}\n`);
 }
 
@@ -564,6 +617,7 @@ async function main(): Promise<void> {
       manifest: { type: "string" },
     },
   });
+
   const [command] = positionals;
 
   switch (command) {
@@ -574,39 +628,50 @@ async function main(): Promise<void> {
         ref: values.ref ?? "",
         releaseRun: values["release-run"],
       });
+
       if (off) {
         console.log(`::notice::${off} Nothing was sent to the Store.`);
         summary(
           `### Microsoft Store: not submitted\n${off} \`docs/maintainers/microsoft-store.md\` lists what to set up first, and how to submit the release's package by hand.`,
         );
       }
+
       output({ ready: String(off === null) });
+
       return;
     }
+
     case "release": {
       if (!values.out) throw new Error("Name the file to write with --out.");
+
       const release = await storeRelease(github(), {
         version: values.version ?? "",
         sha: values.sha || undefined,
         run: values.run ? Number(values.run) : undefined,
         withPackage: values.package,
       });
+
       writeFileSync(values.out, `${JSON.stringify(release, null, 2)}\n`);
       console.log(
         `${release.tag} is a published stable release of ${release.commit}, package ${release.packageVersion}.`,
       );
       output({ "run-id": release.run === null ? "" : String(release.run) });
+
       return;
     }
+
     case "package": {
       if (!values.manifest || !values.dir || !values.version || !values.sha) {
         throw new Error("Give --manifest, --dir, --version and --sha.");
       }
+
       const path = join(values.dir, packageFile(values.version));
+
       const record = packageRecord(readFileSync(values.manifest, "utf8"), readFileSync(path), {
         version: values.version,
         commit: values.sha,
       });
+
       writeFileSync(`${path}.json`, `${JSON.stringify(record, null, 2)}\n`);
       output({
         sha256: record.sha256,
@@ -617,13 +682,17 @@ async function main(): Promise<void> {
       summary(
         `Mr. Streamer ${record.version} is package ${record.packageVersion}, named "${STORE_NAME}", built from ${record.commit}. SHA-256 ${record.sha256}.`,
       );
+
       return;
     }
+
     case "verify": {
       if (!values.release || !values.dir) throw new Error("Give --release and --dir.");
+
       if (values.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(values.sha256)) {
         throw new Error("The build job reported no checksum for the package.");
       }
+
       const release = readStoreRelease(values.release);
       const checked = verifyPackage(release, values.dir, values.sha256);
       writeFileSync(
@@ -633,8 +702,10 @@ async function main(): Promise<void> {
       const record = `The package of ${release.version} is ${release.packageVersion}, named "${checked.displayName}", built from ${release.commit} in run ${release.run}, SHA-256 ${checked.sha256}. The Store knows it as ${checked.fileName}.`;
       console.log(record);
       summary(record);
+
       return;
     }
+
     default:
       throw new Error(`Unknown command "${command}". Use package, gate, release or verify.`);
   }

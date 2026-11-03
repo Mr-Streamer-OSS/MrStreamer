@@ -64,13 +64,17 @@ const APP = `${API}/v1.0/my/applications/${STORE_APP.id}`;
 /** How often a request that changes nothing by being repeated is sent before giving up. */
 const ATTEMPTS = 3;
 const REQUEST_MS = 120_000;
+
 /** Azure takes a file in blocks, and 4 MiB fits every version of its API. */
 const BLOCK_BYTES = 4 * 1024 * 1024;
+
 /** After a commit Microsoft checks the upload: asked every 15 seconds, for ten minutes at most. */
 const COMMIT_POLL_MS = 15_000;
 const COMMIT_POLLS = 40;
+
 /** The Store's "What's new in this version" takes 1500 characters. */
 const NOTES_MAX = 1500;
+
 /** Approved listing text. The app interface and the change titles remain English. */
 const NOTES_INTRO = {
   nl: "Nieuwe versie met verbeteringen en oplossingen. De volledige wijzigingen staan in het Engels op github.com/Mr-Streamer-OSS/MrStreamer/releases.",
@@ -78,6 +82,7 @@ const NOTES_INTRO = {
   de: "Neue Version mit Verbesserungen und Fehlerbehebungen. Die vollständigen Hinweise stehen auf Englisch unter github.com/Mr-Streamer-OSS/MrStreamer/releases.",
   es: "Nueva versión con mejoras y correcciones. Las notas completas están en inglés en github.com/Mr-Streamer-OSS/MrStreamer/releases.",
 };
+
 /** The key's end is worth a warning this long before it comes. */
 const EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -255,14 +260,17 @@ export async function preflight(
   draft?: Draft,
 ): Promise<Preflight> {
   const given = draft?.metadataSha256 ?? null;
+
   if (draft && !(release && isId(draft.id) && (given === null || FINGERPRINT.test(given)))) {
     throw new StoreError(
       "A preflight with a draft takes the draft's submission ID, the version of the release to put in it and, to compare one, the fingerprint an earlier preflight printed.",
     );
   }
+
   const session = await signIn(access);
   const state = await storeState(session);
   const { published, pending } = state;
+
   const found = [
     `Signed in. Application ${STORE_APP.id} is ${STORE_APP.identityName}.`,
     `Published: submission ${published.id}, ${published.visibility || "no audience"}, publishing ${published.publishMode || "unset"}.`,
@@ -272,7 +280,9 @@ export async function preflight(
       ? `In progress: submission ${pending.id}, ${pending.status}.${draft ? "" : " A release waits until it is finished."}`
       : "No submission in progress.",
   ];
+
   const problems = new Set<string>();
+
   const attempt = (check: () => void) => {
     try {
       check();
@@ -281,8 +291,10 @@ export async function preflight(
       problems.add(error.message);
     }
   };
+
   attempt(() => assertPublic(published, "The published submission"));
   let draftMetadataSha256: string | null = null;
+
   if (release) {
     // The named draft's fingerprint is read whatever else would stop a submission into it.
     if (draft && pending?.id === draft.id) {
@@ -293,6 +305,7 @@ export async function preflight(
         `Its fingerprint is ${draftMetadataSha256}, the SHA-256 of what a release leaves alone in it. A submit into the draft takes it.`,
       );
     }
+
     // The package is looked for under the fingerprint the run names, or else the draft's own.
     const original = given ?? draftMetadataSha256;
     const entering = draft && original ? inDraft(release, draft.id, original) : release;
@@ -308,11 +321,13 @@ export async function preflight(
               ? `${release.version} is in submission ${step.submission.id} already: nothing would be sent.`
               : `${release.version} would be committed in the draft ${step.draft.id}, which holds it.`,
       );
+
       if (step.take === "create" || step.take === "adopt") {
         found.push(...retitling(step.renamed, "would retitle", session.clean));
       }
     });
   }
+
   return { found, problems: [...problems], draftMetadataSha256 };
 }
 
@@ -328,14 +343,17 @@ export async function submit(
   draft?: Draft,
 ): Promise<Outcome> {
   const original = draft?.metadataSha256 ?? "";
+
   if (draft && !(isId(draft.id) && FINGERPRINT.test(original))) {
     throw new StoreError(
       "A release goes into a draft by the draft's submission ID and its fingerprint: the SHA-256, 64 hexadecimal characters, that a preflight with the draft prints. Nothing was sent.",
     );
   }
+
   const release = draft ? inDraft(checked, draft.id, original) : checked;
   const session = await signIn(access);
   const step = nextStep(await storeState(session), release, draft);
+
   const reported = (
     { submission, live }: Extract<Step, { take: "report" }>,
     ...remarks: string[]
@@ -347,25 +365,31 @@ export async function submit(
     stage: live ? "live" : stageOf(submission.status),
     remarks: [...submission.remarks, ...remarks],
   });
+
   if (step.take === "report") return reported(step);
   // Only a run that names the draft and this fingerprint finds the package in it again.
   const again = draft ? `${RECOVER}, the draft ${draft.id} and the same fingerprint` : RECOVER;
   let target: Submission;
+
   if (step.take === "adopt") {
     const ready = await adopt(session, step, release, again);
+
     if (ready.take === "report") {
       return reported(
         ready,
         `Someone committed the draft ${ready.submission.id} while this run put the release in it. This run committed nothing, and can't say that the rest of the draft was as its fingerprint says by then.`,
       );
     }
+
     target = ready.draft;
   } else {
     target =
       step.take === "create" ? await fill(session, await create(session), release) : step.draft;
     await upload(session, target, release, again);
   }
+
   const committed = await commit(session, target.id, again);
+
   return {
     ...subject(release),
     fileName: release.package.fileName,
@@ -395,10 +419,13 @@ export async function status(access: StoreAccess, release: StoreRelease): Promis
   const prefix = storeFilePrefix(release);
   const named = (file: SubmittedPackage) => file.fileName.startsWith(prefix);
   const numbered = (file: SubmittedPackage) => file.version === release.packageVersion;
+
   for (const mine of [named, numbered]) {
     for (const submission of [published, pending]) {
       const file = submission && held(submission, mine);
+
       if (!file) continue;
+
       return {
         ...subject(release),
         fileName: file.fileName,
@@ -416,7 +443,9 @@ export async function status(access: StoreAccess, release: StoreRelease): Promis
       };
     }
   }
+
   const offered = published.packages.map((file) => file.version || file.fileName).join(", ");
+
   return {
     ...subject(release),
     fileName: null,
@@ -443,11 +472,14 @@ export function storeNotes(
 ): string {
   const locale = language.toLowerCase().split("-")[0];
   let notes = Object.entries(NOTES_INTRO).find(([key]) => key === locale)?.[1] ?? "";
+
   for (const [, title] of release.notes.matchAll(/^\* (.+) by @\S+ in \S+$/gm)) {
     const next = `${notes}${notes ? "\n" : ""}- ${title}`;
+
     if (next.length > NOTES_MAX) break;
     notes = next;
   }
+
   return notes || `Mr. Streamer ${release.version}.`;
 }
 
@@ -458,11 +490,15 @@ export function storeNotes(
 export function keyExpiry(expires: string | undefined, now: number): string | null {
   const renew = "docs/maintainers/microsoft-store.md#renewing-the-key says how to renew it.";
   const end = /^\d{4}-\d{2}-\d{2}$/.test(expires ?? "") ? Date.parse(`${expires}T00:00:00Z`) : NaN;
+
   if (Number.isNaN(end)) {
     return `No day is recorded for the end of the Store key, in the variable STORE_CLIENT_SECRET_EXPIRES. ${renew}`;
   }
+
   if (end <= now) return `The Store key ended on ${expires}, by the recorded date. ${renew}`;
+
   if (end - now > EXPIRY_WARNING_MS) return null;
+
   return `The Store key ends on ${expires}, in ${Math.ceil((end - now) / 86_400_000)} days. ${renew}`;
 }
 
@@ -476,7 +512,9 @@ function subject(release: StoreRelease) {
 
 function stageOf(status: string): Stage {
   if (status === "Published") return "live";
+
   if (status === "PendingCommit") return "draft";
+
   // Everything else is a refusal or a stop: the Failed statuses, Canceled, and any word Microsoft
   // adds later, which is safer read as a failure than as progress.
   return WORKING.includes(status) ? "in-progress" : "failed";
@@ -489,7 +527,9 @@ function stageOf(status: string): Stage {
  */
 function retitled(submission: Submission, release: CheckedRelease): string[] {
   const { listings } = submission.raw;
+
   if (release.package.displayName !== STORE_NAME || !isRecord(listings)) return [];
+
   return Object.entries(listings).flatMap(([language, listing]) =>
     isRecord(listing) &&
     isRecord(listing["baseListing"]) &&
@@ -509,6 +549,7 @@ function retitling(
   clean: Session["clean"],
 ): string[] {
   if (languages.length === 0) return [];
+
   return [
     `The submission ${verb} the listing in ${languages.map(clean).join(", ")} "${STORE_NAME}", as its package is named.`,
   ];
@@ -539,6 +580,7 @@ function draftFileStem(release: CheckedRelease): string {
  */
 function inDraft(release: CheckedRelease, id: string, metadataSha256: string): CheckedRelease {
   const fileName = `${draftFileStem(release)}${id}.${metadataSha256.slice(0, 16)}.msix`;
+
   return { ...release, package: { ...release.package, fileName } };
 }
 
@@ -552,9 +594,12 @@ function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): St
 function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): Step {
   const { published, pending } = state;
   const mine = (file: SubmittedPackage) => file.fileName === release.package.fileName;
+
   if (held(published, mine)) return { take: "report", submission: published, live: true };
+
   for (const file of published.packages) {
     let newer: boolean;
+
     try {
       newer = comparePackageVersions(release.packageVersion, file.version) > 0;
     } catch {
@@ -562,17 +607,22 @@ function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): St
         `Microsoft lists the published package ${file.fileName} with the version "${file.version}", which can't be compared with ${release.packageVersion}.`,
       );
     }
+
     if (!newer) {
       throw new StoreError(
         `The Store offers package ${file.version} already, as ${file.fileName}. ${release.packageVersion} doesn't sort after it, so ${release.version} isn't submitted.`,
       );
     }
   }
+
   if (draft) return draftStep(state, release, draft);
+
   if (!pending) {
     assertPublic(published, "The published submission");
+
     return { take: "create", renamed: retitled(published, release) };
   }
+
   if (!held(pending, mine)) {
     const named = held(pending, (file) => file.fileName.startsWith(draftFileStem(release)));
     throw new StoreError(
@@ -581,10 +631,13 @@ function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): St
         : `Submission ${pending.id} is in progress (${pending.status}) and doesn't hold ${release.package.fileName}. The Store takes one submission at a time: let it finish, or delete it in Partner Center if nobody needs it, then ${RECOVER}. This script deletes nothing.`,
     );
   }
+
   if (pending.status !== "PendingCommit") {
     return { take: "report", submission: pending, live: false };
   }
+
   assertPublic(pending, "The draft");
+
   return { take: "resume", draft: pending };
 }
 
@@ -596,21 +649,26 @@ function nextStep(state: StoreState, release: CheckedRelease, draft?: Draft): St
 function draftStep(state: StoreState, release: CheckedRelease, draft: Draft): DraftStep {
   const { published, pending } = state;
   const { fileName } = release.package;
+
   if (pending?.id !== draft.id) {
     throw new StoreError(
       `${pending ? `Submission ${pending.id} is in progress, not the draft ${draft.id} that the run names, and is left alone` : `The app has no submission in progress, so no draft ${draft.id} for ${release.version} to go in`}. A run that names a draft never creates a submission.`,
     );
   }
+
   const mine = held(pending, (file) => file.fileName === fileName);
+
   // Committed with the release in it, by whoever: Microsoft changes it from here on, and no run can.
   if (mine && pending.status !== "PendingCommit") {
     return { take: "report", submission: pending, live: false };
   }
+
   if (draft.metadataSha256 !== null && fingerprint(pending, release) !== draft.metadataSha256) {
     throw new StoreError(
       `The draft ${pending.id} doesn't have the fingerprint the run names: something a release leaves alone in it differs from what that preflight read. The draft is left as it is. ${mine ? `It holds the release. ${CHANGED}` : "Look at it in Partner Center, then run preflight with the draft to read its fingerprint again."}`,
     );
   }
+
   const strange = pending.packages.filter(
     (file) =>
       file !== mine &&
@@ -618,23 +676,29 @@ function draftStep(state: StoreState, release: CheckedRelease, draft: Draft): Dr
         (offered) => offered.fileName === file.fileName && offered.version === file.version,
       ),
   );
+
   const stale = strange.find((file) => file.fileName.startsWith(draftFileStem(release)));
+
   if (stale) {
     throw new StoreError(
       `The draft ${pending.id} holds ${release.version}'s package as ${stale.fileName}, which a run put there when the draft had another fingerprint: something a release leaves alone in it has changed since. The draft is left as it is. ${CHANGED}`,
     );
   }
+
   if (strange.length > 0) {
     throw new StoreError(
       `The draft ${pending.id} holds ${strange.length} package(s) that are neither the published submission's nor ${fileName} waiting for its upload. This release would replace them, so the draft is left as it is.`,
     );
   }
+
   if (pending.status !== "PendingCommit") {
     throw new StoreError(
       `Submission ${pending.id} is ${pending.status}, no longer a draft, and doesn't hold ${fileName}. It is left alone.`,
     );
   }
+
   assertPublic(pending, "The draft");
+
   return {
     take: "adopt",
     draft: pending,
@@ -651,6 +715,7 @@ function draftStep(state: StoreState, release: CheckedRelease, draft: Draft): Dr
  */
 function unfilled(submission: Submission, release: CheckedRelease): string[] {
   const { listings } = submission.raw;
+
   return [
     ...(held(submission, (file) => file.fileName === release.package.fileName)
       ? []
@@ -660,6 +725,7 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
       if (!isRecord(listing) || !isRecord(listing["baseListing"])) return [];
       const notes = storeNotes(release, language);
       const kept = listing["baseListing"]["releaseNotes"];
+
       return typeof kept === "string" && kept.replaceAll("\r\n", "\n") === notes
         ? []
         : [`listings.${language}.baseListing.releaseNotes`];
@@ -674,10 +740,13 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
  */
 function metadata(submission: Submission, release: CheckedRelease): Record<string, unknown> {
   const changing = ["applicationPackages", "status", "statusDetails", "fileUploadUrl"];
+
   const ours =
     release.package.displayName === STORE_NAME ? ["releaseNotes", "title"] : ["releaseNotes"];
+
   const without = (from: Record<string, unknown>, keys: readonly string[]) =>
     Object.entries(from).filter(([key]) => !keys.includes(key));
+
   return Object.fromEntries(
     without(submission.raw, changing).map(([key, value]) => [
       key,
@@ -722,8 +791,10 @@ function differing(before: unknown, after: unknown, path = ""): string[] {
   if (!isRecord(before) || !isRecord(after)) {
     return canonical(before) === canonical(after) ? [] : [path];
   }
+
   return [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().flatMap((key) => {
     const field = path ? `${path}.${key}` : key;
+
     return key in before && key in after ? differing(before[key], after[key], field) : [field];
   });
 }
@@ -731,6 +802,7 @@ function differing(before: unknown, after: unknown, path = ""): string[] {
 /** Fields for a message: how many, and the paths of the first ten. Never a value. */
 function listed(paths: readonly string[], clean: Session["clean"]): string {
   const shown = paths.slice(0, 10).map(clean).join(", ");
+
   return `${paths.length} field(s)${shown ? `: ${shown}` : ""}${paths.length > 10 ? " and more" : ""}`;
 }
 
@@ -743,6 +815,7 @@ function relisted(
   change: (base: Record<string, unknown>, language: string) => Record<string, unknown>,
 ): unknown {
   if (!isRecord(listings)) return listings;
+
   return Object.fromEntries(
     Object.entries(listings).map(([language, listing]) => [
       language,
@@ -769,12 +842,16 @@ async function create(session: Session): Promise<Submission> {
   const answer = await call(session, "POST", "/submissions");
   const created = answer && answer.status >= 200 && answer.status < 300;
   const draft = created ? submissionOf(answer.body, session.clean) : null;
+
   if (draft) {
     assertPublic(draft, "The new submission", leftover(draft.id));
+
     return draft;
   }
+
   const unclear =
     !answer || created || answer.status >= 500 || answer.status === 408 || answer.status === 429;
+
   if (!unclear) throw refusal("creating a submission", answer, session.clean);
   // The submission may exist all the same. A second request couldn't make another, since the
   // Store takes one at a time, but nothing would show that the one there is this run's.
@@ -799,13 +876,16 @@ async function adopt(
   again: string,
 ): Promise<DraftStep> {
   let ready: DraftStep = step;
+
   if (step.lacking.length > 0) {
     const stopped = "Nothing was uploaded or committed.";
     await fill(session, step.draft, release, `${stopped} To try again, ${again}.`);
     ready = await reread(session, step, release, "After the update", stopped);
   }
+
   if (ready.take !== "adopt") return ready;
   await upload(session, ready.draft, release, again);
+
   return reread(session, step, release, "After the upload", "Nothing was committed.");
 }
 
@@ -825,22 +905,27 @@ async function reread(
   const { id } = step.draft;
   const state = await storeState(session);
   const now = state.pending;
+
   // The fields that changed while it stayed a draft, by name. What else stops the run, `nextStep` says.
   const changed =
     now?.id === id && now.status === "PendingCommit"
       ? differing(metadata(step.draft, release), metadata(now, release))
       : [];
+
   if (changed.length > 0) {
     throw new StoreError(
       `${after}, something a release leaves alone in the draft ${id} differs from what the run found, in ${listed(changed, session.clean)}. ${stopped} ${CHANGED}`,
     );
   }
+
   const next = nextStep(state, release, step.named);
+
   if (next.take === "adopt" && next.lacking.length > 0) {
     throw new StoreError(
       `${after}, the draft ${id} lacks what the release puts in it, in ${listed(next.lacking, session.clean)}. ${stopped} Look at the draft in Partner Center.`,
     );
   }
+
   return next;
 }
 
@@ -857,11 +942,14 @@ async function fill(
   left = leftover(draft.id),
 ): Promise<Submission> {
   const { fileName } = release.package;
+
   const copied: unknown[] = Array.isArray(draft.raw["applicationPackages"])
     ? draft.raw["applicationPackages"]
     : [];
+
   const mine = (file: unknown) => isRecord(file) && file["fileName"] === fileName;
   const renamed = retitled(draft, release);
+
   const body = {
     ...draft.raw,
     applicationPackages: [
@@ -886,19 +974,25 @@ async function fill(
       ...(renamed.includes(language) && { title: STORE_NAME }),
     })),
   };
+
   const answer = await call(session, "PUT", `/submissions/${draft.id}`, body);
+
   if (!answer || answer.status < 200 || answer.status >= 300) {
     const { message } = refusal(
       `adding the package to submission ${draft.id}`,
       answer,
       session.clean,
     );
+
     throw new StoreError(`${message} ${left}`);
   }
+
   const filled = submissionOf(answer.body, session.clean);
+
   if (!filled || !held(filled, (file) => file.fileName === fileName)) {
     throw new StoreError(`Microsoft took the update without listing ${fileName}. ${left}`);
   }
+
   return { ...filled, uploadUrl: filled.uploadUrl ?? draft.uploadUrl };
 }
 
@@ -914,14 +1008,19 @@ async function upload(
   again: string,
 ): Promise<void> {
   const url = draft.uploadUrl;
+
   if (!url || !/^https:\/\/[^/?#]+\/[^?#]*\?[^#]+$/.test(url)) {
     throw new StoreError(`Microsoft gave no upload address for submission ${draft.id}.`);
   }
+
   const file = readFileSync(release.package.path);
+
   if (createHash("sha256").update(file).digest("hex") !== release.package.sha256) {
     throw new StoreError("The package on disk is no longer the one that was checked.");
   }
+
   const archive = storedZip(release.package.fileName, file);
+
   const put = async (query: string, body: string | Uint8Array) => {
     const answer = await request(
       session.access,
@@ -929,12 +1028,15 @@ async function upload(
       { method: "PUT", headers: {}, body },
       true,
     );
+
     if (answer && answer.status >= 200 && answer.status < 300) return;
     throw new StoreError(
       `Uploading the package for submission ${draft.id} ${answer ? `was refused with HTTP ${answer.status}` : "got no answer"}. The submission is a draft that holds ${release.package.fileName} by name: to upload and commit it, ${again}.`,
     );
   };
+
   const blocks: string[] = [];
+
   for (let start = 0; start < archive.length; start += BLOCK_BYTES) {
     const id = Buffer.from(`block-${String(blocks.length).padStart(6, "0")}`).toString("base64");
     blocks.push(id);
@@ -943,6 +1045,7 @@ async function upload(
       archive.subarray(start, start + BLOCK_BYTES),
     );
   }
+
   const list = blocks.map((id) => `<Latest>${id}</Latest>`).join("");
   await put(
     "comp=blocklist",
@@ -963,18 +1066,22 @@ async function commit(
   const answer = await call(session, "POST", `/submissions/${id}/commit`);
   const accepted = answer !== null && answer.status >= 200 && answer.status < 300;
   let current = await statusOf(session, id);
+
   if (!accepted && current.status === "PendingCommit") {
     const { message } = refusal(`committing submission ${id}`, answer, session.clean);
     throw new StoreError(
       `${message} It is still a draft that holds this release's package: to commit it, ${again}.`,
     );
   }
+
   const waiting = () =>
     current.status === "CommitStarted" || (accepted && current.status === "PendingCommit");
+
   for (let poll = 0; waiting() && poll < COMMIT_POLLS; poll++) {
     await session.access.wait(COMMIT_POLL_MS);
     current = await statusOf(session, id);
   }
+
   return current;
 }
 
@@ -984,25 +1091,33 @@ async function statusOf(
 ): Promise<Pick<Submission, "status" | "remarks">> {
   const what = `reading the status of submission ${id}`;
   const answer = await call(session, "GET", `/submissions/${id}/status`);
+
   if (!answer || answer.status !== 200) throw refusal(what, answer, session.clean);
   const body = answer.body;
+
   if (!isRecord(body) || typeof body["status"] !== "string") {
     throw new StoreError(`Microsoft answered ${what} with nothing readable.`);
   }
+
   return { status: body["status"], remarks: remarksOf(body["statusDetails"], session.clean) };
 }
 
 /** The app's published submission and the one in progress, once the app is shown to be ours. */
 async function storeState(session: Session): Promise<StoreState> {
   const { publishedId, pendingId } = await storeApp(session);
+
   const read = async (id: string) => {
     const what = `reading submission ${id}`;
     const answer = await call(session, "GET", `/submissions/${id}`);
+
     if (!answer || answer.status !== 200) throw refusal(what, answer, session.clean);
     const submission = submissionOf(answer.body, session.clean);
+
     if (!submission) throw new StoreError(`Microsoft answered ${what} with nothing readable.`);
+
     return submission;
   };
+
   return { published: await read(publishedId), pending: pendingId ? await read(pendingId) : null };
 }
 
@@ -1011,24 +1126,31 @@ async function storeApp(
   session: Session,
 ): Promise<{ readonly publishedId: string; readonly pendingId: string | null }> {
   const answer = await call(session, "GET", "");
+
   if (!answer || answer.status !== 200) throw refusal("reading the app", answer, session.clean);
   const app = isRecord(answer.body) ? answer.body : {};
   const { packageIdentityName: name, publisherName: publisher } = app;
+
   if (name !== STORE_APP.identityName || publisher !== STORE_APP.publisher) {
     throw new StoreError(
       `Application ${STORE_APP.id} isn't ${STORE_APP.identityName} by ${STORE_APP.publisher} in this account, so nothing is sent to it. Microsoft names it ${session.clean(String(name))} by ${session.clean(String(publisher))}.`,
     );
   }
+
   const idOf = (key: string) => {
     const named = app[key];
+
     return isRecord(named) && isId(named["id"]) ? named["id"] : null;
   };
+
   const publishedId = idOf("lastPublishedApplicationSubmission");
+
   if (!publishedId) {
     throw new StoreError(
       "The app has no published submission. The API copies the published one, so the first goes through Partner Center.",
     );
   }
+
   return { publishedId, pendingId: idOf("pendingApplicationSubmission") };
 }
 
@@ -1040,11 +1162,15 @@ function isId(value: unknown): value is string {
 /** The submission in one of Microsoft's answers, or null when this script can't read one there. */
 function submissionOf(body: unknown, clean: Session["clean"]): Submission | null {
   if (!isRecord(body) || !isId(body["id"]) || typeof body["status"] !== "string") return null;
+
   const text = (from: Record<string, unknown>, key: string) => {
     const value = from[key];
+
     return typeof value === "string" ? value : "";
   };
+
   const packages = Array.isArray(body["applicationPackages"]) ? body["applicationPackages"] : [];
+
   return {
     id: body["id"],
     status: body["status"],
@@ -1064,14 +1190,18 @@ function submissionOf(body: unknown, clean: Session["clean"]): Submission | null
 /** Microsoft's errors and warnings about a submission. Its reports are counted: they are links. */
 function remarksOf(details: unknown, clean: Session["clean"]): string[] {
   if (!isRecord(details)) return [];
+
   const listed = (key: string, label: string) =>
     (Array.isArray(details[key]) ? details[key] : []).filter(isRecord).map((each) => {
       const parts = [each["code"], each["details"]].filter((part) => typeof part === "string");
+
       return `${label}: ${clean(parts.join(": "))}`;
     });
+
   const reports = Array.isArray(details["certificationReports"])
     ? details["certificationReports"].length
     : 0;
+
   return [
     ...listed("errors", "Error"),
     ...listed("warnings", "Warning"),
@@ -1082,16 +1212,21 @@ function remarksOf(details: unknown, clean: Session["clean"]): string[] {
 /** What a copy of `submission` would carry over, for a person to check against the listing. */
 function listingFacts(submission: Submission, clean: Session["clean"]): string[] {
   const { listings, trailers, pricing } = submission.raw;
+
   const languages = Object.entries(isRecord(listings) ? listings : {}).map(
     ([language, listing]) => {
       const base =
         isRecord(listing) && isRecord(listing["baseListing"]) ? listing["baseListing"] : {};
+
       const images = Array.isArray(base["images"]) ? base["images"].length : 0;
+
       return `${clean(language)} with ${images} image(s)`;
     },
   );
+
   const price =
     isRecord(pricing) && typeof pricing["priceId"] === "string" ? pricing["priceId"] : "";
+
   return [
     `Listings: ${languages.join(", ") || "none"}. Trailers: ${Array.isArray(trailers) ? trailers.length : 0}.`,
     `Price: ${clean(price) || "unread"}.`,
@@ -1101,8 +1236,11 @@ function listingFacts(submission: Submission, clean: Session["clean"]): string[]
 /** Signs in as the application. The token lasts an hour, longer than any run of this script. */
 async function signIn(access: StoreAccess): Promise<Session> {
   const id = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
   if (!id.test(access.tenantId)) throw new StoreError("STORE_TENANT_ID is not a tenant ID.");
+
   if (!id.test(access.clientId)) throw new StoreError("STORE_CLIENT_ID is not a client ID.");
+
   const answer = await request(
     access,
     `${LOGIN}/${access.tenantId}/oauth2/token`,
@@ -1119,11 +1257,14 @@ async function signIn(access: StoreAccess): Promise<Session> {
     // Asking for a token twice changes nothing.
     true,
   );
+
   const body = answer && isRecord(answer.body) ? answer.body : {};
   const token = body["access_token"];
+
   if (answer?.status === 200 && typeof token === "string" && token) {
     return { access, token, clean: cleaner([access.clientSecret, token]) };
   }
+
   if (!answer) throw new StoreError("Microsoft Entra didn't answer the sign-in.");
   const error = typeof body["error"] === "string" ? body["error"] : "";
   const code = /AADSTS\d+/.exec(String(body["error_description"]))?.[0];
@@ -1181,16 +1322,19 @@ async function request(
 ): Promise<Answer | null> {
   for (let attempt = 1; ; attempt++) {
     let answer: Answer | null = null;
+
     try {
       const response = await access.send(url, { ...init, signal: AbortSignal.timeout(REQUEST_MS) });
       const text = await response.text();
       const correlation = response.headers.get("MS-CorrelationId");
       let body: unknown;
+
       try {
         body = JSON.parse(text);
       } catch {
         body = undefined;
       }
+
       answer = {
         status: response.status,
         body,
@@ -1199,7 +1343,9 @@ async function request(
     } catch {
       // No answer: the error could name the address, so it isn't kept.
     }
+
     const later = !answer || answer.status >= 500 || answer.status === 408 || answer.status === 429;
+
     if (!repeat || !later || attempt >= ATTEMPTS) return answer;
     await access.wait(attempt * 2000);
   }
@@ -1208,6 +1354,7 @@ async function request(
 /** What to say when Microsoft refused or didn't answer, with what its documented answers mean. */
 function refusal(what: string, answer: Answer | null, clean: Session["clean"]): StoreError {
   if (!answer) return new StoreError(`Microsoft didn't answer ${what}.`);
+
   const hints: Record<number, string> = {
     401: "The sign-in was refused.",
     403: "The application lacks the Manager role in Partner Center.",
@@ -1215,13 +1362,17 @@ function refusal(what: string, answer: Answer | null, clean: Session["clean"]): 
     409: "The app's state doesn't allow it, or the app uses a Partner Center feature the API doesn't support.",
     429: "Microsoft asks for fewer requests.",
   };
+
   // Microsoft's own errors name a code and a message. Any other body stays unprinted.
   const { body } = answer;
+
   const said =
     isRecord(body) && typeof body["code"] === "string" && typeof body["message"] === "string"
       ? `Microsoft says: ${clean(`${body["code"]}: ${body["message"]}`)}`
       : "";
+
   const asked = answer.correlation ? `Request ${answer.correlation}.` : "";
+
   return new StoreError(
     [`Microsoft answered HTTP ${answer.status} to ${what}.`, hints[answer.status], said, asked]
       .filter(Boolean)
@@ -1247,6 +1398,7 @@ function cleaner(secrets: readonly string[]): (text: string) => string {
 
 function summary(markdown: string): void {
   const file = process.env["GITHUB_STEP_SUMMARY"];
+
   if (file) appendFileSync(file, `${markdown}\n`);
 }
 
@@ -1273,6 +1425,7 @@ function report(outcome: Outcome, fine: readonly Stage[]): void {
     ["Submission", outcome.submissionId ?? "none"],
     ["Microsoft's status", outcome.status ?? "none"],
   ];
+
   const verdict = VERDICTS[outcome.stage];
   console.log([...rows.map((row) => row.join(": ")), ...outcome.remarks, verdict].join("\n"));
   summary(
@@ -1287,12 +1440,14 @@ function report(outcome: Outcome, fine: readonly Stage[]): void {
     ].join("\n"),
   );
   const output = process.env["GITHUB_OUTPUT"];
+
   if (output) {
     appendFileSync(
       output,
       `submission-id=${outcome.submissionId ?? ""}\nstatus=${outcome.status ?? ""}\nstage=${outcome.stage}\n`,
     );
   }
+
   if (!fine.includes(outcome.stage)) throw new StoreError([verdict, ...outcome.remarks].join(" "));
   console.log(`::notice::Microsoft Store, ${outcome.version}: ${verdict}`);
 }
@@ -1306,18 +1461,22 @@ async function main(): Promise<void> {
       "draft-metadata-sha256": { type: "string" },
     },
   });
+
   const [command] = positionals;
   const env = process.env;
+
   const lacking = [
     ["the variable STORE_TENANT_ID", env["STORE_TENANT_ID"]],
     ["the variable STORE_CLIENT_ID", env["STORE_CLIENT_ID"]],
     ["the secret STORE_CLIENT_SECRET", env["STORE_CLIENT_SECRET"]],
   ].flatMap(([name, value]) => (value ? [] : [name]));
+
   if (lacking.length > 0) {
     throw new StoreError(
       `The ${STORE_ENVIRONMENT} environment lacks ${lacking.join(", ")}. scripts/setup-microsoft-store.sh stores them.`,
     );
   }
+
   const access: StoreAccess = {
     tenantId: env["STORE_TENANT_ID"] ?? "",
     clientId: env["STORE_CLIENT_ID"] ?? "",
@@ -1325,20 +1484,28 @@ async function main(): Promise<void> {
     send: (url, request) => fetch(url, request),
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+
   const expiry = keyExpiry(env["STORE_CLIENT_SECRET_EXPIRES"], Date.now());
+
   if (expiry) console.log(`::warning::${expiry}`);
   const release = values.release ? readStoreRelease(values.release) : null;
   const unnamed = "Enter the version of a published stable release, such as 0.0.5.";
+
   /** The release with its checked package, which sending needs. */
   const checked = (): CheckedRelease => {
     if (!release) throw new StoreError(unnamed);
+
     if (!release.package) throw new StoreError("The release's package wasn't checked first.");
+
     return { ...release, package: release.package };
   };
+
   const given = values["draft-metadata-sha256"];
+
   if (given !== undefined && !values.draft) {
     throw new StoreError("A fingerprint is a draft's: name the draft it was read from as well.");
   }
+
   /** The draft made in Partner Center that the run names, when it names one. */
   const draft: Draft | undefined = values.draft
     ? { id: values.draft, metadataSha256: given ?? null }
@@ -1357,19 +1524,25 @@ async function main(): Promise<void> {
           "Nothing was sent or changed.",
         ].join("\n"),
       );
+
       if (problems.length > 0) throw new StoreError(problems.join(" "));
       console.log(
         "::notice::The Store account and listing are ready. Nothing was sent or changed.",
       );
+
       return;
     }
+
     case "submit":
       report(await submit(access, checked(), draft), ["live", "in-progress"]);
+
       return;
     case "status":
       if (!release) throw new StoreError(unnamed);
+
       if (draft) throw new StoreError("status takes no draft: it finds a release by its package.");
       report(await status(access, release), ["live", "in-progress"]);
+
       return;
     default:
       throw new StoreError(`Unknown command "${command}". Use preflight, submit or status.`);

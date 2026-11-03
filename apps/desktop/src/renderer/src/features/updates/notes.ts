@@ -12,13 +12,17 @@ export interface NoteItem {
 
 export function noteItems(markdown: string | null): NoteItem[] {
   if (!markdown) return [];
+
   return markdown.split("\n").flatMap((line): NoteItem[] => {
     const item = /^\s*[*-]\s+(.+)$/.exec(line)?.[1];
+
     if (!item) return [];
     const pull = /^(.*?)\s+by\s+@\S+\s+in\s+(https:\/\/\S+\/pull\/(\d+))\s*$/.exec(item);
+
     if (pull?.[1] && pull[2] && pull[3]) {
       return [{ text: pull[1], url: pull[2], label: `#${pull[3]}` }];
     }
+
     return [{ text: item.replace(/\*\*/g, ""), url: null, label: null }];
   });
 }

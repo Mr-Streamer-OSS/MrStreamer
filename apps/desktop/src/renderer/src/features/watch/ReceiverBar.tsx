@@ -34,9 +34,11 @@ export function useReceiverBar(): boolean {
   const shows = useOutput(
     (state) => state.status.output.kind === "receiver" || state.status.output.kind === "lost",
   );
+
   useEffect(() => {
     document.documentElement.style.setProperty("--receiver-bar", shows ? HEIGHT : "0px");
   }, [shows]);
+
   return shows;
 }
 
@@ -50,8 +52,10 @@ export function ReceiverBar() {
   const title = useTitlePlayer((state) => (state.shows !== null ? state.now : null));
   // Nothing plays here while a receiver is connected, so a channel that isn't idle is its own.
   const channel = usePlayer((state) => (state.phase.kind === "idle" ? null : state.channel));
+
   if (output.kind !== "receiver" && output.kind !== "lost") return null;
   const { receiver } = output;
+
   return (
     <div
       role="region"
@@ -118,6 +122,7 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
   const duration = useTitlePlayer((state) => state.duration);
   // The system's media controls stay with the title while its view is closed.
   useTitleSession();
+
   const state =
     phase.kind === "failed"
       ? phase.problem.kind === "receiver"
@@ -130,7 +135,9 @@ function TitleOn({ now, receiver }: { now: NowPlaying; receiver: Receiver }) {
           : phase.kind === "reconnecting"
             ? t("Reconnecting")
             : null;
+
   const playing = phase.kind === "playing";
+
   return (
     <>
       <Playing
@@ -186,11 +193,14 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
   const phase = usePlayer((state) => state.phase);
   const list = useUi((state) => state.list);
   const channels = useListChannels(list).channels;
+
   const programme =
     useQuery(queries.listings([channel])).data?.[ownedKey(channel)]?.now?.title ?? null;
+
   // The system's media controls stay with the channel while Watch is closed.
   useLiveSession(channel);
   const said = receiverState(phase);
+
   const state =
     phase.kind === "failed"
       ? failureLine(phase, channel)
@@ -203,10 +213,13 @@ function ChannelOn({ channel }: { channel: LiveChannel }) {
             : said === "buffering"
               ? t("Buffering")
               : null;
+
   const step = (direction: number) => {
     const target = adjacentChannel(channels ?? [], channel, direction);
+
     if (target) player.zap(target);
   };
+
   return (
     <>
       <Playing

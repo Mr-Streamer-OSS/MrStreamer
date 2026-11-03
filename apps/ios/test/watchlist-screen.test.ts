@@ -54,10 +54,14 @@ vi.mock("react-native", async () => ({
       scenario.alerts.push({ title, message, buttons }),
   },
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/files.ts", async (original) => {
   const files = await original<typeof import("../src/files.ts")>();
+
   return {
     ...files,
     writeJson: (name: string, value: unknown) => {
@@ -66,10 +70,12 @@ vi.mock("../src/files.ts", async (original) => {
     },
   };
 });
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
   titleLists: () => scenario.lists,
@@ -77,13 +83,17 @@ vi.mock("../src/titles.ts", () => ({
   titlesWorkedOut: () => scenario.complete,
   named: (title: Title) => title,
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: (title: Title) =>
     scenario.did.push(`details ${title.kind} ${title.subscriptionId}:${title.id}`),
 }));
+
 vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#A1A1A6", fill: "#1C1C1E", line: "#2C2C2E" },
     Notice: ({ failure }: { failure: { headline: string; advice: string } }) =>
@@ -114,6 +124,7 @@ const movie = (
   container: "mp4",
   tmdbId,
 });
+
 const lists = (movies: readonly ProviderTitle[]): OnDemandCatalogue => ({
   movieCategories: [],
   movies,
@@ -122,8 +133,10 @@ const lists = (movies: readonly ProviderTitle[]): OnDemandCatalogue => ({
 });
 
 type Standing = Member["titles"];
+
 const ready = (value: OnDemandCatalogue): Standing =>
   ({ kind: "ready", value, from: "provider", fetchedAt: 0, took: 1 }) as Standing;
+
 const failure = { kind: "unexpected", detail: "" } as const;
 
 const member = (id: string, titles: Standing, needsSecret = false): Member =>
@@ -139,64 +152,84 @@ const member = (id: string, titles: Standing, needsSecret = false): Member =>
 /** The providers as they stand, their lists that show indexed together as the app does. */
 function providers(...each: { id: string; titles: Standing }[]) {
   scenario.members = each.map(({ id, titles }) => member(id, titles));
+
   const listed = each.flatMap(({ id, titles }) => {
     const catalogue =
       titles.kind === "ready" ? titles.value : "last" in titles ? titles.last : null;
+
     return catalogue ? [{ subscriptionId: id, catalogue }] : [];
   });
+
   const index = indexCatalogue(listed, "en");
   scenario.lists = listed.length > 0 ? { kind: "ready", index } : { kind: "loading" };
   React.act(() => watchlist.setWatchlistOwners(each.map(({ id }) => id)));
   rerender();
+
   return index;
 }
 
 /** The title the lists give `name`. */
 function titled(index: IndexedCatalogue, name: string, kind: TitleKind = "movie"): Title {
   const found = kindOf(index, kind).titles.find((title) => title.title === name);
+
   if (!found) throw new Error(`No ${name} in the lists`);
+
   return found;
 }
+
 const save = (title: Title) => React.act(() => watchlist.saveTitle(title));
 
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function open() {
   container = document.createElement("div");
   root = createRoot(container);
   React.act(() => root!.render(React.createElement(WatchlistScreen)));
 }
+
 const rerender = () => root && React.act(() => root!.render(React.createElement(WatchlistScreen)));
+
 /** The rows as VoiceOver reads them, in order. */
 const rows = () =>
   [...container.querySelectorAll("button[aria-label]")].flatMap((row) => {
     const label = row.getAttribute("aria-label")!;
+
     return !label.startsWith("Sort, ") ? [label] : [];
   });
+
 function press(testID: string) {
   const button = container.querySelector(`[data-testid="${testID}"]`) as {
     click(): void;
   } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
+
 /** The test id of the row named `name`, or of the one `at` that place among those so named. */
 function rowOf(name: string, at = 0) {
   const row = [...container.querySelectorAll('[data-testid^="watchlist-"]')]
     .filter((each) => each.getAttribute("aria-label")?.startsWith(`${name},`))
     .at(at);
+
   if (!row) throw new Error(`No row for ${name}`);
+
   return row.getAttribute("data-testid")!;
 }
+
 const lastSheet = () => scenario.sheets.at(-1)!;
+
 const savedOwners = () =>
   watchlist.currentWatchlist().map((entry) => entry.map((each) => each.subscriptionId));
 
 beforeEach(() => {
   Object.assign(scenario, { refuse: false, complete: true, sheets: [], alerts: [], did: [] });
+
   // Every save of the test before goes, the providers' kept ones too.
   for (const id of ["a", "b", "c"]) watchlist.eraseWatchlist(id);
 });
+
 afterEach(() => {
   if (root) React.act(() => root!.unmount());
   root = null;
@@ -210,6 +243,7 @@ describe("the whole watchlist", () => {
         id: "a",
         titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
       });
+
       save(titled(index, "Dune"));
       save(titled(index, "Arrival"));
       open();
@@ -234,11 +268,13 @@ describe("the whole watchlist", () => {
       const restoredModule = "../src/watchlist.ts?restored-policy";
       const restored: typeof watchlist = await import(restoredModule);
       restored.setWatchlistOwners(["a"]);
+
       const shown = restored.watchlistRows(
         restored.currentWatchlist(),
         { index: null, complete: false, members: scenario.members, named: (title) => title },
         "newest",
       );
+
       expect(shown.map((row) => row.name)).toEqual(["Arrival"]);
     },
   );
@@ -251,10 +287,12 @@ describe("the whole watchlist", () => {
       "Beta",
       ...Array.from({ length: 26 }, (_, at) => `Saga ${at + 1}`),
     ];
+
     const index = providers({
       id: "a",
       titles: ready(lists(names.map((name, at) => movie(`m${at}`, name)))),
     });
+
     for (const name of names) save(titled(index, name));
     open();
     expect(rows()).toHaveLength(30);
@@ -306,6 +344,7 @@ describe("the whole watchlist", () => {
     save(titled(index, "Dune"));
     open();
     const without = lists([movie("8", "Arrival")]);
+
     const states: [Standing, boolean, string][] = [
       [{ kind: "loading", last: null }, true, "Lists still loading"],
       [
@@ -317,11 +356,13 @@ describe("the whole watchlist", () => {
       [ready(without), false, "Lists still loading"],
       [ready(without), true, "No longer listed"],
     ];
+
     for (const [titles, complete, said] of states) {
       scenario.complete = complete;
       providers({ id: "a", titles });
       expect(rows()).toEqual([`Dune, Movie · 2021, ${said}`]);
     }
+
     scenario.members = [member("a", ready(without), true)];
     rerender();
     expect(rows()).toEqual(["Dune, Movie · 2021, Password needed in Settings"]);
@@ -347,6 +388,7 @@ describe("the whole watchlist", () => {
       id: "a",
       titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
     });
+
     open();
     expect(container.textContent).toContain("Nothing saved yet.");
     expect(container.querySelector('[data-testid="watchlist-sort"]')).toBeNull();
@@ -357,10 +399,12 @@ describe("the whole watchlist", () => {
       "Arrival, Movie · 2021, No longer listed",
       "Dune, Movie · 2021, No longer listed",
     ]);
+
     for (const name of ["Arrival", "Dune"]) {
       press(`${rowOf(name)}-more`);
       lastSheet().choose("Remove from Watchlist");
     }
+
     expect(rows()).toEqual([]);
     expect(container.textContent).toContain("Nothing saved yet.");
   });
@@ -370,6 +414,7 @@ describe("the whole watchlist", () => {
       { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
       { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("71", "Dune", null, 1)])) },
     );
+
     save(kindOf(both, "movie").titles.find((title) => title.tmdbId === "100")!);
     open();
     // The film without a TMDB id named the same is another title, not saved.
@@ -395,6 +440,7 @@ describe("the whole watchlist", () => {
       id: "a",
       titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
     });
+
     save(titled(index, "Dune"));
     open();
     press(`${rowOf("Dune")}-more`);
@@ -417,6 +463,7 @@ describe("the whole watchlist", () => {
       id: "a",
       titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
     });
+
     save(titled(index, "Dune"));
     save(titled(index, "Arrival"));
     open();
@@ -440,7 +487,9 @@ describe("the whole watchlist", () => {
       id: "a",
       titles: ready(lists([movie("7", "Dune"), movie("8", "Arrival")])),
     });
+
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2027, 0, 15));
+
     try {
       save(titled(index, "Dune"));
       open();
@@ -462,6 +511,7 @@ describe("the whole watchlist", () => {
       { id: "a", titles: ready(lists([movie("7", "Dune", "100"), movie("8", "Heat")])) },
       { id: "b", titles: ready(lists([])) },
     );
+
     save(titled(index, "Dune"));
     save(titled(index, "Heat"));
     open();
@@ -485,6 +535,7 @@ describe("the whole watchlist", () => {
       { id: "a", titles: ready(lists([movie("7", "Dune"), movie("8", "Dune again")])) },
       { id: "b", titles: ready(lists([movie("70", "Dune", "100")])) },
     );
+
     save(titled(before, "Dune"));
     save(titled(before, "Dune again"));
     save(kindOf(before, "movie").titles.find((title) => title.tmdbId === "100")!);
@@ -504,6 +555,7 @@ describe("the whole watchlist", () => {
       },
       { id: "b", titles: ready(lists([movie("70", "Dune", "100")])) },
     );
+
     React.act(() => watchlist.alignWatchlist(after));
     expect(savedOwners()).toEqual([["a", "b"]]);
 
@@ -552,6 +604,7 @@ describe("a provider whose password the Keychain lost", () => {
       { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
       { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("9", "Heat")])) },
     );
+
     save(kindOf(index, "movie").titles.find((title) => title.tmdbId === "100")!);
     save(titled(index, "Heat"));
     open();
@@ -591,6 +644,7 @@ describe("the watchlist's file", () => {
       { id: "a", titles: ready(lists([movie("7", "Dune", "100")])) },
       { id: "b", titles: ready(lists([movie("70", "Dune", "100"), movie("9", "Heat")])) },
     );
+
     save(titled(index, "Dune"));
     save(titled(index, "Heat"));
     // The second is removed with its history kept.

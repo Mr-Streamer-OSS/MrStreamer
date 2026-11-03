@@ -41,6 +41,7 @@ import { defined } from "@mrstreamer/core/defined";
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
+
 const DECODERS = ["h264", "aac"] as const;
 const LONG = 30_000;
 
@@ -69,7 +70,9 @@ async function app(
       },
     }),
   );
+
   const downloads = await promised(runtime, Downloads);
+
   return {
     runtime,
     downloads,
@@ -96,12 +99,15 @@ async function connected(
   const started = await app(dataDir, disk, undefined, observeTransfer);
   const saved = await started.subscriptions.add(demoLogin(provider));
   await started.onDemand.refresh(saved.id);
+
   return { provider, dataDir, subscriptionId: saved.id, ...started };
 }
 
 function movie(provider: FakeProvider, subscriptionId: string, name: string) {
   const found = provider.titles.movies.find((each) => each.name.startsWith(name));
+
   if (!found) throw new Error(`No movie ${name}`);
+
   return {
     id: found.id,
     bytes: found.fixture ? fixture(found.fixture) : Buffer.alloc(0),
@@ -112,6 +118,7 @@ function movie(provider: FakeProvider, subscriptionId: string, name: string) {
 function episode(provider: FakeProvider, subscriptionId: string) {
   const series = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
   const file = series.seasons[0]![1]!;
+
   return {
     bytes: fixture(file.fixture!),
     ref: {
@@ -129,7 +136,9 @@ function episode(provider: FakeProvider, subscriptionId: string) {
 async function copyOf(dataDir: string, id: string): Promise<Buffer> {
   const names = await readdir(join(dataDir, "downloads", id));
   const media = names.find((name) => name.startsWith("media.") && !name.endsWith(".part"));
+
   if (!media) throw new Error(`No copy in ${names.join(", ")}`);
+
   return readFile(join(dataDir, "downloads", id, media));
 }
 
@@ -137,6 +146,7 @@ async function copyOf(dataDir: string, id: string): Promise<Buffer> {
 async function partial(dataDir: string, id: string): Promise<number | null> {
   const names = await readdir(join(dataDir, "downloads", id)).catch((): string[] => []);
   const part = names.find((name) => name.endsWith(".part"));
+
   return part ? (await stat(join(dataDir, "downloads", id, part))).size : null;
 }
 
@@ -158,6 +168,7 @@ function digest(bytes: Uint8Array): string {
 async function read(url: string, start: number): Promise<number> {
   const answer = await fetch(`${url}?start=${start}`);
   expect(answer.ok).toBe(true);
+
   return (await answer.arrayBuffer()).byteLength;
 }
 
@@ -183,6 +194,7 @@ async function playlistHost() {
   let origin = "";
   const asked: string[] = [];
   const holds = new Map<string, { arrived: () => void; released: Promise<void> }>();
+
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://host").pathname;
     asked.push(path);
@@ -191,6 +203,7 @@ async function playlistHost() {
     held?.arrived();
     void (held?.released ?? Promise.resolve()).then(() => {
       if (response.destroyed) return;
+
       if (path === "/list") {
         return response.end(
           [
@@ -202,9 +215,11 @@ async function playlistHost() {
           ].join("\n"),
         );
       }
+
       if (path !== FILM || request.headers["user-agent"] !== "Twelve") {
         return response.writeHead(403).end();
       }
+
       const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
       const start = range ? Number(range[1]) : 0;
       response.writeHead(range ? 206 : 200, {
@@ -218,8 +233,10 @@ async function playlistHost() {
       response.end(film.subarray(start));
     });
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
   return {
     film,
     link: `${origin}/list?token=fake`,
@@ -228,6 +245,7 @@ async function playlistHost() {
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
       holds.set(path, { arrived: arrived.resolve, released: released.promise });
+
       return { arrived: arrived.promise, release: () => released.resolve() };
     },
     close: () =>
@@ -254,21 +272,27 @@ async function cutsHost({ film = "title-h264-aac.mp4", lengthless = false } = {}
   let origin = "";
   const state = { cut: "a", held: false };
   const asked: string[] = [];
+
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
     asked.push(url.pathname + url.search);
+
     if (url.pathname === "/list") {
       return response.end(
         `#EXTM3U\n#EXTINF:-1 group-title="Films",Film\n${origin}/film.${extension}\n`,
       );
     }
+
     if (url.pathname === `/film.${extension}`) {
       return response.writeHead(302, { Location: `/media.${extension}?cut=${state.cut}` }).end();
     }
+
     const bytes = url.searchParams.get("cut") === "a" ? first : second;
+
     if (lengthless && bytes === second) {
       return response.writeHead(200, { "Content-Type": type, ETag: '"one"' }).end(bytes);
     }
+
     const range = /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
     const start = range ? Number(range[1]) : 0;
     response.writeHead(range ? 206 : 200, {
@@ -279,11 +303,14 @@ async function cutsHost({ film = "title-h264-aac.mp4", lengthless = false } = {}
         "Content-Range": range ? `bytes ${start}-${bytes.length - 1}/${bytes.length}` : undefined,
       }),
     });
+
     if (state.held) response.write(bytes.subarray(start, 40_000));
     else response.end(bytes.subarray(start));
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
   return {
     first,
     second,
@@ -305,6 +332,7 @@ async function mappedFilm(started: Awaited<ReturnType<typeof app>>, link: string
   await started.onDemand.refresh(saved.id);
   const source = (await started.subscriptions.sources())[0]!;
   const [listed] = (await source.provider.onDemandCatalogue()).movies;
+
   return { kind: "movie", subscriptionId: saved.id, id: listed!.id } satisfies TitleRef;
 }
 
@@ -317,10 +345,13 @@ function serveSubdl() {
   const request = fetch;
   let requests = 0;
   const answer: { release: string; fileMark?: string | null } = { release: "Cinema cut" };
+
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
+
     if (url.hostname === "api.subdl.com") {
       requests++;
+
       return Response.json({
         status: true,
         results: [{ tmdb_id: Number(url.searchParams.get("tmdb_id")), type: "movie" }],
@@ -333,20 +364,28 @@ function serveSubdl() {
         ],
       });
     }
+
     if (url.hostname === "dl.subdl.com") {
       requests++;
+
       return new Response(`1\n00:00:01,000 --> 00:00:03,000\n${answer.release}.\n`);
     }
+
     const response = await request(input, init);
+
     if (answer.fileMark === undefined || !url.pathname.startsWith("/files/")) return response;
     const headers = new Headers(response.headers);
+
     if (answer.fileMark === null) headers.delete("etag");
     else headers.set("etag", answer.fileMark);
     const marked = new Response(response.body, { status: response.status, headers });
     Object.defineProperty(marked, "url", { value: response.url });
+
     return marked;
   });
+
   onTestFinished(() => spy.mockRestore());
+
   return { answer, requests: () => requests };
 }
 
@@ -357,21 +396,27 @@ function serveSubdl() {
 function seriesDetailsHold() {
   const request = fetch;
   const holds: Array<{ arrived: () => void; released: Promise<void> }> = [];
+
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const held = url.searchParams.get("action") === "get_series_info" ? holds.shift() : undefined;
     const response = await request(input, init);
+
     if (held) {
       held.arrived();
       await held.released;
     }
+
     return response;
   });
+
   onTestFinished(() => spy.mockRestore());
+
   return () => {
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
     holds.push({ arrived: arrived.resolve, released: released.promise });
+
     return { arrived: arrived.promise, release: () => released.resolve() };
   };
 }
@@ -410,6 +455,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(provider.mostFilesAtOnce()).toBe(1);
 
     const asked = provider.fileRequests();
+
     const copy = await playback.openCopy(
       {
         id: first.id,
@@ -420,6 +466,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       },
       DECODERS,
     );
+
     expect(copy.audio.length).toBe(2);
     expect(copy.subtitles.length).toBeGreaterThan(0);
     expect(await read(copy.url, 0)).toBeGreaterThan(0);
@@ -474,6 +521,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       );
       await quit();
       const replacement = fixture("title-long-subs.mkv");
+
       if (!options.wholeFiles) provider.replaceMovieFile(film.id, replacement);
       provider.stallMovieFile(film.id, Number.MAX_SAFE_INTEGER, 0);
       const sentBefore = provider.fileBytes();
@@ -509,13 +557,16 @@ describe.skipIf(!hasTools)("downloads", () => {
     // The app stops as the replacement is about to be written, before the partial was emptied,
     // as a crash would: a start from what was on disk then takes the replacement whole.
     const writing = Promise.withResolvers<void>();
+
     const crashing = await app(dataDir, {
       ...fileDisk,
       write: () => {
         writing.resolve();
+
         return new Writable({ write: () => {} });
       },
     });
+
     await writing.promise;
     const crashed = await tempDir();
     await cp(dataDir, crashed, { recursive: true });
@@ -551,6 +602,7 @@ describe.skipIf(!hasTools)("downloads", () => {
   it("gives the connection to playback of its subscription, waits, then finishes", async () => {
     const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
       await connected();
+
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     const other = movie(provider, subscriptionId, "TEST | Index at the end");
     provider.stallMovieFile(film.id, 200_000, 60_000);
@@ -585,11 +637,13 @@ describe.skipIf(!hasTools)("downloads", () => {
     const closing = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
     let held = true;
+
     const disk: Disk = {
       ...fileDisk,
       write: (path, start) => {
         if (!held) return fileDisk.write(path, start);
         held = false;
+
         return new Writable({
           write: (_chunk, _encoding, done) => done(),
           destroy: (error, done) => {
@@ -599,8 +653,10 @@ describe.skipIf(!hasTools)("downloads", () => {
         });
       },
     };
+
     const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
       await connected({}, disk);
+
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     const other = movie(provider, subscriptionId, "TEST | Index at the end");
     provider.stallMovieFile(film.id, 200_000, 60_000);
@@ -613,10 +669,13 @@ describe.skipIf(!hasTools)("downloads", () => {
     const file = await onDemand.file(other.ref);
     // The open waits 10 s for the partial file to close: the clock is moved on past that.
     useMovedClock();
+
     const refused = expect(
       playback.openTitle(other.ref, file.url, DECODERS, file),
     ).rejects.toMatchObject({ error: { kind: "stream", failure: { kind: "network" } } });
+
     await closing.promise;
+
     try {
       await vi.advanceTimersByTimeAsync(10_000);
       // The provider hears nothing of the stream while the download's file is still open.
@@ -625,6 +684,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     } finally {
       closed.resolve();
     }
+
     // Asked again once it closed, it plays.
     const playing = await playback.openTitle(other.ref, file.url, DECODERS, file);
     expect(await read(playing.url, 0)).toBeGreaterThan(0);
@@ -683,6 +743,7 @@ describe.skipIf(!hasTools)("downloads", () => {
   it("tells of a failed download added again while its subscription plays", async () => {
     const { provider, subscriptionId, runtime, downloads, playback, onDemand, find } =
       await connected();
+
     const broken = movie(provider, subscriptionId, "TEST | Missing file");
     const other = movie(provider, subscriptionId, "TEST | Index at the end");
     const failing = await downloads.add(broken.ref);
@@ -708,27 +769,34 @@ describe.skipIf(!hasTools)("downloads", () => {
       code: "ENOSPC",
       message: "no space left on device",
     };
+
     let free: number | null = null;
+
     const disk: Disk = {
       ...fileDisk,
       free: async (dir) => free ?? fileDisk.free(dir),
       write: (path, start) => {
         const failure = fails;
+
         if (!failure) return fileDisk.write(path, start);
+
         return new Writable({
           write: (_chunk, _encoding, done) =>
             done(Object.assign(new Error(failure.message), { code: failure.code })),
         });
       },
     };
+
     const { provider, subscriptionId, downloads, find } = await connected({}, disk);
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
     const queued = await downloads.add(film.ref);
+
     const failsWith = (failure: object) =>
       vi.waitFor(
         async () => expect((await find(queued.id))?.status).toEqual({ kind: "failed", failure }),
         { timeout: LONG },
       );
+
     await failsWith({ kind: "disk-full", needed: null });
 
     // Too little room for the file, known before a byte of it is written.
@@ -782,6 +850,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       posterUrl: expect.any(String),
       progress: { position: 4 },
     });
+
     const copy = await again.playback.openCopy(
       {
         id: done.id,
@@ -792,6 +861,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       },
       DECODERS,
     );
+
     expect(await read(copy.url, 1)).toBeGreaterThan(0);
     await again.downloads.remove(done.id);
     expect((await again.downloads.list()).items).toEqual([]);
@@ -809,6 +879,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     const requests = provider.fileRequests();
     await provider.close();
     const copy = await playback.openCopy(await downloads.copy(done.id), DECODERS);
+
     for (const [query, expected] of [
       ["start=3&audio=2", "copy"],
       ["start=6&audio=2&picture=convert", "convert"],
@@ -818,6 +889,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       expect(response.headers.get("x-title-video")).toBe(expected);
       expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(1000);
     }
+
     expect(provider.fileRequests()).toBe(requests);
     await playback.close(copy.sessionId);
   });
@@ -839,11 +911,13 @@ describe.skipIf(!hasTools)("downloads", () => {
     onTestFinished(() => tmdb.close());
     const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
     const dataDir = await tempDir();
+
     const { subscriptions, onDemand, downloads, roster, quit } = await app(
       dataDir,
       undefined,
       tmdb,
     );
+
     const saved = await subscriptions.add(demoLogin(provider));
     await onDemand.refresh(saved.id);
     tmdb.failSeasons("hold");
@@ -868,8 +942,10 @@ describe.skipIf(!hasTools)("downloads", () => {
     "looks an episode's file up again once, and no more nor under a login replaced meanwhile, when catalogue refreshes overtake the lookup as its transfer starts (%o)",
     async ({ overtaken, replaced, ends, requests }) => {
       const hold = seriesDetailsHold();
+
       const { provider, dataDir, subscriptionId, downloads, subscriptions, onDemand, find, quit } =
         await connected();
+
       // The episode waits behind a stalled film, with the details it was queued by.
       const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
       provider.stallMovieFile(film.id, 200_000, 60_000);
@@ -885,18 +961,22 @@ describe.skipIf(!hasTools)("downloads", () => {
       const asked = provider.detailRequests();
       const holds = Array.from({ length: overtaken }, hold);
       await downloads.pause(first.id);
+
       // Each refresh is accepted while the lookup's answer is still on its way.
       for (const held of holds) {
         await held.arrived;
+
         if (replaced) await subscriptions.add(demoLogin(provider));
         await onDemand.refresh(subscriptionId);
         held.release();
       }
+
       await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe(ends), {
         timeout: LONG,
       });
       // Renewed once only, and not at all once the login was replaced during the lookup.
       expect(provider.detailRequests() - asked).toBe(requests);
+
       if (ends === "complete")
         expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(target.bytes));
       else
@@ -912,6 +992,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected({
       slotReleaseMs: 800,
     });
+
     const first = movie(provider, subscriptionId, "TEST | Index at the end");
     const second = movie(provider, subscriptionId, "TEST | Old AVI");
     const a = await downloads.add(first.ref);
@@ -953,19 +1034,23 @@ describe.skipIf(!hasTools)("downloads", () => {
   it("tells of a deleted copy last, though a list made before it waited on the disk", async () => {
     let hold: PromiseWithResolvers<void> | null = null;
     const held = Promise.withResolvers<void>();
+
     const slow: Disk = {
       ...fileDisk,
       free: async (dir) => {
         const holding = hold;
+
         // Only the downloads folder's, which the list asks for; a transfer asks for its own.
         if (holding && basename(dir) === "downloads") {
           hold = null;
           held.resolve();
           await holding.promise;
         }
+
         return fileDisk.free(dir);
       },
     };
+
     const { provider, subscriptionId, runtime, downloads, find } = await connected({}, slow);
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
     const done = await downloads.add(film.ref);
@@ -1034,6 +1119,7 @@ describe.skipIf(!hasTools)("downloads", () => {
   it("lets another subscription play while a download goes on", async () => {
     const { provider, subscriptionId, downloads, subscriptions, onDemand, playback, find } =
       await connected();
+
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
     const second = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(second.id);
@@ -1081,14 +1167,17 @@ describe.skipIf(!hasTools)("downloads", () => {
 
   it("downloads a mapped playlist's film with its headers, and stops while the file is still looked up", async () => {
     const host = await playlistHost();
+
     try {
       const dataDir = await tempDir();
       const first = await app(dataDir);
+
       const saved = await first.subscriptions.add({
         server: host.link,
         username: "",
         password: "",
       });
+
       await first.subscriptions.mapPlaylist(saved.id, playlistGroupId("Films"), "movie");
       await first.onDemand.refresh(saved.id);
       const source = (await first.subscriptions.sources())[0]!;
@@ -1124,6 +1213,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       expect(digest(await copyOf(dataDir, again.id))).toBe(digest(host.film));
       // What is kept on disk names no address: the secret in the file's path stays in memory.
       const db = new DatabaseSync(join(dataDir, "mrstreamer.db"), { readOnly: true });
+
       try {
         const kept = JSON.stringify(db.prepare("select * from downloads").all());
         expect(kept).toContain(again.id);
@@ -1132,6 +1222,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       } finally {
         db.close();
       }
+
       const another = await second.downloads.add({ ...ref });
       expect(another.id).toBe(again.id);
       await second.quit();
@@ -1143,6 +1234,7 @@ describe.skipIf(!hasTools)("downloads", () => {
   it("starts again when a file's address redirects to another query, whatever its mark", async () => {
     const host = await cutsHost();
     host.state.held = true;
+
     try {
       const dataDir = await tempDir();
       const started = await app(dataDir);
@@ -1179,6 +1271,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     async (cases) => {
       const service = serveSubdl();
       const host = await cutsHost(cases.host);
+
       try {
         const dataDir = await tempDir();
         const started = await app(dataDir);
@@ -1190,11 +1283,14 @@ describe.skipIf(!hasTools)("downloads", () => {
         const ref = await mappedFilm(started, host.link);
         const file = await onDemand.file(ref);
         const session = await playback.openTitle(ref, file.url, DECODERS, file);
+
         const choose = async (release: string) => {
           service.answer.release = release;
           const found = await subtitles.search(session.sessionId);
+
           return (await subtitles.choose(session.sessionId, found.results[0]!.id)).saved.selection!;
         };
+
         expect(await read(session.url, 0)).toBeGreaterThan(0);
         const first = await choose("Cut A");
         // The same address now leads to the other file, read again, under the same size and ETag.
@@ -1212,6 +1308,7 @@ describe.skipIf(!hasTools)("downloads", () => {
           { timeout: LONG },
         );
         expect(digest(await copyOf(dataDir, queued.id))).toBe(digest(host.first));
+
         const copy = await playback.openCopy(
           {
             id: queued.id,
@@ -1222,6 +1319,7 @@ describe.skipIf(!hasTools)("downloads", () => {
           },
           DECODERS,
         );
+
         expect(await read(copy.url, 0)).toBeGreaterThan(0);
         expect(await subtitles.saved(copy.sessionId)).toBeNull();
         await expect(subtitles.show(copy.sessionId, second)).rejects.toBeDefined();
@@ -1242,14 +1340,17 @@ describe.skipIf(!hasTools)("downloads", () => {
 
   it("brings saved subtitles along only for the very bytes they were saved for", async () => {
     const service = serveSubdl();
+
     const { provider, subscriptionId, downloads, playback, onDemand, subtitles, find, dataDir } =
       await connected({ maxConnections: 2, slotReleaseMs: 0 });
+
     await subtitles.configure(
       { enabled: true, service: "subdl", languages: ["en"] },
       { subdl: { apiKey: "fixture-key" } },
     );
     const same = movie(provider, subscriptionId, "TEST | Long subtitles");
     const other = movie(provider, subscriptionId, "TEST | Index at the end");
+
     for (const film of [same, other]) {
       const file = await onDemand.file(film.ref);
       const session = await playback.openTitle(film.ref, file.url, DECODERS, file);
@@ -1259,6 +1360,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       await subtitles.timing(session.sessionId, { offset: -2, speed: 1 });
       await playback.close(session.sessionId);
     }
+
     // The second film's file changes before it is downloaded: its subtitles were for other bytes.
     provider.replaceMovieFile(other.id, fixture("title-mpeg4-mp3.avi"));
     const kept = await downloads.add(same.ref);
@@ -1271,13 +1373,17 @@ describe.skipIf(!hasTools)("downloads", () => {
       { timeout: LONG },
     );
     const asked = service.requests();
+
     const copies = [
       { id: kept.id, container: "mkv" },
       { id: changed.id, container: "mp4" },
     ];
+
     const saved = [];
+
     for (const { id, container } of copies) {
       const download = (await find(id))!;
+
       const copy = await playback.openCopy(
         {
           id,
@@ -1288,11 +1394,13 @@ describe.skipIf(!hasTools)("downloads", () => {
         },
         DECODERS,
       );
+
       saved.push(await subtitles.saved(copy.sessionId));
       // A copy is searched for nowhere.
       await expect(subtitles.search(copy.sessionId)).rejects.toBeDefined();
       await playback.close(copy.sessionId);
     }
+
     expect(saved[0]).toMatchObject({ subtitle: { release: "Cinema cut" }, timing: { offset: -2 } });
     expect(saved[1]).toBeNull();
     expect(service.requests()).toBe(asked);
@@ -1300,13 +1408,16 @@ describe.skipIf(!hasTools)("downloads", () => {
 
   it("brings no subtitle chosen while nothing proved the bytes, though the file was proven before", async () => {
     const service = serveSubdl();
+
     const { provider, subscriptionId, downloads, playback, onDemand, subtitles, find, dataDir } =
       await connected({ maxConnections: 2, slotReleaseMs: 0 });
+
     await subtitles.configure(
       { enabled: true, service: "subdl", languages: ["en"] },
       { subdl: { apiKey: "fixture-key" } },
     );
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
+
     const choose = async (release: string) => {
       service.answer.release = release;
       const file = await onDemand.file(film.ref);
@@ -1316,6 +1427,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       await subtitles.choose(session.sessionId, found.results[0]!.id);
       await playback.close(session.sessionId);
     };
+
     service.answer.fileMark = '"first"';
     await choose("Cinema cut");
     // Other bytes of the same size behind the address, with nothing to tell them by.
@@ -1331,6 +1443,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     await vi.waitFor(async () => expect((await find(queued.id))?.status.kind).toBe("complete"), {
       timeout: LONG,
     });
+
     const copy = await playback.openCopy(
       {
         id: queued.id,
@@ -1341,6 +1454,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       },
       DECODERS,
     );
+
     expect(await subtitles.saved(copy.sessionId)).toBeNull();
     await playback.close(copy.sessionId);
   }, 60_000);
@@ -1350,6 +1464,7 @@ describe.skipIf(!hasTools)("the queue", () => {
   /** How main lists the downloads now: each one's id and how it stands, in its order. */
   const standing = async (downloads: Awaited<ReturnType<typeof app>>["downloads"]) =>
     (await downloads.list()).items.map((item) => [item.id, item.status.kind]);
+
   const quiet = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   /**
@@ -1360,6 +1475,7 @@ describe.skipIf(!hasTools)("the queue", () => {
     const coordination = await runtime.runPromise(PlaybackCoordination);
     const held = Promise.withResolvers<void>();
     const letGo = Promise.withResolvers<void>();
+
     const holding = runtime.runPromise(
       coordination.exclusive(
         Effect.promise(async () => {
@@ -1368,7 +1484,9 @@ describe.skipIf(!hasTools)("the queue", () => {
         }),
       ),
     );
+
     await held.promise;
+
     return async () => {
       letGo.resolve();
       await holding;
@@ -1384,12 +1502,15 @@ describe.skipIf(!hasTools)("the queue", () => {
     const closing = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
     let holding = true;
+
     const disk: Disk = {
       ...fileDisk,
       write: (path, start) => {
         const sink = fileDisk.write(path, start);
+
         if (!holding) return sink;
         holding = false;
+
         return new Writable({
           write: (chunk, encoding, done) => void sink.write(chunk, encoding, done),
           final: (done) => void sink.end(() => done()),
@@ -1403,12 +1524,15 @@ describe.skipIf(!hasTools)("the queue", () => {
         });
       },
     };
+
     const started = await connected({}, disk);
+
     const film = movie(
       started.provider,
       started.subscriptionId,
       "TEST | Two sound tracks and subtitles (MULTI)",
     );
+
     started.provider.stallMovieFile(film.id, 200_000, 60_000);
     const id = (await started.downloads.add(film.ref)).id;
     await vi.waitFor(
@@ -1421,12 +1545,14 @@ describe.skipIf(!hasTools)("the queue", () => {
     const lock = new DatabaseSync(join(started.dataDir, "mrstreamer.db"));
     lock.exec("begin exclusive");
     closed.resolve();
+
     try {
       await expect(pausing).rejects.toMatchObject({ error: { kind: "unexpected" } });
     } finally {
       lock.exec("rollback");
       lock.close();
     }
+
     return { ...started, film, id };
   }
 
@@ -1477,12 +1603,14 @@ describe.skipIf(!hasTools)("the queue", () => {
   it("keeps a pause through playback and a receiver taking the connection, then goes on in order", async () => {
     const { provider, dataDir, subscriptionId, downloads, playback, onDemand, find } =
       await connected();
+
     const [first, held, last, shown] = [
       "TEST | Two sound tracks and subtitles (MULTI)",
       "TEST | Old AVI",
       "TEST | Long subtitles",
       "TEST | Index at the end",
     ].map((name) => movie(provider, subscriptionId, name));
+
     provider.stallMovieFile(first!.id, 200_000, 60_000);
     provider.stallMovieFile(last!.id, 30_000, 60_000);
     const a = (await downloads.add(first!.ref)).id;
@@ -1519,11 +1647,13 @@ describe.skipIf(!hasTools)("the queue", () => {
     await vi.waitFor(async () =>
       expect((await find(c))?.status).toMatchObject({ received: 30_000 }),
     );
+
     // A receiver takes it too, and gives it back to the same one.
     const receiving = await playback.openReceiverTitle(shown!.ref, file.url, {
       address: "127.0.0.1",
       decoders: DECODERS,
     });
+
     await vi.waitFor(async () =>
       expect(await standing(downloads)).toEqual([
         [b, "paused"],
@@ -1548,15 +1678,18 @@ describe.skipIf(!hasTools)("the queue", () => {
 
   it("moves the downloads waiting their turn, keeps the order through a restart, and never stops the transfer", async () => {
     const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+
     const titles = [
       "TEST | Two sound tracks and subtitles (MULTI)",
       "TEST | Index at the end",
       "TEST | Old AVI",
       "TEST | Long subtitles",
     ].map((name) => movie(provider, subscriptionId, name));
+
     provider.stallMovieFile(titles[0]!.id, 200_000, 60_000);
     // Added one after another, as a season's episodes are, they go in that order.
     const ids: string[] = [];
+
     for (const title of titles) ids.push((await downloads.add(title.ref)).id);
     const [a, b, c, d] = ids as [string, string, string, string];
     await vi.waitFor(
@@ -1664,11 +1797,13 @@ describe.skipIf(!hasTools)("the queue", () => {
 
   it("changes nothing when a pause or a move can't be written down at all, the transfer going on, and holds once asked again", async () => {
     const { provider, dataDir, subscriptionId, downloads, find } = await connected();
+
     const [first, second, third] = [
       "TEST | Two sound tracks and subtitles (MULTI)",
       "TEST | Index at the end",
       "TEST | Old AVI",
     ].map((name) => movie(provider, subscriptionId, name));
+
     provider.stallMovieFile(first!.id, 200_000, 60_000);
     provider.stallMovieFile(third!.id, 30_000, 60_000);
     const a = (await downloads.add(first!.ref)).id;
@@ -1682,6 +1817,7 @@ describe.skipIf(!hasTools)("the queue", () => {
     // Another copy of the app holds the database's write lock past the second the app waits.
     const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
     lock.exec("begin exclusive");
+
     try {
       const unwritten = { error: { kind: "unexpected" } };
       await expect(downloads.pause(a)).rejects.toMatchObject(unwritten);
@@ -1691,6 +1827,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       lock.exec("rollback");
       lock.close();
     }
+
     // The transfer went on and nothing moved.
     expect(await standing(downloads)).toEqual([
       [a, "transferring"],
@@ -1750,12 +1887,14 @@ describe.skipIf(!hasTools)("the queue", () => {
 
   it("starts the first download allowed once a held admission lets go, as moved meanwhile, and keeps that order", async () => {
     const { provider, dataDir, runtime, subscriptionId, downloads, find, quit } = await connected();
+
     const [missing, held, first, second] = [
       "TEST | Missing file",
       "TEST | Long subtitles",
       "TEST | Two sound tracks and subtitles (MULTI)",
       "TEST | Old AVI",
     ].map((name) => movie(provider, subscriptionId, name));
+
     provider.stallMovieFile(held!.id, 10_000, 60_000);
     provider.stallMovieFile(first!.id, 200_000, 60_000);
     provider.stallMovieFile(second!.id, 30_000, 60_000);
@@ -1830,6 +1969,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       playback,
       find,
     } = await connected();
+
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
     const elsewhere = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(elsewhere.id);
@@ -1881,6 +2021,7 @@ describe.skipIf(!hasTools)("the queue", () => {
       playback,
       find,
     } = await connected();
+
     const other = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
     const elsewhere = await subscriptions.add(demoLogin(other));
     await onDemand.refresh(elsewhere.id);
@@ -1916,12 +2057,15 @@ describe.skipIf(!hasTools)("the queue", () => {
     const flushed = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();
     let holding = true;
+
     const disk: Disk = {
       ...fileDisk,
       write: (path, start) => {
         const sink = fileDisk.write(path, start);
+
         if (!holding) return sink;
         holding = false;
+
         return new Writable({
           write: (chunk, encoding, done) => void sink.write(chunk, encoding, done),
           final: (done) => {
@@ -1938,6 +2082,7 @@ describe.skipIf(!hasTools)("the queue", () => {
         });
       },
     };
+
     const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected({}, disk);
     const film = movie(provider, subscriptionId, "TEST | Index at the end");
     const held = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
@@ -1967,11 +2112,14 @@ describe.skipIf(!hasTools)("the queue", () => {
       async () => expect((await find(going))?.status).toMatchObject({ received: 200_000 }),
       { timeout: LONG },
     );
+
     const [paused, removed] = await Promise.allSettled([
       downloads.pause(going),
       downloads.remove(going),
     ]);
+
     expect(removed.status).toBe("fulfilled");
+
     if (paused.status === "rejected")
       expect(paused.reason).toMatchObject({ error: { kind: "unexpected" } });
     await vi.waitFor(() => expect(provider.activeStreams()).toBe(0), { timeout: 1000 });
@@ -1987,8 +2135,10 @@ describe.skipIf(!hasTools)("an episode's series", () => {
   it("keeps what an episode's series lists as it is queued, from the details it reads anyway, by series version and account", async () => {
     const { provider, dataDir, subscriptionId, downloads, subscriptions, onDemand, quit } =
       await connected();
+
     const dutch = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
     const english = provider.titles.series.find((each) => each.name === "TEST | Formats (EN)")!;
+
     const ref = (
       series: typeof dutch,
       season: number,
@@ -2002,6 +2152,7 @@ describe.skipIf(!hasTools)("an episode's series", () => {
       season,
       episode: number,
     });
+
     const asked = provider.detailRequests();
     const first = await downloads.add(ref(dutch, 1, 2));
     // The series' details are what queuing an episode reads already: once, then kept.
@@ -2009,9 +2160,11 @@ describe.skipIf(!hasTools)("an episode's series", () => {
     const read = provider.detailRequests();
     const next = await downloads.add(ref(dutch, 2, 1));
     const other = await downloads.add(ref(english, 1, 1));
+
     const film = await downloads.add(
       movie(provider, subscriptionId, "TEST | Index at the end").ref,
     );
+
     expect(provider.detailRequests() - read).toBeLessThanOrEqual(2);
 
     // The same ids and TMDB id of another account's series stand apart.
@@ -2024,8 +2177,10 @@ describe.skipIf(!hasTools)("an episode's series", () => {
 
     const keys = async (list: Awaited<ReturnType<typeof downloads.list>>) => {
       const of = (id: string) => list.items.find((item) => item.id === id)!.series;
+
       return [of(first.id), of(next.id), of(other.id), of(film.id), of(theirs.id)] as const;
     };
+
     const check = async (list: Awaited<ReturnType<typeof downloads.list>>) => {
       const [a, b, english, movie, account] = await keys(list);
       expect(a).toEqual(expect.any(String));
@@ -2042,11 +2197,13 @@ describe.skipIf(!hasTools)("an episode's series", () => {
         ],
         sourceOrder: false,
       });
+
       // Made up for the window: nothing of the account or its server in it.
       for (const key of [a, english, account]) {
         expect(key).not.toMatch(/demo|127\.0\.0\.1|localhost/);
       }
     };
+
     await check(await downloads.list());
     await quit();
     // Kept with each record: the next start groups them alike, under keys of its own.
@@ -2057,7 +2214,9 @@ describe.skipIf(!hasTools)("an episode's series", () => {
   it("keeps apart a series whose id the provider gave to another, and lets copies without a series stand alone", async () => {
     const { provider, dataDir, subscriptionId, downloads, onDemand, find, quit } =
       await connected();
+
     const dutch = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
+
     const ref = (number: number): TitleRef => ({
       kind: "episode",
       subscriptionId,
@@ -2066,6 +2225,7 @@ describe.skipIf(!hasTools)("an episode's series", () => {
       season: 1,
       episode: number,
     });
+
     const before = await downloads.add(ref(2));
     // Finish the old copy before replacing its catalogue: a refresh can invalidate an in-flight file lookup.
     await vi.waitFor(async () => expect((await find(before.id))?.status.kind).toBe("complete"), {
@@ -2093,10 +2253,12 @@ describe.skipIf(!hasTools)("an episode's series", () => {
 
     // A record kept before series were, and one whose series this build can't read, stand alone.
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
     const row = (id: string) =>
       JSON.parse(
         String(db.prepare("select record from downloads where id = ?").get(id)?.["record"]),
       ) as Record<string, unknown>;
+
     const { series: _kept, ...older } = row(before.id);
     const update = db.prepare("update downloads set record = ? where id = ?");
     update.run(JSON.stringify(older), before.id);
@@ -2138,9 +2300,11 @@ it("says Downloads can't be opened in the interface language picked since the st
   const { downloads, quit } = await app(dataDir);
   setLanguage({ locale: "fr-FR", formats: "fr-FR" });
   onTestFinished(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+
   const closed = {
     error: { kind: "unexpected", detail: "Impossible d'ouvrir les téléchargements." },
   };
+
   await expect(downloads.list()).rejects.toMatchObject(closed);
   await expect(
     downloads.add({ kind: "movie", subscriptionId: "any", id: "1" }),
@@ -2152,10 +2316,13 @@ it("says Downloads can't be opened in the interface language picked since the st
 it("observes actual download runs, successful completion, disk failure and cancelled transfers with bounded codes", async () => {
   const outcomes: { outcome: OperationOutcome; failure?: AnalyticsFailure }[] = [];
   let starts = 0;
+
   const observeTransfer: OperationObserver = () => {
     starts++;
+
     return (outcome, failure) => outcomes.push({ outcome, ...defined({ failure }) });
   };
+
   // The file system's room until the last download, which finds none.
   let full = false;
   const disk: Disk = { ...fileDisk, free: async (dir) => (full ? 0 : fileDisk.free(dir)) };
@@ -2169,11 +2336,13 @@ it("observes actual download runs, successful completion, disk failure and cance
   expect(outcomes).toEqual([{ outcome: "success" }]);
   await started.downloads.add(film.ref);
   expect(starts).toBe(1);
+
   const stoppedFilm = movie(
     started.provider,
     started.subscriptionId,
     "TEST | Two sound tracks and subtitles (MULTI)",
   );
+
   started.provider.stallMovieFile(stoppedFilm.id, 200_000, 60_000);
   const stopped = await started.downloads.add(stoppedFilm.ref);
   await vi.waitFor(
@@ -2195,11 +2364,13 @@ it("observes actual download runs, successful completion, disk failure and cance
       }),
     { timeout: LONG },
   );
+
   const opened = await started.playback.openTitle(
     film.ref,
     (await started.onDemand.file(film.ref)).url,
     DECODERS,
   );
+
   await vi.waitFor(() =>
     expect(outcomes).toEqual([
       { outcome: "success" },
@@ -2211,9 +2382,11 @@ it("observes actual download runs, successful completion, disk failure and cance
   await started.downloads.remove(preempted.id);
   await started.playback.close(opened.sessionId);
   full = true;
+
   const failed = await started.downloads.add(
     movie(started.provider, started.subscriptionId, "TEST | Old AVI").ref,
   );
+
   await vi.waitFor(
     async () => expect((await started.find(failed.id))?.status.kind).toBe("failed"),
     { timeout: LONG },

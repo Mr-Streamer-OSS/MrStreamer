@@ -41,18 +41,23 @@ export function RemindersScreen() {
   const list = useReminders();
   const permission = usePermission();
   const reminders = list.kind === "read" ? list.reminders : [];
+
   const days = useMemo(() => {
     const now = Date.now();
     const grouped: Day[] = [];
+
     for (const reminder of reminders) {
       const from = localDay(reminder.start).from;
       const last = grouped.at(-1);
+
       if (last?.from === from) last.data.push(reminder);
       else grouped.push({ from, title: dayTitle(from, now), data: [reminder] });
     }
+
     return grouped;
     // A new language writes the days' headings again.
   }, [reminders, locale]);
+
   if (list.kind !== "read") {
     return (
       <View style={styles.screen}>
@@ -68,6 +73,7 @@ export function RemindersScreen() {
       </View>
     );
   }
+
   return (
     <SectionList<Reminder, Day>
       style={styles.screen}
@@ -146,10 +152,12 @@ const Row = memo(function Row({ reminder }: { reminder: Reminder }) {
   const title = reminder.status.kind === "changed" ? reminder.status.was : reminder.title;
   const facts = `${reminder.channelName} · ${programmeRange(reminder)}`;
   const status = statusOf(reminder);
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate") open(reminder);
     else if (nativeEvent.actionName === "cancel") void cancel(reminder);
   };
+
   return (
     <Swipe
       label={t("reminder.cancel")}

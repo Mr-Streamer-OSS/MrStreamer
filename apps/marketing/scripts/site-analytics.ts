@@ -2,13 +2,16 @@ import type { SiteCapture } from "../src/analytics.ts";
 
 /** The only production ingestion the site may reach: the EU Cloud the privacy policy states. */
 const EU = "https://eu.i.posthog.com";
+
 /** PostHog's capture path, kept the same behind the site's own route. */
 const CAPTURE = "/i/v0/e/";
+
 /**
  * The site's own address for PostHog, which pages send to and name as `$lib_custom_api_host`, as
  * posthog-js does for a proxy. Only INGEST_ROUTE gives it meaning.
  */
 export const INGEST = "https://mrstreamer.app/ingest";
+
 /**
  * The Vercel route package-vercel.ts packs: a POST to exactly /ingest/i/v0/e/ goes on to EU's
  * capture path. Any other method or path under /ingest answers 404. Vercel passes the visitor's
@@ -34,21 +37,26 @@ export function siteAnalyticsConfiguration(
   building: boolean,
 ): SiteCapture | null {
   const local = env["MR_STREAMER_SITE_ANALYTICS_LOCAL_ENDPOINT"];
+
   if (local !== undefined) return loopback(local);
+
   if (!building || env["MR_STREAMER_SITE_ANALYTICS_RELEASE_BUILD"] !== "1") return null;
   const token = env["MR_STREAMER_SITE_ANALYTICS_PROJECT_TOKEN"];
+
   if (
     env["MR_STREAMER_SITE_ANALYTICS_HOST"] !== EU ||
     !token ||
     !/^phc_[A-Za-z0-9_-]+$/.test(token)
   )
     return null;
+
   return { endpoint: `${INGEST}${CAPTURE}`, token, apiHost: INGEST };
 }
 
 function loopback(endpoint: string): SiteCapture | null {
   try {
     const url = new URL(endpoint);
+
     return url.protocol === "http:" &&
       ["127.0.0.1", "[::1]"].includes(url.hostname) &&
       url.port &&

@@ -32,6 +32,7 @@ const STATUS: UpdateStatus = {
 
 const views: (() => void)[] = [];
 let opener: HTMLButtonElement;
+
 beforeEach(() => {
   ipc.reset();
   ipc.always("updates.downloadVersion", {
@@ -43,6 +44,7 @@ beforeEach(() => {
   document.body.append(opener);
   opener.focus();
 });
+
 afterEach(() => {
   for (const unmount of views.splice(0)) unmount();
   opener.remove();
@@ -62,11 +64,13 @@ async function mount() {
     createElement(Fragment, null, createElement(UpdateNotice), createElement(UpdateReminder)),
   );
   views.push(view.unmount);
+
   return { ...view, client };
 }
 
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
 const dialog = () => document.querySelector<HTMLElement>("[data-update-reminder]");
+
 const named = (text: string) =>
   [...document.querySelectorAll("button")].find((button) => button.textContent === text);
 

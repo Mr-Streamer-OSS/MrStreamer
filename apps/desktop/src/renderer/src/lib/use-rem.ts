@@ -10,7 +10,9 @@ export function useRem(): number {
   useEffect(() => {
     const update = () => setRem(measure());
     window.addEventListener("resize", update);
+
     return () => window.removeEventListener("resize", update);
   }, []);
+
   return rem;
 }

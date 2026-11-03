@@ -6,9 +6,12 @@ import Module, { createRequire } from "node:module";
 createRequire(import.meta.url).extensions[".png"] = (module) => {
   module.exports = 1;
 };
+
 const resolving = Module as typeof Module & {
   _resolveFilename(request: string, ...rest: unknown[]): string;
 };
+
 const resolve = resolving._resolveFilename.bind(resolving);
+
 resolving._resolveFilename = (request, ...rest) =>
   resolve(request.endsWith("/tmdb.png") ? request.replace(/\.png$/, "@2x.png") : request, ...rest);

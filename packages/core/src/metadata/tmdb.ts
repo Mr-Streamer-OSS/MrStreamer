@@ -249,6 +249,7 @@ export function tmdb(options: TmdbOptions) {
   async function get(path: string, params: Record<string, string>, signal?: AbortSignal) {
     const query = new URLSearchParams(bearer ? params : { ...params, api_key: options.key });
     let response: Response;
+
     try {
       response = await fetchImpl(`${api}${path}?${query}`, {
         headers: bearer
@@ -263,16 +264,22 @@ export function tmdb(options: TmdbOptions) {
       if (signal?.aborted) throw cause;
       throw new TmdbError({ kind: "unavailable", detail: String(cause) });
     }
+
     if (response.status === 401) throw new TmdbError({ kind: "refused" });
+
     if (response.status === 404) throw new TmdbError({ kind: "missing" });
+
     if (response.status === 429) {
       const retryAfter = Number(response.headers.get("retry-after")) || 10;
       throw new TmdbError({ kind: "busy", retryAfter });
     }
+
     if (!response.ok) {
       throw new TmdbError({ kind: "unavailable", detail: `HTTP ${response.status}` });
     }
+
     const body: unknown = await response.json();
+
     return body;
   }
 
@@ -289,12 +296,15 @@ export function tmdb(options: TmdbOptions) {
       signal?: AbortSignal,
     ): Promise<TitleMetadata & TitleNames> {
       const body = Details()(await get(`/${kind}/${id}`, { language }, signal));
+
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+
       const name = (body.title ?? body.name)?.trim() || null;
       const original = (body.original_title ?? body.original_name)?.trim() || null;
       const madeIn = body.original_language || null;
+
       return {
         genres: (body.genres ?? []).map((genre) => genre.id),
         language: madeIn,
@@ -321,15 +331,18 @@ export function tmdb(options: TmdbOptions) {
       const body = About()(
         await get(`/${kind}/${id}`, { language, append_to_response: "credits" }, signal),
       );
+
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+
       const directors =
         kind === "tv"
           ? (body.created_by ?? []).map((person) => person.name)
           : (body.credits?.crew ?? [])
               .filter((person) => person.job === "Director")
               .map((person) => person.name);
+
       return {
         original: (body.original_title ?? body.original_name)?.trim() || null,
         language: body.original_language || null,
@@ -360,12 +373,15 @@ export function tmdb(options: TmdbOptions) {
       signal?: AbortSignal,
     ): Promise<readonly EpisodeAbout[]> {
       const body = seasonEpisodes()(await get(`/tv/${id}/season/${season}`, { language }, signal));
+
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+
       return body.episodes.map((episode): EpisodeAbout => {
         const name = episode.name?.trim() || null;
         const unnamed = name && UNNAMED_EPISODE.exec(name);
+
         return {
           number: episode.episode_number,
           name: unnamed && Number(unnamed[1]) === episode.episode_number ? null : name,
@@ -395,9 +411,11 @@ export function tmdb(options: TmdbOptions) {
       const body = Services()(
         await get(`/watch/providers/${kind}`, { watch_region: region }, signal),
       );
+
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+
       return body.results
         .map((service): StreamingService => ({
           id: service.provider_id,
@@ -429,9 +447,11 @@ export function tmdb(options: TmdbOptions) {
           signal,
         ),
       );
+
       if (body instanceof type.errors) {
         throw new TmdbError({ kind: "unavailable", detail: body.summary });
       }
+
       return { ids: body.results.map((result) => String(result.id)), pages: body.total_pages };
     },
   };

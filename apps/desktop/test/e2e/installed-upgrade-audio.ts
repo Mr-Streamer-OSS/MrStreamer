@@ -5,7 +5,9 @@ import type { Driver } from "./installed-upgrade.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 type AudioPreferences = Pick<Preferences, "audioLanguage">;
+
 type AudioReply = AudioPreferences | { revision: number; preferences: AudioPreferences };
+
 const audioOf = (reply: AudioReply) =>
   "preferences" in reply ? reply.preferences.audioLanguage : reply.audioLanguage;
 
@@ -62,12 +64,14 @@ export async function restoreAudioInput(
 ): Promise<void> {
   const boundary = `Symbol.for(${JSON.stringify(`mrstreamer.restore-audio.${randomUUID()}`)})`;
   const selector = `'[aria-label="Audio in"]'`;
+
   const control = `
     const controls = document.querySelectorAll(${selector});
     const e = controls[0];
     if (controls.length !== 1 || !(e instanceof HTMLSelectElement) ||
         !e.isConnected || e.matches(':disabled') || e.multiple)
       throw new Error('Expected one enabled single Audio in select');`;
+
   const trace: AudioEvidence = {
     snapshots: [],
     events: [],
@@ -75,20 +79,24 @@ export async function restoreAudioInput(
     keys: [],
     diagnosticErrors: [],
   };
+
   // Diagnostics have a short CDP budget of their own, including the public read. They never
   // extend an acknowledgement wait or replace its error if the page is already failing.
   const snapshot = async (phase: string) => {
     let publicAudio: AudioSnapshot["publicAudio"];
+
     try {
       const result = await d.page.evaluate<Result<AudioReply>>(
         "window.mrStreamer.invoke('preferences.get')",
         1000,
       );
+
       if (!result.ok) throw new Error("Audio snapshot preferences.get failed");
       publicAudio = audioOf(result.value) ?? null;
     } catch (error) {
       trace.diagnosticErrors.push(`${phase} public read: ${errorText(error)}`);
     }
+
     try {
       const result = await d.page.evaluate<Omit<AudioSnapshot, "phase" | "publicAudio">>(
         `(() => {
@@ -110,18 +118,23 @@ export async function restoreAudioInput(
         })()`,
         1000,
       );
+
       const observation = { ...result, phase, publicAudio };
       trace.snapshots.push(observation);
       trace.events = result.events;
       trace.truncated = result.truncated;
+
       return observation;
     } catch (error) {
       trace.diagnosticErrors.push(`${phase}: ${errorText(error)}`);
+
       return null;
     }
   };
+
   let failed = false;
   let primaryError: unknown;
+
   try {
     await d.wait(
       () => d.page.evaluate<boolean>(`!!document.querySelector(${selector})`),
@@ -151,6 +164,7 @@ export async function restoreAudioInput(
           if (globalThis[${boundary}]?.element !== e) throw new Error('Audio in changed element');
           return e.value;
         })()`);
+
         return shown !== "nl" && shown === audioOf(await d.read("preferences.get"));
       },
       10_000,
@@ -168,6 +182,7 @@ export async function restoreAudioInput(
     // mount refresh cannot leave us validating an earlier option list before sending N.
     const focused = await snapshot("focused-before-key");
     const dom = focused?.dom;
+
     if (
       !dom ||
       dom.controls !== 1 ||
@@ -185,6 +200,7 @@ export async function restoreAudioInput(
     const enabled = dom.options.filter((o) => !o.disabled);
     const target = enabled.filter((o) => o.value === "nl");
     const prefix = enabled.filter((o) => o.label.toLowerCase().startsWith("n"));
+
     if (
       target.length !== 1 ||
       target[0]?.label !== "Nederlands" ||
@@ -193,10 +209,12 @@ export async function restoreAudioInput(
     )
       throw new Error("N does not uniquely identify enabled Nederlands/nl");
     d.actions.push({ at: new Date().toISOString(), action: "Restore Audio in: N" });
+
     for (const type of ["keyDown", "keyUp"]) {
       const key: AudioEvidence["keys"][number] = { at: Date.now(), type, key: "N" };
       // Keep the request time even if CDP fails to acknowledge the command.
       trace.keys.push(key);
+
       const reply = await d.page.send("Input.dispatchKeyEvent", {
         type,
         key: "N",
@@ -204,9 +222,12 @@ export async function restoreAudioInput(
         windowsVirtualKeyCode: 78,
         ...defined({ text: type === "keyDown" ? "N" : undefined }),
       });
+
       key.completedAt = Date.now();
+
       if (reply.error) throw new Error(`Restore Audio in ${type}: ${String(reply.error)}`);
     }
+
     const tab: AudioEvidence["keys"][number] = { at: Date.now(), type: "press", key: "Tab" };
     trace.keys.push(tab);
     await d.key("Tab", 9);
@@ -228,12 +249,14 @@ export async function restoreAudioInput(
     trace.error = errorText(error);
   } finally {
     await snapshot(failed ? "restore-failure" : "post-public-ack");
+
     // Save before listener/app cleanup, even when the original public acknowledgement failed.
     try {
       await writeEvidence(trace);
     } catch (error) {
       trace.diagnosticErrors.push(`write evidence: ${errorText(error)}`);
     }
+
     try {
       await d.page.evaluate(
         `(() => {
@@ -246,6 +269,7 @@ export async function restoreAudioInput(
       );
     } catch (error) {
       trace.diagnosticErrors.push(`remove listeners: ${errorText(error)}`);
+
       try {
         await writeEvidence(trace);
       } catch (writeError) {
@@ -253,7 +277,9 @@ export async function restoreAudioInput(
       }
     }
   }
+
   if (failed) throw primaryError;
+
   if (trace.diagnosticErrors.length)
     throw new Error(`Restore Audio in evidence incomplete: ${trace.diagnosticErrors.join("; ")}`);
 }

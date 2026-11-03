@@ -29,40 +29,49 @@ const boundary = vi.hoisted(() => ({
 // Every other filesystem operation and all services remain real.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:fs/promises")>();
+
   return {
     ...real,
     mkdir: async (...args: Parameters<typeof real.mkdir>) => {
       const held = boundary.next;
+
       if (held && String(args[0]) === held.directory) {
         boundary.next = null;
         held.arrived();
         await held.released;
       }
+
       return real.mkdir(...args);
     },
     rm: async (...args: Parameters<typeof real.rm>) => {
       const held = boundary.deleting;
+
       if (held && String(args[0]) === held.path) {
         boundary.deleting = null;
         held.arrived();
         await held.released;
       }
+
       const failed = boundary.failure;
+
       if (failed && String(args[0]) === failed.path) {
         boundary.failure = null;
         failed.arrived();
         await failed.released;
         throw Object.assign(new Error("simulated filesystem refusal"), { code: "EACCES" });
       }
+
       return real.rm(...args);
     },
     readFile: async (...args: Parameters<typeof real.readFile>) => {
       const held = boundary.reading;
+
       if (held && String(args[0]) === held.path) {
         boundary.reading = null;
         held.arrived();
         await held.released;
       }
+
       return real.readFile(...args);
     },
   };
@@ -81,13 +90,16 @@ it("settles a refresh before its first scheduler turn and lets the saved source 
   const subscriptions = await promised(runtime, Subscriptions);
   const provider = await fakeProvider();
   const { id } = await subscriptions.add(demoLogin(provider));
+
   const result = await runtime.runPromise(
     Effect.gen(function* () {
       const library = yield* Library;
       const saved = (yield* (yield* Subscriptions).saved).find((source) => source.id === id)!;
+
       const refresh = yield* Effect.forkChild(Effect.exit(library.refresh(id)), {
         startImmediately: true,
       });
+
       // Let admission finish through microtasks without giving the new owner a scheduler turn.
       yield* Effect.forEach(
         Array.from({ length: 20 }),
@@ -97,9 +109,11 @@ it("settles a refresh before its first scheduler turn and lets the saved source 
       const forgotten = yield* Effect.exit(library.forget(saved).pipe(Effect.timeout("2 seconds")));
       yield* Fiber.await(refresh);
       const later = yield* Effect.exit(library.refresh(id).pipe(Effect.timeout("5 seconds")));
+
       return { forgotten, later };
     }),
   );
+
   expect(Exit.isSuccess(result.forgotten), "forget must settle an owner that has not started").toBe(
     true,
   );
@@ -122,34 +136,44 @@ it.each([
     const first = await fakeProvider();
     const login = (server: string) => ({ server, username: "demo", password: "demo" });
     let id = (await subscriptions.add(login(first.url))).id;
+
     if (kind === "added") {
       const second = await fakeProvider({ second: true });
       id = (await subscriptions.add(login(second.url))).id;
     }
+
     await library.refresh(id);
     const folder = kind === "original" ? dataDir : join(dataDir, "subscriptions", id);
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
     boundary.next = { directory: folder, arrived: arrived.resolve, released: released.promise };
+
     const refresh = library.refresh(id).then(
       () => null,
       (cause: unknown) => cause,
     );
+
     await arrived.promise;
     let returned = false;
     const fiber = runtime.runFork(roster.remove(id, false));
+
     const removal = runtime.runPromise(Fiber.await(fiber)).then((exit) => {
       returned = true;
+
       return exit;
     });
+
     let interrupting: Promise<unknown> | undefined;
+
     try {
       // Its login goes first; the removal then waits for the write the refresh began.
       const login =
         kind === "original"
           ? join(dataDir, "subscription.json")
           : join(folder, "subscription.json");
+
       await vi.waitFor(async () => expect(await stat(login).catch(() => null)).toBeNull());
+
       if (cancel) interrupting = runtime.runPromise(Fiber.interrupt(fiber));
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(returned, "removal must not return past an admitted write").toBe(false);
@@ -157,6 +181,7 @@ it.each([
       released.resolve();
       boundary.next = null;
     }
+
     expect(Exit.isSuccess(await removal)).toBe(!cancel);
     await interrupting;
     expect(await refresh).toMatchObject({
@@ -205,6 +230,7 @@ it("does not return a removed source from a viewing read held on another source'
     released: released.promise,
   };
   const pending = viewing.state();
+
   try {
     await arrived.promise;
     await roster.remove(b, false);
@@ -212,6 +238,7 @@ it("does not return a removed source from a viewing read held on another source'
     released.resolve();
     boundary.reading = null;
   }
+
   expect((await subscriptions.list()).map((each) => each.id)).toEqual([a]);
   expect((await pending).favourites.map((each) => each.subscriptionId)).toEqual([a]);
 }, 30_000);
@@ -237,6 +264,7 @@ it("finishes removing a source whose cache deletion fails after its login went",
   };
   const warnings: string[] = [];
   const rawRoster = await runtime.runPromise(Roster);
+
   const removal = runtime
     .runPromise(
       rawRoster
@@ -256,12 +284,14 @@ it("finishes removing a source whose cache deletion fails after its login went",
       () => "removed",
       () => "refused",
     );
+
   try {
     await arrived.promise;
   } finally {
     released.resolve();
     boundary.failure = null;
   }
+
   expect(await removal).toBe("removed");
   expect(warnings).toContain("[storage] removal cleanup failed");
   expect(await subscriptions.list()).toEqual([]);
@@ -300,8 +330,10 @@ it.each([false, true])(
     const removal = runtime.runPromise(Fiber.await(fiber));
     let interrupting: Promise<unknown> | undefined;
     let interrupted = false;
+
     try {
       await arrived.promise;
+
       if (cancel) {
         interrupting = runtime.runPromise(Fiber.interrupt(fiber)).then(() => {
           interrupted = true;
@@ -313,6 +345,7 @@ it.each([false, true])(
       released.resolve();
       boundary.failure = null;
     }
+
     expect(Exit.isFailure(await removal)).toBe(true);
     await interrupting;
     // Successful optional erasure stays committed even when login deletion then refuses.
@@ -343,40 +376,51 @@ it.each(["original", "added"])(
     const roster = await promised(runtime, Roster);
     const first = await fakeProvider();
     let id = (await subscriptions.add(demoLogin(first))).id;
+
     if (kind === "added") {
       const second = await fakeProvider({ second: true });
       id = (await subscriptions.add(demoLogin(second))).id;
     }
+
     await library.refresh(id);
     const folder = kind === "original" ? dataDir : join(dataDir, "subscriptions", id);
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
     boundary.next = { directory: folder, arrived: arrived.resolve, released: released.promise };
+
     const old = library.refresh(id).then(
       () => "accepted",
       () => "refused",
     );
+
     await arrived.promise;
     await subscriptions.update(id, { secret: "demo" });
     let replacementReturned = false;
+
     const newer = library.refresh(id).then(
       () => {
         replacementReturned = true;
+
         return "accepted";
       },
       () => "refused",
     );
+
     // Give the first replacement a turn at the held old writer, then start another.
     await new Promise((resolve) => setTimeout(resolve, 20));
+
     const newest = library.refresh(id).then(
       () => "accepted",
       () => "refused",
     );
+
     await new Promise((resolve) => setTimeout(resolve, 20));
     let removed = false;
+
     const removal = roster.remove(id, false).then(() => {
       removed = true;
     });
+
     try {
       await vi.waitFor(async () =>
         expect((await subscriptions.list()).some((source) => source.id === id)).toBe(false),
@@ -389,6 +433,7 @@ it.each(["original", "added"])(
     } finally {
       released.resolve();
     }
+
     await removal;
     expect(await Promise.all([old, newer, newest])).toEqual(["refused", "refused", "refused"]);
     expect(
@@ -422,9 +467,11 @@ it.each(["login", "folder"])(
     const fiber = runtime.runFork(rawRoster.remove(b, false));
     await arrived.promise;
     let interrupted = false;
+
     const interrupting = runtime.runPromise(Fiber.interrupt(fiber)).then(() => {
       interrupted = true;
     });
+
     try {
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(interrupted, "the owner must not leave a native deletion running").toBe(false);
@@ -432,6 +479,7 @@ it.each(["login", "folder"])(
     } finally {
       released.resolve();
     }
+
     await interrupting;
     expect(await stat(folder).catch(() => null)).toBeNull();
     await runtime.dispose();
@@ -455,9 +503,11 @@ it("cancelling the reversible erase restores the source before any cache teardow
   await titles.refresh(id);
   const raw = await runtime.runPromise(Subscriptions);
   const arrived = Promise.withResolvers<void>();
+
   const fiber = runtime.runFork(
     raw.remove(id, { erase: Effect.andThen(Effect.sync(arrived.resolve), Effect.never) }),
   );
+
   await arrived.promise;
   await runtime.runPromise(Fiber.interrupt(fiber));
   expect((await subscriptions.list()).map((source) => source.id)).toEqual([id]);
@@ -492,6 +542,7 @@ it.each([
     const rawSubscriptions = Context.get(services, Subscriptions);
     const queued = Promise.withResolvers<void>();
     const go = Promise.withResolvers<void>();
+
     // The real removal is waiting for its storage turn, after Settings captured discovery.
     const slowed = Context.add(services, Subscriptions, {
       ...rawSubscriptions,
@@ -499,20 +550,25 @@ it.each([
         Effect.andThen(
           Effect.promise(() => {
             queued.resolve();
+
             return go.promise;
           }),
           rawSubscriptions.remove(id, steps),
         ),
     });
+
     const roster = await promised(
       runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
       Roster,
     );
+
     const folder = original ? dataDir : join(dataDir, "subscriptions", b);
     let returned = false;
+
     const removal = roster.remove(b, erase).then(() => {
       returned = true;
     });
+
     await queued.promise;
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
@@ -520,9 +576,12 @@ it.each([
     const writing = runtime.runFork(rawSettings.updateSubscription(b, { lastCategoryId: "x" }));
     let cancelling: Promise<unknown> | undefined;
     const failedCache = Promise.withResolvers<void>();
+
     try {
       await arrived.promise;
+
       if (cancelWrite) cancelling = runtime.runPromise(Fiber.interrupt(writing));
+
       if (original) {
         // A sibling's EACCES must not interrupt Settings while its native write is held.
         boundary.failure = {
@@ -531,10 +590,12 @@ it.each([
           released: Promise.resolve(),
         };
       }
+
       go.resolve();
       await vi.waitFor(async () =>
         expect(await stat(join(folder, "subscription.json")).catch(() => null)).toBeNull(),
       );
+
       if (original) await failedCache.promise;
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(returned, "Settings must settle its turn before the folder goes").toBe(false);
@@ -543,12 +604,15 @@ it.each([
       go.resolve();
       released.resolve();
     }
+
     try {
       const write = await runtime.runPromise(Fiber.await(writing));
+
       if (cancelWrite) expect(Exit.isFailure(write)).toBe(true);
       else expect(Exit.isSuccess(write)).toBe(true);
       await cancelling;
       await removal;
+
       if (!original) expect(await stat(folder).catch(() => null)).toBeNull();
       expect(await stat(join(folder, "subscription.json")).catch(() => null)).toBeNull();
       expect((await subscriptions.list()).map((source) => source.id)).toEqual([a]);
@@ -576,6 +640,7 @@ it("logs a refused added-folder cleanup and startup finishes its committed remov
   boundary.failure = { path: folder, arrived: arrived.resolve, released: released.promise };
   const warnings: string[] = [];
   const roster = await runtime.runPromise(Roster);
+
   const removal = runtime.runPromise(
     roster
       .remove(b, false)
@@ -590,12 +655,14 @@ it("logs a refused added-folder cleanup and startup finishes its committed remov
         ),
       ),
   );
+
   try {
     await arrived.promise;
     expect(await stat(join(folder, "subscription.json")).catch(() => null)).toBeNull();
   } finally {
     released.resolve();
   }
+
   await removal;
   expect(warnings).toContain("[storage] removal cleanup failed");
   expect((await subscriptions.list()).map((source) => source.id)).toEqual([a]);

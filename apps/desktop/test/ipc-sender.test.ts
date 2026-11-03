@@ -18,6 +18,7 @@ import { runtimeFor, tempDir, testConfig } from "./support.ts";
 const boundary = vi.hoisted(
   () => new Map<string, (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>>(),
 );
+
 vi.mock("electron", () => ({
   ipcMain: {
     handle: (
@@ -30,12 +31,14 @@ vi.mock("electron", () => ({
 /** A window's page as Electron gives it to main: the same main frame object on every call. */
 function page(processId: number) {
   const mainFrame = { processId, routingId: 1, parent: null };
+
   return Object.assign(new EventEmitter(), { mainFrame }) as WebContents;
 }
 
 /** A frame inside `of`'s page, as an iframe of it is, in the same renderer process. */
 function childOf(of: WebContents) {
   const parent = of.mainFrame;
+
   return { processId: parent.processId, routingId: 2, parent } as WebFrameMain;
 }
 
@@ -50,11 +53,14 @@ async function start() {
   const customLists = await runtime.runPromise(CustomLists);
   const window = page(1);
   const calls: string[] = [];
+
   const note = (call: string) =>
     Effect.sync(() => {
       calls.push(call);
+
       return null;
     });
+
   const handlers: Partial<IpcHandlers> = {
     ...customListHandlers({ customLists }),
     "reminders.cancel": ({ id }) => note(`reminders.cancel ${id}`),
@@ -63,22 +69,26 @@ async function start() {
     "guide.search": ({ query }) => Effect.as(note(`guide.search ${query}`), []),
     "analytics.action": (action) => note(`analytics.action ${action}`),
   };
+
   // Only these methods are called; registerIpc still registers every contract.
   registerIpc(
     (effect) => runtime.runPromiseExit(effect),
     handlers as IpcHandlers,
     (sender) => sender === window,
   );
+
   const call = (
     method: IpcMethod,
     senderFrame: WebFrameMain | null,
     input?: unknown,
     sender = window,
   ) => boundary.get(method)!({ sender, senderFrame } as IpcMainInvokeEvent, input);
+
   return { window, calls, call };
 }
 
 const search = { view: "palette", id: "first" };
+
 /** Representative methods, with what their handler notes when one runs. */
 const methods: { name: string; method: IpcMethod; input: unknown; noted: string | null }[] = [
   {
@@ -126,6 +136,7 @@ const methods: { name: string; method: IpcMethod; input: unknown; noted: string 
     noted: "analytics.action search_used",
   },
 ];
+
 const senders = {
   "another frame of the window": (window: WebContents) => ({
     sender: window,
@@ -134,9 +145,11 @@ const senders = {
   "a frame of the window that has gone": (window: WebContents) => ({ sender: window, frame: null }),
   "another window": () => {
     const other = page(2);
+
     return { sender: other, frame: other.mainFrame };
   },
 };
+
 const refusals = methods.flatMap((method) =>
   Object.entries(senders).map(([from, sender]) => ({ ...method, from, sender })),
 );

@@ -23,24 +23,31 @@ import { createHash } from "node:crypto";
 import type { FakeProvider, FakeTitles } from "../../desktop/test/fake-provider.ts";
 
 type Movie = FakeTitles["movies"][number];
+
 type Series = FakeTitles["series"][number];
 
 /** The word Search is given. */
 export const BROWSE_QUERY = "Ocean";
+
 /** The titles of each kind Search finds for it, adults and versions of one title counted once. */
 export const BROWSE_MATCHES = 125;
+
 /** Rank n's provider id is this plus n, for movies and series alike. */
 const RANKED = 70_000;
+
 /** The rank whose title has a second version. */
 const VERSIONED = 10;
+
 /** Where each kind's TMDB ids start; movies and series are numbered apart on TMDB. */
 const TMDB = 600_000;
 const ADULT = 70_600;
 const SHARED = { first: 70_900, second: 70_950, tmdb: "650900" } as const;
 const UNRELATED = { id: 70_901, tmdb: "650901" } as const;
 const NAME = "Quiet Lighthouse (EN)";
+
 /** Before the default titles, the oldest of which is about a million seconds before theirs. */
 const ADDED = 1_788_000_000;
+
 /** The longest a hold lasts. */
 const HOLD_MAX_MS = 600_000;
 
@@ -88,15 +95,20 @@ export function browseTitles(built: FakeTitles, second: boolean): FakeTitles {
   if (second) {
     return { ...built, movies: [...built.movies, movie(SHARED.second, NAME, ADDED, SHARED.tmdb)] };
   }
+
   const ranks = Array.from({ length: BROWSE_MATCHES }, (_, index) => index + 1);
   const added = (rank: number) => ADDED - rank;
+
   const movies = ranks.map((rank) =>
     movie(RANKED + rank, `Ocean Voyage ${padded(rank)} (EN)`, added(rank), String(TMDB + rank)),
   );
+
   const shows = ranks.map((rank) =>
     series(RANKED + rank, `Ocean Tides ${padded(rank)} (EN)`, added(rank), String(TMDB + rank)),
   );
+
   const version = `${padded(VERSIONED)} (NL)`;
+
   return {
     ...built,
     movies: [
@@ -175,6 +187,7 @@ type Release = "control" | "limit" | "stop";
 export function browseControls(provider: FakeProvider, second: boolean) {
   const declared = browseDeclared(provider.titles, second);
   let listed = true;
+
   let hold: {
     readonly release: () => void;
     readonly timer: NodeJS.Timeout;
@@ -182,6 +195,7 @@ export function browseControls(provider: FakeProvider, second: boolean) {
     readonly ms: number;
     arrived: boolean;
   } | null = null;
+
   let lastRelease: Release | null = null;
 
   const release = (how: Release) => {
@@ -191,6 +205,7 @@ export function browseControls(provider: FakeProvider, second: boolean) {
     hold = null;
     lastRelease = how;
   };
+
   const state = () => ({
     ...declared,
     sharedListed: listed,
@@ -204,9 +219,12 @@ export function browseControls(provider: FakeProvider, second: boolean) {
     state,
     control(method: string, url: URL): { status: number; body: unknown } | undefined {
       if (url.pathname === "/profile") return { status: 200, body: state() };
+
       if (method !== "POST") return undefined;
+
       if (url.pathname === "/shared") {
         const asked = url.searchParams.get("listed");
+
         if (asked !== "true" && asked !== "false") return { status: 400, body: null };
         listed = asked === "true";
         provider.serveTitles((all) =>
@@ -214,12 +232,16 @@ export function browseControls(provider: FakeProvider, second: boolean) {
             ? all
             : { ...all, movies: all.movies.filter((each) => each.id !== declared.shared.id) },
         );
+
         return { status: 200, body: state() };
       }
+
       if (url.pathname === "/hold-title-lists") {
         const ms = Number(url.searchParams.get("ms") ?? 60_000);
+
         if (!Number.isInteger(ms) || ms <= 0 || ms > HOLD_MAX_MS)
           return { status: 400, body: null };
+
         // A second hold would leave the first's requests without a release.
         if (!hold) {
           const held = provider.hold("titles");
@@ -231,12 +253,16 @@ export function browseControls(provider: FakeProvider, second: boolean) {
             current.arrived = true;
           });
         }
+
         return { status: 200, body: state() };
       }
+
       if (url.pathname === "/release-title-lists") {
         release("control");
+
         return { status: 200, body: state() };
       }
+
       return undefined;
     },
     stop: () => release("stop"),

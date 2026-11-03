@@ -12,8 +12,10 @@ const DEPENDENCY_FACADES = "build/rndeps-facades";
 /** A section of a Podfile.lock, from its heading to the blank line after it. */
 function section(text: string, name: string): string {
   const start = text.indexOf(`\n${name}:\n`);
+
   if (start < 0) return "";
   const end = text.indexOf("\n\n", start + 1);
+
   return text.slice(start, end < 0 ? undefined : end);
 }
 
@@ -38,12 +40,15 @@ const versionIn = (licences: Licences, name: string) =>
 export function podProblems(lockfile: string, licences: Licences, manifest: Manifest): string[] {
   const text = `\n${readFileSync(lockfile, "utf8")}`;
   const pods = new Map<string, string>();
+
   for (const [, name = "", version = ""] of section(text, "PODS").matchAll(
     /^ {2}- "?([^\s"/]+)(?:\/[^\s"]+)? \(([^)]+)\)/gm,
   )) {
     pods.set(name, version);
   }
+
   if (pods.size === 0) return [`${lockfile} lists no pods`];
+
   const sources = new Map(
     [
       ...section(text, "EXTERNAL SOURCES").matchAll(
@@ -51,8 +56,10 @@ export function podProblems(lockfile: string, licences: Licences, manifest: Mani
       ),
     ].map(([, pod = "", source = ""]) => [pod, source] as const),
   );
+
   const project = dirname(resolve(lockfile));
   const within = (path: string, dir: string) => !relative(dir, path).startsWith("..");
+
   const native = new Set(
     licences.components
       .filter((each) =>
@@ -60,6 +67,7 @@ export function podProblems(lockfile: string, licences: Licences, manifest: Mani
       )
       .map((each) => each.name),
   );
+
   // Their pins hold: scripts/licences.ts checked them as it generated the inventory.
   const { aggregate, generated } = manifest;
   const problems: string[] = [];
@@ -67,36 +75,45 @@ export function podProblems(lockfile: string, licences: Licences, manifest: Mani
   for (const [pod, version] of [...pods].sort(([a], [b]) => a.localeCompare(b, "en"))) {
     const source = sources.get(pod);
     const path = source === undefined ? null : resolve(project, source);
+
     if (path && !existsSync(path)) {
       problems.push(`${pod}'s source ${source} is missing`);
       continue;
     }
+
     const where = source === undefined ? "from the CocoaPods specs" : source;
 
     if (pod === aggregate.pod) {
       const expected = versionIn(licences, aggregate.versionOf);
+
       if (version !== expected) {
         problems.push(
           `${pod} ${version} resolves, but Licences has ${aggregate.versionOf} ${expected}`,
         );
       }
+
       if (!path || packageNameAt(path) !== aggregate.versionOf) {
         problems.push(`${pod} comes ${where}, not from ${aggregate.versionOf}`);
       }
+
       continue;
     }
 
     const component = manifest.components.find((entry) => entry.pods?.includes(pod));
+
     if (component) {
       if (version !== component.version) {
         problems.push(
           `${pod} ${version} resolves, but Licences has ${component.name} ${component.version}`,
         );
       }
+
       const facade = path !== null && relative(project, path) === join(DEPENDENCY_FACADES, pod);
+
       if (path && !facade && packageNameAt(path) !== "react-native") {
         problems.push(`${pod} comes from ${source}, not where ${component.name}'s pins say`);
       }
+
       continue;
     }
 
@@ -104,6 +121,7 @@ export function podProblems(lockfile: string, licences: Licences, manifest: Mani
       problems.push(`${pod} (${where}) has no notice in Licences`);
     } else if (within(path, project)) {
       const expected = generated.pods[pod];
+
       if (expected === undefined || relative(project, path) !== expected) {
         problems.push(`${pod} (${source}) is in the native project but isn't a pod it generates`);
       }
@@ -111,8 +129,10 @@ export function podProblems(lockfile: string, licences: Licences, manifest: Mani
       // The app's own modules, under the app's licence.
     } else {
       const name = packageNameAt(path);
+
       if (!name || !native.has(name)) problems.push(`${pod} (${source}) has no notice in Licences`);
     }
   }
+
   return problems;
 }

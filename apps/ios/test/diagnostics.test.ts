@@ -61,26 +61,34 @@ vi.mock("react-native", async () => ({
   Share: {
     share: async (content: unknown) => {
       scenario.shared.push(content);
+
       return { action: "sharedAction" };
     },
   },
 }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
+
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => scenario.pushed.push(href) },
   useNavigation: () => ({
     setOptions: (options: Record<string, unknown>) => scenario.options.push(options),
   }),
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => ({ tab: scenario.tab, above: 0 }),
   tabHref: (tab: string, screen: string) => `${tab === "(home)" ? "" : `/${tab}`}/${screen}`,
   openOnTabs: () => undefined,
 }));
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#A1A1A6", line: "#2C2C2E" },
     ChannelLogo: () => null,
@@ -89,11 +97,13 @@ vi.mock("../src/ui.tsx", async () => {
     Message: ({ text }: { text: string }) => createElement("p", null, text),
   };
 });
+
 vi.mock("../src/titles.ts", async () => ({
   useMetadataStanding: () => scenario.standing,
   useTitleTimings: () => null,
   saveTmdbKey: async (key: string) => {
     scenario.asked.push(`save ${key}`);
+
     if (scenario.saveFails) throw new Error("Keychain refused");
   },
   removeTmdbKey: async () => {
@@ -105,6 +115,7 @@ vi.mock("../src/titles.ts", async () => ({
     null,
     (tell: () => void) => {
       scenario.metadata.told.add(tell);
+
       return () => scenario.metadata.told.delete(tell);
     },
     () => scenario.metadata.version,
@@ -115,34 +126,44 @@ vi.mock("../src/titles.ts", async () => ({
   episodesOf: async () => [],
   detailsOf: (_title: unknown, show: (details: unknown) => void) => {
     const read = scenario.details[Math.min(scenario.reads++, scenario.details.length - 1)];
+
     return read ? read(show) : new Promise(() => undefined);
   },
 }));
+
 vi.mock("../src/diagnostics.ts", () => ({ diagnosticsText: () => scenario.diagnostics }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
   retryTitles: () => undefined,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   useStatistics: () => ({ enabled: false, transport: "production" }),
   setStatistics: async () => undefined,
   noteAction: () => undefined,
 }));
+
 vi.mock("../src/online-subtitles.ts", () => ({
   useSubtitleKey: () => false,
   saveSubtitleKey: async () => undefined,
   removeSubtitleKey: async () => undefined,
 }));
+
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 // The details screen's other owners, quiet: this file reads only its About part.
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/loading.tsx", () => ({
   Docked: ({ children }: { children?: React.ReactNode }) => children,
   Placeholders: ({ children }: { children?: React.ReactNode }) => children,
@@ -150,19 +171,23 @@ vi.mock("../src/loading.tsx", () => ({
   PlaceholderLines: () => null,
   loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
 }));
+
 vi.mock("../src/titles-ui.tsx", () => ({
   Artwork: () => null,
   ProgressLine: () => null,
   Shelf: () => null,
   TextTabs: () => null,
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: () => undefined,
   versionOf: (key: string) => {
     const at = key.indexOf(":");
+
     return { subscriptionId: key.slice(0, at), id: key.slice(at + 1) };
   },
 }));
+
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
@@ -170,7 +195,9 @@ vi.mock("../src/play-title.ts", () => ({
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));
+
 vi.mock("../src/playback.ts", () => ({ request: () => ({ stands: () => true }) }));
+
 vi.mock("../src/viewing.ts", () => ({
   useViewing: () => null,
   progressOf: async () => [],
@@ -179,11 +206,13 @@ vi.mock("../src/viewing.ts", () => ({
   relist: async () => undefined,
   undoMark: async () => undefined,
 }));
+
 vi.mock("../src/downloads.ts", () => ({
   useDownloadOf: () => undefined,
   useDownloads: () => 0,
   downloadOf: () => undefined,
 }));
+
 vi.mock("../src/watchlist.ts", () => ({
   useWatchlist: () => [],
   savedEntry: () => undefined,
@@ -197,19 +226,25 @@ const { DetailsScreen } = await import("../src/details-screen.tsx");
 
 let container: ReturnType<typeof document.createElement>;
 let unmount = () => {};
+
 function render(element: React.ReactElement) {
   container = document.createElement("div");
   const root = createRoot(container);
   React.act(() => root.render(element));
   unmount = () => React.act(() => root.unmount());
 }
+
 const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`);
+
 function press(testID: string) {
   const found = find(testID);
+
   if (!found) throw new Error(`No ${testID}: ${container.textContent}`);
   React.act(() => found.dispatchEvent(new Event("click", { bubbles: true })));
 }
+
 const text = (testID: string) => find(testID)?.textContent ?? null;
+
 /** Until promises the screen waits for have answered. */
 async function settled() {
   for (let at = 0; at < 5; at++) await React.act(async () => await Promise.resolve());
@@ -229,6 +264,7 @@ beforeEach(() => {
   scenario.reads = 0;
   scenario.members = [];
 });
+
 afterEach(() => unmount());
 
 describe("Settings' TMDB group", () => {
@@ -311,10 +347,12 @@ describe("Diagnostics", () => {
     expect(container.textContent).toContain(shown);
     // What changes after it opened isn't shared unseen.
     scenario.diagnostics = "Providers: 2";
+
     const options = scenario.options.at(-1) as {
       title: string;
       unstable_headerRightItems: () => { label: string; onPress: () => void }[];
     };
+
     expect(options.title).toBe("Diagnostics");
     const items = options.unstable_headerRightItems();
     expect(items.map(({ label }) => label)).toEqual(["Share"]);
@@ -345,6 +383,7 @@ const catalogue: OnDemandCatalogue = {
     },
   ],
 };
+
 /** The film's facts as details answer them, with where TMDB's part stands. */
 const facts = (about: AboutStanding) => ({
   kind: "movie",
@@ -365,6 +404,7 @@ describe("a title's details", () => {
     };
     scenario.members = [{ entry: { id: "a" }, label: "Home" }];
   });
+
   const open = async () => {
     render(React.createElement(DetailsScreen, { kind: "movie", version: "a:1" }));
     await settled();
@@ -383,6 +423,7 @@ describe("a title's details", () => {
       [{ kind: "missing" }, "Provider details only. TMDB doesn't know this title."],
       [{ kind: "unlinked" }, "Provider details only."],
     ];
+
     for (const [about, reason] of reasons) {
       scenario.details = [async () => facts(about)];
       scenario.reads = 0;
@@ -391,6 +432,7 @@ describe("a title's details", () => {
       expect(find("details-about-retry")).toBeNull();
       unmount();
     }
+
     scenario.details = [async () => facts({ kind: "tmdb" })];
     scenario.reads = 0;
     await open();
@@ -407,6 +449,7 @@ describe("a title's details", () => {
     expect(container.textContent).toContain("TMDB refused the key in Settings.");
     React.act(() => {
       scenario.metadata.version++;
+
       for (const tell of scenario.metadata.told) tell();
     });
     await settled();
@@ -418,11 +461,13 @@ describe("a title's details", () => {
     const savedAt = new Date(new Date().getFullYear(), 0, 12).getTime();
     const saved = `Saved TMDB facts from ${formatDate(savedAt, "day")}.`;
     let answer = () => {};
+
     scenario.details = [
       async () => facts({ kind: "unavailable", savedAt }),
       async (show) => {
         show(facts({ kind: "asking", savedAt }));
         await new Promise<void>((done) => (answer = done));
+
         return facts({ kind: "tmdb" });
       },
     ];

@@ -56,6 +56,7 @@ const PrivateInput = type({
 export async function verifyPrivateCandidate(github: GitHub, input: unknown, authenticate = false) {
   const value = PrivateInput.assert(input);
   check(value.repository === github.repository, "Private input belongs to another repository.");
+
   if (authenticate) {
     const run = type({
       id: "number",
@@ -71,6 +72,7 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
         `/actions/runs/${value.request.run.id}/attempts/${value.request.run.attempt}`,
       ),
     );
+
     check(
       run.path === ".github/workflows/release.yml" &&
         run.head_repository.full_name === github.repository &&
@@ -82,6 +84,7 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
         run.conclusion === "success",
       "Private run identity or success does not match.",
     );
+
     for (const expected of value.artifacts) {
       const actual = Artifact.assert(await github.json(`/actions/artifacts/${expected.id}`));
       check(
@@ -96,7 +99,9 @@ export async function verifyPrivateCandidate(github: GitHub, input: unknown, aut
       );
     }
   }
+
   const request: PackageRequest = value.request;
+
   return resolvePackageReceipt(github, request, value.artifacts);
 }
 
@@ -114,6 +119,7 @@ export interface GitHub {
 
 const FullSha = type(/^[0-9a-f]{40}$/);
 const Digest = type(/^[0-9a-f]{64}$/);
+
 const Resolved = type({
   stableTag: "string",
   stableSha: FullSha,
@@ -121,8 +127,10 @@ const Resolved = type({
   candidateSha: FullSha,
   "+": "reject",
 });
+
 /** Stable tag, candidate label (not necessarily a published tag), and their resolved sources. */
 export type Resolved = typeof Resolved.infer;
+
 const Package = type({
   stage: "'stable' | 'candidate'",
   version: "string",
@@ -143,8 +151,10 @@ const Package = type({
     },
   },
 });
+
 /** One checked installer, with what vouches for it. */
 export type Package = typeof Package.infer;
+
 const UpgradePackage = Package.or(
   Package.omit("provenance").and({
     provenance: {
@@ -155,7 +165,9 @@ const UpgradePackage = Package.or(
     },
   }),
 );
+
 export type UpgradePackage = typeof UpgradePackage.infer;
+
 const Receipt = type({
   repository: "string",
   resolvedAt: "string",
@@ -165,10 +177,12 @@ const Receipt = type({
   candidateAheadBy: "number.integer > 0",
   limits: "string[]",
 });
+
 /** receipt.json beside the downloaded setups: what `run` installs, in order. */
 export type Receipt = typeof Receipt.infer;
 
 const UpgradeReceipt = Receipt.omit("packages").and({ packages: [UpgradePackage, UpgradePackage] });
+
 type UpgradeReceipt = typeof UpgradeReceipt.infer;
 
 const Asset = type({
@@ -177,6 +191,7 @@ const Asset = type({
   size: "number.integer > 0",
   "digest?": "string | null",
 });
+
 const Release = type({
   tag_name: "string",
   draft: "boolean",
@@ -184,17 +199,20 @@ const Release = type({
   published_at: "string | null",
   assets: Asset.array(),
 });
+
 const Listed = type({
   tag_name: "string",
   draft: "boolean",
   prerelease: "boolean",
   published_at: "string | null",
 });
+
 const Ancestry = type({
   status: "string",
   ahead_by: "number.integer",
   behind_by: "number.integer",
 });
+
 const LatestYml = type({
   version: "string",
   path: "string",
@@ -215,6 +233,7 @@ const setupName = (version: string) => `Mr-Streamer-${version}-win-x64-setup.exe
 /** The version a canonical `v`-prefixed release tag of `kind` names, or undefined. */
 function tagVersion(tag: string, kind: Package["provenance"]["releaseKind"]): Version | undefined {
   const version = parseVersion(tag);
+
   return tag.startsWith("v") &&
     version &&
     !!version.nightly === (kind === "nightly") &&
@@ -241,6 +260,7 @@ function checkPair(pair: Resolved): Resolved {
     pair.stableSha !== pair.candidateSha,
     "The candidate must strictly descend from stable, with a different source commit.",
   );
+
   return pair;
 }
 
@@ -251,19 +271,26 @@ function checkPair(pair: Resolved): Resolved {
  */
 async function newestStable(github: GitHub): Promise<string> {
   let newest: { tag: string; version: Version } | undefined;
+
   for (let page = 1; ; page++) {
     const releases = Listed.array().assert(
       await github.json(`/releases?per_page=100&page=${page}`),
     );
+
     for (const release of releases) {
       const version = tagVersion(release.tag_name, "stable");
+
       if (release.draft || release.prerelease || !release.published_at || !version) continue;
+
       if (!newest || compareVersions(version, newest.version) > 0)
         newest = { tag: release.tag_name, version };
     }
+
     if (releases.length < 100) break;
   }
+
   check(newest, "There is no published stable release to upgrade from.");
+
   return newest.tag;
 }
 
@@ -301,19 +328,23 @@ export async function resolvePackages(
 ) {
   const candidateTag = candidate.tag;
   check(tagVersion(candidateTag, "nightly"), `${candidateTag} is not a canonical nightly tag.`);
+
   if (candidate.sha !== undefined)
     check(FullSha.allows(candidate.sha), `${candidate.sha} is not a full commit SHA.`);
   const branch = type({ default_branch: "string" }).assert(await github.json("")).default_branch;
   check(branch === "main", "The installed upgrade check requires this repository's main branch.");
   const stableTag = await newestStable(github);
+
   const commitOf = async (tag: string) =>
     type({ sha: FullSha }).assert(await github.json(`/commits/${encodeURIComponent(tag)}`)).sha;
+
   const candidateSha = candidate.private?.receipt.sourceCommit ?? (await commitOf(candidateTag));
   check(
     candidate.sha === undefined || candidateSha === candidate.sha,
     `${candidateTag} names ${candidateSha}, not ${candidate.sha}, the commit the release planned.`,
   );
   const stableSha = await commitOf(stableTag);
+
   for (const source of new Set([
     stableSha,
     candidateSha,
@@ -325,17 +356,21 @@ export async function resolvePackages(
       `main does not contain ${source}.`,
     );
   }
+
   const diff = Ancestry.assert(
     await github.json(`/compare/${stableSha}...${candidateSha}?per_page=1`),
   );
+
   // The release plan's own rule for which nightly a stable release may promote.
   const ancestry = ANCESTRIES.find((known) => known === diff.status);
   check(ancestry, `GitHub compared ${stableTag} and ${candidateTag} as "${diff.status}".`);
+
   const problem = promotionProblem(
     { tag: candidateTag, version: tagVersion(candidateTag, "nightly")! },
     { tag: stableTag, version: tagVersion(stableTag, "stable")! },
     ancestry,
   );
+
   check(!problem, problem ?? "");
   check(
     diff.ahead_by > 0 && diff.behind_by === 0,
@@ -344,6 +379,7 @@ export async function resolvePackages(
   const resolved = checkPair({ stableTag, stableSha, candidateTag, candidateSha });
 
   const files = new Map<string, Uint8Array>();
+
   const resolve = async (stage: Package["stage"], tag: string, source: string) => {
     if (stage === "candidate" && candidate.private) {
       const verified = candidate.private;
@@ -359,6 +395,7 @@ export async function resolvePackages(
       check(bytes, "Private candidate has no Windows installer.");
       const file = `candidate-${name}`;
       files.set(file, bytes);
+
       return UpgradePackage.assert({
         stage,
         version: tag.slice(1),
@@ -374,6 +411,7 @@ export async function resolvePackages(
         },
       });
     }
+
     const kind = stage === "stable" ? "stable" : "nightly";
     const version = tag.slice(1);
     const release = Release.assert(await github.json(`/releases/tags/${encodeURIComponent(tag)}`));
@@ -385,6 +423,7 @@ export async function resolvePackages(
         Number.isFinite(Date.parse(release.published_at)),
       `${tag} is not a published ${kind === "stable" ? "stable release" : "nightly"}.`,
     );
+
     /** Downloads the one asset named `name`, checking its size and GitHub's digest of it. */
     const asset = async (name: string) => {
       const found = release.assets.filter((each) => each.name === name);
@@ -392,22 +431,27 @@ export async function resolvePackages(
       const item = found[0]!;
       const bytes = await github.bytes(`/releases/assets/${item.id}`, "application/octet-stream");
       check(bytes.length === item.size, `${name} does not match its asset size.`);
+
       if (item.digest)
         check(
           item.digest === `sha256:${sha256(bytes)}`,
           `${name} does not match its asset digest.`,
         );
+
       return { item, bytes };
     };
+
     const name = setupName(version);
     const setup = await asset(name);
     const sums = await asset("SHA256SUMS.txt");
     const metadata = await asset("latest.yml");
+
     const matches = new TextDecoder()
       .decode(sums.bytes)
       .split("\n")
       .map((line) => /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim()))
       .filter((match) => match?.[2] === name);
+
     const hash = sha256(setup.bytes);
     check(
       matches.length === 1 && matches[0]![1] === hash,
@@ -428,6 +472,7 @@ export async function resolvePackages(
     );
     const file = `${stage}-${name}`;
     files.set(file, setup.bytes);
+
     return Package.assert({
       stage,
       version,
@@ -445,6 +490,7 @@ export async function resolvePackages(
       },
     });
   };
+
   const receipt: UpgradeReceipt = {
     repository: github.repository,
     resolvedAt: new Date(now).toISOString(),
@@ -462,6 +508,7 @@ export async function resolvePackages(
       "The last phase restarts the same candidate. It does not prove a second version upgrade.",
     ],
   };
+
   return { receipt, files };
 }
 
@@ -474,6 +521,7 @@ export function readReceipt(
 export function readReceipt(value: unknown, privateCandidate?: PrivateCandidate): UpgradeReceipt {
   const receipt = UpgradeReceipt.assert(value);
   const pair = checkPair(receipt.resolved);
+
   for (const [index, stage, tag, source] of [
     [0, "stable", pair.stableTag, pair.stableSha],
     [1, "candidate", pair.candidateTag, pair.candidateSha],
@@ -497,26 +545,33 @@ export function readReceipt(value: unknown, privateCandidate?: PrivateCandidate)
       "The receipt's package identity does not match its resolved tags.",
     );
   }
+
   return receipt;
 }
 
 /** GitHub's REST API with the workflow's read-only token. */
 export function restGitHub(repository: string, token: string): GitHub {
   const api = `https://api.github.com/repos/${repository}`;
+
   const get = async (path: string, accept = "application/vnd.github+json") => {
     const headers = {
       Accept: accept,
       Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": "2022-11-28",
     };
+
     let response = await fetch(`${api}${path}`, { headers, redirect: "manual" });
     // Assets redirect to storage, which gets no token.
     const location = response.headers.get("location");
+
     if (response.status >= 300 && response.status < 400 && location)
       response = await fetch(location, { headers: { Accept: accept } });
+
     if (!response.ok) throw new Error(`GitHub answered ${response.status} for ${path}.`);
+
     return response;
   };
+
   return {
     repository,
     json: async (path) => (await get(path)).json(),

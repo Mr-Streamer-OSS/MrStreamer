@@ -17,6 +17,7 @@ const now = {
   artworkUrl: null,
   originalLanguage: null,
 };
+
 const dropped = { kind: "network", detail: "Connection lost" } as const;
 const settle = () => vi.advanceTimersByTimeAsync(0);
 
@@ -48,6 +49,7 @@ beforeEach(() => {
   });
   ipc.always("analytics.playbackBind", "22222222-2222-4222-8222-222222222222");
 });
+
 afterEach(() => {
   titlePlayer.close();
   vi.useRealTimers();
@@ -177,6 +179,7 @@ async function relapse(played = 1000) {
 
 it("exhausts four 1/2/4/8-second retries across one-second returns", async () => {
   await open();
+
   for (const [index, delay] of [1000, 2000, 4000, 8000].entries()) {
     await relapse();
     expect(titlePlayer.state().phase).toMatchObject({
@@ -190,6 +193,7 @@ it("exhausts four 1/2/4/8-second retries across one-second returns", async () =>
     expect(runs).toHaveLength(index + 2);
     expect(runs.at(-1)!.run.start).toBe(13 + index);
   }
+
   await relapse();
   expect(titlePlayer.state().phase).toMatchObject({ kind: "failed", problem: { kind: "network" } });
   await vi.advanceTimersByTimeAsync(60_000);
@@ -268,14 +272,17 @@ it.each(["lookup", "delay"] as const)(
       runs[0]!.fail(dropped);
       await settle();
       titlePlayer.close();
+
       if (supersede) {
         void titlePlayer.open({ ...now, title: { ...now.title, id: "2" } }, 80);
         await settle();
       }
+
       lookup?.resolve(dropped);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(runs).toHaveLength(supersede ? 2 : 1);
       expect(titlePlayer.state().phase.kind).toBe(supersede ? "starting" : "idle");
+
       if (supersede) expect(runs.at(-1)!.run.start).toBe(80);
     }
   },
@@ -287,6 +294,7 @@ it.each([false, true])(
     await open();
     runs[0]!.start();
     await settle();
+
     if (paused) titlePlayer.togglePause();
     titlePlayer.setAudio(2);
     runs.at(-1)!.start();

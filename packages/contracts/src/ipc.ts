@@ -99,10 +99,13 @@ export interface PreferenceSnapshot {
 const none = () => type("undefined");
 const titleKind = () => type.enumerated(...TITLE_KINDS);
 const decoders = () => type.enumerated(...CODECS).array();
+
 /** An `OwnedId`: what a provider lists, with the subscription that lists it. */
 const owned = () => type({ subscriptionId: "string > 0", id: "string" });
+
 /** A list's or a list channel's id, as the window or the main process made it up. */
 const listId = () => type("string").atLeastLength(1).atMostLength(64);
+
 /** Movies, and series whose every episode counts, by the ids of their versions: a `TitleFilter`. */
 const titleFilter = () => type({ "movies?": owned().array(), "series?": owned().array() });
 
@@ -117,6 +120,7 @@ const loginInput = () =>
     password: "string",
     "name?": "string",
   });
+
 export type LoginInput = IpcInput<"subscription.add">;
 
 /** Identifies one guide-search invocation within a renderer view. Main supplies sender/frame. */
@@ -1008,10 +1012,12 @@ export interface IpcOutputs {
 }
 
 export type IpcMethod = keyof IpcOutputs;
+
 /** An HLS cause belongs only to this opaque local proxy path. Null selects no HTTP cause. */
 export type PlaybackFailureSelector = NonNullable<IpcInput<"playback.failure">["selector"]>;
 
 export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["infer"];
+
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
 /** Methods without input can be called with no argument. */
@@ -1092,6 +1098,7 @@ export interface IpcEvents {
    */
   "window.leaveAsked": null;
 }
+
 export type IpcEvent = keyof IpcEvents;
 
 /** The API the preload script exposes as `window.mrStreamer`. */

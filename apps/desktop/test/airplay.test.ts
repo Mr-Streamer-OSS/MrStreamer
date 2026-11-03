@@ -23,6 +23,7 @@ const TIMINGS: AirplayTimings = {
 };
 
 const opened: { close(): Promise<void> }[] = [];
+
 afterEach(async () => {
   for (const each of opened.splice(0).reverse()) await each.close();
 });
@@ -49,17 +50,20 @@ function media(generation: number, more: Partial<ReceiverMedia> = {}): ReceiverM
 /** A fake helper and an adapter that scans with it, so the helper runs and says what it sees. */
 async function setup(timings: Partial<AirplayTimings> = {}) {
   const helper = await startFakeAirplayHelper();
+
   const adapter = airplayAdapter({
     helper: helper.helper,
     args: helper.args,
     timings: { ...TIMINGS, ...timings },
   });
+
   opened.push(helper, adapter);
   const events: AdapterEvent[] = [];
   adapter.listen((event) => events.push(event));
   adapter.scan(true);
   await helper.took("detect");
   await expect.poll(() => events, { interval: 5 }).toEqual([NO_ROUTES]);
+
   return {
     helper,
     adapter,
@@ -87,7 +91,9 @@ async function connected(timings: Partial<AirplayTimings> = {}) {
   await made.helper.took("showPicker");
   made.helper.choose();
   const connection = await connecting;
+
   if (!connection) throw new Error("The connect found no receiver.");
+
   return { ...made, connection };
 }
 
@@ -243,8 +249,10 @@ describe("AirPlay adapter", () => {
 
   it("reports what the player says as the load's status", async () => {
     const { helper, connection, events } = await connected();
+
     const statuses = () =>
       events.flatMap((event) => (event.type === "status" ? [event.status] : []));
+
     const began = Date.now();
 
     await connection.load(media(1), never());
@@ -259,6 +267,7 @@ describe("AirPlay adapter", () => {
       { generation: 1, state: "playing", position: 12.5, duration: 180 },
       { generation: 1, state: "paused", position: 13, duration: 180 },
     ]);
+
     for (const status of statuses()) {
       expect(status.at).toBeGreaterThanOrEqual(began);
       expect(status.at).toBeLessThanOrEqual(Date.now());
@@ -267,6 +276,7 @@ describe("AirPlay adapter", () => {
 
   it("tells a real end from a stop", async () => {
     const { helper, connection, events } = await connected();
+
     const states = () =>
       events.flatMap((event) =>
         event.type === "status" ? [`${event.status.generation} ${event.status.state}`] : [],
@@ -298,6 +308,7 @@ describe("AirPlay adapter", () => {
       events.flatMap((event) =>
         event.type === "status" && event.status.state === "playing" ? [event.status] : [],
       );
+
     await expect.poll(playing).toHaveLength(2);
     expect(playing()).toMatchObject([
       { generation: 1, position: 50 },
@@ -429,6 +440,7 @@ describe("AirPlay adapter", () => {
       expect(helper.pids).toHaveLength(restarts + 1);
       helper.crash();
     }
+
     await expect.poll(() => helper.running()).toEqual([]);
     await expect.poll(() => events.at(-1)).toEqual(NO_ROUTES);
 

@@ -13,9 +13,11 @@ import { CustomizeHome } from "../../src/renderer/src/features/home/CustomizeHom
 import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   useUi.setState({
@@ -28,10 +30,13 @@ afterEach(() => {
   });
   vi.useRealTimers();
 });
+
 /** Lets the page take in what just happened, on the fake clock. */
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
+
 const labels = () =>
   [...document.querySelectorAll("li label")].map((label) => label.textContent?.trim());
+
 const button = (name: string) =>
   [...document.querySelectorAll("button")].find(
     (button) => button.getAttribute("aria-label") === name || button.textContent?.trim() === name,
@@ -162,6 +167,7 @@ it("blocks a move during save notification and preserves the settled visibility 
   await settle();
   const hidden = ipc.argsOf("preferences.update")[0]!;
   hide.resolve(ipc.snapshot({ volume: 1, muted: false, ...hidden }));
+
   // Let the IPC promise finish before React receives the scheduled observer notification.
   for (let i = 0; i < 20; i++) await Promise.resolve();
   expect(button("Move Watchlist up").getAttribute("aria-disabled")).toBe("true");
@@ -245,6 +251,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
   const { SAVED, SUBSCRIPTION } = await import("./support.ts");
   const { defaultPreferences } = await import("@mrstreamer/contracts/preferences");
   const { queries } = await import("../../src/renderer/src/lib/queries.ts");
+
   const channel = {
     subscriptionId: SUBSCRIPTION,
     id: "one",
@@ -257,6 +264,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
     catchupDays: null,
     variants: [{ id: "one", name: "Channel one", tags: [], quality: null }],
   };
+
   const film = {
     kind: "movie" as const,
     key: "movie:continuing",
@@ -277,6 +285,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
     genres: [],
     versions: [{ subscriptionId: SUBSCRIPTION, id: "film", tags: [] }],
   };
+
   ipc.reset();
   ipc.always("subscription.list", [SAVED]);
   ipc.always("library.categories", [
@@ -338,12 +347,15 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
     ),
   );
   await settle();
+
   const promoted = () =>
     container.querySelector("[data-home-promoted]")?.getAttribute("data-home-row");
+
   const assertOnce = (id: string) => {
     expect(promoted()).toBe(id);
     expect(container.querySelectorAll(`[data-home-row=${id}]`)).toHaveLength(1);
   };
+
   assertOnce("category");
   expect(
     [...container.querySelectorAll("[data-home-row]")].map((r) => r.getAttribute("data-home-row")),
@@ -354,6 +366,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
   expect([...document.querySelectorAll("button")].some((b) => b.textContent === "Done")).toBe(
     false,
   );
+
   const save = async (action: () => void) => {
     const held = ipc.hold("preferences.update");
     await act(async () => action());
@@ -364,6 +377,7 @@ it("promotes the first visible nonempty channel row once, across title rows, mov
     );
     await settle();
   };
+
   await save(() => checkbox("Current category").click());
   assertOnce("recent");
   await save(() => button("Move Favourites up").click());
@@ -380,6 +394,7 @@ it("sparse saved titles keep their resolved owner and unavailable-entry action w
   const { useUi } = await import("../../src/renderer/src/app/ui-store.ts");
   const { SAVED, SUBSCRIPTION } = await import("./support.ts");
   const { queries } = await import("../../src/renderer/src/lib/queries.ts");
+
   const title = {
     kind: "movie" as const,
     key: "movie:original",
@@ -400,6 +415,7 @@ it("sparse saved titles keep their resolved owner and unavailable-entry action w
     genres: [],
     versions: [{ subscriptionId: SUBSCRIPTION, id: "original", tags: [] }],
   };
+
   const resolved = {
     subscriptionId: SUBSCRIPTION,
     id: "saved",
@@ -412,6 +428,7 @@ it("sparse saved titles keep their resolved owner and unavailable-entry action w
     sources: [SUBSCRIPTION],
     listed: true,
   };
+
   const unavailable = { ...resolved, id: "missing", name: "Missing movie", title: null };
   ipc.reset();
   useUi.setState(useUi.getInitialState(), true);
@@ -437,6 +454,7 @@ it("sparse saved titles keep their resolved owner and unavailable-entry action w
     useUi.setState(useUi.getInitialState(), true);
     measuredWidth.mockRestore();
   };
+
   await mounted.render(createElement(HomeScreen, { active: false }));
   await settle();
   const cards = container.querySelectorAll("[data-home-row=watchlist] article");

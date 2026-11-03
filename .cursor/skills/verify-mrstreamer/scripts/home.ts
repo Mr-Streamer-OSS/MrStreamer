@@ -2,9 +2,12 @@ import type { Driver } from "./language.ts";
 
 const byText = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
 const controls = "document.querySelector('section[aria-label=\"Customize Home\"]')";
+
 const check = (name: string) =>
   `${byText("section[aria-label] li label", name)}?.querySelector('input')`;
+
 const move = (name: string, direction: string) =>
   `document.querySelector('button[aria-label="Move ${name} ${direction}"]')`;
 
@@ -18,6 +21,7 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
     await d.click("Open Home settings", byText("nav button", "Home"));
     await d.wait(() => d.exists(controls));
   };
+
   const closeSettings = async () => {
     await d.click(
       "Return from Home settings",
@@ -25,18 +29,22 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
     );
     await d.wait(async () => !(await d.exists(controls)));
   };
+
   const prefs = () =>
     d.evaluate<{ id: string; visible: boolean }[]>(`(async () => {
     const read = await window.mrStreamer.invoke('preferences.get');
     return read.ok ? read.value.preferences.homeRows ?? [] : [];
   })()`);
+
   const titles = () =>
     d.evaluate<string[]>(
       "[...document.querySelectorAll('[data-home-row] h2')].map(h => h.textContent)",
     );
+
   const expect = (ok: boolean, message: string) => {
     if (!ok) throw new Error(message);
   };
+
   await d.wait(() =>
     d.evaluate<boolean>("document.querySelectorAll('[data-home-row] button').length > 0"),
   );
@@ -117,8 +125,10 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
   await closeSettings();
   await d.click("Open Movies", byText("header button", "Movies"));
   await d.click("Open All movies", byText("nav button", "All movies"));
+
   const movie =
     "[...document.querySelectorAll('button[title]')].find(b => b.title.includes('Index at the end'))";
+
   await d.click("Open fixture movie", movie);
   // The loading sheet's Save control moves when the movie actions arrive.
   await d.wait(() => d.exists(byText('[role="dialog"] button', "Play")));
@@ -141,9 +151,11 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
   await d.key("Escape", 27);
   await d.click("Return Home for local recommendations", byText("header button", "Home"));
   await d.wait(() => d.exists(byText("h2", "Recommendations")));
+
   const recs = await d.evaluate<string[]>(
     "[...document.querySelectorAll('[data-home-row=recommendations] [data-home-title], [data-home-row=recommendations] button:not([data-slot])')].filter(b => !b.closest('[data-home-title]') || b.matches('[data-home-title]')).map(b => b.innerText)",
   );
+
   expect(
     recs.length > 0 && recs.every((line) => line.includes("Because you watched")),
     "Actual seed reasons missing",
@@ -161,6 +173,7 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
   );
   await d.capture("full-watchlist-hidden-populated");
   await d.click("Return Home", byText("header button", "Home"));
+
   const seeds = await d.evaluate<unknown[]>(`(async () => {
     const read = await window.mrStreamer.invoke('viewing.get');
     return read.ok ? read.value.recentTitles.map(({ title }) => ({
@@ -168,13 +181,16 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
       version: { subscriptionId: title.subscriptionId, id: title.kind === 'movie' ? title.id : title.seriesId },
     })) : [];
   })()`);
+
   const before = counts();
+
   const timing = await d.evaluate<{ ms: number; count: number }>(`(async () => {
     const start = performance.now();
     const read = await window.mrStreamer.invoke('ondemand.recommendations', { seeds: ${JSON.stringify(seeds)} });
     if (!read.ok) throw new Error('Recommendation read failed');
     return { ms: performance.now() - start, count: read.value.length };
   })()`);
+
   expect(
     JSON.stringify(counts()) === JSON.stringify(before),
     "Recommendation read fetched content",
@@ -247,12 +263,14 @@ export async function homeScenario(d: Driver, counts: () => Record<string, numbe
   await d.capture("adult-series-details-before-save");
   await d.click("Save adult series", byText('[role="dialog"] button', "Save"));
   await d.wait(() => d.exists(byText('[role="dialog"] button', "Saved")));
+
   const adultName = await d.evaluate<string>(`(async () => {
     const read = await window.mrStreamer.invoke('watchlist.list', { sort: 'saved', offset: 0, limit: 100 });
     const entry = read.ok && read.value.entries.find(e => e.title?.adult);
     if (!entry) throw new Error('Adult title was not saved');
     return entry.title.title;
   })()`);
+
   await d.key("Escape", 27);
   await d.click("Return Home with adult titles enabled", byText("header button", "Home"));
   await customize();

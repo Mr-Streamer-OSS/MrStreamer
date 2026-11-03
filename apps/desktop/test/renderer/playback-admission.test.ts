@@ -11,11 +11,13 @@ import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 // The media engine confirms/ends playback independently of the optional analytics bridge.
 const mediaEngine = vi.hoisted(() => ({ starts: [] as number[], ended: () => {} }));
+
 vi.mock("../../src/renderer/src/player/title-engine.ts", () => ({
   titleEngine(video: HTMLVideoElement, run: TitleRun) {
     if (run.paused) video.pause();
     else void video.play();
     mediaEngine.starts.push(run.start);
+
     return {
       started: Promise.resolve(),
       onPlayback(listener: (state: AnalyticsPlaybackState) => void) {
@@ -55,7 +57,9 @@ const channel = {
   catchupDays: null,
   variants: [{ id: "fixture", name: "Fixture", tags: [], quality: null }],
 };
+
 const title = { kind: "movie" as const, subscriptionId: SUBSCRIPTION, id: "fixture" };
+
 const now = {
   kind: "provider" as const,
   title,
@@ -64,6 +68,7 @@ const now = {
   artworkUrl: null,
   originalLanguage: "en",
 };
+
 const localTitle = {
   sessionId: "local-title",
   title,
@@ -72,7 +77,9 @@ const localTitle = {
   audio: [],
   subtitles: [],
 };
+
 const receiver = { id: "fixture-tv", kind: "cast" as const, name: "Fixture TV" };
+
 const local: OutputStatus = {
   offers: ["cast"],
   airplayRoutes: null,
@@ -80,6 +87,7 @@ const local: OutputStatus = {
   receivers: [receiver],
   output: { kind: "local" },
 };
+
 const remoteMedia = (state: RemoteMedia["state"] = "playing", generation = 1): RemoteMedia => ({
   generation,
   sessionId: "remote-title",
@@ -90,6 +98,7 @@ const remoteMedia = (state: RemoteMedia["state"] = "playing", generation = 1): R
   duration: 120,
   subtitles: false,
 });
+
 const remote = (media: RemoteMedia | null = null): OutputStatus => ({
   ...local,
   output: {
@@ -100,6 +109,7 @@ const remote = (media: RemoteMedia | null = null): OutputStatus => ({
     failure: null,
   },
 });
+
 const emit = (status: OutputStatus) => act(async () => ipc.emit("output.changed", status));
 const settle = () => act(async () => vi.advanceTimersByTimeAsync(0));
 
@@ -109,6 +119,7 @@ function unavailable(
 ) {
   if (mode === "pending") return ipc.hold(method);
   ipc.refuse(method, { kind: "unexpected", detail: "Optional observer unavailable" });
+
   return null;
 }
 
@@ -142,6 +153,7 @@ beforeEach(async () => {
   });
   ipc.always("analytics.playbackBind", "22222222-2222-4222-8222-222222222222");
 });
+
 afterEach(async () => {
   titlePlayer.close();
   player.reset();
@@ -155,6 +167,7 @@ describe.each(["pending", "rejected"] as const)("optional measurement reply %s",
     "admits local %s and obtains a usable media result independently",
     async (kind) => {
       const reply = unavailable(mode);
+
       if (kind === "live") player.watch(channel);
       else
         void titlePlayer.open(
@@ -163,14 +176,17 @@ describe.each(["pending", "rejected"] as const)("optional measurement reply %s",
         );
       await settle();
       const hint = ipc.argsOf("analytics.playbackBegin")[0]!.measurement;
+
       const args =
         kind === "live"
           ? ipc.argsOf("playback.open")
           : kind === "provider"
             ? ipc.argsOf("playback.openTitle")
             : ipc.argsOf("playback.openCopy");
+
       expect(args).toHaveLength(1);
       expect(args[0]?.measurement).toEqual(hint);
+
       if (kind === "live") {
         player.element.currentTime += 1;
         await act(async () => vi.advanceTimersByTimeAsync(1000));
@@ -268,6 +284,7 @@ describe.each(["pending", "rejected"] as const)("optional measurement reply %s",
       ...remoteMedia(),
       item: { kind: "channel" as const, channel: { subscriptionId: SUBSCRIPTION, id: "fixture" } },
     };
+
     await emit(remote(media));
     unavailable(mode, "analytics.playbackResume");
     player.adopt(channel, media);
@@ -359,6 +376,7 @@ describe("switching between live and title playback", () => {
       await settle();
       await titlePlayer.open(now, 0);
       await settle();
+
       if (action === "preview") player.preview(channel);
       else player[action]();
       await settle();
@@ -375,20 +393,24 @@ describe("switching between live and title playback", () => {
       player.preview(channel);
       await titlePlayer.open(now, 0);
       await settle();
+
       const newer = {
         ...channel,
         id: "newer",
         variants: [{ ...channel.variants[0]!, id: "newer" }],
       };
+
       if (returnToLive) {
         player.watch(newer);
         await settle();
       }
+
       pending.resolve(ipc.snapshot(defaultPreferences));
       await settle();
       expect(ipc.argsOf("playback.open").map((args) => args.channel.id)).toEqual(
         returnToLive ? ["newer"] : [],
       );
+
       if (returnToLive) expect(player.state().channel?.id).toBe("newer");
       else expect(titlePlayer.state().phase.kind).toBe("playing");
     },
@@ -399,6 +421,7 @@ describe("switching between live and title playback", () => {
     async (action) => {
       await titlePlayer.open(now, 0);
       await settle();
+
       if (action === "archive")
         player.playArchive(channel, {
           start: Date.now() - 60_000,
@@ -446,6 +469,7 @@ describe("switching between live and title playback", () => {
     "replaces receiver %s controls without sending a stop for that load",
     async (first) => {
       await emit(remote());
+
       if (first === "live") {
         player.watch(channel);
         await settle();
@@ -463,6 +487,7 @@ describe("switching between live and title playback", () => {
         expect(titlePlayer.onReceiver()).toBe(false);
         expect(player.onReceiver()).toBe(true);
       }
+
       expect(ipc.argsOf("output.command").filter((args) => args.command === "stop")).toEqual([]);
     },
   );
@@ -471,10 +496,12 @@ describe("switching between live and title playback", () => {
     // A prior title has fully closed before adoption, as after returning to an idle window.
     await titlePlayer.open(now, 0);
     titlePlayer.close();
+
     const media = {
       ...remoteMedia(),
       item: { kind: "channel" as const, channel: { subscriptionId: SUBSCRIPTION, id: "fixture" } },
     };
+
     await emit(remote(media));
     player.adopt(channel, media);
     await titlePlayer.open(now, 0);

@@ -43,6 +43,7 @@ import { setLanguage, t } from "@mrstreamer/core/i18n";
 
 /** A second subscription beside the tests' own, as the main process lists it. */
 const OTHER = "9d2b7c41-6e0a-4f3b-8a15-c4e7f1d09b62";
+
 const BOTH: readonly SubscriptionSummary[] = [
   { ...SAVED, name: "Nova TV" },
   { ...SAVED, id: OTHER, name: "Skyline", server: "https://skyline.example.tv" },
@@ -76,7 +77,9 @@ const harbour = {
   ...listed("movie", SUBSCRIPTION, "a", "Night Harbour"),
   backdropUrl: "https://image.example/harbour.jpg",
 };
+
 const canyon = listed("series", OTHER, "b", "Canyon Hours");
+
 // Two versions, so its details offer the menu of them beside Play.
 const meridian = {
   ...listed("movie", SUBSCRIPTION, "c", "Meridian Dawn"),
@@ -85,7 +88,9 @@ const meridian = {
     { subscriptionId: SUBSCRIPTION, id: "c2", tags: ["NL"] },
   ],
 };
+
 const field = listed("movie", OTHER, "d", "Quiet Field");
+
 const titles = new Map<string, Title>([
   ...[harbour, canyon, meridian, field].map((title) => [title.id, title] as const),
   ["c2", meridian],
@@ -117,7 +122,9 @@ const base = {
 
 function detailsOf(id: string): MovieDetails | SeriesDetails {
   const title = titles.get(id)!;
+
   if (title.kind === "movie") return { ...base, kind: "movie", title };
+
   return {
     ...base,
     kind: "series",
@@ -134,6 +141,7 @@ function detailsOf(id: string): MovieDetails | SeriesDetails {
 
 /** What each title's related row shows, by the version opened. */
 let related: Record<string, readonly Title[]> = {};
+
 /** The versions the lists now mark for adults, as after a provider's update. */
 let forAdults = new Set<string>();
 
@@ -151,33 +159,41 @@ const status: OnDemandStatus = {
 /** Lets the window take in what just happened, on the fake clock. */
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
 const sheet = () => document.body.querySelector<HTMLElement>('[role="dialog"]');
+
 /** The details' name, as the sheet is called. */
 const shown = () => {
   const named = sheet()?.getAttribute("aria-labelledby");
+
   return named ? (document.getElementById(named)?.textContent ?? null) : null;
 };
+
 const relatedTile = (name: string) =>
   [
     ...(sheet()?.querySelectorAll<HTMLButtonElement>(
       '[aria-label="Also in your subscriptions"] button',
     ) ?? []),
   ].find((tile) => tile.textContent?.includes(name));
+
 const inSheet = (label: string) =>
   [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
     (each) => each.textContent?.trim() === label || each.getAttribute("aria-label") === label,
   );
+
 /** Back in the top bar the sheet keeps above its backdrop. */
 const back = () =>
   [...(sheet()?.querySelectorAll<HTMLButtonElement>("header button") ?? [])].find(
     (each) => each.textContent?.trim() === "Back",
   );
+
 /** The part of the sheet that scrolls. */
 const scroller = () => sheet()?.querySelector<HTMLElement>(".overflow-y-auto") ?? null;
+
 const press = async (button: HTMLButtonElement | undefined) => {
   if (!button) throw new Error("No such button.");
   await act(async () => button.click());
   await settle();
 };
+
 const key = (name: string, modifiers: KeyboardEventInit = {}) =>
   act(async () => {
     (document.activeElement ?? window).dispatchEvent(
@@ -198,6 +214,7 @@ async function showing(name: string) {
 }
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
@@ -209,7 +226,9 @@ beforeEach(() => {
   ipc.answer("ondemand.titles", ({ versions }) =>
     versions.flatMap((version) => {
       const title = titles.get(version.id);
+
       if (!title) return [];
+
       return forAdults.has(version.id) ? [{ ...title, adult: true }] : [title];
     }),
   );
@@ -226,6 +245,7 @@ beforeEach(() => {
   );
   useUi.setState(useUi.getInitialState(), true);
 });
+
 afterEach(() => {
   unmount();
   useUi.setState(useUi.getInitialState(), true);
@@ -243,6 +263,7 @@ async function window_(): Promise<QueryClient> {
     stopLists();
     mounted.unmount();
   };
+
   await vi.waitFor(
     async () => {
       await settle();
@@ -250,6 +271,7 @@ async function window_(): Promise<QueryClient> {
     },
     { interval: 1 },
   );
+
   return client;
 }
 
@@ -266,6 +288,7 @@ async function onPage(label: string): Promise<HTMLButtonElement> {
     },
     { interval: 1 },
   );
+
   return control!;
 }
 
@@ -285,6 +308,7 @@ async function threeDeep(): Promise<HTMLButtonElement> {
   scroller()!.scrollTop = 240;
   await press(relatedTile("Meridian Dawn"));
   await showing("Meridian Dawn");
+
   return opener;
 }
 
@@ -385,6 +409,7 @@ describe("Back over details", () => {
       locale: "en-US",
       formats: "en-US",
     };
+
     ipc.always("language.get", english);
     ipc.always("language.set", { ...english, choice: "de-DE", locale: "de-DE", formats: "de-DE" });
     onTestFinished(() => setLanguage(english));
@@ -395,9 +420,11 @@ describe("Back over details", () => {
 
     await key(",", { ctrlKey: true, metaKey: true });
     await settle();
+
     const language = document.querySelector<HTMLSelectElement>(
       'select[aria-label="Interface language"]',
     )!;
+
     await act(async () => {
       language.value = "de-DE";
       language.dispatchEvent(new Event("change", { bubbles: true }));
@@ -564,22 +591,26 @@ describe("a Back still waiting for the lists", () => {
   /** Holds the lists' answer about Canyon Hours, which Back asks for, until the test gives it. */
   const holdCanyon = () =>
     ipc.hold("ondemand.titles", ({ versions }) => versions.some((version) => version.id === "b"));
+
   const answer = async (held: ReturnType<typeof holdCanyon>) => {
     await act(async () => held.resolve([canyon]));
     await settle();
   };
+
   const leaveSettings = () =>
     press(
       [
         ...document.querySelectorAll<HTMLButtonElement>('[data-view="settings"] header button'),
       ].find((each) => each.textContent?.trim() === "Back"),
     );
+
   const leaveTitle = () =>
     press(
       [...document.querySelectorAll<HTMLButtonElement>("[data-view=title] header button")].find(
         (each) => each.textContent?.trim() === "Back",
       ),
     );
+
   /** Back again, answered at once: Canyon Hours as it stood, so the way back stayed whole. */
   const stillLeadsToCanyon = async () => {
     await press(back());
@@ -597,6 +628,7 @@ describe("a Back still waiting for the lists", () => {
     ipc.answer("ondemand.titles", ({ versions }) =>
       versions.flatMap((version) => {
         const title = titles.get(version.id);
+
         return title ? [{ ...title, adult: version.id === "b" }] : [];
       }),
     );
@@ -630,6 +662,7 @@ describe("a Back still waiting for the lists", () => {
         [...(sheet()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((button) =>
           /^Play\b/.test(button.textContent?.trim() ?? ""),
         );
+
       await threeDeep();
       const held = ipc.hold("ondemand.related", ({ version }) => version.id === "b");
       await act(async () => ipc.emit("ondemand.updated", status));
@@ -643,11 +676,13 @@ describe("a Back still waiting for the lists", () => {
         },
         { interval: 1 },
       );
+
       if (cover === "settings") await key(",", { ctrlKey: true, metaKey: true });
       else {
         ipc.hold("playback.openTitle");
         await press(play());
       }
+
       await settle();
       const focused = document.activeElement;
       await act(async () =>
@@ -656,6 +691,7 @@ describe("a Back still waiting for the lists", () => {
       await settle();
       expect(document.activeElement).toBe(focused);
       expect(document.querySelector('[aria-label="Also in your subscriptions"]')).toBeNull();
+
       if (cover === "settings") await leaveSettings();
       else await leaveTitle();
       await showing("Canyon Hours");
@@ -781,20 +817,26 @@ describe("the way back", () => {
     subscriptionId,
     id,
   });
+
   const here = (related: string) => ({ season: null, scroll: 0, related });
+
   /** Presses Back until the details close: the version each Back shows, the page last. */
   async function backs(): Promise<(string | null)[]> {
     const seen: (string | null)[] = [];
+
     while (useUi.getState().details) {
       await backDetails();
       seen.push(useUi.getState().details?.id ?? null);
     }
+
     return seen;
   }
+
   /** Opens `ids` one from the other, the first from the page. */
   function chain(...targets: DetailsTarget[]) {
     const [first, ...rest] = targets;
     openDetails(first!);
+
     for (const next of rest) openRelated(next, here(next.id));
   }
 
@@ -871,9 +913,11 @@ describe("grid and related details", () => {
       },
       { interval: 1 },
     );
+
     const opener = document.querySelector<HTMLButtonElement>(
       '[role="listitem"][data-index="0"] button',
     );
+
     expect(opener).not.toBeNull();
     opener!.focus();
     await key("Home");

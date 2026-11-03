@@ -49,8 +49,10 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 /** Set, the viewing record's saves of progress wait for it, as a busy record would. */
 const viewingSaves: { hold: Promise<void> | null } = { hold: null };
+
 /**
  * Has the next launch's viewing record hold its saves of progress while `viewingSaves.hold` is
  * set, for the test that asks, until it ends. Other tests run the record as it is: errors from a
@@ -59,19 +61,25 @@ const viewingSaves: { hold: Promise<void> | null } = { hold: null };
 function holdingViewingSaves() {
   vi.doMock("../src/viewing.ts", async (original) => {
     const viewing = await original<typeof import("../src/viewing.ts")>();
+
     return {
       ...viewing,
       recordProgress: async (...args: Parameters<typeof viewing.recordProgress>) => {
         await viewingSaves.hold;
+
         return viewing.recordProgress(...args);
       },
     };
   });
   onTestFinished(() => vi.doUnmock("../src/viewing.ts"));
 }
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("react-native", () => ({
   StyleSheet: { create: <T>(styles: T) => styles },
   Alert: { alert: () => undefined },
@@ -89,42 +97,52 @@ vi.mock("react-native", () => ({
     },
     addEventListener: (_: "change", listener: (state: string) => void) => {
       memory.appListeners.push(listener);
+
       return { remove: () => undefined };
     },
   },
 }));
+
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async (key: string) => {
     if (memory.locked && key.includes("download")) throw new Error("Interaction not allowed");
+
     return memory.keychain.get(key) ?? null;
   },
   setItemAsync: async (key: string, value: string) => {
     if (key.includes("download") && memory.keychainMs > 0) {
       await new Promise((done) => setTimeout(done, memory.keychainMs));
     }
+
     memory.keychain.set(key, value);
   },
   deleteItemAsync: async (key: string) => {
     const held = key.includes("download") ? memory.removal : null;
+
     if (held) {
       held.started();
       await held.done;
     }
+
     memory.keychain.delete(key);
   },
 }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => {
     let stream: AbortController | null = null;
     let request = Promise.resolve();
+
     const player = nativePlayer((source) => {
       const played = {
         uri: source.uri,
         downloading: memory.downloading(),
         status: null as number | null,
       };
+
       memory.played.push(played);
+
       if (!source.uri.startsWith("http")) return;
       const controller = new AbortController();
       stream = controller;
@@ -132,6 +150,7 @@ vi.mock("expo-video", () => ({
       request = fetch(source.uri, { signal: controller.signal }).then(
         async (response) => {
           played.status = response.status;
+
           if (response.ok) return;
           await response.body?.cancel();
           player.observation(
@@ -142,6 +161,7 @@ vi.mock("expo-video", () => ({
         () => undefined,
       );
     });
+
     const detach = player.detachObservedAsync.getMockImplementation()!;
     player.detachObservedAsync.mockImplementation(async (id) => {
       // Aborted only once the provider answered: a request already sent, a redirect's second hop
@@ -149,52 +169,66 @@ vi.mock("expo-video", () => ({
       // panels look idle.
       await request;
       stream?.abort();
+
       return detach(id);
     });
     memory.player = player;
+
     return player;
   },
 }));
 
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
   const response = await passThrough(input, init);
   const restricted = memory.restricted;
   const action = typeof input === "string" ? new URL(input).searchParams.get("action") : null;
+
   if (restricted && response.ok && action?.startsWith("get_")) {
     if (action === "get_vod_categories") {
       const categories = (await response.json()) as unknown[];
+
       return Response.json([
         ...categories,
         { category_id: "excluded", category_name: "XXX Adults" },
       ]);
     }
+
     if (["get_vod_streams", "get_series", "get_live_streams"].includes(action)) {
       const rows = (await response.json()) as Record<string, unknown>[];
+
       return Response.json(
         rows.map((row) => {
           const id = String(row["stream_id"] ?? row["series_id"]);
+
           if (action === "get_vod_streams" && id === restricted.movies[0]) {
             return { ...row, category_id: "excluded", category_ids: ["excluded"] };
           }
+
           const flagged =
             action === "get_vod_streams"
               ? restricted.movies.includes(id)
               : action === "get_series"
                 ? restricted.series.includes(id)
                 : id === restricted.channel;
+
           return flagged ? { ...row, is_adult: 1 } : row;
         }),
       );
     }
   }
+
   const held = memory.details;
+
   if (!held || typeof input !== "string" || !input.includes("action=get_series_info")) {
     return response;
   }
+
   const body = await response.text();
   held.arrived();
   await held.released;
+
   return new Response(body, { status: response.status, headers: response.headers });
 });
 
@@ -206,12 +240,14 @@ interface FakeTitle {
   readonly name: string;
   readonly fixture: string | null;
 }
+
 interface FakeSeries {
   readonly id: number;
   readonly seasons: readonly (readonly (FakeTitle & { readonly number?: number })[])[];
   /** The TMDB id it shares with another version of the series, when it is one. */
   readonly tmdb?: string;
 }
+
 interface FakeProvider {
   readonly url: string;
   readonly titles: {
@@ -226,8 +262,10 @@ interface FakeProvider {
   replaceMovieFile(movieId: number, file: string | Buffer): void;
   close(): Promise<void>;
 }
+
 /** Typed by Node's own lib, which the app's tsconfig leaves out of the desktop's: by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider, fixture } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: Record<string, unknown>): Promise<FakeProvider>;
   fixture(name: string): Buffer;
@@ -237,6 +275,7 @@ const ONE = { username: "one", password: "one+Pw@1" };
 const TWO = { username: "two", password: "two+Pw@2" };
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ ...ONE, channels: 20, titles: 10 }),
@@ -244,6 +283,7 @@ beforeAll(async () => {
   ]);
   memory.downloading = () => native.open;
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
@@ -253,12 +293,16 @@ const films = () =>
   one.titles.movies.filter(
     (each) => each.name.startsWith("TEST") && each.fixture?.endsWith(".mp4"),
   );
+
 const movie = () => films()[0]!;
+
 const otherMovie = () =>
   films()[1] ?? one.titles.movies.find((each) => each.fixture && each !== movie())!;
+
 const episode = () => {
   const series = one.titles.series.find((each) => each.seasons[0]?.[0]?.fixture)!;
   const first = series.seasons[0]![0]!;
+
   return { series, first };
 };
 
@@ -296,9 +340,11 @@ async function launch() {
   background.die();
   const list = new DiskFile(native.root, "documents", "downloads.json");
   const left = { list: list.exists ? list.textSync() : null, keychain: new Map(memory.keychain) };
+
   if (background.task === null && background.strays.size === 0) {
     await until(panelsIdle, "the last process's requests to be freed");
   }
+
   if (left.list === null) {
     if (list.exists) list.delete();
   } else list.writeSync(left.list);
@@ -314,6 +360,7 @@ async function launch() {
   const series = await import("../src/series-download.ts");
   await account.restore();
   downloads.startDownloads();
+
   // `playback` too, whose `retry` another owner's shadows.
   return {
     ...titles,
@@ -326,6 +373,7 @@ async function launch() {
     playback,
   };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 /** A fresh install: nothing in Documents, the Keychain or the native ledger. */
@@ -357,6 +405,7 @@ async function installedApp() {
   await install();
   const app = await launch();
   background.launchedAt -= 1_000;
+
   return app;
 }
 
@@ -367,16 +416,23 @@ async function installedApp() {
 async function withProviders(app: App, both = false) {
   const a = await app.add({ server: one.url, ...ONE });
   const b = both ? await app.add({ server: two.url, ...TWO }) : null;
+
   const listed = () => {
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") return false;
+
     const has = (kind: "movie" | "series", subscriptionId: string, id: number) =>
       app.titleOf(lists.index, kind, { subscriptionId, id: String(id) }) !== undefined;
+
     const films = (subscriptionId: string) =>
       has("movie", subscriptionId, movie().id) && has("movie", subscriptionId, otherMovie().id);
+
     return films(a!) && has("series", a!, episode().series.id) && (b === null || films(b));
   };
+
   await until(listed, "the title lists");
+
   return { a: a!, b };
 }
 
@@ -385,24 +441,32 @@ const movieRef = (subscriptionId: string, id = movie().id): TitleRef => ({
   subscriptionId,
   id: String(id),
 });
+
 const statusOf = (app: App, id: string): DownloadStatus | undefined =>
   app.downloadList().items.find((item) => item.id === id)?.status;
+
 const isComplete = (app: App, id: string) => statusOf(app, id)?.kind === "complete";
 const doc = () => JSON.parse(new DiskFile(native.root, "documents", "downloads.json").textSync());
+
 /** An earlier build's resume data, in the app's own Keychain items. */
 const downloadSecrets = () =>
   [...memory.keychain.keys()].filter((key) => key.startsWith("s.download"));
+
 /** Downloads the native side keeps resume data for. */
 const nativeSecrets = () => [...background.resume.keys()];
+
 const receivedOf = (app: App, id: string) =>
   (statusOf(app, id) as { received?: number } | undefined)?.received;
+
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const folder = (id: string) => new Folder(native.root, "documents", "downloads", id);
+
 const mediaFile = (id: string) =>
   folder(id)
     .list()
     .filter((entry) => entry instanceof DiskFile)
     .find((entry) => entry.name.startsWith("media."));
+
 /** Everything app storage holds, to look for logins. */
 function everythingStored(): string {
   const read = (dir: InstanceType<typeof Folder>): string[] =>
@@ -415,12 +479,14 @@ function everythingStored(): string {
             ? []
             : [entry.textSync()],
       );
+
   return read(new Folder(native.root, "documents")).join("\n");
 }
 
 /** Plays a film of `subscriptionId` in Watch, online, as its details' Play does. */
 function playFilm(app: App, subscriptionId: string, id: number) {
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No titles");
   const version = { subscriptionId, id: String(id) };
   app.playMovie(app.titleOf(lists.index, "movie", version)!, version, 0, () => undefined);
@@ -429,6 +495,7 @@ function playFilm(app: App, subscriptionId: string, id: number) {
 /** Sends the app to the background and back, as iOS reports it. */
 function appGoes(state: "background" | "active") {
   memory.appState = state;
+
   for (const listener of memory.appListeners) listener(state);
 }
 
@@ -446,6 +513,7 @@ const late =
 const bridge = (
   globalThis as typeof globalThis & { expo: { modules: { BackgroundDownloads: Bridge } } }
 ).expo.modules.BackgroundDownloads;
+
 interface Bridge {
   holdAuthorization(authorization: string, held: boolean): Promise<void>;
   arrangeAuthorizations(authorizations: string[]): Promise<void>;
@@ -500,4 +568,5 @@ export {
   bridge,
   unanswered,
 };
+
 export type { App };

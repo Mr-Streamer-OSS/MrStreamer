@@ -5,7 +5,9 @@ import type { SecretStore } from "../src/secrets.ts";
 import { guideFixture } from "./native-guide.ts";
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
+
 vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0 }));
 
 const LINK = "https://guide.test/epg.xml.gz?token=private-guide-token";
@@ -17,21 +19,27 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
   control.prepare = async () => ({ kind: "failed", error: "network" });
   native.prepare = async (_lease, _job, url) => {
     prepared.push(url);
+
     return control.prepare();
   };
+
   const cancel = native.cancel;
   native.cancel = async (job) => {
     control.calls.push(`cancel:${job}`);
+
     return cancel(job);
   };
+
   const owner = createGuide(
     () => native,
     Date.now,
     () => undefined,
   );
+
   const refused = new Set<string>();
   /** The guides of each file written, by id. */
   const written: (readonly string[])[] = [];
+
   const secrets: SecretStore = {
     read: async (id) => disk.items.get(id) ?? null,
     async write(id, secret) {
@@ -45,6 +53,7 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
     },
     clear: async () => disk.items.clear(),
   };
+
   const guides = createGuides(
     secrets,
     owner,
@@ -55,8 +64,10 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
       written.push(value.guides.map(({ id }) => id));
     },
   );
+
   return { guides, owner, control, prepared, refused, disk, written };
 }
+
 const fresh = () => ({ file: null as unknown, items: new Map<string, string>() });
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -85,6 +96,7 @@ describe("external guides", () => {
     expect(await guides.add("https://other.test/epg.xml")).toBe("saving");
     expect(guides.links()).toHaveLength(1);
     refused.clear();
+
     for (let i = guides.links().length; i < GUIDE_LIMIT; i++)
       expect(await guides.add(`https://guide.test/${i}.xml`)).toBeNull();
     expect(await guides.add("https://guide.test/last.xml")).toBe("limit");
@@ -139,6 +151,7 @@ describe("external guides", () => {
       await initial.guides.add(LINK, "Second");
       const first = initial.guides.links()[0]!;
       const active = kind === "locked" ? launch(disk) : initial;
+
       if (kind === "locked") {
         disk.items.set(first.id, "https://stale.test/epg.xml");
         const { ids, kept } = active.guides.load();
@@ -146,6 +159,7 @@ describe("external guides", () => {
         await active.guides.restore();
         expect(active.guides.links()[0]!.locked).toBe(true);
       }
+
       const { guides, control, prepared, written } = active;
       const before = written.length;
       expect(await guides.replace(first.id, "https://new.test/a.xml")).toBeNull();
@@ -172,6 +186,7 @@ describe("external guides", () => {
       await before.guides.add(LINK);
       await before.guides.add("https://other.test/epg.xml");
       const lost = before.guides.links()[0]!;
+
       if (kind === "missing") disk.items.delete(lost.id);
       else disk.items.set(lost.id, "https://stale.test/epg.xml?token=wrong-guide");
       const after = launch(disk);
@@ -204,6 +219,7 @@ describe("external guides", () => {
     before.guides.load();
     await before.guides.add(LINK);
     const saved = locked.file;
+
     const after = createGuides(
       {
         read: async () => null,
@@ -223,6 +239,7 @@ describe("external guides", () => {
         locked.file = value;
       },
     );
+
     expect(after.load().ids).toEqual([]);
     expect(await after.add("https://other.test/epg.xml")).toBe("saving");
     expect(await after.map("a:1", "news")).toBe("saving");
@@ -237,17 +254,21 @@ describe("external guides", () => {
     const downloading = new Promise<void>((resolve) => (started = resolve));
     control.prepare = () => {
       started();
+
       return new Promise(() => {});
     };
+
     await guides.add(LINK);
     await downloading;
     const { id } = guides.links()[0]!;
     expect(owner.status(id).activity).toBe("loading");
     await guides.remove(id);
     const revoked = control.calls.indexOf(`revoke:${id}`);
+
     const cancelled = control.calls.findIndex(
       (call, at) => at > revoked && call.startsWith("cancel:"),
     );
+
     expect(revoked).toBeGreaterThan(-1);
     expect(cancelled).toBeGreaterThan(revoked);
     expect(control.calls.indexOf(`forget:${id}`)).toBeGreaterThan(cancelled);

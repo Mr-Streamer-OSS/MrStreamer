@@ -21,7 +21,9 @@ process.env["NODE_COMPILE_CACHE"] ??= join(
 const mobile = ["apps/ios", "apps/android"].map(
   (app) => `${join(import.meta.dirname, app).replaceAll("\\", "/")}/`,
 );
+
 const desktop = join(import.meta.dirname, "apps/desktop/package.json").replaceAll("\\", "/");
+
 const fromDesktop =
   /^(?:@mrstreamer\/(?:contracts|core)\/|(?:react(?:-dom)?|arktype|effect|fflate)(?:\/|$))/;
 
@@ -33,6 +35,7 @@ export default defineConfig({
       resolveId(source, importer, options) {
         if (!mobile.some((app) => importer?.startsWith(app)) || !fromDesktop.test(source))
           return null;
+
         return this.resolve(source, desktop, { ...options, skipSelf: true });
       },
     },

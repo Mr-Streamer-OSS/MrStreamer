@@ -72,6 +72,7 @@ function defineEvent() {
       .or({ type: "'volume'", level: "0 <= number <= 1", muted: "boolean" })
   );
 }
+
 const Event = lazy(defineEvent);
 
 export type HelperEvent = Infer<typeof Event>;
@@ -79,11 +80,14 @@ export type HelperEvent = Infer<typeof Event>;
 /** The event on a line, or null for anything else: other JSON, other types, or no JSON at all. */
 export function readEvent(line: string): HelperEvent | null {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch {
     return null;
   }
+
   const event = Event()(parsed);
+
   return event instanceof type.errors ? null : event;
 }

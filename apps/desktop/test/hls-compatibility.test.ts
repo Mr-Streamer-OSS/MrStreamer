@@ -12,12 +12,15 @@ import { defined } from "@mrstreamer/core/defined";
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
 const dispose: (() => Promise<unknown>)[] = [];
+
 afterEach(async () => {
   for (const close of dispose.splice(0).reverse()) await close();
 });
+
 async function app(ffmpeg = FFMPEG) {
   const host = await startFakeHls();
   dispose.push(() => host.close());
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg, ffprobe: FFPROBE }).pipe(
       Layer.provideMerge(PlaybackCoordination.layer),
@@ -30,12 +33,16 @@ async function app(ffmpeg = FFMPEG) {
       ),
     ),
   );
+
   dispose.push(() => runtime.dispose());
+
   const subscription = await (
     await promised(runtime, Subscriptions)
   ).add({ server: host.link, username: "", password: "" });
+
   const playback = await promised(runtime, Playback);
   const channel = (name: string) => ({ subscriptionId: subscription.id, id: `${name}.test` });
+
   return { host, playback, channel, coordination: await promised(runtime, PlaybackCoordination) };
 }
 
@@ -45,7 +52,9 @@ function decoded(bytes: Buffer) {
     ["-v", "error", "-count_frames", "-show_streams", "-show_packets", "-of", "json", "pipe:0"],
     { input: bytes, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
   );
+
   expect(probe.status, probe.stderr).toBe(0);
+
   const output = JSON.parse(probe.stdout) as {
     streams: {
       codec_name: string;
@@ -56,12 +65,14 @@ function decoded(bytes: Buffer) {
     }[];
     packets: { codec_type: string; pts_time?: string; dts_time?: string }[];
   };
+
   for (const type of ["video", "audio"])
     expect(
       output.streams.some(
         (stream) => stream.codec_type === type && Number(stream.nb_read_frames) > 0,
       ),
     ).toBe(true);
+
   return output;
 }
 
@@ -81,6 +92,7 @@ it("keeps compatible local HLS lazy and byte-preserving", async () => {
 
 it("preserves anamorphic display proportions and a stable square-pixel canvas when epoch SAR changes", async () => {
   const { host, playback, channel } = await app();
+
   // Change only the committed H.264 VUI. Both segments still decode the same 149 pictures.
   const remuxed = spawnSync(
     FFMPEG,
@@ -103,6 +115,7 @@ it("preserves anamorphic display proportions and a stable square-pixel canvas wh
     ],
     { input: fixture("hls-epoch-1.mpegts"), maxBuffer: 4 * 1024 * 1024 },
   );
+
   expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
   host.overrides.set("/media/epochs.m3u8", {
     body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
@@ -113,6 +126,7 @@ it("preserves anamorphic display proportions and a stable square-pixel canvas wh
   expect(session.format).toBe("mpegts");
   const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
   decoded(bytes);
+
   const probe = spawnSync(
     FFPROBE,
     [
@@ -129,10 +143,13 @@ it("preserves anamorphic display proportions and a stable square-pixel canvas wh
     ],
     { input: bytes, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 },
   );
+
   expect(probe.status, probe.stderr).toBe(0);
+
   const { frames } = JSON.parse(probe.stdout) as {
     frames: { width: number; height: number; sample_aspect_ratio: string }[];
   };
+
   expect(frames).toHaveLength(298);
   const first = frames[0]!;
   expect(first.sample_aspect_ratio).toBe("1:1");
@@ -213,6 +230,7 @@ it("reports a post-open converter launch failure with its typed conversion conte
 
 it("preserves compatible receiver passthrough when a secondary AAC PID has no packets", async () => {
   const { host, playback, channel } = await app();
+
   const remuxed = spawnSync(
     FFMPEG,
     [
@@ -234,19 +252,25 @@ it("preserves compatible receiver passthrough when a secondary AAC PID has no pa
     ],
     { input: fixture("h264-aac.mpegts") },
   );
+
   expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
   const packets: Buffer[] = [];
+
   for (let at = 0; at + 188 <= remuxed.stdout.length; at += 188) {
     const pid = ((remuxed.stdout[at + 1]! & 31) << 8) | remuxed.stdout[at + 2]!;
+
     if (pid !== 258) packets.push(remuxed.stdout.subarray(at, at + 188));
   }
+
   const body = Buffer.concat(packets);
   decoded(body);
   host.overrides.set("/media/compatible-0.ts", { body });
+
   const session = await playback.openReceiver(channel("compatible"), {
     address: "127.0.0.1",
     decoders: ["h264", "aac"],
   });
+
   const playlist = await (await fetch(session.url)).text();
   const segment = playlist.split("\n").find((line) => line && !line.startsWith("#"))!;
   expect(Buffer.from(await (await fetch(new URL(segment, session.url))).arrayBuffer())).toEqual(
@@ -291,17 +315,23 @@ it("fails a post-open 188KB HLS media stall without treating the segment as comp
 // Read public output PMTs across the entire stream, including descriptor changes after an epoch.
 function programTracks(bytes: Buffer) {
   const tracks: { type: number; pid: number; language: string; hearingImpaired: boolean }[] = [];
+
   for (let offset = 0; offset + 188 <= bytes.length; offset += 188) {
     const packet = bytes.subarray(offset, offset + 188);
+
     if (packet[0] !== 0x47 || !(packet[1]! & 0x40)) continue;
     const mode = (packet[3]! >> 4) & 3;
+
     if (mode !== 1 && mode !== 3) continue;
     const payload = packet.subarray(mode === 3 ? 5 + packet[4]! : 4);
     const section = payload.subarray(1 + payload[0]!);
+
     if (section[0] !== 2) continue;
     const end = Math.min(section.length, 3 + (((section[1]! & 15) << 8) | section[2]!) - 4);
+
     for (let at = 12 + (((section[10]! & 15) << 8) | section[11]!); at + 5 <= end;) {
       const length = ((section[at + 3]! & 15) << 8) | section[at + 4]!;
+
       if (section[at] === 15 || section[at] === 6) {
         for (let d = at + 5; d + 2 <= at + 5 + length; d += 2 + section[d + 1]!)
           if ([10, 86, 89].includes(section[d]!))
@@ -313,9 +343,11 @@ function programTracks(bytes: Buffer) {
                 section[d] === 89 && section[d + 5]! >= 0x20 && section[d + 5]! <= 0x24,
             });
       }
+
       at += 5 + length;
     }
   }
+
   return tracks;
 }
 
@@ -324,27 +356,37 @@ function programTracks(bytes: Buffer) {
 function hearingImpairedDvb(bytes: Buffer, pid: number) {
   for (let at = 0; at + 188 <= bytes.length; at += 188) {
     const packet = bytes.subarray(at, at + 188);
+
     if (!(packet[1]! & 0x40)) continue;
     const mode = (packet[3]! >> 4) & 3;
+
     if (mode !== 1 && mode !== 3) continue;
     const payload = packet.subarray(mode === 3 ? 5 + packet[4]! : 4);
     const section = payload.subarray(1 + payload[0]!);
+
     if (section[0] !== 2) continue;
     const end = 3 + (((section[1]! & 15) << 8) | section[2]!);
+
     for (let entry = 12 + (((section[10]! & 15) << 8) | section[11]!); entry + 5 <= end - 4;) {
       const length = ((section[entry + 3]! & 15) << 8) | section[entry + 4]!;
+
       if ((((section[entry + 1]! & 31) << 8) | section[entry + 2]!) === pid)
         for (let d = entry + 5; d + 2 <= entry + 5 + length; d += 2 + section[d + 1]!)
           if (section[d] === 0x59) section[d + 5] = 0x20;
       entry += 5 + length;
     }
+
     let crc = 0xffffffff;
+
     for (const byte of section.subarray(0, end - 4)) {
       crc ^= byte << 24;
+
       for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
     }
+
     section.writeUInt32BE(crc >>> 0, end - 4);
   }
+
   return bytes;
 }
 
@@ -352,8 +394,10 @@ it.each([false, true])(
   "keeps duplicate Dutch DVB subtitles on distinct stable PIDs, hearing-impaired=%s",
   async (hearingImpaired) => {
     const { host, playback, channel } = await app();
+
     for (const epoch of [0, 1]) {
       const subtitles = epoch ? 3 : 2;
+
       const changed = spawnSync(
         FFMPEG,
         [
@@ -384,12 +428,16 @@ it.each([false, true])(
         ],
         { input: fixture(`hls-epoch-${epoch}.mpegts`), maxBuffer: 4 * 1024 * 1024 },
       );
+
       expect(changed.status, changed.stderr.toString()).toBe(0);
+
       const body = hearingImpaired
         ? hearingImpairedDvb(changed.stdout, (epoch ? 512 : 256) + 2 + (epoch ? 0 : 1))
         : changed.stdout;
+
       host.overrides.set(`/media/epochs-${epoch}.ts`, { body });
     }
+
     host.overrides.set("/media/epochs-selected.m3u8", {
       body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
     });
@@ -401,6 +449,7 @@ it.each([false, true])(
       streams.filter((track) => track.codec_name === "dvb_subtitle").map((track) => track.id),
     ).toEqual(["0x102", "0x103"]);
     const tracks = programTracks(output).filter((track) => track.type === 6);
+
     for (const pid of [258, 259]) {
       const carried = tracks.filter((track) => track.pid === pid);
       expect(new Set(carried.map((track) => track.language))).toEqual(new Set(["dut", "nld"]));
@@ -408,6 +457,7 @@ it.each([false, true])(
         new Set([hearingImpaired && pid === 259]),
       );
     }
+
     expect(await playback.failure(session.sessionId)).toBeNull();
     expect(host.stats().peak).toBe(1);
     await playback.close(session.sessionId);
@@ -419,6 +469,7 @@ it.each([false, true])(
   "keeps selected sound when a later segment's secondary AAC PID is silent, discontinuity=%s",
   async (discontinuity) => {
     const { host, playback, channel } = await app();
+
     for (const epoch of [0, 1]) {
       const remuxed = spawnSync(
         FFMPEG,
@@ -443,15 +494,20 @@ it.each([false, true])(
         ],
         { input: fixture("h264-aac.mpegts"), maxBuffer: 4 * 1024 * 1024 },
       );
+
       expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
       const packets: Buffer[] = [];
+
       for (let at = 0; at + 188 <= remuxed.stdout.length; at += 188) {
         const packet = remuxed.stdout.subarray(at, at + 188);
         const pid = ((packet[1]! & 31) << 8) | packet[2]!;
+
         if (!epoch || pid !== 258) packets.push(packet);
       }
+
       host.overrides.set(`/media/compatible-${epoch}.ts`, { body: Buffer.concat(packets) });
     }
+
     host.overrides.set("/media/compatible.m3u8", {
       body: [
         "#EXTM3U",
@@ -477,8 +533,10 @@ it.each([false, true])(
     // Each converter declares its first TS packet discontinuous. A silent unused PID must
     // not add a discontinuity within an otherwise unchanged PMT epoch.
     let boundaries = 0;
+
     for (let at = 0; at + 188 <= bytes.length; at += 188) {
       const packet = bytes.subarray(at, at + 188);
+
       if (
         (((packet[1]! & 31) << 8) | packet[2]!) === 256 &&
         packet[3]! & 0x20 &&
@@ -487,6 +545,7 @@ it.each([false, true])(
       )
         boundaries++;
     }
+
     expect(boundaries).toBe(discontinuity ? 2 : 1);
     expect(await playback.tracks(session.sessionId)).toMatchObject({ playing: 257 });
     expect(await playback.failure(session.sessionId)).toBeNull();
@@ -498,6 +557,7 @@ it.each([false, true])(
 
 it("keeps Dutch sound across dut/nld aliases and reordered mixed-language epoch PIDs", async () => {
   const { host, playback, channel } = await app();
+
   const remuxed = spawnSync(
     FFMPEG,
     [
@@ -532,21 +592,25 @@ it("keeps Dutch sound across dut/nld aliases and reordered mixed-language epoch 
     ],
     { input: fixture("hls-epoch-1.mpegts"), maxBuffer: 4 * 1024 * 1024 },
   );
+
   expect(remuxed.status, remuxed.stderr.toString()).toBe(0);
   host.overrides.set("/media/epochs-1.ts", { body: remuxed.stdout });
   host.overrides.set("/media/epochs-selected.m3u8", {
     body: "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nepochs-0.ts\n#EXT-X-DISCONTINUITY\n#EXTINF:6,\nepochs-1.ts\n#EXT-X-ENDLIST\n",
   });
+
   const session = await playback.open(channel("epochs"), ["h264", "aac"], {
     repair: true,
     audioLanguage: "nl",
   });
+
   const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
   decoded(bytes);
   const tables = programTracks(bytes);
   const tracks = tables.filter((track) => track.type === 15);
   expect(new Set(tracks.map((track) => track.language))).toEqual(new Set(["dut", "nld"]));
   expect(new Set(tracks.map((track) => track.pid))).toEqual(new Set([258]));
+
   for (const pid of [259, 260])
     expect(
       new Set(tables.filter((track) => track.pid === pid).map((track) => track.language)),
@@ -579,15 +643,18 @@ it.each(["ended", "archive"] as const)(
       ].join("\n"),
     });
     const start = Date.now() - 600_000;
+
     const session = await playback.open(channel("compatible"), ["h264", "aac"], {
       repair: true,
       ...defined({ archive: mode === "archive" ? { start, end: start + 50_000 } : undefined }),
     });
+
     const bytes = Buffer.from(await (await fetch(session.url)).arrayBuffer());
     const output = decoded(bytes);
     expect(await playback.failure(session.sessionId)).toBeNull();
     const requested = host.requests().filter((path) => /compatible-\d+.ts/.test(path));
     expect(requested.length).toBeGreaterThanOrEqual(17);
+
     if (mode === "ended") {
       expect(requested).toHaveLength(count);
       expect(output.streams.find((stream) => stream.codec_type === "video")?.nb_read_frames).toBe(
@@ -597,11 +664,13 @@ it.each(["ended", "archive"] as const)(
       const pictures = output.packets
         .filter((packet) => packet.codec_type === "video")
         .map((packet) => Number(packet.pts_time));
+
       expect(Math.max(...pictures) - Math.min(...pictures)).toBeGreaterThan(50);
       expect(Math.max(...pictures) - Math.min(...pictures)).toBeLessThan(56);
       expect(requested.length).toBeLessThan(20);
       expect(host.stats().bytes).toBeLessThan(20 * fixture("h264-aac.mpegts").length);
     }
+
     expect(host.stats().peak).toBe(1);
     await playback.close(session.sessionId);
     expect(host.stats().active).toBe(0);
@@ -709,27 +778,34 @@ it.each(['#EXT-X-KEY:METHOD=AES-128,URI="key.bin"'])(
           "",
         ].join("\n"),
     });
+
     const session = await playback.openReceiver(channel("ac3"), {
       address: "127.0.0.1",
       decoders: ["h264", "aac"],
     });
+
     const until = performance.now() + 10_000;
     let failure = await playback.failure(session.sessionId);
+
     while (!failure && performance.now() < until) {
       await new Promise((resolve) => setTimeout(resolve, 25));
       failure = await playback.failure(session.sessionId);
     }
+
     const playlist = await (await fetch(session.url)).text();
     const segments = playlist.split("\n").filter((line) => line && !line.startsWith("#"));
+
     const bytes = Buffer.concat(
       await Promise.all(
         segments.map(async (line) => {
           const response = await fetch(new URL(line, session.url));
           expect(response.status).toBe(200);
+
           return Buffer.from(await response.arrayBuffer());
         }),
       ),
     );
+
     const output = decoded(bytes);
     expect(output.streams.map((stream) => stream.codec_name)).toEqual(["h264", "aac"]);
     const plan = await playback.diagnostic(session.sessionId);
@@ -758,10 +834,12 @@ it.each(['#EXT-X-KEY:METHOD=AES-128,URI="key.bin"'])(
 
 it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound and supported subtitles", async () => {
   const { host, playback, channel } = await app();
+
   const session = await playback.open(channel("epochs"), ["h264", "aac"], {
     repair: true,
     audioLanguage: "nl",
   });
+
   expect(session.format).toBe("mpegts");
   const answer = await fetch(session.url);
   expect(answer.status).toBe(200);
@@ -775,10 +853,13 @@ it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound 
       .filter((stream) => stream.codec_type === "subtitle")
       .map((stream) => stream.codec_name),
   ).toEqual(expect.arrayContaining(["dvb_subtitle", "dvb_teletext"]));
+
   const video = output.packets
     .filter((packet) => packet.codec_type === "video")
     .map((packet) => Number(packet.pts_time));
+
   expect(Math.max(...video) - Math.min(...video)).toBeGreaterThan(23);
+
   // Presentation may reorder inside a GOP. Compare each six-second epoch's observed range.
   for (const time of [7, 13, 19])
     expect(video.some((pts) => pts > time && pts < time + 1)).toBe(true);
@@ -792,14 +873,18 @@ it("converts ordered epochs with changed PIDs/PCR/codecs, stable selected sound 
 it("carries the archive stop window across the same PID/PCR-changing discontinuity with bounded provider bytes", async () => {
   const { host, playback, channel } = await app();
   const start = Math.floor((Date.now() - 60000) / 1000) * 1000;
+
   const session = await playback.open(channel("archive"), ["h264", "aac"], {
     repair: true,
     archive: { start, end: start + 8000 },
   });
+
   const output = decoded(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
+
   const times = output.packets
     .filter((packet) => packet.codec_type === "video")
     .map((packet) => Number(packet.pts_time));
+
   expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(7);
   expect(Math.max(...times) - Math.min(...times)).toBeLessThan(10);
   expect(host.requests().filter((path) => /archive-\d.ts/.test(path))).toEqual([
@@ -843,10 +928,12 @@ it.each([
         },
       },
     });
+
     const receiver = await playback.openReceiver(channel("compatible"), {
       address: "127.0.0.1",
       decoders: ["h264", "aac"],
     });
+
     expect(await (await fetch(receiver.url)).text()).toContain(tag.split(":")[0]);
     expect(host.requests().filter((path) => path.endsWith(".ts"))).toHaveLength(0);
   },
@@ -854,10 +941,12 @@ it.each([
 
 it("retains external audio receiver passthrough despite incompatible declared codecs", async () => {
   const { host, playback, channel } = await app();
+
   const receiver = await playback.openReceiver(channel("excluded"), {
     address: "127.0.0.1",
     decoders: ["h264", "aac"],
   });
+
   const master = await (await fetch(receiver.url)).text();
   expect(master).toContain("TYPE=AUDIO");
   expect(master).not.toContain(host.origin);
@@ -891,37 +980,47 @@ it.each([401, 403, 404, 500])(
 
 it("preconverts receiver AC-3 and preserves a continuous segment timeline across changed source epochs", async () => {
   const { host, playback, channel } = await app();
+
   const session = await playback.openReceiver(
     channel("epochs"),
     { address: "127.0.0.1", decoders: ["h264", "aac"] },
     { audioLanguage: "nl" },
   );
+
   const received = new Map<string, Buffer>();
   let final = "";
   const deadline = performance.now() + 12000;
+
   while (performance.now() < deadline) {
     const response = await fetch(session.url);
     expect(response.status).toBe(200);
     final = await response.text();
+
     for (const line of final.split("\n").filter((line) => line && !line.startsWith("#"))) {
       const url = new URL(line, session.url).href;
+
       if (received.has(url)) continue;
       const segment = await fetch(url);
       expect(segment.status).toBe(200);
       received.set(url, Buffer.from(await segment.arrayBuffer()));
     }
+
     if (final.includes("#EXT-X-ENDLIST")) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
+
   expect(final).toContain("#EXT-X-ENDLIST");
   expect(final).toContain("#EXT-X-DISCONTINUITY");
   const output = decoded(Buffer.concat([...received.values()]));
   expect(output.streams.find((stream) => stream.codec_type === "video")?.codec_name).toBe("h264");
   expect(output.streams.find((stream) => stream.codec_type === "audio")?.codec_name).toBe("aac");
+
   const times = output.packets
     .filter((packet) => packet.codec_type === "video")
     .map((packet) => Number(packet.pts_time));
+
   expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(12);
+
   for (let index = 1; index < times.length; index++)
     expect(times[index]! - times[index - 1]!).toBeGreaterThan(-0.1);
   expect(host.stats().peak).toBe(1);
@@ -962,6 +1061,7 @@ it("polls one selected live playlist in sequence without a parallel adaptive rea
   host.overrides.set("/media/epochs.m3u8", {
     body: () => {
       const from = polls++ ? 1 : 0;
+
       return [
         "#EXTM3U",
         "#EXT-X-TARGETDURATION:1",
@@ -989,6 +1089,7 @@ it.each(["live", "ended", "archive"] as const)(
     host.overrides.set("/media/epochs.m3u8", {
       body: () => {
         const from = polls++ ? 4 : 0;
+
         return [
           "#EXTM3U",
           "#EXT-X-TARGETDURATION:1",
@@ -999,10 +1100,12 @@ it.each(["live", "ended", "archive"] as const)(
         ].join("\n");
       },
     });
+
     const session = await playback.open(channel("epochs"), ["h264", "aac"], {
       repair: true,
       ...defined({ archive: mode === "archive" ? { start: 0, end: 60_000 } : undefined }),
     });
+
     expect(
       await fetch(session.url)
         .then((answer) => answer.arrayBuffer())
@@ -1053,10 +1156,13 @@ it("keeps picture and sound running when a declared subtitle stream supplies no 
   const { host, playback, channel } = await app();
   const source = fixture("hls-epoch-0.mpegts");
   const packets: Buffer[] = [];
+
   for (let offset = 0; offset + 188 <= source.length; offset += 188) {
     const pid = ((source[offset + 1]! & 31) << 8) | source[offset + 2]!;
+
     if (pid !== 259 && pid !== 260) packets.push(source.subarray(offset, offset + 188));
   }
+
   host.overrides.set("/media/epochs-0.ts", { body: Buffer.concat(packets) });
   const session = await playback.open(channel("epochs"), ["h264", "aac"], { repair: true });
   const output = decoded(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
@@ -1068,11 +1174,14 @@ it("keeps picture and sound running when a declared subtitle stream supplies no 
 it("releases a stalled HLS inspection at its deadline before admitting the replacement", async () => {
   const { host, playback, channel } = await app();
   host.stalls.set("/media/epochs-0.ts", 1);
+
   const pending = playback.open(channel("epochs"), ["h264", "aac"], { repair: true }).then(
     (value) => ({ value }),
     (error) => ({ error }),
   );
+
   const deadline = performance.now() + 1500;
+
   while (!host.requests().includes("/media/epochs-0.ts") && performance.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 5));
   expect(host.requests()).toContain("/media/epochs-0.ts");
@@ -1080,6 +1189,7 @@ it("releases a stalled HLS inspection at its deadline before admitting the repla
   expect(await pending).toHaveProperty("error");
   // The OS delivers the provider's close notification after cancellation settles in main.
   const closed = performance.now() + 500;
+
   while (host.stats().active && performance.now() < closed)
     await new Promise((resolve) => setTimeout(resolve, 5));
   expect(host.stats().active).toBe(0);
@@ -1099,6 +1209,7 @@ it("forwards excluded init, key and byte-range resources with auth on local and 
     headers: { "Content-Range": "bytes 0-187/1880" },
     body: Buffer.alloc(188, 0x47),
   });
+
   for (const receiver of [false, true]) {
     const session = receiver
       ? await playback.openReceiver(channel("compatible"), {
@@ -1106,22 +1217,28 @@ it("forwards excluded init, key and byte-range resources with auth on local and 
           decoders: ["h264", "aac"],
         })
       : await playback.open(channel("compatible"), ["h264", "aac"]);
+
     const text = await (await fetch(session.url)).text();
     const uris = [...text.matchAll(/URI="([^"]+)"/g)].map((match) => match[1]!);
     expect(uris).toHaveLength(2);
+
     const [key, init] = await Promise.all(
       uris.map(async (uri) => Buffer.from(await (await fetch(uri)).arrayBuffer())),
     );
+
     expect(key).toEqual(Buffer.alloc(16, 7));
     expect(init).toEqual(Buffer.from("fixture-init"));
     const segment = text.split("\n").find((line) => line && !line.startsWith("#"))!;
+
     const response = await fetch(new URL(segment, session.url), {
       headers: { Range: "bytes=0-187" },
     });
+
     expect(response.status).toBe(206);
     expect(response.headers.get("content-range")).toBe("bytes 0-187/1880");
     expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.alloc(188, 0x47));
   }
+
   const ranges = host.resources.filter((resource) => resource.path === "/media/compatible-0.ts");
   expect(ranges).toHaveLength(2);
   expect(
@@ -1147,6 +1264,7 @@ it("releases a prepared session superseded during inspection without needing ano
   host.overrides.set("/media/epochs-0.ts", {
     body: () => {
       newer.push(playback.begin());
+
       return fixture("hls-epoch-0.mpegts");
     },
   });
@@ -1162,6 +1280,7 @@ it.each(["refused", "network"] as const)(
   "preserves receiver %s failures instead of falling back",
   async (kind) => {
     const { host, playback, channel } = await app();
+
     if (kind === "refused") host.overrides.set("/media/compatible-0.ts", { status: 403 });
     else host.failures.add("/media/compatible-0.ts");
     await expect(

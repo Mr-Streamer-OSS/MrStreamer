@@ -53,8 +53,10 @@ const ID = {
 /** The most one description may hold, and the longest element header: an id and a size. */
 const ELEMENT_LIMIT = 32 * 1024 * 1024;
 const HEADER_BYTES = 12;
+
 /** A block's own header at most: its track's number, its time and its flags. */
 const BLOCK_HEAD_BYTES = 8 + 2 + 1;
+
 /** The track types ffmpeg makes streams of, in the file's order: video, audio, subtitles, metadata. */
 const STREAM_TYPES = [0x01, 0x02, 0x11, 0x21];
 const SUBTITLE_TYPE = 0x11;
@@ -72,23 +74,30 @@ function header(
   offset: number,
 ): { id: number; size: number | null; length: number } | null {
   const first = data[offset];
+
   if (first === undefined || first === 0) return null;
   const idLength = Math.clz32(first) - 23;
+
   if (idLength > 4 || offset + idLength >= data.length) return null;
   let id = 0;
+
   for (let index = 0; index < idLength; index++) id = id * 256 + data[offset + index]!;
   const sizeAt = offset + idLength;
   const mark = data[sizeAt]!;
+
   if (mark === 0) return null;
   const sizeLength = Math.clz32(mark) - 23;
+
   if (sizeAt + sizeLength > data.length) return null;
   let size = mark & (0xff >> sizeLength);
   let unknown = size === 0xff >> sizeLength;
+
   for (let index = 1; index < sizeLength; index++) {
     const byte = data[sizeAt + index]!;
     unknown &&= byte === 0xff;
     size = size * 256 + byte;
   }
+
   return { id, size: unknown ? null : size, length: idLength + sizeLength };
 }
 
@@ -96,8 +105,10 @@ function header(
 function* children(data: Uint8Array): Generator<Element> {
   for (let offset = 0; offset < data.length;) {
     const head = header(data, offset);
+
     if (!head || head.size === null) return;
     const start = offset + head.length;
+
     if (start + head.size > data.length) return;
     yield {
       id: head.id,
@@ -113,7 +124,9 @@ const child = (data: Uint8Array, id: number) => [...children(data)].find((each) 
 function unsigned(data: Uint8Array | undefined): number | null {
   if (!data || data.length > 8) return null;
   let value = 0;
+
   for (const byte of data) value = value * 256 + byte;
+
   return Number.isSafeInteger(value) ? value : null;
 }
 
@@ -153,10 +166,12 @@ interface Cue {
 export async function readLayout(read: ReadFile): Promise<Layout | null> {
   const lead = await read(0, 64);
   const ebml = lead && header(lead, 0);
+
   if (!lead || !ebml || ebml.id !== ID.ebml || ebml.size === null) return null;
   const segmentAt = ebml.length + ebml.size;
   const head = await read(0, segmentAt + HEADER_BYTES);
   const segment = head && header(head, segmentAt);
+
   if (!head || !segment || segment.id !== ID.segment) return null;
   // Positions in the seek head and the index count from here.
   const base = segmentAt + segment.length;
@@ -165,41 +180,54 @@ export async function readLayout(read: ReadFile): Promise<Layout | null> {
   // The segment's first elements, up to its first cluster: the seek head says where the rest is.
   const places = new Map<number, number>();
   let firstCluster: number | null = null;
+
   for (let offset = base; firstCluster === null;) {
     const at = await read(offset, HEADER_BYTES);
     const found = at && header(at, 0);
+
     if (!found || found.size === null) return null;
+
     if (found.id === ID.cluster) {
       firstCluster = offset;
       break;
     }
+
     if (!places.has(found.id)) places.set(found.id, offset);
+
     if (found.id === ID.seekHead && found.size <= ELEMENT_LIMIT) {
       const body = await read(offset + found.length, found.size);
+
       for (const seek of body ? children(body) : []) {
         if (seek.id !== ID.seek) continue;
         const id = unsigned(child(seek.data, ID.seekId)?.data);
         const position = unsigned(child(seek.data, ID.seekPosition)?.data);
+
         if (id !== null && position !== null && !places.has(id)) places.set(id, base + position);
       }
     }
+
     offset += found.length + found.size;
   }
 
   /** The whole element `id`, wherever the file keeps it. */
   const element = async (id: number): Promise<Element | null> => {
     const at = places.get(id);
+
     if (at === undefined) return null;
     const start = await read(at, HEADER_BYTES);
     const found = start && header(start, 0);
+
     if (!found || found.id !== id || found.size === null || found.size > ELEMENT_LIMIT) return null;
     const whole = await read(at, found.length + found.size);
+
     if (!whole || whole.length !== found.length + found.size) return null;
+
     return { id, data: whole.subarray(found.length), whole };
   };
 
   const info = await element(ID.info);
   const tracks = await element(ID.tracks);
+
   if (!info || !tracks) return null;
   // Nanoseconds a tick; a millisecond unless the file says otherwise.
   const scale = unsigned(child(info.data, ID.timestampScale)?.data) ?? 1_000_000;
@@ -207,15 +235,19 @@ export async function readLayout(read: ReadFile): Promise<Layout | null> {
 
   const index = await element(ID.cues);
   const cues: Cue[] = [];
+
   for (const point of index ? children(index.data) : []) {
     if (point.id !== ID.cuePoint) continue;
     const time = unsigned(child(point.data, ID.cueTime)?.data);
+
     if (time === null) continue;
+
     for (const positions of children(point.data)) {
       if (positions.id !== ID.cueTrackPositions) continue;
       const track = unsigned(child(positions.data, ID.cueTrack)?.data);
       const cluster = unsigned(child(positions.data, ID.cueClusterPosition)?.data);
       const inside = unsigned(child(positions.data, ID.cueRelativePosition)?.data);
+
       if (track !== null && cluster !== null) {
         cues.push({ time: time * tick, track, cluster: base + cluster, inside });
       }
@@ -231,8 +263,11 @@ export async function readLayout(read: ReadFile): Promise<Layout | null> {
       if (entry.id !== ID.trackEntry) return [];
       const number = unsigned(child(entry.data, ID.trackNumber)?.data);
       const kind = unsigned(child(entry.data, ID.trackType)?.data);
+
       if (number === null || kind === null || !STREAM_TYPES.includes(kind)) return [];
+
       if (!child(entry.data, ID.codecId)) return [];
+
       return [{ number, subtitles: kind === SUBTITLE_TYPE, entry: entry.whole }];
     }),
     firstCluster,
@@ -267,32 +302,44 @@ export async function* blocks(
 ): AsyncGenerator<Step> {
   const part = async (start: number, length: number): Promise<Uint8Array> => {
     const data = await read(start, length);
+
     if (!data) throw new Unreadable("A part of the file couldn't be had.");
+
     return data;
   };
+
   /** Where in the first cluster's data the index says to start; null once past it. */
   let inside = from.inside ?? null;
+
   for (let offset = from.cluster; layout.end === null || offset < layout.end;) {
     const lead = await part(offset, HEADER_BYTES);
+
     if (lead.length < 2) return;
     const cluster = header(lead, 0);
+
     if (!cluster || cluster.size === null) throw new Unreadable("A cluster doesn't say its size.");
     const clusterEnd = offset + cluster.length + cluster.size;
+
     // Between clusters a file may keep its index or its tags.
     if (cluster.id === ID.cluster) {
       let clusterTime: number | null = null;
+
       for (let at = offset + cluster.length; at < clusterEnd;) {
         const found = header(await part(at, HEADER_BYTES), 0);
+
         if (!found || found.size === null) throw new Unreadable("A block doesn't say its size.");
         const dataAt = at + found.length;
+
         if (found.id === ID.timestamp) {
           clusterTime = unsigned(await part(dataAt, found.size));
           // The index is only a hint: a block has to start where it says, in this cluster.
           const listed = inside === null ? null : offset + cluster.length + inside;
           inside = null;
+
           if (listed !== null && listed > dataAt + found.size && listed < clusterEnd) {
             const there = header(await part(listed, HEADER_BYTES), 0);
             const fits = there?.size != null && listed + there.length + there.size <= clusterEnd;
+
             if (fits && (there.id === ID.simpleBlock || there.id === ID.blockGroup)) {
               at = listed;
               continue;
@@ -301,34 +348,46 @@ export async function* blocks(
         } else if (found.id === ID.simpleBlock || found.id === ID.blockGroup) {
           // A group holds the block among what describes it, its duration for one.
           let blockAt: number | null = found.id === ID.simpleBlock ? dataAt : null;
+
           for (let inner = dataAt; blockAt === null && inner < dataAt + found.size;) {
             const each = header(await part(inner, HEADER_BYTES), 0);
+
             if (!each || each.size === null) throw new Unreadable("A block doesn't say its size.");
+
             if (each.id === ID.block) blockAt = inner + each.length;
             inner += each.length + each.size;
           }
+
           if (blockAt !== null) {
             const start = await part(blockAt, BLOCK_HEAD_BYTES);
             // The track's number is coded as a size is; the time counts from the cluster's.
             const length = Math.clz32(start[0] ?? 0) - 23;
+
             if (length > 8 || start.length < length + 2 || clusterTime === null) {
               throw new Unreadable("A block doesn't say its track or its time.");
             }
+
             let track = start[0]! & (0xff >> length);
+
             for (let index = 1; index < length; index++) track = track * 256 + start[index]!;
+
             const relative = new DataView(start.buffer, start.byteOffset, start.length).getInt16(
               length,
             );
+
             const time = (clusterTime + relative) * layout.tick;
+
             if (track === number) {
               const element = await part(at, found.length + found.size);
               yield { packet: true, time, clusterTime, element };
             } else yield { packet: false, time };
           }
         }
+
         at = dataAt + found.size;
       }
     }
+
     offset = clusterEnd;
   }
 }
@@ -364,9 +423,11 @@ export function selected(
 function element(id: number, data: Uint8Array): Buffer {
   const name = Buffer.from(id.toString(16), "hex");
   let length = 1;
+
   while (data.length >= 2 ** (7 * length) - 1) length++;
   const size = Buffer.alloc(8);
   size.writeBigUInt64BE(BigInt(data.length) | (1n << BigInt(7 * length)));
+
   return Buffer.concat([name, size.subarray(8 - length), data]);
 }
 
@@ -375,6 +436,8 @@ function ticks(value: number): Buffer {
   const bytes = Buffer.alloc(8);
   bytes.writeBigUInt64BE(BigInt(value));
   let start = 0;
+
   while (start < 7 && bytes[start] === 0) start++;
+
   return bytes.subarray(start);
 }

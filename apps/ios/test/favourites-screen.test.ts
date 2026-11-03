@@ -39,9 +39,11 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => {
   const { useEffect } = await import("react");
   const { box, reactNative } = await import("./react-native.ts");
+
   return {
     ...reactNative,
     /** A view, which lays out once, as a phone's screen. */
@@ -52,6 +54,7 @@ vi.mock("react-native", async () => {
       onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
     }) => {
       useEffect(() => onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } }), []);
+
       return box(props);
     },
     Alert: {
@@ -60,20 +63,26 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", () => ({ VideoView: () => null, createVideoPlayer: () => ({}) }));
+
 vi.mock("expo-router", () => ({
   router: {
     push: (href: string) => void scenario.did.push(`push ${href}`),
@@ -81,14 +90,17 @@ vi.mock("expo-router", () => ({
   },
   useIsFocused: () => true,
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
+
 vi.mock("../src/account.ts", () => ({
   onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => {
     scenario.rosterChanged = listener;
+
     return () => {};
   },
   useRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -101,6 +113,7 @@ vi.mock("../src/account.ts", () => ({
   retryChannels: () => void scenario.did.push("retry channels"),
   reloadAllChannels: () => undefined,
 }));
+
 vi.mock("../src/playback.ts", async (original) => ({
   channelStatus: (await original<typeof import("../src/playback.ts")>()).channelStatus,
   usePlayback: () => ({ phase: { kind: "idle" }, watch: false, pip: false, muted: true }),
@@ -109,10 +122,12 @@ vi.mock("../src/playback.ts", async (original) => ({
   retry: () => undefined,
   setMuted: () => undefined,
 }));
+
 vi.mock("../src/storage.ts", () => ({
   useSavedState: () => ({ recentChannels: [] }),
   writeState: () => undefined,
 }));
+
 // Home's movie rows stand aside: lists that failed show nothing in their place.
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => ({ kind: "failed" }),
@@ -123,11 +138,13 @@ vi.mock("../src/titles.ts", () => ({
     kinds.some((kind) => (scenario.made[kind]?.size("all") ?? 0) > 0),
   named: <T>(title: T) => title,
 }));
+
 // The still rows while channels first load are decoration this window doesn't animate.
 vi.mock("../src/loading.tsx", async (original) => ({
   ...(await original<typeof import("../src/loading.tsx")>()),
   PlaceholderRows: () => null,
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: () => undefined,
   resume: () => undefined,
@@ -149,10 +166,12 @@ const channel = (id: string, name: string): ProviderChannel => ({
   guideId: null,
   catchupDays: null,
 });
+
 const listing = (...channels: ProviderChannel[]): LiveCatalogue => ({
   categories: [{ id: "1", name: "NL | News" }],
   channels,
 });
+
 // The second panel numbers its channels as the first does.
 const library = buildLibrary([
   {
@@ -177,6 +196,7 @@ const relisted = (home: ProviderChannel[], cabin: ProviderChannel[]) =>
     { subscriptionId: "a", label: "Home", catalogue: listing(...home) },
     { subscriptionId: "b", label: "Cabin", catalogue: listing(...cabin) },
   ]);
+
 const NOS_HD = channel("10", "NL | NOS Journaal HD");
 const NOS_FHD = channel("14", "NL | NOS Journaal FHD");
 const ZIGGO = channel("11", "NL | Ziggo Sport");
@@ -187,9 +207,11 @@ const ZAPPELIN = channel("11", "NL | Zappelin");
 async function refresh(next: ReturnType<typeof buildLibrary>) {
   scenario.catalogue = { kind: "ready", library: next, failing: [] };
   viewing.setViewingChannels(next.byKey);
+
   if (root) React.act(() => root!.render(React.createElement(shown!)));
   await settle();
 }
+
 let shown: React.ComponentType | null = null;
 
 const member = (id: string, label: string, needsSecret = false): Member => ({
@@ -209,8 +231,10 @@ const member = (id: string, label: string, needsSecret = false): Member => ({
 
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function open(component: React.ComponentType) {
   shown = component;
+
   if (root) React.act(() => root!.unmount());
   container = document.createElement("div");
   root = createRoot(container);
@@ -219,26 +243,36 @@ function open(component: React.ComponentType) {
     root!.render(React.createElement(component));
   });
 }
+
 const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`);
 const text = (testID: string) => find(testID)?.textContent ?? "";
+
 function press(testID: string) {
   const button = find(testID) as { click(): void; disabled?: boolean } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
+
   if (button.disabled) throw new Error(`${testID} is disabled`);
   React.act(() => button.click());
 }
+
 const disabled = (testID: string) => (find(testID) as { disabled?: boolean } | null)?.disabled;
+
 /** The favourites the list shows, in order. */
 const listed = () =>
   [...container.querySelectorAll('[data-testid^="favourite-"]')].flatMap((row) => {
     const key = row.getAttribute("data-testid")?.slice("favourite-".length) ?? "";
+
     return !key.endsWith("-star") ? [key] : [];
   });
+
 const arranged = () =>
   [...container.querySelectorAll('[data-testid^="arranged-"]')].flatMap((row) => {
     const key = row.getAttribute("data-testid")?.slice("arranged-".length) ?? "";
+
     return !key.endsWith("-up") && !key.endsWith("-down") ? [key] : [];
   });
+
 /** The record's favourites, as their subscriptions' ids. */
 const saved = () =>
   (viewing.currentViewing()?.favourites ?? []).map((each) => `${each.subscriptionId}:${each.id}`);
@@ -250,13 +284,16 @@ async function holds(keys: readonly string[]) {
     await React.act(() => new Promise((done) => setTimeout(done, 10)));
   }
 }
+
 /** Lets the record's answer land and the screen draw it. */
 const settle = () => React.act(() => new Promise((done) => setTimeout(done, 20)));
+
 async function starred(...keys: string[]) {
   for (const key of keys) {
     const [subscriptionId = "", id = ""] = key.split(":");
     await viewing.setFavourite({ subscriptionId, id }, true);
   }
+
   await holds(keys);
 }
 
@@ -275,6 +312,7 @@ beforeEach(async () => {
   await viewing.eraseViewing("a");
   await viewing.eraseViewing("b");
 });
+
 afterEach(() => {
   if (root) React.act(() => root!.unmount());
   root = null;
@@ -291,9 +329,11 @@ describe("Live", () => {
 
   it("has Reminders after Favourites, which opens the reminders with none set too", () => {
     open(LiveHome);
+
     const rows = [...container.querySelectorAll("[data-testid^='live-']")].map((row) =>
       row.getAttribute("data-testid"),
     );
+
     expect(rows.indexOf("live-reminders")).toBeGreaterThan(rows.indexOf("live-favourites"));
     expect(text("live-reminders")).toBe("Reminders");
     press("live-reminders");
@@ -432,9 +472,11 @@ describe("Home", () => {
   it("previews a favourite on the Stage, in their order", async () => {
     await starred("b:11", "a:10");
     open(Home);
+
     const tiles = [...container.querySelectorAll('[data-testid^="home-favourite-"]')].map((tile) =>
       tile.getAttribute("data-testid"),
     );
+
     expect(tiles).toEqual(["home-favourite-b:11", "home-favourite-a:10"]);
     press("home-favourite-a:10");
     expect(scenario.did).toEqual(["play a:10"]);
@@ -443,6 +485,7 @@ describe("Home", () => {
 
 describe("Live's own rows", () => {
   const empty = buildLibrary([]);
+
   const once = () => ({
     favourites: container.querySelectorAll('[data-testid="live-favourites"]').length,
     find: container.querySelectorAll('[data-testid="live-discover"]').length,
@@ -450,6 +493,7 @@ describe("Live's own rows", () => {
 
   it("lead Live once, whether its channels load, failed, need a password or are none", () => {
     const [home] = scenario.members;
+
     const states: Catalogue[] = [
       { kind: "ready", library, failing: [] },
       { kind: "loading" },
@@ -457,11 +501,13 @@ describe("Live's own rows", () => {
       { kind: "failed", member: home!, error: { kind: "needs-secret", subscriptionId: "a" } },
       { kind: "ready", library: empty, failing: [] },
     ];
+
     for (const catalogue of states) {
       scenario.catalogue = catalogue;
       open(LiveHome);
       expect(once()).toEqual({ favourites: 1, find: 1 });
     }
+
     // What each state says is still there with them.
     expect(container.textContent).toContain("No live channels");
     press("live-favourites");
@@ -490,6 +536,7 @@ describe("an order arranged while the favourites change", () => {
     press("arranged-a:11-up");
     expect(arranged()).toEqual(["a:11", "a:10", "b:10"]);
   }
+
   const titles = () => scenario.alerts.map((alert) => alert.title);
 
   it("moves nothing once a provider shown needs its password", async () => {
@@ -561,11 +608,13 @@ describe("a star whose channel changed", () => {
     expect(scenario.alerts.map((alert) => alert.title)).toEqual(["Couldn't add NOS Journaal"]);
     rmSync(join(native.root, "documents", "viewing.json.next"), { recursive: true });
   }
+
   const tryAgain = async () => {
     const again = scenario.alerts[0]?.buttons?.find((button) => button.text === "Try again");
     React.act(() => again?.onPress?.());
     await settle();
   };
+
   const said = () => scenario.alerts.slice(1).map((alert) => alert.title);
 
   it("stars on Try again the channel its streams make now", async () => {
@@ -658,9 +707,11 @@ describe("Find countries or categories with no channel list", () => {
       scenario.catalogue = { kind: "failed", member: home!, error };
       open(DiscoverScreen);
       expect(container.textContent).toContain(`Couldn't load channels${why}`);
+
       const again = [...container.querySelectorAll("button")].find(
         (button) => button.textContent === "Try again",
       ) as { click(): void } | undefined;
+
       if (!again) throw new Error("No Try again");
       React.act(() => again.click());
       expect(scenario.did).toEqual(["retry channels"]);
@@ -684,14 +735,18 @@ describe("Home provider recovery follows the content it shows", () => {
         categoryIds: [],
         container: null,
       };
+
       const visible: ProviderTitle = { ...hidden, id: "visible", name: "Dune", adult: false };
+
       const rawTitles: OnDemandCatalogue = {
         movieCategories: [],
         movies: [usable === "movie" ? visible : hidden],
         seriesCategories: [],
         series: [visible],
       };
+
       const index = indexCatalogue([{ subscriptionId: "a", catalogue: rawTitles }], "en");
+
       for (const kind of ["movie", "series"] as const) {
         scenario.made[kind] = collections({
           kind,
@@ -703,10 +758,13 @@ describe("Home provider recovery follows the content it shows", () => {
           now: Date.now(),
         });
       }
+
       const rawLive = listing({ ...NOS_HD, adult: usable !== "channels" });
+
       const derived = buildLibrary([
         { subscriptionId: "a", label: "Northwind", catalogue: rawLive },
       ]);
+
       const failure = { kind: "unexpected", detail: "" } as const;
       scenario.members = [
         {
@@ -718,6 +776,7 @@ describe("Home provider recovery follows the content it shows", () => {
       scenario.catalogue = { kind: "ready", library: derived, failing: scenario.members };
       open(Home);
       const status = text("status-line");
+
       if (usable === "series-only") {
         expect(scenario.made.movie!.size("all")).toBe(0);
         expect(scenario.made.series!.size("all")).toBe(1);

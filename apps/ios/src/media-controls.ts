@@ -62,6 +62,7 @@ interface Native {
  */
 function native(): Native | null {
   const host: { expo?: { modules?: { MediaControls?: Native } } } = globalThis;
+
   return host.expo?.modules?.MediaControls ?? null;
 }
 
@@ -71,11 +72,14 @@ function nowPlaying(): {
   readonly info: Omit<NowPlaying, "session">;
 } | null {
   const { phase, watch, pip, external, aside } = playbackState.get();
+
   if (phase.kind === "idle" || phase.kind === "failed") return null;
+
   if (!watch && !pip && !external && !aside) return null;
   const { item } = phase;
   const speed = playbackSpeed.get() ?? 1;
   const length = playbackLength.get();
+
   const info = {
     title: item.title,
     subtitle: item.live ? "" : item.past ? "Catch-up" : item.place,
@@ -88,6 +92,7 @@ function nowPlaying(): {
     // Watch's Next episode, which shows nowhere else: elsewhere it would bring Watch back.
     next: item.next && watch,
   };
+
   return { item, info };
 }
 
@@ -100,14 +105,17 @@ interface Shown {
   readonly info: NowPlaying;
   readonly at: number;
 }
+
 let shown: Shown | null = null;
 let sessions = 0;
 
 /** Whether `next` says anything `before` doesn't, apart from a position iOS counts on to. */
 function changed(before: Shown, next: NowPlaying) {
   const rest = (info: NowPlaying) => JSON.stringify({ ...info, elapsed: 0 });
+
   if (rest(before.info) !== rest(next)) return true;
   const counted = before.info.elapsed + ((Date.now() - before.at) / 1000) * before.info.rate;
+
   return Math.abs(next.elapsed - counted) > DRIFT_S;
 }
 
@@ -121,10 +129,13 @@ function hide(module: Native) {
 
 function publish(module: Native) {
   const now = nowPlaying();
+
   if (!now) return hide(module);
   const session = shown?.item === now.item ? shown.info.session : ++sessions;
   const info = { ...now.info, session };
+
   if (shown && !changed(shown, info)) return;
+
   if (!shown) player().ownsNowPlaying = true;
   shown = { item: now.item, info, at: Date.now() };
   module.set(info);
@@ -134,6 +145,7 @@ function publish(module: Native) {
 function answer(command: Command) {
   if (!shown || command.session !== shown.info.session) return;
   const { info } = shown;
+
   switch (command.command) {
     case "play":
     case "pause":
@@ -141,9 +153,11 @@ function answer(command: Command) {
       return playOrPause(command.command);
     case "skip":
       if (info.seekable) seekBy(command.seconds);
+
       return;
     case "seek":
       if (info.seekable) seekTo(command.position);
+
       return;
     case "next":
       if (info.next) nextEpisode();
@@ -156,13 +170,18 @@ function answer(command: Command) {
  */
 export function startMediaControls(): () => void {
   const module = native();
+
   if (!module) return () => {};
+
   const update = () => publish(module);
+
   const stops = [playbackState, playbackClock, playbackLength, playbackSpeed].map((store) =>
     store.subscribe(update),
   );
+
   const listening = module.addListener("command", answer);
   update();
+
   return () => {
     for (const stop of stops) stop();
     listening.remove();

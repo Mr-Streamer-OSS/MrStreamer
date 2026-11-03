@@ -16,6 +16,7 @@ export const analyticsFeatures = [
   "player",
   "details",
 ] as const;
+
 export type AnalyticsFeature = (typeof analyticsFeatures)[number];
 
 /** Main-process consent and availability. Identity is never returned to a renderer. */
@@ -37,7 +38,9 @@ export const analyticsActions = [
   "update_seen",
   "update_dismissed",
 ] as const;
+
 export type AnalyticsAction = (typeof analyticsActions)[number];
+
 export const analyticsSettings = [
   "interface_language",
   "audio_language",
@@ -49,9 +52,13 @@ export const analyticsSettings = [
   "home_rows",
   "update_channel",
 ] as const;
+
 export type AnalyticsSetting = (typeof analyticsSettings)[number];
+
 export type AnalyticsPlaybackKind = "live" | "vod";
+
 export type AnalyticsPlaybackState = "playing" | "paused" | "waiting" | "seeking" | "stopped";
+
 export const analyticsFailures = [
   "network",
   "credentials",
@@ -60,6 +67,7 @@ export const analyticsFailures = [
   "unavailable",
   "app",
 ] as const;
+
 export type AnalyticsFailure = (typeof analyticsFailures)[number];
 
 /** Optional desktop facts only. No free text, codec strings, media or provider identifiers. */
@@ -77,6 +85,7 @@ export const PlaybackDiagnostic = lazy(() =>
     "diagnostic_fallback?": "'none' | 'audio' | 'video' | 'repair' | 'unknown'",
   }).onUndeclaredKey("reject"),
 );
+
 export type PlaybackDiagnostic = Infer<typeof PlaybackDiagnostic>;
 
 /** Only already classified codec facts enter the allowlist, never a decoder message. */
@@ -109,6 +118,7 @@ export function diagnosticCodecs(
 /** Main and renderer use typed upstream evidence before any engine-only classification. */
 export function streamDiagnostic(failure: StreamFailure): PlaybackDiagnostic {
   if (failure.diagnostic) return failure.diagnostic;
+
   switch (failure.kind) {
     case "network":
       return { diagnostic_stage: "deliver", diagnostic_reason: "network" };
@@ -124,23 +134,30 @@ export function streamDiagnostic(failure: StreamFailure): PlaybackDiagnostic {
 
 export function appDiagnostic(error: AppError): PlaybackDiagnostic {
   if (error.kind === "stream") return streamDiagnostic(error.failure);
+
   if (error.kind === "output" && error.failure.kind === "stream")
     return streamDiagnostic(error.failure.failure);
+
   if (error.kind === "output") {
     if (error.failure.kind === "media")
       return { diagnostic_stage: "decode", diagnostic_reason: "decode_rejected" };
+
     if (
       error.failure.kind === "unreachable" ||
       error.failure.kind === "not-fetched" ||
       error.failure.kind === "no-network"
     )
       return { diagnostic_stage: "deliver", diagnostic_reason: "network" };
+
     return { diagnostic_stage: "unknown", diagnostic_reason: "unknown" };
   }
+
   if (error.kind === "unreachable")
     return { diagnostic_stage: "open", diagnostic_reason: "network" };
+
   if (error.kind === "provider-error")
     return { diagnostic_stage: "open", diagnostic_reason: "provider_unavailable" };
+
   return { diagnostic_stage: "open", diagnostic_reason: "unknown" };
 }
 
@@ -190,6 +207,7 @@ export function appFailure(error: AppError): AnalyticsFailure {
         default:
           return "unavailable";
       }
+
     default:
       return "app";
   }
@@ -203,4 +221,5 @@ export const PlaybackControl = lazy(() =>
     ongoing: "boolean",
   }),
 );
+
 export type PlaybackControl = Infer<typeof PlaybackControl>;

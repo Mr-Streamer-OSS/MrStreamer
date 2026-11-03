@@ -6,11 +6,14 @@ import type { Page } from "./e2e/app.ts";
 import { failRendererLaunch } from "./e2e/analytics-launch-diagnostic.ts";
 
 vi.mock("node:fs", { spy: true });
+
 const { writeFileSync: write } = await vi.importActual<typeof fs>("node:fs");
 const directories: string[] = [];
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+
   for (const directory of directories.splice(0))
     fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -31,10 +34,12 @@ function fixture(rejectedUrl = "about:blank") {
   const evidence = fs.mkdtempSync(join(tmpdir(), "renderer-launch-diagnostic-"));
   directories.push(evidence);
   const calls: string[] = [];
+
   const send = vi.fn<Page["send"]>(async (method, _params, timeoutMs) => {
     calls.push(method);
     expect(timeoutMs).toBeGreaterThan(0);
     expect(timeoutMs).toBeLessThanOrEqual(500);
+
     return {
       result:
         method === "Page.getFrameTree"
@@ -62,6 +67,7 @@ function fixture(rejectedUrl = "about:blank") {
             },
     };
   });
+
   const evaluate = vi.fn<Page["evaluate"]>().mockResolvedValue({
     pid: 123,
     executable: "/owned/app.exe",
@@ -90,6 +96,7 @@ function fixture(rejectedUrl = "about:blank") {
       },
     ],
   });
+
   const listing = [
     {
       id: "same-page",
@@ -102,12 +109,16 @@ function fixture(rejectedUrl = "about:blank") {
       faviconUrl: "https://excluded",
     },
   ];
+
   const fetch_ = vi.fn<typeof fetch>(async () => {
     calls.push("listing");
+
     return Response.json(listing);
   });
+
   vi.stubGlobal("fetch", fetch_);
   const observations: Record<string, unknown> = { instance: { pid: 999 } };
+
   const context = {
     evidence,
     observations,
@@ -123,11 +134,15 @@ function fixture(rejectedUrl = "about:blank") {
     target: { version: "0.0.15", source: "selected-source", executable: "/owned/app.exe" },
     launchOrdinal: 4,
   };
+
   const file = (suffix: string) => {
     const name = fs.readdirSync(evidence).find((name) => name.endsWith(suffix));
+
     if (!name) throw new Error(`Missing receipt ${suffix}`);
+
     return { name, bytes: fs.readFileSync(join(evidence, name), "utf8") };
   };
+
   return { context, calls, send, evaluate, fetch_, file };
 }
 
@@ -143,6 +158,7 @@ describe("failure-only renderer launch evidence", () => {
       const read = f.send.getMockImplementation()!;
       f.send.mockImplementation((...args) => {
         primaryBeforeQuery ||= f.file(".primary.json").bytes;
+
         return read(...args);
       });
       const error = new Error("Wrong renderer build.");
@@ -183,6 +199,7 @@ describe("failure-only renderer launch evidence", () => {
     const f = fixture();
     f.evaluate.mockImplementationOnce(async () => {
       f.context.app.exitCode = 0;
+
       return {
         pid: 123,
         version: "0.0.15",
@@ -245,6 +262,7 @@ describe("failure-only renderer launch evidence", () => {
         ],
       },
     ]);
+
     for (const sample of later.samples) {
       expect(sample.phase).toEqual(expect.any(String));
       expect(Date.parse(sample.startedAt)).toBeLessThanOrEqual(Date.parse(sample.completedAt));
@@ -253,6 +271,7 @@ describe("failure-only renderer launch evidence", () => {
         signalCode: null,
       });
     }
+
     expect(f.evaluate.mock.calls[0]?.[1]).toBeGreaterThan(0);
     expect(f.evaluate.mock.calls[0]?.[1]).toBeLessThanOrEqual(500);
     expect(f.fetch_.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
@@ -266,9 +285,11 @@ describe("failure-only renderer launch evidence", () => {
     f.context.launchOrdinal++;
     f.context.rejectedUrl = "chrome-error://chromewebdata/";
     await expect(failRendererLaunch(error, f.context)).rejects.toBe(error);
+
     const primary = fs
       .readdirSync(f.context.evidence)
       .filter((name) => name.endsWith(".primary.json"));
+
     expect(primary).toHaveLength(2);
     expect(
       primary.map((name) => fs.readFileSync(join(f.context.evidence, name), "utf8")),
@@ -281,6 +302,7 @@ describe("failure-only renderer launch evidence", () => {
     "retains %s failures without replacing the caller's Error",
     async (mode) => {
       const f = fixture();
+
       if (mode === "rejection") f.send.mockRejectedValue(new Error("page rejected"));
       else f.send.mockResolvedValue({ error: { code: -32601, message: "unsupported" } });
       f.fetch_.mockRejectedValue(new Error("listing rejected"));
@@ -323,10 +345,12 @@ describe("failure-only renderer launch evidence", () => {
       ),
     ).toBe(true);
     expect(f.fetch_.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+
     const durable = () =>
       fs
         .readdirSync(f.context.evidence)
         .map((name) => [name, fs.readFileSync(join(f.context.evidence, name), "utf8")]);
+
     const before = durable();
     const observed = JSON.stringify(f.context.observations);
     const writes = vi.mocked(fs.writeFileSync).mock.calls.length;
@@ -356,6 +380,7 @@ describe("failure-only renderer launch evidence", () => {
           errors: [{ phase: `${phase}-write`, error: "Error: disk unavailable" }],
         }),
       ]);
+
       if (phase === "primary") {
         expect(f.send).not.toHaveBeenCalled();
         expect(f.fetch_).not.toHaveBeenCalled();

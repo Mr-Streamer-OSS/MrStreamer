@@ -29,6 +29,7 @@ export function guideHandlers({
       Effect.gen(function* () {
         yield* guide.refresh(subscriptionId);
         const status = (yield* guide.status).find((each) => each.subscriptionId === subscriptionId);
+
         // Removed while its guide downloaded.
         return status ?? (yield* new Failed({ error: { kind: "no-subscription" } }));
       }),

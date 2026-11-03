@@ -205,11 +205,13 @@ export const RecordingPlanSchema = lazy(() => {
     before: `0 <= number.integer <= ${PADDING_MAX}`,
     after: `0 <= number.integer <= ${PADDING_MAX}`,
   });
+
   const common = {
     channel: { subscriptionId: "string > 0", id: "string" },
     title: "string",
     padding,
   } as const;
+
   return type({
     kind: "'programme'",
     ...common,
@@ -225,6 +227,7 @@ export const RecordingPlanSchema = lazy(() => {
     })
     .narrow((plan) => {
       const minutes = plan.kind === "slot" ? plan.minutes : (plan.stop - plan.start) / 60_000;
+
       return (
         minutes > 0 &&
         (minutes + plan.padding.before + plan.padding.after) * 60_000 <= RECORDING_MAX_MS &&

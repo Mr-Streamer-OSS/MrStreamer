@@ -10,6 +10,7 @@ import { defined } from "@mrstreamer/core/defined";
 
 const STEADY_PROFILE_MS = 60_000;
 const STEADY_TRACE_MS = 20_000;
+
 const TRACE_CATEGORIES = [
   "toplevel",
   "devtools.timeline",
@@ -17,6 +18,7 @@ const TRACE_CATEGORIES = [
   "v8.execute",
   "blink.user_timing",
 ];
+
 // Tasks that start a thread's unit of work; nested run loops are skipped by containment.
 const TOP_LEVEL_TASKS = new Set([
   "ThreadControllerImpl::RunTask",
@@ -24,6 +26,7 @@ const TOP_LEVEL_TASKS = new Set([
   "RunTask",
   "RunNormalPriorityTask",
 ]);
+
 const electron = `process.getBuiltinModule('module').createRequire(process.execPath)('electron')`;
 
 export type CpuProfile = {
@@ -38,6 +41,7 @@ export type CpuProfile = {
   startTime: number;
   endTime: number;
 };
+
 export type TraceEvent = {
   name: string;
   cat?: string;
@@ -71,7 +75,9 @@ async function command<T>(
   timeoutMs = 120_000,
 ) {
   const reply = await page.send(method, params, timeoutMs);
+
   if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
   return reply.result as T;
 }
 
@@ -93,6 +99,7 @@ export function profileSummary(profile: CpuProfile, top = 25) {
   )
     throw new Error("Invalid CPU profile interval, nodes, samples or time deltas");
   const byId = new Map(profile.nodes.map((node) => [node.id, node]));
+
   if (
     byId.size !== profile.nodes.length ||
     profile.nodes.some(
@@ -106,25 +113,30 @@ export function profileSummary(profile: CpuProfile, top = 25) {
   )
     throw new Error("Invalid CPU profile nodes or sample references");
   const parent = new Map<number, number>();
+
   for (const node of profile.nodes)
     for (const child of node.children ?? []) {
       if (!byId.has(child) || parent.has(child))
         throw new Error("Invalid CPU profile child reference");
       parent.set(child, node.id);
     }
+
   for (const node of profile.nodes) {
     const seen = new Set<number>();
+
     for (let at: number | undefined = node.id; at !== undefined; at = parent.get(at)) {
       if (seen.has(at)) throw new Error("Cyclic CPU profile ancestry");
       seen.add(at);
     }
   }
+
   const self = new Map<number, number>();
   profile.samples.forEach((id, index) =>
     self.set(id, (self.get(id) ?? 0) + profile.timeDeltas[index]!),
   );
   const sampledUs = [...self.values()].reduce((sum, value) => sum + value, 0);
   const special = { "(idle)": 0, "(program)": 0, "(garbage collector)": 0, "(root)": 0 };
+
   const functions = new Map<
     string,
     {
@@ -135,13 +147,17 @@ export function profileSummary(profile: CpuProfile, top = 25) {
       stacks: Map<string, number>;
     }
   >();
+
   for (const [id, us] of self) {
     const { functionName, url, lineNumber } = byId.get(id)!.callFrame;
+
     if (Object.hasOwn(special, functionName) && url === "") {
       special[functionName as keyof typeof special] += us;
       continue;
     }
+
     const identity = `${functionName}|${url}|${lineNumber}`;
+
     const entry = functions.get(identity) ?? {
       functionName,
       url,
@@ -149,18 +165,24 @@ export function profileSummary(profile: CpuProfile, top = 25) {
       sampledUs: 0,
       stacks: new Map<string, number>(),
     };
+
     functions.set(identity, entry);
     entry.sampledUs += us;
     const frames: string[] = [];
+
     for (let at = parent.get(id); at !== undefined && frames.length < 8; at = parent.get(at)) {
       const frame = byId.get(at)!.callFrame;
+
       if (frame.functionName === "(root)") break;
       frames.push(`${frame.functionName || "(anonymous)"}:${frame.lineNumber + 1}`);
     }
+
     const stack = frames.join(" < ");
     entry.stacks.set(stack, (entry.stacks.get(stack) ?? 0) + us);
   }
+
   const busyUs = sampledUs - special["(idle)"];
+
   return {
     durationUs: profile.endTime - profile.startTime,
     sampledUs,
@@ -193,13 +215,18 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
   if (!Array.isArray(events) || !events.length) throw new Error("Empty or missing renderer trace");
   const processes = new Map<number, string>();
   const threads = new Map<string, string>();
+
   for (const event of events) {
     if (event.ph !== "M") continue;
+
     if (event.name === "process_name") processes.set(event.pid, event.args?.name ?? "");
+
     if (event.name === "thread_name")
       threads.set(`${event.pid}:${event.tid}`, event.args?.name ?? "");
   }
+
   const tasks = new Map<string, TraceEvent[]>();
+
   for (const event of events)
     if (event.ph === "X" && TOP_LEVEL_TASKS.has(event.name)) {
       if (!Number.isFinite(event.ts) || !Number.isFinite(event.dur) || event.dur! < 0)
@@ -207,25 +234,31 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
       const thread = `${event.pid}:${event.tid}`;
       tasks.set(thread, [...(tasks.get(thread) ?? []), event]);
     }
+
   const perThread = [...tasks].map(([thread, list]) => {
     list.sort((a, b) => a.ts - b.ts || b.dur! - a.dur!);
+
     let end = -Infinity,
       count = 0,
       wallUs = 0,
       cpuUs = 0,
       missingTasks = 0,
       missingWallUs = 0;
+
     for (const task of list) {
       if (task.ts < end) continue;
       end = task.ts + (task.dur ?? 0);
       count++;
       wallUs += task.dur ?? 0;
+
       if (!Number.isFinite(task.tdur) || task.tdur! < 0) {
         missingTasks++;
         missingWallUs += task.dur!;
       } else cpuUs += task.tdur!;
     }
+
     const [pid] = thread.split(":").map(Number);
+
     return {
       pid: pid!,
       process: processes.get(pid!) ?? "unknown",
@@ -244,38 +277,50 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
         : { status: "supported" as const, ms: cpuUs / 1000 },
     };
   });
+
   const mainThreads = [...threads].filter(
     ([thread, name]) => name === "CrRendererMain" && thread.startsWith(`${rendererPid}:`),
   );
+
   const mainThread = mainThreads[0]?.[0];
+
   if (mainThreads.length !== 1 || !tasks.get(mainThread!)?.some((task) => task.dur! > 0))
     throw new Error("Renderer trace has no unique main thread with task observations");
+
   const timeline = new Map<
     string,
     { count: number; wallMs: number; observedCpuMs: number; observedEvents: number }
   >();
+
   const scripts: typeof timeline = new Map();
+
   for (const event of events) {
     if (`${event.pid}:${event.tid}` !== mainThread || event.ph !== "X") continue;
+
     if (!event.cat?.includes("devtools.timeline") || TOP_LEVEL_TASKS.has(event.name)) continue;
+
     const add = (map: typeof timeline, name: string) => {
       const entry = map.get(name) ?? { count: 0, wallMs: 0, observedCpuMs: 0, observedEvents: 0 };
       map.set(name, entry);
       entry.count++;
       entry.wallMs += (event.dur ?? 0) / 1000;
+
       if (Number.isFinite(event.tdur) && event.tdur! >= 0) {
         entry.observedCpuMs += event.tdur! / 1000;
         entry.observedEvents++;
       }
     };
+
     add(timeline, event.name);
     const data = event.args?.data;
+
     if ((event.name === "FunctionCall" || event.name === "TimerFire") && data)
       add(
         scripts,
         `${event.name} ${data.functionName || "(anonymous)"}:${(data.lineNumber ?? -1) + 1}`,
       );
   }
+
   const ranked = (map: typeof timeline) =>
     [...map]
       .map(([name, { count, wallMs, observedCpuMs, observedEvents }]) => ({
@@ -302,6 +347,7 @@ export function traceSummary(events: readonly TraceEvent[], rendererPid: number,
           a.name.localeCompare(b.name),
       )
       .slice(0, top);
+
   return {
     scope:
       "Outer task thread time per traced thread; nested timeline events are inclusive, so their times overlap",
@@ -349,6 +395,7 @@ async function countIpc(main: Page, bytes: boolean) {
       } catch (error) { entry.failures++; throw error; }
     });
   })()`);
+
   return () => main.evaluate<void>(`globalThis.__probeIpcRestore()`);
 }
 
@@ -379,15 +426,19 @@ async function traceTo(page: Page, path: string, ms: number) {
   let dataLossOccurred = false;
   let endedAt: string | undefined;
   const errors: unknown[] = [];
+
   const complete = new Promise<void>((resolve, reject) => {
     timer = setTimeout(() => reject(new Error("Trace completion timed out after 30 s")), 30_000);
     removeComplete = page.on("Tracing.tracingComplete", (params) => {
       const completion = params as { stream?: unknown; dataLossOccurred?: boolean } | undefined;
       const handle = completion?.stream;
+
       if (typeof handle !== "string" || !handle) {
         reject(new Error("Trace completion has no IO stream"));
+
         return;
       }
+
       stream = handle;
       dataLossOccurred = completion?.dataLossOccurred === true;
       resolve();
@@ -396,21 +447,27 @@ async function traceTo(page: Page, path: string, ms: number) {
       reject(new Error("DevTools session closed before trace completion")),
     );
   });
+
   try {
     // Consume both failures immediately, including closure before Tracing.end answers.
     await Promise.all([command(page, "Tracing.end"), complete]);
     endedAt = new Date().toISOString();
     writeFileSync(path, "");
     const until = performance.now() + 120_000;
+
     for (;;) {
       const remaining = until - performance.now();
+
       if (remaining <= 0) throw new Error("Trace IO stream exceeded 120 s");
       const reply = await page.send("IO.read", { handle: stream, size: 4 << 20 }, remaining);
+
       if (reply.error) throw new Error(`IO.read: ${JSON.stringify(reply.error)}`);
       const chunk = reply.result as { data: string; eof: boolean; base64Encoded?: boolean };
       appendFileSync(path, chunk.base64Encoded ? Buffer.from(chunk.data, "base64") : chunk.data);
+
       if (chunk.eof) break;
     }
+
     if (dataLossOccurred) throw new Error("Trace completion reported data loss");
   } catch (error) {
     errors.push(error);
@@ -419,6 +476,7 @@ async function traceTo(page: Page, path: string, ms: number) {
     removeComplete();
     removeClose();
   }
+
   if (stream) {
     try {
       await command(page, "IO.close", { handle: stream }, 10_000);
@@ -426,7 +484,9 @@ async function traceTo(page: Page, path: string, ms: number) {
       errors.push(error);
     }
   }
+
   if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
+
   return { startedAt, endedAt: endedAt! };
 }
 
@@ -443,15 +503,18 @@ export async function steadyProfiles(
   const { page, main, output } = context;
   const restoreIpc = await countIpc(main, false);
   const errors: unknown[] = [];
+
   try {
     for (const state of ["live", "watch", "home"] as const) {
       if (state === "live") await context.list();
+
       if (state === "watch") {
         await context.click("Watch");
         await waitFor(() =>
           page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`),
         );
       }
+
       if (state === "home") {
         await key(page, "Escape", 27);
         await waitFor(() =>
@@ -462,26 +525,33 @@ export async function steadyProfiles(
           page.evaluate<boolean>(`!!document.querySelector("[data-home-preview] h2")`),
         );
       }
+
       await delay(2_000);
       const before = await playing(page);
+
       if (!before.some((video) => !video.paused && video.width > 0))
         throw new Error(`No playing picture before the ${state} steady profile`);
       await takeIpc(main);
       context.action(`Begin ${state} steady profile`);
+
       const targets = [
         ["main", main],
         ["renderer", page],
       ] as const;
+
       const profiles: unknown[] = [];
       const startedAt = new Date().toISOString();
       const profileStarts = new Map<Page, string>();
+
       for (const [, target] of targets) {
         await command(target, "Profiler.enable");
         await command(target, "Profiler.setSamplingInterval", { interval: 1_000 });
         profileStarts.set(target, new Date().toISOString());
         await command(target, "Profiler.start");
       }
+
       await delay(STEADY_PROFILE_MS);
+
       const captured: {
         role: string;
         target: Page;
@@ -489,7 +559,9 @@ export async function steadyProfiles(
         endedAt: string;
         profile: CpuProfile;
       }[] = [];
+
       const captureErrors: unknown[] = [];
+
       for (const [role, target] of targets) {
         try {
           const { profile } = await command<{ profile: CpuProfile }>(target, "Profiler.stop");
@@ -500,14 +572,17 @@ export async function steadyProfiles(
         } catch (error) {
           captureErrors.push(error);
         }
+
         try {
           await command(target, "Profiler.disable");
         } catch (error) {
           captureErrors.push(error);
         }
       }
+
       if (captureErrors.length)
         throw new AggregateError(captureErrors, captureErrors.map(String).join("; "));
+
       for (const { role, target, path, endedAt, profile } of captured)
         profiles.push({
           role,
@@ -524,6 +599,7 @@ export async function steadyProfiles(
       const traceTimes = await traceTo(page, tracePath, STEADY_TRACE_MS);
       const trace = JSON.parse(readFileSync(tracePath, "utf8")) as { traceEvents: TraceEvent[] };
       const after = await playing(page);
+
       if (
         !after.some(
           (video, index) =>
@@ -551,11 +627,13 @@ export async function steadyProfiles(
   } catch (error) {
     errors.push(error);
   }
+
   try {
     await restoreIpc();
   } catch (error) {
     errors.push(error);
   }
+
   if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
 }
 
@@ -582,6 +660,7 @@ const QUERY_CLIENT = `(() => {
   if (!client) throw new Error('React Query client unavailable');
   return client;
 })()`;
+
 const QUERY_INVENTORY = `(() => {
   const encoder = new TextEncoder();
   return ${QUERY_CLIENT}.getQueryCache().getAll().map(query => {
@@ -624,6 +703,7 @@ function inventorySummary(entries: readonly QueryEntry[]) {
       inactiveChannels: number;
     }
   >();
+
   for (const entry of entries) {
     const family = families.get(entry.family) ?? {
       entries: 0,
@@ -633,18 +713,22 @@ function inventorySummary(entries: readonly QueryEntry[]) {
       channels: 0,
       inactiveChannels: 0,
     };
+
     families.set(entry.family, family);
     family.entries++;
     family.dataBytes += entry.dataBytes;
     family.channels += entry.channels ?? 0;
+
     if (!entry.active) {
       family.inactive++;
       family.inactiveDataBytes += entry.dataBytes;
       family.inactiveChannels += entry.channels ?? 0;
     }
   }
+
   const total = (field: "dataBytes" | "inactiveDataBytes") =>
     [...families.values()].reduce((sum, family) => sum + family[field], 0);
+
   return {
     entries: entries.length,
     inactive: entries.filter((entry) => !entry.active).length,
@@ -658,14 +742,17 @@ async function collectedHeap(target: Page) {
   // Two passes let weakly held and finalized objects go before reading.
   await command(target, "HeapProfiler.collectGarbage");
   await command(target, "HeapProfiler.collectGarbage");
+
   return command<{ usedSize: number; totalSize: number }>(target, "Runtime.getHeapUsage");
 }
 
 async function heapSnapshotTo(page: Page, path: string) {
   writeFileSync(path, "");
+
   const stop = page.on("HeapProfiler.addHeapSnapshotChunk", (params) =>
     appendFileSync(path, (params as { chunk: string }).chunk),
   );
+
   try {
     await command(page, "HeapProfiler.takeHeapSnapshot", { reportProgress: false });
   } finally {
@@ -691,23 +778,29 @@ export async function queryRetention(
   const { points, returns } = record;
   const restoreIpc = await countIpc(main, true);
   const errors: unknown[] = [];
+
   try {
     await takeIpc(main);
     const picker = `document.querySelector('[role=navigation][aria-label="Channel categories"]')`;
+
     const header = (text: string) =>
       page.evaluate(
         `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === ${JSON.stringify(text)}).click()`,
       );
+
     const heading = () =>
       page.evaluate<string>(`document.querySelector('main h1')?.textContent ?? ''`);
+
     const rows = () =>
       page.evaluate<boolean>(`document.querySelectorAll('main [data-index]').length > 0`);
+
     const entry = async (title: string) => {
       context.action(`Pick ${title}`);
       await page.evaluate(
         `(() => { const b = ${picker}.querySelector('button[title=' + ${JSON.stringify(JSON.stringify(title))} + ']'); if (!b) throw new Error('Missing list ' + ${JSON.stringify(title)}); b.click(); })()`,
       );
     };
+
     // A list has settled once no browse read is under way and it shows rows or says it has none.
     const settled = async () => {
       await waitFor(() =>
@@ -717,11 +810,13 @@ export async function queryRetention(
       );
       await delay(500);
     };
+
     const point = async (name: string) => {
       const entries = await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000);
       const renderer = await collectedHeap(page);
       const mainHeap = await collectedHeap(main);
       const mainMemory = await main.evaluate<NodeJS.MemoryUsage>(`process.memoryUsage()`);
+
       const workingSets = (await context.metrics()).map((metric) => ({
         pid: metric.pid,
         type: metric.type,
@@ -729,6 +824,7 @@ export async function queryRetention(
         workingSetKB: metric.memory.workingSetSize,
         privateKB: metric.memory.privateBytes ?? null,
       }));
+
       points.push({
         name,
         at: new Date().toISOString(),
@@ -742,6 +838,7 @@ export async function queryRetention(
       });
       context.action(`Inventory ${name}`);
     };
+
     const timedReturn = async (name: string) => {
       await header("Home");
       await waitFor(() =>
@@ -750,11 +847,13 @@ export async function queryRetention(
       await delay(1_000);
       await takeIpc(main);
       await main.evaluate(`globalThis.__probeIpcBytes = false`);
+
       const rowsShownMs = await observe(
         page,
         `document.querySelectorAll('main [data-index]').length > 0`,
         `[...document.querySelectorAll("header button")].find(b => b.textContent.trim() === "Live TV").click()`,
       );
+
       returns.push({ name, rowsShownMs, ipc: await takeIpc(main) });
       await main.evaluate(`globalThis.__probeIpcBytes = true`);
       context.save();
@@ -764,38 +863,47 @@ export async function queryRetention(
     await entry("All channels");
     await waitFor(async () => (await heading()) === "All channels" && (await rows()));
     await point("live-all");
+
     const root = await page.evaluate<string[]>(
       `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
     );
+
     const topics = root
       .slice(root.indexOf("All channels") + 1)
       .filter((title) => !["Favourites", "Recently watched", "Provider lists"].includes(title));
+
     for (const topic of topics) {
       await entry(topic);
       await settled();
     }
+
     await entry("Provider lists");
     await waitFor(() =>
       page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to topics"]')`),
     );
+
     // Groups open with a chevron; categories outside any country list sit beside them.
     const [country] = await page.evaluate<string[]>(
       `[...${picker}.querySelectorAll('[data-entry]')].filter(b => b.querySelector('svg.lucide-chevron-right')).map(b => b.title)`,
     );
+
     if (!country) throw new Error("No provider list groups");
     await entry(country);
     await waitFor(() =>
       page.evaluate<boolean>(`!!${picker}.querySelector('button[aria-label="Back to countries"]')`),
     );
+
     const categories = (
       await page.evaluate<string[]>(
         `[...${picker}.querySelectorAll('[data-entry]')].map(b => b.title)`,
       )
     ).slice(0, 4);
+
     for (const category of categories) {
       await entry(category);
       await settled();
     }
+
     context.action("Open and close the guide grid");
     await key(page, "g", 71);
     await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[role="grid"]')`));
@@ -809,7 +917,9 @@ export async function queryRetention(
     await entry("All channels");
     await settled();
     const filter = `document.querySelector('[data-browse-filter=countries]')`;
+
     if (!(await page.evaluate<boolean>(`!!${filter}`))) throw new Error("No country filter");
+
     for (const pass of ["Apply", "Clear"]) {
       context.action(`${pass} the first country filter`);
       await page.evaluate(`${filter}.click()`);
@@ -822,13 +932,16 @@ export async function queryRetention(
         option.click();
       })()`);
       await delay(300);
+
       // Escape on the page itself would leave Live TV; close only a menu still open.
       if (await page.evaluate<boolean>(`!!document.querySelector('[role=menu]')`))
         await key(page, "Escape", 27);
       await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=menu]')`));
       await settled();
     }
+
     await point("after-live-churn");
+
     for (const [kind, tab, title] of [
       ["Movies", "All movies", "TEST | Index at the end"],
       ["Series", "All series", "Long-running"],
@@ -850,6 +963,7 @@ export async function queryRetention(
       await key(page, "Escape", 27);
       await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role=dialog]')`));
     }
+
     await point("after-ondemand-churn");
     await header("Home");
     await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-home-preview]")`));
@@ -870,6 +984,7 @@ export async function queryRetention(
     context.action("Renderer heap snapshot");
     await heapSnapshotTo(page, snapshot);
     record.heapSnapshot = snapshot;
+
     // React Query's own gcTime decides when inactive data goes; wait for the longest one seen.
     const gcTimeMs = Math.max(
       ...(await page.evaluate<QueryEntry[]>(QUERY_INVENTORY, 60_000))
@@ -877,6 +992,7 @@ export async function queryRetention(
         .map((query) => query.gcTimeMs),
       0,
     );
+
     record.gcWaitMs = gcTimeMs + 15_000;
     context.action(`Wait ${record.gcWaitMs} ms for query garbage collection`);
     await delay(gcTimeMs + 15_000);
@@ -886,11 +1002,13 @@ export async function queryRetention(
   } catch (error) {
     errors.push(error);
   }
+
   try {
     await restoreIpc();
   } catch (error) {
     errors.push(error);
   }
+
   if (errors.length) throw new AggregateError(errors, errors.map(String).join("; "));
 }
 

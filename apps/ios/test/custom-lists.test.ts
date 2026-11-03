@@ -30,16 +30,19 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   AppState: {
     currentState: "active",
     addEventListener: (_event: string, listener: (state: string) => void) => {
       scenario.appState.add(listener);
+
       return { remove: () => void scenario.appState.delete(listener) };
     },
   },
 }));
+
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => void scenario.rosterChanged.add(listener),
@@ -49,6 +52,7 @@ vi.mock("../src/account.ts", () => ({
   useCatalogue: () => scenario.catalogue,
   currentCatalogue: () => scenario.catalogue,
 }));
+
 vi.mock("../src/subscriptions.ts", () => ({
   readRegistry: () =>
     scenario.retired && {
@@ -69,10 +73,12 @@ const channel = (id: string, name: string): ProviderChannel => ({
   guideId: null,
   catchupDays: null,
 });
+
 const listing = (...channels: ProviderChannel[]): LiveCatalogue => ({
   categories: [{ id: "1", name: "NL | News" }],
   channels,
 });
+
 const NOS = channel("10", "NL | NOS Journaal HD");
 const NOS_FHD = channel("14", "NL | NOS Journaal FHD");
 const ZIGGO = channel("11", "NL | Ziggo Sport");
@@ -97,16 +103,22 @@ function shows(home: ProviderChannel[], cabin: ProviderChannel[] = [RTL]) {
     ]),
     failing: [],
   };
+
   for (const listener of scenario.changed) listener();
 }
+
 const live = (key: string): Channel => {
   const found = scenario.catalogue.kind === "ready" && scenario.catalogue.library.byKey.get(key);
+
   if (!found) throw new Error(`Live doesn't list ${key}`);
+
   return found;
 };
 
 type Lists = typeof import("../src/custom-lists.ts");
+
 let lists: Lists;
+
 /** The app as a launch starts it: the module read afresh over the same files. */
 async function launch() {
   vi.resetModules();
@@ -119,6 +131,7 @@ async function launch() {
 
 /** What a screen showing the lists draws: names, then each entry by key or by name and why. */
 let drawn: string[] = [];
+
 function Probe() {
   drawn = lists
     .useChannelLists()
@@ -130,19 +143,25 @@ function Probe() {
           )
           .join(", ")}${list.away ? ` +${list.away} away` : ""}`,
     );
+
   return null;
 }
+
 let root: Root | null = null;
+
 function open() {
   if (root) React.act(() => root!.unmount());
   root = createRoot(document.createElement("div"));
   React.act(() => root!.render(React.createElement(Probe)));
 }
+
 /** What a screen showing the lists draws now. */
 function shown() {
   React.act(() => root!.render(React.createElement(Probe)));
+
   return drawn;
 }
+
 const file = () => join(native.root, "documents", "custom-lists.json");
 const only = () => lists.currentChannelLists()[0]!;
 
@@ -161,8 +180,10 @@ beforeEach(async () => {
   shows([NOS, NOS_FHD, ZIGGO]);
   await launch();
 });
+
 afterEach(() => {
   native.sync = null;
+
   if (root) React.act(() => root!.unmount());
   root = null;
 });
@@ -195,6 +216,7 @@ describe("lists", () => {
     native.sync = (operation) => {
       if (operation === "write") throw new Error("The disk is full.");
     };
+
     expect(() => lists.setMember(news, live("b:10"), true)).toThrow("The disk is full.");
     expect(() => lists.renameList(news, "Nieuws")).toThrow("The disk is full.");
     expect(shown()).toEqual(["News: a:10"]);
@@ -211,8 +233,10 @@ describe("lists", () => {
         moved = true;
         throw new Error("The disk went away.");
       }
+
       if (operation === "write" && moved) throw new Error("The disk is full.");
     };
+
     expect(() => lists.createList("News", live("a:10"))).toThrow("The disk went away.");
     native.sync = null;
     await launch();
@@ -227,6 +251,7 @@ describe("lists", () => {
         throw new Error("The disk went away.");
       }
     };
+
     expect(() => lists.createList("News", live("a:10"))).toThrow("The disk went away.");
     native.sync = null;
     await launch();
@@ -268,6 +293,7 @@ describe("lists", () => {
       native.sync = (operation) => {
         if (operation === "text") throw new Error("The disk went away.");
       };
+
       await launch();
       expect(shown()).toEqual([]);
       expect(() => lists.createList("Sport")).toThrow(
@@ -291,6 +317,7 @@ describe("lists", () => {
     native.sync = (operation, path) => {
       if (operation === "text" && !path.endsWith(".next")) throw new Error("The disk went away.");
     };
+
     await launch();
     expect(shown()).toEqual([]);
     expect(() => lists.createList("Sport")).toThrow(
@@ -392,6 +419,7 @@ describe("a list's channels", () => {
     root = null;
     // The roster changes alone, as a removal tells it before the channels.
     scenario.members = [member("b", "Cabin")];
+
     for (const listener of scenario.rosterChanged) listener();
     expect(readFileSync(file(), "utf8")).not.toContain("NOS");
   });
@@ -464,8 +492,10 @@ describe("arranging a list", () => {
     const id = lists.createList("Mix", live("a:10"));
     lists.setMember(id, live("a:11"), true);
     lists.setMember(id, live("b:10"), true);
+
     return id;
   }
+
   const memberOf = (key: string) =>
     only().entries.find((entry) => entry.kind === "listed" && entry.channel.key === key)!.member;
 

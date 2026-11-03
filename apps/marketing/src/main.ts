@@ -41,6 +41,7 @@ async function play(part: Element): Promise<void> {
   playing.set(part, run);
   part.classList.add("revealed");
   await Promise.allSettled(part.getAnimations({ subtree: true }).map(({ finished }) => finished));
+
   if (playing.get(part) === run) settle(part);
 }
 
@@ -48,6 +49,7 @@ async function play(part: Element): Promise<void> {
 // once. A part stays watched, so leaving the screen mid-run settles it where it stands.
 let opening = true;
 const entered = new WeakSet<Element>();
+
 const reveal = new IntersectionObserver(
   (entries) => {
     for (const { isIntersecting, target } of entries) {
@@ -55,21 +57,26 @@ const reveal = new IntersectionObserver(
         if (playing.has(target)) settle(target);
         continue;
       }
+
       if (entered.has(target)) continue;
       entered.add(target);
+
       if (!opening) void play(target);
     }
+
     opening = false;
   },
   // A little before it shows, so it never appears and then starts over.
   { rootMargin: "0px 0px 10% 0px" },
 );
+
 for (const part of document.querySelectorAll("[data-reveal]")) reveal.observe(part);
 
 // Hiding the page, or asking for less motion halfway, leaves nothing mid-animation.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) for (const part of [...playing.keys()]) settle(part);
 });
+
 calm.addEventListener("change", () => {
   for (const part of [...playing.keys()]) settle(part);
 });
@@ -77,16 +84,21 @@ calm.addEventListener("change", () => {
 // The trick nearest the middle of the screen is lit, the others dimmed. It is worked out once a
 // frame while the page scrolls, and only while the tricks are on screen, so nothing runs at rest.
 const tricks = document.querySelector(".tricks");
+
 if (tricks) {
   tricks.classList.add("watching");
   const rows = [...tricks.querySelectorAll(".trick")];
   let frame = 0;
+
   const light = (): void => {
     frame = 0;
+
     const distances = rows.map((row) => {
       const { top, bottom } = row.getBoundingClientRect();
+
       return Math.abs((top + bottom) / 2 - innerHeight / 2);
     });
+
     const at = distances.indexOf(Math.min(...distances));
     rows.forEach((row, index) => {
       row.classList.toggle("lit", index === at);
@@ -94,9 +106,11 @@ if (tricks) {
       row.classList.toggle("past", index < at);
     });
   };
+
   const schedule = (): void => {
     if (!frame) frame = requestAnimationFrame(light);
   };
+
   light();
   // A batch can hold more than one change for the tricks; the last is where they are now.
   new IntersectionObserver((entries) => {
@@ -115,40 +129,52 @@ if (tricks) {
 // heading's noun follows the tab ("Same guide…", "Same channels…"); without scripts every screen
 // shows and it says "Same app…".
 const tablist = document.querySelector<HTMLElement>(".tabs");
+
 if (tablist) {
   const tabs = [...tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const noun = document.querySelector(".screens h2 .noun");
+
   const select = (chosen: HTMLButtonElement, focus = false): void => {
     if (noun && chosen.dataset["noun"]) noun.textContent = chosen.dataset["noun"];
+
     for (const tab of tabs) {
       const on = tab === chosen;
       tab.setAttribute("aria-selected", String(on));
       tab.tabIndex = on ? 0 : -1;
       const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+
       if (panel) panel.hidden = !on;
     }
+
     if (focus) chosen.focus();
   };
+
   tablist.addEventListener("click", ({ target }) => {
     const tab =
       target instanceof Element ? target.closest<HTMLButtonElement>('[role="tab"]') : null;
+
     if (tab) select(tab);
   });
   tablist.addEventListener("keydown", (event) => {
     const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
     const current = tabs.findIndex((tab) => tab.getAttribute("aria-selected") === "true");
     const next = step === undefined ? undefined : tabs.at((current + step) % tabs.length);
+
     if (!next) return;
     event.preventDefault();
     select(next, true);
   });
+
   // Panels hold only pictures, so each takes focus itself, as a tab panel does.
   for (const tab of tabs) {
     const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
     panel?.setAttribute("role", "tabpanel");
+
     if (panel) panel.tabIndex = 0;
   }
+
   const [first] = tabs;
+
   if (first) select(first);
   tablist.hidden = false;
 }
@@ -157,6 +183,7 @@ if (tablist) {
 async function refreshDownloads(): Promise<void> {
   try {
     const response = await fetch(FEED, { signal: AbortSignal.timeout(8_000) });
+
     if (response.ok) showFeedDownloads(document, await response.json());
   } catch {
     // Offline, blocked or not a feed.
@@ -171,19 +198,25 @@ if (document.querySelector("[data-installer], [data-release-version]")) void ref
 // the link still lands on the section's heading, which opens with a click.
 function openLinked(): void {
   let id = location.hash.slice(1);
+
   try {
     id = decodeURIComponent(id);
   } catch {
     // A malformed address names no section.
   }
+
   const target = id ? document.getElementById(id) : null;
   // An old fragment's anchor sits in a run of anchors right above its section.
   let next = target?.nextElementSibling;
+
   while (next instanceof HTMLAnchorElement && !next.href) next = next.nextElementSibling;
   const section = target?.closest("details") ?? (next instanceof HTMLDetailsElement ? next : null);
+
   if (!target || !section || section.open) return;
   section.open = true;
   target.scrollIntoView();
 }
+
 openLinked();
+
 addEventListener("hashchange", openLinked);

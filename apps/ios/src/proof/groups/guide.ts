@@ -7,11 +7,14 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       const names: string[] = [];
+
       const reader = xmltvReader(
         { channel: (c) => names.push(c.id), programme: () => {} },
         1 << 20,
       );
+
       reader.push(new TextEncoder().encode('<tv><channel id="a.test"></channel></tv>'));
+
       return { channels: names, ending: plain(reader.end()) };
     },
   },

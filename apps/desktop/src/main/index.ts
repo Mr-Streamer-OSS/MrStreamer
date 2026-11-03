@@ -112,6 +112,7 @@ const isWindows = process.platform === "win32";
 const UPDATE_FEED =
   process.env["MR_STREAMER_UPDATE_FEED"] ??
   "https://mr-streamer-oss.github.io/MrStreamer/updates.json";
+
 const UPDATE_API = process.env["MR_STREAMER_UPDATE_API"] ?? "https://api.github.com";
 const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
 
@@ -123,20 +124,25 @@ const REPOSITORY = "Mr-Streamer-OSS/MrStreamer";
  * explicit --user-data-dir, as tests pass, still wins.
  */
 const storeCopy = process.windowsStore === true;
+
 if (storeCopy && !app.commandLine.hasSwitch("user-data-dir")) {
   app.setPath("userData", join(app.getPath("appData"), "Mr. Streamer Store"));
 }
+
 /**
  * A Snap, which snapd updates, saves passwords in the keyring it is pinned to or not at all: never
  * under Chromium's fixed key, which `start` doesn't allow it. An explicit --password-store wins,
  * but naming the fixed key ("basic") only gets the same refusal.
  */
 const snap = snapName(process.env, process.resourcesPath);
+
 if (snap && !app.commandLine.hasSwitch("password-store")) {
   app.commandLine.appendSwitch("password-store", snapPasswordStore(process.env));
 }
+
 // Capture the evidence before application services or their migrations create profile files.
 const initialProfileOrigin = profileOrigin(app.getPath("userData"));
+
 /** The app's page in the Microsoft Store, by the Store ID Partner Center gave it. */
 const STORE_PAGE = "ms-windows-store://pdp/?ProductId=9N45GG76ZP4T";
 const STORE_REVIEW = "ms-windows-store://review/?ProductId=9N45GG76ZP4T";
@@ -146,6 +152,7 @@ const STORE_REVIEW = "ms-windows-store://review/?ProductId=9N45GG76ZP4T";
  * first. Artwork shown this session stays in memory either way.
  */
 const DISK_CACHE_BYTES = 64 * 1024 * 1024;
+
 app.commandLine.appendSwitch("disk-cache-size", String(DISK_CACHE_BYTES));
 
 // The pictures kept with downloads load from the app's own scheme, as a page's images do.
@@ -154,12 +161,14 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+
 /**
  * The viewer closed the window while a receiver had playback, and macOS keeps it, out of sight:
  * its page is what counts down to the next episode and answers the media keys. The Dock brings it
  * back, and it closes for good once the receiver lets go (see `start`).
  */
 let away = false;
+
 /**
  * The window the system's list of receivers opens from, and where its page was on screen when the
  * list was asked for, from then until the viewer is done at that list. The list hangs from a
@@ -167,8 +176,10 @@ let away = false;
  * when that happens first (see `start`).
  */
 let listedFrom: { readonly window: BrowserWindow; readonly page: Rectangle } | null = null;
+
 /** How long to wait for a window on its way into full screen to say it arrived. */
 const FULL_SCREEN_MS = 2000;
+
 /**
  * How long the system's list waits after the window arrived in full screen. As macOS finishes
  * the change of Space it gives the window's app the front once more, and takes it from the helper
@@ -177,10 +188,13 @@ const FULL_SCREEN_MS = 2000;
  * no event for it, so this is that time with room to spare.
  */
 const FULL_SCREEN_SETTLE_MS = 250;
+
 /** When the window arrived in full screen, by `performance.now()`; null once it has left it. */
 let filledAt: number | null = null;
+
 /** The smallest the window gets, except as the mini player. */
 const MIN_SIZE = { minWidth: 960, minHeight: 600 } as const;
+
 /** Each window's mini player, which remembers where the window was. */
 const miniPlayers = new WeakMap<BrowserWindow, ReturnType<typeof miniPlayer>>();
 
@@ -193,6 +207,7 @@ const miniPlayers = new WeakMap<BrowserWindow, ReturnType<typeof miniPlayer>>();
 function putAway(window: BrowserWindow): void {
   away = true;
   window.webContents.setBackgroundThrottling(false);
+
   if (!window.isFullScreen()) return window.hide();
   window.once("leave-full-screen", () => {
     // Not when it was brought back meanwhile.
@@ -208,11 +223,13 @@ function putAway(window: BrowserWindow): void {
 let reopen = () => {
   if (mainWindow) bringBack(mainWindow);
 };
+
 /**
  * Whether the app stays, without a window, as Windows and Linux close their last: while a
  * recording's time goes on or a schedule is kept. Set once the app started.
  */
 let staysWithoutWindow = () => false;
+
 /** How often an update waiting for recordings to end looks again. */
 const RECORDING_WAIT_MS = 5000;
 
@@ -221,6 +238,7 @@ function bringBack(window: BrowserWindow): void {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
+
   if (!away) return;
   away = false;
   window.webContents.setBackgroundThrottling(true);
@@ -248,21 +266,26 @@ function settledInFullScreen(window: BrowserWindow, signal: AbortSignal): Promis
   return new Promise((resolve) => {
     if (signal.aborted) return resolve();
     let timer: NodeJS.Timeout | undefined;
+
     const done = () => {
       clearTimeout(timer);
       window.off("enter-full-screen", arrived).off("closed", done);
       signal.removeEventListener("abort", done);
       resolve();
     };
+
     /** The window is there, or never said so in time: what is left of its time to settle. */
     const arrived = () => {
       clearTimeout(timer);
       const left = filledAt === null ? 0 : filledAt + FULL_SCREEN_SETTLE_MS - performance.now();
+
       if (left > 0) timer = setTimeout(done, left);
       else done();
     };
+
     window.once("closed", done);
     signal.addEventListener("abort", done, { once: true });
+
     // On its way: the window says it is full screen from the start, and tells when it arrived.
     if (filledAt === null && window.isFullScreen()) {
       window.once("enter-full-screen", arrived);
@@ -292,16 +315,20 @@ function listPlace(
   if (!onScreen(window)) return null;
   const page = window.getContentBounds();
   const zoom = window.webContents.getZoomFactor();
+
   const place = {
     x: page.x + anchor.x * zoom,
     y: page.y + anchor.y * zoom,
     width: anchor.width * zoom,
     height: anchor.height * zoom,
   };
+
   const inside = (at: number, from: number, length: number) => at >= from && at <= from + length;
+
   const inPage =
     inside(place.x + place.width / 2, page.x, page.width) &&
     inside(place.y + place.height / 2, page.y, page.height);
+
   return {
     page,
     front: window.isFocused(),
@@ -347,6 +374,7 @@ function openWindow(
       nodeIntegration: false,
     },
   });
+
   window.once("ready-to-show", () => window.show());
   // Full screen hides the traffic lights and the Windows controls; the top bar takes their room.
   const fullScreen = () => emit(window.webContents, "window.fullScreen", window.isFullScreen());
@@ -372,6 +400,7 @@ function openWindow(
       away = false;
       filledAt = null;
     }
+
     // Nothing can be watching once the window is gone, so release the provider connection.
     closeStreams();
   });
@@ -386,11 +415,13 @@ function openWindow(
     .on("closed", moved);
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+
     return { action: "deny" };
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("context-menu", (_event, params) => {
     const items = fieldMenu(params);
+
     if (items.length) Menu.buildFromTemplate(items).popup({ window });
   });
   miniPlayers.set(window, miniPlayer(window, MIN_SIZE));
@@ -398,13 +429,16 @@ function openWindow(
   // Attach lifecycle observation before loadFile/loadURL can emit the initial renderer start.
   observe(window);
   const devServer = process.env["ELECTRON_RENDERER_URL"];
+
   if (devServer) void window.loadURL(devServer);
   else void window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
+
   return window;
 }
 
 async function start(): Promise<void> {
   await app.whenReady();
+
   if (!isMac) {
     // Windows and Linux have no app menu to keep; macOS gets its menu in the interface language,
     // with the Edit shortcuts fields need, such as paste (see `applyLanguage`).
@@ -414,6 +448,7 @@ async function start(): Promise<void> {
     // macOS uses its own spellchecker and downloads nothing.
     session.defaultSession.setSpellCheckerLanguages([]);
   }
+
   if (
     process.platform === "linux" &&
     !snap &&
@@ -423,9 +458,11 @@ async function start(): Promise<void> {
     // login then uses a fixed key: it still saves, but other programs of the same user can read it.
     safeStorage.setUsePlainTextEncryption(true);
   }
+
   const dataDir = app.getPath("userData");
   // Installation validation can fail before the runtime loads Settings.
   applyLanguage(languageFor(await Settings.readInterfaceLanguage(dataDir).catch(() => undefined)));
+
   const distribution = snap
     ? "snap"
     : await installedDistribution({
@@ -434,6 +471,7 @@ async function start(): Promise<void> {
         store: storeCopy,
         resources: process.resourcesPath,
       });
+
   const appUpdates = updatesInApp(distribution);
   await removeUnfinishedWrites(dataDir);
   // And in the folder of the guides of Settings > Guides.
@@ -449,6 +487,7 @@ async function start(): Promise<void> {
   const localEndpoint = app.commandLine.hasSwitch("user-data-dir")
     ? process.env["MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT"]
     : undefined;
+
   const buildProperties = analyticsBuild({
     version: app.getVersion(),
     packaged: app.isPackaged,
@@ -456,7 +495,9 @@ async function start(): Promise<void> {
     arch: process.arch,
     store: storeCopy,
   });
+
   let refreshConsent: (() => Promise<void>) | undefined;
+
   const analytics = new Analytics({
     dataDir,
     consentChanged: () => refreshConsent?.(),
@@ -485,10 +526,12 @@ async function start(): Promise<void> {
       localEndpoint,
     }),
   });
+
   powerMonitor.on("suspend", () => analytics.suspendPlayback());
   powerMonitor.on("resume", () => analytics.suspendPlayback());
   // Outcomes of work begun before the update channel is read would carry a guessed dimension.
   let dimensionsReady = !appUpdates;
+
   const observeOperation = (event: "download_ended" | "update_check_ended") => () =>
     dimensionsReady ? analytics.observeOperation(event) : () => {};
 
@@ -509,6 +552,7 @@ async function start(): Promise<void> {
           observeCheck: (channel) => {
             analytics.setUpdateChannel(channel);
             dimensionsReady = true;
+
             return observeOperation("update_check_ended")();
           },
           discover: discovery({
@@ -532,6 +576,7 @@ async function start(): Promise<void> {
 
   /** Brings the window forward, or opens it again, for a reminder's notice that was clicked. */
   let showWindow = () => {};
+
   /** Whether a recording's time goes on now. Set once recordings are read. */
   let recordingNow = () => false;
   /** Whether every recording the viewer stopped is kept as stopped. Set once recordings are read. */
@@ -543,12 +588,15 @@ async function start(): Promise<void> {
    * comes from the system, as a session that ends, which a window-less app may not hear of.
    */
   let quitChosen = false;
+
   const quit = () => {
     quitChosen = true;
     app.quit();
   };
+
   /** The system shuts down or ends the session: what records goes on when the app runs again. */
   let shuttingDown = false;
+
   const runtime = ManagedRuntime.make(
     mainLayer({
       dataDir,
@@ -576,6 +624,7 @@ async function start(): Promise<void> {
       updates: updatesConfig(),
     }),
   );
+
   const {
     subscriptions,
     roster,
@@ -629,15 +678,18 @@ async function start(): Promise<void> {
     void runtime.runFork(reminders.check);
     void runtime.runFork(recordings.check);
   };
+
   powerMonitor.on("resume", woke);
   // A recording pauses as the computer sleeps, and goes on with the rest after it wakes.
   const sleeps = () => void runtime.runFork(recordings.suspend);
   powerMonitor.on("suspend", sleeps);
+
   // Also without a window, which would otherwise not end the app before the system does.
   const shutsDown = () => {
     shuttingDown = true;
     app.quit();
   };
+
   powerMonitor.on("shutdown", shutsDown);
   recordingNow = () => runtime.runSync(recordings.live).recording;
   stopsKept = () => runtime.runPromise(recordings.keepStops);
@@ -650,30 +702,38 @@ async function start(): Promise<void> {
   let restartInto: string | null = null;
   /** What was put off when the restart was asked for: only putting it off since then counts. */
   let putOff: string | null = null;
+
   const restartAfterRecording = Effect.promise(async () => {
     const asked = await runtime.runPromise(updates.status);
+
     if (asked.update.kind !== "ready") return;
     restartInto = asked.update.version;
     putOff = asked.dismissed;
     restarting ??= (async () => {
       const wanted = async () => {
         const now = await runtime.runPromise(updates.status);
+
         return (
           now.update.kind === "ready" &&
           now.update.version === restartInto &&
           (now.dismissed !== restartInto || putOff === restartInto)
         );
       };
+
       // A recording that starts, or begins to, while the release is checked is waited for too.
       for (;;) {
         if (!recordingNow()) {
           if (!(await wanted())) return;
+
           if (runtime.runSync(recordings.holdStarts(true))) break;
         }
+
         await sleep(RECORDING_WAIT_MS);
       }
+
       // Refused or failed, the app goes on: so do recordings.
       let goes = false;
+
       try {
         await runtime.runPromise(updates.restart);
         goes = await wanted();
@@ -686,8 +746,10 @@ async function start(): Promise<void> {
       // Kept without a window while this restart waited, the app goes once nothing else keeps it.
       void runtime.runFork(settle);
     });
+
     return restarting;
   });
+
   // A system that ends the session, as a Linux logout, asks the app to end this way.
   for (const signal of ["SIGTERM", "SIGHUP"] as const)
     process.on(signal, () => {
@@ -702,11 +764,14 @@ async function start(): Promise<void> {
     const url = URL.parse(request.url);
     const [, id, artwork, extra] = url?.pathname.split("/") ?? [];
     const kind = DOWNLOAD_ARTWORK.find((each) => each === artwork);
+
     if (url?.host !== "download" || !id || !kind || extra !== undefined) {
       return new Response(null, { status: 404 });
     }
+
     const kept = await runtime.runPromise(downloads.artwork(decodeURIComponent(id), kind));
     const bytes = kept && (await readFile(kept.path).catch(() => null));
+
     return bytes
       ? new Response(bytes, { headers: { "Content-Type": kept.type, "Cache-Control": "no-store" } })
       : new Response(null, { status: 404 });
@@ -716,11 +781,13 @@ async function start(): Promise<void> {
     updatesInApp(updateStatus.distribution) ? updateStatus.channel : "none",
   );
   dimensionsReady = true;
+
   const preferences = await runtime.runPromise(
     preferencePublication({
       read: Effect.gen(function* () {
         const viewing = yield* settings.get;
         const collection = yield* Effect.promise(() => analytics.settings());
+
         return { ...viewing, analyticsEnabled: collection.enabled };
       }),
       write: (patch) => settings.update(patch),
@@ -741,9 +808,11 @@ async function start(): Promise<void> {
       },
     }),
   );
+
   refreshConsent = async () => {
     await runtime.runPromise(preferences.get);
   };
+
   // Replay initial consent once composition exists, including reads settled before it was ready.
   void analytics.loaded.then(refreshConsent).catch(() => {});
   // The interface language, before the window asks for it.
@@ -755,6 +824,7 @@ async function start(): Promise<void> {
       runtime.runPromise(subscriptions.list),
       runtime.runPromise(updates.status),
     ]);
+
     return {
       version: app.getVersion(),
       commit: __BUILD_COMMIT__,
@@ -787,6 +857,7 @@ async function start(): Promise<void> {
         }),
       ),
     );
+
   forward(library.changes, "library.updated", (status) => status);
   forward(onDemand.changes, "ondemand.updated", (status) => status);
   forward(onDemand.progressChanges, "ondemand.progress", (metadata) => metadata);
@@ -797,6 +868,7 @@ async function start(): Promise<void> {
   forward(customLists.changes, "customLists.changed", () => null);
   forward(updates.changes, "updates.changed", (status) => {
     analytics.setUpdateChannel(updatesInApp(status.distribution) ? status.channel : "none");
+
     return status;
   });
   forward(downloads.changes, "downloads.changed", (list) => list);
@@ -816,9 +888,12 @@ async function start(): Promise<void> {
         // closes, as the viewer asked, before its page hears of it: the page would carry on
         // here, or start a preview, with nobody watching.
         if (away && status.output.kind === "local") mainWindow?.destroy();
+
         if (mainWindow) emit(mainWindow.webContents, "output.changed", status);
         const playing = status.output.kind === "receiver" && status.output.media !== null;
+
         if (playing && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
+
         if (!playing && awake !== null) {
           powerSaveBlocker.stop(awake);
           awake = null;
@@ -831,6 +906,7 @@ async function start(): Promise<void> {
     Effect.suspend(() => {
       const window = mainWindow;
       const asked = window && listPlace(window, anchor);
+
       // No window on screen for the list to open from: nothing changes.
       if (!window || !asked) return output.status;
       // The list is this window's from here on, also while it waits for the window to
@@ -838,13 +914,16 @@ async function start(): Promise<void> {
       // viewer chooses next, and the page with the view it asked from, by its name.
       const mine = { window, page: asked.page };
       listedFrom = mine;
+
       return output
         .pick(async (signal) => {
           await settledInFullScreen(window, signal);
           // The window closed or went elsewhere meanwhile, or another took its place, which
           // leaves the place asked for behind: no list opens.
           const from = mainWindow === window ? listPlace(window, anchor) : null;
+
           if (!from || !samePage(from.page, asked.page)) return null;
+
           // Nor when the viewer went to another app while the window settled: the list
           // would open over that app, and its helper would take the keyboard from it. A
           // window that had no keyboard when asked isn't held to this: leaving the mini
@@ -897,9 +976,11 @@ async function start(): Promise<void> {
             defaultPath: current,
             properties: ["openDirectory", "createDirectory"],
           };
+
           const chosen = await (mainWindow
             ? dialog.showOpenDialog(mainWindow, options)
             : dialog.showOpenDialog(options));
+
           return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
         },
         openFolder: async (folder) => {
@@ -911,6 +992,7 @@ async function start(): Promise<void> {
           else await stat(folder);
           // The system answers with why it couldn't, or nothing.
           const failed = await shell.openPath(folder);
+
           if (failed) throw new Error(failed);
         },
       }),
@@ -927,6 +1009,7 @@ async function start(): Promise<void> {
           yield* settings.setInterfaceLanguage(choice);
           language = languageFor(choice);
           applyLanguage(language);
+
           return language;
         }),
       "window.miniPlayerAvailable": () => Effect.succeed(miniPlayerAvailable()),
@@ -934,12 +1017,14 @@ async function start(): Promise<void> {
         Effect.promise(async () => {
           const mini = mainWindow && miniPlayers.get(mainWindow);
           await mini?.set(on);
+
           return null;
         }),
       "window.quit": () =>
         Effect.sync(() => {
           quitConfirmed = true;
           app.quit();
+
           return null;
         }),
     },
@@ -955,6 +1040,7 @@ async function start(): Promise<void> {
         remote ? Effect.void : Effect.andThen(output.disconnect, playback.closeAll),
       ),
     );
+
   /**
    * Takes the system's list down, or keeps one that still waits for its window from opening.
    * Only the list goes. A receiver that plays goes on, and what plays here does too.
@@ -963,21 +1049,25 @@ async function start(): Promise<void> {
     listedFrom = null;
     void runtime.runFork(output.closePicker());
   };
+
   /**
    * Ends the system's list once the window it opens from is elsewhere, another size or out of
    * sight: the button it hangs from is no longer there.
    */
   const followList = (window: BrowserWindow) => {
     if (listedFrom?.window !== window) return;
+
     if (onScreen(window) && samePage(window.getContentBounds(), listedFrom.page)) return;
     closeList();
   };
+
   /**
    * The app is quitting, or restarting into an update: its window closes for good, whatever
    * plays. Both say so before they close the window. An update's restart closes it before
    * `before-quit`, and would wait forever for a window that only went out of sight.
    */
   let leaving = false;
+
   /** Only the primary window on screen with keyboard focus counts as foreground app use. */
   const trackForeground = (window: BrowserWindow) => {
     let requestedClose = false;
@@ -990,11 +1080,13 @@ async function start(): Promise<void> {
     });
     window.webContents.on("render-process-gone", (_event, details) => {
       analytics.rendererGone();
+
       if (leaving || requestedClose || details.reason === "clean-exit") return;
       analytics.noteRendererExit(
         details.reason === "crashed" ? "crashed" : details.reason === "killed" ? "killed" : "other",
       );
     });
+
     const observe = () =>
       analytics.setForeground(
         !leaving &&
@@ -1003,6 +1095,7 @@ async function start(): Promise<void> {
           !window.isMinimized() &&
           window.isFocused(),
       );
+
     window
       .on("focus", observe)
       .on("blur", observe)
@@ -1013,6 +1106,7 @@ async function start(): Promise<void> {
       .on("closed", observe);
     observe();
   };
+
   const leave = () => {
     leaving = true;
     analytics.rendererGone();
@@ -1020,11 +1114,13 @@ async function start(): Promise<void> {
     // No list opens from a window on its way out.
     closeList();
   };
+
   autoUpdater.on("before-quit-for-update", leave);
   // On macOS the app outlives its window. While a receiver has playback, or is gone with what it
   // played still to pick up, closing the window keeps it out of sight. Other systems quit with
   // their window, which ends the receiver's playback.
   const keeps = () => isMac && !leaving && runtime.runSync(output.remote);
+
   /**
    * Each window's watchers: foreground use, Ctrl+Q, which quits on Windows and Linux as the menu's
    * Quit does on macOS, and the end of a Windows session.
@@ -1033,22 +1129,27 @@ async function start(): Promise<void> {
     trackForeground(window);
     window.webContents.on("before-input-event", (event, input) => {
       if (isMac || input.type !== "keyDown" || !input.control || input.alt || input.shift) return;
+
       if (input.key.toLowerCase() !== "q") return;
       event.preventDefault();
       quit();
     });
     window.on("session-end", shutsDown);
   };
+
   /**
    * While Windows or Linux keep the app without a window, the tray opens it again, or quits; the
    * app also opens again when launched. Gone once the window is back.
    */
   let tray: Tray | null = null;
+
   const open = () => {
     tray?.destroy();
     tray = null;
+
     return openWindow(closeStreams, keeps, followList, watch);
   };
+
   mainWindow = open();
   // How long the app took to show its window, from the start of the process.
   mainWindow.once("ready-to-show", () =>
@@ -1059,6 +1160,7 @@ async function start(): Promise<void> {
   app.on("activate", () => {
     // Nothing opens on a runtime that is closing.
     if (closing) return;
+
     if (!mainWindow) {
       mainWindow = open();
     } else if (away) bringBack(mainWindow);
@@ -1067,16 +1169,22 @@ async function start(): Promise<void> {
   // macOS kept the app without one.
   showWindow = () => {
     if (closing) return;
+
     if (mainWindow) bringBack(mainWindow);
     else mainWindow = open();
   };
+
   reopen = showWindow;
+
   const live = () => {
     const now = runtime.runSync(recordings.live);
+
     return now.recording || now.scheduled || now.unsaved;
   };
+
   staysWithoutWindow = () => {
     if (closing || leaving || !live()) return false;
+
     if (!tray) {
       const name = app.getName();
       tray = new Tray(nativeImage.createFromPath(trayIcon).resize({ width: 16, height: 16 }));
@@ -1089,15 +1197,19 @@ async function start(): Promise<void> {
       );
       tray.on("click", showWindow);
     }
+
     return true;
   };
+
   // Kept without a window, the app goes once nothing records and no schedule is kept.
   const settle = Effect.sync(() => {
     // Not while an update waits to restart it once the last recording ended.
     if (tray && !mainWindow && !closing && !restarting && !live()) app.quit();
   });
+
   void runtime.runFork(Stream.runForEach(recordings.changes, () => settle));
   void runtime.runFork(Stream.runForEach(recordings.scheduleChanges, () => settle));
+
   /**
    * Quit asks first while a recording's time goes on, in the window, opened again if it was
    * closed: Quit there confirms, through `window.quit`. A shutdown or an update's restart doesn't
@@ -1106,11 +1218,14 @@ async function start(): Promise<void> {
   const askToQuit = () => {
     showWindow();
     const window = mainWindow;
+
     if (!window) return;
     const ask = () => emit(window.webContents, "window.leaveAsked", null);
+
     if (window.webContents.isLoading()) window.webContents.once("did-finish-load", ask);
     else ask();
   };
+
   // First, so the profile is handed on only by a quit that goes ahead.
   app.prependListener("before-quit", (event) => {
     // Once closing, the runtime is going: nothing more to ask or tell it.
@@ -1118,11 +1233,14 @@ async function start(): Promise<void> {
     // On macOS every Quit is the viewer's; a shutdown says so first.
     const chosen = isMac || quitChosen;
     quitChosen = false;
+
     if (chosen && !quitConfirmed && !shuttingDown && recordingNow()) {
       event.preventDefault();
       askToQuit();
+
       return;
     }
+
     const away = shuttingDown || (!chosen && !quitConfirmed);
     runtime.runSync(recordings.leave(away ? "away" : "quit"));
     leave();
@@ -1133,6 +1251,7 @@ async function start(): Promise<void> {
     // installer has started by then and waits for the app to exit, so the wait takes nothing
     // from it.
     event.preventDefault();
+
     if (closing) return;
     closing = true;
     powerMonitor
@@ -1162,9 +1281,12 @@ async function start(): Promise<void> {
 function toolPath(tool: "ffmpeg" | "ffprobe"): string | null {
   const executable = isWindows ? `${tool}.exe` : tool;
   const override = process.env["MR_STREAMER_FFMPEG"];
+
   if (override) return tool === "ffmpeg" ? override : join(dirname(override), executable);
+
   if (!app.isPackaged) return tool;
   const bundled = join(process.resourcesPath, "ffmpeg", executable);
+
   return existsSync(bundled) ? bundled : null;
 }
 
@@ -1177,10 +1299,12 @@ function toolPath(tool: "ffmpeg" | "ffprobe"): string | null {
  */
 function receiverAdapters(): ReceiverAdapter[] {
   const adapters: ReceiverAdapter[] = [];
+
   if (isMac) {
     const helper = app.isPackaged
       ? join(process.resourcesPath, "airplay", "MrStreamerAirPlay")
       : join(app.getAppPath(), "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
+
     if (existsSync(helper)) {
       adapters.push(
         airplayAdapter({
@@ -1195,7 +1319,9 @@ function receiverAdapters(): ReceiverAdapter[] {
       );
     }
   }
+
   if (isWindows || process.env["MR_STREAMER_CAST"] === "on") adapters.push(castAdapter());
+
   return adapters;
 }
 

@@ -32,26 +32,35 @@ export type SubtitleFeedLine =
 /** What a line of the feed says, or null when it isn't one. */
 export function readFeedLine(line: string): SubtitleFeedLine | null {
   let value: unknown;
+
   try {
     value = JSON.parse(line);
   } catch {
     return null;
   }
+
   if (typeof value !== "object" || value === null) return null;
+
   if ("ready" in value) {
     if (value.ready !== true) return null;
+
     return "at" in value && typeof value.at === "number"
       ? { ready: true, at: value.at }
       : { ready: true };
   }
+
   if ("unavailable" in value) {
     const why = value.unavailable;
+
     return why === "limit" || why === "changed" || why === "unreadable" || why === "network"
       ? { unavailable: why }
       : null;
   }
+
   if (!("at" in value) || typeof value.at !== "number") return null;
+
   if ("data" in value && typeof value.data === "string") return { at: value.at, data: value.data };
+
   if (
     "text" in value &&
     typeof value.text === "string" &&
@@ -60,5 +69,6 @@ export function readFeedLine(line: string): SubtitleFeedLine | null {
   ) {
     return { at: value.at, until: value.until, text: value.text };
   }
+
   return null;
 }

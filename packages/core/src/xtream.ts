@@ -33,8 +33,10 @@ export interface XtreamAccount {
 
 const AUTH_TIMEOUT_MS = 15_000;
 const CATALOGUE_TIMEOUT_MS = 90_000;
+
 /** One movie's or series' details. */
 const DETAILS_TIMEOUT_MS = 20_000;
+
 /**
  * The whole guide download, before it is indexed: tens of megabytes on large panels, and up to
  * the 2 GiB a guide may unpack to.
@@ -63,6 +65,7 @@ export function parseLogin(input: LoginInput): ParsedLogin {
   const raw = input.server.trim();
   const schemeless = !/^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
   let url: URL;
+
   try {
     url = new URL(schemeless ? `https://${raw}` : raw);
   } catch {
@@ -71,6 +74,7 @@ export function parseLogin(input: LoginInput): ParsedLogin {
       detail: t("The server address is not a valid URL."),
     });
   }
+
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new AppFailure({
       kind: "incomplete-login",
@@ -82,9 +86,11 @@ export function parseLogin(input: LoginInput): ParsedLogin {
   const password = input.password || url.searchParams.get("password") || "";
   // A server address alone, as the login form sends one without its login, is no playlist.
   const serverOnly = url.pathname === "/" && !url.search;
+
   if (!username && !password && !serverOnly) {
     return { account: { kind: "m3u", link: url.href }, schemeless };
   }
+
   if (!username || !password) {
     throw new AppFailure({
       kind: "incomplete-login",
@@ -95,6 +101,7 @@ export function parseLogin(input: LoginInput): ParsedLogin {
   const path = url.pathname
     .replace(/\/(player_api|get|xmltv|panel_api)\.php$/i, "")
     .replace(/\/+$/, "");
+
   return {
     account: { kind: "xtream", server: `${url.origin}${path}`, username, password },
     schemeless,
@@ -140,6 +147,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
   const fetchImpl = providerFetch(options.fetch ?? fetch, {
     secrets: [account.username, account.password],
   });
+
   const credentials = new URLSearchParams({
     username: account.username,
     password: account.password,
@@ -160,18 +168,23 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
   ): Promise<A> {
     const url = `${account.server}/player_api.php?${credentials}${params}`;
     const timeout = AbortSignal.timeout(timeoutMs);
+
     try {
       const response = await fetchImpl(url, {
         headers: { "User-Agent": options.userAgent, Accept: "application/json" },
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
+
       if (response.status === 401 || response.status === 403) {
         throw new AppFailure({ kind: "invalid-login" });
       }
+
       if (!response.ok) throw new AppFailure({ kind: "provider-error", status: response.status });
+
       return await read(response);
     } catch (cause) {
       if (cause instanceof AppFailure || signal?.aborted) throw cause;
+
       if (cause instanceof SyntaxError) throw notAnApi(account.server);
       throw new AppFailure({
         kind: "unreachable",
@@ -189,10 +202,12 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
    * says, asked once, or null when it names none. A failed ask is asked again next time.
    */
   let timeZone: Promise<string | null> | null = null;
+
   const serverTimeZone = (signal?: AbortSignal): Promise<string | null> =>
     (timeZone ??= getJson("", AUTH_TIMEOUT_MS, signal).then(
       (body) => {
         const parsed = AuthResponse()(body);
+
         return parsed instanceof type.errors ? null : parsed.timeZone;
       },
       (cause: unknown) => {
@@ -214,11 +229,15 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
   ) =>
     request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
       const body: unknown = JSON.parse(await response.text());
+
       if (isRejectedLogin(body)) throw new AppFailure({ kind: "invalid-login" });
       const mapping = mapSteps(rows(body), map);
+
       if (!options.inTasks) return finish(mapping);
       const mapped = await options.inTasks(mapping, () => !signal?.aborted);
+
       if (mapped !== null) return mapped;
+
       // Left unfinished once the caller aborted: its reason, whatever it is, which `request`
       // passes on as it is.
       if (signal?.aborted) throw signal.reason;
@@ -228,11 +247,14 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
   return {
     async authenticate(signal) {
       const body = AuthResponse()(await getJson("", AUTH_TIMEOUT_MS, signal));
+
       if (body instanceof type.errors || !body.user_info || !isTruthy(body.user_info.auth)) {
         throw new AppFailure({ kind: "invalid-login" });
       }
+
       timeZone = Promise.resolve(body.timeZone);
       const account = accountStatus(body.user_info);
+
       if (
         account.state === "expired" ||
         account.state === "banned" ||
@@ -244,6 +266,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
           expiresAt: account.expiresAt,
         });
       }
+
       return account;
     },
 
@@ -252,9 +275,11 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
         getJson("&action=get_live_categories", CATALOGUE_TIMEOUT_MS, signal),
         getJson("&action=get_live_streams", CATALOGUE_TIMEOUT_MS, signal),
       ]);
+
       if (isRejectedLogin(categories) || isRejectedLogin(streams)) {
         throw new AppFailure({ kind: "invalid-login" });
       }
+
       return {
         categories: rows(categories).flatMap(toCategory),
         channels: rows(streams).flatMap(toChannel),
@@ -263,12 +288,14 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
 
     async liveGuideRequest(signal) {
       signal?.throwIfAborted();
+
       return guideRequest();
     },
 
     async liveGuide(signal) {
       const timeout = AbortSignal.timeout(GUIDE_TIMEOUT_MS);
       let response: Response;
+
       try {
         const request = guideRequest();
         response = await fetchImpl(request.url, {
@@ -283,12 +310,15 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
           detail: describeNetworkError(cause),
         });
       }
+
       if (response.status === 401 || response.status === 403) {
         throw new AppFailure({ kind: "invalid-login" });
       }
+
       if (!response.ok || !response.body) {
         throw new AppFailure({ kind: "provider-error", status: response.status });
       }
+
       return { kind: "document", body: response.body, size: bodySize(response) };
     },
 
@@ -299,9 +329,11 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
         getRows("&action=get_vod_streams", signal, toMovie),
         getRows("&action=get_series", signal, toSeries),
       ]);
+
       if (isRejectedLogin(movieCategories) || isRejectedLogin(seriesCategories)) {
         throw new AppFailure({ kind: "invalid-login" });
       }
+
       return {
         movieCategories: rows(movieCategories).flatMap(toCategory),
         movies,
@@ -318,8 +350,10 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
           signal,
         ),
       );
+
       if (body instanceof type.errors) throw notAnApi(account.server);
       const info = fields(body.info);
+
       return {
         ...detailsOf(info),
         duration: seconds(info?.duration_secs) ?? clockSeconds(info?.duration),
@@ -338,18 +372,23 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
           signal,
         ),
       );
+
       if (body instanceof type.errors) throw notAnApi(account.server);
       const info = fields(body.info);
+
       const episodes = Array.isArray(body.episodes)
         ? body.episodes.flat()
         : Object.values(body.episodes ?? {}).flat();
+
       return {
         ...detailsOf(info),
         duration: minutes(info?.episode_run_time),
         posterUrl: url(info?.cover),
         seasons: (body.seasons ?? []).flatMap((season) => {
           const number = toInteger(season.season_number);
+
           if (number === null) return [];
+
           return [
             {
               number,
@@ -369,6 +408,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
       const user = encodeURIComponent(account.username);
       const pass = encodeURIComponent(account.password);
       const folder = kind === "movie" ? "movie" : "series";
+
       return {
         url: `${account.server}/${folder}/${user}/${pass}/${encodeURIComponent(id)}.${encodeURIComponent(container)}`,
         container,
@@ -380,6 +420,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
       const pass = encodeURIComponent(account.password);
       const format = options.live ?? "mpegts";
       const extension = format === "hls" ? "m3u8" : "ts";
+
       return {
         url: `${account.server}/live/${user}/${pass}/${encodeURIComponent(channelId)}.${extension}`,
         format,
@@ -402,6 +443,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
       const time = `${at.year}-${at.month}-${at.day}:${at.hour}-${at.minute}`;
       const format = options.live ?? "mpegts";
       const extension = format === "hls" ? "m3u8" : "ts";
+
       return {
         url: `${account.server}/timeshift/${user}/${pass}/${minutes}/${time}/${encodeURIComponent(channelId)}.${extension}`,
         format,
@@ -520,6 +562,7 @@ function defineDetailSchemas() {
     "duration?": loose,
     "episode_run_time?": loose,
   });
+
   // Panels send `info: []` or `null` for a title they know nothing more about; see `fields`.
   const InfoOrNothing = Info.or("unknown[] | null");
 
@@ -561,13 +604,17 @@ function defineDetailSchemas() {
 
   return { Info, MovieInfo, EpisodeRow, SeriesInfo };
 }
+
 const detailSchemas = lazy(defineDetailSchemas);
+
 type Info = ReturnType<typeof detailSchemas>["Info"]["infer"];
 
 function toMovie(raw: unknown): ProviderTitle[] {
   const row = rowSchemas().MovieRow(raw);
+
   if (row instanceof type.errors) return [];
   const id = String(row.stream_id);
+
   return [
     {
       id,
@@ -588,13 +635,16 @@ function toMovie(raw: unknown): ProviderTitle[] {
 /** A TMDB id: digits, and not the 0 some panels write for none. */
 function tmdbIdOf(value: string | number | null | undefined): string | null {
   const text = String(value ?? "").trim();
+
   return /^\d+$/.test(text) && Number(text) > 0 ? text : null;
 }
 
 function toSeries(raw: unknown): ProviderTitle[] {
   const row = rowSchemas().SeriesRow(raw);
+
   if (row instanceof type.errors) return [];
   const id = String(row.series_id);
+
   return [
     {
       id,
@@ -614,12 +664,15 @@ function toSeries(raw: unknown): ProviderTitle[] {
 
 function toEpisode(raw: unknown): ProviderEpisode[] {
   const row = detailSchemas().EpisodeRow(raw);
+
   if (row instanceof type.errors) return [];
   const season = toInteger(row.season);
   const number = toInteger(row.episode_num);
+
   if (season === null || number === null) return [];
   const id = String(row.id);
   const info = fields(row.info);
+
   return [
     {
       id,
@@ -666,6 +719,7 @@ function categoryIdsOf(row: {
   readonly category_ids?: readonly (string | number)[] | null | undefined;
 }): string[] {
   const ids = row.category_ids?.length ? row.category_ids : [row.category_id];
+
   // Array membership is authoritative. Keep raw IDs, including leading zeros, for saved picks.
   return [...new Set(ids.flatMap((id) => (id != null && id !== "" ? [String(id)] : [])))];
 }
@@ -673,6 +727,7 @@ function categoryIdsOf(row: {
 /** An http(s) address, or null for empty strings and anything else panels send. */
 function url(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
+
   return trimmed && /^https?:\/\//i.test(trimmed) ? trimmed : null;
 }
 
@@ -690,21 +745,25 @@ function list(value: string | null | undefined, separator: RegExp): string[] {
 /** A rating out of 10; panels send "0" or "" when they have none. */
 function rating(value: string | number | null | undefined): number | null {
   const number = typeof value === "number" ? value : Number(value);
+
   return Number.isFinite(number) && number > 0 && number <= 10 ? number : null;
 }
 
 function epochSeconds(value: string | number | null | undefined): number | null {
   const number = toInteger(value);
+
   return number && number > 0 ? number * 1000 : null;
 }
 
 function seconds(value: string | number | null | undefined): number | null {
   const number = typeof value === "number" ? value : Number(value);
+
   return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
 }
 
 function minutes(value: string | number | null | undefined): number | null {
   const number = seconds(value);
+
   return number === null ? null : number * 60;
 }
 
@@ -712,8 +771,10 @@ function minutes(value: string | number | null | undefined): number | null {
 function clockSeconds(value: string | number | null | undefined): number | null {
   if (typeof value !== "string") return null;
   const parts = value.trim().split(":").map(Number);
+
   if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
   const total = parts.reduce((sum, part) => sum * 60 + part, 0);
+
   return total > 0 ? total : null;
 }
 
@@ -727,16 +788,20 @@ function notAnApi(server: string): AppFailure {
 
 function toCategory(raw: unknown): ProviderCategory[] {
   const row = CategoryRow()(raw);
+
   if (row instanceof type.errors) return [];
   const id = String(row.category_id);
+
   return [{ id, name: row.category_name?.trim() || `Category ${id}` }];
 }
 
 function toChannel(raw: unknown): ProviderChannel[] {
   const row = StreamRow()(raw);
+
   if (row instanceof type.errors) return [];
   const id = String(row.stream_id);
   const archiveDays = toInteger(row.tv_archive_duration);
+
   return [
     {
       id,
@@ -754,6 +819,7 @@ function toChannel(raw: unknown): ProviderChannel[] {
 
 function accountStatus(info: Infer<typeof UserInfo>): AccountStatus {
   const expiry = toInteger(info.exp_date);
+
   return {
     state: accountState(info.status),
     expiresAt: expiry ? new Date(expiry * 1000).toISOString() : null,
@@ -783,8 +849,10 @@ function accountState(status: string | null | undefined): AccountState {
  */
 function isRejectedLogin(body: unknown): boolean {
   const parsed = AuthBody()(body);
+
   if (parsed instanceof type.errors) return false;
   const info = fields(parsed.user_info);
+
   return info !== undefined && !isTruthy(info.auth);
 }
 
@@ -792,17 +860,22 @@ function isRejectedLogin(body: unknown): boolean {
 function* mapSteps<A>(raw: readonly unknown[], map: (raw: unknown) => A[]): Steps<A[]> {
   const due = pacer();
   const mapped: A[] = [];
+
   for (const row of raw) {
     if (due()) yield;
+
     for (const each of map(row)) mapped.push(each);
   }
+
   return mapped;
 }
 
 function rows(body: unknown): unknown[] {
   if (Array.isArray(body)) return body;
+
   // A few panels return an object keyed by index instead of an array.
   if (body && typeof body === "object" && !("user_info" in body)) return Object.values(body);
+
   return [];
 }
 
@@ -813,6 +886,7 @@ function isTruthy(value: string | number | boolean | null | undefined): boolean 
 function toInteger(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
+
   return Number.isInteger(number) ? number : null;
 }
 
@@ -824,6 +898,7 @@ export function bodySize(response: Response): number | null {
   if (response.headers.has("content-encoding")) return null;
   const length = response.headers.get("content-length");
   const size = length === null ? Number.NaN : Number(length);
+
   return Number.isSafeInteger(size) && size >= 0 ? size : null;
 }
 
@@ -835,6 +910,7 @@ export function describeNetworkError(cause: unknown): string {
   // fetch wraps the socket error: TypeError("fetch failed", { cause: Error { code } }).
   const inner = cause instanceof Error && cause.cause instanceof Error ? cause.cause : null;
   const code = inner && "code" in inner ? inner.code : null;
+
   switch (code) {
     case "ENOTFOUND":
     case "EAI_AGAIN":

@@ -20,10 +20,15 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { addSubscription, connect, key, MODIFIERS, silent, waitFor, type Page } from "./app.ts";
 
 const { values } = parseArgs({ options: { output: { type: "string" } } });
+
 assert(values.output, "Required: --output NEW_DIRECTORY");
+
 const output = resolve(values.output);
+
 await mkdir(dirname(output), { recursive: true });
+
 await mkdir(output, { recursive: false });
+
 const desktop = resolve("apps/desktop");
 const bundle = await readFile(join(desktop, "out/main/index.js"), "utf8");
 const profile = await mkdtemp(join(tmpdir(), "mrstreamer-search-"));
@@ -38,6 +43,7 @@ let inspector: Page | undefined;
 let failure = false;
 const providers: Awaited<ReturnType<typeof startFakeProvider>>[] = [];
 let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
+
 const proof: Record<string, unknown> = {
   revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   mainSha256: createHash("sha256").update(bundle).digest("hex"),
@@ -56,39 +62,50 @@ const proof: Record<string, unknown> = {
 
 const live = () => {
   assert(page);
+
   return page;
 };
+
 async function send(method: string, params: Record<string, unknown> = {}) {
   const reply = await live().send(method, params);
   assert(!reply.error, `${method}: ${JSON.stringify(reply.error)}`);
+
   return reply.result;
 }
+
 const exists = (expression: string) => live().evaluate<boolean>(`!!(${expression})`);
+
 const button = (text: string, selector = "button") =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)} || b.getAttribute('aria-label') === ${JSON.stringify(text)})`;
+
 const combo = `document.querySelector('[role="combobox"]')`;
 const liveInput = `document.querySelector('input[aria-label^="Search "]:not([role="combobox"])')`;
 const treeRows = `[...document.querySelectorAll('[role="treeitem"]')]`;
 const liveRows = `[...document.querySelectorAll('[data-search-row]')]`;
+
 async function click(expression: string) {
   await waitFor(() => exists(expression), 15000);
   await live().evaluate(`(${expression}).scrollIntoView({block:'nearest'})`);
   await pointer(await position(expression));
 }
+
 async function position(expression: string) {
   return live().evaluate<{ x: number; y: number }>(
     `(() => { const r=(${expression}).getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
   );
 }
+
 async function pointer(point: { x: number; y: number }, move = true) {
   for (const type of [...(move ? ["mouseMoved"] : []), "mousePressed", "mouseReleased"])
     await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
 }
+
 async function type(expression: string, text: string) {
   await click(expression);
   await key(live(), "a", 65, MODIFIERS.main);
   await send("Input.insertText", { text });
 }
+
 async function capture(name: string) {
   await live().evaluate("new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))");
   const shot = (await send("Page.captureScreenshot", { format: "png" })) as { data: string };
@@ -106,6 +123,7 @@ async function capture(name: string) {
     ),
   );
 }
+
 async function state() {
   return live().evaluate<{
     input: string | null;
@@ -123,21 +141,26 @@ async function state() {
       inert:rows.some(r=>r.closest('[inert]'))};
   })()`);
 }
+
 async function palette(query: string) {
   if (!(await exists(combo))) await key(live(), "k", 75, MODIFIERS.main);
   await type(combo, query);
   await waitFor(async () => {
     const current = await state();
+
     return current.input === query && current.rows.length > 0 && !current.inert;
   }, 15000);
 }
+
 async function closePalette() {
   if (await exists(combo)) await key(live(), "Escape", 27);
   await waitFor(async () => !(await exists(combo)), 10000);
 }
+
 async function check(name: string, run: () => Promise<void>) {
   console.log(`RUN ${name}`);
   events.push({ action: name, at: new Date().toISOString() });
+
   try {
     await run();
     cases.push({ name, status: "pass" });
@@ -150,8 +173,10 @@ async function check(name: string, run: () => Promise<void>) {
     throw error;
   }
 }
+
 async function guideTrace() {
   assert(inspector);
+
   return inspector.evaluate<
     {
       method: string;
@@ -163,20 +188,25 @@ async function guideTrace() {
     }[]
   >("globalThis.__searchProbe.events");
 }
+
 async function pending(method: string, query: string) {
   await waitFor(async () => {
     const trace = await guideTrace();
+
     const started = trace.filter(
       (e) => e.method === method && e.query === query && e.phase === "start",
     );
+
     return started.some(
       (s) => !trace.some((e) => e.phase === "end" && e.view === s.view && e.id === s.id),
     );
   }, 10000);
 }
+
 async function settled() {
   await waitFor(async () => !(await state()).statuses.some((s) => /Searching/.test(s)), 15000);
 }
+
 /** Same-turn UI events keep the inertness observation and attempted action before debounce. */
 async function staleActions(input: string, rows: string) {
   return live().evaluate<{ input: string; rows: number; inert: boolean }>(`(() => {
@@ -188,6 +218,7 @@ async function staleActions(input: string, rows: string) {
     return observed;
   })()`);
 }
+
 /** Read trusted event timestamps in the renderer so CDP reply overhead cannot decide the window. */
 async function armPointerProbe(input: string, rows: string) {
   await live().evaluate(`(() => {
@@ -203,16 +234,20 @@ async function armPointerProbe(input: string, rows: string) {
     document.addEventListener('click',clicked,true);
   })()`);
 }
+
 async function pointerProbe() {
   const observed = await live().evaluate<{ clickMs: number; inert: boolean; target: string }>(
     "globalThis.__rawPointerProbe",
   );
+
   assert(
     observed.clickMs < 120 && observed.inert,
     `Native stale click missed inert debounce window: ${JSON.stringify(observed)}`,
   );
+
   return observed;
 }
+
 async function watchFrom(providerIndex: number, before: readonly number[]) {
   await waitFor(() => live().evaluate<boolean>("!!document.querySelector('video')"), 15000);
   await waitFor(
@@ -256,6 +291,7 @@ try {
             ? { ...channel, name: "Earth", fixture: "h264-aac.mpegts", guideId: "earth.test" }
             : channel,
     });
+
     provider.serveTitles((all) => ({
       ...all,
       movies: all.movies.map((movie) =>
@@ -267,10 +303,12 @@ try {
     );
     providers.push(provider);
   }
+
   tmdb = await startFakeTmdb();
   const port = await freePort();
   const inspectorPort = await freePort();
   const executable = await electronExecutable();
+
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
@@ -285,6 +323,7 @@ try {
         ].includes(name),
     ),
   );
+
   app = spawn(
     executable,
     [
@@ -311,11 +350,13 @@ try {
       },
     },
   );
+
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
   page = await connect(port, "page", { app });
   inspector = await connect(inspectorPort, "node", { app });
   const command = (await send("Browser.getBrowserCommandLine")) as { arguments: string[] };
+
   for (const arg of [
     desktop,
     `--user-data-dir=${profile}`,
@@ -341,6 +382,7 @@ try {
   await send("Network.setBlockedURLs", { urls: ["*image.example*", "*image.tmdb.org*"] });
   await waitFor(() => exists("document.querySelector('form input')"), 15000);
   const fields = [providers[0]!.url, "demo", "demo"];
+
   for (const [index, text] of fields.entries())
     await type(`document.querySelectorAll('form input')[${index}]`, text);
   await click("document.querySelector('form button[type=submit]')");
@@ -367,14 +409,17 @@ try {
   })()`);
   await inspector.send("Debugger.enable");
   const lines = bundle.split("\n");
+
   const injectionLine =
     lines.findIndex((line) => line.includes("let work = suspend(() => handler(input, frame));")) +
     1;
+
   const completionLine = lines.findIndex(
     (line, i) =>
       i > injectionLine &&
       line.includes("if (isSuccess(exit2)) return { ok: true, value: exit2.value }"),
   );
+
   assert(
     injectionLine > 0 && completionLine > injectionLine,
     "Registered IPC handler locations unavailable",
@@ -384,28 +429,34 @@ try {
       const paused = params as {
         callFrames: { callFrameId: string; location: { lineNumber: number } }[];
       };
+
       const frame = paused.callFrames[0]!;
+
       const expression =
         frame.location.lineNumber === injectionLine
           ? `(() => { globalThis.__searchProbe.events.push({phase:'start', method, query:input.query, ...input.request, at:Date.now()}); work=andThen(sleep(${guideDelayMs}),work); return true; })()`
           : `globalThis.__searchProbe.events.push({phase:'end', method, query:input.query, ...input.request, at:Date.now(), success:isSuccess(exit2), interrupted:!isSuccess(exit2)&&closing(exit2), count:isSuccess(exit2)?(Array.isArray(exit2.value)?exit2.value.length:Object.keys(exit2.value).length):null})`;
+
       const reply = await inspector!.send("Debugger.evaluateOnCallFrame", {
         callFrameId: frame.callFrameId,
         expression,
         returnByValue: true,
       });
+
       if (reply.error || (reply.result as { exceptionDetails?: unknown })?.exceptionDetails)
         inspectorErrors.push(reply);
     })()
       .catch((error) => inspectorErrors.push(String(error)))
       .finally(() => inspector!.send("Debugger.resume"));
   });
+
   for (const lineNumber of [injectionLine, completionLine]) {
     const reply = await inspector.send("Debugger.setBreakpointByUrl", {
       url: pathToFileURL(join(desktop, "out/main/index.js")).href,
       lineNumber,
       condition: `method === 'guide.search' || method === 'guide.searchList'`,
     });
+
     assert(!reply.error, JSON.stringify(reply));
     events.push({ breakpoint: reply.result });
   }
@@ -417,8 +468,10 @@ try {
       () => live().evaluate<boolean>(`${treeRows}.some(r=>r.innerText.includes('Movie'))`),
       15000,
     );
+
     const before =
       tmdb!.aboutRequests() + providers.reduce((sum, p) => sum + p.detailRequests(), 0);
+
     await capture("global-local-pending");
     await click(`${treeRows}.find(r=>r.innerText.includes('Movie'))`);
     await waitFor(() => exists(button("Play")), 15000);
@@ -493,8 +546,10 @@ try {
     async () => {
       await palette("Earth");
       const before = providers.map((p) => p.streamRequests());
+
       const details =
         tmdb!.aboutRequests() + providers.reduce((sum, p) => sum + p.detailRequests(), 0);
+
       await click(combo);
       const point = await position(`${treeRows}[0]`);
       await armPointerProbe(combo, treeRows);
@@ -525,12 +580,14 @@ try {
     "Global rapid typing, paste, erase, close and reopen abandon old requests",
     async () => {
       const before = providers.map((p) => p.streamRequests());
+
       for (const text of ["E", "Ea", "Ear", "Earth N", "Earth News"]) {
         await type(combo, text);
         await key(live(), "Enter", 13);
         events.push({ rapidInput: text, state: await state() });
         assert(await exists(combo));
       }
+
       await pending("guide.search", "Earth News");
       await key(live(), "a", 65, MODIFIERS.main);
       await key(live(), "Backspace", 8);
@@ -557,6 +614,7 @@ try {
 
   await check("Live channel plays while real guide is pending", async () => {
     await click(button("Live TV", "header button"));
+
     if (!(await exists(liveInput))) await click(button("All channels"));
     await type(liveInput, "earth");
     await pending("guide.searchList", "earth");
@@ -577,6 +635,7 @@ try {
 
   await check("Live name copy remains selected when programme-only rows prepend", async () => {
     await click(button("Live TV", "header button"));
+
     if (!(await exists(liveInput))) await click(button("All channels"));
     await type(liveInput, "Earth");
     await pending("guide.searchList", "Earth");
@@ -683,6 +742,7 @@ try {
   failure = true;
   proof.status = "fail";
   proof.error = String(error);
+
   if (page) await capture("failure").catch(() => undefined);
 } finally {
   if (inspector) {
@@ -690,6 +750,7 @@ try {
     await inspector.send("Debugger.disable");
     inspector.close();
   }
+
   try {
     if (app) await stop(app, page);
     await rm(profile, { recursive: true, force: true });
@@ -698,7 +759,9 @@ try {
     failure = true;
     proof.cleanup = { error: String(error), profileRetained: true };
   }
+
   page?.close();
+
   for (const provider of providers) await provider.close();
   await tmdb?.close();
   proof.fixturesClosed = true;
@@ -710,4 +773,5 @@ try {
   await writeFile(join(output, "electron.log"), logs.join(""));
   console.log(output);
 }
+
 process.exitCode = failure ? 1 : 0;

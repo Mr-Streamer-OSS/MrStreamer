@@ -19,11 +19,13 @@ interface Button {
   readonly text: string;
   readonly onPress?: () => void;
 }
+
 interface Shown {
   readonly title: string;
   readonly message: string;
   readonly buttons?: readonly Button[];
 }
+
 type Removal = (id: string, options: { keepHistory: boolean }) => Promise<void>;
 
 const scenario = vi.hoisted(() => ({
@@ -37,7 +39,9 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -54,38 +58,50 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
   useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
   useNavigation: () => ({ setOptions: () => undefined }),
 }));
+
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 // Downloads open from a row of their own, which this test leaves out.
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 // This screen's native header is outside the renderer; its queue button has separate coverage.
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#8E8E93", line: "#38383A" },
   ChannelLogo: () => null,
   TextButton: () => null,
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   useStatistics: () => ({ enabled: false, transport: "production" }),
   setStatistics: async () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   endDemo: async () => {
     scenario.demoActions.push("exit");
+
     return scenario.demoResult;
   },
   resetDemo: async () => {
     scenario.demoActions.push("reset");
+
     return scenario.demoResult;
   },
   useRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -115,13 +131,16 @@ const cabin: Member = {
 
 /** The registry refused the removal: the provider is saved as it was. */
 const refused: Removal = () => Promise.reject(new Error("The disk is full"));
+
 /** The removal went through, but some of its history is still to delete. */
 const erasePending: Removal = (id) => {
   scenario.members = scenario.members.filter((member) => member.entry.id !== id);
+
   return Promise.reject(new Error("The disk is full"));
 };
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   scenario.sheet = null;
@@ -143,17 +162,20 @@ async function removeCabin(choice: string, removal: Removal) {
       .dispatchEvent(new Event("click", { bubbles: true })),
   );
   const sheet = scenario.sheet;
+
   if (!sheet) throw new Error("No provider sheet");
   React.act(() => sheet.pick(sheet.options.indexOf("Remove")));
   const confirm = scenario.alerts.at(-1);
   expect(confirm?.title).toBe("Remove Cabin?");
   const button = confirm?.buttons?.find((each) => each.text === choice);
+
   if (!button?.onPress) throw new Error(`No ${choice} button`);
   const press = button.onPress;
   await React.act(async () => {
     press();
     await new Promise((settle) => setTimeout(settle, 0));
   });
+
   return scenario.alerts.slice(1);
 }
 

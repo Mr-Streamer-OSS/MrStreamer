@@ -10,14 +10,20 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 // A refused write of the lists keeps that erasure pending, so nothing comes back afterwards.
 
 const memory = vi.hoisted(() => ({ keychain: new Map<string, string>() }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("react-native", () => ({
   Alert: { alert: () => undefined },
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
 }));
+
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer(() => undefined) }));
 
 const { native } = await import("./native-files.ts");
@@ -27,8 +33,10 @@ interface FakeProvider {
   readonly url: string;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -37,7 +45,9 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
     readonly titles: number;
   }): Promise<FakeProvider>;
 };
+
 let panel: FakeProvider;
+
 beforeAll(async () => {
   panel = await startFakeProvider({
     username: "one",
@@ -46,12 +56,15 @@ beforeAll(async () => {
     titles: 1,
   });
 });
+
 afterAll(() => panel.close());
 
 const documents = join(native.root, "documents");
 const lists = () => readFileSync(join(documents, "custom-lists.json"), "utf8");
+
 const registry = () =>
   JSON.parse(readFileSync(join(documents, "subscriptions.json"), "utf8")) as { erasing: string[] };
+
 /** Writes of the lists fail while this holds. */
 let refused = false;
 
@@ -71,12 +84,14 @@ async function launch() {
   const downloads = await import("../src/downloads.ts");
   await account.restore();
   downloads.startDownloads();
+
   return { ...channelLists, ...account };
 }
 
 beforeEach(async () => {
   await background.forceQuit();
   background.reset();
+
   for (const name of readdirSync(native.root))
     rmSync(join(native.root, name), { recursive: true, force: true });
   mkdirSync(documents);
@@ -94,10 +109,12 @@ describe("a list's channels, as their subscription's history is erased", () => {
   it("of a removed provider stay pending while the lists refuse the write, and go at the next launch", async () => {
     const app = await launch();
     const id = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+
     if (!id) throw new Error("The add was cancelled");
     await until(() => app.currentCatalogue().kind === "ready");
     const catalogue = app.currentCatalogue();
     const first = catalogue.kind === "ready" ? catalogue.library.channels[0] : undefined;
+
     if (!first) throw new Error("No channel listed");
     app.createList("News", first);
 

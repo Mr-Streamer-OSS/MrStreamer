@@ -78,6 +78,7 @@ export function LoginForm({
    */
   function connectUnencrypted() {
     const sent = add.variables;
+
     if (!sent) return;
     const address = `http://${sent.server.trim()}`;
     (mode === "link" ? setLink : setServer)(address);
@@ -87,11 +88,14 @@ export function LoginForm({
   const failure = add.error ? appError(add.error) : null;
   const asking = failure?.kind === "unencrypted-only" ? failure : null;
   const error = failure && !asking ? describeError(failure) : null;
+
   /** Changes an address. A question about the one before doesn't hold for it. */
   function changeAddress(set: (value: string) => void, value: string) {
     set(value);
+
     if (asking) add.reset();
   }
+
   const address = (mode === "link" ? link : server).trim();
 
   return (
@@ -214,10 +218,12 @@ function savedWhere(checked: boolean): string {
     return checked
       ? t("Checked with the provider, then saved on this Mac.")
       : t("Saved on this Mac.");
+
   if (isWindows)
     return checked
       ? t("Checked with the provider, then saved on this PC.")
       : t("Saved on this PC.");
+
   return checked
     ? t("Checked with the provider, then saved on this computer.")
     : t("Saved on this computer.");
@@ -230,11 +236,13 @@ function encrypted(secret: "password" | "link"): string {
       ? t("The link is encrypted with your macOS Keychain.")
       : t("The password is encrypted with your macOS Keychain.");
   }
+
   if (isWindows) {
     return secret === "link"
       ? t("The link is encrypted with your Windows account.")
       : t("The password is encrypted with your Windows account.");
   }
+
   return secret === "link"
     ? t("The link is encrypted with your keyring.")
     : t("The password is encrypted with your keyring.");
@@ -248,6 +256,7 @@ function plainHttp(address: string): boolean {
 /** Whether an M3U link names a login, as `get.php?username=…&password=…` does. */
 function carriesLogin(link: string): boolean {
   const query = URL.parse(link.trim())?.searchParams;
+
   return !!query?.get("username") || !!query?.get("password");
 }
 

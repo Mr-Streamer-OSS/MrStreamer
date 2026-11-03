@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { Engine } from "../../src/renderer/src/player/engine.ts";
 
 let engine: Engine | undefined;
+
 afterEach(() => {
   engine?.destroy();
   vi.useRealTimers();
@@ -18,6 +19,7 @@ it.each(["player", "tracks"])(
     vi.resetModules();
     vi.doMock("hls.js", () => {
       if (chunk === "player") throw new Error("Chunk unavailable");
+
       return { default: { isSupported: () => true } };
     });
     vi.doMock("../../src/renderer/src/player/hls-tracks.ts", () => {

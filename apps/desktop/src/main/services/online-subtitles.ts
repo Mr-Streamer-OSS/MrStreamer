@@ -35,10 +35,12 @@ export interface PlayingFile {
   /** Which bytes play, as the file's answers prove them; null when they don't. */
   readonly proof: () => FileProof | null;
 }
+
 /** Main's playback and catalogue adapters agree on a currently listed exact file. */
 export interface SubtitleSession extends PlayingFile {
   readonly query: SubtitleQuery | null;
 }
+
 export class SubtitleSessions extends Context.Service<
   SubtitleSessions,
   {
@@ -97,6 +99,7 @@ interface Search {
 function unavailable(detail: string): Failed {
   return new Failed({ error: { kind: "unexpected", detail } });
 }
+
 function requestFailure(cause: unknown): Failed {
   return unavailable(
     cause instanceof SubtitleRequestFailure
@@ -113,6 +116,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
     const client = subtitleServiceClient(deps);
     const searches = new Map<string, Search>();
     let revision = 0;
+
     const cancel = (id: string) => {
       const previous = searches.get(id);
       searches.delete(id);
@@ -120,37 +124,49 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
       previous?.choice?.abort();
       previous?.removeListener();
     };
+
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         for (const id of searches.keys()) cancel(id);
       }),
     );
+
     const current = (id: string) =>
       Effect.gen(function* () {
         const session = yield* sessions.resolve(id);
+
         if (!session || session.signal.aborted || !(yield* session.standing))
           return yield* unavailable(t("This exact file is no longer playing here."));
+
         return session;
       });
+
     const guarded = (session: SubtitleSession) =>
       Effect.gen(function* () {
         if (session.signal.aborted || !(yield* session.standing))
           return yield* unavailable(t("This exact file changed or stopped playing here."));
       });
+
     const selectedServices = (settings: OnlineSubtitleSettings): readonly SubtitleService[] =>
       settings.service === "both" ? ["subdl", "opensubtitles"] : [settings.service];
+
     const configure = (preferences: OnlineSubtitlePreferences, credentials?: SubtitleCredentials) =>
       Effect.gen(function* () {
         const saved = yield* accounts.update(preferences, credentials);
         revision++;
+
         for (const id of searches.keys()) cancel(id);
+
         return saved;
       });
+
     const search = (id: string, languages?: readonly string[]) =>
       Effect.gen(function* () {
         const settings = yield* accounts.get;
+
         if (!settings.enabled) return yield* unavailable(t("Online subtitle search is off."));
         const session = yield* current(id);
+
         if (!session.query)
           return yield* unavailable(
             t("This file has no current title identity for subtitle search."),
@@ -159,6 +175,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
         const controller = new AbortController();
         const abort = () => cancel(id);
         session.signal.addEventListener("abort", abort, { once: true });
+
         const request: Search = {
           session,
           controller,
@@ -166,10 +183,12 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
           choice: null,
           removeListener: () => session.signal.removeEventListener("abort", abort),
         };
+
         searches.set(id, request);
         const generation = revision;
         const query = { ...session.query, languages: languages ?? settings.languages };
         const signal = AbortSignal.any([session.signal, controller.signal]);
+
         const answers = yield* Effect.forEach(
           selectedServices(settings),
           (service) =>
@@ -177,7 +196,9 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
               if (!settings.configured[service])
                 return { service, reason: "not-configured" as const };
               const keys = yield* accounts.credentials(service);
+
               if (!keys) return { service, reason: "not-configured" as const };
+
               return yield* Effect.tryPromise({
                 try: async () => ({
                   service,
@@ -205,16 +226,20 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             ),
           { concurrency: 2 },
         );
+
         yield* guarded(session);
+
         if (generation !== revision || signal.aborted || searches.get(id) !== request)
           return yield* unavailable(t("Subtitle search was replaced."));
         const results: OnlineSubtitleSearch["results"][number][] = [];
         const failures: OnlineSubtitleSearch["failures"][number][] = [];
+
         for (const answer of answers) {
           if ("reason" in answer) {
             failures.push(answer);
             continue;
           }
+
           for (const candidate of answer.candidates) {
             const key = randomUUID();
             request.candidates.set(key, candidate);
@@ -222,21 +247,27 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             results.push({ id: key, service, language, release, hearingImpaired, downloads });
           }
         }
+
         return { results, failures };
       });
+
     const choose = (id: string, resultId: string) =>
       Effect.gen(function* () {
         const settings = yield* accounts.get;
+
         if (!settings.enabled) return yield* unavailable(t("Online subtitle search is off."));
         const request = searches.get(id);
         const candidate = request?.candidates.get(resultId);
+
         if (!request || !candidate || !selectedServices(settings).includes(candidate.service))
           return yield* unavailable(t("Search again for this file before choosing a subtitle."));
         request.choice?.abort();
         const choice = new AbortController();
         request.choice = choice;
         yield* guarded(request.session);
+
         if (choice.signal.aborted) return yield* unavailable(t("Subtitle choice was replaced."));
+
         // The fingerprint supplies a cache identity without storing a service download address.
         const key = createHash("sha256")
           .update(
@@ -246,15 +277,20 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             ]),
           )
           .digest("hex");
+
         const generation = revision;
+
         const signal = AbortSignal.any([
           request.session.signal,
           request.controller.signal,
           choice.signal,
         ]);
+
         const cached = yield* storage.result(request.session.file, key);
+
         if (cached?.subtitle) {
           yield* guarded(request.session);
+
           if (generation !== revision || signal.aborted || searches.get(id) !== request)
             return yield* unavailable(t("Subtitle choice was replaced."));
           // Saved for the bytes this playback proved, so a download of them takes it along.
@@ -265,9 +301,12 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             cached.timing,
             request.session.proof(),
           );
+
           return { saved: cached, quota: null };
         }
+
         const keys = yield* accounts.credentials(candidate.service);
+
         if (!keys) return yield* unavailable(t("Set up this subtitle service in Settings."));
 
         const answer = yield* Effect.tryPromise({
@@ -283,7 +322,9 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             ),
           catch: requestFailure,
         });
+
         yield* guarded(request.session);
+
         if (generation !== revision || signal.aborted || searches.get(id) !== request)
           return yield* unavailable(t("Subtitle choice was replaced."));
         yield* storage.remember(
@@ -294,12 +335,15 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
           request.session.proof(),
         );
         const saved = yield* storage.read(request.session.file);
+
         if (!saved) return yield* unavailable(t("The downloaded subtitle couldn't be saved."));
+
         return {
           saved,
           quota: answer.quota ? { service: candidate.service, ...answer.quota } : null,
         };
       });
+
     return {
       settings: accounts.get,
       configure,
@@ -315,6 +359,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
             selection,
             session.proof(),
           );
+
           return (yield* storage.read(session.file))!;
         }),
       show: (id: string, selection?: string) =>
@@ -322,6 +367,7 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
       hide: (id: string) =>
         Effect.gen(function* () {
           const session = yield* sessions.playing(id);
+
           if (session && !session.signal.aborted && (yield* session.standing))
             yield* storage.hide(session.file);
         }),

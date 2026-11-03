@@ -45,16 +45,21 @@ export const unavailable = (detail: string) => new ReceiverFailed({ kind: "unava
 function lineReader(onLine: (line: string) => void): (chunk: string) => void {
   let pending = "";
   let skipping = false;
+
   return (chunk) => {
     let start = 0;
+
     for (let end = chunk.indexOf("\n"); end !== -1; end = chunk.indexOf("\n", start)) {
       const line = pending + chunk.slice(start, end);
+
       if (!skipping && line.length <= MAX_LINE) onLine(line);
       pending = "";
       skipping = false;
       start = end + 1;
     }
+
     pending += chunk.slice(start);
+
     if (pending.length > MAX_LINE) {
       pending = "";
       skipping = true;
@@ -82,6 +87,7 @@ export function startHelper(options: HelperOptions): HelperRun {
     given ??= end;
     child.kill("SIGKILL");
   };
+
   const starting = setTimeout(() => giveUp("crashed"), options.start);
 
   const finish = (end: HelperEnd) => {
@@ -91,6 +97,7 @@ export function startHelper(options: HelperOptions): HelperRun {
     clearTimeout(quitting);
     const stopped = unavailable("the AirPlay helper stopped");
     greeted.reject(stopped);
+
     for (const settle of [...waiting.values()]) settle(stopped);
     options.onEnd(asked ? "asked" : (given ?? end));
     gone.resolve();
@@ -98,6 +105,7 @@ export function startHelper(options: HelperOptions): HelperRun {
 
   const write = (line: string) => {
     options.log(`> ${withoutAddresses(line)}`);
+
     // The helper may be gone before a command is written; its close says so.
     if (child.stdin.writable) child.stdin.write(`${line}\n`);
   };
@@ -105,15 +113,19 @@ export function startHelper(options: HelperOptions): HelperRun {
   const heard = (line: string) => {
     options.log(`< ${withoutAddresses(line)}`);
     const event = readEvent(line);
+
     if (!event) return;
+
     if (event.type === "hello") {
       clearTimeout(starting);
+
       if (event.protocol === PROTOCOL) greeted.resolve();
       else giveUp("unusable");
     } else if (event.type === "answer") {
       const refusal = event.ok
         ? undefined
         : unavailable(withoutAddresses(event.error ?? "refused"));
+
       waiting.get(event.id)?.(refusal);
     } else {
       options.onEvent(event);
@@ -134,21 +146,26 @@ export function startHelper(options: HelperOptions): HelperRun {
   return {
     async send(command) {
       await greeted.promise;
+
       if (finished) throw unavailable("the AirPlay helper stopped");
       const id = ++commands;
       const answered = Promise.withResolvers<void>();
+
       const late = setTimeout(() => {
         waiting.delete(id);
         answered.reject(unavailable("the AirPlay helper did not answer"));
         giveUp("crashed");
       }, options.answer);
+
       waiting.set(id, (refusal) => {
         clearTimeout(late);
         waiting.delete(id);
+
         if (refusal) answered.reject(refusal);
         else answered.resolve();
       });
       write(JSON.stringify({ id, ...command }));
+
       return answered.promise;
     },
 
@@ -158,6 +175,7 @@ export function startHelper(options: HelperOptions): HelperRun {
         write(JSON.stringify({ id: ++commands, cmd: "quit" }));
         quitting = setTimeout(() => child.kill("SIGKILL"), options.quit);
       }
+
       return gone.promise;
     },
   };

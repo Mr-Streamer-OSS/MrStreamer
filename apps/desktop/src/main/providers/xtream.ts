@@ -37,21 +37,27 @@ export function connectionIgnored(
   const url = new URL(server);
   // An IPv6 address comes in brackets.
   const host = url.hostname.replace(/^\[|\]$/g, "");
+
   return new Promise((resolve) => {
     const socket = open({ host, port: url.port === "" ? 443 : Number(url.port) });
     let deadline: NodeJS.Timeout | undefined;
+
     const finish = (ignored: boolean) => {
       clearTimeout(deadline);
       signal.removeEventListener("abort", answered);
       socket.destroy();
       resolve(ignored);
     };
+
     const answered = () => finish(false);
+
     // A name can still resolve after `signal` ended the attempt.
     const wait = () => {
       if (!socket.destroyed) deadline ??= setTimeout(finish, CONNECT_TIMEOUT_MS, true);
     };
+
     signal.addEventListener("abort", answered);
+
     // The time the name takes to resolve, or to fail to, doesn't count.
     if (isIP(host)) wait();
     else {
@@ -59,6 +65,7 @@ export function connectionIgnored(
         if (!error) wait();
       });
     }
+
     socket.once("connect", answered);
     socket.on("error", answered);
   });

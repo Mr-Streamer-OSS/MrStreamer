@@ -76,12 +76,16 @@ function repository(
 ) {
   const { releases = [], histories = {}, commits = {}, history = [], pulls = {} } = options;
   const compared: string[] = [];
+
   /** The position of a tag's or commit's commit on main. */
   const position = (ref: string) => {
     const index = history.indexOf(commits[ref] ?? ref);
+
     if (index === -1) throw new Error(`Unknown commit ${ref}`);
+
     return index;
   };
+
   const repo: Repository = {
     url: REPOSITORY,
     defaultBranch: "main",
@@ -96,12 +100,16 @@ function repository(
     async compare(base, head) {
       compared.push(`${base}...${head}`);
       const history = histories[`${base}...${head}`];
+
       if (!history) throw new Error(`Unexpected comparison ${base}...${head}`);
+
       return history;
     },
     async commitOf(tag) {
       const commit = commits[tag];
+
       if (!commit) throw new Error(`Unknown tag ${tag}`);
+
       return commit;
     },
     async commits(base, head) {
@@ -111,6 +119,7 @@ function repository(
       return (pulls[commit] ?? []).map(pull);
     },
   };
+
   return { repo, compared };
 }
 
@@ -162,10 +171,12 @@ describe("scheduled nightlies", () => {
     expect(desktopReleaseChanged(null)).toBe(true);
     expect(desktopReleaseChanged([])).toBe(false);
     const last = "v0.0.1-nightly.20261001.30";
+
     const { repo } = repository({
       releases: [published(last, 25)],
       histories: { [`${last}...head`]: "ahead" },
     });
+
     repo.releasePaths = async () => ["apps/marketing/src/page.ts"];
     expect(await planNightly(repo, scheduled())).toMatchObject({
       skip: expect.stringContaining("No desktop"),
@@ -188,6 +199,7 @@ describe("scheduled nightlies", () => {
   it("waits until the next UTC day, allowing a daily build that published after yesterday’s cron", async () => {
     const last = "v0.0.1-nightly.20261002.30";
     const early = repository({ releases: [published(last, 0.01)] });
+
     const due = repository({
       releases: [published(last, 23)],
       histories: { [`${last}...head`]: "ahead" },
@@ -203,6 +215,7 @@ describe("scheduled nightlies", () => {
 
   it("skips when main has nothing new, or is behind or apart from the last nightly", async () => {
     const last = "v0.0.1-nightly.20261001.30";
+
     const plan = (history: History) =>
       planNightly(
         repository({ releases: [published(last, 25)], histories: { [`${last}...head`]: history } })
@@ -220,6 +233,7 @@ describe("scheduled nightlies", () => {
 
   it("measures from the last published nightly, not drafts or other pre-releases", async () => {
     const last = "v0.0.1-nightly.20261001.30";
+
     const { repo, compared } = repository({
       releases: [
         published(last, 25),
@@ -253,11 +267,13 @@ describe("scheduled nightlies", () => {
 
 describe("what a release run is", () => {
   const tested = "v0.0.1-nightly.20261001.20";
+
   const { repo } = repository({
     releases: [published(tested, 30)],
     commits: { [tested]: "tested-commit" },
     histories: { "tested-commit...main": "ahead", [`${tested}...head`]: "identical" },
   });
+
   const run = (event: string, overrides: Partial<RunRequest> = {}) =>
     planRun(repo, {
       event,
@@ -360,6 +376,7 @@ describe("nightly versions", () => {
 describe("stable releases", () => {
   const older = "v0.0.1-nightly.20261001.20";
   const latest = "v0.0.1-nightly.20261002.30";
+
   // `main` says how main's commit, "head", relates to the latest nightly.
   const promotion = (releases: GitHubRelease[] = [], main: History = "identical") =>
     repository({
@@ -405,6 +422,7 @@ describe("stable releases", () => {
       commits: { [latest]: "rewritten" },
       histories: { "rewritten...main": "diverged" },
     });
+
     const pinned = (nightly: string) => planStable(repo, promote(nightly));
 
     await expect(pinned("0.0.1-nightly.20261002.31")).rejects.toThrow("not a published nightly");
@@ -450,6 +468,7 @@ describe("stable releases", () => {
         [`${latest}...head`]: "ahead",
       },
     }).repo;
+
   const FRESH = "A stable release needs a fresh tested nightly: test one published after v0.0.1.";
 
   it("are refused for a nightly that sorts below the newest stable release, whatever it holds or the version entered", async () => {
@@ -466,6 +485,7 @@ describe("stable releases", () => {
   // A nightly planned after 0.0.1 shipped, which previews 0.0.2. `holds` says how it relates to
   // 0.0.1's commit.
   const fresh = "v0.0.2-nightly.20261002.35";
+
   const afterRelease = (holds: History) =>
     repository({
       releases: [published("v0.0.1", 10, false), published(fresh, 8)],
@@ -491,6 +511,7 @@ describe("stable releases", () => {
     await expect(planStable(afterRelease("identical"), promote(fresh))).rejects.toThrow(
       `${fresh} was built from the same commit as v0.0.1, so it holds nothing new. ${FRESH}`,
     );
+
     for (const holds of ["behind", "diverged"] as const) {
       await expect(planStable(afterRelease(holds), promote(fresh))).rejects.toThrow(
         `${fresh} doesn't contain v0.0.1's commit (${holds}), so it can hold older code than 0.0.1. ${FRESH}`,
@@ -504,11 +525,13 @@ describe("release notes", () => {
   // #13 arrived in two commits.
   const history = ["c0", "c1", "c2", "c3", "c4", "c5", "c6"];
   const pulls = { c0: [10], c1: [11], c2: [12], c3: [13], c4: [13, 14], c5: [15], c6: [16] };
+
   const nightlies = [
     published("v0.1.1-nightly.20261001.1", 30),
     published("v0.1.1-nightly.20261001.2", 20),
     published("v0.1.1-nightly.20261002.3", 8),
   ];
+
   const commits = {
     "v0.1.0": "c1",
     "v0.1.1-nightly.20261001.1": "c3",
@@ -516,7 +539,9 @@ describe("release notes", () => {
     "v0.1.1-nightly.20261002.3": "c5",
     main: "c6",
   };
+
   const promoted = "v0.1.1-nightly.20261002.3";
+
   const histories: Record<string, History> = {
     "c4...main": "ahead",
     "c5...main": "ahead",
@@ -572,6 +597,7 @@ describe("release notes", () => {
       repo,
       scheduled({ sha: "c6", recorded: "0.1.0", scheduled: false }),
     );
+
     if ("skip" in plan) throw new Error(plan.skip);
 
     expect(listed(await releaseNotes(repo, plan))).toEqual([16]);
@@ -608,6 +634,7 @@ describe("publishing", () => {
 
   it("waits for every platform's installers, update metadata and source archive", () => {
     const sources = ["ffmpeg-8.0.tar.xz", "electron-38.1.0.tar.gz"];
+
     const files = [
       "Mr-Streamer-0.0.5-mac-arm64.dmg",
       "Mr-Streamer-0.0.5-mac-arm64.zip",
@@ -666,11 +693,13 @@ describe("update feed", () => {
       published("v0.0.20", 30, false),
       published("v0.1.0", 10, false),
     ]);
+
     expect(feed.stable?.previousStable).toBe("0.0.20");
     expect(readFeed(JSON.parse(JSON.stringify(feed))).stable?.previousStable).toBe("0.0.20");
     expect(mergeFeeds(feed, feedOf([published("v0.0.16", 60, false)])).stable?.previousStable).toBe(
       "0.0.20",
     );
+
     for (const previousStable of ["bad", "0.2.0", "0.1.0", "0.0.21-nightly.20261027.1"]) {
       expect(
         readFeed({ ...feed, stable: { ...feed.stable, previousStable } }).stable?.previousStable,
@@ -770,20 +799,24 @@ describe("update feed", () => {
     const offersIn = (feed: UpdateFeed): Offer[] =>
       [feed.stable, feed.nightly].flatMap((entry) => {
         const version = entry && parseVersion(entry.version);
+
         return entry && version
           ? [{ version, feedUrl: entry.files, notes: entry.notes, page: entry.page }]
           : [];
       });
+
     /** Versions 0.0.3 and earlier: Nightly takes the highest of all, stable or not. */
     const newestUpTo003 = (channel: Channel, offers: readonly Offer[]) =>
       offers
         .filter((offer) => channel === "nightly" || !offer.version.nightly)
         .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null;
+
     /** The newest release each app finds on Stable and Nightly: 0.0.3 and earlier, then later. */
     const newest = (feed: UpdateFeed) =>
       [newestUpTo003, newestOn].flatMap((select) =>
         (["stable", "nightly"] as const).map((channel) => {
           const offer = select(channel, offersIn(feed));
+
           return offer ? formatVersion(offer.version) : null;
         }),
       );
@@ -827,6 +860,7 @@ describe("update feed", () => {
         ...feedOf([stable003]),
         nightly: feedOf([stable003]).stable,
       };
+
       const next = mergeFeeds(
         deployed,
         feedOf([published("v0.0.3-nightly.20261002.62", 40), stable003]),
@@ -840,6 +874,7 @@ describe("update feed", () => {
 
   it("takes newer releases and the latest details of the same one", () => {
     const deployed = feedOf([{ ...published("v0.0.2", 20, false), notes: "Draft notes" }]);
+
     const listed = feedOf([
       published("v0.0.2", 20, false),
       published("v0.0.3-nightly.20261002.9", 1),
@@ -858,13 +893,17 @@ describe("update feed", () => {
 
   it("reads the deployed feed, and stops when it can't tell whether one exists", async () => {
     const feed = feedOf([published("v0.0.3", 5, false)]);
+
     const server = createServer((request, response) => {
       const path = new URL(request.url ?? "/", "http://localhost").pathname;
+
       if (path === "/updates.json") response.end(JSON.stringify(feed));
       else response.writeHead(path === "/missing.json" ? 404 : 503).end();
     });
+
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
     const site = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
     try {
       expect(await deployedFeed(`${site}/updates.json`)).toEqual(feed);
       // Nothing deployed yet: the releases alone decide.
@@ -874,6 +913,7 @@ describe("update feed", () => {
     } finally {
       await new Promise((closed) => server.close(closed));
     }
+
     // Unreachable says nothing about what is deployed, so nothing is published.
     await expect(deployedFeed(`${site}/updates.json`)).rejects.toThrow("unreachable");
   });
@@ -883,6 +923,7 @@ describe("update feed", () => {
       published("v0.0.2", 20, false),
       published("v0.0.3-nightly.20261002.9", 1),
     ]);
+
     const json: Record<string, unknown> = JSON.parse(JSON.stringify(feed));
 
     expect(readFeed(json)).toEqual(feed);
@@ -940,6 +981,7 @@ describe("Release validation lookup CLI", () => {
     const dir = mkdtempSync(join(tmpdir(), "release-lookup-"));
     const script = resolve(".github/scripts/release-validation.ts");
     const identityScript = resolve(".github/scripts/validation-evidence.ts");
+
     const git = (...args: string[]) =>
       execFileSync(
         "git",
@@ -954,15 +996,18 @@ describe("Release validation lookup CLI", () => {
         ],
         { cwd: dir, encoding: "utf8" },
       ).trim();
+
     try {
       git("init", "-q");
       git("commit", "--allow-empty", "-qm", "candidate");
       const sha = git("rev-parse", "HEAD");
       git("update-ref", "refs/remotes/origin/main", sha);
+
       const identity = execFileSync(process.execPath, [identityScript, "identity"], {
         cwd: dir,
         encoding: "utf8",
       }).trim();
+
       const evidence = {
         version: 1,
         sha,
@@ -971,6 +1016,7 @@ describe("Release validation lookup CLI", () => {
         identities: { check: identity, test: identity, website: "" },
         results: { check: "success", test: "success", website: "skipped" },
       };
+
       // The external GitHub transport is stubbed; Git trust checks and archive extraction are real.
       const gh = join(dir, "gh");
       writeFileSync(
@@ -985,6 +1031,7 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
 `,
         { mode: 0o755 },
       );
+
       const run = {
         id: 123,
         run_attempt: 2,
@@ -997,15 +1044,19 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
         repository: { full_name: "Mr-Streamer-OSS/MrStreamer" },
         head_repository: { full_name: "Mr-Streamer-OSS/MrStreamer" },
       };
+
       const artifact = { id: 456, name: "validation-123-2", expired: false };
+
       const fixture = {
         runs: [run],
         artifacts: [artifact],
         zip: validationArchive(evidence).toString("base64"),
       };
+
       const execute = (patch: Record<string, unknown> = {}, workflowSha = sha) => {
         const output = join(dir, "output");
         writeFileSync(output, "");
+
         const result = spawnSync(process.execPath, [script], {
           cwd: dir,
           encoding: "utf8",
@@ -1019,10 +1070,14 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
             LOOKUP_FIXTURE: JSON.stringify({ ...fixture, ...patch }),
           },
         });
+
         expect(result.status, result.stderr).toBe(0);
+
         return readFileSync(output, "utf8").trim();
       };
+
       expect(execute()).toBe("reused=true");
+
       for (const patch of [
         { runs: [] },
         { error: true },
@@ -1054,10 +1109,13 @@ function validationArchive(value: unknown): Buffer {
   const name = Buffer.from("validation.json");
   const data = Buffer.from(JSON.stringify(value));
   let crc = 0xffffffff;
+
   for (const byte of data) {
     crc ^= byte;
+
     for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
   }
+
   crc = (crc ^ 0xffffffff) >>> 0;
   const local = Buffer.alloc(30);
   local.writeUInt32LE(0x04034b50);
@@ -1080,5 +1138,6 @@ function validationArchive(value: unknown): Buffer {
   end.writeUInt16LE(1, 10);
   end.writeUInt32LE(central.length + name.length, 12);
   end.writeUInt32LE(local.length + name.length + data.length, 16);
+
   return Buffer.concat([local, name, data, central, name, end]);
 }

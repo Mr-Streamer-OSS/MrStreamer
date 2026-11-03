@@ -119,19 +119,23 @@ const before: SeriesViewing = {
   marks: [],
   undoable: null,
 };
+
 /** The same once the second was marked watched. */
 const after: SeriesViewing = { ...before, marks: [marked(1, 2, true, 10)], undoable: 10 };
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
 });
 
 const text = () => document.body.textContent ?? "";
+
 /** Waits until `check` passes, moving the fake clock so React Query passes the answers on. */
 const until = (check: () => void) =>
   vi.waitFor(
@@ -143,15 +147,20 @@ const until = (check: () => void) =>
   );
 
 const buttons = () => [...document.body.querySelectorAll("button")];
+
 /** The button that says exactly `label`. */
 const button = (label: string) => buttons().find((each) => each.textContent === label);
+
 /** The sheet's main action: what the series goes on with. */
 const mainAction = () =>
   buttons().find((each) => /^(Play|Resume|Replay) S\d/.test(each.textContent ?? ""))?.textContent;
+
 /** The dots on an episode's row. */
 const dots = (label: string) =>
   document.body.querySelector<HTMLElement>(`[aria-label="More for ${label}"]`);
+
 const items = () => [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+
 /** The rows whose episode shows as watched, by their episode's name. */
 const watched = () =>
   [...document.body.querySelectorAll('[aria-label="Watched"]')].map(
@@ -162,6 +171,7 @@ const watched = () =>
 async function offered(label: string): Promise<boolean[]> {
   await act(async () => dots(label)?.click());
   await until(() => expect(items()).toHaveLength(2));
+
   return items().map((each) => !each.hasAttribute("data-disabled"));
 }
 
@@ -189,6 +199,7 @@ async function sheet(
 ): Promise<void> {
   ipc.reset();
   const read = "kind" in standing ? null : standing;
+
   if (read) ipc.always("viewing.episodes", read);
   else ipc.refuse("viewing.episodes", standing as AppError);
   const listed = ipc.hold("ondemand.titles");
@@ -204,6 +215,7 @@ async function sheet(
     stopSync();
     view.unmount();
   };
+
   await act(async () => listed.resolve([title]));
   await act(async () => progress.resolve(read?.progress ?? []));
   await act(async () => opened.resolve({ ...shown, title }));
@@ -311,10 +323,12 @@ describe("marking an episode watched", () => {
 
   it("names the subscription once the title's versions are of several", async () => {
     const other = { ...SAVED, id: "b0e1", name: "Holiday house" };
+
     const both = {
       ...series,
       versions: [...series.versions, { subscriptionId: other.id, id: "harbour", tags: [] }],
     };
+
     await sheet(before, { saved: [{ ...SAVED, name: "Mega IPTV" }, other], title: both });
     const stored = ipc.hold("viewing.markEpisode");
 
@@ -457,10 +471,12 @@ describe("a record that can't be read", () => {
 
 describe("Continue watching with a marked series", () => {
   const OTHER = "b0e1";
+
   const both: Title = {
     ...series,
     versions: [...series.versions, { subscriptionId: OTHER, id: "harbour", tags: [] }],
   };
+
   const mark = (
     next: MarkedSeries["next"],
     at = 10,
@@ -471,6 +487,7 @@ describe("Continue watching with a marked series", () => {
     at,
     next,
   });
+
   const from = (season: number, number: number) => ({ season, episode: number, resume: null });
 
   /** What the row shows of the series for a record that reads `viewing`. */
@@ -487,15 +504,19 @@ describe("Continue watching with a marked series", () => {
     });
     ipc.always("ondemand.titles", [both]);
     let lines: string[] = [];
+
     function Probe() {
       const { entries, loading } = useContinueWatching();
       lines = loading ? ["loading"] : entries.map((entry) => entry.line);
+
       return null;
     }
+
     const view = queryView(client);
     await view.render(createElement(Probe));
     unmount = view.unmount;
     await until(() => expect(lines).not.toEqual(["loading"]));
+
     return lines;
   }
 
@@ -589,10 +610,12 @@ it.each([
         })),
       })),
     };
+
     const playedAlternate = {
       ...played(1, 2, 500, 3),
       title: { ...played(1, 2, 500, 3).title, id: "alternate" },
     };
+
     await sheet(
       {
         progress: [played(1, 2, 1000, 2), playedAlternate],
@@ -601,9 +624,11 @@ it.each([
       },
       { shown: exact },
     );
+
     const trigger = document.body.querySelector<HTMLButtonElement>(
       '[aria-label="Versions for S1 E2"]',
     );
+
     expect(trigger?.getAttribute("title")).toBe("2 versions");
     await act(async () => trigger?.click());
     const files = () => [...document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];

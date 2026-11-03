@@ -84,6 +84,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   // Measured with the words the notice shows, which a live recording lengthens.
   const recordingNow = useLiveRecordings().length > 0;
   const updateWords = updateNoticeLabel(update, updateOpen, useKeptUpdate(), recordingNow);
+
   const filled: Partial<Record<View, boolean>> = {
     // The owner counts visible saves, including unavailable titles and the adult setting.
     watchlist: useQuery(queries.watchlistAvailability()).data ?? true,
@@ -92,11 +93,14 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
     // Every kept recording counts, recording or ended.
     recordings: useAnyRecording(),
   };
+
   const shown = VIEWS.filter(
     (entry) => (!liveOnly || withoutTitles(entry.view)) && filled[entry.view] !== false,
   );
+
   const home = useRef<HTMLButtonElement>(null);
   const focused = document.activeElement;
+
   const focusedCollection =
     focused instanceof HTMLElement && home.current?.closest("header")?.contains(focused)
       ? focused.dataset["view"] === "watchlist"
@@ -105,10 +109,12 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           ? "downloads"
           : null
       : null;
+
   // A removed entry hands focus to Home; a folded Downloads entry keeps it on its replacement.
   useLayoutEffect(() => {
     if (!focusedCollection || focused?.isConnected || document.activeElement !== document.body)
       return;
+
     if (filled[focusedCollection] === false) home.current?.focus();
     else if (focusedCollection === "downloads")
       home.current
@@ -120,6 +126,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const [pages, fold] = useFolds(status?.text, updateWords, locale, names);
   const [backRoom, backFold] = useFolds(status?.text, updateWords, locale);
   const folded = fold !== "none";
+
   const back =
     onBack ??
     (settingsOpen
@@ -131,6 +138,7 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
           : savedOpen
             ? () => useUi.setState({ savedEntry: null })
             : null);
+
   return (
     <BarFrame className={className}>
       <Brand />
@@ -216,6 +224,7 @@ export function BarFrame({
   children: ReactNode;
 }) {
   const controls = !useWindowFullScreen();
+
   return (
     <header
       className={cn("drag flex flex-none items-center gap-1 px-4", className)}
@@ -301,8 +310,10 @@ function useFolds(
   const needed = useRef(0);
   const besideArrow = useRef(Infinity);
   const measured = useRef<(again: boolean, renamed?: boolean) => void>(undefined);
+
   const ref = useCallback((element: HTMLElement | null) => {
     if (!element) return;
+
     // `again`: what the bar holds changed, so the arrow tries its words whatever the room.
     // `renamed`: the names changed, so Downloads tries its place among them too.
     const measure = (again: boolean, renamed = false) =>
@@ -310,37 +321,46 @@ function useFolds(
         const room = element.clientWidth;
         const over = element.scrollWidth > room;
         const notice = element.parentElement?.querySelector("[data-downloads-notice]");
+
         if (renamed && was !== "none" && !notice?.contains(document.activeElement)) return "none";
+
         switch (was) {
           case "none":
             if (!over) return "none";
             needed.current = element.scrollWidth;
+
             return "downloads";
           case "downloads":
             if (!over) return room < needed.current ? "downloads" : "none";
             besideArrow.current = Infinity;
+
             return "arrow";
           case "arrow":
             if (again || room > besideArrow.current) return "downloads";
             besideArrow.current = room;
+
             return "arrow";
         }
       });
+
     measured.current = measure;
     // The pages come back after Back with the fold they had, and the bar may have changed meanwhile.
     measure(true, true);
     const observer = new ResizeObserver(() => measure(false));
     observer.observe(element);
+
     return () => {
       observer.disconnect();
       measured.current = undefined;
     };
   }, []);
+
   // A fold can leave the pages' room as it was, as when Downloads' words stand beside Search
   // before and after its name goes, so nothing resizes: measured again before it is drawn. Words
   // or a language that changes resize nothing either while the arrow stands alone.
   useLayoutEffect(() => measured.current?.(false), [fold]);
   useLayoutEffect(() => measured.current?.(true), [words, updateWords, locale]);
   useLayoutEffect(() => measured.current?.(true, true), [names]);
+
   return [ref, fold];
 }

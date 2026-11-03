@@ -69,6 +69,7 @@ async function opened(recording: Recording = noon) {
   await act(async () => trigger.click());
   const popup = document.querySelector<HTMLElement>("[role=dialog][aria-label=Recording]");
   expect(popup?.textContent).toContain(recording.title);
+
   return { trigger, popup: popup! };
 }
 
@@ -88,9 +89,11 @@ it("says why a refused Stop failed, and Escape gives the keys back to Recording"
   const { trigger, popup } = await opened();
   ipc.refuse("recordings.stop", { kind: "unexpected", detail: "Recordings could not be saved." });
   await act(async () => button("Stop recording")?.click());
+
   const alert = await vi.waitFor(
     () => popup.querySelector("[role=alert]") ?? Promise.reject(new Error("none")),
   );
+
   expect(alert.textContent).toContain("Recordings could not be saved.");
   // Still recording: Stop can be tried again.
   expect(button("Stop recording")?.disabled).toBe(false);

@@ -12,10 +12,12 @@ import { Flash } from "../../src/renderer/src/features/watch/Flash.tsx";
 import { LookRows } from "../../src/renderer/src/features/watch/SubtitleSettings.tsx";
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
 });
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -27,6 +29,7 @@ async function render() {
   acceptPreferences(client, { revision: 1, preferences: defaultPreferences });
   const mounted = queryView(client);
   const host = mounted.container;
+
   const mount = async (settings = false, cc = true) => {
     await mounted.render(
       createElement(
@@ -39,18 +42,23 @@ async function render() {
     );
     await act(() => vi.advanceTimersByTimeAsync(20));
   };
+
   cleanup = () => {
     stop();
     mounted.unmount();
   };
+
   await mount();
+
   const pick = async (label: string) => {
     await act(async () =>
       host.querySelector<HTMLButtonElement>(`[role="radio"][aria-label="${label}"]`)!.click(),
     );
   };
+
   return { host, client, mount, pick };
 }
+
 const snapshot = (revision: number, look = DEFAULT_SUBTITLE_LOOK) => ({
   revision,
   preferences: { ...defaultPreferences, subtitleLook: look },

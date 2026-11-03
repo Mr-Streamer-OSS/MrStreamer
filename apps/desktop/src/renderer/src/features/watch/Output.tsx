@@ -25,8 +25,10 @@ import { Choice, Menu, MenuNote } from "./TrackMenus.tsx";
 
 /** How long the note that a connect reached no receiver stays. */
 const REFUSED_MS = 8000;
+
 /** How long a receiver that stopped answering stays in the list, marked as gone. */
 const GONE_MS = 2000;
+
 /** After this long without a receiver, the list says none was found. */
 const NONE_FOUND_MS = 6000;
 
@@ -48,10 +50,14 @@ export function playHere(): void {
  */
 export async function openChooser(showList: () => void, view: AbortSignal): Promise<void> {
   const { account } = useUi.getState();
+
   if (!(await miniPlayer.leave())) return;
+
   if (view.aborted || account !== useUi.getState().account) return;
   const { offers } = outputs.status();
+
   if (offers.length === 0) return;
+
   if (offers.includes("cast")) return showList();
   outputs.pick();
 }
@@ -63,8 +69,10 @@ function useElapsed(since: number | null): number | null {
     if (since === null) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
+
     return () => clearInterval(timer);
   }, [since]);
+
   return since === null ? null : Math.max(0, Math.floor((now - since) / 1000));
 }
 
@@ -89,17 +97,21 @@ export function OutputButton({
   // The app's own list looks for receivers while it shows.
   useEffect(() => {
     outputs.list(open);
+
     return () => outputs.list(false);
   }, [open]);
+
   if (offers.length === 0) return null;
   const active = output.kind === "receiver" || output.kind === "lost";
   const listed = offers.includes("cast");
   const kind = listed ? "cast" : "airplay";
+
   const label = active
     ? t("Playing {where}", { where: where(output.receiver) })
     : listed
       ? t("Play on a TV")
       : "AirPlay";
+
   if (!listed) {
     // The system's list is the only chooser: a press opens it, and ends a connect under way.
     // It opens at this element (see `outputs.pick`).
@@ -119,6 +131,7 @@ export function OutputButton({
       </span>
     );
   }
+
   return (
     <span data-output="">
       <Menu
@@ -165,6 +178,7 @@ export function Receivers({
   const gone = useGone(status.receivers);
   const current = output.kind === "receiver" || output.kind === "lost" ? output.receiver : null;
   const target = output.kind === "connecting" ? output.receiver : null;
+
   // The connected one stays listed while the browse hasn't heard from it lately.
   const receivers = [
     ...status.receivers.filter((each) => each.kind === "cast"),
@@ -174,7 +188,9 @@ export function Receivers({
       ? [current]
       : []),
   ];
+
   const nothing = receivers.length === 0 && gone.length === 0;
+
   return (
     <>
       <Choice
@@ -239,18 +255,23 @@ function useGone(receivers: readonly Receiver[]): readonly Receiver[] {
     const left = before.current.filter(
       (was) => was.kind === "cast" && !receivers.some((each) => each.id === was.id),
     );
+
     before.current = receivers;
+
     if (left.length === 0) return;
     setGone((known) => [
       ...known.filter((each) => !left.some((one) => one.id === each.id)),
       ...left,
     ]);
+
     const timer = setTimeout(
       () => setGone((known) => known.filter((each) => !left.some((one) => one.id === each.id))),
       GONE_MS,
     );
+
     return () => clearTimeout(timer);
   }, [receivers]);
+
   return gone.filter((each) => !receivers.some((one) => one.id === each.id));
 }
 
@@ -272,9 +293,11 @@ export function ConnectingNote() {
   useEffect(() => {
     if (!refused) return;
     const timer = setTimeout(() => expire((count) => count + 1), REFUSED_MS);
+
     return () => clearTimeout(timer);
   }, [refused]);
   const waiting = output.kind === "connecting" && output.protocol === "airplay";
+
   const failed =
     !waiting &&
     (output.kind === "local" || output.kind === "lost") &&
@@ -283,7 +306,9 @@ export function ConnectingNote() {
     Date.now() - refused.at < REFUSED_MS
       ? receiverProblem(refused.failure, false, refused.receiver, null)
       : null;
+
   if (!waiting && !failed) return null;
+
   return (
     <div
       className={cn(
@@ -346,6 +371,7 @@ export function receiverProblem(
   stopped: string | null,
 ): { readonly title: string; readonly body: string; readonly retry: boolean } {
   const name = receiverName(receiver);
+
   switch (failure.kind) {
     case "unreachable":
       return lost

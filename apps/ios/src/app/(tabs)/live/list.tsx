@@ -14,5 +14,6 @@ export default function LiveList() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: name });
   }, [navigation, name]);
+
   return <ChannelListScreen id={id} />;
 }

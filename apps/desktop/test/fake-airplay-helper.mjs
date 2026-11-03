@@ -7,8 +7,11 @@ import { createInterface } from "node:readline";
 
 const socket = connect(Number(process.argv[2]), "127.0.0.1");
 let stays = false;
+
 socket.on("error", () => process.exit(1));
+
 socket.on("close", () => process.exit(1));
+
 socket.write(`${process.pid}\n`);
 
 // From the test: "=<line>" to write as it is, "!exit <code>", or "!stay".

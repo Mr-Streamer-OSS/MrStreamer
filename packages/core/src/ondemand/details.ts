@@ -44,20 +44,25 @@ export function seriesDetails(
 ): SeriesDetails {
   const listedOrder = new Map(details.episodes.map((episode, index) => [episode.id, index]));
   const files = new Map<string, ProviderEpisode[]>();
+
   for (const episode of details.episodes) {
     const key = `${episode.season}:${episode.number}`;
     const group = files.get(key);
+
     if (group) {
       if (!group.some((each) => each.id === episode.id)) group.push(episode);
     } else files.set(key, [episode]);
   }
+
   const sourceOrder = details.episodeOrder === "source";
   const bySeason = new Map<number, Episode[]>();
   const episodeOrder: string[] = [];
+
   for (const versions of files.values()) {
     const episode = sourceOrder
       ? versions[0]!
       : versions.reduce((best, file) => (preferredFile(file, best, language) ? file : best));
+
     const shown: Episode = {
       subscriptionId: title.subscriptionId,
       id: episode.id,
@@ -85,17 +90,22 @@ export function seriesDetails(
             : undefined,
       }),
     };
+
     episodeOrder.push(shown.id);
     const list = bySeason.get(episode.season);
+
     if (list) list.push(shown);
     else bySeason.set(episode.season, [shown]);
   }
+
   const provided = new Map(details.seasons.map((season) => [season.number, season]));
+
   const seasons = [...bySeason.entries()]
     // Specials, season 0, come after the numbered seasons.
     .sort(([a], [b]) => (sourceOrder ? 0 : a === 0 ? 1 : b === 0 ? -1 : a - b))
     .map(([number, episodes]): Season => {
       const known = provided.get(number);
+
       return {
         number,
         name: number === 0 ? t("Specials") : t("Season {number}", { number: String(number) }),
@@ -103,6 +113,7 @@ export function seriesDetails(
         episodes: sourceOrder ? episodes : episodes.sort((a, b) => a.number - b.number),
       };
     });
+
   return {
     kind: "series",
     ...shared(title, details, about),
@@ -122,6 +133,7 @@ function preferredFile(file: ProviderEpisode, other: ProviderEpisode, language: 
   const fit =
     suitability(titleName(file.name).tags, language) -
     suitability(titleName(other.name).tags, language);
+
   return fit > 0 || (fit === 0 && (file.addedAt ?? 0) > (other.addedAt ?? 0));
 }
 
@@ -140,23 +152,29 @@ export function nextEpisode(
     (episode) =>
       series.episodeOrder !== undefined || (episode.season === 0) === (current.season === 0),
   );
+
   const byId = episodes.findIndex(
     (each) => each.id === current.id || each.versions?.some((version) => version.id === current.id),
   );
+
   if (series.exactVersions && current.id !== undefined && byId === -1) return undefined;
+
   const index =
     byId === -1
       ? episodes.findIndex(
           (each) => each.season === current.season && each.number === current.episode,
         )
       : byId;
+
   if (index === -1) return undefined;
+
   return episodes[index + 1] ?? null;
 }
 
 /** Resolves a selected or resumed exact episode file without changing the logical episode. */
 export function episodeFileVersion(episode: Episode, id: string | undefined): Episode {
   const version: EpisodeVersion | undefined = episode.versions?.find((each) => each.id === id);
+
   return version ? { ...episode, id: version.id, duration: version.duration } : episode;
 }
 
@@ -168,8 +186,10 @@ export function seriesEpisodeOrder<
   readonly episodeOrder?: readonly string[] | "source";
 }): E[] {
   const episodes = series.seasons.flatMap((season) => season.episodes);
+
   if (!series.episodeOrder || series.episodeOrder === "source") return episodes;
   const positions = new Map(series.episodeOrder.map((id, at) => [id, at]));
+
   return episodes.toSorted(
     (a, b) => (positions.get(a.id ?? "") ?? Infinity) - (positions.get(b.id ?? "") ?? Infinity),
   );
@@ -180,11 +200,14 @@ export function seriesEpisodeSeasons(
   series: SeriesDetails,
 ): readonly { number: number; episodes: readonly Episode[] }[] {
   const seasons: { number: number; episodes: Episode[] }[] = [];
+
   for (const episode of seriesEpisodeOrder(series)) {
     const last = seasons.at(-1);
+
     if (last?.number === episode.season) last.episodes.push(episode);
     else seasons.push({ number: episode.season, episodes: [episode] });
   }
+
   return seasons;
 }
 
@@ -203,11 +226,13 @@ export function seasonEpisodes(
   const [viewer, ...others] = answers.map(
     (answer) => new Map(answer.map((episode) => [episode.number, episode])),
   );
+
   return season.episodes.map((episode): EpisodeDetails => {
     const own = viewer?.get(episode.number);
     const fallbacks = others.flatMap((answer) => answer.get(episode.number) ?? []);
     const known = own ?? fallbacks[0];
     const [runtime] = [own, ...fallbacks].flatMap((each) => runtimeSeconds(each?.runtime) ?? []);
+
     return {
       ...episode,
       title: own?.name ?? fallbacks.find((each) => each.name)?.name ?? episode.title,
@@ -235,6 +260,7 @@ function shared(title: Title, details: ProviderDetails, about: TitleAbout | null
   const poster = about?.poster ? tmdbImage(about.poster, 780) : null;
   const backdrop = about?.backdrop ? tmdbImage(about.backdrop, 1280) : null;
   const genres = [...new Set((about?.genres ?? []).flatMap((id) => GENRES[id] ?? []))];
+
   return {
     title: {
       ...title,

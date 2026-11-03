@@ -32,8 +32,10 @@ const catalogue: OnDemandCatalogue = {
   ],
   series: [row("series", "Harbour HD (EN)", "2")],
 };
+
 const index = indexCatalogue([{ subscriptionId: "provider", catalogue }], "en");
 const key = (id: string) => ownedKey({ subscriptionId: "provider", id });
+
 const tracks = (audio: readonly (string | null)[], subtitles: readonly (string | null)[]) => ({
   audio,
   subtitles,
@@ -45,16 +47,19 @@ describe("current-kind library filters", () => {
       [key("en"), [{ tags: ["FHD", "EN"], tracks: tracks(["en"], ["nl"]) }]],
       [key("nl"), [{ tags: ["4K", "NL"], tracks: tracks(["nl"], ["en"]) }]],
     ]);
+
     expect(
       searchPage(index, "movie", "harbour", undefined, 1, {
         filters: { quality: "4k", language: "nl", verified: { kind: "subtitles", language: "nl" } },
         files,
       }),
     ).toEqual({ titles: [], total: 0, unfiltered: 1 });
+
     const page = searchPage(index, "movie", "harbour", undefined, 1, {
       filters: { quality: "4k", language: "nl", verified: { kind: "audio", language: "nl" } },
       files,
     });
+
     expect(page).toMatchObject({
       total: 1,
       unfiltered: 1,
@@ -80,6 +85,7 @@ describe("current-kind library filters", () => {
       [key("en"), [{ tags: ["FHD", "EN"], tracks: tracks(["en"], ["nl"]) }]],
       [key("nl"), [{ tags: ["4K", "NL"], tracks: tracks(["nl"], ["en"]) }]],
     ]);
+
     expect(
       filterTitles(
         index.movies.titles,
@@ -87,11 +93,13 @@ describe("current-kind library filters", () => {
         files,
       ),
     ).toEqual([]);
+
     const matches = filterTitles(
       index.movies.titles,
       { quality: "4k", language: "nl", verified: { kind: "audio", language: "nl" } },
       files,
     );
+
     expect(matches).toHaveLength(1);
     expect(matches[0]).toMatchObject({ subscriptionId: "provider", id: "nl", tags: ["NL", "4K"] });
     expect(matches[0]?.versions).toEqual(index.movies.titles[0]?.versions);
@@ -102,6 +110,7 @@ describe("current-kind library filters", () => {
     const files: FilterFiles = new Map([
       [key("nl"), [{ tags: ["4K", "NL"], tracks: tracks([null], []) }]],
     ]);
+
     expect(
       filterTitles(index.movies.titles, { verified: { kind: "audio", language: "nl" } }, files),
     ).toEqual([]);
@@ -143,6 +152,7 @@ describe("current-kind library filters", () => {
         [{ tags: ["4K", "NL"] }, { tags: ["FHD", "EN"], tracks: tracks(["nl"], ["nl"]) }],
       ],
     ]);
+
     expect(
       filterTitles(
         index.series.titles,
@@ -166,9 +176,11 @@ describe("current-kind library filters", () => {
       verified: [],
       files: 0,
     });
+
     const files: FilterFiles = new Map([
       [key("en"), [{ tags: ["FHD", "EN"], tracks: tracks(["en"], ["nl", null]) }]],
     ]);
+
     expect(filterOptions(index.movies.titles, files)).toMatchObject({
       files: 1,
       verified: expect.arrayContaining([

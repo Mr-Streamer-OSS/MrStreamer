@@ -27,10 +27,12 @@ import {
 // Offline preparation only. No fetch, Cloudflare client, installation or deployment.
 // Existing stages/indexes are never overwritten; a failure keeps its evidence.
 process.umask(0o077);
+
 const root = fileURLToPath(new NodeURL("../../../", import.meta.url));
 const originalRoot = join(root, "apps/ios/demo-media");
 const generated = join(root, "apps/review-provider/generated/media.json");
 const stageArg = process.argv[2];
+
 if (
   process.argv.length !== 3 ||
   !stageArg ||
@@ -42,16 +44,22 @@ if (
     "Give one new absolute private stage path; neither it nor generated/media.json may exist",
   );
 }
+
 const stage = join(realpathSync(dirname(stageArg)), stageArg.slice(dirname(stageArg).length + 1));
+
 mkdirSync(stage, { mode: 0o700 });
+
 const provenance = join(stage, "provenance");
+
 mkdirSync(provenance, { mode: 0o700 });
+
 const commands: {
   command: string;
   args: readonly string[];
   exit: number | null;
   signal: string | null;
 }[] = [];
+
 const sha = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 let sequence = 0;
 
@@ -69,6 +77,7 @@ function run(command: "ffmpeg" | "ffprobe", args: readonly string[], label: stri
     maxBuffer: 8 * 1024 * 1024,
     env: { ...process.env, AV_LOG_FORCE_NOCOLOR: "1" },
   });
+
   const name = `${String(++sequence).padStart(4, "0")}-${label}`;
   save(join(provenance, `${name}.stdout`), result.stdout ?? "");
   save(join(provenance, `${name}.stderr`), result.stderr ?? "");
@@ -76,6 +85,7 @@ function run(command: "ffmpeg" | "ffprobe", args: readonly string[], label: stri
   writeFileSync(join(provenance, "commands.json"), JSON.stringify(commands, null, 2) + "\n", {
     mode: 0o600,
   });
+
   if (
     result.error ||
     result.status !== 0 ||
@@ -83,30 +93,41 @@ function run(command: "ffmpeg" | "ffprobe", args: readonly string[], label: stri
   ) {
     throw new Error(`Preparation command failed; see ${name} evidence`);
   }
+
   return result.stdout;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
 function object(value: unknown): Record<string, unknown> {
   if (!isObject(value)) throw new Error("Invalid probe object");
+
   return value;
 }
+
 function list(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw new Error("Missing probe list");
+
   return value;
 }
+
 function text(value: unknown): string {
   if (typeof value !== "string") throw new Error("Missing probe text");
+
   return value;
 }
+
 function numeric(value: unknown): number {
   const n =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+
   if (!Number.isFinite(n)) throw new Error("Missing probe number");
+
   return n;
 }
+
 const ticks = (value: unknown) => Math.round(numeric(value) * 90000);
 
 function probe(path: string, label: string) {
@@ -130,14 +151,18 @@ function probe(path: string, label: string) {
       label,
     ),
   );
+
   const result = object(raw);
   const streams = list(result.streams).map(object);
   const video = streams.find((s) => s.codec_type === "video");
   const audio = streams.find((s) => s.codec_type === "audio");
+
   if (!video || !audio || streams.length !== 2)
     throw new Error("Expected one video and one audio stream");
+
   const packets = list(result.packets).map((p) => {
     const row = object(p);
+
     return {
       stream: numeric(row.stream_index),
       pts: ticks(row.pts_time),
@@ -146,6 +171,7 @@ function probe(path: string, label: string) {
       flags: text(row.flags),
     };
   });
+
   return {
     video: {
       codec: text(video.codec_name),
@@ -186,18 +212,24 @@ function firstVideoNals(path: string, label: string): Uint8Array[] {
       label,
     ),
   );
+
   const packet = list(object(raw).packets)[0];
   const dump = text(object(packet).data);
+
   const hex = dump
     .split("\n")
     .flatMap((line) => {
       const part = /^[0-9a-f]+:\s(.+)$/.exec(line)?.[1];
+
       if (!part) return [];
+
       return part.split(/\s{2,}/)[0]?.replace(/\s/g, "") ?? [];
     })
     .join("");
+
   const data = Buffer.from(hex, "hex");
   const starts: { offset: number; payload: number }[] = [];
+
   for (let i = 0; i + 3 < data.length; i++) {
     if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
       starts.push({ offset: i, payload: i + 3 });
@@ -207,6 +239,7 @@ function firstVideoNals(path: string, label: string): Uint8Array[] {
       i += 3;
     }
   }
+
   return starts.map((s, i) => data.subarray(s.payload, starts[i + 1]?.offset ?? data.length));
 }
 
@@ -216,12 +249,14 @@ function objectFile(path: string, key: string, mime: ObjectFact["mime"]): Object
 
 function copiedOriginal(filename: string, expected: string, mime: ObjectFact["mime"]): ObjectFact {
   const input = join(originalRoot, filename);
+
   if (sha(readFileSync(input)) !== expected)
     throw new Error(`Frozen R107 input changed: ${filename}`);
   const key = `original/${expected}/${filename}`;
   const target = join(stage, "objects", key);
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
   copyFileSync(input, target);
+
   return objectFile(target, key, mime);
 }
 
@@ -231,8 +266,10 @@ function certifyPackets(
   name: string,
 ): void {
   if (!packets.length) throw new Error(`No packets: ${name}`);
+
   for (const [at, packet] of packets.entries()) {
     const previous = packets[at - 1];
+
     if (
       packet.duration !== step ||
       (previous && Math.abs(packet.pts - previous.pts - previous.duration) > 1)
@@ -245,21 +282,25 @@ function certifyPackets(
 try {
   run("ffmpeg", ["-version"], "ffmpeg-version");
   run("ffprobe", ["-version"], "ffprobe-version");
+
   const originals = {
     movie: copiedOriginal(ORIGINALS[0].filename, ORIGINALS[0].sha256, "video/mp4"),
     "episode-1": copiedOriginal(ORIGINALS[1].filename, ORIGINALS[1].sha256, "video/mp4"),
     "episode-2": copiedOriginal(ORIGINALS[2].filename, ORIGINALS[2].sha256, "video/mp4"),
   };
+
   const artwork = {
     "movie-cover": copiedOriginal("movie-cover.png", ARTWORK[0].sha256, "image/png"),
     "movie-backdrop": copiedOriginal("movie-backdrop.png", ARTWORK[1].sha256, "image/png"),
     "series-cover": copiedOriginal("series-cover.png", ARTWORK[2].sha256, "image/png"),
     "series-backdrop": copiedOriginal("series-backdrop.png", ARTWORK[3].sha256, "image/png"),
   };
+
   const segments: Segment[] = [];
   const programmes: ProgrammeMedia[] = [];
   const codecs = new Map<RenditionId, string>();
   const outputPaths = new Map<string, string>();
+
   const audioEvidence: {
     id: MediaId;
     rendition: RenditionId;
@@ -275,6 +316,7 @@ try {
   for (const original of ORIGINALS) {
     const input = join(originalRoot, original.filename);
     const source = probe(input, `${original.id}-original`);
+
     if (
       source.video.codec !== "h264" ||
       source.video.frameRate !== "24/1" ||
@@ -317,9 +359,11 @@ try {
     let sharedAudioHash: string | undefined;
     let sharedVideoTimeline: string | undefined;
     let programmeEdges: { first: number; last: number } | undefined;
+
     for (const rendition of ["540p", "180p"] as const) {
       const folder = join(work, rendition);
       mkdirSync(folder, { mode: 0o700 });
+
       const videoArgs =
         rendition === "540p"
           ? ["-c:v", "copy"]
@@ -359,6 +403,7 @@ try {
               "-x264-params",
               "threads=1:lookahead_threads=1:rc-lookahead=0:sync-lookahead=0",
             ];
+
       run(
         "ffmpeg",
         [
@@ -411,6 +456,7 @@ try {
       const manifest = readFileSync(join(folder, "prepared.m3u8"), "utf8");
       const entries = manifest.split(/\r?\n/).filter((line) => line && !line.startsWith("#"));
       const extinf = [...manifest.matchAll(/^#EXTINF:([\d.]+),/gm)].map((m) => Number(m[1]));
+
       if (
         entries.length !== original.frames / 144 ||
         extinf.length !== entries.length ||
@@ -418,15 +464,18 @@ try {
       ) {
         throw new Error("Prepared HLS video EXTINF/count changed; do not alter programme clock");
       }
+
       const facts: ObjectFact[] = [];
       const videoPackets: { pts: number; duration: number }[] = [];
       const audioPackets: { pts: number; duration: number; hash: string }[] = [];
+
       for (const [i, filename] of entries.entries()) {
         if (!/^\d{3}\.ts$/.test(filename)) throw new Error("Unexpected prepared segment path");
         const path = join(folder, filename);
         const proof = probe(path, `${original.id}-${rendition}-${i}-decode-packets`);
         const expectedWidth = rendition === "540p" ? 960 : 320;
         const expectedHeight = rendition === "540p" ? 540 : 180;
+
         if (
           proof.video.codec !== "h264" ||
           proof.video.frames !== 144 ||
@@ -439,14 +488,19 @@ try {
         ) {
           throw new Error("Prepared segment track/frame certification failed");
         }
+
         const nals = firstVideoNals(path, `${original.id}-${rendition}-${i}-idr`);
+
         const firstVcl = nals.find(
           (n) => n[0] !== undefined && (n[0] & 31) >= 1 && (n[0] & 31) <= 5,
         );
+
         const sps = nals.find((n) => n[0] !== undefined && (n[0] & 31) === 7);
+
         if (!firstVcl || (firstVcl[0]! & 31) !== 5 || !sps || sps.length < 4)
           throw new Error("Segment does not begin with certified IDR/SPS");
         const codec = `avc1.${Buffer.from(sps.subarray(1, 4)).toString("hex")},mp4a.40.2`;
+
         if (codecs.has(rendition) && codecs.get(rendition) !== codec)
           throw new Error("Codec changes within cycle");
         codecs.set(rendition, codec);
@@ -457,9 +511,11 @@ try {
         facts.push(objectFile(path, provisionalKey, "video/mp2t"));
         outputPaths.set(provisionalKey, path);
       }
+
       certifyPackets(videoPackets, 3750, "programme video");
       certifyPackets(audioPackets, 1920, "programme audio");
       const videoTimeline = sha(JSON.stringify(videoPackets.map((p) => [p.pts, p.duration])));
+
       if (sharedVideoTimeline && sharedVideoTimeline !== videoTimeline)
         throw new Error("Actual video PTS differ between renditions");
       sharedVideoTimeline = videoTimeline;
@@ -467,16 +523,19 @@ try {
       const lastVideo = videoPackets.at(-1)!;
       const firstAudio = audioPackets[0]!;
       const lastAudio = audioPackets.at(-1)!;
+
       if (
         videoPackets.length !== original.frames ||
         lastVideo.pts + lastVideo.duration - firstVideo.pts !== original.frames * 3750
       ) {
         throw new Error("Video programme clock failed");
       }
+
       const edges = {
         first: firstAudio.pts - firstVideo.pts,
         last: lastAudio.pts + lastAudio.duration - lastVideo.pts - lastVideo.duration,
       };
+
       if (Math.abs(edges.first) > 3840 || Math.abs(edges.last) > 3840) {
         save(
           join(provenance, `${original.id}-${rendition}-audio-edge-failure.json`),
@@ -486,7 +545,9 @@ try {
           "AAC edge exceeds 2048-sample bound; return measured facts, do not change clock",
         );
       }
+
       const audioHash = sha(JSON.stringify(audioPackets.map((p) => [p.hash, p.pts, p.duration])));
+
       if (
         sharedAudioHash &&
         (sharedAudioHash !== audioHash ||
@@ -495,6 +556,7 @@ try {
       ) {
         throw new Error("Renditions do not mux identical shared AAC access units/timestamps");
       }
+
       sharedAudioHash = audioHash;
       programmeEdges = edges;
       audioEvidence.push({
@@ -510,6 +572,7 @@ try {
       });
       perRendition.set(rendition, facts);
     }
+
     if (!sharedAudioHash || !programmeEdges) throw new Error("Missing shared audio certification");
     programmes.push({
       id: original.id,
@@ -523,8 +586,10 @@ try {
     });
     const high = perRendition.get("540p")!;
     const low = perRendition.get("180p")!;
+
     for (const [i, fact] of high.entries()) {
       const other = low[i];
+
       if (!other) throw new Error("Rendition segment counts differ");
       segments.push({
         programme: original.id,
@@ -534,26 +599,34 @@ try {
       });
     }
   }
+
   const release = `r107-${sha(JSON.stringify(segments.map((s) => [s.files["540p"].sha256, s.files["180p"].sha256]))).slice(0, 20)}`;
+
   const finalSegments = segments.map((s) => {
     function materialize(fact: ObjectFact): ObjectFact {
       const source = outputPaths.get(fact.key);
+
       if (!source) throw new Error("Missing prepared path");
       const key = `hls/${release}/${fact.key}`;
       const target = join(stage, "objects", key);
       mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
       copyFileSync(source, target);
+
       return { ...fact, key };
     }
+
     return {
       ...s,
       files: { "540p": materialize(s.files["540p"]), "180p": materialize(s.files["180p"]) },
     };
   });
+
   const renditions = (["540p", "180p"] as const).map((id) => {
     const bytes = finalSegments.map((s) => s.files[id].bytes);
     const codec = codecs.get(id);
+
     if (!codec) throw new Error("Missing measured codec");
+
     return {
       id,
       width: id === "540p" ? 960 : 320,
@@ -564,6 +637,7 @@ try {
       averageBandwidth: Math.ceil((bytes.reduce((sum, n) => sum + n, 0) * 8) / 330),
     };
   });
+
   const media: MediaIndex = {
     version: 1,
     sourceCommit: SOURCE_COMMIT,
@@ -574,18 +648,22 @@ try {
     renditions,
     segments: finalSegments,
   };
+
   save(join(stage, "measured-candidate.json"), JSON.stringify(media, null, 2) + "\n");
   save(join(stage, "audio-certification.json"), JSON.stringify(audioEvidence, null, 2) + "\n");
   validateMedia(media);
+
   const objects = [
     ...Object.values(originals),
     ...Object.values(artwork),
     ...finalSegments.flatMap((s) => Object.values(s.files)),
   ];
+
   for (const fact of objects) {
     if (sha(readFileSync(join(stage, "objects", fact.key))) !== fact.sha256)
       throw new Error("Stage copy hash changed");
   }
+
   const json = JSON.stringify(media, null, 2) + "\n";
   save(join(stage, "media.json"), json);
   save(

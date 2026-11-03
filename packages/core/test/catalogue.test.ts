@@ -268,6 +268,7 @@ describe("channels with several streams", () => {
           [`${prefix} | Matrix FHD`, 0, guide],
         ],
       );
+
       const { channels, guideIds } = liveChannels(normalizeCatalogue(raw).streams);
       expect(channels).toHaveLength(1);
       expect(channels[0]).toMatchObject({
@@ -295,6 +296,7 @@ describe("channels with several streams", () => {
         ["BE | Matrix FHD", 0, "guide.nl"],
       ],
     );
+
     const { channels, guideIds } = liveChannels(normalizeCatalogue(raw).streams);
     expect(channels.map((channel) => channel.variants.map((variant) => variant.id))).toEqual([
       ["100"],
@@ -317,6 +319,7 @@ describe("channels with several streams", () => {
         ["🇦🇫 Matrix FHD", 1, "matrix.af@FHD"],
       ],
     );
+
     const channels = liveChannels(normalizeCatalogue(raw).streams).channels;
     expect(channels.map((channel) => channel.variants.length)).toEqual([2, 2]);
     expect(channels.map((channel) => channel.searchIdentity?.region)).toEqual([
@@ -343,10 +346,12 @@ describe("channels with several streams", () => {
         ["Unknown FHD", 99],
       ],
     );
+
     const channels = raw.channels.map((channel, index) => ({
       ...channel,
       categoryIds: index === 2 ? ["0", "1"] : index === 5 ? ["2", "3"] : channel.categoryIds,
     }));
+
     const result = liveChannels(normalizeCatalogue({ ...raw, channels }).streams).channels;
     expect(result).toHaveLength(channels.length);
     expect(result.every((channel) => channel.variants.length === 1)).toBe(true);
@@ -450,6 +455,7 @@ describe("channels with several streams", () => {
         ["TR | DAILYMAX SD", 2],
       ],
     );
+
     const [hd, fhd, ...rest] = raw.channels;
     const listed = { ...raw, channels: [fhd!, hd!, ...rest] };
 
@@ -490,6 +496,7 @@ describe("channels with several streams", () => {
         catchupDays: at === 900 ? 3 : null,
       })),
     };
+
     const { channels } = liveChannels(normalizeCatalogue(raw).streams);
     expect(channels).toHaveLength(1);
     expect(channels[0]).toMatchObject({
@@ -510,6 +517,7 @@ describe("channels with several streams", () => {
         ["NL | Events"],
         names.map((name): [string, number, string] => [name, 0, "placeholder.tv"]),
       );
+
     const same = Array.from({ length: 800 }, () => "NL | Event Offline HD");
     // One name: the id is the channel's under another name. Its country isn't the category's,
     // so each stream stays a channel of its own.
@@ -517,10 +525,12 @@ describe("channels with several streams", () => {
     expect(kept.channels).toHaveLength(800);
     expect(new Set([...kept.guideIds.values()].flat())).toEqual(new Set(["placeholder.tv"]));
     expect(kept.channels.every((channel) => channel.searchIdentity === undefined)).toBe(true);
+
     // Another name under it at the end: nobody keeps the id, and the streams join.
     const mixed = liveChannels(
       normalizeCatalogue(placeholder([...same, "NL | Other Show HD"])).streams,
     );
+
     expect(mixed.guideIds.size).toBe(0);
     expect(mixed.channels.map(({ variants }) => variants.length)).toEqual([800, 1]);
   });
@@ -582,6 +592,7 @@ describe("which stream plays", () => {
     tags: [],
     quality,
   });
+
   const channel = (...variants: ChannelVariant[]): ListedChannel => ({
     id: variants[0]?.id ?? "",
     name: "",
@@ -593,7 +604,9 @@ describe("which stream plays", () => {
     variants,
     catchupDays: null,
   });
+
   const ids = (variants: readonly ChannelVariant[]) => variants.map(({ id }) => id);
+
   const all = channel(
     variant("uhd", "uhd"),
     variant("unknown", null),

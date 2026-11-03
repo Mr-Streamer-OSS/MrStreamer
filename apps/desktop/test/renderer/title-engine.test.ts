@@ -19,6 +19,7 @@ const run: TitleRun = {
   paused: false,
   duration: 600,
 };
+
 const tracks = { codecs: "avc1.64001f", firstFragment: 0 };
 let engine: TitleEngine | Engine | null = null;
 let append: "ok" | "sync" | "async" = "ok";
@@ -32,6 +33,7 @@ class Buffer extends EventTarget {
     queueMicrotask(() => this.dispatchEvent(new Event(append === "async" ? "error" : "updateend")));
   }
 }
+
 class Source extends EventTarget {
   static isTypeSupported = () => true;
   readyState = "open";
@@ -60,6 +62,7 @@ beforeEach(() => {
   vi.spyOn(mp4, "readMp4Start").mockReturnValue(tracks);
   vi.stubGlobal("fetch", async () => new Response(new Uint8Array([1])));
 });
+
 afterEach(() => {
   engine?.destroy();
   engine = null;
@@ -90,18 +93,22 @@ it("reports an incompatible codec as unsupported", async () => {
 
 it("keeps a malformed MP4 parser exception on the local media path", async () => {
   vi.mocked(mp4.readMp4Start).mockRestore();
+
   // Complete boxes whose final hdlr lacks its required fields. The actual parser rejects it.
   const box = (name: string, ...children: Uint8Array[]) => {
     const bytes = new Uint8Array(8 + children.reduce((size, child) => size + child.length, 0));
     new DataView(bytes.buffer).setUint32(0, bytes.length);
     bytes.set(new TextEncoder().encode(name), 4);
     let offset = 8;
+
     for (const child of children) {
       bytes.set(child, offset);
       offset += child.length;
     }
+
     return bytes;
   };
+
   const malformed = box(
     "moov",
     box(
@@ -110,6 +117,7 @@ it("keeps a malformed MP4 parser exception on the local media path", async () =>
       box("mdia", box("mdhd"), box("minf", box("stbl", box("stsd"))), box("hdlr")),
     ),
   );
+
   vi.stubGlobal("fetch", async () => new Response(malformed));
   engine = titleEngine(document.createElement("video"), run);
   await expect(engine.started).rejects.toMatchObject({ kind: "media" });
@@ -121,6 +129,7 @@ it.each(["fetch", "head", "body"] as const)(
     vi.stubGlobal("fetch", async () => {
       if (phase === "fetch") throw new TypeError("Transport lost");
       let reads = 0;
+
       return new Response(
         new ReadableStream<Uint8Array>({
           pull(controller) {
@@ -130,6 +139,7 @@ it.each(["fetch", "head", "body"] as const)(
         }),
       );
     });
+
     if (phase === "head")
       vi.mocked(mp4.readMp4Start).mockReturnValue({ codecs: null, firstFragment: null });
     engine = titleEngine(document.createElement("video"), run);
@@ -157,6 +167,7 @@ it.each(["paused", "seeking", "buffering", "seek-between-ticks"] as const)(
   async (held) => {
     let paused = false,
       seeking = false;
+
     const video = document.createElement("video");
     Object.defineProperties(video, {
       paused: { get: () => paused },
@@ -173,24 +184,30 @@ it.each(["paused", "seeking", "buffering", "seek-between-ticks"] as const)(
     const before = title.played();
 
     if (held === "paused") paused = true;
+
     if (held === "seeking") seeking = true;
+
     if (held === "seek-between-ticks") {
       await vi.advanceTimersByTimeAsync(500);
       video.dispatchEvent(new Event("seeking"));
       video.currentTime += 100;
       video.dispatchEvent(new Event("seeked"));
     }
+
     if (held !== "buffering" && held !== "seek-between-ticks") video.currentTime += 100;
     await vi.advanceTimersByTimeAsync(40_000);
     expect(title.played()).toBe(before);
 
     paused = seeking = false;
+
     // Seek completion prevents its last jump from being credited on the first resumed tick.
     if (held === "seeking") video.dispatchEvent(new Event("seeked"));
+
     for (let second = 0; second < 30; second++) {
       video.currentTime += 1;
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     expect(title.played() - before).toBeCloseTo(30_000);
   },
 );
@@ -227,11 +244,13 @@ it.each(["transport", "sync", "async"] as const)(
   "classifies %s failure after playback starts and reports it once",
   async (failure) => {
     let source!: ReadableStreamDefaultController<Uint8Array>;
+
     const feed = new ReadableStream<Uint8Array>({
       start(controller) {
         source = controller;
       },
     });
+
     vi.stubGlobal("fetch", async () => new Response(feed));
     const video = document.createElement("video");
     engine = titleEngine(video, run);
@@ -241,11 +260,13 @@ it.each(["transport", "sync", "async"] as const)(
     await engine.started;
     const failed = vi.fn();
     engine.onFailure(failed);
+
     if (failure === "transport") source.error(new TypeError("Body reset"));
     else {
       append = failure;
       source.enqueue(new Uint8Array([2]));
     }
+
     await vi.advanceTimersByTimeAsync(0);
     expect(failed).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ kind: failure === "transport" ? "network" : "media" }),
@@ -276,6 +297,7 @@ it("identifies a copied video codec refusal and forwards conversion to subsequen
   let requested = "";
   vi.stubGlobal("fetch", async (url: string) => {
     requested = url;
+
     return new Response(new Uint8Array([1]), {
       headers: { "x-title-video": "copy", "x-title-audio": "copy" },
     });
@@ -363,6 +385,7 @@ it.each([
     engine = title;
     await vi.advanceTimersByTimeAsync(0);
     expect(reads).toBe(0);
+
     if (wake === "play") {
       paused = false;
       video.dispatchEvent(new Event("play"));
@@ -378,6 +401,7 @@ it.each([
       readyState = 1;
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     if (end === 60 && wake === "play") {
       expect(reads).toBe(0);
       video.currentTime = 10;
@@ -388,6 +412,7 @@ it.each([
       video.dispatchEvent(new Event("timeupdate"));
       await vi.advanceTimersByTimeAsync(0);
     }
+
     expect(reads).toBe(1);
     await vi.advanceTimersByTimeAsync(5000);
     expect(reads).toBe(1);

@@ -25,15 +25,19 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
+
   return {
     ...(await import("./react-native.ts")).reactNative,
     Text: ({ children }: { children?: React.ReactNode }) => createElement("p", null, children),
     Linking: {
       openURL: async (url: string) => {
         scenario.opened.push(url);
+
         if (!scenario.opens) throw new Error("Unable to open URL");
       },
     },
@@ -42,9 +46,12 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
+
 vi.mock("expo-router", () => {
   const TABS = ["(home)", "live", "films", "series"].map((name) => ({ name }));
+
   return {
     router: { push: (href: unknown) => scenario.pushed.push(href) },
     useRootNavigationState: () => ({
@@ -59,13 +66,19 @@ vi.mock("expo-router", () => {
     }),
   };
 });
+
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 // This screen's native header is outside the renderer; its queue button has separate coverage.
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#8E8E93", line: "#38383A" },
     ChannelLogo: () => null,
@@ -73,14 +86,17 @@ vi.mock("../src/ui.tsx", async () => {
     Message: ({ text }: { text: string }) => createElement("p", null, text),
   };
 });
+
 vi.mock("../src/titles.ts", () => ({
   useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   useStatistics: () => ({ enabled: true, transport: "production" }),
   setStatistics: async () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: [] }),
   members: () => [],
@@ -98,6 +114,7 @@ const { licences } = await import("../src/licences.ts");
 const app = join(import.meta.dirname, "..");
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   vi.unstubAllGlobals();
@@ -113,13 +130,16 @@ function show(screen: () => React.ReactNode) {
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(screen)));
   unmount = () => React.act(() => root.unmount());
+
   return container;
 }
 
 const press = (container: ReturnType<typeof show>, testID: string) => {
   const button = container.querySelector(`[data-testid="${testID}"]`);
+
   if (!button) throw new Error(`No ${testID}`);
   React.act(() => button.dispatchEvent(new Event("click", { bubbles: true })));
+
   return button;
 };
 
@@ -163,9 +183,11 @@ describe("Licences", () => {
   it("lead with the app, each row naming its licence, and open a component on the same tab", () => {
     scenario.tab = 2;
     const list = show(Licences);
+
     const rows = [...list.querySelectorAll("button")].map((each) =>
       each.getAttribute("aria-label"),
     );
+
     expect(rows[0]).toBe("Mr. Streamer, GPL-3.0-only");
     expect(rows).toHaveLength(licences.components.length);
     expect(rows).toContain("FFmpeg, LGPL-2.1-or-later");
@@ -189,6 +211,7 @@ describe("Licences", () => {
 
   it("open a component's source in the browser, and say so when iOS won't", async () => {
     const ffmpeg = licences.components.find((each) => each.name === "FFmpeg");
+
     if (!ffmpeg) throw new Error("No FFmpeg");
     scenario.params = { id: ffmpeg.id };
     scenario.opens = false;
@@ -208,6 +231,7 @@ describe("the committed inventory", () => {
     const flags = block.slice(0, block.indexOf("\n)")).trim().split(/\s+/);
     const ffmpeg = licences.components.find((each) => each.name === "FFmpeg");
     const configuration = ffmpeg?.notices.find((notice) => notice.title === "Configuration");
+
     if (!configuration) throw new Error("No FFmpeg configuration");
     const carried = licences.texts[configuration.text]?.split(/\s+/);
     expect(carried).toEqual(flags);
@@ -223,6 +247,7 @@ describe("the committed inventory", () => {
   it("gives every component a notice, and every patched package its patch", () => {
     for (const component of licences.components) {
       expect(component.notices.length, component.id).toBeGreaterThan(0);
+
       for (const notice of component.notices) {
         expect(
           licences.texts[notice.text]?.length,
@@ -230,6 +255,7 @@ describe("the committed inventory", () => {
         ).toBeGreaterThan(0);
       }
     }
+
     for (const patch of readdirSync(join(app, "patches"))) {
       const id = patch.slice(0, -".patch".length).replace("__", "/");
       const component = licences.components.find((each) => each.id === id);

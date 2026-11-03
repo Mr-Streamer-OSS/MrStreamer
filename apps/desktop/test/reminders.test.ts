@@ -21,6 +21,7 @@ import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } fr
 vi.setConfig({ testTimeout: 20_000 });
 
 const MINUTE = 60_000;
+
 /** 20:10 in the guide's +02:00. */
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
@@ -28,6 +29,7 @@ const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
 /** A programme on a guide channel that day, "2030" to "2130". */
 const programme = (id: string, from: string, to: string, title: string) =>
   `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title><desc>About ${title}.</desc></programme>`;
+
 const tv = (...programmes: string[]) =>
   `<?xml version="1.0" encoding="utf-8" ?><tv>${programmes.join("")}</tv>`;
 
@@ -44,19 +46,23 @@ const evening = (id: string) => [
  */
 function fakeNotifier(file: string, supported = true) {
   type Events = Parameters<Notifier["show"]>[1];
+
   const shown: { id: string; title: string; body: string }[] = [];
   const storedAtShow: unknown[] = [];
   const closed: string[] = [];
   const events = new Map<string, Events>();
   /** When set, the system says it couldn't show the next notice, or throws as it is asked. */
   let refuse: "no" | "fail" | "throw" = "no";
+
   const notifier: Notifier = {
     supported,
     show(notice, on) {
       if (refuse === "throw") throw new Error("The system broke.");
+
       const kept = JSON.parse(readFileSync(file, "utf8")) as {
         subscriptions: Record<string, { id: string; state: unknown }[]>;
       };
+
       storedAtShow.push(
         Object.values(kept.subscriptions)
           .flat()
@@ -64,6 +70,7 @@ function fakeNotifier(file: string, supported = true) {
       );
       shown.push(notice);
       events.set(notice.id, on);
+
       if (refuse === "fail") on.failed();
       else on.shown();
     },
@@ -71,6 +78,7 @@ function fakeNotifier(file: string, supported = true) {
       closed.push(id);
     },
   };
+
   return {
     notifier,
     shown,
@@ -88,6 +96,7 @@ function guidedChannel(provider: FakeProvider) {
   const channel = provider.catalogue.channels.find(
     (each) => each.streamId >= 2000 && !each.offline && each.guideId && !each.adult,
   )!;
+
   return { id: String(channel.streamId), guideId: channel.guideId! };
 }
 
@@ -104,21 +113,25 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
   const dataDir = await tempDir();
   const notices = fakeNotifier(join(dataDir, "reminders.json"), options.supported);
   let owner: string | null = null;
+
   const start = async (time = NOW) => {
     const clock = Layer.effectDiscard(TestClock.setTime(time)).pipe(
       Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
     );
+
     const runtime = runtimeFor(
       mainLayer({ ...testConfig(dataDir), notifier: notices.notifier }).pipe(
         Layer.provideMerge(clock),
       ),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     owner ??= (await subscriptions.add(demoLogin(provider))).id;
     const subscriptionId = owner;
     const reminders = await promised(runtime, Reminders);
     const guide = await promised(runtime, Guide);
     const own = (id: string): OwnedId => ({ subscriptionId, id });
+
     return {
       subscriptionId,
       own,
@@ -132,9 +145,11 @@ async function reminding(options: { adultChannels?: boolean; supported?: boolean
       close: () => runtime.dispose(),
     };
   };
+
   const app = await start();
   await app.library.refresh(app.subscriptionId);
   await app.guide.refresh(app.subscriptionId);
+
   return { provider, channel, dataDir, notices, start, app };
 }
 
@@ -147,10 +162,12 @@ async function unwritable(dataDir: string, phase: () => Promise<void>) {
   const before = existsSync(path) ? await readFile(path) : null;
   await rm(path, { force: true });
   await mkdir(path);
+
   try {
     await phase();
   } finally {
     await rmdir(path);
+
     if (before) await writeFile(path, before);
   }
 }
@@ -200,11 +217,13 @@ describe("programme reminders", () => {
   it("tells on its own at its start, without being asked", async () => {
     const { app, channel, notices } = await reminding();
     const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
+
     // The clock runs on as the app's would, a quarter of a minute at a time.
     for (let time = NOW; notices.shown.length === 0 && time <= at("20:40"); time += MINUTE / 4) {
       await app.clockTo(time);
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
+
     expect(notices.shown).toMatchObject([{ id: reminder.id, title: "Ski Jumping" }]);
     const [told] = (await app.reminders.list()).reminders;
     expect(told?.status.kind === "told" && told.status.at - at("20:30")).toBeLessThan(MINUTE);
@@ -467,6 +486,7 @@ describe("programme reminders", () => {
     const path = join(dataDir, "reminders.json");
     await rm(path);
     await mkdir(path);
+
     try {
       forAdults(provider, channel.id);
       await app.library.refresh(app.subscriptionId);
@@ -476,6 +496,7 @@ describe("programme reminders", () => {
     } finally {
       await rmdir(path);
     }
+
     // Once it can be written, it stays hidden, and told: it tells nothing again.
     await app.reminders.check();
     expect((await app.reminders.list()).reminders).toEqual([]);
@@ -487,6 +508,7 @@ describe("programme reminders", () => {
     const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
     await app.clockTo(at("20:30"));
     await app.reminders.check();
+
     for (const programmes of [
       [
         programme(channel.guideId, "2000", "2030", "Evening News"),
@@ -509,6 +531,7 @@ describe("programme reminders", () => {
         },
       ]);
     }
+
     expect(notices.shown).toHaveLength(1);
   });
 
@@ -527,6 +550,7 @@ describe("programme reminders", () => {
 
     // As a release that knows no reminders leaves them when it removes a subscription.
     await app.close();
+
     const left = {
       id: "left-behind",
       channel: channel.id,
@@ -539,6 +563,7 @@ describe("programme reminders", () => {
       title: "Left Behind",
       state: { kind: "pending" },
     };
+
     await writeFile(
       join(dataDir, "reminders.json"),
       JSON.stringify({ version: 1, subscriptions: { "gone-subscription": [left] } }),
@@ -547,9 +572,11 @@ describe("programme reminders", () => {
     await again.reminders.check();
     expect((await again.reminders.list()).reminders).toEqual([]);
     expect(notices.shown).toHaveLength(1);
+
     const read = JSON.parse(await readFile(join(dataDir, "reminders.json"), "utf8")) as {
       subscriptions: Record<string, unknown>;
     };
+
     expect(read.subscriptions["gone-subscription"]).toBeUndefined();
   });
 
@@ -589,6 +616,7 @@ describe("programme reminders", () => {
     const { app, channel, dataDir, start } = await reminding();
     await app.close();
     const path = join(dataDir, "reminders.json");
+
     for (const [text, reason] of [
       ["{ not json", "unreadable"],
       [JSON.stringify({ version: 2, subscriptions: {}, groups: [] }), "newer"],
@@ -612,9 +640,11 @@ describe("programme reminders", () => {
     const reminder = await app.reminders.set(app.own(channel.id), at("20:30"));
     await app.close();
     const path = join(dataDir, "reminders.json");
+
     const file = JSON.parse(await readFile(path, "utf8")) as {
       subscriptions: Record<string, Record<string, unknown>[]>;
     };
+
     const [entry] = file.subscriptions[app.subscriptionId] ?? [];
     const later = { kind: "later", when: "never" };
     await writeFile(
@@ -680,10 +710,12 @@ describe("programme reminders", () => {
 
     // A system that throws as it is asked is one that couldn't show it.
     const throwing = await reminding();
+
     const thrown = await throwing.app.reminders.set(
       throwing.app.own(throwing.channel.id),
       at("20:30"),
     );
+
     throwing.notices.refuseNext("throw");
     await throwing.app.clockTo(at("20:30"));
     await throwing.app.reminders.check();
@@ -693,10 +725,12 @@ describe("programme reminders", () => {
     });
 
     const unsupported = await reminding({ supported: false });
+
     const told = await unsupported.app.reminders.set(
       unsupported.app.own(unsupported.channel.id),
       at("20:30"),
     );
+
     await unsupported.app.clockTo(at("20:30"));
     await unsupported.app.reminders.check();
     expect(unsupported.notices.shown).toEqual([]);
@@ -730,6 +764,7 @@ describe("programme reminders", () => {
     await again.clockTo(at("20:28") + 10_000);
     await new Promise((resolve) => setTimeout(resolve, 50));
     await writeFile(path, saved);
+
     // Only that call reads it again: Retry in the bell's list, or Remind me pressed once more,
     // which answers the reminder already set.
     if (via === "set")
@@ -743,6 +778,7 @@ describe("programme reminders", () => {
       await again.clockTo(time);
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
+
     expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]);
     // Told was on disk before the system was asked.
     expect(notices.storedAtShow).toEqual([{ kind: "told", at: expect.any(Number) }]);

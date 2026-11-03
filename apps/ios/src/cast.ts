@@ -167,12 +167,15 @@ interface CastModule {
 }
 
 let found: CastModule | null | undefined;
+
 /** The native module, or null in a build without it; looked up on first use, as the tests need. */
 function native(): CastModule | null {
   if (found !== undefined) return found;
   const host: { expo?: { modules?: { Cast?: CastModule } } } = globalThis;
   found = host.expo?.modules?.Cast ?? null;
+
   if (found) listen(found);
+
   return found;
 }
 
@@ -189,15 +192,20 @@ let browsing = 0;
  */
 export function browseTvs(): () => void {
   const module = native();
+
   if (!module) return () => {};
+
   if (browsing++ === 0) {
     search.set({ kind: "searching", tvs: [] });
     module.browse();
   }
+
   let stopped = false;
+
   return () => {
     if (stopped) return;
     stopped = true;
+
     if (--browsing > 0) return;
     module.stopBrowsing();
     search.set({ kind: "off" });
@@ -206,8 +214,10 @@ export function browseTvs(): () => void {
 
 /** Each open channel's reader, by its name. */
 const channels = new Map<string, { read: (bytes: Uint8Array) => void; closed: () => void }>();
+
 /** Each served token's playlist rewriting. */
 const relays = new Map<string, (url: string, body: string) => string | null>();
+
 /** Told when the app left the foreground with a TV connected. */
 let leaving: ((done: () => void) => void) | null = null;
 
@@ -222,6 +232,7 @@ function listen(module: CastModule) {
   module.addListener("onClosed", ({ channel }) => channels.get(channel)?.closed());
   module.addListener("onPlaylist", ({ request, token, url, body }) => {
     let answer: string | null = null;
+
     try {
       answer = relays.get(token)?.(url, body) ?? null;
     } finally {
@@ -230,11 +241,13 @@ function listen(module: CastModule) {
   });
   module.addListener("onBackground", () => {
     let done = false;
+
     const release = () => {
       if (done) return;
       done = true;
       module.endBackground();
     };
+
     if (leaving) leaving(release);
     else release();
   });
@@ -280,21 +293,29 @@ export async function serveOnRelay(
   signal: AbortSignal,
 ): Promise<Relay> {
   const module = native();
+
   if (!module) throw new TvRefused("network");
   const served = await module.serve(url, headers ?? null, kind.hls);
+
   if (!served) throw new TvRefused("network");
   const { token } = served;
+
   const revoke = () => {
     relays.delete(token);
+
     return module.revoke(token);
   };
+
   // Given up on, as when the viewer stops or plays something else while it is read: the token
   // goes now, which ends any read under way, rather than once the reads answer.
   const abort = () => void revoke();
+
   if (signal.aborted) abort();
   else signal.addEventListener("abort", abort, { once: true });
+
   if (!kind.hls) {
     signal.removeEventListener("abort", abort);
+
     return {
       address: `${served.address}0.${extension(url, "mp4")}`,
       contentType: kind.contentType,
@@ -302,53 +323,71 @@ export async function serveOnRelay(
       revoke,
     };
   }
+
   let next = 1;
   /**
    * Each address a playlist named and its path, so a refreshed playlist names the same ones; as
    * many as the relay keeps.
    */
   const known = new Map<string, string>();
+
   /** Rewrites one playlist read from `base`, adding the routes it names to the token. */
   const rewrite = (base: string, body: string) => {
     const made: RelayRoute[] = [];
     const fresh = new Map<string, string>();
+
     const route = (target: string, kind: RouteKind) => {
       const key = `${kind} ${target}`;
       const found = known.get(key) ?? fresh.get(key);
+
       if (found) return found;
       const id = String(next++);
       const path = `${id}.${kind === "playlist" ? "m3u8" : extension(target, "ts")}`;
       made.push({ id, url: target, playlist: kind === "playlist" });
       fresh.set(key, path);
+
       return path;
     };
+
     const rewritten = rewritePlaylist(body, base, route, sound, kind.hls && kind.strict);
+
     if (rewritten.kind === "playlist") {
       module.route(token, made);
+
       for (const [key, path] of fresh) known.set(key, path);
+
       for (const key of known.keys()) {
         if (known.size <= ROUTES_KEPT) break;
         known.delete(key);
       }
     }
+
     return rewritten;
   };
+
   relays.set(token, (base, body) => {
     const rewritten = rewrite(base, body);
+
     return rewritten.kind === "playlist" ? rewritten.text : null;
   });
+
   try {
     const entry = await module.read(token, "0");
+
     if (!entry) throw new TvRefused("unreadable");
     let first = rewrite(entry.url, entry.body);
+
     if (first.kind === "playlist" && first.variant !== null) {
       const variant = await module.read(token, first.variant.replace(/\.m3u8$/, ""));
+
       if (!variant) throw new TvRefused("unreadable");
       first = rewrite(variant.url, variant.body);
     }
+
     if (first.kind === "refused") throw new TvRefused(first.refusal);
     // From here the load's own teardown stops the TV's media before the token goes.
     signal.removeEventListener("abort", abort);
+
     return {
       address: `${served.address}0.m3u8`,
       contentType: "application/x-mpegURL",
@@ -376,14 +415,17 @@ export function onLeftApp(listener: ((done: () => void) => void) | null) {
 
 const SENDER = "sender-0";
 const PLATFORM = "receiver-0";
+
 const NAMESPACE = {
   connection: "urn:x-cast:com.google.cast.tp.connection",
   heartbeat: "urn:x-cast:com.google.cast.tp.heartbeat",
   receiver: "urn:x-cast:com.google.cast.receiver",
   media: "urn:x-cast:com.google.cast.media",
 } as const;
+
 /** Google's Default Media Receiver, which needs no registration. */
 const MEDIA_RECEIVER = "CC1AD845";
+
 /** The protocol's limit on one frame's message. */
 const MAX_FRAME = 65_535;
 
@@ -409,26 +451,32 @@ const decoder = new TextDecoder();
 
 function varint(value: number): number[] {
   const bytes = [];
+
   for (; value > 0x7f; value >>>= 7) bytes.push((value & 0x7f) | 0x80);
+
   return [...bytes, value];
 }
 
 /** A message as one frame: its length in four bytes, then a protobuf `CastMessage`. */
 function encodeFrame(message: CastMessage): Uint8Array {
   const parts: number[] = [1 << 3, 0];
+
   const text = (field: number, value: string) => {
     const bytes = encoder.encode(value);
     parts.push((field << 3) | 2, ...varint(bytes.length), ...bytes);
   };
+
   text(2, message.sourceId);
   text(3, message.destinationId);
   text(4, message.namespace);
   parts.push(5 << 3, 0);
   text(6, message.payload);
+
   if (parts.length > MAX_FRAME) throw new RangeError("Cast message over the frame limit");
   const frame = new Uint8Array(4 + parts.length);
   new DataView(frame.buffer).setUint32(0, parts.length);
   frame.set(parts, 4);
+
   return frame;
 }
 
@@ -436,19 +484,25 @@ function encodeFrame(message: CastMessage): Uint8Array {
 function decodeFrame(body: Uint8Array): CastMessage | null {
   const fields = new Map<number, Uint8Array>();
   let binary = false;
+
   for (let at = 0; at < body.length;) {
     const tag = readVarint(body, at);
+
     if (!tag) return null;
     at = tag.next;
     const number = Math.floor(tag.value / 8);
     const wire = tag.value % 8;
+
     if (wire === 0) {
       const value = readVarint(body, at);
+
       if (!value) return null;
+
       if (number === 5 && value.value !== 0) binary = true;
       at = value.next;
     } else if (wire === 2) {
       const length = readVarint(body, at);
+
       if (!length || length.next + length.value > body.length) return null;
       fields.set(number, body.subarray(length.next, length.next + length.value));
       at = length.next + length.value;
@@ -456,46 +510,60 @@ function decodeFrame(body: Uint8Array): CastMessage | null {
     else if (wire === 5) at += 4;
     else return null;
   }
+
   const text = (number: number) => decoder.decode(fields.get(number) ?? new Uint8Array());
+
   const message = {
     sourceId: text(2),
     destinationId: text(3),
     namespace: text(4),
     payload: text(6),
   };
+
   return binary || !message.sourceId || !message.namespace ? null : message;
 }
 
 function readVarint(bytes: Uint8Array, at: number): { value: number; next: number } | null {
   let value = 0;
+
   for (let index = 0; index < 10; index++) {
     const byte = bytes[at + index];
+
     if (byte === undefined) return null;
     value += (byte & 0x7f) * 2 ** (7 * index);
+
     if (byte < 0x80) return { value, next: at + index + 1 };
   }
+
   return null;
 }
 
 /** Turns the bytes a channel delivers into the messages they complete; null once they aren't. */
 function messageReader(): (chunk: Uint8Array) => CastMessage[] | null {
   let held = new Uint8Array();
+
   return (chunk) => {
     const joined = new Uint8Array(held.length + chunk.length);
     joined.set(held);
     joined.set(chunk, held.length);
     const messages: CastMessage[] = [];
     let at = 0;
+
     while (joined.length - at >= 4) {
       const length = new DataView(joined.buffer, at, 4).getUint32(0);
+
       if (length > MAX_FRAME) return null;
+
       if (joined.length - at - 4 < length) break;
       const message = decodeFrame(joined.subarray(at + 4, at + 4 + length));
       at += 4 + length;
+
       // A binary message, which nothing the app speaks sends, is passed over.
       if (message) messages.push(message);
     }
+
     held = joined.slice(at);
+
     return messages;
   };
 }
@@ -504,6 +572,7 @@ const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 
 function toBase64(bytes: Uint8Array): string {
   let out = "";
+
   for (let at = 0; at < bytes.length; at += 3) {
     const [a = 0, b = 0, c = 0] = [bytes[at], bytes[at + 1], bytes[at + 2]];
     const n = (a << 16) | (b << 8) | c;
@@ -511,6 +580,7 @@ function toBase64(bytes: Uint8Array): string {
     out += at + 1 < bytes.length ? BASE64[(n >> 6) & 63]! : "=";
     out += at + 2 < bytes.length ? BASE64[n & 63]! : "=";
   }
+
   return out;
 }
 
@@ -520,14 +590,17 @@ function fromBase64(text: string): Uint8Array {
   let bits = 0;
   let value = 0;
   let at = 0;
+
   for (const char of clean) {
     value = (value << 6) | BASE64.indexOf(char);
     bits += 6;
+
     if (bits >= 8) {
       bits -= 8;
       out[at++] = (value >> bits) & 0xff;
     }
   }
+
   return out.subarray(0, at);
 }
 
@@ -538,21 +611,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 function payloadOf(message: CastMessage): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(message.payload);
+
     return isRecord(value) ? value : {};
   } catch {
     return {};
   }
 }
+
 const numberOr = <T>(value: unknown, fallback: T) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 /** A media status's `playerState`, and `idleReason` when idle, as a `TvStatus` state. */
 function stateOf(player: unknown, idle: unknown): TvStatus["state"] {
   if (player === "PLAYING") return "playing";
+
   if (player === "PAUSED") return "paused";
+
   if (player !== "IDLE") return "loading";
+
   if (idle === "FINISHED") return "ended";
+
   if (idle === "ERROR") return "failed";
+
   return idle === "CANCELLED" || idle === "INTERRUPTED" ? "stopped" : "loading";
 }
 
@@ -564,6 +644,7 @@ let made = 0;
  */
 export async function connectTv(tv: Tv): Promise<TvLink> {
   const module = native();
+
   if (!module) throw new Error("This build can't play on a TV.");
   const channel = `c${++made}`;
   const read = messageReader();
@@ -571,13 +652,16 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   /** Closing in order: the receiver's answer to STOP is no loss. */
   let closing = false;
   let requests = 0;
+
   /** Each request waiting for its answer: told the answer, or failed when the channel goes. */
   const waiting = new Map<
     number,
     { answer: (payload: Record<string, unknown>) => void; fail: (cause: Error) => void }
   >();
+
   let transport: string | null = null;
   let session: string | null = null;
+
   /** The load whose statuses count: its media session once the LOAD named it, and its requests. */
   let media: {
     id: number | null;
@@ -586,6 +670,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     /** It finished or failed: the TV then has no media to name, which ends nothing more. */
     over: boolean;
   } | null = null;
+
   const volume = store<Volume | null>(null);
   let heard = Date.now();
   let lostNow!: (why: "lost" | "stopped") => void;
@@ -606,13 +691,16 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       ),
     );
   };
+
   const ask = (to: string, namespace: string, payload: object, ms = TIMING.answer) => {
     const requestId = ++requests;
+
     return new Promise<Record<string, unknown>>((resolve, reject) => {
       const timer = setTimeout(() => {
         waiting.delete(requestId);
         reject(new Error("The TV didn't answer."));
       }, ms);
+
       waiting.set(requestId, {
         answer: (answer) => {
           clearTimeout(timer);
@@ -626,16 +714,20 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       send(to, namespace, { ...payload, requestId });
     });
   };
+
   const end = (by: "us" | "lost" | "stopped") => {
     if (!open) return;
     open = false;
+
     for (const timer of timers) clearInterval(timer);
     timers = [];
     channels.delete(channel);
     module.disconnect(channel);
+
     // Nothing waiting can be answered any more.
     for (const { fail } of waiting.values()) fail(new Error("The TV went."));
     waiting.clear();
+
     // What the TV last said stands: where a title got to is kept for playing it again.
     if (by !== "us") lostNow(by);
   };
@@ -643,44 +735,56 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   const receiverStatus = (payload: Record<string, unknown>) => {
     const status = isRecord(payload["status"]) ? payload["status"] : {};
     const level = status["volume"];
+
     if (isRecord(level)) {
       volume.set({
         level: numberOr(level["level"], volume.get()?.level ?? 1),
         muted: level["muted"] === true,
       });
     }
+
     const applications = Array.isArray(status["applications"]) ? status["applications"] : null;
+
     if (!applications || transport === null) return;
+
     // Another sender started something else, or the TV's own remote stopped the receiver.
     const ours = applications.some(
       (app) => isRecord(app) && app["sessionId"] === session && app["transportId"] === transport,
     );
+
     if (!ours && !closing) end("stopped");
   };
 
   /** `own` when it answers one of this load's requests, rather than the TV's own word. */
   const mediaStatus = (payload: Record<string, unknown>, own: boolean) => {
     const statuses = Array.isArray(payload["status"]) ? payload["status"] : [];
+
     const ids = statuses.map((status) =>
       isRecord(status) ? numberOr(status["mediaSessionId"], null) : null,
     );
+
     // Only once the LOAD's answer named this load's media, so a late word of the one before
     // can't end it. Another sender's load in its place ends it.
     if (!media || media.id === null) return;
+
     if (ids.length > 0 && !ids.includes(media.id)) {
       return media.status({ state: "taken", time: 0, duration: null });
     }
+
     // Asked, the TV no longer names this load's media: it went unannounced, as the TV's remote
     // or another sender stopping it leaves an empty answer.
     if (own && ids.length === 0 && !media.over) {
       return media.status({ state: "stopped", time: 0, duration: null });
     }
+
     for (const status of statuses) {
       if (!isRecord(status) || !media) continue;
       const id = numberOr(status["mediaSessionId"], null);
+
       if (id !== media.id) continue;
       const info = isRecord(status["media"]) ? status["media"] : {};
       const state = stateOf(status["playerState"], status["idleReason"]);
+
       if (state === "ended" || state === "failed") media.over = true;
       media.status({
         state,
@@ -693,26 +797,33 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   channels.set(channel, {
     read(bytes) {
       const messages = read(bytes);
+
       if (!messages) return end("lost");
       heard = Date.now();
+
       for (const message of messages) {
         if (!open) return;
         const payload = payloadOf(message);
+
         if (message.namespace === NAMESPACE.heartbeat) {
           if (payload["type"] === "PING")
             send(message.sourceId, NAMESPACE.heartbeat, { type: "PONG" });
           continue;
         }
+
         if (message.namespace === NAMESPACE.connection) {
           if (payload["type"] === "CLOSE") end("stopped");
           continue;
         }
+
         const requestId = numberOr(payload["requestId"], 0);
         const answer = waiting.get(requestId);
+
         if (answer) {
           waiting.delete(requestId);
           answer.answer(payload);
         }
+
         if (payload["type"] === "RECEIVER_STATUS") receiverStatus(payload);
         // The TV's own word, or an answer to this load's requests; an answer to a load given up
         // or one before says nothing of this one.
@@ -741,16 +852,20 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         send(PLATFORM, NAMESPACE.heartbeat, { type: "PING" });
       }, TIMING.ping),
     );
+
     const launched = await ask(
       PLATFORM,
       NAMESPACE.receiver,
       { type: "LAUNCH", appId: MEDIA_RECEIVER },
       TIMING.launch,
     );
+
     const status = isRecord(launched["status"]) ? launched["status"] : {};
+
     const app = (Array.isArray(status["applications"]) ? status["applications"] : []).find(
       (each): each is Record<string, unknown> => isRecord(each) && each["appId"] === MEDIA_RECEIVER,
     );
+
     if (
       launched["type"] !== "RECEIVER_STATUS" ||
       typeof app?.["transportId"] !== "string" ||
@@ -758,6 +873,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     ) {
       throw new Error("The TV didn't start its player.");
     }
+
     transport = app["transportId"];
     session = app["sessionId"];
     send(transport, NAMESPACE.connection, { type: "CONNECT", origin: {} });
@@ -765,11 +881,13 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     end("us");
     throw cause;
   }
+
   const to = transport;
 
   const close = async (stop = true) => {
     if (!open || closing) return;
     closing = true;
+
     if (stop) {
       await ask(
         PLATFORM,
@@ -778,6 +896,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         TIMING.close,
       ).catch(() => undefined);
     }
+
     send(to, NAMESPACE.connection, { type: "CLOSE" });
     send(PLATFORM, NAMESPACE.connection, { type: "CLOSE" });
     end("us");
@@ -792,6 +911,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         volume: { level: Math.min(1, Math.max(0, level)) },
         requestId: ++requests,
       });
+
       // Cast keeps mute apart from the level: moving the level from the phone also unmutes.
       if (volume.get()?.muted) {
         send(PLATFORM, NAMESPACE.receiver, {
@@ -810,7 +930,9 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         requests: new Set(),
         over: false,
       };
+
       media = mine;
+
       const asked = ask(to, NAMESPACE.media, {
         type: "LOAD",
         sessionId: session,
@@ -829,8 +951,10 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         autoplay: !loaded.paused,
         ...defined({ currentTime: loaded.live ? undefined : loaded.from }),
       });
+
       const firstOf = (answer: Record<string, unknown>) =>
         (Array.isArray(answer["status"]) ? answer["status"] : []).find(isRecord);
+
       const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
         const abort = () => {
           if (media === mine) media = null;
@@ -839,6 +963,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           void asked.then(
             (late) => {
               const id = numberOr(firstOf(late)?.["mediaSessionId"], null);
+
               if (id !== null) {
                 send(to, NAMESPACE.media, {
                   type: "STOP",
@@ -850,29 +975,37 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
             () => undefined,
           );
         };
+
         if (signal.aborted) return abort();
         signal.addEventListener("abort", abort, { once: true });
         asked.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
       });
+
       const first = firstOf(answer);
+
       if (answer["type"] !== "MEDIA_STATUS" || !first) {
         if (media === mine) media = null;
         throw new Error("The TV couldn't play it.");
       }
+
       mine.id = numberOr(first["mediaSessionId"], null);
       mediaStatus(answer, true);
+
       const poll = setInterval(() => {
         if (media !== mine) return clearInterval(poll);
         mine.requests.add(++requests);
         send(to, NAMESPACE.media, { type: "GET_STATUS", requestId: requests });
       }, TIMING.poll);
+
       timers.push(poll);
+
       const command = (payload: object) => {
         if (media === mine && mine.id !== null) {
           mine.requests.add(++requests);
           send(to, NAMESPACE.media, { ...payload, mediaSessionId: mine.id, requestId: requests });
         }
       };
+
       return {
         play: () => command({ type: "PLAY" }),
         pause: () => command({ type: "PAUSE" }),
@@ -881,6 +1014,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           if (media !== mine) return;
           media = null;
           clearInterval(poll);
+
           if (mine.id === null || !open) return;
           await ask(
             to,

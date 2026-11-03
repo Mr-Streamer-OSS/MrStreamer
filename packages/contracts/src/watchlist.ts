@@ -9,6 +9,7 @@ import type { Title, TitleKind } from "./ondemand.ts";
 
 /** How the Watchlist is ordered: the title saved last first, or by name. */
 export const WATCHLIST_SORTS = ["saved", "title"] as const;
+
 export type WatchlistSort = (typeof WATCHLIST_SORTS)[number];
 
 /**

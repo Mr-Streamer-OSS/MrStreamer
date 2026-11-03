@@ -21,10 +21,13 @@ export async function updateSubtitleLook(
     ...(pending ?? currentPreferences(client)?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK),
     ...patch,
   };
+
   pending = next;
   setSubtitleLook(next);
+
   try {
     const saved = await updatePreferences({ subtitleLook: next }, client);
+
     if (pending === next) {
       pending = null;
       setSubtitleLook(saved.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);
@@ -33,6 +36,7 @@ export async function updateSubtitleLook(
     if (pending === next) {
       // Partial writes can have committed. Refresh through the same acceptance/cache owner.
       await readPreferences(client).catch(() => {});
+
       if (pending === next) {
         pending = null;
         setSubtitleLook(currentPreferences(client)?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK);

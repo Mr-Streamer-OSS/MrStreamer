@@ -22,12 +22,14 @@ vi.stubGlobal("__DEV__", false);
 
 /** Sign-ins waiting for an answer, oldest first. */
 const signIns: Array<{ server: string; fail: () => void; succeed: () => void }> = [];
+
 const consent = vi.hoisted(() => ({
   choice: null as "on" | "off" | null,
   answers: [] as Array<{ text: string; onPress: () => void }>,
   prompts: 0,
   privacy: [] as string[],
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   statisticsChoice: () => consent.choice,
   setStatistics: (enabled: boolean) => {
@@ -46,19 +48,26 @@ vi.mock("../src/account.ts", () => ({
       });
     }),
 }));
+
 // Downloads open from a row of their own, which this test leaves out.
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => ({ items: [], series: {}, bytes: 0, free: null, ended: 0 }),
 }));
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
+
 vi.mock("react-native-safe-area-context", async () => ({
   SafeAreaView: (await import("./react-native.ts")).reactNative.View,
 }));
+
 // ui.tsx keeps its pictures with artwork-cache.ts: over the files stand-in here.
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 // Channel rows draw their star with an SF Symbol.
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Alert: {
@@ -77,6 +86,7 @@ vi.mock("react-native", async () => ({
 const { default: Connect } = await import("../src/app/connect.tsx");
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   signIns.length = 0;
@@ -91,12 +101,15 @@ function mount() {
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(Connect)));
   unmount = () => React.act(() => root.unmount());
+
   const field = (name: string) =>
     container.querySelector(`[data-testid="connect-${name}"]`) as HTMLInputElement;
+
   const button = () =>
     [...container.querySelectorAll("button")].find((each) =>
       ["Connect", "Connecting", "Try again"].includes(each.textContent ?? ""),
     )!;
+
   return {
     container,
     click(label: string) {
@@ -133,6 +146,7 @@ function filledForm() {
   form.type("server", "http://a.example");
   form.type("username", "demo");
   form.type("password", "secret");
+
   return form;
 }
 

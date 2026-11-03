@@ -12,10 +12,13 @@ import type { Driver } from "./language.ts";
 const GRID = "document.querySelector('[role=grid]')";
 const DETAILS = "document.querySelector('[role=grid] [role=region]')";
 const SELECTED = "document.querySelector('[role=grid] [role=gridcell][aria-selected=true]')";
+
 /** A programme's cell, not a stretch without guide. */
 const PROGRAMME = '[role=gridcell]:not([aria-label^="No programme information"])';
+
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -114,13 +117,16 @@ export async function guideGridCellsScenario(d: Driver) {
           && b.top > viewport.top + 20 && b.bottom < viewport.bottom;
       });
     })()`;
+
     await d.click("Select a tiny programme through its actual cell", tiny);
     await d.wait(() => d.exists(DETAILS));
+
     const selected = await d.evaluate<{ label: string; width: number; details: string }>(`(() => {
       const cell = ${SELECTED};
       return { label: cell.getAttribute('aria-label'), width: cell.getBoundingClientRect().width,
         details: ${DETAILS}.innerText };
     })()`);
+
     expect(selected.width < 12, "The pointer missed the tiny programme", selected);
     expect(
       selected.details.includes("Watch live"),
@@ -145,6 +151,7 @@ export async function guideGridCellsScenario(d: Driver) {
     const point = await d.evaluate<{ x: number; y: number }>(`(() => {
       const b = ${GRID}.getBoundingClientRect(); return { x: b.right - 100, y: b.top + 100 };
     })()`);
+
     const beforeWheel = (await geometry()).scroll;
     await d.send("Input.dispatchMouseEvent", {
       type: "mouseWheel",
@@ -177,6 +184,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   await d.key("Enter", 13);
   await d.wait(async () => {
     const v = await picture(d);
+
     return v.watching && v.time >= 1 && v.width > 0;
   });
   await d.key("Escape", 27);
@@ -219,12 +227,14 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
     moved,
   );
   d.observed["afterArrows"] = moved;
+
   // The keys gave the grid the focus, and it names the cell with the cursor as its active one.
   const focus = await d.evaluate<{ focused: boolean; active: string | null; selected: boolean }>(
     `(() => { const grid = ${GRID}; const cell = document.getElementById(grid.getAttribute('aria-activedescendant'));
       return { focused: document.activeElement === grid, active: cell?.getAttribute('aria-label') ?? null,
         selected: cell?.getAttribute('aria-selected') === 'true' }; })()`,
   );
+
   d.observed["gridFocus"] = focus;
   expect(
     focus.focused && focus.selected && moved.selected === focus.active,
@@ -258,9 +268,11 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   // Tab to its Watch live: Enter there is the button's, which watches the channel live.
   for (let presses = 0; presses < 4; presses++) {
     await d.key("Tab", 9);
+
     if (await d.evaluate<boolean>("document.activeElement?.textContent?.trim() === 'Watch live'"))
       break;
   }
+
   expect(
     await d.evaluate<boolean>("document.activeElement?.textContent?.trim() === 'Watch live'"),
     "Tab didn't reach Watch live",
@@ -317,6 +329,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
     return [...[...${GRID}.querySelectorAll('[role=row]')][1].querySelectorAll(${JSON.stringify(PROGRAMME)})]
       .find(cell => { const b = cell.getBoundingClientRect(); return b.x > now + 4 && b.right < grid.right && b.width > 40; });
   })()`;
+
   const laterTitle = await d.evaluate<string>(`${later}?.textContent ?? ''`);
   await d.click("Click a later programme on the second channel", later);
   await d.wait(async () => (await gridState(d)).details?.includes(laterTitle) === true);
@@ -326,6 +339,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   await d.click("Watch live from the details", `${DETAILS}?.querySelector('button')`);
   await d.wait(async () => {
     const v = await picture(d);
+
     return v.watching && v.time > 1 && v.width > 0 && v.audio > 0 && !v.title.includes("Aired");
   });
   const first = await picture(d);
@@ -384,16 +398,21 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   // Tab back into the grid takes them back: Down moves its cursor, and Enter watches that cell.
   for (let presses = 0; presses < 150; presses++) {
     await d.key("ArrowLeft", 37);
+
     if (!(await d.evaluate<boolean>(`document.activeElement === ${GRID}`))) break;
   }
+
   expect(
     !(await d.evaluate<boolean>(`document.activeElement === ${GRID}`)),
     "Left never handed the keys to the lists",
   );
+
   for (let presses = 0; presses < 60; presses++) {
     await d.key("Tab", 9);
+
     if (await d.evaluate<boolean>(`document.activeElement === ${GRID}`)) break;
   }
+
   expect(
     await d.evaluate<boolean>(`document.activeElement === ${GRID}`),
     "Tab didn't reach the grid",
@@ -442,22 +461,27 @@ async function watchesLive(
   await act();
   await d.wait(async () => {
     const v = await picture(d);
+
     return v.watching && v.width > 0 && !v.title.includes("Aired");
   });
+
   if (fromRecording) {
     await d.wait(async () => {
       const v = await picture(d);
+
       return v.time >= 1 && v.audio > 0;
     });
     const first = await picture(d);
     await d.wait(async () => (await picture(d)).time > first.time + 0.5);
   }
+
   const after = {
     ...(await picture(d)),
     streams: fixture.streams(),
     archiveRequests: fixture.archiveRequests().length - before.archive,
     before: before.streams,
   };
+
   d.observed[label] = after;
   expect(
     after.archiveRequests === 0 &&
@@ -480,6 +504,7 @@ async function leftUntilEnded(d: Driver) {
     d.evaluate<boolean>(
       `!!${SELECTED} && ${SELECTED}.getBoundingClientRect().right <= ${GRID}.querySelector('.bg-white.w-px').getBoundingClientRect().x + 1`,
     );
+
   for (let presses = 0; presses < 4 && !(await ended()); presses++) await d.key("ArrowLeft", 37);
   expect(await ended(), "Left didn't reach a programme that has ended", await gridState(d));
 }
@@ -494,10 +519,12 @@ async function previewNamesRecording(d: Driver, area: string, title: string, cap
   const shown = `document.querySelector(${JSON.stringify(area)})?.innerText ?? ''`;
   // Labelled either way, so a preview naming the programme on now fails with what it shows.
   await d.wait(async () => /Aired| left/.test(await d.evaluate<string>(shown)));
+
   const seen = {
     text: await d.evaluate<string>(shown),
     ...(await picture(d)),
   };
+
   d.observed[capture] = seen;
   expect(
     seen.text.includes(title) && !seen.text.includes(" left"),
@@ -518,34 +545,41 @@ async function playAired(d: Driver, fixture: GridFixture, width: string): Promis
   await d.key("Enter", 13);
   await d.wait(async () => {
     const v = await picture(d);
+
     return v.watching && v.time >= 1 && v.width > 0 && v.audio > 0;
   });
   const first = await picture(d);
   await d.wait(async () => (await picture(d)).time > first.time + 0.5);
+
   const playing = {
     ...(await picture(d)),
     title,
     archiveRequests: fixture.archiveRequests().slice(asked),
     streams: fixture.streams(),
   };
+
   d.observed[`catchupPlayback-${width}`] = playing;
   expect(
     playing.archiveRequests.length >= 1 && playing.streams.active === 1,
     "The programme didn't play from the archive on one connection",
     playing,
   );
+
   const shown = await d.evaluate<string>(
     "document.querySelector('[data-view=watch]')?.innerText ?? ''",
   );
+
   expect(
     shown.includes(title) && shown.includes("Aired"),
     "Watch doesn't say the programme aired",
     shown,
   );
+
   // The pointer wakes Watch's controls, so the picture shows what plays.
   for (const x of [600, 640])
     await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y: 400 });
   await d.capture(`grid-catchup-playing-${width}`);
+
   return title;
 }
 
@@ -576,12 +610,15 @@ export async function guideGridScrollScenario(d: Driver) {
       const tick = t => { if (last) window.__frames.push(t - last); last = t; if (window.__run) requestAnimationFrame(tick); };
       requestAnimationFrame(tick);
     })()`);
+
     const point = await d.evaluate<{ x: number; y: number }>(
       `(() => { const b = ${area}.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`,
     );
+
     d.action(`Wheel ${label}: ${wheels.length} events, sampling the renderer's CPU`);
     await d.send("Profiler.enable");
     await d.send("Profiler.start");
+
     for (const wheel of wheels) {
       await d.send("Input.dispatchMouseEvent", {
         type: "mouseWheel",
@@ -591,8 +628,10 @@ export async function guideGridScrollScenario(d: Driver) {
       });
       await new Promise((resolve) => setTimeout(resolve, 16));
     }
+
     await new Promise((resolve) => setTimeout(resolve, 500));
     const profile = (await d.send("Profiler.stop")) as { profile: CpuProfile };
+
     const result = await d.evaluate<{
       frames: number[];
       long: number[];
@@ -603,9 +642,12 @@ export async function guideGridScrollScenario(d: Driver) {
         const scroller = ${area};
         return { frames: window.__frames, long: window.__long, top: scroller.scrollTop, left: scroller.scrollLeft }; })()`,
     );
+
     const sorted = result.frames.toSorted((a, b) => a - b);
+
     const at = (q: number) =>
       Math.round((sorted[Math.floor(q * (sorted.length - 1))] ?? 0) * 10) / 10;
+
     const summary = {
       frames: sorted.length,
       p50: at(0.5),
@@ -617,9 +659,12 @@ export async function guideGridScrollScenario(d: Driver) {
       scrolledTo: { top: result.top, left: result.left },
       busiest: busiest(profile.profile),
     };
+
     d.observed[`scroll-${label}`] = summary;
+
     return summary;
   };
+
   const down = Array.from({ length: 150 }, () => ({ x: 0, y: 120 }));
   // About 18 hours ahead, within the guide's day ahead.
   const across = Array.from({ length: 30 }, () => ({ x: 120, y: 0 }));
@@ -660,13 +705,16 @@ interface CpuProfile {
 function busiest(profile: CpuProfile): { name: string; ms: number }[] {
   const frames = new Map(profile.nodes.map((node) => [node.id, node.callFrame]));
   const time = new Map<string, number>();
+
   for (const [index, id] of profile.samples.entries()) {
     const frame = frames.get(id);
+
     if (!frame) continue;
     const file = frame.url.split("/").at(-1) || "(native)";
     const name = `${frame.functionName || "(anonymous)"} ${file}:${frame.lineNumber + 1}`;
     time.set(name, (time.get(name) ?? 0) + (profile.timeDeltas[index] ?? 0) / 1000);
   }
+
   return [...time]
     .toSorted((a, b) => b[1] - a[1])
     .slice(0, 12)

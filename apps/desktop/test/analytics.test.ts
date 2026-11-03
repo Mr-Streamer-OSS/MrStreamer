@@ -42,7 +42,9 @@ async function saved(dataDir: string) {
   const record = AnalyticsRecord()(
     JSON.parse(await readFile(join(dataDir, "analytics.json"), "utf8")),
   );
+
   if (record instanceof type.errors) throw new Error("Invalid test analytics state.");
+
   return record;
 }
 
@@ -54,17 +56,22 @@ async function until(check: () => boolean | Promise<boolean>) {
     } catch (error) {
       if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
     }
+
     await pause(5);
   }
+
   throw new Error("Analytics side effect did not complete.");
 }
 
 async function captureServer(status: number | (() => number) = 200) {
   const payloads: unknown[] = [];
+
   const server = createServer(async (req, res) => {
     const bytes: Buffer[] = [];
+
     for await (const chunk of req) bytes.push(Buffer.from(chunk));
     const payload: unknown = JSON.parse(Buffer.concat(bytes).toString());
+
     if (!(
       typeof payload === "object" &&
       payload !== null &&
@@ -77,10 +84,13 @@ async function captureServer(status: number | (() => number) = 200) {
     });
     res.end("ok");
   });
+
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (!address || typeof address === "string") throw new Error("No local capture address.");
+
   return { payloads, endpoint: `http://127.0.0.1:${address.port}/i/v0/e/` };
 }
 
@@ -257,9 +267,11 @@ describe("analytics consent and persistence", () => {
     const disk = analyticsStore(dataDir);
     let release: (() => void) | undefined;
     let saving = false;
+
     const wait = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     const { owner, events } = await start({
       dataDir,
       store: {
@@ -271,6 +283,7 @@ describe("analytics consent and persistence", () => {
         },
       },
     });
+
     owner.setForeground(true);
     await until(() => saving);
     const disabling = owner.configure(false);
@@ -288,16 +301,19 @@ describe("analytics consent and persistence", () => {
 
   it("aborts its active request, clears pending events and restart never resumes them", async () => {
     let signal: AbortSignal | undefined;
+
     const { owner, dataDir } = await start({
       transport: {
         send(_event, owned) {
           signal = owned;
+
           return new Promise((resolve) =>
             owned.addEventListener("abort", () => resolve("retry"), { once: true }),
           );
         },
       },
     });
+
     owner.setForeground(true);
     await until(() => signal !== undefined);
     const disabling = owner.configure(false);
@@ -313,6 +329,7 @@ describe("analytics consent and persistence", () => {
 
   it("fails closed on damaged or unreadable telemetry without creating a fresh identity or logging it", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     try {
       for (const text of [
         "{broken",
@@ -329,6 +346,7 @@ describe("analytics consent and persistence", () => {
         expect(events).toEqual([]);
         expect(await readFile(join(dataDir, "analytics.json"), "utf8")).toBe(text);
       }
+
       const unavailable = await start({
         store: {
           load: async () => {
@@ -337,6 +355,7 @@ describe("analytics consent and persistence", () => {
           save: async () => {},
         },
       });
+
       expect(await unavailable.owner.settings()).toMatchObject({ transport: "unavailable" });
       expect(warn).not.toHaveBeenCalled();
     } finally {
@@ -353,6 +372,7 @@ describe("analytics consent and persistence", () => {
         },
       },
     });
+
     failing.owner.setForeground(true);
     await until(async () => (await failing.owner.settings()).transport === "unavailable");
     expect(failing.events).toEqual([]);
@@ -382,6 +402,7 @@ describe("analytics delivery and deadlines", () => {
       host: "https://eu.i.posthog.com",
       projectToken: "phc_local_contract_fixture",
     });
+
     expect(production).toEqual({
       releaseBuild: true,
       capture: {
@@ -389,6 +410,7 @@ describe("analytics delivery and deadlines", () => {
         projectToken: "phc_local_contract_fixture",
       },
     });
+
     for (const invalid of [
       {
         releaseBuild: false,
@@ -408,6 +430,7 @@ describe("analytics delivery and deadlines", () => {
         releaseBuild: false,
         capture: null,
       });
+
     const eligible = {
       production: production.capture,
       releaseBuild: true,
@@ -416,8 +439,10 @@ describe("analytics delivery and deadlines", () => {
       automated: false,
       localEndpoint: undefined,
     };
+
     // Merely constructing eligible configuration makes no request to its host.
     expect(analyticsTransport(eligible)?.kind).toBe("production");
+
     for (const excluded of [
       { ...eligible, releaseBuild: false },
       { ...eligible, packaged: false },
@@ -444,6 +469,7 @@ describe("analytics delivery and deadlines", () => {
     await until(() => capture.payloads.length === 2);
     const first = CaptureEvent()(capture.payloads[0]);
     const day = CaptureEvent()(capture.payloads[1]);
+
     if (first instanceof type.errors || day instanceof type.errors)
       throw new Error("Invalid local payload.");
     expect(capture.payloads[0]).toEqual({ api_key: "mrstreamer-local-verification", ...first });
@@ -460,6 +486,7 @@ describe("analytics delivery and deadlines", () => {
     });
     expect(first.distinct_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(first.uuid).not.toBe(day.uuid);
+
     for (const endpoint of [
       "https://us.i.posthog.com/i/v0/e/",
       "https://eu.i.posthog.com/i/v0/e/",
@@ -477,7 +504,9 @@ describe("analytics delivery and deadlines", () => {
   it("copies only allowed values at capture even when a loaded caller supplies extra content", async () => {
     const capture = await captureServer();
     const transport = localCapture(capture.endpoint);
+
     if (!transport) throw new Error("No local transport.");
+
     const fixture = {
       event: "installation_observed" as const,
       uuid: "da0330b7-8e49-4f15-96d3-db7598f60a47",
@@ -492,6 +521,7 @@ describe("analytics delivery and deadlines", () => {
         provider: "private",
       },
     };
+
     expect(await transport.send(fixture, new AbortController().signal)).toBe("accepted");
     expect(capture.payloads[0]).not.toHaveProperty("private_title");
     expect(capture.payloads[0]).not.toHaveProperty("properties.provider");
@@ -503,15 +533,19 @@ describe("analytics delivery and deadlines", () => {
     const capture = await captureServer(() => (++requests === 1 ? 503 : 200));
     const local = localCapture(capture.endpoint)!;
     let answered = 0;
+
     const { owner, dataDir } = await start({
       transport: {
         async send(event, signal) {
           const result = await local.send(event, signal);
+
           if (event.event !== "app_version_observed") answered++;
+
           return result;
         },
       },
     });
+
     owner.setForeground(true);
     await until(() => capture.payloads.length === 2 && answered === 2);
     // Move only scheduling time. Socket IO/deadlines stay real, then foreground wakes the owner.
@@ -530,25 +564,30 @@ describe("analytics delivery and deadlines", () => {
     });
     const events: CaptureEvent[] = [];
     const store = memoryStore();
+
     const offline: Omit<CaptureTransport, "kind"> = {
       async send(event) {
         // Version observations have their own complete wire/lifecycle contracts.
         if (event.event !== "app_version_observed") events.push(structuredClone(event));
+
         return "retry";
       },
     };
+
     const first = await start({
       store,
       transport: {
         send(event, signal) {
           // Version observations have their own complete wire/lifecycle contracts.
           if (event.event !== "app_version_observed") events.push(structuredClone(event));
+
           return new Promise((resolve) =>
             signal.addEventListener("abort", () => resolve("retry"), { once: true }),
           );
         },
       },
     });
+
     first.owner.setForeground(true);
     await until(() => events.length === 1);
     await first.owner.settings();
@@ -558,16 +597,20 @@ describe("analytics delivery and deadlines", () => {
     const restarted = await start({ dataDir: first.dataDir, transport: offline, store });
     restarted.owner.setForeground(true);
     await until(() => events.length > 1);
+
     for (let i = 0; i < 6; i++) {
       await vi.advanceTimersByTimeAsync(2000);
       await restarted.owner.settings();
     }
+
     await until(async () => (await store.load())?.pending.length === 0);
     const installs = events.filter((event) => event.event === "installation_observed");
     const days = events.filter((event) => event.event === "app_active_day");
     expect(installs.length).toBeLessThanOrEqual(3);
     expect(days.length).toBeLessThanOrEqual(3);
+
     for (const event of installs) expect(event).toEqual(installs[0]);
+
     for (const event of days) expect(event).toEqual(days[0]);
   });
 
@@ -579,6 +622,7 @@ describe("analytics delivery and deadlines", () => {
     const incidents: CaptureEvent[] = [];
     let answer: ((result: "retry" | "accepted") => void) | undefined;
     let active: AbortSignal | undefined;
+
     const { owner } = await start({
       store,
       transport: {
@@ -586,12 +630,14 @@ describe("analytics delivery and deadlines", () => {
           if (event.event !== "renderer_exited") return "accepted";
           incidents.push(structuredClone(event));
           active = signal;
+
           return new Promise<"retry" | "accepted">((resolve) => {
             answer = resolve;
           });
         },
       },
     });
+
     owner.setForeground(true);
     await vi.advanceTimersByTimeAsync(0);
     owner.noteRendererExit("crashed");
@@ -633,20 +679,24 @@ describe("analytics delivery and deadlines", () => {
     let signal: AbortSignal | undefined;
     // The rate window follows its own clock, so retry timers never run during this test.
     let now = 0;
+
     const { owner } = await start({
       store,
       monotonic: () => now,
       transport: {
         send(_event, owned) {
           signal = owned;
+
           return new Promise(() => {});
         },
       },
     });
+
     owner.setForeground(true);
     await vi.advanceTimersByTimeAsync(0);
     const first = await store.load();
     expect(signal).toBeDefined();
+
     // Usage bursts share a separate admission budget and persist as counters, not captures.
     for (let i = 0; i < 100; i++) owner.noteFeature("home");
     await vi.advanceTimersByTimeAsync(0);
@@ -655,7 +705,9 @@ describe("analytics delivery and deadlines", () => {
       properties: { counts: { feature_home: 60 } },
     });
     now += 60_000;
+
     for (let i = 0; i < 10; i++) owner.noteAction("epg_opened");
+
     for (let i = 0; i < 70; i++) owner.noteRendererExit("crashed");
     await vi.advanceTimersByTimeAsync(0);
     const kept = await store.load();
@@ -678,6 +730,7 @@ describe("analytics delivery and deadlines", () => {
       toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
     });
     const dataDir = await tempDir();
+
     const owner = new Analytics({
       dataDir,
       origin: Promise.resolve("unknown"),
@@ -685,16 +738,20 @@ describe("analytics delivery and deadlines", () => {
       transport: null,
       store: { load: () => new Promise(() => {}), save: async () => {} },
     });
+
     owners.push(owner);
     const settings = owner.settings();
     await vi.advanceTimersByTimeAsync(1500);
     expect(await settings).toMatchObject({ transport: "unavailable" });
+
     const stalledWrite = await start({
       store: { load: async () => null, save: () => new Promise(() => {}) },
     });
+
     const changed = expect(stalledWrite.owner.configure(false)).rejects.toThrow(
       "Analytics preference could not be saved.",
     );
+
     await vi.advanceTimersByTimeAsync(1500);
     await changed;
     expect(await stalledWrite.owner.settings()).toMatchObject({ transport: "unavailable" });
@@ -727,9 +784,12 @@ describe("direct product and reliability events", () => {
     owner.setForeground(true);
     await until(() => capture.payloads.length === 2);
     const token = owner.beginPlayback("live");
+
     if (!token) throw new Error("No playback run.");
     const binding = owner.bindPlayback(token, "local");
+
     if (!binding) throw new Error("No playback binding.");
+
     const diagnostic = {
       diagnostic_stage: "decode",
       diagnostic_reason: "decode_rejected",
@@ -739,13 +799,16 @@ describe("direct product and reliability events", () => {
       diagnostic_audio_codec: "aac",
       diagnostic_fallback: "repair",
     } as const;
+
     owner.notePlaybackFailure(token, binding, "unsupported", diagnostic);
     owner.notePlaybackFailure(token, binding, "unsupported", { diagnostic_reason: "unknown" });
     const remote = owner.bindPlayback(token, "remote");
+
     if (!remote) throw new Error("No remote binding.");
     owner.notePlaybackFailure(token, remote, "unsupported", diagnostic);
     await until(() => capture.payloads.length === 3);
     const event = CaptureEvent()(capture.payloads[2]);
+
     if (event instanceof type.errors) throw new Error("Invalid diagnostic body.");
     expect(capture.payloads[2]).toEqual({ api_key: "mrstreamer-local-verification", ...event });
     expect(event).toMatchObject({
@@ -778,7 +841,9 @@ describe("direct product and reliability events", () => {
   it("rejects arbitrary diagnostic values at capture and IPC and reconstructs only fixed HTTP fields", async () => {
     const capture = await captureServer();
     const transport = localCapture(capture.endpoint);
+
     if (!transport) throw new Error("No local transport.");
+
     const base = {
       uuid: randomUUID(),
       distinct_id: randomUUID(),
@@ -793,6 +858,7 @@ describe("direct product and reliability events", () => {
         error_type: "unsupported" as const,
       },
     };
+
     const context = {
       diagnostic_stage: "decode",
       diagnostic_reason: "decode_rejected",
@@ -802,6 +868,7 @@ describe("direct product and reliability events", () => {
       diagnostic_audio_codec: "aac",
       diagnostic_fallback: "none",
     } as const;
+
     for (const key of Object.keys(context)) {
       const bad = {
         ...base,
@@ -811,6 +878,7 @@ describe("direct product and reliability events", () => {
           [key]: "https://login:password@private.example/media/123?token=PRIVATE",
         },
       };
+
       expect(CaptureEvent()(bad)).toBeInstanceOf(type.errors);
       expect(await transport.send(bad, new AbortController().signal)).toBe("discard");
       expect(
@@ -822,6 +890,7 @@ describe("direct product and reliability events", () => {
         }),
       ).toBeInstanceOf(type.errors);
     }
+
     const valid = CaptureEvent().assert({
       ...base,
       properties: {
@@ -837,6 +906,7 @@ describe("direct product and reliability events", () => {
         credentials: "PRIVATE",
       },
     });
+
     expect(await transport.send(valid, new AbortController().signal)).toBe("accepted");
     expect(capture.payloads).toEqual([
       {
@@ -851,6 +921,7 @@ describe("direct product and reliability events", () => {
   it("keeps enabled consent, identity and old queued events when future optional diagnostics are unknown", async () => {
     const dataDir = await tempDir();
     const id = randomUUID();
+
     const event = {
       uuid: randomUUID(),
       distinct_id: id,
@@ -865,11 +936,13 @@ describe("direct product and reliability events", () => {
         error_type: "unsupported",
       },
     };
+
     const future = Object.fromEntries(
       ["stage", "reason", "container", "delivery", "video_codec", "audio_codec", "fallback"].map(
         (key) => [`diagnostic_${key}`, "future_value"],
       ),
     );
+
     await writeFile(
       join(dataDir, "analytics.json"),
       JSON.stringify({
@@ -927,12 +1000,16 @@ describe("direct product and reliability events", () => {
     owner.noteRendererExit("crashed");
     await owner.close();
     await until(() => capture.payloads.length === 8);
+
     const sent = capture.payloads.map((payload) => {
       const event = CaptureEvent()(payload);
+
       if (event instanceof type.errors) throw new Error("Invalid local payload.");
       expect(payload).toEqual({ api_key: "mrstreamer-local-verification", ...event });
+
       return event;
     });
+
     const common = sent[0]?.properties;
     expect(sent.slice(2).map(({ event, properties }) => [event, properties])).toEqual(
       [
@@ -1017,10 +1094,12 @@ describe("direct product and reliability events", () => {
     await vi.advanceTimersByTimeAsync(0);
     const token = owner.beginPlayback("vod")!;
     const binding = owner.bindPlayback(token, "local")!;
+
     for (let second = 1; second <= 3; second++) {
       owner.notePlaybackState(token, binding, second, "playing");
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     await owner.close();
     expect(streams(events)).toEqual(["stopped vod 3"]);
     expect((await store.load())?.pending).toEqual([]);
@@ -1044,6 +1123,7 @@ describe("persisted state migration", () => {
     },
     attempts,
   });
+
   const summary = {
     day: "2026-10-12",
     counts: { features: { home: 3 }, saturated: false },
@@ -1124,19 +1204,24 @@ describe("persisted state migration", () => {
 
   it("clears a loaded queue when opt-out is requested during startup and never backfills it", async () => {
     const store = memoryStore();
+
     const before = await start({
       store,
       transport: { send: () => new Promise(() => {}) },
     });
+
     before.owner.setForeground(true);
     await until(async () => (await store.load())?.pending.length === 2);
     before.owner.noteFeature("home");
     await until(async () => (await store.load())?.summaries?.usage !== null);
     let loaded: (() => void) | undefined;
+
     const gate = new Promise<void>((resolve) => {
       loaded = resolve;
     });
+
     const events: CaptureEvent[] = [];
+
     const owner = new Analytics({
       dataDir: before.dataDir,
       origin: Promise.resolve("unknown"),
@@ -1144,6 +1229,7 @@ describe("persisted state migration", () => {
       store: {
         async load() {
           await gate;
+
           return store.load();
         },
         save: store.save,
@@ -1153,10 +1239,12 @@ describe("persisted state migration", () => {
         async send(event) {
           // Version observations have their own complete wire/lifecycle contracts.
           if (event.event !== "app_version_observed") events.push(structuredClone(event));
+
           return "accepted";
         },
       },
     });
+
     owners.push(owner);
     const disabled = owner.configure(false);
     loaded?.();
@@ -1177,13 +1265,16 @@ describe("observed playback runs", () => {
     });
     vi.setSystemTime(new Date(at));
   }
+
   async function measuring() {
     const result = await start({ store: memoryStore() });
     result.owner.setForeground(true);
     await vi.advanceTimersByTimeAsync(0);
     await until(() => result.events.length === 2);
+
     return result;
   }
+
   async function playing(
     owner: Analytics,
     token: string,
@@ -1195,8 +1286,10 @@ describe("observed playback runs", () => {
       owner.notePlaybackState(token, binding, ++sequence, "playing");
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     return sequence;
   }
+
   /** Waits for the expected facts, then confirms nothing else arrives. */
   async function expectStreams(
     owner: Analytics,
@@ -1283,6 +1376,7 @@ describe("observed playback runs", () => {
       owner.notePlaybackState(token, binding, 1, "playing");
       closed.abort();
       await expectStreams(owner, events, []);
+
       if (reset === "consent") {
         await owner.configure(false);
         await owner.configure(true);
@@ -1448,10 +1542,12 @@ describe("observed playback runs", () => {
     await vi.advanceTimersByTimeAsync(0);
     obsolete.state("playing");
     obsolete.failure("credentials");
+
     for (let second = 0; second < 35; second++) {
       current.state("playing");
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     expect(owner.controlledPlayback(hint.control, "frame")).not.toBeNull();
     expect(owner.controlledPlayback(old.control, "frame")).toBeNull();
     current.failure("network");
@@ -1494,12 +1590,14 @@ describe("observed playback runs", () => {
     let binding = owner.bindPlayback(token, "local")!;
     owner.notePlaybackState(token, binding, 1, "paused");
     await vi.advanceTimersByTimeAsync(90_000);
+
     for (let run = 0; run < 6; run++) {
       binding = owner.bindPlayback(token, run % 2 ? "remote" : "local")!;
       const sequence = await playing(owner, token, binding, 6);
       owner.notePlaybackState(token, binding, sequence + 1, run % 2 ? "seeking" : "waiting");
       await vi.advanceTimersByTimeAsync(10_000);
     }
+
     owner.endPlayback(token);
     await expectStreams(owner, events, ["stopped vod 36"]);
     expect(JSON.stringify(events)).not.toMatch(/watch_ms|sessionId|binding|position/);
@@ -1597,10 +1695,12 @@ describe("observed playback runs", () => {
     const hint = { control: randomUUID(), order: 1, ongoing: false };
     owner.admitPlayback("vod", hint, "frame");
     const remote = owner.remotePlayback("vod", hint.control);
+
     for (let second = 0; second < 10; second++) {
       remote.state("playing");
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     remote.state("stopped");
     remote.end();
     remote.end();

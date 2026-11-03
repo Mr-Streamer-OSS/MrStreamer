@@ -51,6 +51,7 @@ interface Segment {
   readonly epoch: number;
   readonly duration: number;
 }
+
 interface Media {
   readonly segments: readonly Segment[];
   readonly ended: boolean;
@@ -64,6 +65,7 @@ export interface HlsTsEpoch {
   readonly startS: number;
   readonly chunks: AsyncGenerator<Uint8Array>;
 }
+
 export interface HlsTsInput {
   readonly selected: string;
   readonly firstLayout: HlsTsEpoch["layout"];
@@ -75,28 +77,37 @@ export interface HlsTsInput {
 
 function attributes(line: string): ReadonlyMap<string, string> {
   const values = new Map<string, string>();
+
   for (const match of line.matchAll(/(?:^|,)([\w-]+)=(?:"([^"]*)"|([^,]*))/g)) {
     values.set(match[1]!, match[2] ?? match[3]!);
   }
+
   return values;
 }
+
 function addressOf(value: string, base: string): string {
   const url = URL.parse(value, base);
+
   if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password)
     malformed();
+
   return url.href;
 }
+
 async function readPart(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
   ms = 15_000,
 ) {
   signal.throwIfAborted();
+
   const stop = () => {
     void reader.cancel().catch(() => {});
   };
+
   signal.addEventListener("abort", stop, { once: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     const next = await Promise.race([
       reader.read(),
@@ -113,7 +124,9 @@ async function readPart(
         }, ms);
       }),
     ]);
+
     signal.throwIfAborted();
+
     return next;
   } finally {
     clearTimeout(timer);
@@ -123,28 +136,37 @@ async function readPart(
 
 async function playlist(answer: Response, signal: AbortSignal): Promise<string> {
   const reader = answer.body?.getReader();
+
   if (!reader) malformed();
   const parts: Uint8Array[] = [];
   let size = 0;
+
   try {
     for (;;) {
       const next = await readPart(reader, signal);
+
       if (next.done) break;
       size += next.value.length;
+
       if (size > PLAYLIST_BYTES) malformed();
       parts.push(next.value);
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
+
   const text = Buffer.concat(parts).toString("utf8").trimStart();
+
   if (!text.startsWith("#EXTM3U")) malformed();
+
   return text;
 }
+
 function media(text: string, base: string): Media {
   // These inputs keep their direct paths. A clear METHOD=NONE reset needs no key request.
   if (/^#EXT-X-(?:SESSION-KEY|MAP|BYTERANGE|PART|PRELOAD-HINT|SKIP)(?::|$)/m.test(text))
     throw hlsSubsetFailure();
+
   if (
     text
       .split(/\r?\n/)
@@ -159,6 +181,7 @@ function media(text: string, base: string): Media {
   let target = 6;
   let duration: number | null = null;
   const segments: Segment[] = [];
+
   for (const line of text.split(/\r?\n/).map((line) => line.trim())) {
     if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) sequence = Number(line.split(":")[1]);
     else if (line.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE:")) epoch = Number(line.split(":")[1]);
@@ -182,7 +205,9 @@ function media(text: string, base: string): Media {
       duration = null;
     }
   }
+
   if (!segments.length || !Number.isFinite(target) || target <= 0 || target > 120) malformed();
+
   return { segments, target, ended: /^#EXT-X-ENDLIST\s*$/m.test(text) };
 }
 
@@ -203,18 +228,24 @@ export interface Variant {
 /** The variants of the multivariant playlist `text`, read from `base`, in its order. */
 export function variantsOf(text: string, base: string): readonly Variant[] {
   const lines = text.split(/\r?\n/).map((line) => line.trim());
+
   const renditions = lines
     .filter((line) => line.startsWith("#EXT-X-MEDIA:"))
     .map((line) => attributes(line.slice(13)));
+
   const keyed = /^#EXT-X-SESSION-KEY:/m.test(text);
+
   return lines.flatMap((line, index) => {
     if (!line.startsWith("#EXT-X-STREAM-INF:")) return [];
     const attrs = attributes(line.slice(18));
     const uri = lines[index + 1];
+
     if (!uri || uri.startsWith("#")) malformed();
     const height = Number(attrs.get("RESOLUTION")?.split("x")[1]) || 0;
+
     const separate = (type: string, group: string | undefined) =>
       renditions.some((r) => r.get("TYPE") === type && r.has("URI") && r.get("GROUP-ID") === group);
+
     return [
       {
         address: addressOf(uri, base),
@@ -233,7 +264,9 @@ export function variantsOf(text: string, base: string): readonly Variant[] {
  */
 export function clearMedia(text: string, base: string): Media | null {
   const trimmed = text.trimStart();
+
   if (!trimmed.startsWith("#EXTM3U") || /^#EXT-X-STREAM-INF:/m.test(trimmed)) return null;
+
   try {
     return media(trimmed, base);
   } catch {
@@ -252,44 +285,55 @@ export async function openHlsTsInput(
   const closed = new AbortController();
   const lifetime = AbortSignal.any([signal, closed.signal]);
   let held: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
   const close = async () => {
     closed.abort();
     await held?.cancel().catch(() => {});
   };
+
   try {
     let selected = root;
     const rootAnswer = await open(selected, lifetime);
     selected = rootAnswer.url || selected;
     let text = await playlist(rootAnswer, lifetime);
+
     if (/^#EXT-X-STREAM-INF:/m.test(text)) {
       const variants = variantsOf(text, selected);
       const eligible = variants.filter((v) => v.height <= 1080);
+
       const chosen =
         eligible.find((v) => v.address === preferred) ??
         eligible.toSorted(
           (a, b) =>
             b.height - a.height || a.bandwidth - b.bandwidth || a.address.localeCompare(b.address),
         )[0];
+
       if (!chosen?.recordable) throw hlsSubsetFailure();
       selected = chosen.address;
       const mediaAnswer = await open(selected, lifetime);
       selected = mediaAnswer.url || selected;
       text = await playlist(mediaAnswer, lifetime);
+
       if (/^#EXT-X-STREAM-INF:/m.test(text)) malformed();
     }
+
     let list = media(text, selected);
+
     let nextSequence =
       archive || list.ended
         ? list.segments[0]!.sequence
         : list.segments[Math.max(0, list.segments.length - 3)]!.sequence;
+
     let elapsed = 0;
     let done = false;
     let lastRefresh = performance.now();
     let stagnant = 0;
+
     const nextSegment = async (): Promise<Segment | null> => {
       for (;;) {
         lifetime.throwIfAborted();
         const next = list.segments.find((segment) => segment.sequence >= nextSequence);
+
         if (next) {
           if (next.sequence !== nextSequence) {
             // Reconnect live playback at the current window, but never skip archive media.
@@ -300,27 +344,34 @@ export async function openHlsTsInput(
               });
             malformed();
           }
+
           nextSequence++;
           stagnant = 0;
+
           return next;
         }
+
         if (list.ended) return null;
+
         const delay = Math.max(
           0,
           lastRefresh + Math.max(250, list.target * 500) - performance.now(),
         );
+
         await new Promise<void>((resolve) => {
           const finish = () => {
             clearTimeout(timer);
             lifetime.removeEventListener("abort", finish);
             resolve();
           };
+
           const timer = setTimeout(finish, delay);
           lifetime.addEventListener("abort", finish, { once: true });
         });
         lifetime.throwIfAborted();
         list = media(await playlist(await open(selected, lifetime), lifetime), selected);
         lastRefresh = performance.now();
+
         if (++stagnant > 6)
           throw new HlsInputFailure({
             kind: "network",
@@ -328,9 +379,11 @@ export async function openHlsTsInput(
           });
       }
     };
+
     const inspect = async (segment: Segment, initial = false) => {
       const answer = await open(segment.address, lifetime);
       const reader = answer.body?.getReader();
+
       if (!reader) malformed();
       held = reader;
       const inspector = createInspector();
@@ -340,9 +393,11 @@ export async function openHlsTsInput(
       let signature: string | null = null;
       let settled = false;
       const deadline = performance.now() + 2500;
+
       while (size < PREFIX_BYTES) {
         lifetime.throwIfAborted();
         const next = await readPart(reader, lifetime, Math.max(1, deadline - performance.now()));
+
         if (next.done) break;
         head.push(next.value);
         size += next.value.length;
@@ -350,9 +405,12 @@ export async function openHlsTsInput(
         layout = found?.layout ?? layout;
         signature = found?.signature ?? signature;
         settled = found?.open.length === 0;
+
         if (found && (!initial || settled) && size >= 32 * 1024) break;
+
         if (inspector.notTransportStream) break;
       }
+
       if (
         !layout ||
         !signature ||
@@ -360,6 +418,7 @@ export async function openHlsTsInput(
         (!layout.video && !layout.audio.length)
       )
         throw hlsSubsetFailure();
+
       if (initial && !settled)
         throw new HlsInputFailure({
           kind: "unsupported",
@@ -370,6 +429,7 @@ export async function openHlsTsInput(
             diagnostic_container: "hls",
           },
         });
+
       return {
         segment,
         reader,
@@ -379,53 +439,70 @@ export async function openHlsTsInput(
         size,
       };
     };
+
     let pending = await inspect((await nextSegment())!, true);
     const firstLayout = pending.layout;
+
     async function* epochs(): AsyncGenerator<HlsTsEpoch> {
       try {
         while (!done) {
           const first = pending;
           const signature = first.signature;
           let consumed = false;
+
           const chunks = (async function* () {
             for (;;) {
               const current = pending;
               let size = current.size;
+
               try {
                 yield* current.head;
+
                 for (;;) {
                   lifetime.throwIfAborted();
                   const next = await readPart(current.reader, lifetime);
+
                   if (next.done) break;
                   size += next.value.length;
+
                   if (size > SEGMENT_BYTES) malformed();
                   yield next.value;
                 }
               } finally {
                 await current.reader.cancel().catch(() => {});
+
                 if (held === current.reader) held = null;
               }
+
               elapsed += current.segment.duration;
               const segment = await nextSegment();
+
               if (!segment) {
                 done = true;
                 consumed = true;
+
                 return;
               }
+
               pending = await inspect(segment);
+
               if (
                 segment.epoch !== first.segment.epoch ||
                 pending.layout.programPid !== first.layout.programPid ||
                 pending.signature !== signature
               ) {
                 consumed = true;
+
                 return;
               }
             }
           })();
+
           yield { layout: first.layout, startS: elapsed, chunks };
+
           if (!consumed) {
             await chunks.return();
+
             return;
           }
         }
@@ -433,6 +510,7 @@ export async function openHlsTsInput(
         await close();
       }
     }
+
     return { selected, firstLayout, prefix: pending.head, epochs: epochs(), close };
   } catch (cause) {
     await close();

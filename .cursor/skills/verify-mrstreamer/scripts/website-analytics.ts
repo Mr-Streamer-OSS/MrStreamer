@@ -19,12 +19,15 @@ import { electronExecutable, freePort, record, stop } from "./session.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const marketing = join(root, "apps/marketing");
+
 /** Where a production build's pages send, on the site's own route. */
 const ENDPOINT = "https://mrstreamer.app/ingest/i/v0/e/";
+
 /** What the packaged route must forward that to: PostHog's EU capture. */
 const UPSTREAM = "https://eu.i.posthog.com/i/v0/e/";
 const INGEST_HOST = "mrstreamer.app";
 const CHOICE = "mrstreamer.site-analytics";
+
 /** Words from the private queries, fragments and referrers the run opens with. None may be sent. */
 const PRIVATE = [
   "private-query",
@@ -36,11 +39,14 @@ const PRIVATE = [
   "google.de",
   "example.net",
 ];
+
 /** The session storage key holding the tab's entry codes, and nothing else. */
 const ENTRY = "mrstreamer.site-entry";
 const SITE = "https://mrstreamer.app";
+
 /** posthog-js's cookieless placeholder distinct id. */
 const COOKIELESS = "$posthog_cookieless";
+
 /** The long guide whose measurements the run causes and checks. */
 const MEASURED = "/docs/movies-and-series";
 
@@ -69,34 +75,44 @@ interface Capture {
 
 async function run() {
   const executable = await electronExecutable();
+
   if (process.platform === "linux" && !process.env["DISPLAY"])
     throw new Error("No display. Use xvfb-run -a.");
   const assets = join(marketing, "dist/assets");
+
   const scripts = await Promise.all(
     (await readdir(assets))
       .filter((name) => name.endsWith(".js"))
       .map((name) => readFile(join(assets, name), "utf8")),
   );
+
   const bundle = scripts.find((text) => text.includes(ENDPOINT));
+
   if (!bundle) throw new Error("dist has no production-configured website analytics. See --help.");
+
   if (scripts.some((text) => text.includes("i.posthog.com")))
     throw new Error("The site's script names PostHog's host, past its own route.");
+
   // The routes `vercel deploy --prebuilt` would deploy, before its filesystem phase.
   const { routes } = JSON.parse(
     await readFile(join(marketing, ".vercel/output/config.json"), "utf8"),
   ) as { routes: { src?: string; dest?: string; methods?: string[]; handle?: string }[] };
+
   const before = routes.slice(
     0,
     routes.findIndex((route) => route.handle === "filesystem"),
   );
+
   /** Where the package's first matching route sends `method` `path` off the site, or "site". */
   const routed = (method: string, path: string) => {
     const dest = before.find(
       ({ src, methods }) =>
         src !== undefined && new RegExp(src).test(path) && (!methods || methods.includes(method)),
     )?.dest;
+
     return dest && URL.canParse(dest) ? dest : "site";
   };
+
   const key = /"(phc_[A-Za-z0-9_-]+)"/.exec(bundle)?.[1] ?? "";
   await mkdir(join(root, ".local/verification"), { recursive: true });
   const evidence = await mkdtemp(join(root, ".local/verification/website-analytics-"));
@@ -104,6 +120,7 @@ async function run() {
   const profile = join(scratch, "profile");
   const logs: string[] = [];
   const actions: { action: string; at: string }[] = [];
+
   const observed: Record<string, unknown> = {
     bundleSha256: createHash("sha256").update(bundle).digest("hex"),
     endpointInBundle: ENDPOINT,
@@ -121,6 +138,7 @@ async function run() {
     // The key itself is never written to evidence.
     verificationKey: key === "phc_mrstreamer_verification",
   };
+
   if (
     Object.entries(observed["packagedRoutes"] as Record<string, string>).some(
       ([request, dest]) => dest !== (request === "POST /ingest/i/v0/e/" ? UPSTREAM : "site"),
@@ -138,6 +156,7 @@ async function run() {
   let page: Page | undefined;
   let failure: unknown;
   const act = (action: string) => actions.push({ action, at: new Date().toISOString() });
+
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
@@ -147,6 +166,7 @@ async function run() {
         !name.startsWith("MR_STREAMER_SITE_ANALYTICS_"),
     ),
   );
+
   const launch = (
     binary: string,
     args: string[],
@@ -159,18 +179,24 @@ async function run() {
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     child.on("error", (error) => logs.push(String(error)));
+
     for (const stream of [child.stdout, child.stderr])
       stream?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
+
     return child;
   };
+
   const wait = async (check: () => Promise<boolean> | boolean, what: string, tries = 100) => {
     for (let attempt = 0; attempt < tries; attempt++) {
       if (await Promise.resolve(check()).catch(() => false)) return;
       await delay(100);
     }
+
     throw new Error(`Timed out: ${what}`);
   };
+
   try {
     // A certificate for mrstreamer.app that only this run's browser trusts.
     execFileSync(
@@ -195,6 +221,7 @@ async function run() {
       { stdio: "ignore" },
     );
     const cert = await readFile(join(scratch, "cert.pem"), "utf8");
+
     const capture = createHttpsServer(
       { key: await readFile(join(scratch, "key.pem")), cert },
       (req, res) => {
@@ -215,10 +242,12 @@ async function run() {
             answered: false,
             aborted: false,
           };
+
           captures.push(entry);
           res.on("close", () => {
             if (!entry.answered) entry.aborted = true;
           });
+
           const answer = () => {
             if (res.destroyed) return;
             entry.answered = true;
@@ -228,18 +257,23 @@ async function run() {
             });
             res.end('{"status":"Ok"}');
           };
+
           if (!hold) answer();
         });
       },
     );
+
     const proxy = createHttpServer((_req, res) => res.writeHead(403).end());
     proxy.on("connect", (req, socket, head) => {
       if (req.url !== `${INGEST_HOST}:443`) {
         refusedTunnels.push(req.url ?? "");
         socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+
         return;
       }
+
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+
       if (head.length) socket.unshift(head);
       capture.emit("connection", socket);
     });
@@ -298,6 +332,7 @@ app.on('window-all-closed', () => app.quit());
 `,
     );
     const browserPort = await freePort();
+
     const open = async (start: string) => {
       browser = launch(
         executable,
@@ -324,6 +359,7 @@ app.on('window-all-closed', () => app.quit());
       await send("Page.enable");
       const identity = await send("Browser.getBrowserCommandLine");
       const args = record(identity) ? identity["arguments"] : undefined;
+
       if (
         !Array.isArray(args) ||
         ![shell, `--user-data-dir=${profile}`, `--remote-debugging-port=${browserPort}`].every(
@@ -332,34 +368,45 @@ app.on('window-all-closed', () => app.quit());
       )
         throw new Error("CDP belongs to another browser.");
     };
+
     const live = () => {
       if (!page) throw new Error("No page.");
+
       return page;
     };
+
     const send = async (method: string, params: Record<string, unknown> = {}) => {
       const reply = await live().send(method, params);
+
       if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
       return reply.result;
     };
+
     const evaluate = <T>(expression: string) => live().evaluate<T>(expression);
+
     const shot = async (name: string) => {
       await evaluate(
         "document.fonts.ready.then(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))",
       );
       await delay(400);
       const image = await send("Page.captureScreenshot", { format: "png" });
+
       if (!record(image) || typeof image["data"] !== "string") throw new Error("No screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(image["data"], "base64"));
     };
+
     const switchText = (place: string) =>
       evaluate<string>(
         `(() => { const c = document.querySelector('[data-site-analytics="${place}"]').cloneNode(true); c.querySelectorAll('[hidden]').forEach(e => e.remove()); return c.textContent.replace(/\\s+/g, ' ').trim(); })()`,
       );
+
     /** Scrolls an element into view, then presses it with the pointer where it is drawn. */
     const click = async (selector: string) => {
       const point = await evaluate<{ x: number; y: number; hit: boolean } | null>(
         `(() => { const el = [...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.getClientRects().length && getComputedStyle(e).display !== 'none' && !e.hidden); if (!el) return null; el.scrollIntoView({ block: 'center' }); const b = el.getBoundingClientRect(); const x = b.x + b.width / 2, y = b.y + b.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, hit: hit === el || el.contains(hit) }; })()`,
       );
+
       if (!point?.hit) throw new Error(`No visible pointer target: ${selector}`);
       act(`Click ${selector}`);
       // Records which element the page saw clicked, to prove the pointer reached it.
@@ -367,6 +414,7 @@ app.on('window-all-closed', () => app.quit());
         "window.verifyClicked = ''; document.addEventListener('click', e => { window.verifyClicked = e.target.closest('a, button')?.textContent.trim() ?? '?'; }, { capture: true, once: true })",
       );
       await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+
       for (const type of ["mousePressed", "mouseReleased"])
         await send("Input.dispatchMouseEvent", {
           type,
@@ -375,23 +423,29 @@ app.on('window-all-closed', () => app.quit());
           button: "left",
           clickCount: 1,
         });
+
       const clicked = await evaluate<string>(
         "typeof window.verifyClicked === 'string' ? window.verifyClicked : 'a link to a new page'",
       ).catch(() => "navigated");
+
       if (!clicked) throw new Error(`The page saw no click on ${selector}`);
       act(`Page saw a click on "${clicked}"`);
     };
+
     /** Scrolls an element into the middle of the view without pressing it. */
     const reveal = (selector: string) =>
       evaluate(
         `document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`,
       );
+
     const scrollToEnd = async () => {
       act("Scroll with the mouse wheel to the foot of the page");
+
       for (let step = 0; step < 60; step++) {
         const end = await evaluate<boolean>(
           "innerHeight + scrollY >= document.documentElement.scrollHeight - 2",
         );
+
         if (end) return;
         await send("Input.dispatchMouseEvent", {
           type: "mouseWheel",
@@ -403,29 +457,38 @@ app.on('window-all-closed', () => app.quit());
         await delay(120);
       }
     };
+
     const pageOf = (entry: Capture) =>
       String(
         (JSON.parse(entry.raw) as { properties: { $pathname?: unknown } }).properties.$pathname,
       );
+
     /** Nothing at all from `pathname` since `from`: its page was opened, or turned, off. */
     const silent = (from: number, pathname: string, what: string) => {
       const sent = captures.slice(from).filter((entry) => pageOf(entry) === pathname);
+
       if (sent.length) throw new Error(`${what}: ${sent.length} request(s) from ${pathname}.`);
     };
+
     const storage = () =>
       evaluate<Record<string, string>>("Object.fromEntries(Object.entries(localStorage))");
+
     const session = () =>
       evaluate<Record<string, string>>("Object.fromEntries(Object.entries(sessionStorage))");
+
     /** The entry codes on the newest `event` from `pathname` since `from`. */
     const entryOf = (from: number, pathname: string, event = "$pageview") => {
       const found = captures
         .slice(from)
         .filter((c) => pageOf(c) === pathname && c.raw.includes(`"event":"${event}"`))
         .at(-1);
+
       if (!found) return undefined;
       const { properties } = JSON.parse(found.raw) as { properties: Record<string, unknown> };
+
       return [properties["entry_source"], properties["entry_medium"], properties["entry_campaign"]];
     };
+
     /** Waits for `event` from `pathname` since `from` and requires its entry codes. */
     const expectEntry = async (
       from: number,
@@ -435,15 +498,19 @@ app.on('window-all-closed', () => app.quit());
     ) => {
       await wait(() => entryOf(from, pathname, event) !== undefined, `${event} on ${pathname}`);
       const sent = entryOf(from, pathname, event);
+
       if (JSON.stringify(sent) !== JSON.stringify(codes))
         throw new Error(`${event} on ${pathname} entered as ${JSON.stringify(sent)}.`);
+
       return sent;
     };
+
     /** Nothing new arrives, except the leave and vitals of a page that was already counting. */
     const quiet = async (from: number, what: string) => {
       await delay(1500);
       // The page holds no id, so a leave is matched to an earlier page view by its address.
       const earlier = new Set(captures.slice(0, from).map(pageOf));
+
       const unexpected = captures
         .slice(from)
         .filter(
@@ -453,9 +520,11 @@ app.on('window-all-closed', () => app.quit());
               earlier.has(pageOf(entry))
             ),
         );
+
       if (unexpected.length)
         throw new Error(`${what}: ${unexpected.length} unexpected request(s).`);
     };
+
     const narrow = () =>
       send("Emulation.setDeviceMetricsOverride", {
         width: 390,
@@ -463,12 +532,16 @@ app.on('window-all-closed', () => app.quit());
         deviceScaleFactor: 1,
         mobile: true,
       });
+
     const wide = () => send("Emulation.clearDeviceMetricsOverride");
+
     const fits = async (name: string) => {
       const size = await evaluate<{ width: number; content: number }>(
         "({ width: innerWidth, content: document.documentElement.scrollWidth })",
       );
+
       if (size.content > size.width + 1) throw new Error(`${name} overflows at ${size.width}px.`);
+
       return size;
     };
 
@@ -477,6 +550,7 @@ app.on('window-all-closed', () => app.quit());
     await open("/?campaign=private-query#private-fragment");
     await wait(() => captures.length >= 1, "page view");
     observed["freshFooter"] = await switchText("footer");
+
     if (observed["freshFooter"] !== "Site analytics: on. Turn off What's counted")
       throw new Error(`Fresh footer: ${String(observed["freshFooter"])}`);
     observed["freshStorage"] = await storage();
@@ -484,27 +558,33 @@ app.on('window-all-closed', () => app.quit());
     observed["homeOpenedHidden"] = await evaluate<boolean>(
       "performance.getEntriesByType('visibility-state').some(e => e.name === 'hidden')",
     );
+
     if (Object.keys(observed["freshStorage"] as object).length)
       throw new Error("Fresh visit stored something.");
     const os = await evaluate<string>("document.documentElement.dataset.os ?? 'any'");
     observed["detectedSystem"] = os;
     await scrollToEnd();
     const homeSections = ["tricks", "screens", "what-you-need", "faq", "downloads"];
+
     const reachedSections = () =>
       captures.flatMap((c) => {
         if (!c.raw.includes('"feature_section_viewed"')) return [];
         const body: unknown = JSON.parse(c.raw);
+
         if (typeof body !== "object" || body === null || !("properties" in body))
           return [undefined];
         const properties = body.properties;
+
         return [
           typeof properties === "object" && properties !== null && "feature_name" in properties
             ? properties.feature_name
             : undefined,
         ];
       });
+
     await wait(() => reachedSections().length >= homeSections.length, "home sections", 50);
     const reached = reachedSections();
+
     if (
       reached.length !== homeSections.length ||
       homeSections.some((name) => !reached.includes(name))
@@ -519,8 +599,10 @@ app.on('window-all-closed', () => app.quit());
     observed["homeNarrow"] = await fits("Home");
     await scrollToEnd();
     await shot("home-footer-on-390");
+
     const geometry =
       "({ scrollY, innerHeight, clientHeight: document.documentElement.clientHeight, scrollHeight: document.documentElement.scrollHeight })";
+
     observed["homeGeometry390"] = await evaluate(geometry);
 
     await wide();
@@ -568,6 +650,7 @@ app.on('window-all-closed', () => app.quit());
     );
     await delay(300);
     act("Scroll down twice with the mouse wheel");
+
     for (let wheel = 0; wheel < 2; wheel++) {
       await send("Input.dispatchMouseEvent", {
         type: "mouseWheel",
@@ -578,6 +661,7 @@ app.on('window-all-closed', () => app.quit());
       });
       await delay(300);
     }
+
     // The shares the page should send, from the same geometry posthog-js reads.
     observed["measuredDepthExpected"] = await evaluate<{ scroll: number; content: number }>(
       "(() => { const r = document.documentElement, y = Math.ceil(scrollY); return { scroll: Math.round(y / Math.ceil(r.scrollHeight - r.clientHeight) * 100) / 100, content: Math.round(Math.ceil(scrollY + r.clientHeight) / Math.ceil(r.scrollHeight) * 100) / 100 }; })()",
@@ -607,6 +691,7 @@ app.on('window-all-closed', () => app.quit());
       "document.referrer.startsWith('https://github.com/')",
     );
     entries["taggedSessionStorage"] = await session();
+
     if (
       JSON.stringify(entries["taggedSessionStorage"]) !==
       JSON.stringify({
@@ -672,11 +757,13 @@ app.on('window-all-closed', () => app.quit());
     );
     await scrollToEnd();
     await shot("guide-footer-on-1280");
+
     // An earlier page's leave and vitals keep alive past turning off, so only the guide's count.
     const held = () =>
       captures
         .slice(beforeHeld)
         .filter((c) => pageOf(c) === "/docs/subscriptions" && !c.raw.includes('"$pageleave"'));
+
     const atOff = () => captures.length;
     await click('[data-site-analytics="footer"] button');
     const turnedOff = atOff();
@@ -688,9 +775,11 @@ app.on('window-all-closed', () => app.quit());
     }));
     observed["offFooter"] = await switchText("footer");
     observed["offStorage"] = await storage();
+
     if ((observed["offStorage"] as Record<string, string>)[CHOICE] !== "off")
       throw new Error("Off was not stored.");
     observed["offSessionStorage"] = await session();
+
     if (Object.keys(observed["offSessionStorage"] as object).length)
       throw new Error("Turning off left the tab's entry.");
     await narrow();
@@ -711,11 +800,13 @@ app.on('window-all-closed', () => app.quit());
 
     // 3. A restarted browser keeps the stored off.
     act("Restart the browser on the same profile");
+
     if (browser) await stop(browser, page);
     page?.close();
     await open("/");
     await quiet(afterOff, "After restart with off stored");
     observed["restartFooter"] = await switchText("footer");
+
     if (observed["restartFooter"] !== "Site analytics: off. Turn on What's counted")
       throw new Error(`Restart footer: ${String(observed["restartFooter"])}`);
 
@@ -742,6 +833,7 @@ app.on('window-all-closed', () => app.quit());
     // The switch sits in the policy's collapsed first section: open it as a reader does.
     await click("#information-we-collect");
     observed["policySwitch"] = await switchText("policy");
+
     if (observed["policySwitch"] !== "Website analytics are on in this browser. Turn off")
       throw new Error(`Policy switch: ${String(observed["policySwitch"])}`);
     await narrow();
@@ -775,10 +867,12 @@ app.on('window-all-closed', () => app.quit());
       "held guide view",
     );
     const opened = Date.now();
+
     const timed = () =>
       captures
         .slice(beforeDeadline)
         .filter((c) => pageOf(c) === "/docs/live-tv" && !c.raw.includes('"$pageleave"'));
+
     await wait(() => timed().every((c) => c.aborted), "requests past their deadline", 130);
     hold = false;
     observed["deadline"] = {
@@ -786,6 +880,7 @@ app.on('window-all-closed', () => app.quit());
       allAborted: timed().every((c) => c.aborted),
       waitedMs: Date.now() - opened,
     };
+
     if ((observed["deadline"] as { waitedMs: number }).waitedMs < 8_000)
       throw new Error("Held requests ended before their deadline.");
 
@@ -802,16 +897,20 @@ app.on('window-all-closed', () => app.quit());
     const counted = (from: number, event: string, value: string) =>
       captures.slice(from).filter((c) => c.raw.includes(`"${event}"`) && c.raw.includes(value))
         .length;
+
     const opensOnce = async (from: number, event: string, value: string, summary: string) => {
       await delay(1_000);
+
       if (counted(from, event, value) !== 0) throw new Error(`Closed ${value} counted`);
       await click(summary);
       await wait(() => counted(from, event, value) === 1, `${value} counted once open`);
       await click(summary);
       await click(summary);
       await delay(1_000);
+
       if (counted(from, event, value) !== 1) throw new Error(`Reopened ${value} counted again`);
     };
+
     const second = await evaluate<string>("document.querySelectorAll('.section h2')[1].id");
     await opensOnce(
       releasesFrom,
@@ -863,7 +962,9 @@ app.on('window-all-closed', () => app.quit());
       storage:
         "Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Blocked', 'SecurityError'); } });",
     };
+
     const refusing = captures.length;
+
     for (const [name, script] of Object.entries(refusals)) {
       act(`Open /about from a Bing search, keeping an entry before the ${name} refusal`);
       const kept = captures.length;
@@ -887,6 +988,7 @@ app.on('window-all-closed', () => app.quit());
       await quiet(before, name);
       observed[`${name}Footer`] = await switchText("footer");
       observed[`${name}SessionStorage`] = await session();
+
       if (Object.keys(observed[`${name}SessionStorage`] as object).length)
         throw new Error(`${name} refusal left the tab's entry.`);
       observed[`${name}Emulated`] = await evaluate(
@@ -894,23 +996,28 @@ app.on('window-all-closed', () => app.quit());
       );
       await scrollToEnd();
       await shot(`home-footer-${name}-1280`);
+
       if (record(added))
         await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: added["identifier"] });
     }
+
     act("Open /about to leave the last refused page");
     await send("Page.navigate", { url: `${origin}/about` });
     await delay(1500);
     silent(refusing, "/", "Refused pages");
+
     if (
       !String(observed["gpcFooter"]).includes("asks sites not to track") ||
       !String(observed["dntFooter"]).includes("asks sites not to track")
     )
       throw new Error("GPC or DNT footer is wrong.");
+
     if (observed["storageFooter"] !== "Site analytics: off. What's counted")
       throw new Error("Storage footer is wrong.");
 
     // 8. Every request against the allowlist.
     const browserUserAgent = await evaluate<string>("navigator.userAgent");
+
     const allowed: Record<string, readonly string[]> = {
       $pageview: ["route", "entry_source", "entry_medium", "entry_campaign"],
       $pageleave: [
@@ -938,6 +1045,7 @@ app.on('window-all-closed', () => app.quit());
       faq_question_viewed: ["faq_question", "via"],
       changelog_viewed: ["version"],
     };
+
     const events = captures.map((entry) => {
       if (
         entry.method !== "POST" ||
@@ -946,12 +1054,16 @@ app.on('window-all-closed', () => app.quit());
         routed(entry.method, entry.path) !== UPSTREAM
       )
         throw new Error(`Unexpected request ${entry.method} ${entry.host}${entry.path}`);
+
       if (entry.referer || entry.cookie) throw new Error("A request carried a Referer or cookie.");
+
       if (PRIVATE.some((word) => entry.raw.includes(word)))
         throw new Error("A private query or fragment leaked.");
       const body: unknown = JSON.parse(entry.raw);
+
       if (!record(body) || !record(body["properties"])) throw new Error("Malformed body.");
       const { api_key, event, distinct_id, properties, ...rest } = body;
+
       if (
         Object.keys(rest).length ||
         api_key !== key ||
@@ -959,6 +1071,7 @@ app.on('window-all-closed', () => app.quit());
         distinct_id !== COOKIELESS
       )
         throw new Error(`Body outside the allowlist: ${Object.keys(body).join(",")}`);
+
       const {
         source,
         $process_person_profile,
@@ -971,6 +1084,7 @@ app.on('window-all-closed', () => app.quit());
         $lib_custom_api_host,
         ...fields
       } = properties;
+
       if (
         $lib_custom_api_host !== `https://${INGEST_HOST}/ingest` ||
         source !== "website" ||
@@ -979,9 +1093,11 @@ app.on('window-all-closed', () => app.quit());
         $cookieless_mode !== true
       )
         throw new Error("Fixed properties missing.");
+
       // The user agent is the one the request's own header already carries, and nothing more.
       if ($raw_user_agent !== browserUserAgent || $raw_user_agent !== entry.userAgent)
         throw new Error("$raw_user_agent differs from the browser's User-Agent header.");
+
       if (
         typeof $pathname !== "string" ||
         !/^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/.test($pathname) ||
@@ -991,10 +1107,12 @@ app.on('window-all-closed', () => app.quit());
       )
         throw new Error(`Address outside the site's fixed routes: ${String($current_url)}`);
       const names = allowed[event];
+
       if (!names || Object.keys(fields).some((name) => !names.includes(name)))
         throw new Error(
           `Property outside the allowlist on ${event}: ${Object.keys(fields).join(",")}`,
         );
+
       // Page views and download clicks carry all three entry codes, each a short fixed code.
       if (
         names.includes("entry_source") &&
@@ -1004,12 +1122,14 @@ app.on('window-all-closed', () => app.quit());
         )
       )
         throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
+
       // Measurements are bounded numbers in their units, and each leave carries all three.
       const share = (value: unknown) =>
         typeof value === "number" &&
         value >= 0 &&
         value <= 1 &&
         Math.round(value * 100) / 100 === value;
+
       if (
         event === "$pageleave" &&
         (fields["$prev_pageview_pathname"] !== $pathname ||
@@ -1017,10 +1137,12 @@ app.on('window-all-closed', () => app.quit());
           !share(fields["$prev_pageview_max_content_percentage"]))
       )
         throw new Error(`Scroll depth malformed: ${JSON.stringify(fields)}`);
+
       if (event === "$web_vitals") {
         const vitals = Object.entries(fields);
         const [name, value] = vitals[0] ?? [];
         const whole = name === "$web_vitals_CLS_value" ? 1000 : 1;
+
         if (
           vitals.length !== 1 ||
           typeof value !== "number" ||
@@ -1031,6 +1153,7 @@ app.on('window-all-closed', () => app.quit());
         )
           throw new Error(`Vital malformed: ${JSON.stringify(fields)}`);
       }
+
       return {
         event,
         pathname: $pathname,
@@ -1041,10 +1164,13 @@ app.on('window-all-closed', () => app.quit());
         aborted: entry.aborted,
       };
     });
+
     observed["events"] = events;
+
     // The measurements PostHog's health checks look for, with values the run caused.
     const leaveOf = (pathname: string) =>
       events.find((e) => e.event === "$pageleave" && e.pathname === pathname)?.properties;
+
     const vitalOf = (pathname: string, name: string) =>
       events
         .flatMap((e) =>
@@ -1053,6 +1179,7 @@ app.on('window-all-closed', () => app.quit());
             : [],
         )
         .filter((value) => typeof value === "number");
+
     const expected = observed["measuredDepthExpected"] as { scroll: number; content: number };
     observed["measurements"] = {
       homeLeave: leaveOf("/"),
@@ -1066,11 +1193,13 @@ app.on('window-all-closed', () => app.quit());
     };
     const measured = leaveOf(MEASURED);
     const releases = leaveOf("/releases");
+
     if (
       releases?.["$prev_pageview_max_scroll_percentage"] !== 1 ||
       releases["$prev_pageview_max_content_percentage"] !== 1
     )
       throw new Error("Release notes were scrolled to their foot but their leave says otherwise.");
+
     if (
       measured?.["$prev_pageview_max_scroll_percentage"] !== expected.scroll ||
       measured["$prev_pageview_max_content_percentage"] !== expected.content ||
@@ -1078,9 +1207,12 @@ app.on('window-all-closed', () => app.quit());
       expected.scroll >= 1
     )
       throw new Error(`Guide scroll depth differs from ${JSON.stringify(expected)}.`);
+
     if (!vitalOf(MEASURED, "LCP").length) throw new Error("No LCP after the first click.");
+
     if (!vitalOf(MEASURED, "CLS").some((value) => Number(value) > 0))
       throw new Error("The induced layout shift was not measured.");
+
     if (!vitalOf(MEASURED, "INP").some((value) => Number(value) >= 150))
       throw new Error("The slow interaction was not measured.");
     observed["cookielessBodies"] = events.length;
@@ -1095,29 +1227,38 @@ app.on('window-all-closed', () => app.quit());
     ];
   } catch (error) {
     failure = error;
+
     const image = await page
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
+
     if (record(image?.result) && typeof image.result["data"] === "string")
       await writeFile(join(evidence, "failure.png"), Buffer.from(image.result["data"], "base64"));
   } finally {
     const errors: string[] = [];
+
     for (const child of [browser, server]) {
       if (!child) continue;
+
       try {
         await stop(child, child === browser ? page : undefined);
       } catch (error) {
         errors.push(String(error));
       }
     }
+
     page?.close();
+
     for (const owned of servers) owned.close();
+
     const exited = (child: ChildProcess | undefined) =>
       !child || child.exitCode !== null || child.signalCode !== null;
+
     if (exited(browser) && exited(server))
       await rm(scratch, { recursive: true, force: true, maxRetries: 5 }).catch((error) =>
         errors.push(String(error)),
       );
+
     if (errors.length) failure ??= new Error(errors.join("\n"));
     await writeFile(join(evidence, "session.log"), logs.join(""));
     await writeFile(
@@ -1153,5 +1294,6 @@ app.on('window-all-closed', () => app.quit());
     );
     console.log(`${failure ? "FAIL" : "PASS"} website analytics: ${evidence}`);
   }
+
   if (failure) throw failure;
 }

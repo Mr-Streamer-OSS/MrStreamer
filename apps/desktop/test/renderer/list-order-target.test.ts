@@ -59,9 +59,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -80,6 +82,7 @@ async function sameChannelsPage(shown: ChannelList) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await client.fetchQuery(queries.preferences());
   const lists = [list("alpha", "Alpha", ["1", "2"]), list("beta", "Beta", ["1", "2"])];
+
   const viewing: Viewing = {
     favourites: [own("1"), own("2")],
     recent: [],
@@ -87,6 +90,7 @@ async function sameChannelsPage(shown: ChannelList) {
     marked: [],
     sequence: 1,
   };
+
   client.setQueryData(["subscriptions"], [subscription]);
   client.setQueryData(queries.categories().queryKey, [
     {
@@ -124,20 +128,24 @@ async function sameChannelsPage(shown: ChannelList) {
     stopLists();
     mounted.unmount();
   };
+
   await settled();
 
   const button = (label: string) => {
     const buttons = [...container.querySelectorAll("button")];
+
     return (
       buttons.find((each) => each.getAttribute("aria-label") === label) ??
       buttons.find((each) => each.textContent?.trim().startsWith(label))
     );
   };
+
   const click = (target: Element | null | undefined, what: string) =>
     act(async () => {
       if (!target) throw new Error(`No ${what}.`);
       target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     });
+
   return {
     lists,
     viewing,
@@ -183,6 +191,7 @@ describe("a new order and the list it was made in", () => {
       { list: "beta", revision: 2, order: ["beta-2", "beta-1"] },
     ]);
     const [alpha] = page.lists;
+
     if (!alpha) throw new Error("Alpha is there");
     await act(async () => answer.resolve([alpha, list("beta", "Beta", ["2", "1"], 3)]));
     await settled();
@@ -243,6 +252,7 @@ describe("a new order and the list it was made in", () => {
 
     // Alpha is deleted meanwhile, as another change of the lists says: Live TV shows every channel.
     const [, beta] = page.lists;
+
     if (!beta) throw new Error("Beta is there");
     ipc.always("customLists.get", [beta]);
     await act(async () => ipc.emit("customLists.changed", null));

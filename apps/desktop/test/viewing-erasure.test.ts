@@ -29,12 +29,15 @@ import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./suppo
 /** Holds the next write before its actual SQLite transaction starts. */
 function writeGate() {
   let next: { arrived: () => void; released: Promise<void> } | null = null;
+
   return {
     wait: Effect.suspend(() => {
       const held = next;
       next = null;
+
       if (!held) return Effect.void;
       held.arrived();
+
       return Effect.promise(() => held.released);
     }),
     hold() {
@@ -42,6 +45,7 @@ function writeGate() {
       const released = Promise.withResolvers<void>();
       next = { arrived: arrived.resolve, released: released.promise };
       onTestFinished(() => released.resolve());
+
       return { arrived: arrived.promise, release: () => released.resolve() };
     },
   };
@@ -68,10 +72,12 @@ async function erasureApp() {
       Layer.provide(databaseLayer(dataDir)),
     ),
   );
+
   const viewingStore = await stores.runPromise(ViewingStore);
   const watchlistStore = await stores.runPromise(WatchlistStore);
   const viewingGate = writeGate();
   const watchlistGate = writeGate();
+
   const record = runtimeFor(
     ViewingRecord.layer.pipe(
       Layer.provide(
@@ -97,6 +103,7 @@ async function erasureApp() {
       ),
     ),
   );
+
   const saving = runtimeFor(
     Watchlist.layer.pipe(
       Layer.provide(
@@ -111,8 +118,10 @@ async function erasureApp() {
       ),
     ),
   );
+
   const viewing = await promised(record, ViewingRecord);
   const watchlist = await promised(saving, Watchlist);
+
   return {
     dataDir,
     runtime,
@@ -132,19 +141,24 @@ async function erasureApp() {
       const paused = held.hold();
       const viewing = Context.get(services, ViewingRecord);
       const refused = new Failed({ error: { kind: "unexpected", detail: "Erase refused." } });
+
       const failing = Context.add(services, ViewingRecord, {
         ...viewing,
         erase: () => Effect.andThen(held.wait, Effect.fail(refused)),
       });
+
       const removal = await promised(
         runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(failing)))),
         Roster,
       );
+
       const done = removal.remove(b, true).then(
         () => null,
         (error: unknown) => error,
       );
+
       await paused.arrived;
+
       return { done, release: paused.release, refused };
     },
   };
@@ -154,12 +168,14 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
   it("keeps a favourite erased when its older write resumes", async () => {
     const app = await erasureApp();
     const held = app.viewingGate.hold();
+
     const command = app.viewing
       .setFavourite("late-favourite", { subscriptionId: app.b, id: "1" }, true)
       .then(
         () => null,
         (error: unknown) => error,
       );
+
     await held.arrived;
     await app.roster.remove(app.b, true);
     held.release();
@@ -175,10 +191,12 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
   it("keeps a title erased when its older watchlist save resumes", async () => {
     const app = await erasureApp();
     const held = app.watchlistGate.hold();
+
     const command = app.watchlist.save("movie", { subscriptionId: app.b, id: "91001" }).then(
       () => null,
       (error: unknown) => error,
     );
+
     await held.arrived;
     await app.roster.remove(app.b, true);
     held.release();
@@ -194,8 +212,10 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
       const app = await erasureApp();
       const held = app.viewingGate.hold();
       const channel = { subscriptionId: app.b, id: "1" };
+
       const write = () => {
         if (kind === "history") return app.viewing.recordWatch("late-watch", channel);
+
         if (kind === "progress")
           return app.viewing.recordProgress(
             "late-progress",
@@ -208,6 +228,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
             5400,
             1,
           );
+
         return app.viewing.markEpisode(
           "late-mark",
           {
@@ -221,10 +242,12 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
           true,
         );
       };
+
       const command = write().then(
         () => null,
         (error: unknown) => error,
       );
+
       await held.arrived;
       await app.roster.remove(app.b, true);
       held.release();
@@ -251,10 +274,12 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
   it("refuses a shared-title save wholly when one of its accounts was erased", async () => {
     const app = await erasureApp();
     const held = app.watchlistGate.hold();
+
     const command = app.watchlist.save("movie", { subscriptionId: app.a, id: "91001" }).then(
       () => null,
       (error: unknown) => error,
     );
+
     await held.arrived;
     await app.roster.remove(app.b, true);
     held.release();
@@ -268,11 +293,13 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
     const app = await erasureApp();
     const viewing = app.viewingGate.hold();
     const saving = app.watchlistGate.hold();
+
     const favourite = app.viewing.setFavourite(
       "other-favourite",
       { subscriptionId: app.a, id: "1" },
       true,
     );
+
     const title = app.watchlist.save("movie", { subscriptionId: app.a, id: "91000" });
     await Promise.all([viewing.arrived, saving.arrived]);
     await app.roster.remove(app.b, true);
@@ -289,14 +316,17 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
     async (kind) => {
       const app = await erasureApp();
       const held = (kind === "viewing" ? app.viewingGate : app.watchlistGate).hold();
+
       const write = () =>
         kind === "viewing"
           ? app.viewing.setFavourite("retry-favourite", { subscriptionId: app.b, id: "1" }, true)
           : app.watchlist.save("movie", { subscriptionId: app.b, id: "91001" });
+
       const command = write().then(
         () => null,
         (error: unknown) => error,
       );
+
       await held.arrived;
       const removal = await app.removing();
       held.release();
@@ -334,10 +364,12 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
     const app = await erasureApp();
     const entry = await app.watchlist.save("movie", { subscriptionId: app.b, id: "91001" });
     const held = app.watchlistGate.hold();
+
     const command = app.watchlist.remove(entry).then(
       () => null,
       (error: unknown) => error,
     );
+
     await held.arrived;
     await app.roster.remove(app.b, false);
     held.release();

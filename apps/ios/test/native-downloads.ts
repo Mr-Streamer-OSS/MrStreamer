@@ -194,8 +194,10 @@ function initial() {
       background.die();
       background.down = true;
       const task = background.task;
+
       if (task) {
         task.quit = true;
+
         if (task.waiting) {
           clearTimeout(task.waiting);
           task.waiting = null;
@@ -203,14 +205,18 @@ function initial() {
         } else task.controller.abort();
         await task.ended;
       }
+
       for (const stray of background.strays) stray.abort();
+
       while (background.strays.size > 0) await new Promise((done) => setTimeout(done, 5));
     },
     /** Pauses the task under way, keeping resume data, as a stream's lease does. */
     async pauseAll() {
       const task = background.task;
+
       if (!task) return;
       task.stop = "pause";
+
       if (task.waiting) {
         clearTimeout(task.waiting);
         task.waiting = null;
@@ -221,6 +227,7 @@ function initial() {
     /** The connection of the request under way breaks, as a provider or a network does. */
     async breakConnection() {
       const task = background.task;
+
       if (!task) return;
       task.controller.abort();
       await task.ended;
@@ -260,6 +267,7 @@ function initial() {
         resetting: false,
         deferred: null,
       });
+
       for (const each of [
         background.sources,
         background.grants,
@@ -270,6 +278,7 @@ function initial() {
       ]) {
         each.clear();
       }
+
       background.receipts.length = 0;
       background.legacyReceipts.length = 0;
       background.events.length = 0;
@@ -284,6 +293,7 @@ function initial() {
     },
   };
 }
+
 type Background = ReturnType<typeof initial>;
 
 /** What a test controls and reads of the stand-in; one for the test process, across launches. */
@@ -309,6 +319,7 @@ function write(): boolean {
 function record(id: string, grant: Grant, outcome: OutcomeV2, task: Task | null): ReceiptV2 {
   background.sequence++;
   grant.lastSequence = background.sequence;
+
   const receipt: ReceiptV2 = {
     version: 2,
     receipt: fresh("r"),
@@ -321,14 +332,17 @@ function record(id: string, grant: Grant, outcome: OutcomeV2, task: Task | null)
     restarted: grant.restarted,
     outcome,
   };
+
   background.receipts.push(receipt);
   background.events.push(`receipt:${grant.id}:${outcome.kind}`);
   emit("receipt", receipt);
+
   return receipt;
 }
 
 const load = () => {
   const grants = [...background.grants.values()];
+
   return {
     open: grants.filter((grant) => grant.state !== "terminal").length,
     receipts: background.receipts.length,
@@ -344,16 +358,23 @@ function authorized(
   grant: Grant,
 ): "valid" | "source" | "request" | "gone" | "unavailable" {
   if (grant.state === "terminal" || background.removed.has(id)) return "gone";
+
   if (background.fenced.has(grant.sourceId)) return "gone";
   const source = background.sources.get(grant.sourceId);
+
   if (source?.state !== "enabled" || source.generation !== grant.sourceGeneration) return "gone";
+
   if (background.faults.keychainUnavailable) return "unavailable";
   const anchor = background.anchors.get(grant.sourceId);
+
   if (anchor?.epoch !== background.install || anchor.generation !== grant.sourceGeneration) {
     return "source";
   }
+
   const request = background.requests.get(id);
+
   if (request?.sourceGeneration !== grant.sourceGeneration) return "request";
+
   return "valid";
 }
 
@@ -371,9 +392,12 @@ function earliest(sourceId: string) {
 /** Launch recovery, run before anything else after `die`: every stray is cancelled and waited for. */
 function recover() {
   background.down = false;
+
   if (!background.recovering) return;
   background.recovering = false;
+
   for (const stray of background.strays) stray.abort();
+
   // An attempt no task runs any more: cleared, and its authorization queued again.
   for (const [id, grant] of background.grants) {
     if (grant.state === "active" && background.task?.authorization !== id) {
@@ -386,15 +410,21 @@ function recover() {
 /** The one pump: claims the slot for the first runnable authorization in order, before anything else. */
 function pump() {
   const b = background;
+
   if (b.down) return;
   recover();
+
   if (b.deferred) return retryDeferred();
+
   if (b.task || b.admitting || b.strays.size > 0 || b.corrupt || b.unavailable || b.resetting) {
     return;
   }
+
   if (b.barrier.kind === "installed") return;
   const { open, receipts } = load();
+
   if (open + receipts >= 128) return;
+
   const next = [...b.grants]
     .filter(
       ([id, grant]) =>
@@ -407,6 +437,7 @@ function pump() {
         !held(grant.sourceId),
     )
     .toSorted(([, a], [, z]) => a.order - z.order)[0];
+
   if (!next) return;
   const [id, grant] = next;
   b.admitting = id;
@@ -415,24 +446,32 @@ function pump() {
 
 function admit(id: string, grant: Grant) {
   const b = background;
+
   if (b.admitting !== id) return;
   const verdict = authorized(id, grant);
+
   // Unreadable: no request, fresh or resumed, until a later legitimate trigger.
   if (verdict === "unavailable") {
     b.admitting = null;
+
     return;
   }
+
   if (verdict !== "valid") {
     b.admitting = null;
+
     if (verdict === "request") {
       grant.state = "terminal";
       record(id, grant, { kind: "refresh", reason: "secret-missing" }, null);
     } else if (verdict === "source") b.fenced.add(grant.sourceId);
+
     return pump();
   }
+
   const request = b.requests.get(id)!;
   const kept = b.resume.get(grant.id);
   const legacy = b.legacy.get(grant.id);
+
   const resumeData =
     kept &&
     kept.sourceGeneration === grant.sourceGeneration &&
@@ -442,19 +481,24 @@ function admit(id: string, grant: Grant) {
       : legacy?.url === request.url
         ? legacy.data
         : null;
+
   if (resumeData) {
     // Made this authorization's own first; a Keychain that won't take it defers admission.
     if (b.faults.keychainWrite) {
       b.admitting = null;
+
       return;
     }
+
     b.resume.set(grant.id, { ...request, authorization: id, data: resumeData });
     b.legacy.delete(grant.id);
   }
+
   const attempt = fresh("a");
   grant.state = "active";
   grant.attempt = attempt;
   const ended = Promise.withResolvers<void>();
+
   const task: Task = {
     authorization: id,
     attempt,
@@ -470,20 +514,26 @@ function admit(id: string, grant: Grant) {
     resumed: resumeData !== null,
     restarted: grant.restarted,
   };
+
   b.admitting = null;
   b.task = task;
   b.events.push(`start:${grant.id}`);
   // A lower bound, as earliestBeginDate is: never a moment before it, whatever the timer does.
   const begin = earliest(grant.sourceId);
+
   const go = () => {
     const wait = begin - Date.now();
+
     if (wait > 0) {
       task.waiting = setTimeout(go, wait);
+
       return;
     }
+
     task.waiting = null;
     transfer(id, grant, task, request, resumeData ? decode(resumeData) : null);
   };
+
   task.waiting = setTimeout(go, Math.max(0, begin - Date.now()));
 }
 
@@ -495,8 +545,10 @@ const folderOf = (id: string) => join(native.root, "documents", "downloads", id)
 /** A task stopped before its request went out: nothing loaded, its resume data as it was. */
 function settleUnstarted(task: Task) {
   const grant = background.grants.get(task.authorization) ?? null;
+
   const kept =
     grant !== null && background.resume.get(grant.id)?.authorization === task.authorization;
+
   finish(
     task,
     grant,
@@ -512,18 +564,22 @@ function settleUnstarted(task: Task) {
 function finish(task: Task, grant: Grant | null, outcome: OutcomeV2 | null) {
   const b = background;
   const id = task.authorization;
+
   if (!write()) {
     // Its terminal write refused: the authorization stays active with its attempt, for launch
     // recovery to clear and queue again with no receipt.
   } else if (grant && grant.state === "active" && grant.attempt === task.attempt && outcome) {
     grant.attempt = null;
     grant.restarted ||= task.restarted;
+
     const refusedResume =
       task.resumed &&
       grant.fresh === 1 &&
       ((outcome.kind === "refused" && (outcome.status === 412 || outcome.status === 416)) ||
         (outcome.kind === "network" && outcome.code === -3001));
+
     const owned = b.resume.get(grant.id)?.authorization === id || !b.resume.has(grant.id);
+
     if (refusedResume && (b.faults.keychainDelete || !owned)) {
       // The refused bytes can't go: ended, for an explicit Retry, never started again on them.
       grant.state = "terminal";
@@ -538,8 +594,10 @@ function finish(task: Task, grant: Grant | null, outcome: OutcomeV2 | null) {
     } else {
       grant.state = outcome.kind === "paused" ? "paused" : "terminal";
       record(id, grant, outcome, task);
+
       if (grant.state === "terminal") {
         b.requests.delete(id);
+
         if (outcome.kind === "complete" && b.resume.get(grant.id)?.authorization === id) {
           b.resume.delete(grant.id);
         }
@@ -547,6 +605,7 @@ function finish(task: Task, grant: Grant | null, outcome: OutcomeV2 | null) {
     }
   } else if (grant?.attempt === task.attempt) grant.attempt = null;
   b.closes.set(task.sourceId, Date.now());
+
   if (b.task === task) b.task = null;
   b.events.push(`end:${grant?.id ?? "?"}`);
   task.settle();
@@ -568,20 +627,25 @@ function transfer(
     let ranges = false;
     let url = request.url;
     const headers: Record<string, string> = { ...request.headers };
+
     if (resume) {
       url = resume.url;
       headers["Range"] = `bytes=${resume.written}-`;
       headers["If-Range"] = resume.validator;
     }
+
     native.requests.push({ url, range: headers["Range"] ?? null, at: Date.now() });
     native.open++;
     let outcome: OutcomeV2 | null;
+
     try {
       if (resume && !existsSync(resume.part)) {
         throw Object.assign(new Error("The file couldn't be opened."), { code: -3001 });
       }
+
       const response = await fetch(url, { headers, signal: task.controller.signal });
       url = response.url;
+
       if (!response.ok) {
         await response.body?.cancel();
         outcome = { kind: "refused", status: response.status };
@@ -590,6 +654,7 @@ function transfer(
         ranges = response.headers.get("accept-ranges") === "bytes";
         const length = Number(response.headers.get("content-length") ?? NaN);
         const range = /^bytes \d+-\d+\/(\d+)$/.exec(response.headers.get("content-range") ?? "");
+
         const whole =
           response.status === 206
             ? range
@@ -598,23 +663,29 @@ function transfer(
             : Number.isFinite(length)
               ? length
               : null;
+
         if (response.status === 206 && resume) written = resume.written;
         else {
           writeFileSync(part, "");
+
           // The server sent the whole file again, as a changed one does: it starts from zero.
           if (resume) task.restarted = true;
         }
+
         task.expected = whole;
         let checked = false;
+
         for await (const piece of response.body ?? []) {
           if (!checked && whole !== null) {
             checked = true;
+
             if (native.free < whole - written) {
               task.stop = "disk";
               task.controller.abort();
               throw new Error("The disk is full.");
             }
           }
+
           appendFileSync(part, piece);
           written += piece.length;
           task.received = written;
@@ -629,21 +700,26 @@ function transfer(
             resumed: task.resumed,
           });
         }
+
         if (whole !== null && written !== whole) throw new Error("The connection was lost.");
         const published = publishPart(id, grant, part, whole);
+
         if (published === "later") {
           // The Keychain didn't answer: every byte stays, the slot with it, for a later trigger.
           // Its request did end: what waits for that closure goes on.
           native.open--;
           background.deferred = { id, task, part, whole };
           task.settle();
+
           return;
         }
+
         outcome = published;
       }
     } catch (cause) {
       const kept =
         validator !== null && ranges && written > 0 && !task.quit && task.stop !== "disk";
+
       if (kept && authorized(id, grant) === "valid") {
         background.resume.set(grant.id, {
           ...request,
@@ -653,6 +729,7 @@ function transfer(
       } else {
         rmSync(part, { force: true });
       }
+
       const code = (cause as { code?: unknown }).code === -3001 ? -3001 : task.quit ? -999 : -1005;
       outcome =
         task.stop === "disk"
@@ -661,6 +738,7 @@ function transfer(
             ? { kind: "paused", resumable: kept }
             : { kind: "network", code, resumable: kept };
     }
+
     native.open--;
     finish(task, background.grants.get(id) ?? null, outcome);
   })();
@@ -679,25 +757,33 @@ function publishPart(
   const folder = folderOf(grant.id);
   const media = join(folder, `media.${grant.ext}`);
   const verdict = authorized(id, grant);
+
   if (verdict === "unavailable") return "later";
+
   if (verdict !== "valid") {
     rmSync(part, { force: true });
+
     return { kind: "refresh", reason: verdict === "source" ? "source" : "secret-missing" };
   }
+
   if (!existsSync(folder) || !statSync(folder).isDirectory() || existsSync(media)) {
     return { kind: "folder" };
   }
+
   const size = statSync(part).size;
   renameSync(part, media);
+
   return { kind: "complete", size, expected: whole };
 }
 
 /** A deferred publication, tried again on a later trigger. */
 function retryDeferred() {
   const deferred = background.deferred;
+
   if (!deferred) return;
   const grant = background.grants.get(deferred.id) ?? null;
   const published = grant ? publishPart(deferred.id, grant, deferred.part, deferred.whole) : null;
+
   if (published === "later") return;
   background.deferred = null;
   finish(deferred.task, grant, published);
@@ -706,13 +792,16 @@ function retryDeferred() {
 /** Stops the slot's task of `sourceId`, or every task: a pause or a cancel, honoring held endings. */
 function stopTask(task: Task, why: "pause" | "cancel") {
   if (why === "pause") task.stop ??= "pause";
+
   if (task.waiting) {
     // Still waiting for its earliest begin: no request went out.
     clearTimeout(task.waiting);
     task.waiting = null;
     end(() => settleUnstarted(task));
+
     return;
   }
+
   end(() =>
     why === "pause"
       ? setTimeout(() => task.controller.abort(), native.pauseMs)
@@ -723,7 +812,9 @@ function stopTask(task: Task, why: "pause" | "cancel") {
 /** Whether a task ends within one of a stream lease's five-second waits (`native.leaseDeadlines`). */
 function endsForLease(ended: Promise<void>) {
   const deadlines = native.leaseDeadlines;
+
   if (!deadlines) return within(ended, 5_000);
+
   return Promise.race([
     ended.then(() => true),
     new Promise<boolean>((done) => deadlines.push(() => done(false))),
@@ -732,34 +823,42 @@ function endsForLease(ended: Promise<void>) {
 
 async function within(promise: Promise<void>, ms: number) {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const ended = await Promise.race([
     promise.then(() => true),
     new Promise<boolean>((done) => (timer = setTimeout(() => done(false), ms))),
   ]);
+
   clearTimeout(timer);
+
   return ended;
 }
 
 function observe(sourceId: string) {
   const b = background;
   const epoch = b.corrupt || b.unavailable ? "q-process" : b.install;
+
   if (b.corrupt || b.unavailable) {
     const token = `o-blocked-${sourceId}`;
+
     return {
       state: "blocked",
       generation: token,
       expected: { queueEpoch: epoch, expected: token },
     };
   }
+
   const source = b.sources.get(sourceId);
   const anchor = b.anchors.get(sourceId);
   const anchored = anchor?.epoch === b.install && anchor.generation === source?.generation;
   const token = `o-fenced-${source?.generation ?? "none"}-${anchor?.generation ?? "none"}-${b.fenced.has(sourceId)}`;
+
   if (!source) {
     return !anchor && !b.fenced.has(sourceId)
       ? { state: "missing", generation: null, expected: { queueEpoch: epoch, expected: "missing" } }
       : { state: "fenced", generation: token, expected: { queueEpoch: epoch, expected: token } };
   }
+
   if (source.state === "revoked") {
     return {
       state: "revoked",
@@ -767,6 +866,7 @@ function observe(sourceId: string) {
       expected: { queueEpoch: epoch, expected: source.generation },
     };
   }
+
   return anchored && !b.fenced.has(sourceId)
     ? {
         state: "enabled",
@@ -779,9 +879,11 @@ function observe(sourceId: string) {
 /** Deletes a source's whole Keychain service: its anchor, request items and resume data. */
 function clearService(sourceId: string) {
   background.anchors.delete(sourceId);
+
   for (const [id, request] of background.requests) {
     if (request.sourceId === sourceId) background.requests.delete(id);
   }
+
   for (const [download, resume] of background.resume) {
     if (resume.sourceId === sourceId) background.resume.delete(download);
   }
@@ -791,11 +893,14 @@ function clearService(sourceId: string) {
 function endSource(sourceId: string, keeping: string | null) {
   for (const [id, grant] of background.grants) {
     if (grant.sourceId !== sourceId || grant.state === "terminal") continue;
+
     if (grant.sourceGeneration === keeping) continue;
+
     if (grant.state === "reserved") {
       background.grants.delete(id);
       continue;
     }
+
     grant.attempt = null;
     grant.state = "terminal";
     record(id, grant, { kind: "refresh", reason: "source" }, null);
@@ -816,6 +921,7 @@ function snapshot() {
   const b = background;
   const blocked = b.unavailable ? "locked" : b.corrupt ? "corrupt" : "none";
   const token = b.barrier.kind === "none" ? null : b.barrier.token;
+
   return {
     version: 2,
     queueEpoch: b.corrupt || b.unavailable ? "q-process" : b.install,
@@ -846,72 +952,91 @@ function snapshot() {
 
 const gate = () => {
   if (background.unavailable) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
+
   if (background.corrupt) throw refused("ERR_DOWNLOADS_CORRUPT");
 };
 
 const module = {
   async sourceState(sourceId: string) {
     recover();
+
     return observe(sourceId);
   },
 
   async enableSource(command: { sourceId: string; queueEpoch: string; expected: string }) {
     gate();
     const seen = observe(command.sourceId);
+
     if (seen.state === "blocked") throw refused("ERR_DOWNLOADS_KEYCHAIN");
+
     if (
       command.queueEpoch !== seen.expected.queueEpoch ||
       command.expected !== seen.expected.expected
     ) {
       throw refused("ERR_DOWNLOADS_OBSOLETE");
     }
+
     if (seen.state === "enabled") return { generation: seen.generation };
     const generation = fresh("g");
+
     // Not enabled: everything in its service is an older generation's, and goes first.
     if (background.faults.keychainDelete) throw refused("ERR_DOWNLOADS_KEYCHAIN");
     clearService(command.sourceId);
     background.anchors.set(command.sourceId, { epoch: background.install, generation });
+
     if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
     background.sources.set(command.sourceId, { generation, state: "enabled" });
     endSource(command.sourceId, generation);
     background.fenced.delete(command.sourceId);
     pump();
+
     return { generation };
   },
 
   async revokeSource(command: { sourceId: string; queueEpoch: string; expected: string }) {
     recover();
     const seen = observe(command.sourceId);
+
     if (
       command.queueEpoch !== seen.expected.queueEpoch ||
       command.expected !== seen.expected.expected
     ) {
       throw refused("ERR_DOWNLOADS_OBSOLETE");
     }
+
     const source = command.sourceId;
+
     const cancel = () => {
       const task = background.task;
+
       if (task?.sourceId === source) stopTask(task, "cancel");
     };
+
     if (seen.state === "revoked") return { ...fenceOf("already-terminal"), source: seen };
+
     if (write()) {
       background.sources.set(source, { generation: fresh("g"), state: "revoked" });
       endSource(source, null);
       cancel();
+
       // The fence is durable; the revoked source's whole service goes after it.
       if (!background.faults.keychainDelete) clearService(source);
+
       return { ...fenceOf("ledger"), source: observe(source) };
     }
+
     if (background.faults.keychainDelete) throw refused("ERR_DOWNLOADS_KEYCHAIN");
     clearService(source);
     background.fenced.add(source);
     cancel();
+
     return { ...fenceOf("secrets"), source: observe(source) };
   },
 
   async reserve(request: { id: string; ext: string; sourceId: string; sourceGeneration: string }) {
     gate();
     const source = background.sources.get(request.sourceId);
+
     if (
       source?.state !== "enabled" ||
       source.generation !== request.sourceGeneration ||
@@ -919,13 +1044,17 @@ const module = {
     ) {
       throw refused("ERR_DOWNLOADS_OBSOLETE");
     }
+
     const { open, receipts } = load();
+
     // Held ones wait outside the window. The pump admits only below 128 and held ones never end
     // by themselves, so a reservation stops one short of it.
     const waiting = [...background.grants.values()].filter(
       (grant) => grant.state !== "terminal" && !grant.held,
     ).length;
+
     if (waiting >= 32 || open + receipts + 1 >= 128) throw refused("ERR_DOWNLOADS_CAPACITY");
+
     if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
     const authorization = fresh("z");
     background.grants.set(authorization, {
@@ -941,6 +1070,7 @@ const module = {
       attempt: null,
       held: false,
     });
+
     return { authorization };
   },
 
@@ -951,10 +1081,14 @@ const module = {
   }) {
     gate();
     const grant = background.grants.get(request.authorization);
+
     if (!grant || grant.state === "terminal") throw refused("ERR_DOWNLOADS_OBSOLETE");
+
     if (grant.state !== "reserved") return;
+
     if (!existsSync(folderOf(grant.id))) throw refused("ERR_DOWNLOADS_FOLDER");
     const anchor = background.anchors.get(grant.sourceId);
+
     if (anchor?.generation !== grant.sourceGeneration) throw refused("ERR_DOWNLOADS_OBSOLETE");
     background.requests.set(request.authorization, {
       sourceId: grant.sourceId,
@@ -962,11 +1096,13 @@ const module = {
       url: request.url,
       headers: { ...request.headers },
     });
+
     if (!write()) {
       // Never armed: the request item just written goes with it.
       background.requests.delete(request.authorization);
       throw refused("ERR_DOWNLOADS_UNAVAILABLE");
     }
+
     grant.state = "queued";
     pump();
   },
@@ -974,72 +1110,98 @@ const module = {
   async cancelAuthorization(authorization: string, reason: "remove" | "abandon") {
     gate();
     const grant = background.grants.get(authorization);
+
     if (!grant) return fenceOf("already-terminal", authorization);
+
     if (reason === "abandon") {
       if (grant.state !== "reserved") throw refused("ERR_DOWNLOADS_INVALID");
       background.grants.delete(authorization);
       background.requests.delete(authorization);
+
       return { durable: "ledger" };
     }
+
     if (grant.state === "terminal") return fenceOf("already-terminal", authorization);
     background.removed.add(authorization);
+
     if (background.admitting === authorization) background.admitting = null;
     const task = background.task?.authorization === authorization ? background.task : null;
+
     if (write()) {
       grant.state = "terminal";
       grant.attempt = null;
       record(authorization, grant, { kind: "cancelled" }, task);
       background.requests.delete(authorization);
+
       if (background.resume.get(grant.id)?.authorization === authorization) {
         background.resume.delete(grant.id);
       }
+
       if (task) stopTask(task, "cancel");
+
       return fenceOf("ledger", authorization);
     }
+
     if (background.faults.keychainDelete) throw refused("ERR_DOWNLOADS_KEYCHAIN");
     background.requests.delete(authorization);
+
     if (background.resume.get(grant.id)?.authorization === authorization) {
       background.resume.delete(grant.id);
     }
+
     if (task) stopTask(task, "cancel");
+
     return { durable: "secrets", receipts: [], legacy: [] };
   },
 
   async holdAuthorization(authorization: string, held: boolean) {
     gate();
     const grant = background.grants.get(authorization);
+
     if (!grant || grant.state === "terminal") throw refused("ERR_DOWNLOADS_OBSOLETE");
+
     if (grant.held !== held) {
       if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
       grant.held = held;
     }
+
     if (!held) return pump();
+
     // Durable first; then its admission gives way and its transfer pauses.
     if (background.admitting === authorization) {
       background.admitting = null;
       pump();
     }
+
     const task = background.task;
+
     if (task?.authorization === authorization) stopTask(task, "pause");
   },
 
   async arrangeAuthorizations(authorizations: string[]) {
     gate();
+
     if (new Set(authorizations).size !== authorizations.length) {
       throw refused("ERR_DOWNLOADS_INVALID");
     }
+
     const listed = authorizations.flatMap((id) => {
       const grant = background.grants.get(id);
+
       return grant && grant.state !== "terminal" ? [grant] : [];
     });
+
     const places = listed.map((grant) => grant.order).toSorted((a, z) => a - z);
+
     if (listed.every((grant, at) => grant.order === places[at])) return;
+
     if (!write()) throw refused("ERR_DOWNLOADS_UNAVAILABLE");
     listed.forEach((grant, at) => (grant.order = places[at]!));
   },
 
   async drainDownload(id: string) {
     const task = background.task;
+
     if (task && background.grants.get(task.authorization)?.id === id) {
       if (!(await within(task.ended, 10_000))) throw refused("ERR_DOWNLOADS_BUSY");
     }
@@ -1047,38 +1209,52 @@ const module = {
 
   async acquirePlayback(request: { sourceId: string; lease: string }) {
     const { sourceId, lease } = request;
+
     if (background.retired.has(lease)) throw refused("ERR_DOWNLOADS_OBSOLETE");
     const known = background.leases.get(lease);
+
     if (known && known.sourceId !== sourceId) throw refused("ERR_DOWNLOADS_INVALID");
+
     if (known?.state === "granted") return { lease, providerDisconnect: "unobservable" };
     background.leases.set(lease, { sourceId, state: "acquiring" });
+
     if (
       background.admitting &&
       background.grants.get(background.admitting)?.sourceId === sourceId
     ) {
       background.admitting = null;
     }
+
     for (const stray of background.strays) stray.abort();
     const task = background.task?.sourceId === sourceId ? background.task : null;
+
     if (task) {
       stopTask(task, "pause");
+
       if (!(await endsForLease(task.ended))) {
         stopTask(task, "cancel");
+
         if (!(await endsForLease(task.ended))) {
           const now = background.leases.get(lease);
+
           if (now) now.state = "refused";
           throw refused("ERR_DOWNLOADS_UNKNOWN_CLOSURE", "A download's request may still be open.");
         }
       }
     }
+
     while (background.strays.size > 0) await new Promise((done) => setTimeout(done, 5));
     const begin = earliest(sourceId);
+
     while (Date.now() < begin) {
       await new Promise((done) => setTimeout(done, begin - Date.now()));
     }
+
     const now = background.leases.get(lease);
+
     if (!now || background.retired.has(lease)) throw refused("ERR_DOWNLOADS_OBSOLETE");
     now.state = "granted";
+
     return { lease, providerDisconnect: "unobservable" };
   },
 
@@ -1086,27 +1262,34 @@ const module = {
     background.retired.add(lease);
     const known = background.leases.get(lease);
     background.leases.delete(lease);
+
     if (known?.state === "granted") background.closes.set(known.sourceId, Date.now());
     pump();
   },
 
   async reconcile(context: "first-foreground" | "background" | "ordinary") {
     recover();
+
     if (context === "first-foreground" && background.barrier.kind === "none") {
       background.barrier = { kind: "installed", token: fresh("f") };
     }
+
     while (background.strays.size > 0) await new Promise((done) => setTimeout(done, 5));
     pump();
+
     return snapshot();
   },
 
   async finishForegroundReconcile(token: string) {
     const { barrier } = background;
+
     if (barrier.kind === "installed" && barrier.token === token) {
       background.barrier = { kind: "finished", token };
       pump();
+
       return;
     }
+
     if (barrier.kind === "finished" && barrier.token === token) return;
     throw refused("ERR_DOWNLOADS_OBSOLETE");
   },
@@ -1119,32 +1302,44 @@ const module = {
   async resetQueue(scope: { queueEpoch: string; knownSourceIds: string[] }) {
     const b = background;
     b.events.push("reset-attempt");
+
     if (b.resetting) throw refused("ERR_DOWNLOADS_BUSY");
+
     if (!b.corrupt) throw refused("ERR_DOWNLOADS_OBSOLETE");
+
     if (scope.queueEpoch !== "q-process") throw refused("ERR_DOWNLOADS_OBSOLETE");
     b.resetting = true;
     let answered = false;
+
     const operation = (async () => {
       const task = b.task;
+
       if (task) {
         stopTask(task, "cancel");
+
         if (!(await within(task.ended, 10_000))) throw refused("ERR_DOWNLOADS_UNKNOWN_CLOSURE");
       }
+
       if (answered) return null;
       await b.resetHold;
+
       if (b.faults.keychainDelete) throw refused("ERR_DOWNLOADS_KEYCHAIN");
+
       for (const source of scope.knownSourceIds) clearService(source);
       b.legacy.clear();
       b.install = fresh("q");
       b.grants.clear();
       b.sources.clear();
+
       for (const source of scope.knownSourceIds) {
         b.sources.set(source, { generation: fresh("g"), state: "revoked" });
       }
+
       b.corrupt = false;
       b.removed.clear();
       b.fenced.clear();
       b.events.push(answered ? "reset-late" : "reset");
+
       return {
         kind: "reset",
         queueEpoch: b.install,
@@ -1158,13 +1353,18 @@ const module = {
       b.resetting = false;
       pump();
     });
+
     let timer: ReturnType<typeof setTimeout> | undefined;
+
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(refused("ERR_DOWNLOADS_BUSY")), b.resetDeadlineMs);
     });
+
     try {
       const result = await Promise.race([operation, deadline]);
+
       if (!result) throw refused("ERR_DOWNLOADS_BUSY");
+
       return result;
     } finally {
       answered = true;
@@ -1181,17 +1381,20 @@ const module = {
     const legacy = background.legacyReceipts.filter((each) => !gone.has(each.receipt));
     background.legacyReceipts.splice(0, background.legacyReceipts.length, ...legacy);
     const owed = new Set(kept.map((each) => each.authorization));
+
     for (const [id, grant] of background.grants) {
       if (grant.state === "terminal" && !owed.has(id) && background.task?.authorization !== id) {
         background.grants.delete(id);
       }
     }
+
     pump();
   },
 
   async forgetResume(id: string) {
     background.legacy.delete(id);
     const task = background.task;
+
     if (task && background.grants.get(task.authorization)?.id === id) return;
     background.resume.delete(id);
   },
@@ -1204,11 +1407,15 @@ const module = {
     const listeners = background.listeners.get(event) ?? new Set();
     listeners.add(listener);
     background.listeners.set(event, listeners);
+
     return { remove: () => listeners.delete(listener) };
   },
 };
 
 const host: { expo?: { modules?: Record<string, unknown> } } = globalThis;
+
 host.expo ??= {};
+
 host.expo.modules ??= {};
+
 host.expo.modules["BackgroundDownloads"] = module;

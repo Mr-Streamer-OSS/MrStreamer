@@ -18,6 +18,7 @@ interface Button {
   readonly text: string;
   readonly onPress?: (typed?: string) => void;
 }
+
 interface Shown {
   readonly title: string;
   readonly message?: string;
@@ -25,6 +26,7 @@ interface Shown {
   /** What a prompt shows typed in it. */
   readonly typed?: string;
 }
+
 interface Sheet {
   readonly title: string;
   readonly options: readonly string[];
@@ -45,9 +47,11 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => {
   const { createElement, useEffect } = await import("react");
   const { box, reactNative } = await import("./react-native.ts");
+
   return {
     ...reactNative,
     View: ({
@@ -57,6 +61,7 @@ vi.mock("react-native", async () => {
       onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
     }) => {
       useEffect(() => onLayout?.({ nativeEvent: { layout: { width: 390, height: 600 } } }), []);
+
       return box(props);
     },
     /** A button pressed by a click and held by a context menu. */
@@ -124,20 +129,26 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-video", () => ({ VideoView: () => null, createVideoPlayer: () => ({}) }));
+
 vi.mock("expo-router", () => ({
   router: {
     push: (href: string) => void scenario.did.push(`push ${href}`),
@@ -148,12 +159,15 @@ vi.mock("expo-router", () => ({
   useLocalSearchParams: () => scenario.params,
   useNavigation: () => navigation,
 }));
+
 const navigation = vi.hoisted(() => ({
   setOptions: ({ title }: { title: string }) => void scenario.titles.push(title),
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
+
 vi.mock("../src/account.ts", () => ({
   onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -168,7 +182,9 @@ vi.mock("../src/account.ts", () => ({
   retryChannels: () => undefined,
   reloadAllChannels: () => undefined,
 }));
+
 vi.mock("../src/subscriptions.ts", () => ({ readRegistry: () => null }));
+
 vi.mock("../src/playback.ts", async (original) => ({
   channelStatus: (await original<typeof import("../src/playback.ts")>()).channelStatus,
   usePlayback: () => ({ phase: { kind: "idle" }, watch: false, pip: false, muted: true }),
@@ -177,10 +193,12 @@ vi.mock("../src/playback.ts", async (original) => ({
   retry: () => undefined,
   setMuted: () => undefined,
 }));
+
 vi.mock("../src/storage.ts", () => ({
   useSavedState: () => ({ recentChannels: [] }),
   writeState: () => undefined,
 }));
+
 vi.mock("../src/loading.tsx", async (original) => ({
   ...(await original<typeof import("../src/loading.tsx")>()),
   PlaceholderRows: () => null,
@@ -203,10 +221,12 @@ const channel = (id: string, name: string): ProviderChannel => ({
   guideId: null,
   catchupDays: null,
 });
+
 const listing = (...channels: ProviderChannel[]): LiveCatalogue => ({
   categories: [{ id: "1", name: "NL | News" }],
   channels,
 });
+
 const NOS = channel("10", "NL | NOS Journaal HD");
 const ZIGGO = channel("11", "NL | Ziggo Sport");
 const RTL = channel("10", "NL | RTL Nieuws");
@@ -218,12 +238,16 @@ function shows(home: ProviderChannel[], cabin: ProviderChannel[]) {
     { subscriptionId: "a", label: "Home", catalogue: listing(...home) },
     { subscriptionId: "b", label: "Cabin", catalogue: listing(...cabin) },
   ]);
+
   scenario.catalogue = { kind: "ready", library, failing: [] };
   viewing.setViewingChannels(library.byKey);
 }
+
 const live = (key: string): Channel => {
   const found = scenario.catalogue.kind === "ready" && scenario.catalogue.library.byKey.get(key);
+
   if (!found) throw new Error(`Live doesn't list ${key}`);
+
   return found;
 };
 
@@ -239,56 +263,74 @@ const member = (id: string, label: string): Member => ({
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
 let shown: React.ComponentType | null = null;
+
 function open(component: React.ComponentType) {
   shown = component;
+
   if (root) React.act(() => root!.unmount());
   container = document.createElement("div");
   root = createRoot(container);
   React.act(() => root!.render(React.createElement(component)));
 }
+
 /** Draws the screen again, as a change of the channels shown would. */
 const redraw = () => React.act(() => root!.render(React.createElement(shown!)));
+
 /** A list's screen, as its route opens it. */
 const listScreen = (id: string) => () => React.createElement(ChannelListScreen, { id });
 
 const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`);
 const text = (testID: string) => find(testID)?.textContent ?? "";
+
 function press(testID: string) {
   const button = find(testID) as { click(): void; disabled?: boolean } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
+
   if (button.disabled) throw new Error(`${testID} is disabled`);
   React.act(() => button.click());
 }
+
 function hold(testID: string) {
   const row = find(testID);
+
   if (!row) throw new Error(`No ${testID} on screen`);
   React.act(() => void row.dispatchEvent(new Event("contextmenu", { bubbles: true })));
 }
+
 const lastSheet = () => scenario.sheets.at(-1)!;
+
 /** Chooses `option` in the sheet shown last. */
 function choose(option: string) {
   const index = lastSheet().options.indexOf(option);
+
   if (index < 0) throw new Error(`No ${option} in ${lastSheet().options.join(", ")}`);
   React.act(() => lastSheet().choose(index));
 }
+
 /** Presses `button` of the prompt shown last, with `typed` in it. */
 function answer(button: string, typed: string) {
   const prompt = scenario.prompts.at(-1)!;
   React.act(() => prompt.buttons?.find((each) => each.text === button)?.onPress?.(typed));
 }
+
 /** Presses `button` of the alert shown last. */
 function confirm(button: string) {
   const alert = scenario.alerts.at(-1)!;
   React.act(() => alert.buttons?.find((each) => each.text === button)?.onPress?.());
 }
+
 const prefixed = (prefix: string, ...not: string[]) =>
   [...container.querySelectorAll(`[data-testid^="${prefix}"]`)].flatMap((row) => {
     const id = row.getAttribute("data-testid")!.slice(prefix.length);
+
     return !not.some((suffix) => id.endsWith(suffix)) ? [id] : [];
   });
+
 /** A list's rows on screen, by channel key, or entry for one that doesn't open. */
 const rows = () => prefixed("list-row-", "-remove");
 const arranged = () => prefixed("arranged-", "-up", "-down", "-remove");
+
 /** What the lists hold now: each by name, then its channels by key or name. */
 const saved = () =>
   lists
@@ -297,8 +339,10 @@ const saved = () =>
       (list) =>
         `${list.name}: ${list.entries.map((entry) => (entry.kind === "listed" ? entry.channel.key : entry.name)).join(", ")}`,
     );
+
 const idOf = (name: string) => lists.currentChannelLists().find((list) => list.name === name)!.id;
 const alertTitles = () => scenario.alerts.map((alert) => alert.title);
+
 const failWrites = () => {
   native.sync = (operation) => {
     if (operation === "write") throw new Error("There isn't enough space on this iPhone.");
@@ -317,13 +361,16 @@ beforeEach(async () => {
     titles: [],
   });
   shows([NOS, ZIGGO], [RTL, ZAPPELIN]);
+
   for (const list of lists.currentChannelLists()) lists.deleteList(list.id);
   viewing.setViewingOwners(["a", "b"]);
   await viewing.eraseViewing("a");
   await viewing.eraseViewing("b");
 });
+
 afterEach(() => {
   native.sync = null;
+
   if (root) React.act(() => root!.unmount());
   root = null;
 });

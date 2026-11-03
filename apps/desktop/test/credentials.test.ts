@@ -22,6 +22,7 @@ const LOGIN = { username: "viewer-7", password: "s3cret-pass" };
  */
 async function app(fetchImpl: typeof fetch, tcpConnect?: TcpConnect) {
   const dataDir = await tempDir();
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: null }).pipe(
       Layer.provide(PlaybackCoordination.layer),
@@ -36,6 +37,7 @@ async function app(fetchImpl: typeof fetch, tcpConnect?: TcpConnect) {
       Layer.provideMerge(diagnosticsLogLayer(dataDir)),
     ),
   );
+
   return {
     dataDir,
     subscriptions: await promised(runtime, Subscriptions),
@@ -55,17 +57,23 @@ function httpsPanel(
   login = LOGIN,
 ) {
   const asked: string[] = [];
+
   const panel: typeof fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     asked.push(url.href);
+
     if (url.host === "relay.test") {
       return fetch(`${provider.url}/live/${login.username}/${login.password}${url.pathname}`, init);
     }
+
     if (url.host !== "panel.test") return fetch(url, init);
     const location = redirect(url);
+
     if (location) return new Response(null, { status: 302, headers: { location } });
+
     return fetch(`${provider.url}${url.pathname}${url.search}`, init);
   };
+
   return { fetch: panel, asked };
 }
 
@@ -78,13 +86,16 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
     () => null,
     (cause: unknown) => cause,
   );
+
   if (!(error instanceof Failed)) throw new Error(`Expected a failure, got ${String(error)}`);
+
   return error.error;
 }
 
 /** The parts of the login `value` holds, as the window or a file would receive it. */
 function loginIn(value: unknown): string[] {
   const text = typeof value === "string" ? value : JSON.stringify(value);
+
   return [LOGIN.username, LOGIN.password].filter((secret) => text.includes(secret));
 }
 
@@ -92,10 +103,13 @@ describe("credential protection", () => {
   it("never falls back from an https address to http", async () => {
     const provider = await fakeProvider(LOGIN);
     const asked: string[] = [];
+
     const recording: typeof fetch = (input, init) => {
       asked.push(String(input));
+
       return fetch(input, init);
     };
+
     const { subscriptions } = await app(recording);
     const server = provider.url.replace("http:", "https:");
 
@@ -111,10 +125,12 @@ describe("credential protection", () => {
 
   it("refuses a redirect from https to an http address with the login in it", async () => {
     const provider = await fakeProvider(LOGIN);
+
     // The API moved to plain http, keeping its query: the login.
     const moved = httpsPanel(provider, (url) =>
       url.pathname === "/player_api.php" ? `${provider.url}${url.pathname}${url.search}` : null,
     );
+
     const { subscriptions } = await app(moved.fetch);
 
     const error = await failure(subscriptions.add({ server: "https://panel.test", ...LOGIN }));
@@ -127,17 +143,24 @@ describe("credential protection", () => {
     const provider = await fakeProvider(LOGIN);
     const tokened = channel(provider, "TEST | H.264 + AAC");
     const leaky = channel(provider, "TEST | H.264 + MP3");
+
     const panel = httpsPanel(provider, (url) => {
       const id = /^\/live\/[^/]+\/[^/]+\/(\d+)\.ts$/.exec(url.pathname)?.[1];
+
       if (id === tokened) return `http://relay.test/${id}.ts?token=7f3a`;
+
       if (id === leaky) return `${provider.url}${url.pathname}`;
+
       return null;
     });
+
     const { subscriptions, playback } = await app(panel.fetch);
+
     const { id: subscriptionId } = await subscriptions.add({
       server: "https://panel.test",
       ...LOGIN,
     });
+
     const own = (id: string) => ({ subscriptionId, id });
 
     const refused = await playback.open(own(leaky), ["h264", "aac", "mp3"]);
@@ -158,6 +181,7 @@ describe("credential protection", () => {
     const login = { username: "viewer7", password: "q7x" };
     const provider = await fakeProvider(login);
     const id = channel(provider, "TEST | H.264 + AAC");
+
     const panel = httpsPanel(
       provider,
       (url) =>
@@ -166,7 +190,9 @@ describe("credential protection", () => {
           : null,
       login,
     );
+
     const { subscriptions, playback } = await app(panel.fetch);
+
     const { id: subscriptionId } = await subscriptions.add({
       server: "https://panel.test",
       ...login,
@@ -196,10 +222,13 @@ describe("credential protection", () => {
   it("asks before an address without a scheme gets the login over http", async () => {
     const provider = await fakeProvider(LOGIN);
     const asked: string[] = [];
+
     const recording: typeof fetch = (input, init) => {
       asked.push(String(input));
+
       return fetch(input, init);
     };
+
     const { subscriptions } = await app(recording);
     const address = provider.url.replace("http://", "");
 
@@ -215,30 +244,39 @@ describe("credential protection", () => {
   it("asks within seconds when the https port leaves the connection unanswered", async () => {
     // Behind a firewall that drops https, the name resolves and nothing accepts or refuses.
     const resolved = Promise.withResolvers<void>();
+
     const unanswered: TcpConnect = () => {
       const socket = new Socket();
       setImmediate(() => {
         socket.emit("lookup", null, "192.0.2.1", 4, "panel.test");
         resolved.resolve();
       });
+
       return socket;
     };
+
     // Fetch waits there until the login's time is up.
     const asked: string[] = [];
+
     const waiting: typeof fetch = (input, init) => {
       asked.push(String(input));
+
       return new Promise((_, reject) =>
         init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
       );
     };
+
     const { subscriptions } = await app(waiting, unanswered);
     // The seconds pass on a fake clock; the app's own work goes on as it does.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
     try {
       let answered = false;
+
       const error = failure(subscriptions.add({ server: "panel.test", ...LOGIN })).finally(() => {
         answered = true;
       });
+
       await resolved.promise;
 
       // Time for a lost packet to be sent again, and far less than the 15 seconds a login gets.
@@ -249,6 +287,7 @@ describe("credential protection", () => {
     } finally {
       vi.useRealTimers();
     }
+
     expect(asked.filter((each) => each.startsWith("http:"))).toEqual([]);
     expect(await subscriptions.list()).toEqual([]);
   });
@@ -256,17 +295,23 @@ describe("credential protection", () => {
   it("keeps waiting for a slow login once the https port accepted the connection", async () => {
     const provider = await fakeProvider(LOGIN);
     const address = provider.url.replace("http://", "");
+
     // As if the fake provider were behind https, and answered later than a port gets to accept.
     const slow: typeof fetch = async (input, init) => {
       await new Promise((resolve) => setTimeout(resolve, 4_000));
+
       return fetch(String(input).replace("https:", "http:"), init);
     };
+
     const accepted = Promise.withResolvers<void>();
+
     const connecting: TcpConnect = (options) =>
       connect(options).once("connect", () => accepted.resolve());
+
     const { subscriptions } = await app(slow, connecting);
     // The login's seconds pass on a fake clock, once the port has accepted the connection.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
     try {
       const adding = subscriptions.add({ server: address, ...LOGIN });
       await accepted.promise;
@@ -285,6 +330,7 @@ describe("credential protection", () => {
     const refused = await failure(
       subscriptions.add({ server: "panel.test", username: LOGIN.username, password: "wrong" }),
     );
+
     const nowhere = await failure(subscriptions.add({ server: "nowhere.invalid", ...LOGIN }));
 
     expect(refused).toEqual({ kind: "invalid-login" });
@@ -296,20 +342,26 @@ describe("credential protection", () => {
     // Fetch quotes the address it was given when it can't use it, as it does for one it can't
     // parse or one with a login before the host.
     let failing = "/player_api.php";
+
     const quoting: typeof fetch = async (input, init) => {
       const address = String(input);
+
       if (address.includes(failing)) throw new TypeError(`Failed to parse URL from ${address}`);
+
       return fetch(input, init);
     };
+
     const { dataDir, subscriptions, playback } = await app(quoting);
 
     const connectError = await failure(subscriptions.add({ server: provider.url, ...LOGIN }));
     failing = "/live/";
     const { id: subscriptionId } = await subscriptions.add({ server: provider.url, ...LOGIN });
+
     const session = await playback.open(
       { subscriptionId, id: channel(provider, "TEST | H.264 + AAC") },
       ["h264", "aac"],
     );
+
     await (await fetch(session.url)).arrayBuffer();
     const streamError = await playback.failure(session.sessionId);
 

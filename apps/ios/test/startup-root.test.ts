@@ -15,12 +15,15 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("../src/account.ts", async () => {
   const { useSyncExternalStore } = await import("react");
+
   const subscribe = (listener: () => void) => {
     scenario.changed.add(listener);
+
     return () => {
       scenario.changed.delete(listener);
     };
   };
+
   return {
     useRoster: () => useSyncExternalStore(subscribe, () => scenario.roster),
     currentRoster: () => scenario.roster,
@@ -35,13 +38,16 @@ vi.mock("../src/account.ts", async () => {
       }),
   };
 });
+
 vi.mock("../src/titles.ts", () => ({
   endLaunchBatch: () => {},
   onTitleLists: () => () => {},
   titlesWorkedOut: () => true,
 }));
+
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
+
   return {
     View: ({ children }: { children?: React.ReactNode }) => createElement("div", null, children),
     Alert: {
@@ -52,8 +58,10 @@ vi.mock("react-native", async () => {
     StyleSheet: { create: <T>(styles: T) => styles },
   };
 });
+
 vi.mock("expo-router", async () => {
   const { createElement } = await import("react");
+
   const Stack = Object.assign(
     ({ children }: { children?: React.ReactNode }) => createElement("main", null, children),
     {
@@ -62,6 +70,7 @@ vi.mock("expo-router", async () => {
         guard ? children : null,
     },
   );
+
   return {
     DarkTheme: { colors: {} },
     ThemeProvider: ({ children }: { children?: React.ReactNode }) => children,
@@ -69,25 +78,34 @@ vi.mock("expo-router", async () => {
     usePathname: () => "/",
   };
 });
+
 // The interface language is read from the phone's files, which this test leaves out.
 vi.mock("../src/language.ts", () => ({}));
+
 vi.mock("../src/downloads.ts", () => ({ startDownloads: () => {} }));
+
 vi.mock("../src/playback.ts", () => ({ onScreen: () => {} }));
+
 vi.mock("../src/reminders.ts", () => ({ startReminders: () => {} }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   onTelemetryScreen: () => {},
   startTelemetry: () => {},
   statisticsChoice: () => null,
 }));
+
 vi.mock("../src/startup-screen.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     holdLaunchScreen: () => {},
     StartupScreen: () => createElement("div", { "data-splash": true }),
   };
 });
+
 vi.mock("../src/watch.tsx", async () => {
   const { createElement } = await import("react");
+
   return { WatchLayer: () => createElement("div", { "data-watch": true }) };
 });
 
@@ -95,14 +113,17 @@ it("keeps the splash until routes are known, then mounts saved-account navigatio
   const window = new Window();
   Object.assign(globalThis, { window, document: window.document, IS_REACT_ACT_ENVIRONMENT: true });
   const REACT_DOM = "react-dom/client";
+
   const { createRoot } = (await import(REACT_DOM)) as {
     createRoot(container: object): { render(node: React.ReactNode): void; unmount(): void };
   };
+
   const { default: RootLayout } = await import("../src/app/_layout.tsx");
   const { currentStartup } = await import("../src/startup.ts");
   const container = window.document.createElement("div");
   const root = createRoot(container);
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
   try {
     await React.act(async () => {
       root.render(React.createElement(RootLayout));
@@ -134,6 +155,7 @@ it("keeps the splash until routes are known, then mounts saved-account navigatio
           },
         ],
       };
+
       for (const changed of scenario.changed) changed();
     });
     expect(currentStartup().kind).toBe("open");

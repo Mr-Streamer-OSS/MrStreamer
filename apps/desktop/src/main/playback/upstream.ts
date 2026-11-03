@@ -108,6 +108,7 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
   function recoveryTime(now: number): number {
     held = held.filter((each) => each.to > now - limits.windowMs);
     const running = holder?.lane === "recover" ? now - holder.since : 0;
+
     return (
       running +
       held.reduce((sum, each) => sum + each.to - Math.max(each.from, now - limits.windowMs), 0)
@@ -119,27 +120,32 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
     if (state.starting()) return false;
     const said = state.progress();
     const progress = said && now - said.at <= limits.progressMs ? said : null;
+
     const withinShare =
       !state.attached() ||
       progress?.paused === true ||
       recoveryTime(now) < limits.share * limits.windowMs;
+
     if (!between) return withinShare;
     // Playback wants the slot: only a player with enough buffered spares a turn.
     sparing =
       progress !== null &&
       progress.buffered >= (sparing ? limits.stopBufferS : limits.startBufferS);
+
     return sparing && withinShare;
   }
 
   function give(waiter: Waiter): void {
     waiting.splice(waiting.indexOf(waiter), 1);
     const now = performance.now();
+
     const mine: Holder = {
       lane: waiter.lane,
       since: now,
       revoke: new AbortController(),
       timer: undefined,
     };
+
     holder = mine;
     waiter.grant({
       revoked: mine.revoke.signal,
@@ -147,17 +153,21 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
         if (holder !== mine) return;
         clearTimeout(mine.timer);
         holder = null;
+
         if (mine.lane === "recover") {
           const to = performance.now();
           held.push({ from: mine.since, to });
           counts.recoveryMs += to - mine.since;
+
           if (mine.revoke.signal.aborted) counts.revoked++;
           else usual = to - mine.since;
           // Recovery asks for its next part of the file in a moment: whoever goes next is
           // decided once it has, so a slice can hold more than one request.
           recheck = setTimeout(turn, 0);
+
           return;
         }
+
         turn();
       },
     });
@@ -168,11 +178,13 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
   function press(): void {
     const mine = holder;
     const play = first("play");
+
     if (!mine || mine.lane !== "recover" || !play || mine.revoke.signal.aborted) return;
     clearTimeout(mine.timer);
     // A slice counts from the first turn recovery took ahead of the request that waits.
     const from = play.yielded ?? mine.since;
     const left = play.fresh ? 0 : from + limits.sliceMs - performance.now();
+
     if (left <= 0) mine.revoke.abort();
     else mine.timer = setTimeout(() => mine.revoke.abort(), left);
   }
@@ -181,30 +193,41 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
     clearTimeout(recheck);
     recheck = undefined;
     const recover = first("recover");
+
     if (holder) {
       press();
+
       // Recovery waits behind a request of playback's that stays open: its holder hears now and
       // then, and ends it when playback can spare the provider.
       if (holder.lane === "play" && recover) {
         for (const listener of listeners) listener();
         recheck = setTimeout(turn, 50);
       }
+
       return;
     }
+
     const now = performance.now();
     const play = first("play");
+
     if (play) {
       // Another request of recovery's only when it is likely over within the slice: one cut
       // short is asked again, and the provider may take a moment to free its connection.
       const within = play.yielded === null || now - play.yielded + usual < limits.sliceMs;
+
       if (recover && !play.fresh && within && spare(true, now)) {
         play.yielded ??= now;
+
         return give(recover);
       }
+
       counts.longestWaitMs = Math.max(counts.longestWaitMs, now - play.since);
+
       return give(play);
     }
+
     if (!recover) return;
+
     if (spare(state.reading(), now)) return give(recover);
     // Its share frees up with time, and the player says more.
     recheck = setTimeout(turn, 50);
@@ -212,11 +235,13 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
 
   function wait(lane: Waiter["lane"], signal: AbortSignal, fresh: boolean): Promise<Lease | null> {
     if (signal.aborted) return Promise.resolve(null);
+
     return new Promise((resolve) => {
       const left = () => {
         waiting.splice(waiting.indexOf(waiter), 1);
         resolve(null);
       };
+
       const waiter: Waiter = {
         lane,
         fresh,
@@ -228,6 +253,7 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
           resolve(lease);
         },
       };
+
       signal.addEventListener("abort", left, { once: true });
       // Playback's requests replace each other, newest last; recovery's wait in line.
       waiting.push(waiter);
@@ -256,6 +282,7 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
      */
     onWanting(listener: () => void): () => void {
       listeners.add(listener);
+
       return () => listeners.delete(listener);
     },
     /** Looks again whether recovery may have a turn: the player said something new. */
@@ -271,6 +298,7 @@ export function upstreamSlot(state: UpstreamState, limits: UpstreamLimits = UPST
 /** How fast the provider's file arrives, from the bodies read without the reader holding back. */
 export function rateMeter() {
   let rate: number | null = null;
+
   return {
     /** A body, or part of one, of `bytes` arrived in `ms`. */
     add(bytes: number, ms: number): void {

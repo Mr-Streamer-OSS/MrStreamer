@@ -44,12 +44,15 @@ const KEEP: Decision = { kind: "keep" };
 const WAIT: Decision = { kind: "wait" };
 
 type Track = ObservedAudioTrack | ObservedSubtitleTrack;
+
 const languageOf = (track: Track | undefined) => languageCode(track?.language);
 
 /** The language an audio policy asks for here. A channel follows only an explicit language. */
 export function audioTarget(audio: MediaPolicy["audio"], context: TrackContext): string | null {
   if (audio.kind === "language") return audio.language;
+
   if (context.media === "live") return null;
+
   return audio.kind === "follow-title" ? context.titleLanguage : context.originalLanguage;
 }
 
@@ -65,16 +68,21 @@ export function decideAudio(
   if (tracks.audio.state !== "ready") return WAIT;
   const playable = tracks.audio.options.filter((track) => track.isPlayable);
   const selected = tracks.audio.options.find((track) => track.id === tracks.selectedAudioId);
+
   const choose = (track: ObservedAudioTrack): Decision =>
     track.id === tracks.selectedAudioId
       ? KEEP
       : { kind: "select", selection: { kind: "audio", track } };
+
   const target = audioTarget(policy.audio, context);
+
   if (target !== null && selected?.isPlayable && languageOf(selected) === target) return KEEP;
   const spoken = playable.filter((track) => target !== null && languageOf(track) === target);
   const wanted = spoken.find((track) => track.isDefault) ?? spoken[0];
+
   if (wanted) return choose(wanted);
   const fallback = playable.find((track) => track.isDefault);
+
   return fallback ? choose(fallback) : KEEP;
 }
 
@@ -95,45 +103,60 @@ export function decideSubtitles(
   if (tracks.subtitles.state !== "ready") return WAIT;
   const playable = tracks.subtitles.options.filter((track) => track.isPlayable);
   const selected = tracks.subtitles.options.find((track) => track.id === tracks.selectedSubtitleId);
+
   const off = (): Decision =>
     !tracks.subtitleOffAllowed || tracks.selectedSubtitleId === null
       ? KEEP
       : { kind: "select", selection: { kind: "subtitles", track: null } };
+
   const choose = (track: ObservedSubtitleTrack): Decision =>
     track.id === tracks.selectedSubtitleId
       ? KEEP
       : { kind: "select", selection: { kind: "subtitles", track } };
+
   const wanted = policy.subtitles;
+
   if (wanted.kind === "off") return off();
+
   if (wanted.kind === "language" && context.media === "live") {
     if (tracks.audio.state !== "ready" && tracks.audio.state !== "absent") return WAIT;
+
     const spoken = tracks.audio.options.some(
       (track) => track.isPlayable && languageOf(track) === wanted.language,
     );
+
     if (spoken) return off();
     const inLanguage = playable.filter((track) => languageOf(track) === wanted.language);
     const track = inLanguage.find((each) => !each.forcedOnly) ?? inLanguage[0];
+
     return track ? choose(track) : off();
   }
+
   if (wanted.kind === "language") {
     const plain = (track: ObservedSubtitleTrack | undefined) =>
       track !== undefined &&
       track.isPlayable &&
       !track.forcedOnly &&
       languageOf(track) === wanted.language;
+
     if (plain(selected)) return KEEP;
     const track = playable.find(plain);
+
     if (track) return choose(track);
   }
+
   if (sound === undefined) return WAIT;
+
   const forced = (track: ObservedSubtitleTrack | undefined) =>
     track !== undefined &&
     track.isPlayable &&
     track.forcedOnly &&
     sound !== null &&
     languageOf(track) === sound;
+
   if (forced(selected)) return KEEP;
   const track = playable.find(forced);
+
   return track ? choose(track) : off();
 }
 
@@ -159,7 +182,9 @@ const described = (track: Track): Described => ({
 export function holdOf(selection: ObservedTrackSelection): TrackHold {
   if (selection.kind === "audio") return { group: "audio", ...described(selection.track) };
   const { track } = selection;
+
   if (!track) return { group: "subtitles", off: true };
+
   return { group: "subtitles", off: false, forcedOnly: track.forcedOnly, ...described(track) };
 }
 
@@ -179,15 +204,19 @@ export function rematch(
       tracks.audio.state === "ready"
         ? tracks.audio.options.filter((track) => alike(track, hold))
         : [];
+
     return found.length === 1 && found[0] ? { kind: "audio", track: found[0] } : null;
   }
+
   if (hold.off) return tracks.subtitleOffAllowed ? { kind: "subtitles", track: null } : null;
+
   const found =
     tracks.subtitles.state === "ready"
       ? tracks.subtitles.options.filter(
           (track) => alike(track, hold) && track.forcedOnly === hold.forcedOnly,
         )
       : [];
+
   return found.length === 1 && found[0] ? { kind: "subtitles", track: found[0] } : null;
 }
 
@@ -203,6 +232,7 @@ export function confirms(
   after: ObservedTrackSnapshot,
 ): boolean {
   const { track } = selection;
+
   if (!track) {
     return (
       after.subtitles.state === "ready" &&
@@ -210,9 +240,12 @@ export function confirms(
       after.selectedSubtitleId === null
     );
   }
+
   const selectedId = selection.kind === "audio" ? after.selectedAudioId : after.selectedSubtitleId;
+
   if (after.revision === requestedAt) return selectedId === track.id;
   const again = rematch(holdOf(selection), after);
+
   return again !== null && again.track !== null && again.track.id === selectedId;
 }
 
@@ -239,19 +272,28 @@ export function remembered(
 ): Remembered | null {
   if (picked.kind === "audio") {
     const language = offered(languageOf(picked.track));
+
     if (!language || audioTarget(accepted.audio, context) === language) return null;
+
     return { field: "audio", value: { kind: "language", language } };
   }
+
   const now = accepted.subtitles;
   const { track } = picked;
+
   if (!track) return now.kind === "off" ? null : { field: "subtitles", value: { kind: "off" } };
   const language = languageOf(track);
+
   if (!track.forcedOnly) {
     const listed = offered(language);
+
     if (!listed || (now.kind === "language" && now.language === listed)) return null;
+
     return { field: "subtitles", value: { kind: "language", language: listed } };
   }
+
   if (language === null || language !== sound || now.kind === "forced-only") return null;
+
   return { field: "subtitles", value: { kind: "forced-only" } };
 }
 
@@ -268,10 +310,13 @@ const FACT_TRACKS = 32;
  */
 export function observedFileTracks(tracks: ObservedTrackSnapshot): ObservedFileTracks | null {
   const subtitlesKnown = tracks.subtitles.state === "ready" || tracks.subtitles.state === "absent";
+
   if (tracks.audio.state !== "ready" || !subtitlesKnown) return null;
   const audio = tracks.audio.options.filter((track) => track.isPlayable);
   const subtitles = tracks.subtitles.options.filter((track) => track.isPlayable);
+
   if (audio.length > FACT_TRACKS || subtitles.length > FACT_TRACKS) return null;
+
   return { audio: audio.map(languageOf), subtitles: subtitles.map(languageOf) };
 }
 
@@ -280,10 +325,13 @@ export function observedFileTracks(tracks: ObservedTrackSnapshot): ObservedFileT
 
 /** Waits before each reconnect; their number is the reconnect limit. */
 export const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
+
 /** Playing this long, without pause or waiting, earns every reconnect back. */
 export const STABLE_PLAYBACK_MS = 30_000;
+
 /** A Live attempt with no picture or sound this long after native attach fails. */
 export const START_TIMEOUT_MS = 20_000;
+
 /** A Live stream whose time stands still this long after it played, not paused, fails. */
 export const STALL_TIMEOUT_MS = 15_000;
 
@@ -362,11 +410,15 @@ function classOf(failure: PlaybackFailure): FailureClass {
  */
 function lower(qualities: readonly (Quality | null)[], failed: number): number | null {
   const from = qualities[failed];
+
   if (!from) return null;
+
   for (const quality of QUALITIES.slice(QUALITIES.indexOf(from) + 1)) {
     const index = qualities.indexOf(quality);
+
     if (index >= 0) return index;
   }
+
   return null;
 }
 
@@ -391,22 +443,31 @@ export function nextStep(
   },
 ): Step {
   const failed: Step = { kind: "fail" };
+
   if (!context.live || !context.attended || context.held || !context.sourceStands) return failed;
   const kind = classOf(failure);
+
   if (kind === "refusal" || kind === "terminal") return failed;
+
   if (recovery.playedOn === null) {
     const next = recovery.candidate + 1;
+
     return next < recovery.candidates ? { kind: "candidate", candidate: next } : failed;
   }
+
   const steppedDown = recovery.candidate !== recovery.playedOn;
+
   if (!steppedDown && (kind === "missing" || kind === "media")) return failed;
   const used = recovery.playedMs >= STABLE_PLAYBACK_MS ? 0 : recovery.reconnects;
   const delayMs = RECONNECT_DELAYS_MS[used];
+
   if (delayMs === undefined) return failed;
+
   const below =
     recovery.qualities && (steppedDown || kind === "slow" || kind === "no-start")
       ? lower(recovery.qualities, recovery.candidate)
       : null;
+
   return {
     kind: "reconnect",
     candidate: below ?? recovery.playedOn,

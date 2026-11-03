@@ -10,8 +10,10 @@ const disk = vi.hoisted(() => ({
   code: "EPERM",
   attempts: [] as { from: string; to: string; previous: string; bytes: Buffer }[],
 }));
+
 vi.mock("node:fs/promises", async (original) => {
   const actual = await original<typeof import("node:fs/promises")>();
+
   const rename: typeof actual.rename = async (from, to) => {
     if (typeof from !== "string" || typeof to !== "string")
       throw new Error("This probe requires ordinary file paths");
@@ -21,15 +23,20 @@ vi.mock("node:fs/promises", async (original) => {
       previous: await actual.readFile(to, "utf8"),
       bytes: await actual.readFile(from),
     });
+
     if (disk.failures > 0) {
       disk.failures--;
       throw Object.assign(new Error("Controlled rename rejection"), { code: disk.code });
     }
+
     await actual.rename(from, to);
   };
+
   return { ...actual, rename };
 });
+
 const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+
 afterEach(() => {
   Object.defineProperty(process, "platform", platform);
   disk.attempts = [];
@@ -40,6 +47,7 @@ async function destination() {
   const path = join(await tempDir(), "record.json");
   const previous = '{"revision":"old"}\n';
   await writeFile(path, previous);
+
   return { path, previous };
 }
 
@@ -56,6 +64,7 @@ describe("atomic JSON replacement", () => {
       await writeJsonFile(path, {
         toJSON() {
           serializations++;
+
           return next;
         },
       });
@@ -63,11 +72,13 @@ describe("atomic JSON replacement", () => {
       expect(serializations).toBe(1);
       expect(disk.attempts).toHaveLength(3);
       expect(new Set(disk.attempts.map((attempt) => attempt.from)).size).toBe(1);
+
       for (const attempt of disk.attempts) {
         expect(attempt.to).toBe(path);
         expect(attempt.previous).toBe(previous);
         expect(attempt.bytes.toString()).toBe(JSON.stringify(next));
       }
+
       expect(await readdir(dirname(path))).toEqual([basename(path)]);
     },
   );

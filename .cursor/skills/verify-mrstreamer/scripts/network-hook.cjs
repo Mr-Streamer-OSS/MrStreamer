@@ -16,8 +16,10 @@ function write(entry) {
 }
 
 const connect = net.Socket.prototype.connect;
+
 net.Socket.prototype.connect = function (...args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+
   if (first && typeof first === "object") {
     if (first.path) write({ kind: "ipc", path: String(first.path) });
     else write({ kind: "tcp", host: first.host ?? "localhost", port: Number(first.port) });
@@ -30,29 +32,37 @@ net.Socket.prototype.connect = function (...args) {
       port: Number(first),
     });
   }
+
   return connect.apply(this, args);
 };
 
 const send = dgram.Socket.prototype.send;
+
 dgram.Socket.prototype.send = function (...args) {
   const address = args.find((arg, index) => index > 0 && typeof arg === "string");
   const port = args.find((arg, index) => index > 0 && typeof arg === "number" && arg > 0);
   write({ kind: "udp", host: address ?? "unknown", port: port ?? null });
+
   return send.apply(this, args);
 };
 
 // Main puts undici's fetch in place as it starts (src/main/fetch.ts), after this runs, so the
 // hook stays in front of whichever fetch is installed.
 let fetchInstalled = globalThis.fetch;
+
 const fetchHooked = (input, init) => {
   const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const url = URL.parse(href);
+
   if (images && url && IMAGE_HOSTS.has(url.hostname)) {
     write({ kind: "artwork", host: url.hostname, path: url.pathname });
+
     return fetchInstalled(`${images}${url.pathname}`, init);
   }
+
   return fetchInstalled(input, init);
 };
+
 Object.defineProperty(globalThis, "fetch", {
   configurable: true,
   enumerable: true,

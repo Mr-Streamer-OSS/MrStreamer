@@ -12,8 +12,10 @@ import { DEMO_ID, demoEntry, demoProvider } from "../src/demo.ts";
 
 const COMMIT = "9791b09908e03742cee981c97e37d47829fc7a18";
 const MEDIA = `https://raw.githubusercontent.com/Mr-Streamer-OSS/MrStreamer/${COMMIT}/apps/ios/demo-media/`;
+
 const PLAYLIST =
   "https://raw.githubusercontent.com/Mr-Streamer-OSS/certification-playlist/main/reviewer.m3u";
+
 const LIMIT = 64 * 1024;
 const PLAYLIST_LIVE = { live: { kind: "playlist" } } as const;
 
@@ -23,18 +25,23 @@ async function refusal(work: Promise<unknown>): Promise<AppError> {
     () => null,
     (thrown: unknown) => thrown,
   );
+
   if (!(cause instanceof AppFailure)) throw new Error(`Expected an AppFailure: ${String(cause)}`);
+
   return cause.error;
 }
 
 /** A fetch that answers with `answer`, keeping each address it was asked and its headers. */
 function fetching(answer: (url: string) => Response | Promise<Response>) {
   const asked: { readonly url: string; readonly headers: Headers }[] = [];
+
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = String(input);
     asked.push({ url, headers: new Headers(init?.headers) });
+
     return answer(url);
   };
+
   return { fetch: fetchImpl, asked };
 }
 
@@ -42,7 +49,9 @@ function fetching(answer: (url: string) => Response | Promise<Response>) {
 function answering(...answers: Array<() => Response | Promise<Response>>) {
   return fetching(() => {
     const next = answers.shift();
+
     if (!next) throw new Error("Asked once more than the test expects.");
+
     return next();
   });
 }
@@ -51,6 +60,7 @@ const refuseAll = () => answering();
 
 /** A playlist as the certification one is written: a header line, then each channel. */
 const playlist = (...lines: string[]) => `${["#EXTM3U", ...lines].join("\n")}\n`;
+
 const channel = (id: string, url: string) => [
   `#EXTINF:-1 tvg-id="${id}" group-title="News",${id} Channel`,
   url,
@@ -68,6 +78,7 @@ function streamed(body: ReadableStream<Uint8Array>, init?: ResponseInit): Respon
 function held() {
   let give!: (response: Response) => void;
   const answer = new Promise<Response>((resolve) => (give = resolve));
+
   return { answer: () => answer, give };
 }
 
@@ -76,10 +87,12 @@ function catalogueRows(): ReadonlyMap<string, Readonly<Record<string, string>>> 
   const text = readFileSync(join(import.meta.dirname, "../demo-media/catalogue.tsv"), "utf8");
   const [head = "", ...rows] = text.trim().split("\n");
   const names = head.split("\t");
+
   return new Map(
     rows.map((row): [string, Record<string, string>] => {
       const values = row.split("\t");
       const fields = Object.fromEntries(names.map((name, at) => [name, values[at] ?? ""]));
+
       return [fields["id"] ?? "", fields];
     }),
   );
@@ -198,18 +211,21 @@ describe("the demo provider as the app makes it", () => {
       url: `${MEDIA}movie.mp4`,
       container: "mp4",
     });
+
     for (const id of ["episode-1", "episode-2"]) {
       expect(await provider.titleFile("episode", id, "mp4")).toEqual({
         url: `${MEDIA}${id}.mp4`,
         container: "mp4",
       });
     }
+
     expect(asked).toEqual([]);
   });
 
   it("refuses titles and files it doesn't list", async () => {
     const provider = demoProvider();
     const missing = (titleId: string) => ({ kind: "title-not-found", titleId });
+
     // Each is asked only when checked, so no refusal is left without a handler meanwhile.
     const asked: Array<[() => Promise<unknown>, string]> = [
       [() => provider.movieDetails("series"), "series"],
@@ -218,19 +234,23 @@ describe("the demo provider as the app makes it", () => {
       [() => provider.titleFile("episode", "movie", "mp4"), "movie"],
       [() => provider.titleFile("episode", "episode-3", "mp4"), "episode-3"],
     ];
+
     for (const [ask, id] of asked) expect(await refusal(ask())).toEqual(missing(id));
   });
 
   it("names only files committed with the media, at their measured lengths", async () => {
     const provider = demoProvider();
     const rows = catalogueRows();
+
     /** The file a URL names under the pinned media folder, checked to be in this checkout. */
     const file = (url: string | null) => {
       expect(url?.startsWith(MEDIA)).toBe(true);
       const name = url?.slice(MEDIA.length) ?? "";
       expect(existsSync(join(import.meta.dirname, "../demo-media", name))).toBe(true);
+
       return name;
     };
+
     const { movies, series } = await provider.onDemandCatalogue();
     const artwork = [...movies, ...series].flatMap((each) => [each.posterUrl, each.backdropUrl]);
     const listed = ["movie-cover", "movie-backdrop", "series-cover", "series-backdrop"];
@@ -240,6 +260,7 @@ describe("the demo provider as the app makes it", () => {
     expect((await provider.movieDetails("movie")).duration).toBe(
       Number(movie?.["duration_seconds"]),
     );
+
     for (const each of (await provider.seriesDetails("series")).episodes) {
       const row = rows.get(each.id);
       expect(row).toMatchObject({
@@ -263,6 +284,7 @@ describe("the demo provider as the app makes it", () => {
       "Generated sample movie",
       "Generated sample series",
     ]);
+
     for (const title of shown) {
       expect(title).toMatchObject({
         subscriptionId: DEMO_ID,
@@ -295,6 +317,7 @@ describe("the demo's certification playlist capability, in tests only", () => {
       "https://e.example/live/index.m3u8",
       "",
     ].join("\n");
+
     const { fetch, asked } = fetching(() => new Response(body));
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     const listed = await provider.liveCatalogue();
@@ -341,13 +364,16 @@ describe("the demo's certification playlist capability, in tests only", () => {
   it("refuses a declared size past 64 KiB before reading its body", async () => {
     let pulled = 0;
     let cancelled = false;
+
     const body = new ReadableStream<Uint8Array>(
       { pull: () => void pulled++, cancel: () => void (cancelled = true) },
       { highWaterMark: 0 },
     );
+
     const { fetch } = fetching(() =>
       streamed(body, { headers: { "content-length": String(LIMIT + 1) } }),
     );
+
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     expect(await refusal(provider.liveCatalogue())).toMatchObject({ kind: "invalid-input" });
     expect(pulled).toBe(0);
@@ -359,6 +385,7 @@ describe("the demo's certification playlist capability, in tests only", () => {
     const piece = new TextEncoder().encode(`#EXTM3U\n${"#".repeat(16 * 1024 - 9)}\n`);
     let pulled = 0;
     let cancelled = false;
+
     const body = new ReadableStream<Uint8Array>(
       {
         pull: (controller) => {
@@ -369,6 +396,7 @@ describe("the demo's certification playlist capability, in tests only", () => {
       },
       { highWaterMark: 0 },
     );
+
     const { fetch } = fetching(() => streamed(body));
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     expect(await refusal(provider.liveCatalogue())).toMatchObject({ kind: "invalid-input" });
@@ -380,18 +408,23 @@ describe("the demo's certification playlist capability, in tests only", () => {
     // A small declared size whose real body is far larger, as a wrong header or a packed body
     // that unpacks larger would give. Without a stream it can't be read in bounded pieces.
     const whole: string[] = [];
+
     const { fetch } = fetching(() => {
       const response = new Response(null, { headers: { "content-length": "64" } });
+
       for (const method of ["text", "arrayBuffer", "blob", "json", "bytes"] as const) {
         Object.defineProperty(response, method, {
           value: async () => {
             whole.push(method);
+
             return playlist(...channel("X.test@HD", "https://x.example/x.m3u8")).repeat(LIMIT);
           },
         });
       }
+
       return response;
     });
+
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     expect(await refusal(provider.liveCatalogue())).toMatchObject({ kind: "unexpected" });
     expect(await refusal(provider.liveStream("X.test@HD"))).toMatchObject({ kind: "unexpected" });
@@ -406,6 +439,7 @@ describe("the demo's certification playlist capability, in tests only", () => {
         throw new TypeError("fetch failed");
       },
     );
+
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     expect(await refusal(provider.liveCatalogue())).toMatchObject({ kind: "invalid-input" });
     expect(await refusal(provider.liveCatalogue())).toEqual({
@@ -420,6 +454,7 @@ describe("the demo's certification playlist capability, in tests only", () => {
 
   it("follows an https redirect, and refuses one to cleartext or to another scheme", async () => {
     const mirror = "mirror.example/reviewer.m3u";
+
     const moved = (location: string) => (url: string) =>
       url === PLAYLIST
         ? new Response(null, { status: 302, headers: { location } })
@@ -447,11 +482,13 @@ describe("the demo's certification playlist capability, in tests only", () => {
       const { fetch, asked } = answering(answers.older.answer, answers.newer.answer);
       const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
       const reads = { older: provider.liveCatalogue(), newer: provider.liveCatalogue() };
+
       for (const which of order) {
         const lines = channel("X.test@HD", `https://${which}.example/x.m3u8`);
         answers[which].give(new Response(playlist(...lines)));
         await reads[which];
       }
+
       expect(await provider.liveStream("X.test@HD")).toEqual({
         url: "https://newer.example/x.m3u8",
         format: "hls",
@@ -479,10 +516,12 @@ describe("the demo's certification playlist capability, in tests only", () => {
 
   it("keeps the streams it had when a newer read is stopped", async () => {
     const late = held();
+
     const { fetch, asked } = answering(
       () => new Response(playlist(...channel("X.test@HD", "https://first.example/x.m3u8"))),
       late.answer,
     );
+
     const provider = demoProvider({ fetch, ...PLAYLIST_LIVE });
     await provider.liveCatalogue();
     const stop = new AbortController();

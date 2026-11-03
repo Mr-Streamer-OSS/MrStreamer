@@ -17,9 +17,11 @@ const fixture = vi.hoisted(() => ({
   /** Each level the engine held loading at, -1 for its own pick. */
   held: [] as number[],
 }));
+
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return {
     ...real,
     default: class extends standIn(real.default) {
@@ -38,6 +40,7 @@ vi.mock("hls.js", async (original) => {
       }
       async getMediaDecodingInfo(level: Level) {
         await fixture.slow.get(level);
+
         return {
           supported: !fixture.unsupported.has(level) && !fixture.unknown.has(level),
           decodingInfoResults: [],
@@ -60,6 +63,7 @@ vi.mock("hls.js", async (original) => {
 });
 
 let engine: Engine | undefined;
+
 afterEach(() => {
   engine?.destroy();
   fixture.starts = [];
@@ -69,6 +73,7 @@ afterEach(() => {
   fixture.slow.clear();
   fixture.held = [];
 });
+
 function level(
   bitrate: number,
   group?: string,
@@ -84,6 +89,7 @@ function level(
     audioCodec: "mp4a.40.2",
   });
 }
+
 async function open() {
   engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
     audio: null,
@@ -91,8 +97,10 @@ async function open() {
   });
   await vi.dynamicImportSettled();
   fixture.parsed();
+
   return engine;
 }
+
 const settle = async () => {
   for (let i = 0; i < 15; i++) await Promise.resolve();
 };
@@ -153,9 +161,11 @@ it.each(["before", "after"])(
     });
     let failure: unknown;
     engine.started.catch((error: unknown) => (failure = error));
+
     if (when === "before") engine.fix?.(high.uri);
     await vi.dynamicImportSettled();
     fixture.parsed();
+
     if (when === "after") engine.fix?.(high.uri);
     await settle();
     expect(failure).toMatchObject({ kind: "unsupported" });
@@ -170,6 +180,7 @@ it.each(["saved", "asked"])(
   async (answer) => {
     const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
     const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+
     if (answer === "saved")
       high.supportedResult = {
         supported: false,
@@ -288,6 +299,7 @@ it.each([false, true])(
     });
     const playing = await open();
     expect(fixture.starts).toEqual([]);
+
     if (stop) playing.destroy();
     check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
     await settle();
@@ -309,6 +321,7 @@ it("leaves startup to hls.js when a capability query rejects", async () => {
 
 it("uses default startup when capability service stays pending", async () => {
   vi.useFakeTimers();
+
   try {
     const low = level(128);
     const high = level(512);

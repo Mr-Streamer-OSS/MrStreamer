@@ -66,7 +66,9 @@ export default function TabsLayout() {
   const pathname = usePathname();
   useShortcuts(watch ? NO_SHORTCUTS : titled, (id) => {
     const at = tabsAt(state);
+
     if (!at) return;
+
     if (id === "search") {
       if (pathname !== "/search") openSearch();
     } else if (id === "settings") {
@@ -75,12 +77,15 @@ export default function TabsLayout() {
       // Live's detail column goes back first, while it is what shows of Live's stack. At a tab's
       // root there is no Back, as on the iPhone: the tabs' own history isn't followed.
       const pushed = at.above > 0 || Boolean(tabStack(state, at.tab)?.index);
+
       if (!pushed && at.tab === "live" && closeDetail()) return;
+
       if (pushed) router.back();
     } else {
       selectTab(navigation, state, id);
     }
   });
+
   return (
     <NativeTabs
       tintColor="#FFFFFF"
@@ -121,6 +126,7 @@ function useTabSides() {
   const { left, right } = useSafeAreaInsets();
   useLayoutEffect(() => {
     tabSides.set({ left, right });
+
     return () => tabSides.set({ left: 0, right: 0 });
   }, [left, right]);
 }

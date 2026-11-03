@@ -28,9 +28,11 @@ describe("Microsoft Store package versions", () => {
       "0.1.1-nightly.20261010.31",
       "1.0.0",
     ];
+
     const byRelease = [...releases].sort((a, b) =>
       compareVersions(parseVersion(a)!, parseVersion(b)!),
     );
+
     const byPackage = [...releases].sort((a, b) =>
       comparePackageVersions(packageVersion(a), packageVersion(b)),
     );

@@ -31,11 +31,15 @@ export function planConversion(
 ): Conversion | null {
   const { video } = layout;
   const audio = layout.audio.find((track) => track.pid === options.audio) ?? layout.audio[0];
+
   // Repairing re-encodes a picture the player could decode but not survive.
   const videoOk =
     !video || (!options.repair && video.codec !== "unknown" && decoders.has(video.codec));
+
   const audioOk = !audio || (audio.codec !== "unknown" && decoders.has(audio.codec));
+
   if (videoOk && audioOk) return null;
+
   return {
     video: !video ? "none" : videoOk ? "copy" : "h264",
     audio: !audio ? "none" : audioOk ? "copy" : "aac",
@@ -65,13 +69,16 @@ export function ffmpegArguments(
     ...["-fflags", "+genpts"],
     ...["-f", "mpegts", "-i", "pipe:0"],
   ];
+
   const { pids } = conversion;
+
   const kept = [
     ...(conversion.video !== "none" ? [{ map: "0:v:0", pid: pids.video }] : []),
     ...(conversion.audio !== "none" ? [{ map: "0:a:0", pid: pids.audio }] : []),
     // Teletext and DVB subtitles pass as they are.
     ...pids.subtitles.map((pid) => ({ map: "", pid })),
   ];
+
   const outputPids = output
     ? [
         ...(conversion.video !== "none" ? [output.pids.video] : []),
@@ -79,12 +86,17 @@ export function ffmpegArguments(
         ...output.pids.subtitles,
       ]
     : null;
+
   kept.forEach(({ map, pid }, index) => {
     args.push("-map", pid === null ? map : `0:i:${pid}${map ? "" : "?"}`);
+
     if (pid !== null) args.push("-streamid", `${index}:${outputPids?.[index] ?? pid}`);
   });
+
   if (pids.subtitles.length > 0) args.push("-c:s", "copy");
+
   if (conversion.video === "copy") args.push("-c:v", "copy");
+
   if (conversion.video === "h264") {
     args.push(
       "-c:v",
@@ -100,10 +112,14 @@ export function ffmpegArguments(
       ...h264ImageArguments(output?.picture ?? null),
     );
   }
+
   if (conversion.audio === "copy") args.push("-c:a", "copy");
+
   if (conversion.audio === "aac") args.push(...AAC_STEREO_ARGUMENTS);
+
   // HLS epochs may change their input sample rate. Keep one MSE audio configuration.
   if (output && conversion.audio === "aac") args.push("-ar", "48000");
+
   if (output)
     args.push(
       "-output_ts_offset",
@@ -112,5 +128,6 @@ export function ffmpegArguments(
       "+initial_discontinuity",
     );
   args.push("-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1");
+
   return args;
 }

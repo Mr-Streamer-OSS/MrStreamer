@@ -46,6 +46,7 @@ const runs = vi.hoisted(() => [] as { start: number; paused: boolean }[]);
 vi.mock("../../src/renderer/src/player/title-engine.ts", () => ({
   titleEngine(_video: HTMLVideoElement, run: TitleRun) {
     runs.push({ start: run.start, paused: run.paused ?? false });
+
     return {
       started: Promise.resolve(),
       onFailure() {},
@@ -140,6 +141,7 @@ const movie: Title = {
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id: "m1", tags: ["EN"] }],
 };
+
 const movieRef: TitleRef = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" };
 const movieItem: RemoteItem = { kind: "title", title: movieRef };
 
@@ -160,6 +162,7 @@ function episode(id: string, number: number, title: string): Episode {
 
 const firstLight = episode("e1", 1, "First Light");
 const lowSun = episode("e2", 2, "Low Sun");
+
 const series: SeriesDetails = {
   kind: "series",
   title: { ...movie, kind: "series", id: "s", name: "Canyon Hours (EN)", title: "Canyon Hours" },
@@ -209,7 +212,9 @@ function button(label: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!found) throw new Error(`No ${label} button in "${text()}"`);
+
   return found;
 }
 
@@ -221,6 +226,7 @@ async function key(name: string, target: EventTarget = window): Promise<boolean>
   await act(async () => {
     target.dispatchEvent(event);
   });
+
   return event.defaultPrevented;
 }
 
@@ -274,6 +280,7 @@ async function onReceiver(
   await act(async () => opened.resolve(remoteTitle(`r${generation}`, now.title, tracks)));
   await act(async () => loaded.resolve(said(generation, item, "loading", from, 3600)));
   await emit(connected(said(generation, item, "playing", from, 3600)));
+
   return item;
 }
 
@@ -292,6 +299,7 @@ afterEach(async () => {
   await emit(HERE);
   await unmount();
   unmount = () => {};
+
   container.remove();
   vi.useRealTimers();
 });
@@ -372,6 +380,7 @@ describe("a movie with a receiver connected", () => {
   it("stays the play the viewer began as it moves to the TV, on to another and back here", async () => {
     await emit(HERE);
     await show(TitleWatch);
+
     const here = {
       title: movieRef,
       url: "http://127.0.0.1/title/here.mp4",
@@ -379,6 +388,7 @@ describe("a movie with a receiver connected", () => {
       audio: [],
       subtitles: [],
     };
+
     const began = Date.now();
     const first = ipc.hold("playback.openTitle");
     await act(async () => playTitle(movieNow(movie, null), 120));
@@ -629,6 +639,7 @@ describe("a movie with a receiver connected", () => {
 describe("a movie whose TV another takes the place of", () => {
   const english: AudioTrack = { id: 1, language: "en", label: "English", default: true };
   const dutch: AudioTrack = { id: 2, language: "nl", label: "Nederlands", default: false };
+
   const lines: SubtitleTrack = {
     id: 5,
     page: null,
@@ -638,6 +649,7 @@ describe("a movie whose TV another takes the place of", () => {
     forced: false,
     default: false,
   };
+
   const tracks: Tracks = { audio: [english, dutch], subtitles: [lines] };
 
   it("loads on the other TV where it was, with its tracks, and ignores the TV before", async () => {
@@ -774,12 +786,14 @@ describe("an episode on a receiver", () => {
       await show(TitleWatch);
       const item = await onReceiver(episodeNow(series, firstLight), 0, 1);
       await emit(connected(said(1, item, "ended", 3600, 3600)));
+
       if (nextEpisodeDelaySeconds > 0) {
         expect(text()).toContain(`Plays in ${nextEpisodeDelaySeconds} on Living Room TV`);
         await wait(nextEpisodeDelaySeconds * 1000 - 1);
         expect(ipc.argsOf("output.openTitle")).toHaveLength(1);
         await wait(1);
       }
+
       expect(ipc.argsOf("output.openTitle")).toHaveLength(2);
       expect(ipc.argsOf("output.openTitle").at(-1)?.title.id).toBe("e2");
       expect(ipc.argsOf("playback.openTitle")).toHaveLength(0);
@@ -1075,6 +1089,7 @@ describe("a channel with a receiver connected", () => {
       expect(text()).toContain("Buffering on Living Room TV");
       loaded = ipc.hold("output.playChannel");
       await emit(connected(null, noStream));
+
       if (tries === 5) break;
       expect(text()).toContain(`attempt ${tries} of 4`);
       await wait(8000);
@@ -1099,6 +1114,7 @@ describe("a channel with a receiver connected", () => {
       await playsAgain(tries + 1);
       expect(text()).toContain("Playing on Living Room TV");
     }
+
     await wait(5000);
     await emit(connected(null, noStream));
 
@@ -1198,11 +1214,13 @@ describe("a channel with a receiver connected", () => {
     await playing();
     useUi.setState({ watching: true });
     await show(WatchScreen);
+
     /** What the picture area shows, without what a screen reader was told. */
     const message = () =>
       [...container.querySelectorAll("[data-playback-state]")]
         .map((each) => each.textContent)
         .join();
+
     await emit(lost(tv));
     await press("Close message");
     expect(message()).not.toContain("connection lost");
@@ -1232,11 +1250,13 @@ describe("a channel with a receiver connected", () => {
     await playing();
     useUi.setState({ watching: true });
     await show(WatchScreen);
+
     /** What the picture area shows, without what a screen reader was told. */
     const message = () =>
       [...container.querySelectorAll("[data-playback-state]")]
         .map((each) => each.textContent)
         .join();
+
     await emit(lost(tv));
     await press("Close message");
     await emit(gone());
@@ -1318,6 +1338,7 @@ describe("a channel with a receiver connected", () => {
       kind: "channel",
       channel: { subscriptionId: SUBSCRIPTION, id: "b" },
     };
+
     await act(async () => loaded.resolve(said(2, next, "loading")));
     await emit(connected(said(2, next, "playing")));
     await emit(connected(said(1, item, "paused")));

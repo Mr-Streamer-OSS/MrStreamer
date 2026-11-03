@@ -29,8 +29,10 @@ import {
 
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
 const MINUTE = 60 * 1000;
+
 /** 18:00 UTC on 13 October 2026: 20:00 in Amsterdam, on summer time. */
 const EVENING = Date.UTC(2026, 9, 13, 18, 0);
+
 /** 18:00 UTC on 1 December 2026: 19:00 in Amsterdam, on winter time. */
 const WINTER = Date.UTC(2026, 11, 1, 18, 0);
 
@@ -42,6 +44,7 @@ afterEach(() => {
 async function connected(options: FakeProviderOptions = {}) {
   const provider = await fakeProvider(options);
   const dataDir = await tempDir();
+
   const runtime = runtimeFor(
     Layer.mergeAll(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(Layer.provide(PlaybackCoordination.layer)),
@@ -53,8 +56,10 @@ async function connected(options: FakeProviderOptions = {}) {
       ),
     ),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
   const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
+
   return {
     provider,
     library: await promised(runtime, Library),
@@ -72,10 +77,12 @@ async function whole(url: string): Promise<Buffer> {
 describe("an Xtream panel's catch-up", () => {
   it("lists how many days the panel keeps of each channel, and none where it keeps none", async () => {
     const { library, own, dispose } = await connected();
+
     // "TEST | H.264 + AAC", "TEST | H.264 + MP2" and "TEST | HEVC + AAC".
     const [aac, mp2, hevc] = await Promise.all(
       ["1000", "1001", "1006"].map((id) => library.channel(own(id))),
     );
+
     expect(aac).toMatchObject({ catchupDays: 3, variants: [{ id: "1000", catchupDays: 3 }] });
     expect(mp2?.catchupDays).toBeNull();
     expect(mp2?.variants[0]).not.toHaveProperty("catchupDays");
@@ -91,6 +98,7 @@ describe("an Xtream panel's catch-up", () => {
       variants: ["1000"],
       archive: { start: EVENING, end: EVENING + 30 * MINUTE },
     });
+
     expect(summer.url).not.toContain("demo");
     // The recording arrives whole, and the stream ends with it.
     expect((await whole(summer.url)).length).toBeGreaterThan(fixture("h264-aac.mpegts").length / 2);
@@ -99,6 +107,7 @@ describe("an Xtream panel's catch-up", () => {
       variants: ["1000"],
       archive: { start: WINTER, end: WINTER + 90 * MINUTE },
     });
+
     await whole(winter.url);
 
     expect(provider.archiveRequests()).toEqual([
@@ -113,26 +122,32 @@ describe("an Xtream panel's catch-up", () => {
   it("passes a recording the panel sends at once on no faster than it plays, after a lead", async () => {
     // Forty seconds of recording, which the panel sends in one go.
     const recording = fixture("recording-long-subtitles.mpegts");
+
     const { playback, own, dispose } = await connected({
       channelOf: (channel) =>
         channel.streamId === 1000
           ? { ...channel, fixture: "recording-long-subtitles.mpegts" }
           : channel,
     });
+
     const session = await playback.open(own("1000"), LINUX, {
       variants: ["1000"],
       archive: { start: EVENING, end: EVENING + 30 * MINUTE },
     });
+
     const reader = (await fetch(session.url)).body!.getReader();
     let received = 0;
     let ended = false;
+
     const reading = (async () => {
       for (;;) {
         const { done, value } = await reader.read();
+
         if (done) return void (ended = true);
         received += value.length;
       }
     })();
+
     await new Promise((resolve) => setTimeout(resolve, 2000));
     // The first thirty seconds or so, and the rest held back until they are due.
     expect(received).toBeGreaterThan(recording.length / 2);
@@ -149,15 +164,20 @@ describe("an Xtream panel's catch-up", () => {
       // One for each, so none is refused while the one before is let go of.
       maxConnections: 3,
     });
+
     const end = EVENING + 30 * MINUTE;
+
     const open = async (start: number, until = end) => {
       const session = await playback.open(own("1000"), LINUX, {
         variants: ["1000"],
         archive: { start, end: until },
       });
+
       await whole(session.url);
+
       return session.archive;
     };
+
     // A programme on the minute starts there; resuming 45.5 s in starts on that minute again,
     // and says so, as does a programme half a minute past, whose end is in it too.
     expect(await open(EVENING)).toEqual({ start: EVENING, end });
@@ -180,6 +200,7 @@ describe("an Xtream panel's catch-up", () => {
     // address names no end plays on into what came after.
     const recording = fixture("recording-long-subtitles.mpegts");
     let open = 0;
+
     const server = createServer((request, response) => {
       if (request.url?.startsWith("/list.m3u")) {
         return response.end(
@@ -191,13 +212,16 @@ describe("an Xtream panel's catch-up", () => {
           ].join("\n"),
         );
       }
+
       open++;
       request.on("close", () => open--);
       response.writeHead(200, { "Content-Type": "video/mp2t" });
       response.write(recording);
     });
+
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
     const dataDir = await tempDir();
+
     const runtime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(
         Layer.provide(PlaybackCoordination.layer),
@@ -206,17 +230,21 @@ describe("an Xtream panel's catch-up", () => {
         ),
       ),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     const playback = await promised(runtime, Playback);
+
     const { id: subscriptionId } = await subscriptions.add({
       server: `http://127.0.0.1:${(server.address() as AddressInfo).port}/list.m3u`,
       username: "",
       password: "",
     });
+
     // Ten seconds of programme.
     const session = await playback.open({ subscriptionId, id: "fs" }, LINUX, {
       archive: { start: EVENING, end: EVENING + 10_000 },
     });
+
     expect(session.archive).toEqual({ start: EVENING, end: EVENING + 10_000 });
     const received = await whole(session.url);
     expect(received.length).toBeGreaterThan(recording.length * 0.15);
@@ -285,12 +313,16 @@ describe("a playlist's catch-up", () => {
   /** A playlist provider for `body`, and every address it then requested beyond the playlist. */
   function provider(body: string) {
     const asked: string[] = [];
+
     const fetchImpl: typeof fetch = async (input) => {
       const url = String(input);
+
       if (url === "https://iptv.test/list.m3u") return new Response(body);
       asked.push(url);
+
       return new Response("");
     };
+
     return {
       asked,
       provider: playlistProvider(
@@ -320,11 +352,13 @@ describe("a playlist's catch-up", () => {
     const { provider: list, asked } = provider(LIST);
     await list.liveCatalogue();
     const formats: Record<string, string> = {};
+
     for (const id of ["inherited", "append", "dollar", "braces", "fs-ts", "fs-hls", "xc"]) {
       const stream = await list.archiveStream(id, WINDOW);
       formats[id] = stream.format;
       await list.request(stream.url);
     }
+
     expect(asked).toEqual([
       `https://iptv.test/inherited/index.m3u8?token=t&utc=${S}&lutc=${N}`,
       `https://iptv.test/append/index.m3u8?token=t&utc=${S}&lutc=${N}`,
@@ -364,9 +398,11 @@ describe("a playlist's catch-up", () => {
         "",
       ].join("\n"),
     );
+
     const [channel, ...others] = liveChannels(
       normalizeCatalogue(await list.liveCatalogue()).streams,
     ).channels;
+
     expect(others).toEqual([]);
     expect(channel?.catchupDays).toBe(2);
     expect(archiveVariants(channel!, WINDOW, NOW).map(({ id }) => id)).toEqual([
@@ -491,10 +527,12 @@ describe("a playlist's catch-up", () => {
   it("appends a source that starts with & to a stream without a query as part of its path", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
+
     const { provider: list, asked } = single(
       'catchup="append" catchup-source="&utc={utc}"',
       "https://iptv.test/live.ts",
     );
+
     expect((await list.liveCatalogue()).channels.map((each) => each.catchupDays)).toEqual([2]);
     await list.request((await list.archiveStream("one", WINDOW)).url);
     expect(asked).toEqual([`https://iptv.test/live.ts&utc=${S}`]);
@@ -548,6 +586,7 @@ describe("a playlist's catch-up", () => {
   it("plays a Flussonic recording from the playlist host as HLS", async () => {
     const host = await startFakePlaylist({ catchup: true });
     const dataDir = await tempDir();
+
     const runtime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(
         Layer.provide(PlaybackCoordination.layer),
@@ -556,18 +595,22 @@ describe("a playlist's catch-up", () => {
         ),
       ),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     const playback = await promised(runtime, Playback);
+
     const { id: subscriptionId } = await subscriptions.add({
       server: host.link,
       username: "",
       password: "",
     });
+
     const session = await playback.open(
       { subscriptionId, id: PLAYLIST_CHANNELS.catchup.id },
       LINUX,
       { archive: WINDOW },
     );
+
     expect(session.format).toBe("hls");
     const list = await (await fetch(session.url)).text();
     // The recording's four parts, through the proxy, in a playlist that names no end yet.
@@ -591,8 +634,10 @@ async function hostedPlaylist(
 ) {
   const asked: string[] = [];
   let open = 0;
+
   const server = createServer((request, response) => {
     const path = new URL(request.url ?? "/", "http://host").pathname;
+
     if (path === "/list.m3u")
       return void response.end(["#EXTM3U", ...lines(origin), ""].join("\n"));
     asked.push(path);
@@ -600,9 +645,11 @@ async function hostedPlaylist(
     request.on("close", () => open--);
     answer(path, response);
   });
+
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const dataDir = await tempDir();
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: null }).pipe(
       Layer.provide(PlaybackCoordination.layer),
@@ -611,12 +658,15 @@ async function hostedPlaylist(
       ),
     ),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
+
   const { id: subscriptionId } = await subscriptions.add({
     server: `${origin}/list.m3u`,
     username: "",
     password: "",
   });
+
   return {
     asked,
     open: () => open,
@@ -633,15 +683,19 @@ async function hostedPlaylist(
 describe("a recording's stretch", () => {
   /** Forty seconds of recording, ten frames a second, with a PCR in its packets. */
   const RECORDING = fixture("recording-long-subtitles.mpegts");
+
   /** Sends `recording` in small pieces, so where playback stops it shows to within one. */
   const trickle = (recording: Buffer, response: ServerResponse) => {
     response.writeHead(200, { "Content-Type": "video/mp2t" });
     let offset = 0;
+
     const timer = setInterval(() => {
       response.write(recording.subarray(offset, offset + 32 * 188));
       offset += 32 * 188;
+
       if (offset >= recording.length) clearInterval(timer);
     }, 15);
+
     response.on("close", () => clearInterval(timer));
   };
 
@@ -659,12 +713,15 @@ describe("a recording's stretch", () => {
         trickle(RECORDING, response);
       },
     );
+
     // Ten seconds of programme, from five seconds past.
     const window = { start: EVENING + 5_000, end: EVENING + 15_000 };
+
     const session = await host.playback.open(host.own("Example HD"), LINUX, {
       variants: ["Example HD", "Example SD"],
       archive: window,
     });
+
     // Both from the minute SD can name, which is where the recording starts, to its end.
     expect(session.archive).toEqual({ start: EVENING, end: window.end });
     const received = await whole(session.url);
@@ -691,17 +748,22 @@ describe("a recording's stretch", () => {
       const shifted = Buffer.from(RECORDING);
       let first: number | null = null;
       let jump: number | null = null;
+
       for (let at = 0; at + 188 <= shifted.length; at += 188) {
         const packet = shifted.subarray(at, at + 188);
+
         if (packet[0] !== 0x47 || !(packet[3]! & 0x20) || packet[4]! < 7 || !(packet[5]! & 0x10))
           continue;
+
         const pcr =
           packet[6]! * 2 ** 25 +
           (packet[7]! << 17) +
           (packet[8]! << 9) +
           (packet[9]! << 1) +
           (packet[10]! >> 7);
+
         first ??= pcr;
+
         if ((pcr - first) / 90_000 < 5) continue;
         jump ??= at;
         const ahead = pcr + 4 * 90_000;
@@ -711,9 +773,11 @@ describe("a recording's stretch", () => {
         packet[9] = Math.floor(ahead / 2) & 0xff;
         packet[10] = (packet[10]! & 0x7f) | ((ahead & 1) << 7);
       }
+
       expect(jump).not.toBeNull();
       const at = jump!;
       let recording = shifted;
+
       if (where === "on the PCR's own packet") shifted[at + 5]! |= 0x80;
       else {
         const marker = Buffer.alloc(188, 0xff);
@@ -725,6 +789,7 @@ describe("a recording's stretch", () => {
         marker[5] = 0x80;
         recording = Buffer.concat([shifted.subarray(0, at), marker, shifted.subarray(at)]);
       }
+
       const host = await hostedPlaylist(
         (origin) => [
           '#EXTINF:-1 tvg-id="fs" catchup="flussonic" catchup-days="2",Flussonic',
@@ -732,9 +797,11 @@ describe("a recording's stretch", () => {
         ],
         (_path, response) => trickle(recording, response),
       );
+
       const session = await host.playback.open(host.own("fs"), LINUX, {
         archive: { start: EVENING, end: EVENING + 10_000 },
       });
+
       const received = await whole(session.url);
       // Ten seconds of the forty, not the six the jump would leave.
       expect(received.length).toBeGreaterThan(RECORDING.length * 0.23);

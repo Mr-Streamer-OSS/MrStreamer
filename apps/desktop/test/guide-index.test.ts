@@ -44,6 +44,7 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const ID = "own";
 const HOUR = 60 * 60 * 1000;
+
 /** 20:10 at +02:00, where the guides here write their times. */
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
@@ -56,6 +57,7 @@ const ADDRESS = "https://guide.example.org/xmltv.xml";
 async function openIn(dir: string): Promise<string[]> {
   const fds = await readdir("/proc/self/fd").catch(() => []);
   const paths = await Promise.all(fds.map((fd) => readlink(`/proc/self/fd/${fd}`).catch(() => "")));
+
   return paths
     .filter((path) => path.startsWith(`${dir}/`))
     .map((path) => path.slice(dir.length + 1));
@@ -80,6 +82,7 @@ async function indexesIn(dir: string): Promise<string[]> {
 
 const programme = (id: string, from: string, to: string, title: string) =>
   `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title></programme>`;
+
 const tv = (...elements: string[]) =>
   `<?xml version="1.0" encoding="utf-8"?><tv>${elements.join("")}</tv>`;
 
@@ -94,6 +97,7 @@ function catalogue(
 ): CatalogueChannels {
   const all = Array.from({ length: count }, (_, at): LiveChannel => {
     const id = String(at + 1);
+
     return {
       subscriptionId,
       id,
@@ -107,8 +111,10 @@ function catalogue(
       catchupDays: null,
     };
   });
+
   const guideIdOf = (id: string) => (id === "1" ? "one.test" : `c${id}.test`);
   const byId = new Map(all.map((channel) => [channel.id, channel]));
+
   return {
     all,
     searchNames: all.map((channel) => channel.title.toLowerCase()),
@@ -135,12 +141,15 @@ function stubbornWorker(options: WorkerOptions, ended: Promise<void>, attached: 
     setInterval(() => {}, 1000);`,
     { ...options, eval: true },
   );
+
   worker.once("message", attached);
   const terminate = worker.terminate.bind(worker);
   worker.terminate = async () => {
     await ended;
+
     return terminate();
   };
+
   return worker;
 }
 
@@ -148,11 +157,13 @@ function stubbornWorker(options: WorkerOptions, ended: Promise<void>, attached: 
 function held() {
   const arrived = Promise.withResolvers<void>();
   const released = Promise.withResolvers<void>();
+
   return {
     arrived: arrived.promise,
     release: released.resolve,
     wait: () => {
       arrived.resolve();
+
       return released.promise;
     },
   };
@@ -194,26 +205,32 @@ async function standalone({
   let stubborn: { hold: ReturnType<typeof held>; any: boolean } | null = null;
   let discarding: ReturnType<typeof held> | null = null;
   let starting: (ReturnType<typeof held> & { target: string }) | null = null;
+
   const indexer = Layer.effect(
     GuideIndexer,
     Effect.map(GuideIndexer, (worker) => ({
       build: async (...args: Parameters<typeof worker.build>) => {
         // The next build the test holds has its file begun, as a worker's is, and waits.
         const begun = starting;
+
         if (begun) {
           starting = null;
           begun.target = args[0].target;
           await writeFile(`${args[0].target}.part`, "begun");
           await begun.wait();
         }
+
         // The next build that reads the past from an index waits before it begins.
         const waiting = args[0].previous === null ? null : carrying;
+
         if (waiting) {
           carrying = null;
           await waiting.wait();
         }
+
         const built = await worker.build(...args);
         await indexing?.wait();
+
         return built;
       },
     })),
@@ -223,12 +240,15 @@ async function standalone({
         // The next build, or the next that reads the past from an index, runs in a worker that
         // won't end.
         const waiting = stubborn?.any || options.workerData.previous !== null ? stubborn : null;
+
         if (!waiting) return guideIndexWorker(options);
         stubborn = null;
+
         return stubbornWorker(options, waiting.hold.wait(), () => {});
       }),
     ),
   );
+
   /** Each of the store's writes and sweeps the test holds, once, until it lets it go. */
   const once = (hold: ReturnType<typeof held> | null, take: () => void) =>
     Effect.promise(async () => {
@@ -236,6 +256,7 @@ async function standalone({
       take();
       await hold.wait();
     });
+
   const store = Layer.effect(
     GuideStore,
     Effect.map(GuideStore, (kept) => ({
@@ -270,10 +291,13 @@ async function standalone({
         ),
     })),
   ).pipe(Layer.provide(guideStoreLayer));
+
   const stores = new Map([[ID, dir]]);
+
   for (const id of subscriptions) stores.set(id, await tempDir());
   const listed = catalogue(channels, aliases);
   const catalogues = new Map(subscriptions.map((id) => [id, catalogue(channels, aliases, id)]));
+
   const ports = Layer.mergeAll(
     store,
     indexer,
@@ -307,9 +331,11 @@ async function standalone({
       fetch: async () => ({ body: new Blob([elsewhere]).stream(), size: elsewhere.length }),
     }),
   );
+
   const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
     Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
   );
+
   const runtime = runtimeFor(Guide.layer.pipe(Layer.provide(ports), Layer.provideMerge(clock)));
   const guide = await runtime.runPromise(Guide);
   const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
@@ -319,11 +345,13 @@ async function standalone({
     Stream.runForEach(guide.changes, () =>
       Effect.map(guide.status, ([status]) => {
         const step = status?.processing.state ?? "none";
+
         if (told.at(-1) !== step) told.push(step);
       }),
     ),
   );
   const one: OwnedId = { subscriptionId: ID, id: "1" };
+
   return {
     dir,
     sourcesDir,
@@ -338,11 +366,13 @@ async function standalone({
     /** Holds the next write of the own guide kept, until `release`. */
     holdOwnWrite() {
       ownWriting = held();
+
       return ownWriting;
     },
     /** Holds the next sweep of the guide's folder, before it begins, until `release`. */
     holdSweep() {
       sweeping = held();
+
       return sweeping;
     },
     /**
@@ -353,6 +383,7 @@ async function standalone({
     holdStubborn(any = false) {
       const hold = held();
       stubborn = { hold, any };
+
       return hold;
     },
     /**
@@ -362,11 +393,13 @@ async function standalone({
     holdBuildStart() {
       const hold = { ...held(), target: "" };
       starting = hold;
+
       return hold;
     },
     /** Holds the next removal of a download, once it is read, until `release`. */
     holdDiscard() {
       discarding = held();
+
       return discarding;
     },
     /** What the source's address answers from now on. */
@@ -377,6 +410,7 @@ async function standalone({
     holdChannels() {
       const hold = held();
       listing = hold;
+
       return {
         ...hold,
         release: () => {
@@ -388,6 +422,7 @@ async function standalone({
     /** Holds the next build that reads the past from an index, before it begins. */
     holdCarrying() {
       carrying = held();
+
       return carrying;
     },
     /** Makes writes of what is set fail, as a full disk does, or work again. */
@@ -420,6 +455,7 @@ async function standalone({
         }),
         size: bytes.length,
       });
+
       return { half, total: bytes.length, ...rest };
     },
     /** The own guide's next answer: an HTTP failure. */
@@ -429,6 +465,7 @@ async function standalone({
     /** Holds the next document once it is indexed, before it becomes the guide. */
     holdIndexing() {
       indexing = held();
+
       return indexing;
     },
     status: async () => (await run(guide.status))[0],
@@ -447,6 +484,7 @@ describe("a guide as it downloads and is indexed", () => {
       programme("one.test", "2000", "2100", "After"),
       programme("one.test", "2100", "2200", "Later"),
     );
+
     const download = serveHalf(next);
     const indexing = holdIndexing();
     told.length = 0;
@@ -525,6 +563,7 @@ describe("a guide as it downloads and is indexed", () => {
       ),
     );
     await run(guide.refresh(ID));
+
     const titles = async (from: number, to: number) =>
       (await run(guide.range([one, { subscriptionId: ID, id: "2" }], from, to)))[
         ownedKey(one)
@@ -549,8 +588,10 @@ describe("a guide as it downloads and is indexed", () => {
       channels: 2,
       aliases: { "1": ["expired.test"] },
     });
+
     const described = (id: string, from: string, to: string, title: string, about: string) =>
       `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title><desc>${about}</desc></programme>`;
+
     serve(
       tv(
         described("expired.test", "1900", "1945", "Expired first spelling", "About expired"),
@@ -567,6 +608,7 @@ describe("a guide as it downloads and is indexed", () => {
       title: "Current second spelling",
     });
     expect(slot && "description" in slot).toBe(false);
+
     if (!slot) throw new Error("No slot.");
     expect(await run(guide.programme(one, slot.guide, slot.start))).toEqual({
       start: at("19:00"),
@@ -576,10 +618,12 @@ describe("a guide as it downloads and is indexed", () => {
     });
     // Nothing starts then, and another channel's guide channel isn't this one's.
     expect(await run(guide.programme(one, slot.guide, at("19:30")))).toBeNull();
+
     const [elsewhere] =
       (await run(guide.range([{ subscriptionId: ID, id: "2" }], NOW, NOW + HOUR)))[
         ownedKey({ subscriptionId: ID, id: "2" })
       ] ?? [];
+
     expect(elsewhere?.title).toBe("Elsewhere");
     expect(await run(guide.programme(one, elsewhere?.guide ?? "", at("19:00")))).toBeNull();
   });
@@ -654,8 +698,10 @@ describe("the files of a guide while it is read", () => {
     // Sixty programmes of half a mebibyte each: what one batch held before it was written.
     const description = "d".repeat(512 * 1024);
     const minute = 60_000;
+
     const stampOf = (time: number) =>
       `${new Date(time).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
     await writeFile(
       join(documents, "guide.xml"),
       tv(
@@ -666,6 +712,7 @@ describe("the files of a guide while it is read", () => {
         ),
       ),
     );
+
     const indexer = await runtimeFor(
       guideIndexerLayer((options) =>
         guideIndexWorker({
@@ -674,7 +721,9 @@ describe("the files of a guide while it is read", () => {
         }),
       ),
     ).runPromise(GuideIndexer);
+
     const target = join(output, "guide-index.sqlite");
+
     try {
       const summary = await indexer.build(
         {
@@ -688,9 +737,11 @@ describe("the files of a guide while it is read", () => {
         () => {},
         new AbortController().signal,
       );
+
       expect(summary.programmes).toBe(60);
       const index = await openGuideIndex(target);
       const channel = index?.channels.get("one.test");
+
       if (!index || !channel) throw new Error("No guide.");
       const schedule = index.schedule(channel, NOW, NOW, NOW + HOUR);
       index.close();
@@ -708,19 +759,25 @@ describe("the files of a guide while it is read", () => {
     async () => {
       const documents = await mkdtemp(join(tmpdir(), "mr-streamer-guide-document-"));
       const output = await tempDir();
+
       const many = Array.from({ length: 60_000 }, (_, index) => {
         const start = NOW + index * 60_000;
         const stamp = new Date(start).toISOString().slice(0, 19).replace(/[-T:]/g, "");
         const end = new Date(start + 60_000).toISOString().slice(0, 19).replace(/[-T:]/g, "");
+
         return `<programme start="${stamp} +0000" stop="${end} +0000" channel="one.test"><title>Item ${index}</title></programme>`;
       });
+
       await writeFile(join(documents, "guide.xml"), tv(...many));
+
       const indexer = await runtimeFor(guideIndexerLayer(guideIndexWorker)).runPromise(
         GuideIndexer,
       );
+
       const stopping = new AbortController();
       const reading = held();
       const target = join(output, "guide-index.sqlite");
+
       const built = indexer.build(
         {
           document: join(documents, "guide.xml"),
@@ -733,6 +790,7 @@ describe("the files of a guide while it is read", () => {
         () => void reading.wait(),
         stopping.signal,
       );
+
       try {
         await reading.arrived;
         // What it wrote so far can't be removed: the folder is closed to changes.
@@ -762,6 +820,7 @@ describe("which guide is current, as changes to it meet", () => {
       nowOn,
       status,
     } = await standalone();
+
     serve(tv(programme("one.test", "2000", "2100", "Own")));
     serveElsewhere(tv(programme("one.test", "2000", "2100", "External")));
 
@@ -779,9 +838,11 @@ describe("which guide is current, as changes to it meet", () => {
     });
     // What is kept names files that are there, each in its own folder.
     const own: { index: string } = JSON.parse(await readFile(join(dir, "guide.json"), "utf8"));
+
     const kept: { sources: { document: { file: string } }[] } = JSON.parse(
       await readFile(join(sourcesDir, "sources.json"), "utf8"),
     );
+
     await vi.waitFor(async () => expect(await indexesIn(dir)).toEqual([own.index]));
     await vi.waitFor(async () =>
       expect(await indexesIn(sourcesDir)).toEqual(kept.sources.map((each) => each.document.file)),
@@ -791,6 +852,7 @@ describe("which guide is current, as changes to it meet", () => {
   it("keeps a source's index while a read has it open, though the source is removed meanwhile", async () => {
     const { sourcesDir, run, guide, one, serveElsewhere, holdChannels, addSource } =
       await standalone();
+
     serveElsewhere(tv(programme("one.test", "2000", "2100", "External")));
     const source = await addSource();
 
@@ -832,6 +894,7 @@ describe("which guide is current, as changes to it meet", () => {
   it("leaves an index being written to its build, though the sweep comes meanwhile", async () => {
     const { dir, runtime, run, guide, serve, holdSweep, holdBuildStart, nowOn } =
       await standalone();
+
     serve(tv(programme("one.test", "2000", "2100", "Built")));
     // Left by a run before: what shows the sweep ran.
     const left = `guide-index.${randomUUID()}.sqlite`;
@@ -894,6 +957,7 @@ describe("the guide that supplies a channel, as time passes", () => {
     let told = 0;
     runtime.runFork(Stream.runForEach(guide.changes, () => Effect.sync(() => void told++)));
     await settle();
+
     return {
       ...harness,
       told: () => told,
@@ -986,13 +1050,16 @@ async function sliced<A>(work: () => Promise<A>): Promise<{ value: A; longest: n
   const native = globalThis.setImmediate;
   let began = process.threadCpuUsage();
   let longest = 0;
+
   const cut = () => {
     const used = process.threadCpuUsage(began);
     longest = Math.max(longest, (used.user + used.system) / 1000);
   };
+
   globalThis.setImmediate = Object.assign(
     (callback: (...args: unknown[]) => void, ...args: unknown[]) => {
       cut();
+
       return native(() => {
         began = process.threadCpuUsage();
         callback(...args);
@@ -1000,9 +1067,11 @@ async function sliced<A>(work: () => Promise<A>): Promise<{ value: A; longest: n
     },
     { __promisify__: native.__promisify__ },
   ) as typeof setImmediate;
+
   try {
     const value = await work();
     cut();
+
     return { value, longest };
   } finally {
     globalThis.setImmediate = native;
@@ -1016,15 +1085,20 @@ describe("a search of a large guide", () => {
     const channels = 2_000;
     const { run, guide, serve } = await standalone({ channels });
     const week = 7 * 24 * HOUR;
+
     const stamp = (time: number) =>
       `${new Date(time).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
     const programmes = Array.from({ length: channels }, (_, at) => {
       const id = at === 0 ? "one.test" : `c${at + 1}.test`;
+
       return Array.from({ length: 20 }, (_, slot) => {
         const start = NOW + week + slot * 7 * HOUR;
+
         return `<programme start="${stamp(start)}" stop="${stamp(start + 7 * HOUR)}" channel="${id}"><title>News long event</title></programme>`;
       }).join("");
     });
+
     serve(tv(...programmes));
     await run(guide.refresh(ID));
 
@@ -1042,13 +1116,16 @@ describe("work stopped on its way to becoming the guide", () => {
     async (point) => {
       const { dir, run, guide, serve, holdIndexing, holdOwnWrite, holdDiscard } =
         await standalone();
+
       serve(tv(programme("one.test", "2000", "2100", "Stopped")));
+
       const holding =
         point === "indexing"
           ? holdIndexing()
           : point === "own write"
             ? holdOwnWrite()
             : holdDiscard();
+
       const refreshed = failureOf(run(guide.refresh(ID)));
       await holding.arrived;
       const forgotten = run(guide.forget({ id: ID, store: dir }));
@@ -1085,11 +1162,13 @@ describe("searching across saved accounts", () => {
     { id: "second", now: "2000", later: "2030", title: "News second" },
     { id: "third", now: "1900", later: "2200", title: "News third" },
   ];
+
   const ids = shows.map(({ id }) => id);
 
   /** Real searches, except accounts whose index has become unreadable to the worker. */
   async function accounts() {
     let unreadable: readonly string[] = [];
+
     const fixture = await standalone({
       subscriptions: ids.slice(1),
       searchWorker: (options) => {
@@ -1105,9 +1184,11 @@ describe("searching across saved accounts", () => {
                 : request.search.path,
             },
           });
+
         return worker;
       },
     });
+
     for (const { id, now, later, title } of shows) {
       fixture.serve(
         tv(
@@ -1118,9 +1199,11 @@ describe("searching across saved accounts", () => {
       );
       await fixture.run(fixture.guide.refresh(id));
     }
+
     // A lower-priority source must not replace the programmes of an account's own guide.
     fixture.serveElsewhere(tv(programme("one.test", "1800", "2300", "News wrong source")));
     await fixture.addSource();
+
     return {
       ...fixture,
       fail(ids: readonly string[]) {
@@ -1151,11 +1234,13 @@ describe("searching across saved accounts", () => {
     const { run, guide, fail } = await accounts();
     fail([broken]);
     const channels = ids.map((subscriptionId) => ({ subscriptionId, id: "1" }));
+
     const expected = [
       [ID, { now: true, later: { start: at("21:00"), title: "News own later" } }],
       ["second", { now: true, later: { start: at("20:30"), title: "News second later" } }],
       ["third", { now: true, later: { start: at("22:00"), title: "News third later" } }],
     ] as const;
+
     expect(await run(guide.searchChannels("news", channels, at("23:00")))).toEqual(
       Object.fromEntries(
         expected.flatMap(([subscriptionId, match]) =>
@@ -1168,11 +1253,13 @@ describe("searching across saved accounts", () => {
   it("keeps the global first-fifty cap and merges healthy accounts by programme time", async () => {
     const { run, guide, fail, serve } = await accounts();
     fail([ID]);
+
     for (const [offset, id] of ["second", "third"].entries()) {
       serve(
         tv(
           ...Array.from({ length: 26 }, (_, index) => {
             const minute = index * 2 + offset;
+
             return programme(
               "one.test",
               String(2100 + minute),
@@ -1184,6 +1271,7 @@ describe("searching across saved accounts", () => {
       );
       await run(guide.refresh(id));
     }
+
     expect(
       (await run(guide.search("bulletin"))).map(({ channel, programme }) => [
         channel.subscriptionId,
@@ -1229,11 +1317,14 @@ describe("searching across saved accounts", () => {
         ),
       ),
     ).toEqual({});
+
     // Remove shared and other own guides so those saved accounts cannot be searched at all.
     for (const source of await run(guide.sources)) await run(guide.removeSource(source.id));
+
     for (const [id, store] of stores) {
       if (id !== ID) await run(guide.forget({ id, store }));
     }
+
     await expect(run(guide.search("news"))).rejects.toBeInstanceOf(Failed);
     await expect(
       run(
@@ -1253,6 +1344,7 @@ describe("a search that doesn't answer", () => {
     async (also) => {
       const ending = held();
       let terminated = 0;
+
       const runtime = runtimeFor(
         guideSearcherLayer((options) => {
           const worker = silentSearchWorker(options);
@@ -1260,20 +1352,25 @@ describe("a search that doesn't answer", () => {
           worker.terminate = async () => {
             terminated++;
             await ending.wait();
+
             return terminate();
           };
+
           return worker;
         }, 100),
       );
+
       const searcher = await runtime.runPromise(GuideSearcher);
       const stopping = new AbortController();
       let settled = false;
+
       const searched = searcher
         .first(
           { path: "none", words: ["news"], at: NOW, channels: [1], limit: 50 },
           stopping.signal,
         )
         .finally(() => (settled = true));
+
       void searched.catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, 20));
       stopping.abort();
@@ -1287,19 +1384,23 @@ describe("a search that doesn't answer", () => {
       await expect(searched).rejects.toThrow();
       await quitting;
       expect(terminated).toBe(1);
+
       if (!quitting) await runtime.dispose();
     },
   );
 
   it("reports a timed out search, ends its worker, and starts another for the next search", async () => {
     let started = 0;
+
     const { run, guide, serve } = await standalone({
       searchWorker: (options) => {
         started++;
+
         return silentSearchWorker(options);
       },
       searchTimeout: 200,
     });
+
     serve(tv(programme("one.test", "2000", "2100", "News")));
     await run(guide.refresh(ID));
 
@@ -1318,6 +1419,7 @@ describe("a search that doesn't answer", () => {
     const { dir, runtime, run, guide, serve } = await standalone({
       searchWorker: silentSearchWorker,
     });
+
     serve(tv(programme("one.test", "2000", "2100", "News")));
     await run(guide.refresh(ID));
 
@@ -1341,8 +1443,10 @@ describe("a search of many matching titles", () => {
   it("finds the first fifty, reading a page of them at a time within a small heap", async () => {
     // Every programme its own title, every title found.
     const minute = 60_000;
+
     const stamp = (time: number) =>
       `${new Date(time).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
     const { run, guide, serve } = await standalone({
       searchWorker: (options) =>
         guideSearchWorker({
@@ -1350,6 +1454,7 @@ describe("a search of many matching titles", () => {
           resourceLimits: { maxOldGenerationSizeMb: 12, maxYoungGenerationSizeMb: 4 },
         }),
     });
+
     serve(
       tv(
         Array.from(
@@ -1373,9 +1478,11 @@ it("drops abandoned queued guide searches and waits for active termination befor
   const active = Promise.withResolvers<void>();
   const launched: string[] = [];
   let starts = 0;
+
   const runtime = runtimeFor(
     guideSearcherLayer((options) => {
       starts++;
+
       const worker = new Worker(
         `
       const { parentPort } = require("node:worker_threads");
@@ -1386,30 +1493,41 @@ it("drops abandoned queued guide searches and waits for active termination befor
     `,
         { ...options, eval: true },
       );
+
       worker.on("message", (message: { observed?: string }) => {
         if (!message.observed) return;
         launched.push(message.observed);
+
         if (message.observed === "blocked") active.resolve();
       });
       const terminate = worker.terminate.bind(worker);
+
       if (starts === 1)
         worker.terminate = async () => {
           await ending.wait();
+
           return terminate();
         };
+
       return worker;
     }),
   );
+
   try {
     const searcher = await runtime.runPromise(GuideSearcher);
+
     const running = new AbortController(),
       queued = new AbortController();
+
     const ask = (path: string, signal: AbortSignal) =>
       searcher.first({ path, words: ["fixture"], at: NOW, channels: [1], limit: 50 }, signal);
+
     let stopped = false;
+
     const first = ask("blocked", running.signal).catch(() => {
       stopped = true;
     });
+
     await active.promise;
     const abandoned = ask("abandoned", queued.signal);
     const useful = ask("useful", new AbortController().signal);

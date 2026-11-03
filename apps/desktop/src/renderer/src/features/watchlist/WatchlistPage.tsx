@@ -33,11 +33,14 @@ const useOrder = create<{ sort: WatchlistSort }>(() => ({ sort: "saved" }));
  */
 function useWatchlist(sort: WatchlistSort) {
   const { pages, load } = usePages(sort);
+
   const loaded = useQueries({
     queries: pages.map((page) => queries.watchlist(sort, page * PAGE, PAGE)),
   });
+
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
+
   return {
     total: first ? first.total : null,
     entryAt: (index: number) => byPage.get(Math.floor(index / PAGE))?.entries[index % PAGE],
@@ -62,9 +65,11 @@ export function WatchlistPage({ active }: { active: boolean }) {
   const { total } = saved;
   useEffect(() => {
     const box = page.current;
+
     if (!hadFocus.current || !box || removal.isPending) return;
     hadFocus.current = false;
     const focused = document.activeElement;
+
     if (total === 0 && (!focused || focused === document.body)) box.focus();
   }, [total, removal.isPending]);
 
@@ -138,10 +143,13 @@ export function WatchlistPage({ active }: { active: boolean }) {
 function useStale(): readonly { readonly subscriptionId: string; readonly words: string }[] {
   const subscriptions = useSubscriptions();
   const lists = useQuery(queries.onDemandStatus()).data?.lists ?? [];
+
   return lists.flatMap(({ subscriptionId, failure }) => {
     const subscription = subscriptions.find((each) => each.id === subscriptionId);
+
     if (!subscription || !failure || subscription.needsSecret) return [];
     const words = describeError(failure);
+
     return [
       {
         subscriptionId,

@@ -22,15 +22,18 @@ const supported = isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
 const accessibility = store({ reduceTransparency: false, reduceMotion: false, motionRead: false });
 let watching = false;
+
 function watchAccessibility() {
   if (watching) return;
   watching = true;
+
   const set = (key: "reduceTransparency" | "reduceMotion") => (on: boolean) =>
     accessibility.set((current) =>
       current[key] === on && (key !== "reduceMotion" || current.motionRead)
         ? current
         : { ...current, [key]: on, motionRead: current.motionRead || key === "reduceMotion" },
     );
+
   void AccessibilityInfo.isReduceTransparencyEnabled().then(set("reduceTransparency"));
   void AccessibilityInfo.isReduceMotionEnabled().then(set("reduceMotion"));
   AccessibilityInfo.addEventListener("reduceTransparencyChanged", set("reduceTransparency"));
@@ -39,6 +42,7 @@ function watchAccessibility() {
 
 function useAccessibility() {
   watchAccessibility();
+
   return useStore(accessibility);
 }
 
@@ -53,6 +57,7 @@ export function useReduceMotion(): boolean {
  */
 export function useMotionAllowed(): boolean {
   const { reduceMotion, motionRead } = useAccessibility();
+
   return motionRead && !reduceMotion;
 }
 
@@ -68,6 +73,7 @@ const SOLID = DynamicColorIOS({
   highContrastDark: "#3A3A3C",
   highContrastLight: "#3A3A3C",
 });
+
 const EDGE = DynamicColorIOS({
   dark: "#00000000",
   light: "#00000000",
@@ -78,6 +84,7 @@ const EDGE = DynamicColorIOS({
 /** A surface for controls: regular glass, dark so white symbols read over bright pictures. */
 export function Glass({ style, children }: { style?: StyleProp<ViewStyle>; children?: ReactNode }) {
   const { reduceTransparency, reduceMotion } = useAccessibility();
+
   if (supported && !reduceTransparency) {
     return (
       <GlassView
@@ -90,6 +97,7 @@ export function Glass({ style, children }: { style?: StyleProp<ViewStyle>; child
       </GlassView>
     );
   }
+
   return <View style={[style, styles.solid]}>{children}</View>;
 }
 

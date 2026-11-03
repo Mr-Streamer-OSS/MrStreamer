@@ -15,10 +15,13 @@ const DETAILS = "document.querySelector('[role=grid] [role=region]')";
 const SELECTED = "document.querySelector('[role=grid] [role=gridcell][aria-selected=true]')";
 const BELL = "document.querySelector('button[aria-label^=\"Reminders\"]')";
 const POPUP = "document.querySelector('[role=dialog][aria-label=Reminders]')";
+
 const BANNER =
   "[...document.querySelectorAll('section[aria-label]')].find(s => /^(Starts now|Started )/.test(s.innerText))";
+
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -71,24 +74,30 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
     d.evaluate<number | null>(
       `(() => { const id = ${SELECTED}?.id; return id ? Number(id.split('-').pop()) : null; })()`,
     );
+
   for (let i = 0; i < 6; i++) {
     await d.key("ArrowRight", 39);
     await d.wait(() => d.exists(DETAILS));
     const start = await selectedStart();
+
     if (start !== null && start - Date.now() >= 150_000) break;
   }
+
   const gridStart = await selectedStart();
   expect(gridStart !== null && gridStart - Date.now() >= 150_000, "No programme ahead", gridStart);
   const remind = named("button", "Remind me", DETAILS);
   await d.wait(() => d.exists(remind));
   // Tab reaches Remind me from the grid, and Enter presses it.
   const tabs: string[] = [];
+
   for (let i = 0; i < 8; i++) {
     await d.key("Tab", 9);
     const focused = await d.evaluate<string>("document.activeElement?.textContent.trim() ?? ''");
     tabs.push(focused);
+
     if (focused === "Remind me") break;
   }
+
   d.observed["tabsToRemindMe"] = tabs;
   expect(tabs.at(-1) === "Remind me", "Tab didn't reach Remind me", tabs);
   await d.key("Enter", 13);
@@ -183,6 +192,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   const title = await d.evaluate<string>(
     `${later}[5].querySelector('span.block').textContent.trim()`,
   );
+
   await d.click("Open global Search", "document.querySelector('button[aria-label=Search]')");
   d.action(`Search ${title}`);
   await d.send("Input.insertText", { text: title });
@@ -231,6 +241,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   await d.click("Watch from the reminder's notice", named("button", "Watch", BANNER));
   await d.wait(async () => {
     const v = await picture(d);
+
     return v.watching && v.time >= 1 && v.width > 0 && v.audio > 0;
   });
   const after = fixture.streams();
@@ -248,10 +259,12 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   await d.capture("bell-while-on");
   const crosses = `[...${POPUP}.querySelectorAll('button[data-remove]')]`;
   await d.wait(() => d.evaluate<boolean>(`${crosses}.length === 2`));
+
   for (let i = 0; i < 4; i++) {
     if (await d.evaluate<boolean>(`document.activeElement === ${crosses}[0]`)) break;
     await d.key("Tab", 9);
   }
+
   expect(
     await d.evaluate<boolean>(`document.activeElement === ${crosses}[0]`),
     "Tab didn't reach the first cross",

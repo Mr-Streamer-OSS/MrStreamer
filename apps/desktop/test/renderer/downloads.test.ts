@@ -81,11 +81,13 @@ async function until(ready: () => boolean): Promise<void> {
   for (let tries = 0; tries < 100 && !ready(); tries++) {
     await act(settle);
   }
+
   if (!ready()) throw new Error("The window never showed what the test waited for.");
 }
 
 let unmount = () => {};
 let stopSync = () => {};
+
 afterEach(() => {
   unmount();
   stopSync();
@@ -110,12 +112,15 @@ async function show(element: ReactElement, ready?: string): Promise<HTMLElement>
     downloads();
     watchlist();
   };
+
   const view = queryView(client);
   const { container } = view;
   await view.render(element);
   await act(settle);
   unmount = view.unmount;
+
   if (ready) await until(() => container.querySelector(ready) !== null);
+
   return container;
 }
 
@@ -123,8 +128,10 @@ const button = (within: HTMLElement, text: string) =>
   [...within.querySelectorAll("button")].find(
     (each) => each.textContent?.trim() === text || each.getAttribute("aria-label") === text,
   );
+
 const labelled = (within: HTMLElement, label: string) =>
   within.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+
 /** Main says the list changed; waits until the window shows what `ready` looks for. */
 async function changed(next: DownloadList, ready: () => boolean): Promise<void> {
   await act(async () => ipc.emit("downloads.changed", next));
@@ -135,6 +142,7 @@ async function changed(next: DownloadList, ready: () => boolean): Promise<void> 
 async function key(name: string, target: EventTarget = window): Promise<boolean> {
   const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
   await act(async () => target.dispatchEvent(event));
+
   return event.defaultPrevented;
 }
 
@@ -270,10 +278,12 @@ describe("a series' copies on the Downloads page", () => {
     const page = await show(createElement(DownloadsPage), "[data-series]");
     const copies = page.querySelector<HTMLElement>('section[aria-label="On this computer"]')!;
     const series = copies.querySelector<HTMLElement>('[data-series="severance"]')!;
+
     const rows = (within: HTMLElement) =>
       [...within.querySelectorAll<HTMLElement>("[data-download]")].map(
         (row) => row.dataset.download,
       );
+
     const row = (id: string) => page.querySelector<HTMLElement>(`[data-download="${id}"]`)!;
 
     // Where its newest copy is, before the older build's copy and the movie, in its own order.
@@ -340,6 +350,7 @@ describe("a series' copies on the Downloads page", () => {
           ...list(items),
           series: { severance: series },
         });
+
         const all = [...before, ...later];
         ipc.always("downloads.list", listed(change === "comes" ? later : all));
         const page = await show(createElement(DownloadsPage), "[data-series]");
@@ -374,13 +385,17 @@ describe("the queue on the Downloads page", () => {
       restarted: false,
     },
   });
+
   const waiting = download({ id: "waiting", name: "Dune: Part Two", status: { kind: "waiting" } });
+
   const held = download({
     id: "held",
     name: "Attila",
     status: { kind: "paused", received: 310_000_000, size: 2_000_000_000 },
   });
+
   const next = download({ id: "next", name: "The Bear", status: { kind: "queued" } });
+
   const refused = download({
     id: "refused",
     name: "Planet Earth III",
@@ -389,6 +404,7 @@ describe("the queue on the Downloads page", () => {
       failure: { kind: "stream", failure: { kind: "refused", status: 403 } },
     },
   });
+
   const answered = () => {
     for (const method of [
       "downloads.pause",
@@ -399,8 +415,10 @@ describe("the queue on the Downloads page", () => {
     ] as const)
       ipc.always(method, null);
   };
+
   const rowOf = (page: HTMLElement, id: string) =>
     page.querySelector<HTMLElement>(`[data-download="${id}"]`)!;
+
   const order = (page: HTMLElement) =>
     [...page.querySelectorAll<HTMLElement>("[data-download]")].map(
       (row) => row.dataset["download"],
@@ -431,10 +449,12 @@ describe("the queue on the Downloads page", () => {
     // Pause all while anything can be paused, then Resume all once everything is.
     await click(button(page, "Pause all"));
     expect(ipc.argsOf("downloads.pauseAll")).toHaveLength(1);
+
     const pausedAs = (item: Download): Download => ({
       ...item,
       status: { kind: "paused", received: 0, size: null },
     });
+
     await changed(
       list([held, pausedAs(running), pausedAs(waiting), pausedAs(next), refused]),
       () => button(page, "Resume all") !== undefined,
@@ -506,6 +526,7 @@ describe("the queue on the Downloads page", () => {
     const [b, c, d] = ["B", "C", "D"].map((name) =>
       download({ id: name.toLowerCase(), name, status: { kind: "queued" } }),
     );
+
     return { b: b!, c: c!, d: d! };
   };
 
@@ -576,13 +597,17 @@ describe("the queue on the Downloads page", () => {
       { id: "c", by: 1 },
       { id: "b", by: 1 },
     ]);
+
     if (order === "answer first") await act(async () => answer.resolve(null));
     await changed(list([running, b, d, c]), () => rows(page) === "running,b,d,c");
+
     if (order === "list first") await act(async () => answer.resolve(null));
     await changed(list([running, d, b, c]), () => rows(page) === "running,d,b,c");
     expect(document.activeElement).toBe(down());
+
     return { page, b, c, d };
   }
+
   const rows = (page: HTMLElement) => order(page).join();
 
   for (const arrival of ["answer first", "list first"] as const) {
@@ -609,10 +634,12 @@ describe("the queue on the Downloads page", () => {
       await act(async () => up().focus());
       const answer = ipc.hold("downloads.move");
       await click(up());
+
       if (leaving === "after") await act(async () => answer.resolve(null));
       const cancel = button(rowOf(page, "c"), "Cancel")!;
       await act(async () => cancel.focus());
       await click(cancel);
+
       if (leaving === "before") await act(async () => answer.resolve(null));
       // Main moved D past C, then took C away, both told in one list: the keyboard went with C.
       await changed(list([running, b, d]), () => rows(page) === "running,b,d");
@@ -624,6 +651,7 @@ describe("the queue on the Downloads page", () => {
     const [p, q] = ["P", "Q"].map((name) =>
       download({ id: name.toLowerCase(), name, status: { kind: "queued" } }),
     );
+
     const paused = { kind: "paused", received: 0, size: null } as const;
     const moving = { ...running, id: "a", name: "A" };
     ipc.always("downloads.list", list([moving, { ...p!, status: paused }, q!]));
@@ -661,8 +689,10 @@ describe("the queue on the Downloads page", () => {
     const setAttribute = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
       setAttribute.call(this, name, value);
+
       if (name === "disabled" && this === document.activeElement) (this as HTMLElement).blur();
     };
+
     try {
       const { b, c, d } = passing();
       ipc.always("downloads.list", list([running, b, c, d]));
@@ -800,6 +830,7 @@ describe("a copy playing offline", () => {
       { id: "d1", position: 1195, duration: 6360 },
     ]);
     const methods = ipc.methods();
+
     for (const online of [
       "playback.openTitle",
       "viewing.recordProgress",
@@ -838,6 +869,7 @@ describe("a movie's Download in its details", () => {
 
   it("ignores other files' progress, follows exact identity and reassociation, and keeps the first duplicate", async () => {
     const own = download({ status: { kind: "queued" } });
+
     const collisions = [
       download({ id: "other-account", subscription: { id: "other", name: "Other" } }),
       download({ id: "detached", subscription: null }),
@@ -848,8 +880,10 @@ describe("a movie's Download in its details", () => {
       own,
       download({ id: "duplicate", status: { kind: "missing" } }),
     ];
+
     ipc.always("downloads.list", list(collisions));
     let commits = 0;
+
     const details = await show(
       createElement(
         Profiler,
@@ -863,6 +897,7 @@ describe("a movie's Download in its details", () => {
       ),
       "button",
     );
+
     await until(() => labelled(details, "Queued, cancel download") !== null);
     commits = 0;
     await act(async () => {
@@ -881,6 +916,7 @@ describe("a movie's Download in its details", () => {
     });
     expect(commits).toBe(0);
     expect(labelled(details, "Queued, cancel download")).not.toBeNull();
+
     const transferring = {
       ...own,
       status: {
@@ -891,16 +927,19 @@ describe("a movie's Download in its details", () => {
         restarted: false,
       },
     };
+
     await changed(
       list([...collisions.slice(0, 3), transferring, collisions[4]!]),
       () => labelled(details, "Downloading 42%, cancel download") !== null,
     );
     await click(labelled(details, "Downloading 42%, cancel download"));
     expect(ipc.argsOf("downloads.remove")).toEqual([{ id: own.id }]);
+
     // With both exact records detached, no collision grants a copy of this file.
     const detached = collisions.map((file) =>
       file.id === own.id || file.id === "duplicate" ? { ...file, subscription: null } : file,
     );
+
     await changed(list(detached), () => button(details, "Download") !== undefined);
     await changed(
       list(detached.map((file) => (file.id === own.id ? own : file))),
@@ -918,19 +957,24 @@ describe("a movie's Download in its details", () => {
     const details = await show(createElement(MovieDownload, { title: ref }), "button");
     await click(button(details, "Download"));
     expect(ipc.argsOf("downloads.add")).toEqual([{ title: ref }]);
+
     const running = download({
       status: { kind: "transferring", received: 62, size: 100, rate: null, restarted: false },
     });
+
     await changed(
       list([running]),
       () => labelled(details, "Downloading 62%, cancel download") !== null,
     );
     expect(labelled(details, "Downloading 62%, cancel download")).not.toBeNull();
+
     const full = download({
       status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
     });
+
     const retry = () =>
       [...details.querySelectorAll("button")].find((each) => each.textContent?.includes("Retry"));
+
     await changed(list([full]), () => retry() !== undefined);
     expect(retry()?.textContent).toContain("Disk full");
     await click(retry());
@@ -965,6 +1009,7 @@ describe("the top bar's word on the downloads", () => {
       id: "running",
       status: { kind: "transferring", received, size, rate: null, restarted: false },
     });
+
   /** The bar's Downloads beside Search, which names how they stand while there is something to say. */
   const notice = (within: HTMLElement) =>
     within.querySelector<HTMLButtonElement>('header [aria-label^="Downloads, "]');
@@ -997,11 +1042,13 @@ describe("the top bar's word on the downloads", () => {
     // Between transfers, what waits for playback comes before what is queued.
     await changed(list([queued, waiting]), () => notice(bar)?.textContent === "Waiting");
     await changed(list([queued]), () => notice(bar)?.textContent === "Queued");
+
     // A failure speaks once nothing else is left, while Retry can still reach its subscription.
     const failed = download({
       id: "full",
       status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
     });
+
     await changed(
       list([failed, download()]),
       () => notice(bar)?.textContent === "Download stopped",
@@ -1014,10 +1061,12 @@ describe("the top bar's word on the downloads", () => {
 
   it("says Paused, quietly, once only paused downloads are left, before one that stopped", async () => {
     useUi.setState({ view: "movies" });
+
     const failed = download({
       id: "full",
       status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
     });
+
     ipc.always(
       "downloads.list",
       list([download({ id: "held", status: { kind: "paused", received: 5, size: 10 } }), failed]),
@@ -1131,10 +1180,12 @@ describe("the top bar's word on the downloads", () => {
     const wide = (text: string, padding: number) => padding + 7 * text.length;
     // The pages' place: the nav with their names, or the slot Back stands in.
     const place = (element: HTMLElement) => element.matches("header > :nth-child(2)");
+
     const room = (pages: HTMLElement) => {
       const header = pages.closest("header")!;
       const notice = header.querySelector("[data-downloads-notice]")?.textContent ?? null;
       const update = header.querySelector("[data-update-notice]");
+
       return (
         width -
         363 -
@@ -1142,8 +1193,10 @@ describe("the top bar's word on the downloads", () => {
         (update ? (update.textContent ? 88 : 32) : 0)
       );
     };
+
     const names = (pages: HTMLElement) =>
       [...pages.children].reduce((sum, each) => sum + wide(each.textContent ?? "", 24) + 4, -4);
+
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (
       this: HTMLElement,
     ) {
@@ -1154,17 +1207,21 @@ describe("the top bar's word on the downloads", () => {
     ) {
       return place(this) ? Math.max(room(this), names(this)) : 0;
     });
+
     return {
       resize: (next = width) =>
         act(async () => {
           width = next;
+
           for (const observer of observers) observer([], {} as ResizeObserver);
           await settle();
         }),
     };
   }
+
   const pages = (bar: HTMLElement) =>
     [...bar.querySelectorAll("nav button")].map((each) => each.textContent);
+
   const failed = download({
     id: "full",
     status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
@@ -1191,6 +1248,7 @@ describe("the top bar's word on the downloads", () => {
         nextCheckAt: null,
         dismissed: null,
       };
+
       ipc.always("updates.status", update);
       ipc.always("updates.dismiss", { ...update, dismissed: "0.0.10" });
       ipc.always("downloads.list", list([failed]));
@@ -1236,6 +1294,7 @@ describe("the top bar's word on the downloads", () => {
         locale,
         formats: locale,
       });
+
       ipc.always("downloads.list", list([transfer(40, 100)]));
       ipc.always("language.get", language("nl-NL"));
       ipc.always("language.set", language("en-US"));
@@ -1243,10 +1302,13 @@ describe("the top bar's word on the downloads", () => {
       useUi.setState({ settings: "general" });
       // Back has room beside the percentage at this width; the longer Terug doesn't.
       layOut(490);
+
       function Localized() {
         useLocale();
+
         return createElement(SettingsPage);
       }
+
       try {
         const settings = await show(createElement(Localized), "header [data-downloads-notice]");
         const said = () => settings.querySelector("header [data-downloads-notice]")?.textContent;
@@ -1256,6 +1318,7 @@ describe("the top bar's word on the downloads", () => {
 
         const picker = () =>
           settings.querySelector<HTMLSelectElement>('select[aria-label="Taal van de interface"]');
+
         await until(() => picker()?.value === "nl-NL");
         await act(async () => {
           picker()!.value = "en-US";

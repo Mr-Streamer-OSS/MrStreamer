@@ -23,6 +23,7 @@ export function CatalogueScreen({
   onAdd: () => void;
 }) {
   const insets = useSafeAreaInsets();
+
   const rows = useMemo(
     () =>
       sources.flatMap((source) => (source.channels.kind === "ready" ? source.channels.rows : [])),
@@ -74,6 +75,7 @@ export function CatalogueScreen({
       {sources.map((source) => {
         const { channels } = source;
         const failed = channels.kind === "failed";
+
         return (
           <View
             key={source.id}
@@ -218,5 +220,6 @@ function monogram(title: string): string {
   const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const [first, second] = words.map((word) => Array.from(word));
   const letters = second ? [first?.[0], second[0]] : (first ?? []).slice(0, 2);
+
   return letters.join("").toLocaleUpperCase();
 }

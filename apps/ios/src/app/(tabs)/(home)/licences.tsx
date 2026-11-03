@@ -11,6 +11,7 @@ import { colors } from "../../../ui.tsx";
  */
 export default function Licences() {
   const tab = useTabs()?.tab ?? "(home)";
+
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       {licences.components.map(({ id, name, licence }) => (

@@ -51,9 +51,11 @@ const ffprobe = override ? join(dirname(override), "ffprobe") : "ffprobe";
 const { featured, shelf } = manifest;
 const titles = [featured, ...shelf];
 const MINUTE_MS = 60 * 1000;
+
 /** How far the guide reaches before and after the subscription starts. */
 const GUIDE_BEFORE_MS = 2 * 60 * MINUTE_MS;
 const GUIDE_AFTER_MS = 24 * 60 * MINUTE_MS;
+
 /** Where the lists say their pictures are. Nothing answers there: the capture fills them in. */
 const ARTWORK = "https://image.example";
 
@@ -70,12 +72,14 @@ export interface DemoMedia {
 /** The folder given as --cache-dir, from a command's parsed options. */
 export function cacheDirectory(given: string | undefined): string {
   if (!given) throw new Error("Pass --cache-dir <folder outside the repository>.");
+
   return resolve(given);
 }
 
 /** Downloads and cuts the media unless the cache folder already holds it. */
 export async function prepareMedia(cache: string): Promise<DemoMedia> {
   mkdirSync(cache, { recursive: true });
+
   const media: DemoMedia = {
     earth: join(cache, "earth-loop.ts"),
     canyon: join(cache, "canyon-hours.mkv"),
@@ -83,7 +87,9 @@ export async function prepareMedia(cache: string): Promise<DemoMedia> {
     poster: join(cache, "canyon-poster.jpg"),
     stills: featured.episodes.map((episode) => join(cache, `canyon-still-${episode.still}.jpg`)),
   };
+
   const files = [media.earth, media.canyon, media.backdrop, media.poster, ...media.stills];
+
   if (files.every((file) => existsSync(file))) return media;
 
   const earth = await download(cache, manifest.sources.earth);
@@ -96,14 +102,18 @@ export async function prepareMedia(cache: string): Promise<DemoMedia> {
     ...["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-g", "60"],
     ...["-c:a", "aac", "-b:a", "96k", "-f", "mpegts", media.earth],
   ]);
+
   // The episode: the canyon, two sound tracks of generated noise and two subtitle tracks.
   const subtitles = Object.entries(featured.subtitles).map(([language, lines]) => {
     const file = join(cache, `canyon-${language}.srt`);
     writeFileSync(file, subRip(lines));
+
     return { language, file };
   });
+
   const noise = (seed: number) =>
     `anoisesrc=color=brown:amplitude=0.02:sample_rate=48000:seed=${seed}`;
+
   run(ffmpeg, [
     ...["-ss", manifest.sources.canyon.from, "-to", manifest.sources.canyon.to, "-i", canyon],
     ...["-f", "lavfi", "-i", noise(1), "-f", "lavfi", "-i", noise(2)],
@@ -123,17 +133,21 @@ export async function prepareMedia(cache: string): Promise<DemoMedia> {
     ...subtitles.map(({ language }) => `audio:aac:${language}`),
     ...subtitles.map(({ language }) => `subtitle:subrip:${language}`),
   ]);
+
   // Stills of the same clip, at the source times the manifest lists.
   const still = (seconds: number, filter: string, file: string) =>
     run(ffmpeg, [
       ...["-ss", String(seconds), "-i", canyon, "-frames:v", "1", "-vf", filter],
       ...["-q:v", "2", file],
     ]);
+
   still(featured.backdrop, "scale=1280:720", media.backdrop);
   still(featured.poster, "crop=720:1080,scale=600:900", media.poster);
+
   for (const [index, episode] of featured.episodes.entries()) {
     still(episode.still, "scale=780:-2", media.stills[index] ?? media.backdrop);
   }
+
   return media;
 }
 
@@ -143,21 +157,27 @@ async function download(
   source: { readonly url: string; readonly file: string; readonly sha256: string },
 ): Promise<string> {
   const path = join(cache, source.file);
+
   if (!existsSync(path)) {
     console.log(`Downloading ${source.url}`);
     const response = await fetch(source.url);
+
     if (!response.ok || !response.body) {
       throw new Error(`${source.url} answered HTTP ${response.status}.`);
     }
+
     await pipeline(Readable.fromWeb(response.body), createWriteStream(`${path}.part`));
     renameSync(`${path}.part`, path);
   }
+
   const hash = createHash("sha256");
   await pipeline(createReadStream(path), hash);
   const found = hash.digest("hex");
+
   if (found !== source.sha256) {
     throw new Error(`${path} has SHA-256 ${found}, and the manifest says ${source.sha256}.`);
   }
+
   return path;
 }
 
@@ -177,11 +197,13 @@ function checkTracks(file: string, expected: readonly string[]): void {
       { encoding: "utf8" },
     ),
   ) as { streams: { codec_type: string; codec_name: string; tags?: { language?: string } }[] };
+
   const found = probed.streams.map((stream) =>
     stream.codec_type === "video"
       ? `video:${stream.codec_name}`
       : `${stream.codec_type}:${stream.codec_name}:${stream.tags?.language ?? ""}`,
   );
+
   if (found.join(" ") !== expected.join(" ")) {
     throw new Error(`${file} holds ${found.join(" ")}, not ${expected.join(" ")}.`);
   }
@@ -192,6 +214,7 @@ function subRip(
 ): string {
   const time = (seconds: number) =>
     `00:00:${String(Math.floor(seconds)).padStart(2, "0")},${String(Math.round((seconds % 1) * 1000)).padStart(3, "0")}`;
+
   return lines
     .map((line, index) => `${index + 1}\n${time(line.from)} --> ${time(line.to)}\n${line.text}\n`)
     .join("\n");
@@ -210,6 +233,7 @@ export interface MarketingDemo {
 /** Starts the subscription and TMDB's stand-in on loopback ports of their own. */
 export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDemo> {
   const started = Date.now();
+
   const provider = await startFakeProvider({
     channels: manifest.provider.channels,
     // Every channel plays the Earth loop, at its own pace, until the app lets go of it.
@@ -222,10 +246,12 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
         ],
         { stdio: ["ignore", "pipe", "ignore"] },
       );
+
       loop.stdout.pipe(out);
       signal.addEventListener("abort", () => loop.kill("SIGKILL"), { once: true });
     },
   });
+
   const tmdb = await startFakeTmdb();
 
   /** The same request, sent on to the fake provider. */
@@ -242,9 +268,12 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
         return manifest.categories.map(categoryRow);
       case "get_live_streams": {
         const rows = await listed<{ stream_id: number }>(url);
+
         return manifest.channels.flatMap((channel) => {
           const row = rows.find((each) => each.stream_id === channel.streamId);
+
           if (!row) return [];
+
           return {
             ...row,
             num: channel.number,
@@ -259,13 +288,17 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
           };
         });
       }
+
       case "get_series_categories":
         return [categoryRow(manifest.seriesCategory)];
       case "get_series": {
         const rows = await listed<{ series_id: number }>(url);
+
         return titles.flatMap((title) => {
           const row = rows.find((each) => each.series_id === title.providerId);
+
           if (!row) return [];
+
           return {
             ...row,
             name: `${title.name} (EN)`,
@@ -278,6 +311,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
           };
         });
       }
+
       case "get_series_info":
         return url.searchParams.get("series_id") === String(featured.providerId)
           ? featuredInfo()
@@ -290,21 +324,28 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
 
   const adapter = await listen((request, response) => {
     const url = new URL(request.url ?? "/", "http://adapter");
+
     if (url.pathname === "/player_api.php") return api(url).then((body) => json(response, body));
+
     if (url.pathname === "/xmltv.php") {
       response.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+
       return void response.end(guide(started));
     }
+
     // A channel's stream comes from the fake provider, which counts it as its one connection.
     if (url.pathname.startsWith("/live/")) {
       const upstream = httpRequest(new URL(url.pathname, provider.url), (answer) => {
         response.writeHead(answer.statusCode ?? 502, answer.headers);
         answer.pipe(response);
       });
+
       upstream.on("error", () => response.destroy());
       response.on("close", () => upstream.destroy());
+
       return void upstream.end();
     }
+
     if (url.pathname.startsWith("/series/")) return sendFile(media.canyon, request, response);
     response.writeHead(404).end();
   });
@@ -320,31 +361,44 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
     tmdbApi: `${address(wrapper)}/3`,
     artwork(address) {
       const url = new URL(address);
+
       if (url.hostname !== "image.example" && url.hostname !== "image.tmdb.org") return null;
+
       const [, kind, id] = /\/(poster|backdrop|still|portrait|logo)-(\d+)\.\w+$/.exec(
         url.pathname,
       ) ?? [null, null, null];
+
       const number = Number(id);
       const jpeg = (file: string) => ({ contentType: "image/jpeg", body: readFileSync(file) });
       const svg = (text: string) => ({ contentType: "image/svg+xml", body: Buffer.from(text) });
+
       if (kind === "still") {
         const index = featured.episodes.findIndex((episode) => episode.providerId === number);
         const file = media.stills[index];
+
         return file ? jpeg(file) : null;
       }
+
       if (kind === "portrait") {
         const person = featured.cast[number];
+
         return person ? svg(portrait(person.colour)) : null;
       }
+
       if (kind === "logo") {
         const channel = manifest.channels.find((each) => each.streamId === number);
+
         return channel?.logo ? svg(logo(channel.logo, channel.name)) : null;
       }
+
       if (number === featured.providerId) {
         return jpeg(kind === "poster" ? media.poster : media.backdrop);
       }
+
       const title = shelf.find((each) => each.providerId === number);
+
       if (!title || !kind) return null;
+
       return svg(cover(title.colours, kind === "poster" ? [600, 900] : [1280, 720], number));
     },
     async close() {
@@ -357,6 +411,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
 /** The featured series' details, as a panel sends them: its seasons, episodes and their files. */
 function featuredInfo(): unknown {
   const seasons = [...new Set(featured.episodes.map((episode) => episode.season))];
+
   return {
     seasons: seasons.map((season) => ({
       season_number: season,
@@ -396,6 +451,7 @@ function featuredInfo(): unknown {
 /** What TMDB's stand-in answered, with the manifest's words for the titles it names. */
 function about(url: URL, body: unknown): unknown {
   const season = /^\/3\/tv\/(\d+)\/season\/(\d+)$/.exec(url.pathname);
+
   if (season && Number(season[1]) === featured.tmdbId) {
     return {
       season_number: Number(season[2]),
@@ -416,10 +472,13 @@ function about(url: URL, body: unknown): unknown {
         })),
     };
   }
+
   const id = Number(/^\/3\/tv\/(\d+)$/.exec(url.pathname)?.[1]);
   const title = titles.find((each) => each.tmdbId === id);
+
   if (!title || typeof body !== "object" || body === null) return body;
   const opened = url.searchParams.get("append_to_response") === "credits";
+
   const listed = {
     ...body,
     name: title.name,
@@ -430,6 +489,7 @@ function about(url: URL, body: unknown): unknown {
     backdrop_path: `/backdrop-${title.providerId}.jpg`,
     ...defined({ poster_path: opened ? `/poster-${title.providerId}.jpg` : undefined }),
   };
+
   return opened && title === featured
     ? {
         ...listed,
@@ -455,7 +515,9 @@ function guideId(channel: { readonly streamId: number }): string {
 /** A programme's length: each title keeps the one the manifest gives it, from 15 minutes to 2 hours. */
 function lengthOf(title: string): number {
   const minutes = (manifest.programmeMinutes as Readonly<Record<string, number>>)[title];
+
   if (!minutes) throw new Error(`The demo manifest gives "${title}" no length.`);
+
   return minutes * MINUTE_MS;
 }
 
@@ -466,11 +528,13 @@ function lengthOf(title: string): number {
  */
 function guide(started: number): string {
   const parts = ['<?xml version="1.0" encoding="utf-8" ?><tv generator-info-name="marketing">'];
+
   for (const channel of manifest.channels) {
     parts.push(
       `<channel id="${guideId(channel)}"><display-name>${guideId(channel)}</display-name></channel>`,
     );
   }
+
   manifest.channels.forEach((channel, index) => {
     const { programmes } = channel;
     const titleAt = (slot: number): string => programmes.at(slot % programmes.length) ?? "";
@@ -478,16 +542,19 @@ function guide(started: number): string {
     // 3 to 27 minutes in, always with at least 4 minutes of the programme left.
     const into = Math.min(((index * 11) % 25) + 3, opening / MINUTE_MS - 4) * MINUTE_MS;
     const shown: { title: string; start: number; stop: number }[] = [];
+
     for (let slot = 0, start = started - into; start < started + GUIDE_AFTER_MS; slot++) {
       const stop = start + lengthOf(titleAt(slot));
       shown.push({ title: titleAt(slot), start, stop });
       start = stop;
     }
+
     for (let slot = -1, stop = started - into; stop > started - GUIDE_BEFORE_MS; slot--) {
       const start = stop - lengthOf(titleAt(slot));
       shown.unshift({ title: titleAt(slot), start, stop });
       stop = start;
     }
+
     for (const { title, start, stop } of shown) {
       parts.push(
         `<programme start="${xmltvTime(start)}" stop="${xmltvTime(stop)}" channel="${guideId(channel)}">` +
@@ -496,6 +563,7 @@ function guide(started: number): string {
     }
   });
   parts.push("</tv>");
+
   return parts.join("\n");
 }
 
@@ -523,8 +591,10 @@ function cover(
 ): string {
   const [top = "#222", bottom = "#000"] = colours;
   const sun = { x: 0.24 + ((seed * 37) % 53) / 100, y: 0.22 + ((seed * 53) % 23) / 100 };
+
   const ridge = (y: number, dip: number) =>
     `M0 ${height * y}Q${width * (0.2 + sun.x / 3)} ${height * (y - dip)} ${width * 0.55} ${height * y}T${width} ${height * (y - dip / 2)}V${height}H0Z`;
+
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">` +
     `<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${top}"/><stop offset="1" stop-color="${bottom}"/></linearGradient></defs>` +
@@ -548,6 +618,7 @@ function portrait(colour: string): string {
 /** A channel's logo: its first letter on a disc of its colour. */
 function logo(colour: string, name: string): string {
   const letter = name.replace(/^[A-Z]{2} \| /, "").charAt(0);
+
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 64" width="96" height="64">` +
     `<circle cx="48" cy="32" r="26" fill="${colour}"/>` +
@@ -562,9 +633,11 @@ function sendFile(path: string, request: IncomingMessage, response: ServerRespon
   const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
   const start = range ? Number(range[1]) : 0;
   const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+
   if (start >= size) {
     return void response.writeHead(416, { "Content-Range": `bytes */${size}` }).end();
   }
+
   response.writeHead(range ? 206 : 200, {
     "Content-Type": "video/x-matroska",
     "Accept-Ranges": "bytes",
@@ -586,16 +659,20 @@ async function listen(
         response.end(String(error));
       });
   });
+
   await new Promise<void>((done, failed) => {
     server.once("error", failed);
     server.listen(0, "127.0.0.1", done);
   });
+
   return server;
 }
 
 function address(server: Server): string {
   const bound = server.address();
+
   if (!bound || typeof bound === "string") throw new Error("The server has no address.");
+
   return `http://127.0.0.1:${bound.port}`;
 }
 

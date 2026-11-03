@@ -37,8 +37,10 @@ const elsewhere = new Set([
 /** The document's folder and every folder above it, ending at the root. */
 function folders(document: string): string[] {
   const found: string[] = [];
+
   for (let folder = dirname(document); folder !== "."; folder = dirname(folder)) found.push(folder);
   found.push(".");
+
   return found;
 }
 
@@ -52,12 +54,15 @@ export function missingReferences(root: string): string[] {
   )
     .split("\0")
     .filter(Boolean);
+
   // Each reference not on disk, with the places it could be. Git is asked about all at once.
   const absent: { reference: string; candidates: string[] }[] = [];
+
   for (const document of documents) {
     // A tracked file deleted but not yet removed from the index has nothing to read.
     if (!existsSync(join(root, document))) continue;
     const text = readFileSync(join(root, document), "utf8");
+
     for (const [, quoted = ""] of text.matchAll(/`([^`\n]+)`/g)) {
       // A line number, anchor or closing punctuation after the path isn't part of it.
       const path = quoted
@@ -65,32 +70,42 @@ export function missingReferences(root: string): string[] {
         .replaceAll("\\", "/")
         .replace(/[:#].*$/, "")
         .replace(/[.,)]+$/, "");
+
       // `./x` and `../x` count from the document's own folder only.
       const relative = /^\.\.?\//.test(path);
+
       if (!(relative ? /^[\w./@-]+$/.test(path) : pathLike.test(path))) continue;
+
       if (elsewhere.has(`${document} ${path}`)) continue;
+
       const candidates = relative
         ? [join(dirname(document), path)]
         : folders(document).map((folder) => join(folder, path));
+
       // A path that climbs out of the checkout is missing, whatever lies outside it.
       const inside = candidates.filter(
         (candidate) => candidate !== ".." && !candidate.startsWith("../"),
       );
+
       if (inside.some((candidate) => existsSync(join(root, candidate)))) continue;
       absent.push({ reference: `${document}: ${path}`, candidates: inside });
     }
   }
+
   if (!absent.length) return [];
+
   const asked = spawnSync("git", ["check-ignore", "--no-index", "-z", "--stdin"], {
     cwd: root,
     encoding: "utf8",
     input: absent.flatMap(({ candidates }) => candidates).join("\0"),
   });
+
   // Status 1 means none is ignored; anything else but 0 is git failing.
   if (asked.status !== 0 && asked.status !== 1)
     throw new Error(`git check-ignore: ${asked.stderr}`);
   // -z keeps names with other characters unquoted, both ways.
   const ignored = new Set(asked.stdout.split("\0"));
+
   return absent.flatMap(({ reference, candidates }) =>
     candidates.some((candidate) => ignored.has(candidate)) ? [] : [reference],
   );
@@ -99,6 +114,8 @@ export function missingReferences(root: string): string[] {
 if (import.meta.main) {
   // The native path of the checkout, which posix joins would garble on Windows.
   const missing = missingReferences(fileURLToPath(new URL("..", import.meta.url)));
+
   for (const line of missing) console.error(`missing path ${line}`);
+
   if (missing.length) process.exitCode = 1;
 }

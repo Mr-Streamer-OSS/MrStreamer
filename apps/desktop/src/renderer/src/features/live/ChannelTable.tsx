@@ -165,10 +165,12 @@ export function ChannelTable({
     const requested = asked.current !== searchFocus;
     asked.current = searchFocus;
     const focused = document.activeElement;
+
     const ownsFocus =
       (focused?.hasAttribute("data-search-row") && scroller.current?.contains(focused)) ||
       // A regroup replaces the focused row's node. Keep its focus on the selected exact copy.
       (focused === document.body && focusedRow.current !== null && !focusedRow.current.isConnected);
+
     if (!searchRows || selected === null || (!requested && !ownsFocus)) return;
     scroller.current
       ?.querySelector<HTMLElement>(`[data-index="${selected}"] [data-search-row]`)
@@ -180,26 +182,33 @@ export function ChannelTable({
   const subscriptionName = useSearchSubscriptionNames();
   // The row with the focus stays in the page when it scrolls out of view, so it keeps the focus.
   const kept = order || searchRows ? selected : null;
+
   const rangeExtractor = useCallback(
     (range: Range) => {
       const drawn = defaultRangeExtractor(range);
+
       if (kept === null || kept >= range.count || drawn.includes(kept)) return drawn;
+
       return [...drawn, kept].sort((a, b) => a - b);
     },
     [kept],
   );
+
   // Whole pixels, as the virtualizer measures a row: one scrolling in measures as estimated, and
   // the thousands after it aren't placed again.
   const rowPx = Math.round(ROW_REM * rem);
+
   // The virtualizer places every row again when this changes: once per list or search, not on
   // each render while it scrolls.
   const getItemKey = useCallback(
     (index: number) => {
       const channel = channels[index];
+
       return searchRows?.[index]?.key ?? (channel ? ownedKey(channel) : index);
     },
     [channels, searchRows],
   );
+
   const virtualizer = useVirtualizer({
     count: channels.length,
     getScrollElement: () => scroller.current,
@@ -218,6 +227,7 @@ export function ChannelTable({
     const index = channels.findIndex((channel, at) =>
       rowPlays(channel, searchRows?.[at], playingKey),
     );
+
     virtualizer.scrollToIndex(Math.max(index, 0), { align: index > 0 ? "center" : "start" });
     // Only once its channels are in, not when another channel starts.
   }, [channels.length > 0]);
@@ -229,15 +239,18 @@ export function ChannelTable({
 
   const items = virtualizer.getVirtualItems();
   const saved = order?.saved;
+
   const savedAt = useMemo(
     () => new Map(saved?.map((channel, index) => [ownedKey(channel), index])),
     [saved],
   );
+
   const listings = useVisibleListings(
     saved ?? channels,
     items.flatMap((item) => {
       if (!saved) return item.index;
       const channel = channels[item.index];
+
       return (channel && savedAt.get(ownedKey(channel))) ?? [];
     }),
   );
@@ -260,8 +273,10 @@ export function ChannelTable({
       >
         {items.map((item) => {
           const channel = channels[item.index];
+
           if (!channel) return null;
           const key = ownedKey(channel);
+
           return (
             <div
               key={item.key}
@@ -289,6 +304,7 @@ export function ChannelTable({
                 copiesOpen={expandedCopies.has(searchRows?.[item.index]?.group.key ?? "")}
                 onToggleCopies={() => {
                   const row = searchRows?.[item.index];
+
                   if (row) onToggleCopies?.(row.group.key);
                 }}
                 onSelectSearch={() => onSelectSearch?.(item.index)}
@@ -390,23 +406,28 @@ function ChannelRow({
 }) {
   const searching = words.length > 0;
   const grouped = searchRow && !searchRow.copy && searchRow.group.copies.length > 1;
+
   const subscriptionCount = grouped
     ? new Set(searchRow.group.copies.map((copy) => copy.subscriptionId)).size
     : 0;
+
   const groupSummary = grouped
     ? `${t("{count} subscriptions", { count: subscriptionCount })} · ${searchQualities(searchRow.group.copies)}`
     : null;
+
   const copySummary = searchRow?.copy
     ? [source, searchQualities([channel]), category?.group, category?.title]
         .filter(Boolean)
         .join(" · ")
     : null;
+
   // Under the name: a group's subscriptions and qualities, a copy's source and where it's filed,
   // or else the source where another's channel is called the same, its country and qualities.
   const details =
     groupSummary ??
     copySummary ??
     ([source, channel.browse?.country, qualitiesLine(channel)].filter(Boolean).join(" · ") || null);
+
   const current = listing?.now ?? null;
   const next = listing?.next ?? null;
   // A match that began since it was found is the programme on now.
@@ -420,12 +441,15 @@ function ChannelRow({
   const locked = order?.locked;
   useLayoutEffect(() => {
     if (!part) return;
+
     const target =
       part === "row"
         ? row.current
         : row.current?.querySelector<HTMLElement>(`[data-move="${part}"]`);
+
     if (target && document.activeElement !== target) target.focus({ preventScroll: true });
   }, [part, asked, locked]);
+
   return (
     <div className="pb-1">
       <div
@@ -472,6 +496,7 @@ function ChannelRow({
               ...defined({ "aria-expanded": grouped ? copiesOpen : undefined }),
               onKeyDown: (event) => {
                 if (!searchRow || event.target !== event.currentTarget || event.repeat) return;
+
                 // Enter belongs to the page, which also commits a typed channel number.
                 if (event.key === " ") {
                   event.preventDefault();
@@ -633,26 +658,34 @@ function ChannelName({
   const line = useRef<HTMLSpanElement>(null);
   const [hovered, setHovered] = useState(false);
   const [holding, setHolding] = useState(false);
+
   const clipped = () =>
     [name.current, line.current].some(
       (text) => text !== null && text.scrollWidth > text.clientWidth,
     );
+
   useLayoutEffect(() => {
     if (!held) {
       setHolding(false);
+
       return;
     }
+
     const measure = () => setHolding(clipped());
     measure();
     const observer = new ResizeObserver(measure);
+
     if (name.current) observer.observe(name.current);
+
     if (line.current) observer.observe(line.current);
+
     return () => observer.disconnect();
   }, [held, channel.title, details, playing]);
   // Covered, the pointer can leave unheard: the label waits for the next hover.
   useLayoutEffect(() => {
     if (covered) setHovered(false);
   }, [covered]);
+
   return (
     <Tooltip
       side="bottom"
@@ -661,11 +694,13 @@ function ChannelName({
       onOpenChange={(open, change) => {
         // Escape stays the page's, which ends a search or an order with the label up.
         const escape = change.reason === "escape-key";
+
         if (escape) {
           setHolding(false);
           change.cancel();
           change.allowPropagation();
         }
+
         setHovered(open && !escape && clipped());
       }}
       label={
@@ -724,6 +759,7 @@ function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; 
   const ended = by < 0 ? order.position === 1 : order.position === order.count;
   const off = ended || order.locked;
   const Icon = by < 0 ? ArrowUp : ArrowDown;
+
   return (
     <button
       data-move={part}
@@ -743,6 +779,7 @@ function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; 
       onFocus={() => order.onFocused(part)}
       onClick={(event) => {
         event.stopPropagation();
+
         if (off) return;
         // Pressed with a key, the button has the focus and keeps it; a click leaves it on the row.
         const held = document.activeElement === event.currentTarget ? part : "row";
@@ -762,6 +799,7 @@ function MoveButton({ by, channel, order }: { by: -1 | 1; channel: LiveChannel; 
 export function Marked({ text, words }: { text: string; words: readonly string[] }) {
   const parts: ReactNode[] = [];
   let at = 0;
+
   for (const [start, end] of matchRanges(text, words)) {
     parts.push(
       text.slice(at, start),
@@ -774,6 +812,7 @@ export function Marked({ text, words }: { text: string; words: readonly string[]
     );
     at = end;
   }
+
   return [...parts, text.slice(at)];
 }
 
@@ -809,14 +848,17 @@ function Schedule({
   const reminders = useReminders().data;
   const found = match?.later?.start ?? null;
   const [open, setOpen] = useState(found);
+
   const programmes = useMemo(() => {
     const all = schedule.data ?? [];
+
     const aired = remote
       ? []
       : all.filter(
           (programme) =>
             programme.stop <= now && archiveHolds(channel.catchupDays, programme.start, now),
         );
+
     return [
       ...aired.filter(
         (programme, index) =>
@@ -827,6 +869,7 @@ function Schedule({
         .filter((programme, index) => programme.start < midnight || index < GUIDE_SCHEDULE.atLeast),
     ];
   }, [schedule.data, now, today, midnight, remote, channel.catchupDays]);
+
   return (
     <div className="rounded-b-lg bg-white/5 py-2 pr-4 pl-[17.5rem]">
       {programmes.map((programme) => (
@@ -888,6 +931,7 @@ function ScheduleLine({
     // Only when it opens, not as the programme on now changes.
   }, [found]);
   const later = !aired && !onNow;
+
   return (
     <div className={cn("rounded-lg", (found || (open && later)) && "bg-white/6")}>
       <button

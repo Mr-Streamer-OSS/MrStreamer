@@ -12,23 +12,29 @@ import type { Driver } from "./language.ts";
 
 const button = (selector: string, label: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(label)})`;
+
 const shown = (selector: string) => `document.querySelector('main:not([hidden]) ${selector}')`;
+
 const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
 
 export async function settingsScenario(d: Driver): Promise<void> {
   let locale: Locale = "en-US";
+
   const nav = async (label: PlainKey) =>
     d.click(`Open ${label}`, button("nav button", translate(locale, label)));
+
   const settings = async () => {
     await d.click("Open Settings", "document.querySelector('header button[aria-label=Settings]')");
     await d.wait(() => d.exists("document.querySelector('[data-view=settings]')"));
   };
+
   const saved = () =>
     d.evaluate<Preferences>(
       `(async () => { const r = await window.mrStreamer.invoke('preferences.get'); if (!r.ok) throw new Error('Cannot read preferences'); return r.value.preferences; })()`,
     );
+
   const type = async (field: string, value: string) => {
     await d.click(`Type into ${value ? "setting" : "search"}`, field);
     const modifiers = process.platform === "darwin" ? 4 : 2;
@@ -47,7 +53,9 @@ export async function settingsScenario(d: Driver): Promise<void> {
     });
     await d.send("Input.insertText", { text: value });
   };
+
   const search = `document.querySelector('nav input[type=search]')`;
+
   const find = async (query: string, destination: string) => {
     await type(search, query);
     await d.key("Enter", 13);
@@ -57,6 +65,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
       ),
     );
   };
+
   const size = async (width: number, height: number) => {
     await d.send("Emulation.setDeviceMetricsOverride", {
       width,
@@ -66,14 +75,17 @@ export async function settingsScenario(d: Driver): Promise<void> {
     });
     await d.wait(() => d.evaluate<boolean>(`innerWidth === ${width} && innerHeight === ${height}`));
   };
+
   // Native select type-ahead commits on macOS too, where CDP ArrowDown does not commit a choice.
   const choose = async (field: string, name: string) => {
     await d.wait(() => d.exists(field));
     await d.evaluate(`${field}.focus()`);
+
     for (const char of name.slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+
     await d.wait(() =>
       d.evaluate<boolean>(
         `${field}?.getAttribute('aria-busy') !== 'true' && ${field}?.closest('fieldset')?.getAttribute('aria-busy') !== 'true'`,
@@ -117,6 +129,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     tabTo: "own-quality",
     escapeRestoredOpener: true,
   };
+
   const order = [
     "General",
     "Playback",
@@ -130,16 +143,20 @@ export async function settingsScenario(d: Driver): Promise<void> {
     "Privacy",
     "About",
   ] as const;
+
   const rail = await d.evaluate<string[]>(
     "[...document.querySelectorAll('nav button')].map(e => e.textContent.trim())",
   );
+
   expect(rail.join() === order.join(), "Incorrect Settings section order");
   d.observed["sectionOrder"] = rail;
+
   for (const section of order) {
     await nav(section);
     await d.wait(() => d.evaluate<boolean>("!!document.querySelector('main:not([hidden])')"));
     await d.capture(`section-${section.toLowerCase().replaceAll(" ", "-")}`);
   }
+
   await d.click("Open licences", shown("[data-setting=licences]"));
   await d.wait(() => d.exists("document.querySelector('[aria-label=\"Search the licences\"]')"));
   await d.key("Escape", 27);
@@ -156,9 +173,12 @@ export async function settingsScenario(d: Driver): Promise<void> {
     "de-DE": "Sekunden",
     "es-ES": "cuenta atras",
   };
+
   const searches: unknown[] = [];
+
   for (const next of LOCALES) {
     await nav("General");
+
     if (locale !== next) {
       await choose(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES[next]);
       await d.key("Tab", 9);
@@ -167,6 +187,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
       );
       locale = next;
     }
+
     await find(synonyms[next], "delay");
     searches.push({
       locale,
@@ -176,6 +197,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     await d.capture(`search-${locale}`);
     await find(translate(locale, "Interface language"), "interface-language");
   }
+
   d.observed["translatedSearch"] = searches;
   await choose(shown('select:has(option[value="en-US"])'), LANGUAGE_NAMES["en-US"]);
   await d.key("Tab", 9);
@@ -241,6 +263,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
   const original = await readFile(path, "utf8");
   await rename(path, backup);
   let restored = false;
+
   try {
     await mkdir(path);
     d.action("Block preference replacement with a directory at the owned profile file path");
@@ -327,6 +350,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
       await rename(backup, path);
     }
   }
+
   d.observed["persistenceFailure"] = {
     boundary: "actual rename to directory in owned profile",
     savedBefore: 60,

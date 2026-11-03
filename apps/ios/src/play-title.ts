@@ -59,6 +59,7 @@ const failureKey = (kind: TitleKind, version: OwnedId) => `${kind}|${ownedKey(ve
 export function useFailure(kind: TitleKind, version: OwnedId): Failure | undefined {
   return useStore(failed).get(failureKey(kind, version));
 }
+
 /** The same, as it stands now, for a menu opened later than the screen last drew. */
 export function failureOf(kind: TitleKind, version: OwnedId): Failure | undefined {
   return failed.get().get(failureKey(kind, version));
@@ -67,12 +68,15 @@ export function failureOf(kind: TitleKind, version: OwnedId): Failure | undefine
 /** Notes whether `version` played: a failure until it plays, cleared once it does. */
 function outcomeOf(kind: TitleKind, version: OwnedId, failure: Failure) {
   const key = failureKey(kind, version);
+
   return (played: boolean) =>
     failed.set((current) => {
       if (played ? !current.has(key) : current.get(key) === failure) return current;
       const next = new Map(current);
+
       if (played) next.delete(key);
       else next.set(key, failure);
+
       return next;
     });
 }
@@ -87,6 +91,7 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
   const ref: TitleRef = { kind: "movie", ...ownedId(version) };
   const since = Date.now();
   const key = ownedKey(version);
+
   const item: Playing = {
     id: key,
     subscriptionId: version.subscriptionId,
@@ -102,6 +107,7 @@ export function playMovie(title: Title, version: OwnedId, from: number, versions
       year: title.year,
     }),
   };
+
   void play(
     item,
     { kind: "file", open: sourceOf(ref), originalLanguage: title.originalLanguage },
@@ -135,9 +141,12 @@ export function playEpisode(
     season: episode.season,
     episode: episode.number,
   };
+
   const series = { subscriptionId: episode.subscriptionId, id: episode.seriesId };
+
   const demo =
     episode.subscriptionId === DEMO_ID && members().some(({ entry }) => entry.kind === "demo");
+
   const demoSource = demo ? currentSource(DEMO_ID) : undefined;
   const since = Date.now();
   const key = ownedKey(episode);
@@ -146,17 +155,21 @@ export function playEpisode(
   const after = nextEpisode(details, at) ?? null;
   let finishing = false;
   const standing = () => seriesViewing(series);
+
   // The next one not yet watched, as the record stands once this one's progress is saved, else the
   // next in order, while `stands`. A refused save was told (`onProgressRefused`), and an
   // unreadable record can't say which episode goes on or from where: either way none does, and
   // this one stays, for Next to be pressed again.
   const upcoming = async (saved: Promise<Saved>, stands = () => true) => {
     const { saved: kept } = await saved;
+
     if (!kept || !stands()) return null;
     const { progress, marks } = await standing();
     const episode = nextUnwatched(details, at, progress, marks) ?? after;
+
     if (!episode || !stands()) return null;
     const state = episodeStates(progress, marks)(episode);
+
     // The logical episode can stand by another file; resume this file's own checkpoint.
     const selected =
       state.kind === "watched"
@@ -165,11 +178,13 @@ export function playEpisode(
             progress.filter(({ title }) => sameOwned(title, episode)),
             marks,
           )(episode);
+
     return {
       episode,
       from: resumePoint(selected.kind === "partial" ? selected.progress : undefined),
     };
   };
+
   const item: Playing = {
     id: key,
     subscriptionId: episode.subscriptionId,
@@ -187,6 +202,7 @@ export function playEpisode(
       episode,
     }),
   };
+
   void play(
     item,
     { kind: "file", open: sourceOf(ref), originalLanguage: details.title.originalLanguage },
@@ -196,6 +212,7 @@ export function playEpisode(
       from,
       progress: (position, duration) => {
         const saved = recordProgress(ref, position, duration, since);
+
         if (after !== null || finishing || !isFinished(position, duration)) return saved;
         // In the credits of an episode with none after it: once the progress is saved, the series
         // is finished if the record says no numbered episode is left to watch.
@@ -209,6 +226,7 @@ export function playEpisode(
               : (finishing = false),
           )
           .catch(() => (finishing = false));
+
         return saved;
       },
       outcome: outcomeOf("series", series, "episode"),
@@ -222,6 +240,7 @@ export function playEpisode(
       // Playback keeps its own word on whether the countdown still stands.
       upNext: async (saved) => {
         const found = await upcoming(saved).catch(() => null);
+
         return (
           found && {
             place: lineOf(found.episode),
@@ -251,8 +270,10 @@ function resumeWith<P>(
   const stands = () => asked.stands() && (owner?.stands() ?? true);
   void (async () => {
     await progressSettled();
+
     if (!stands()) return;
     const found = await read().catch(() => shown);
+
     if (stands()) start(found);
   })();
 }
@@ -290,7 +311,9 @@ export function resumeEpisode(
         subscriptionId: episode.subscriptionId,
         id: episode.seriesId,
       });
+
       const state = episodeStates(progress, marks)(episode);
+
       return state.kind === "partial" ? state.progress : undefined;
     },
     shown,
@@ -310,6 +333,7 @@ export function resumeSeries(
   resumeWith(
     async () => {
       const { progress, marks } = await seriesViewing(version);
+
       return continuation(details, progress, marks) ?? shown;
     },
     shown,

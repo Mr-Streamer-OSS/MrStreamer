@@ -89,8 +89,11 @@ export function seen(
 ): KeptReminder {
   if (reminder.state.kind === "told" || reminder.state.kind === "missed") return reminder;
   const found = channel ? relisted(reminder, channel) : reminder;
+
   if (channel === null || programme === null) return { ...found, state: { kind: "gone" } };
+
   if (programme === undefined) return found;
+
   return { ...found, title: programme.title, stop: programme.stop, state: { kind: "pending" } };
 }
 
@@ -105,8 +108,10 @@ export function atTime(
   visible: boolean,
 ): { readonly reminder: KeptReminder; readonly tells: boolean } {
   if (reminder.state.kind !== "pending" || now < reminder.start) return { reminder, tells: false };
+
   if (visible && now < reminder.stop)
     return { reminder: { ...reminder, state: { kind: "told", at: now } }, tells: true };
+
   return { reminder: { ...reminder, state: { kind: "missed" } }, tells: false };
 }
 
@@ -143,9 +148,11 @@ export function lateMinutes(start: number, at: number): number {
  */
 export function nextAt(reminders: readonly KeptReminder[], now: number): number | null {
   let next: number | null = null;
+
   const consider = (at: number) => {
     if (at > now && (next === null || at < next)) next = at;
   };
+
   for (const reminder of reminders) {
     if (reminder.state.kind === "pending") consider(reminder.start);
     else {
@@ -153,6 +160,7 @@ export function nextAt(reminders: readonly KeptReminder[], now: number): number 
       consider(keptUntil(reminder));
     }
   }
+
   return next;
 }
 

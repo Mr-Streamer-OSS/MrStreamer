@@ -7,24 +7,32 @@ import { afterEach, expect, it } from "vitest";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 
 const cleanups: (() => void)[] = [];
+
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
+
 function observer(client: QueryClient, query: string, list = false) {
   const node = document.createElement("div");
   const root = createRoot(node);
+
   function Search() {
     if (list) useQuery(queries.listSearch({}, query, 1));
     else useQuery(queries.programmes(query));
+
     return null;
   }
+
   act(() => root.render(createElement(QueryClientProvider, { client }, createElement(Search))));
   let mounted = true;
+
   const unmount = () => {
     if (mounted) act(() => root.unmount());
     mounted = false;
   };
+
   cleanups.push(unmount);
+
   return unmount;
 }
 
@@ -48,9 +56,11 @@ it("keeps shared guide queries alive until the last observer leaves", async () =
 it("cancels an abandoned palette invocation without cancelling Live or another query", async () => {
   ipc.reset();
   ipc.always("guide.cancelSearch", null);
+
   const held = ipc.hold("guide.search"),
     other = ipc.hold("guide.search"),
     live = ipc.hold("guide.searchList");
+
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   cleanups.push(() => client.clear());
   const first = observer(client, "first");

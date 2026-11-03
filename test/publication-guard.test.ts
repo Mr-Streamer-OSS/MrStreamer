@@ -41,9 +41,11 @@ interface Workflow {
 }
 
 const parsed = new Map<string, Workflow>();
+
 const read = (name: string): Workflow => {
   if (!parsed.has(name))
     parsed.set(name, parse(readFileSync(`.github/workflows/${name}`, "utf8")) as Workflow);
+
   return parsed.get(name)!;
 };
 
@@ -73,22 +75,29 @@ const tokenized = new Map<string, string[]>();
 
 function tokenize(expression: string): string[] {
   const known = tokenized.get(expression);
+
   if (known) return known;
   const tokens: string[] = [];
   const source = expression.trimEnd();
   TOKEN.lastIndex = 0;
+
   while (TOKEN.lastIndex < source.length) {
     const match = TOKEN.exec(source);
+
     if (!match) throw new Error(`Can't read ${JSON.stringify(expression)} past ${TOKEN.lastIndex}`);
     tokens.push(match[1]!);
   }
+
   tokenized.set(expression, tokens);
+
   return tokens;
 }
 
 const truthy = (value: Value) => value !== null && value !== false && value !== 0 && value !== "";
+
 const number = (value: Value) =>
   value === null ? 0 : typeof value === "boolean" ? Number(value) : Number(value || 0);
+
 const equal = (a: Value, b: Value) =>
   typeof a === "string" && typeof b === "string"
     ? a.toLowerCase() === b.toLowerCase()
@@ -101,63 +110,91 @@ function evaluate(expression: string, scope: Scope): Value {
   const tokens = tokenize(expression);
   let at = 0;
   const peek = () => tokens[at];
+
   const take = (expected?: string) => {
     const token = tokens[at++];
+
     if (token === undefined || (expected && token !== expected))
       throw new Error(`Expected ${expected ?? "more"} in ${expression}`);
+
     return token;
   };
+
   const primary = (): Value => {
     const token = take();
+
     if (token === "(") {
       const value = or();
       take(")");
+
       return value;
     }
+
     if (token.startsWith("'")) return token.slice(1, -1).replaceAll("''", "'");
+
     if (peek() === "(") {
       take("(");
       take(")");
+
       if (token === "success") return scope.needsSucceeded && !scope.cancelled;
+
       if (token === "failure") return scope.ancestorFailed;
+
       if (token === "cancelled") return scope.cancelled;
+
       if (token === "always") return true;
       throw new Error(`Unknown function ${token}()`);
     }
+
     if (token === "true" || token === "false") return token === "true";
+
     if (token === "null") return null;
+
     return scope.path(token);
   };
+
   const unary = (): Value => (peek() === "!" ? (take(), !truthy(unary())) : primary());
+
   const comparison = (): Value => {
     const left = unary();
     const operator = peek();
+
     if (operator !== "==" && operator !== "!=") return left;
     take();
     const same = equal(left, unary());
+
     return operator === "==" ? same : !same;
   };
+
   const and = (): Value => {
     let value = comparison();
+
     while (peek() === "&&") {
       take();
       const right = comparison();
       value = truthy(value) ? right : value;
     }
+
     return value;
   };
+
   const or = (): Value => {
     let value = and();
+
     while (peek() === "||") {
       take();
       const right = and();
       value = truthy(value) ? value : right;
     }
+
     return value;
   };
+
   const value = or();
+
   if (at !== tokens.length)
     throw new Error(`Unread ${tokens.slice(at).join(" ")} in ${expression}`);
+
   return value;
 }
 
@@ -166,6 +203,7 @@ function runs(expression: string | undefined, scope: Scope): boolean {
   const source = (expression ?? "success()").replace(/^\$\{\{(.*)\}\}$/s, "$1").trim();
   const tokens = tokenize(source);
   const status = tokens.some((token, index) => STATUS.includes(token) && tokens[index + 1] === "(");
+
   return truthy(evaluate(source, scope)) && (status || evaluate("success()", scope) === true);
 }
 
@@ -180,6 +218,7 @@ function ancestorsOf(workflow: Workflow, name: string): Set<string> {
 }
 
 type Result = "success" | "failure" | "skipped" | "cancelled";
+
 const RESULTS: readonly Result[] = ["success", "failure", "skipped", "cancelled"];
 
 const unmodelled = (path: string): never => {
@@ -200,13 +239,19 @@ function jobScope(
   cancelled: boolean,
 ): Scope {
   const needs = needsOf(workflow.jobs[name]!);
+
   return {
     path: (path) => {
       const [scope, need, kind, output, ...rest] = path.split(".");
+
       if (scope !== "needs") return context(path);
+
       if (!need || !needs.includes(need) || rest.length > 0) return unmodelled(path);
+
       if (kind === "result" && output === undefined) return results.get(need) ?? unmodelled(path);
+
       if (kind === "outputs" && output !== undefined) return outputs(need, output);
+
       return unmodelled(path);
     },
     // GitHub's implicit success() skips a job when any job it waits for, however indirectly, didn't
@@ -224,15 +269,21 @@ function jobScope(
 function callInputs(workflow: Workflow, given: Record<string, Value>) {
   const called = workflow.on.workflow_call?.inputs ?? {};
   const byHand = workflow.on.workflow_dispatch?.inputs ?? {};
+
   return (name: string): Value => {
     const input = called[name];
+
     if (input) {
       if (name in given) return given[name]!;
+
       if ("default" in input) return input.default as Value;
+
       // GitHub's own defaults for an omitted input without one.
       return input.type === "boolean" ? false : input.type === "number" ? 0 : "";
     }
+
     if (name in byHand) return null;
+
     return unmodelled(`inputs.${name}`);
   };
 }
@@ -250,26 +301,37 @@ function simulate(
   outcomes: Readonly<Record<string, Result>> = {},
 ) {
   const inputs = callInputs(workflow, given);
+
   const context = (path: string): Value => {
     if (path === "github.event_name") return event;
+
     if (path === "github.ref") return "refs/heads/main";
+
     if (path.startsWith("inputs.")) return inputs(path.slice("inputs.".length));
+
     // Every kill switch on: the worst case.
     if (path === "vars.MARKETING_DEPLOY_ENABLED" || path === "vars.STORE_AUTOMATION_ENABLED")
       return "true";
+
     return unmodelled(path);
   };
+
   const results = new Map<string, Result>();
+
   const outputs = (job: string, output: string): Value => {
     if (!(output in (workflow.jobs[job]!.outputs ?? {})))
       return unmodelled(`needs.${job}.outputs.${output}`);
+
     return results.get(job) === "success" ? "true" : "";
   };
+
   const pending = Object.keys(workflow.jobs);
+
   while (pending.length > 0) {
     const index = pending.findIndex((name) =>
       needsOf(workflow.jobs[name]!).every((need) => results.has(need)),
     );
+
     if (index === -1) throw new Error(`A cycle among ${pending.join(", ")}`);
     const [name] = pending.splice(index, 1);
     const scope = jobScope(workflow, name!, results, outputs, context, cancelled);
@@ -278,6 +340,7 @@ function simulate(
       runs(workflow.jobs[name!]!.if, scope) ? (outcomes[name!] ?? "success") : "skipped",
     );
   }
+
   return [...results].flatMap(([name, result]) => (result === "success" ? [name] : []));
 }
 
@@ -304,6 +367,7 @@ function publication(
   const event = options.event ?? "schedule";
   const results = new Map<string, Result>();
   const actual = new Map<string, Result>();
+
   const plan = {
     skip: "false",
     "dry-run": options.dry ?? "false",
@@ -311,40 +375,58 @@ function publication(
     tag: "v0.0.22",
     promoted: options.channel === "stable" ? "v0.0.22-nightly.20261029.1" : "",
   };
+
   const outputs = (job: string, output: string): Value => {
     if (!(output in (workflow.jobs[job]?.outputs ?? {})))
       return unmodelled(`needs.${job}.outputs.${output}`);
+
     if (actual.get(job) !== "success") return "";
+
     if (job === "plan") return plan[output as keyof typeof plan] ?? unmodelled(output);
+
     if (job === "validation") return options.reused ? "true" : "false";
+
     return "true";
   };
+
   const context = (path: string): Value => {
     if (path === "github.event_name") return event;
+
     if (path === "github.ref") return "refs/heads/main";
+
     if (path === "github.repository" || path === "github.event.pull_request.head.repo.full_name")
       return "Mr-Streamer-OSS/MrStreamer";
+
     if (path === "github.event.label.name") return "release dry run";
+
     if (path === "inputs.dry-run") return options.dry === "true";
+
     if (path === "inputs.operation")
       return options.operation ?? (event === "workflow_dispatch" ? "release" : "");
+
     return unmodelled(path);
   };
+
   for (const [name, job] of Object.entries(workflow.jobs)) {
     const forced = PUBLIC.includes(name) ? undefined : options.outcomes?.[name];
     const scope = jobScope(workflow, name, results, outputs, context, options.cancelled ?? false);
+
     const result =
       forced ?? (runs(job.if, scope) ? (options.outcomes?.[name] ?? "success") : "skipped");
+
     actual.set(name, result);
     const tolerated = job["continue-on-error"];
+
     const continuing =
       typeof tolerated === "boolean"
         ? tolerated
         : tolerated
           ? truthy(evaluate(tolerated.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), scope))
           : false;
+
     results.set(name, result === "failure" && continuing ? "success" : result);
   }
+
   return PUBLIC.filter((name) => results.get(name) === "success");
 }
 
@@ -353,11 +435,13 @@ describe("publication boundaries", () => {
     const ancestors = [
       ...new Set(PUBLIC.flatMap((name) => [...ancestorsOf(release, name)])),
     ].filter((name) => name !== "plan" && !PUBLIC.includes(name));
+
     const outcomes: Record<string, Result>[] = [
       {},
       ...ancestors.flatMap((name) => RESULTS.map((result) => ({ [name]: result }))),
       ...RESULTS.map((result) => Object.fromEntries(ancestors.map((name) => [name, result]))),
     ];
+
     for (const event of ["schedule", "workflow_dispatch", "pull_request"])
       for (const dry of ["true", "false"])
         for (const channel of ["stable", "nightly"])
@@ -386,6 +470,7 @@ describe("publication boundaries", () => {
       "finalize",
       "website-refresh",
     ]);
+
     for (const job of [
       "check",
       "test",
@@ -413,6 +498,7 @@ describe("publication boundaries", () => {
         expect(jobs).toContain("discord");
         expect(jobs).toContain("website-refresh");
       }
+
     expect(
       publication(release, { channel: "stable", outcomes: { finalize: "failure" } }),
     ).not.toContain("website-refresh");
@@ -431,7 +517,9 @@ describe("publication boundaries", () => {
   it("recovery options cannot weaken normal release acceptance", () => {
     const selected = (job: string, key: string, operation: string) => {
       const expressions = release.jobs[job]!.steps?.flatMap((step) => step.env?.[key] ?? []) ?? [];
+
       if (!expressions.length) throw new Error(`Missing ${job}/${key}`);
+
       return expressions.map((expression) =>
         evaluate(expression.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), {
           path: (path) =>
@@ -450,6 +538,7 @@ describe("publication boundaries", () => {
         }),
       );
     };
+
     expect(selected("upgrade", "NATIVE_CASE", "release")).toEqual(["all", "all"]);
     expect(selected("upgrade", "NATIVE_CASE", "upgrade")).toEqual([
       "compatibility",
@@ -457,6 +546,7 @@ describe("publication boundaries", () => {
     ]);
     expect(selected("feed", "ALLOW_REGRESS", "release")).toEqual([false]);
     expect(selected("feed", "ALLOW_REGRESS", "feed")).toEqual([true]);
+
     for (const key of ["DRAFT", "DRAFT_METADATA_SHA256"]) {
       expect(selected("store", key, "release")).toEqual([""]);
       expect(selected("store", key, "store")).not.toEqual([""]);
@@ -470,6 +560,7 @@ describe("publication boundaries", () => {
   });
   it("detects missing boundaries and failure-only publication leaks", () => {
     const original = release.jobs["publish"]!.if!;
+
     for (const condition of [
       "!cancelled()",
       "needs.plan.outputs.dry-run == 'false' && !cancelled()",
@@ -512,11 +603,13 @@ describe("the website", () => {
     const script = (id: string) => steps.find((step) => step.id === id)!.run!;
     const dir = mkdtempSync(join(tmpdir(), "website-delivery-"));
     const output = join(dir, "output");
+
     const gitEnv = {
       ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
       GIT_CONFIG_GLOBAL: devNull,
       GIT_CONFIG_NOSYSTEM: "1",
     };
+
     const git = (...args: string[]) =>
       execFileSync(
         "git",
@@ -531,6 +624,7 @@ describe("the website", () => {
         ],
         { cwd: dir, env: gitEnv, encoding: "utf8" },
       ).trim();
+
     try {
       git("init", "-q");
       mkdirSync(join(dir, ".github/workflows"), { recursive: true });
@@ -545,11 +639,14 @@ describe("the website", () => {
         cwd: dir,
         env: { ...gitEnv, GITHUB_OUTPUT: output },
       });
+
       const inputs = readFileSync(output, "utf8")
         .trim()
         .replace(/^paths=/, "");
+
       const decide = (before: string, after: string, event = "push", requested = "") => {
         writeFileSync(output, "");
+
         const run = spawnSync("bash", ["-e", "-c", script("delivery")], {
           cwd: dir,
           env: {
@@ -562,8 +659,10 @@ describe("the website", () => {
             INPUTS: inputs,
           },
         });
+
         return { status: run.status, output: readFileSync(output, "utf8") };
       };
+
       for (const [path, deploy] of [
         [".github/workflows/release.yml", false],
         ["docs/maintainers/ci.md", false],
@@ -582,7 +681,9 @@ describe("the website", () => {
           output: `deploy=${deploy}\n`,
         });
       }
+
       expect(decide("missing", "HEAD")).toMatchObject({ status: 1, output: "" });
+
       for (const requested of ["true", "false", ""]) {
         expect(decide("", "", "workflow_dispatch", requested)).toEqual({
           status: 0,

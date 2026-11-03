@@ -76,11 +76,14 @@ export function createInspector() {
 
   function inspection(): Inspection | null {
     if (!table || pmtPid === null) return null;
+
     const settled = (track: TableTrack) => ({
       pid: track.pid,
       codec: track.pending ? fallback(track.pending) : track.codec,
     });
+
     const video = table.tracks.find((track) => track.kind === "video");
+
     return {
       signature: table.signature,
       layout: {
@@ -105,8 +108,11 @@ export function createInspector() {
     const start = (bytes[1]! & 0x40) !== 0;
     const adaptation = (bytes[3]! >> 4) & 0x03;
     let offset = 4;
+
     if (adaptation === 2) return;
+
     if (adaptation === 3) offset += 1 + bytes[4]!;
+
     if (offset >= PACKET) return;
     const payload = bytes.subarray(offset);
 
@@ -114,12 +120,15 @@ export function createInspector() {
     else if (pid === pmtPid && start && table === null) table = parsePmt(payload);
     else if (table) {
       const track = table.tracks.find((entry) => entry.pid === pid);
+
       if (!track?.pending) return;
       const collected = payloads.get(pid);
+
       if (!collected && !start) return;
       const joined = collected ? concat(collected, payload) : payload;
       payloads.set(pid, joined);
       const codec = examine(track.pending, pesData(joined));
+
       if (codec) {
         track.codec = codec;
         track.pending = null;
@@ -134,24 +143,32 @@ export function createInspector() {
     push(chunk: Uint8Array): Inspection | null {
       const data = carry.length ? concat(carry, chunk) : chunk;
       let offset = align(data);
+
       if (offset < 0) {
         // Too little data to find the packet boundaries yet: keep the tail for the next chunk.
         unaligned += chunk.length;
         carry = data.subarray(Math.max(0, data.length - 3 * PACKET)).slice();
+
         return null;
       }
+
       aligned = true;
+
       while (offset + PACKET <= data.length) {
         if (data[offset] !== SYNC) {
           const next = align(data.subarray(offset));
+
           if (next < 0) break;
           offset += next;
           continue;
         }
+
         packet(data.subarray(offset, offset + PACKET));
         offset += PACKET;
       }
+
       carry = data.subarray(offset).slice();
+
       return inspection();
     },
     /** True once enough data has passed to be sure it is not MPEG-TS, such as a radio stream. */
@@ -172,19 +189,24 @@ function align(data: Uint8Array): number {
       return offset;
     }
   }
+
   return -1;
 }
 
 /** The PMT pid of the first program in a PAT section. */
 function parsePat(payload: Uint8Array): number | null {
   const section = payload.subarray(1 + payload[0]!);
+
   if (section[0] !== 0x00) return null;
   const length = ((section[1]! & 0x0f) << 8) | section[2]!;
   const end = Math.min(3 + length - 4, section.length);
+
   for (let offset = 8; offset + 4 <= end; offset += 4) {
     const program = (section[offset]! << 8) | section[offset + 1]!;
+
     if (program !== 0) return ((section[offset + 2]! & 0x1f) << 8) | section[offset + 3]!;
   }
+
   return null;
 }
 
@@ -207,12 +229,14 @@ interface ProgramTable {
 
 function parsePmt(payload: Uint8Array): ProgramTable | null {
   const section = payload.subarray(1 + payload[0]!);
+
   if (section[0] !== 0x02) return null;
   const length = ((section[1]! & 0x0f) << 8) | section[2]!;
   const end = Math.min(3 + length - 4, section.length);
   const programInfo = ((section[10]! & 0x0f) << 8) | section[11]!;
   const tracks: TableTrack[] = [];
   const subtitles: SubtitleStream[] = [];
+
   for (let offset = 12 + programInfo; offset + 5 <= end;) {
     const type = section[offset]!;
     const pid = ((section[offset + 1]! & 0x1f) << 8) | section[offset + 2]!;
@@ -220,14 +244,19 @@ function parsePmt(payload: Uint8Array): ProgramTable | null {
     const descriptors = section.subarray(offset + 5, offset + 5 + infoLength);
     offset += 5 + infoLength;
     const pages = type === 0x06 ? subtitlePages(pid, descriptors) : [];
+
     if (pages.length > 0) {
       subtitles.push(...pages);
       continue;
     }
+
     const entry = classify(type, descriptors);
+
     if (entry) tracks.push({ pid, streamType: type, ...entry, ...audioFacts(descriptors) });
   }
+
   const pcrPid = ((section[8]! & 0x1f) << 8) | section[9]!;
+
   return {
     tracks,
     subtitles,
@@ -241,33 +270,40 @@ function parsePmt(payload: Uint8Array): ProgramTable | null {
 function audioFacts(descriptors: Uint8Array): { language: string | null; description: boolean } {
   let language: string | null = null;
   let description = false;
+
   for (const [tag, body] of descriptorsOf(descriptors)) {
     // ISO 639 language, then the audio type: 3 is commentary for viewers who can't see.
     if (tag === 0x0a && body.length >= 4) {
       language = code(body.subarray(0, 3));
       description ||= body[3] === 0x03;
     }
+
     // DVB's supplementary audio descriptor: an editorial classification of 1 is a description.
     if (tag === 0x7f && body[0] === 0x06 && body.length >= 2) {
       description ||= ((body[1]! >> 2) & 0x1f) === 0x01;
+
       if (body[1]! & 0x01 && body.length >= 5) language = code(body.subarray(2, 5));
     }
   }
+
   return { language, description };
 }
 
 /** Teletext subtitle pages and DVB subtitle pages a private data track describes. */
 function subtitlePages(pid: number, descriptors: Uint8Array): SubtitleStream[] {
   const pages: SubtitleStream[] = [];
+
   for (const [tag, body] of descriptorsOf(descriptors)) {
     // Teletext, or VBI teletext: language, type and magazine, page. Types 2 and 5 are subtitles,
     // 5 for viewers who are hard of hearing.
     if (tag === 0x56 || tag === 0x46) {
       for (let entry = 0; entry + 5 <= body.length; entry += 5) {
         const kind = body[entry + 3]! >> 3;
+
         if (kind !== 0x02 && kind !== 0x05) continue;
         const magazine = body[entry + 3]! & 0x07 || 8;
         const page = magazine * 100 + Number(body[entry + 4]!.toString(16));
+
         if (!Number.isInteger(page)) continue;
         pages.push({
           pid,
@@ -278,6 +314,7 @@ function subtitlePages(pid: number, descriptors: Uint8Array): SubtitleStream[] {
         });
       }
     }
+
     // DVB subtitles: language, type, composition page, ancillary page. Types 0x20 to 0x24 are
     // for viewers who are hard of hearing.
     if (tag === 0x59) {
@@ -293,6 +330,7 @@ function subtitlePages(pid: number, descriptors: Uint8Array): SubtitleStream[] {
       }
     }
   }
+
   return pages;
 }
 
@@ -309,6 +347,7 @@ function* descriptorsOf(descriptors: Uint8Array): Generator<readonly [number, Ui
 /** A three-letter language code, or null for one that isn't letters. */
 function code(bytes: Uint8Array): string | null {
   const text = String.fromCharCode(...bytes).toLowerCase();
+
   return /^[a-z]{3}$/.test(text) ? text : null;
 }
 
@@ -345,8 +384,10 @@ function classify(
       return { kind: "audio", codec: "dts", pending: null };
     case 0x06: {
       const codec = privateCodec(descriptors);
+
       return codec ? { kind: "audio", codec, pending: null } : null;
     }
+
     default:
       return null;
   }
@@ -356,23 +397,33 @@ function classify(
 function privateCodec(descriptors: Uint8Array): Codec | null {
   for (let offset = 0; offset + 2 <= descriptors.length; offset += 2 + descriptors[offset + 1]!) {
     const tag = descriptors[offset]!;
+
     if (tag === 0x6a) return "ac3";
+
     if (tag === 0x7a) return "eac3";
+
     if (tag === 0x7b) return "dts";
+
     if (tag === 0x05) {
       const id = String.fromCharCode(...descriptors.subarray(offset + 2, offset + 6));
+
       if (id === "AC-3") return "ac3";
+
       if (id === "EAC3") return "eac3";
+
       if (id.startsWith("DTS")) return "dts";
+
       if (id === "Opus") return "opus";
     }
   }
+
   return null;
 }
 
 /** The elementary stream bytes of a PES packet, or empty when its header is incomplete. */
 function pesData(pes: Uint8Array): Uint8Array {
   if (pes.length < 9 || pes[0] !== 0 || pes[1] !== 0 || pes[2] !== 1) return new Uint8Array(0);
+
   return pes.subarray(9 + pes[8]!);
 }
 
@@ -383,10 +434,13 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
       for (let i = 0; i + 1 < data.length; i++) {
         if (data[i] === 0xff && (data[i + 1]! & 0xe0) === 0xe0) {
           const layer = (data[i + 1]! >> 1) & 0x03;
+
           if (layer === 1) return "mp3";
+
           if (layer !== 0) return "mp2";
         }
       }
+
       return null;
     case "aac":
       for (let i = 0; i + 3 < data.length; i++) {
@@ -394,17 +448,21 @@ function examine(pending: Pending, data: Uint8Array): Codec | null {
           // An ADTS channel configuration of 0 leaves the layout to an in-band element that
           // browsers do not read.
           const channels = ((data[i + 2]! & 0x01) << 2) | (data[i + 3]! >> 6);
+
           return channels === 0 ? "aac-pce" : "aac";
         }
       }
+
       return null;
     case "hevc":
       for (const nal of nalUnits(data)) {
         if (((nal[0]! >> 1) & 0x3f) === 33 && nal.length > 3) {
           const profile = nal[3]! & 0x1f;
+
           return profile === 1 || profile === 3 ? "hevc" : "hevc-10bit";
         }
       }
+
       return null;
   }
 }
@@ -424,6 +482,7 @@ function fallback(pending: Pending): Codec {
 /** NAL units in Annex B data, each starting at its header byte. */
 function* nalUnits(data: Uint8Array): Generator<Uint8Array> {
   let start = -1;
+
   for (let i = 0; i + 2 < data.length; i++) {
     if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
       if (start >= 0) yield data.subarray(start, i);
@@ -431,6 +490,7 @@ function* nalUnits(data: Uint8Array): Generator<Uint8Array> {
       i += 2;
     }
   }
+
   if (start >= 0 && start < data.length) yield data.subarray(start);
 }
 
@@ -438,5 +498,6 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const joined = new Uint8Array(a.length + b.length);
   joined.set(a);
   joined.set(b, a.length);
+
   return joined;
 }

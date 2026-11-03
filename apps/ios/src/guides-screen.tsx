@@ -96,12 +96,17 @@ function standing(
     status.availability === "available" && status.fetchedAt !== null
       ? [{ text: t("Showing the guide from {time}", { time: when(status.fetchedAt) }) }]
       : [];
+
   if (link.locked) return [{ text: t("Enter the link again"), failed: true }, ...kept];
+
   if (status.activity === "loading") return [{ text: t("Downloading") }];
+
   if (status.error) return [{ text: t(PROBLEMS[status.error]), failed: true }, ...kept];
+
   if (status.fetchedAt !== null) {
     return [{ text: t("Updated {time}", { time: when(status.fetchedAt) }) }];
   }
+
   return [{ text: t("Not downloaded yet") }];
 }
 
@@ -117,8 +122,10 @@ export function GuidesScreen() {
   useSyncExternalStore(guide.subscribe, guide.getSnapshot);
   const tab = useTabs()?.tab ?? "(home)";
   const [replacing, setReplacing] = useState<GuideLink | null>(null);
+
   const open = (link: GuideLink) => {
     const label = labelOf(link);
+
     const actions = [
       ...(link.locked
         ? [{ label: t("Enter link"), run: () => setReplacing(link) }]
@@ -128,6 +135,7 @@ export function GuidesScreen() {
           ]),
       { label: t("Remove"), run: () => confirmRemove(link) },
     ];
+
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: label,
@@ -138,6 +146,7 @@ export function GuidesScreen() {
       (index) => actions[index]?.run(),
     );
   };
+
   const confirmRemove = (link: GuideLink) =>
     Alert.alert(
       t("Remove {name}?", { name: labelOf(link) }),
@@ -160,6 +169,7 @@ export function GuidesScreen() {
         },
       ],
     );
+
   return (
     <ScrollView
       style={styles.screen}
@@ -169,6 +179,7 @@ export function GuidesScreen() {
       {links.map((link) => {
         const lines = standing(link, guide.status(link.id));
         const label = labelOf(link);
+
         return (
           <Pressable
             key={link.id}
@@ -232,10 +243,12 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
   const [busy, setBusy] = useState(false);
   // The keyboard's Go can submit before `busy` renders: one change at a time.
   const pending = useRef(false);
+
   const edit = (set: (value: string) => void) => (value: string) => {
     set(value);
     setRefusal(null);
   };
+
   const submit = () => {
     if (pending.current) return;
     pending.current = true;
@@ -247,12 +260,14 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
         pending.current = false;
         setBusy(false);
         setRefusal(refused);
+
         if (refused) return;
         setLink("");
         setName("");
         onDone();
       });
   };
+
   return (
     <View style={styles.form}>
       <Text style={styles.section} accessibilityRole="header">
@@ -334,9 +349,11 @@ interface Mappable {
 /** How Map channels names channel `key`, from the catalogue when it lists it. */
 function describe(key: string, library: Library | null): Omit<Mappable, "mapped"> {
   const listed = library?.byKey.get(key);
+
   if (listed) return { key, title: listed.title, line: library?.placeOf.get(key) ?? null };
   const at = key.indexOf(":");
   const provider = library?.labels.get(key.slice(0, at));
+
   return {
     key,
     title: t("Channel {id}", { id: key.slice(at + 1) }),
@@ -353,34 +370,42 @@ export function GuideMapScreen() {
   const locale = useLocale();
   const catalogue = useCatalogue();
   const roster = useRoster();
+
   const providers =
     roster.kind === "ready"
       ? roster.members
       : catalogue.kind === "failed"
         ? [catalogue.member]
         : [];
+
   const mappings = guides.useMappings();
   const tab = useTabs()?.tab ?? "(home)";
   const large = largeText(useWindowDimensions().fontScale);
   const [query, setQuery] = useState("");
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const words = query.trim().toLocaleLowerCase();
+
   const found = ({ title, mapped }: Mappable) =>
     !words ||
     title.toLocaleLowerCase().includes(words) ||
     !!mapped?.toLocaleLowerCase().includes(words);
+
   const mapped = [...mappings].flatMap(([key, id]) => {
     const row = { ...describe(key, library), mapped: id };
+
     return found(row) ? [row] : [];
   });
+
   const others = (library?.channels ?? [])
     .filter((channel) => !mappings.has(channel.key))
     .map((channel) => ({ ...describe(channel.key, library), mapped: null }))
     .filter(found);
+
   const sections = [
     { title: t("Mapped"), data: mapped },
     { title: t("Channels"), data: others },
   ].filter((section) => section.data.length);
+
   return (
     <SectionList
       style={styles.screen}
@@ -518,10 +543,12 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
       .then((read) => {
         if (!controller.signal.aborted) setAnswered({ id: wanted, read });
       });
+
     return () => controller.abort();
   }, [channelKey, wanted, snapshot]);
   // Done and Save can both land before the first change answers: it alone goes back.
   const pending = useRef(false);
+
   const change = (guideId: string | null) => {
     if (pending.current) return;
     pending.current = true;
@@ -530,15 +557,19 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
       .catch((): GuideRefusal => "saving")
       .then((refused) => {
         pending.current = false;
+
         if (refused) setRefusal(refused);
         else router.back();
       });
   };
+
   const source = (owner: string) => {
     const link = links.find((each) => each.id === owner);
     const name = link ? labelOf(link) : library?.labels.get(owner);
+
     return name ? t("From {guide}", { guide: name }) : t("From its provider's guide");
   };
+
   return (
     <ScrollView
       style={styles.screen}
@@ -576,6 +607,7 @@ export function GuideMapEditor({ channelKey }: { channelKey: string }) {
                 <Text style={styles.fieldLabel}>{source(read.guide)}</Text>
                 {(["now", "next"] as const).map((at) => {
                   const programme = read.listing[at];
+
                   return programme ? (
                     <Text key={at} style={styles.text}>
                       <Text style={styles.dim}>{t(at === "now" ? "Now" : "Next")}</Text>

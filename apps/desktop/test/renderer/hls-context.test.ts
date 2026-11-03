@@ -7,9 +7,11 @@ import { createEngine, type Engine } from "../../src/renderer/src/player/engine.
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 
 const events = vi.hoisted(() => ({ error: (_data: unknown) => {} }));
+
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return {
     default: class extends standIn(real.default) {
       errors: ((event: string, data: unknown) => void)[] = [];
@@ -30,6 +32,7 @@ vi.mock("hls.js", async (original) => {
 const SOURCE = "http://127.0.0.1:1234/stream/session-token.m3u8";
 const VIDEO = "http://127.0.0.1:1234/stream/session-token/7";
 const AUDIO = "http://127.0.0.1:1234/stream/session-token/2";
+
 const channel: LiveChannel = {
   subscriptionId: SUBSCRIPTION,
   id: "hls",
@@ -42,13 +45,16 @@ const channel: LiveChannel = {
   catchupDays: null,
   variants: [{ id: "hls", name: "HLS", tags: [], quality: null }],
 };
+
 let engine: Engine | null = null;
+
 beforeEach(() => {
   vi.useFakeTimers();
   player.reset();
   player.element.currentTime = 0;
   ipc.reset();
 });
+
 afterEach(() => {
   player.reset();
   engine?.destroy();
@@ -65,6 +71,7 @@ function error(details: ErrorData["details"], fields: Partial<ErrorData> = {}): 
     ...fields,
   };
 }
+
 const response = (url: string) => ({ url, code: 403, text: "Forbidden" });
 
 it.each([
@@ -164,6 +171,7 @@ it.each(["parser", "native", "watchdog"] as const)(
     const video = document.createElement("video");
     engine = createEngine("hls", video, SOURCE, { audio: null, audioLanguage: null });
     await vi.dynamicImportSettled();
+
     if (source === "parser")
       events.error(
         error(Hls.ErrorDetails.FRAG_PARSING_ERROR, {

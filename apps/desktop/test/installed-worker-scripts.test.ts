@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { catalogueWorkerScripts, installedMainScript } from "./e2e/installed-worker-scripts.ts";
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+
 /** Synthetic archive bytes at the same public manifest/data boundary as a packaged ASAR. */
 async function archive(
   sources: Record<string, string>,
@@ -18,6 +19,7 @@ async function archive(
   const files: Record<string, Record<string, unknown>> = {};
   const contents: Buffer[] = [];
   let offset = 0;
+
   for (const [name, text] of Object.entries(sources)) {
     const bytes = Buffer.from(text);
     files[name] = {
@@ -28,6 +30,7 @@ async function archive(
     offset += bytes.length;
     contents.push(bytes);
   }
+
   change?.(files);
   const json = Buffer.from(JSON.stringify({ files: { out: { files: { main: { files } } } } }));
   const headerSize = 8 + Math.ceil(json.length / 4) * 4;
@@ -39,8 +42,10 @@ async function archive(
   json.copy(header, 16);
   const bytes = Buffer.concat([header, ...contents]);
   await writeFile(join(resources, "app.asar"), bytes);
+
   return { root, resources, sha256: sha256(bytes) };
 }
+
 const entry = "catalogue-worker-test.js";
 
 describe("packaged worker startup script provenance", () => {
@@ -53,6 +58,7 @@ describe("packaged worker startup script provenance", () => {
       "nested.js": "import './dependency.js';",
       "unrelated.js": "throw Error('never allowed');",
     });
+
     try {
       const proof = await catalogueWorkerScripts(fixture.resources, fixture.sha256);
       expect(proof.archive).toEqual({
@@ -79,10 +85,12 @@ describe("packaged worker startup script provenance", () => {
 
   it("reads main bytes from the pinned archive and refuses changed manifest integrity", async () => {
     const source = "export const main = 'actual packed main';";
+
     for (const corrupt of [false, true]) {
       const fixture = await archive({ "index.js": source }, (files) => {
         if (corrupt) files["index.js"]!.integrity = { algorithm: "SHA256", hash: "0".repeat(64) };
       });
+
       try {
         if (corrupt)
           await expect(installedMainScript(fixture.resources, fixture.sha256)).rejects.toThrow(
@@ -116,16 +124,24 @@ describe("packaged worker startup script provenance", () => {
       [entry]: 'import "./dependency.js";',
       "dependency.js": "export const x=1;",
     };
+
     if (scenario === "ambiguous") sources["catalogue-worker-second.js"] = "export {};";
+
     if (scenario === "missing") delete sources["dependency.js"];
+
     if (scenario === "nested-path") sources[entry] = 'import "./nested/dependency.js";';
+
     if (scenario === "syntax") sources[entry] = "import {";
+
     const fixture = await archive(sources, (files) => {
       if (scenario === "integrity")
         files[entry]!.integrity = { algorithm: "SHA256", hash: "0".repeat(64) };
+
       if (scenario === "unpacked") files[entry]!.unpacked = true;
+
       if (scenario === "offset") files[entry]!.offset = "9007199254740992";
     });
+
     try {
       await expect(
         catalogueWorkerScripts(

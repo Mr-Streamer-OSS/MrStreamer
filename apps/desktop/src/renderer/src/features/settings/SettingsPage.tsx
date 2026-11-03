@@ -40,6 +40,7 @@ import { useUpdates } from "../updates/use-updates.ts";
 
 const REPOSITORY_URL = "https://github.com/Mr-Streamer-OSS/MrStreamer";
 const PRIVACY_URL = "https://mrstreamer.app/privacy";
+
 const CONTROL_SELECTOR =
   "button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [data-setting-focus]";
 
@@ -81,9 +82,11 @@ export function SettingsPage() {
       opened.current = false;
       setVisited(new Set());
       const previous = returnFocus.current;
+
       const fallback =
         document.querySelector<HTMLElement>('[data-view="title"], [data-view="watch"]') ??
         document.querySelector<HTMLButtonElement>(`header button[aria-label="${t("Settings")}"]`);
+
       const target =
         previous instanceof HTMLElement &&
         previous !== document.body &&
@@ -91,9 +94,11 @@ export function SettingsPage() {
         !previous.closest("[inert], [hidden]")
           ? previous
           : fallback;
+
       target?.focus();
       returnFocus.current = null;
     }
+
     if (shownTab) setVisited((previous) => new Set([...previous, shownTab]));
   }, [tab, shownTab]);
 
@@ -109,35 +114,46 @@ export function SettingsPage() {
   // Wait for an enabled control or informational destination, including a section still loading.
   useEffect(() => {
     if (!target || !tab) return;
+
     const focus = () => {
       const container = root.current?.querySelector(
         `[data-settings-section="${settingSection(target)}"]`,
       );
+
       const row = container?.querySelector(`[data-setting="${target}"]`);
       const control = row?.matches(CONTROL_SELECTOR) ? row : row?.querySelector(CONTROL_SELECTOR);
+
       if (!(control instanceof HTMLElement)) return false;
       control.scrollIntoView({ block: "nearest" });
       control.focus({ preventScroll: true });
       useUi.setState({ settingsTarget: null });
+
       return true;
     };
+
     if (focus()) return;
+
     const observer = new MutationObserver(() => {
       if (focus()) observer.disconnect();
     });
+
     if (root.current)
       observer.observe(root.current, { subtree: true, childList: true, attributes: true });
+
     return () => observer.disconnect();
   }, [target, tab, visited]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+
       if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
       const current = useUi.getState().settings;
+
       const editing =
         isTyping(event) &&
         !(event.target instanceof HTMLInputElement && event.target.type === "checkbox");
+
       if (!current || (editing && current !== "licences")) return;
       useUi.setState({
         settings: current === "licences" ? "about" : null,
@@ -145,11 +161,14 @@ export function SettingsPage() {
       });
       event.preventDefault();
     }
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   if (!tab) return null;
+
   const navigate = (section: SettingsSection, control?: SettingsControl) => {
     setQuery("");
     useUi.setState({
@@ -157,7 +176,9 @@ export function SettingsPage() {
       settingsTarget: control ?? null,
     });
   };
+
   const results = query.trim() ? findSettings(query, updates.data?.distribution) : null;
+
   const panels = {
     general: <GeneralSection />,
     playback: <PlaybackSection />,
@@ -184,6 +205,7 @@ export function SettingsPage() {
     privacy: <PrivacySection />,
     about: <About />,
   } satisfies Record<SettingsSection, ReactNode>;
+
   return (
     <div
       ref={root}
@@ -211,10 +233,12 @@ export function SettingsPage() {
                 event.stopPropagation();
                 setQuery("");
               }
+
               if (event.key === "ArrowDown" && results?.length) {
                 event.preventDefault();
                 root.current?.querySelector<HTMLButtonElement>("[data-setting-result]")?.focus();
               }
+
               if (event.key === "Enter" && results?.[0]) {
                 event.preventDefault();
                 navigate(results[0].section, results[0].id);
@@ -311,6 +335,7 @@ export function SettingsPage() {
 function About() {
   const { status } = useUpdates();
   const rating = useMutation({ mutationFn: () => call("updates.rateStore") });
+
   const rows: [string, ReactNode][] = [
     [
       t("Version"),
@@ -356,6 +381,7 @@ function About() {
     ],
     [t("Privacy"), <Link href={PRIVACY_URL}>mrstreamer.app/privacy</Link>],
   ];
+
   return (
     <section>
       <Rows rows={rows} />

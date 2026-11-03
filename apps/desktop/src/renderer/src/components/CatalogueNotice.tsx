@@ -21,7 +21,9 @@ export function catalogueState(query: {
   readonly error: unknown;
 }): CatalogueState | null {
   if (query.error) return { kind: "failed", cause: query.error };
+
   if (!query.data) return { kind: "loading" };
+
   return query.data.length === 0 ? { kind: "empty" } : null;
 }
 
@@ -29,6 +31,7 @@ export function CatalogueNotice({ state }: { state: CatalogueState }) {
   if (state.kind === "loading") {
     return <p className="text-sm text-muted-foreground">Loading channels…</p>;
   }
+
   return state.kind === "failed" ? <Failed cause={state.cause} /> : <Empty />;
 }
 
@@ -40,11 +43,14 @@ function Failed({ cause }: { cause: unknown }) {
   const client = useQueryClient();
   const subscriptions = useSubscriptions();
   const error = appError(cause);
+
   const locked =
     error.kind === "needs-secret"
       ? subscriptions.find((each) => each.id === error.subscriptionId)
       : undefined;
+
   const loginProblem = error.kind === "invalid-login" || error.kind === "account-inactive";
+
   return (
     <Notice
       title={t("Channels unavailable")}
@@ -79,11 +85,13 @@ function Failed({ cause }: { cause: unknown }) {
 
 function Empty() {
   const subscriptions = useSubscriptions();
+
   // The empty lists are cached, so checking again has to ask the providers.
   const refresh = useMutation({
     mutationFn: () =>
       Promise.all(subscriptions.map(({ id }) => call("library.refresh", { subscriptionId: id }))),
   });
+
   return (
     <Notice
       title={t("No live channels")}

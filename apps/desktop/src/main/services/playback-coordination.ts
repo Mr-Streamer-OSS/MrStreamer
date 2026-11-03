@@ -101,15 +101,18 @@ export class PlaybackCoordination extends Context.Service<
     Effect.gen(function* () {
       const one = (yield* Semaphore.make(1)).withPermits(1);
       const changed = yield* PubSub.sliding<void>(1);
+
       /** Each open session's subscription, and the connection it reads. */
       const sessions = new Map<
         string,
         { readonly subscriptionId: string | null; connection: string }
       >();
+
       const lent = new Map<
         string,
         { readonly controller: AbortController; readonly released: Promise<void> }
       >();
+
       /**
        * Each admitted recording's subscription, what reads its account's current limit, and the
        * connection it reads.
@@ -122,8 +125,10 @@ export class PlaybackCoordination extends Context.Service<
           connection: string;
         }
       >();
+
       const recordingsOf = (subscriptionId: string) =>
         [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
+
       /** Connections the subscription's recordings read, but those in `joining`. */
       const recorded = (subscriptionId: string, joining: readonly string[] = []) =>
         new Set(
@@ -131,9 +136,11 @@ export class PlaybackCoordination extends Context.Service<
             joining.includes(connection) ? [] : [connection],
           ),
         );
+
       /** One use per connection: a recording's, when one reads it, else Watch's. */
       const usesOf = (subscriptionId: string): ConnectionUse[] => {
         const recording = recorded(subscriptionId);
+
         const watching = new Set(
           [...sessions.values()].flatMap((each) =>
             each.subscriptionId === subscriptionId && !recording.has(each.connection)
@@ -141,36 +148,46 @@ export class PlaybackCoordination extends Context.Service<
               : [],
           ),
         );
+
         return [
           ...[...watching].map(() => "watch" as const),
           ...(lent.has(subscriptionId) ? (["download"] as const) : []),
           ...[...recording].map(() => "recording" as const),
         ];
       };
+
       /** Whether something of the subscription reads `connection` now. */
       const read = (subscriptionId: string, connection: string) =>
         [...sessions.values(), ...recordings.values()].some(
           (each) => each.subscriptionId === subscriptionId && each.connection === connection,
         );
+
       /** Aborts the subscription's download, answering whether its lease ended in time. */
       const takeBack = (subscriptionId: string) =>
         Effect.promise(async () => {
           const lease = lent.get(subscriptionId);
+
           if (!lease) return true;
           lease.controller.abort();
           let timer: NodeJS.Timeout | undefined;
+
           const late = new Promise<boolean>(
             (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
           );
+
           const given = await Promise.race([lease.released.then(() => true), late]);
           clearTimeout(timer);
+
           return given;
         });
+
       let turns = 0;
+
       const whileAsked = (turn: number | undefined) =>
         Effect.suspend(() =>
           turn === undefined || turn === turns ? Effect.void : Effect.fail(superseded()),
         );
+
       return {
         begin: Effect.sync(() => ++turns),
         passed: (turn: number) => Effect.sync(() => turn !== turns),
@@ -184,21 +201,26 @@ export class PlaybackCoordination extends Context.Service<
             // for one the play will read too.
             const held = recordingsOf(subscriptionId);
             const counted = recorded(subscriptionId, joining).size;
+
             if (held[0] && counted > 0 && counted >= (yield* held[0].limit))
               return yield* recordingHolds();
+
             if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
           }),
         lend: (subscriptionId: string) =>
           one(
             Effect.sync((): Lent | null => {
               if (lent.has(subscriptionId) || recordingsOf(subscriptionId).length > 0) return null;
+
               for (const session of sessions.values()) {
                 if (session.subscriptionId === subscriptionId) return null;
               }
+
               const controller = new AbortController();
               const { promise: released, resolve } = Promise.withResolvers<void>();
               const lease = { controller, released };
               lent.set(subscriptionId, lease);
+
               return {
                 signal: controller.signal,
                 release: () => {
@@ -218,6 +240,7 @@ export class PlaybackCoordination extends Context.Service<
         connected: (owner: string, connection: string) => {
           const session = sessions.get(owner);
           const holding = session ?? [...recordings].find(([held]) => held.id === owner)?.[1];
+
           if (!holding || holding.connection === connection) return;
           holding.connection = connection;
           PubSub.publishUnsafe(changed, undefined);
@@ -233,25 +256,32 @@ export class PlaybackCoordination extends Context.Service<
               const admit = (joined?: string) => {
                 const id = randomUUID();
                 const connection = joined ?? id;
+
                 const held: Held = {
                   id,
                   release: () => {
                     if (recordings.delete(held)) PubSub.publishUnsafe(changed, undefined);
                   },
                 };
+
                 recordings.set(held, { subscriptionId, limit, connection });
                 PubSub.publishUnsafe(changed, undefined);
+
                 return { kind: "held" as const, held };
               };
+
               if (joining !== undefined && read(subscriptionId, joining)) return admit(joining);
               const allowed = yield* limit;
               let uses = usesOf(subscriptionId);
+
               // Only when taking the download's connection back admits it.
               if (fromDownload && lent.has(subscriptionId) && uses.length === allowed) {
                 if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
                 uses = usesOf(subscriptionId);
               }
+
               if (uses.length >= allowed) return { kind: "busy" as const, uses };
+
               return admit();
             }),
           ),

@@ -164,6 +164,7 @@ useUi.subscribe((state) => titlePlayer.holdNext(state.settings !== null));
  * way to it (`backDetails`), even when the viewer has come back by the time they answer.
  */
 let navigation = 0;
+
 useUi.subscribe((state, previous) => {
   if (
     state.details !== previous.details ||
@@ -276,6 +277,7 @@ export function openDetails(target: DetailsTarget): void {
  */
 export function openRelated(target: DetailsTarget, here: DetailsPlace): void {
   const { details, trail, visit } = useUi.getState();
+
   if (!details) return openDetails(target);
   useUi.setState({
     details: target,
@@ -298,19 +300,24 @@ export async function backDetails(): Promise<void> {
     const mine = ++navigation;
     const { details, trail } = useUi.getState();
     const step = trail.at(-1);
+
     if (!details || !step) return closeDetails();
     const shown = await stillShown(step.target);
+
     if (mine !== navigation) return;
+
     if (!shown) {
       useUi.setState({ trail: trail.slice(0, -1) });
       continue;
     }
+
     useUi.setState(({ visit }) => ({
       details: step.target,
       trail: trail.slice(0, -1),
       place: step.place,
       visit: visit + 1,
     }));
+
     return;
   }
 }
@@ -326,7 +333,9 @@ async function stillShown(target: DetailsTarget): Promise<boolean> {
       kind: target.kind,
       versions: [ownedId(target)],
     });
+
     if (!title?.adult) return true;
+
     return (currentPreferences() ?? (await readPreferences())).adultTitles === true;
   } catch {
     return false;

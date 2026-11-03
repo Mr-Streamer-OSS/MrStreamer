@@ -3,6 +3,7 @@ import { metadataStore, type MetadataFile } from "../src/metadata/store.ts";
 import { TmdbError, tmdb } from "../src/metadata/tmdb.ts";
 
 const DAY = 86_400_000;
+
 afterEach(() => vi.useRealTimers());
 
 /** Runs the public background fetch to completion without real retry/pacing waits. */
@@ -11,6 +12,7 @@ async function finish(store: ReturnType<typeof metadataStore>) {
     await vi.runOnlyPendingTimersAsync();
     await Promise.resolve();
   }
+
   expect(store.status().fetching).toBe(false);
   await store.flush();
 }
@@ -22,6 +24,7 @@ function serviceStore(
 ) {
   let saved = initial;
   const at = 1000 * DAY;
+
   const onService = vi.fn(async (_kind: string, _id: number, _region: string, page: number) => {
     if (page === 2 && fault) {
       if (fault === "offline") throw new TypeError("offline");
@@ -33,9 +36,12 @@ function serviceStore(
             : { kind: "missing" },
       );
     }
+
     if (abandon && _kind === "tv" && page === 2) store.want([]);
+
     return { ids: [page === 1 ? "new" : "last"], pages: 2 };
   });
+
   const store = metadataStore({
     read: async () => structuredClone(initial),
     write: async (file) => {
@@ -53,7 +59,9 @@ function serviceStore(
     now: () => at,
     onChange: () => {},
   });
+
   store.want([{ kind: "movie", tmdbId: "1", addedAt: 1 }]);
+
   return { store, saved: () => saved, onService };
 }
 
@@ -77,6 +85,7 @@ describe("complete streaming-service snapshots", () => {
       await finish(failed.store);
       expect(failed.saved()?.services).toEqual(complete.services);
       expect([...failed.store.services("movie")[0]!.ids]).toEqual(["old", "retained"]);
+
       const restarted = metadataStore({
         read: async () => failed.saved(),
         write: async () => {},
@@ -85,6 +94,7 @@ describe("complete streaming-service snapshots", () => {
         now: () => 1000 * DAY,
         onChange: () => {},
       });
+
       await Promise.resolve();
       expect([...restarted.services("movie")[0]!.ids]).toEqual(["old", "retained"]);
       const recovered = serviceStore(failed.saved(), null);
@@ -122,6 +132,7 @@ describe("complete streaming-service snapshots", () => {
 describe("warmed metadata aliases", () => {
   it("checks the raw expiry even without a key, including a backward clock correction", async () => {
     let now = 182 * DAY - 1;
+
     const store = metadataStore({
       read: async () => ({
         version: 1,
@@ -133,6 +144,7 @@ describe("warmed metadata aliases", () => {
       now: () => now,
       onChange: () => {},
     });
+
     await Promise.resolve();
     expect(store.searchName("movie", "1")).toContain("translated");
     now++;
@@ -145,6 +157,7 @@ describe("warmed metadata aliases", () => {
 
   it("removes cached aliases when a refreshed title becomes missing", async () => {
     vi.useFakeTimers();
+
     const store = metadataStore({
       read: async () => ({
         version: 1,
@@ -162,6 +175,7 @@ describe("warmed metadata aliases", () => {
       now: () => 151 * DAY,
       onChange: () => {},
     });
+
     await Promise.resolve();
     expect(store.searchName("movie", "1")).toBe("obsolete");
     store.want([{ kind: "movie", tmdbId: "1", addedAt: 0 }]);

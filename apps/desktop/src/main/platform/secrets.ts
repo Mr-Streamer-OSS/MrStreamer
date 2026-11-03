@@ -16,10 +16,13 @@ export function keychainSecrets(snap: string | null): Secrets {
   const error: AppError = snap
     ? { kind: "keychain-refused", connect: `sudo snap connect ${snap}:password-manager-service` }
     : { kind: "keychain-refused" };
+
   const refused = () => new AppFailure(error);
+
   return {
     seal(plain) {
       if (!safeStorage.isEncryptionAvailable()) throw refused();
+
       try {
         return safeStorage.encryptString(plain).toString("base64");
       } catch {
