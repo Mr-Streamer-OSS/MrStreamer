@@ -33,11 +33,11 @@
   },
   "packageManager": "pnpm@11.24.0",
   "devDependencies": {
-    "@oxlint/plugins": "1.86.0",
+    "@oxlint/plugins": "1.90.0",
     "@types/node": "^24.19.2",
     "happy-dom": "21.0.4",
     "knip": "6.38.0",
-    "oxlint": "1.86.0",
+    "oxlint": "1.90.0",
     "prettier": "^3.9.10",
     "tinyglobby": "0.2.17",
     "typescript": "7.0.2",
