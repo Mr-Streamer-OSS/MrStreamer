@@ -15,7 +15,7 @@ async function inputs() {
   await mkdir(".local", { recursive: true });
   const dir = await mkdtemp(resolve(".local/store-artwork-test-"));
   temporary.push(dir);
-  const slots: Record<string, unknown> = {};
+  const slots: Record<string, object> = {};
 
   for (const slot of spec.slots) {
     const file = `${slot.id}.png`;
@@ -43,7 +43,7 @@ async function inputs() {
   return { dir, slots };
 }
 
-async function run(dir: string, slots: Record<string, unknown>, locale = "en-GB") {
+async function run(dir: string, slots: Record<string, object>, locale = "en-GB") {
   await writeFile(join(dir, "inputs.json"), JSON.stringify({ slots }));
 
   return exec(process.execPath, [
@@ -100,8 +100,7 @@ test("refuses a layout reference instead of a native-pixel capture", async () =>
     .toBuffer();
 
   await writeFile(join(dir, "ipad-13.png"), bytes);
-  const entry = slots["ipad-13"] as { sha256: string };
-  entry.sha256 = hash(bytes);
+  slots["ipad-13"] = { ...slots["ipad-13"], sha256: hash(bytes) };
   await expect(run(dir, slots)).rejects.toThrow(/native capture must be 2752x2064/);
 });
 
@@ -125,7 +124,7 @@ test("places a local frame at its cutout without losing the captured screen", as
   await writeFile(join(dir, "frame.png"), frame);
   await writeFile(join(dir, "terms.txt"), "Synthetic test frame only, not Apple artwork.");
   slots["ipad-13"] = {
-    ...(slots["ipad-13"] as object),
+    ...slots["ipad-13"],
     frame: {
       file: "frame.png",
       source: "https://developer.apple.com/design/resources/",

@@ -4,7 +4,10 @@ import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import sharp, { type OverlayOptions } from "../../desktop/node_modules/sharp/dist/index.mjs";
+import sharp, {
+  type Metadata,
+  type OverlayOptions,
+} from "../../desktop/node_modules/sharp/dist/index.mjs";
 import spec from "../assets/store/spec.json" with { type: "json" };
 
 const root = fileURLToPath(new URL("../../..", import.meta.url));
@@ -94,6 +97,10 @@ const INK_LEFT = 0.253;
 // A headline longer than the design's reserves shrinks, down to this share of its Paper size.
 const MIN_TITLE_SCALE = 0.8;
 
+type Slot = (typeof spec.slots)[number];
+
+type Box = { width: number; height: number };
+
 const markup = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 /** Renders one headline line at a pixel size; `advance` is its CSS width with letter spacing. */
@@ -120,7 +127,7 @@ async function renderLine(text: string, px: number) {
  * Wraps a headline greedily into the column like the Paper text box, shrinking it a point at a
  * time until it fits the slot's reserved lines. Sizes are in points; lines come back rendered.
  */
-async function fitTitle(text: string, slot: (typeof spec.slots)[number], width: number) {
+async function fitTitle(text: string, slot: Slot, width: number) {
   const words = text.split(" ");
 
   for (let size = slot.title.size; size >= slot.title.size * MIN_TITLE_SCALE; size--) {
@@ -159,12 +166,142 @@ async function fitTitle(text: string, slot: (typeof spec.slots)[number], width: 
   throw new Error(`${slot.id}: "${text}" does not fit ${slot.title.lines} line(s) of its column`);
 }
 
+/** A single-page PNG without an EXIF rotation, so its pixels are what composition sees. */
+function uprightPng(info: Metadata) {
+  return info.format === "png" && (info.pages || 1) === 1 && (info.orientation || 1) === 1;
+}
+
+/**
+ * Paper A with a supplied frame: the frame scaled into the picture box, the capture resized
+ * into its cutout underneath. The manifest records the frame with its file and licence hashes.
+ */
+async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
+  const supplied = object(value, "frame");
+
+  if (!string(supplied.source, "frame.source").startsWith("https://developer.apple.com/"))
+    throw new Error("frame.source must be an Apple Developer URL");
+  string(supplied.termsSource, "frame.termsSource");
+
+  const licence = await inputFile(
+    resolve(dirname(input.file), string(supplied.licenceFile, "frame.licenceFile")),
+  );
+
+  const image = await inputFile(resolve(dirname(input.file), string(supplied.file, "frame.file")));
+  const info = await sharp(image.bytes).metadata();
+
+  if (!uprightPng(info) || !info.hasAlpha || !info.width || !info.height)
+    throw new Error("frame must be an upright transparent PNG");
+  const cutout = object(supplied.cutout, "frame.cutout");
+  const left = integer(cutout.left, "cutout.left");
+  const top = integer(cutout.top, "cutout.top");
+  const width = integer(cutout.width, "cutout.width", 1);
+  const height = integer(cutout.height, "cutout.height", 1);
+
+  if (
+    left + width > info.width ||
+    top + height > info.height ||
+    Math.abs(width / height / (slot.width / slot.height) - 1) > 0.005
+  )
+    throw new Error(
+      "frame cutout must fit the frame and match the capture aspect ratio without rotation",
+    );
+
+  const resized = await sharp(image.bytes)
+    .resize({ ...box, fit: "inside", withoutEnlargement: true })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const scale = resized.info.width / info.width;
+
+  const screenGeometry = {
+    left: Math.round(left * scale),
+    top: Math.round(top * scale),
+    width: Math.round(width * scale),
+    height: Math.round(height * scale),
+  };
+
+  if (screenGeometry.width > slot.width || screenGeometry.height > slot.height)
+    throw new Error("frame would upscale the capture");
+
+  const screen = await sharp(capture)
+    .resize(screenGeometry.width, screenGeometry.height, { fit: "fill" })
+    .png()
+    .toBuffer();
+
+  const picture = await sharp({
+    create: {
+      width: resized.info.width,
+      height: resized.info.height,
+      channels: 3,
+      background: "#000",
+    },
+  })
+    .composite([
+      { input: screen, left: screenGeometry.left, top: screenGeometry.top },
+      { input: resized.data, left: 0, top: 0 },
+    ])
+    .png()
+    .toBuffer();
+
+  return {
+    picture,
+    width: resized.info.width,
+    height: resized.info.height,
+    screenGeometry,
+    frame: {
+      ...supplied,
+      sha256: hash(image.bytes),
+      licenceSha256: hash(licence.bytes),
+      nativeWidth: info.width,
+      nativeHeight: info.height,
+    },
+  };
+}
+
+/** The frameless fallback: the capture inside a square-corner hairline, never simulated hardware. */
+async function frameless(slot: Slot, capture: Buffer, box: Box) {
+  const border = hairline.width * slot.scale;
+
+  const screen = await sharp(capture)
+    .resize({
+      width: box.width - border * 2,
+      height: box.height - border * 2,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .png()
+    .toBuffer({ resolveWithObject: true });
+
+  const picture = await sharp(screen.data)
+    .extend({
+      top: border,
+      bottom: border,
+      left: border,
+      right: border,
+      background: hairline.colour,
+    })
+    .png()
+    .toBuffer();
+
+  return {
+    picture,
+    width: screen.info.width + border * 2,
+    height: screen.info.height + border * 2,
+    screenGeometry: {
+      left: border,
+      top: border,
+      width: screen.info.width,
+      height: screen.info.height,
+    },
+    frame: "frameless" as const,
+  };
+}
+
 for (const slot of spec.slots) {
   const capture = object(slots[slot.id], `${slot.id} capture`);
   const provenance = object(capture.provenance, `${slot.id} provenance`);
-  const appCommit = string(provenance.appCommit, "provenance.appCommit");
 
-  if (!/^[a-f0-9]{40}$/.test(appCommit))
+  if (!/^[a-f0-9]{40}$/.test(string(provenance.appCommit, "provenance.appCommit")))
     throw new Error("provenance.appCommit must be a full Git SHA");
   string(provenance.device, "provenance.device");
   string(provenance.os, "provenance.os");
@@ -187,13 +324,7 @@ for (const slot of spec.slots) {
     throw new Error(`${slot.id}: capture SHA-256 mismatch`);
   const metadata = await sharp(source.bytes).metadata();
 
-  if (
-    metadata.width !== slot.width ||
-    metadata.height !== slot.height ||
-    metadata.format !== "png" ||
-    (metadata.pages && metadata.pages > 1) ||
-    (metadata.orientation && metadata.orientation !== 1)
-  ) {
+  if (metadata.width !== slot.width || metadata.height !== slot.height || !uprightPng(metadata)) {
     throw new Error(
       `${slot.id}: native capture must be ${slot.width}x${slot.height}, single-page upright PNG`,
     );
@@ -202,150 +333,29 @@ for (const slot of spec.slots) {
   if (metadata.hasAlpha && !(await sharp(source.bytes).stats()).isOpaque)
     throw new Error(`${slot.id}: capture must be opaque`);
 
-  let frame: "frameless" | Record<string, unknown> = "frameless";
-  let picture: Buffer;
-  let screenGeometry;
   // Paper A for a supplied frame, the frameless fallback row otherwise: a headline column over
   // the picture, both centred, the picture at most the column's width and box height.
   const column = capture.frame === undefined ? slot.frameless : slot.framed;
   const box = { width: column.width * slot.scale, height: column.height * slot.scale };
 
-  if (capture.frame !== undefined) {
-    const supplied = object(capture.frame, "frame");
-    const frameSource = string(supplied.source, "frame.source");
-
-    if (!frameSource.startsWith("https://developer.apple.com/"))
-      throw new Error("frame.source must be an Apple Developer URL");
-    const termsSource = string(supplied.termsSource, "frame.termsSource");
-
-    const licence = await inputFile(
-      resolve(dirname(input.file), string(supplied.licenceFile, "frame.licenceFile")),
-    );
-
-    const image = await inputFile(
-      resolve(dirname(input.file), string(supplied.file, "frame.file")),
-    );
-
-    const info = await sharp(image.bytes).metadata();
-
-    if (
-      info.format !== "png" ||
-      !info.hasAlpha ||
-      !info.width ||
-      !info.height ||
-      (info.pages && info.pages > 1) ||
-      (info.orientation && info.orientation !== 1)
-    )
-      throw new Error("frame must be an upright transparent PNG");
-    const cutout = object(supplied.cutout, "frame.cutout");
-    const left = integer(cutout.left, "cutout.left");
-    const top = integer(cutout.top, "cutout.top");
-    const width = integer(cutout.width, "cutout.width", 1);
-    const height = integer(cutout.height, "cutout.height", 1);
-
-    if (
-      left + width > info.width ||
-      top + height > info.height ||
-      Math.abs(width / height / (slot.width / slot.height) - 1) > 0.005
-    )
-      throw new Error(
-        "frame cutout must fit the frame and match the capture aspect ratio without rotation",
-      );
-
-    const resized = await sharp(image.bytes)
-      .resize({
-        width: box.width,
-        height: box.height,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .png()
-      .toBuffer({ resolveWithObject: true });
-
-    const scale = resized.info.width / info.width;
-    screenGeometry = {
-      left: Math.round(left * scale),
-      top: Math.round(top * scale),
-      width: Math.round(width * scale),
-      height: Math.round(height * scale),
-    };
-
-    if (screenGeometry.width > slot.width || screenGeometry.height > slot.height)
-      throw new Error("frame would upscale the capture");
-
-    const screen = await sharp(source.bytes)
-      .resize(screenGeometry.width, screenGeometry.height, { fit: "fill" })
-      .png()
-      .toBuffer();
-
-    picture = await sharp({
-      create: {
-        width: resized.info.width,
-        height: resized.info.height,
-        channels: 3,
-        background: "#000",
-      },
-    })
-      .composite([
-        { input: screen, left: screenGeometry.left, top: screenGeometry.top },
-        { input: resized.data, left: 0, top: 0 },
-      ])
-      .png()
-      .toBuffer();
-    frame = {
-      ...supplied,
-      source: frameSource,
-      termsSource,
-      sha256: hash(image.bytes),
-      licenceSha256: hash(licence.bytes),
-      nativeWidth: info.width,
-      nativeHeight: info.height,
-    };
-  } else {
-    const border = hairline.width * slot.scale; // Square corners, so it never reads as hardware.
-
-    const screen = await sharp(source.bytes)
-      .resize({
-        width: box.width - border * 2,
-        height: box.height - border * 2,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .png()
-      .toBuffer({ resolveWithObject: true });
-
-    picture = await sharp(screen.data)
-      .extend({
-        top: border,
-        bottom: border,
-        left: border,
-        right: border,
-        background: hairline.colour,
-      })
-      .png()
-      .toBuffer();
-    screenGeometry = {
-      left: border,
-      top: border,
-      width: screen.info.width,
-      height: screen.info.height,
-    };
-  }
+  const { picture, width, height, screenGeometry, frame } =
+    capture.frame === undefined
+      ? await frameless(slot, source.bytes, box)
+      : await framed(slot, source.bytes, capture.frame, box);
 
   const headlines: Record<string, string> = slot.headlines;
   const headline = headlines[locale]!;
 
   const title = await fitTitle(headline, slot, column.width);
-  const pictureInfo = await sharp(picture).metadata();
   const columnLeft = (slot.width - column.width * slot.scale) / 2;
   const columnTop = column.top * slot.scale;
 
   // The picture follows the reserved headline lines and the Paper gap, so it stays put in every language.
   const geometry = {
-    left: Math.floor((slot.width - pictureInfo.width!) / 2),
+    left: Math.floor((slot.width - width) / 2),
     top: columnTop + (slot.title.lines * slot.title.lineHeight + column.gap) * slot.scale,
-    width: pictureInfo.width!,
-    height: pictureInfo.height!,
+    width,
+    height,
   };
 
   if (geometry.left < 0 || geometry.top + geometry.height > slot.height)

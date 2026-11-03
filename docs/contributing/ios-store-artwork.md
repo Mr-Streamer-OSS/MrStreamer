@@ -1,16 +1,15 @@
 # iPad and Duo store artwork
 
 The generator prepares Paper A candidates: one genuine capture and one short
-headline on true black, using Inter from the desktop brand assets. The committed
-master is `apps/ios/assets/store/spec.json`. It holds slot geometry and copy in
-English, Dutch, French, German and Spanish, using the Guide terms of
-`apps/ios/src/i18n/live.ts` in the English copy Wout picked in Paper. Its layout is in Paper points: the
-headline column and picture box of row A for a supplied frame, and of the
-frameless fallback row otherwise. A headline that needs more lines than the Paper
-design reserves shrinks a point at a time, to no less than 80% of its size, so the
-picture keeps its place in every language. Copy and composition still need final
-owner visual acceptance. Nothing here changes an Apple listing or the submitted
-0.1.0 build.
+headline on true black, in Inter from the desktop brand assets. Its master,
+`apps/ios/assets/store/spec.json`, holds slot geometry and the headlines in
+English, Dutch, French, German and Spanish, which use the Guide terms of
+`apps/ios/src/i18n/live.ts`; the English copy is the one picked in Paper.
+Layout is in Paper points: the headline column and picture box of row A for a
+supplied frame, and of the frameless fallback row otherwise. A headline that
+needs more lines than the design reserves shrinks a point at a time, to no less
+than 80% of its size, so the picture keeps its place in every language. Copy and composition still need owner visual acceptance.
+Nothing here changes an Apple listing or the submitted 0.1.0 build.
 
 ## Apple requirements
 
@@ -69,9 +68,9 @@ Wi-Fi and battery. Capture the full screen at native pixels, without resizing:
 Capture each language with the matching app interface language. Record the full
 built app commit, device/simulator identity, OS and timezone-qualified capture
 instant. Bind that record to the original capture's SHA-256. A 1x layout reference,
-a Paper placeholder or a screenshot of another app cannot qualify. Native size
-alone does not establish capture truth. Source acceptance must inspect the actual
-view and its provenance. The tool downsizes the full capture for composition;
+a Paper placeholder or a screenshot of another app cannot qualify, and native
+size alone does not prove a capture: source acceptance inspects the actual view
+and its provenance. The tool downsizes the full capture for composition;
 it never crops it or accepts smaller inputs for upscaling.
 
 ## Reproduce candidates
@@ -137,8 +136,8 @@ before retrying. Existing candidates are never overwritten.
 
 Each batch contains three opaque RGB PNGs and `manifest.json`, recording output
 hashes, source capture hashes and provenance, frame source/terms and licence hash
-(or `frameless`), layout, screen placement, translated headline and its point size, input JSON hash,
-Inter hash/licence and Sharp/libvips versions. Keep the input JSON and raw captures
+(or `frameless`), layout, screen placement, translated headline and its point
+size, input JSON hash, Inter hash/licence and Sharp/libvips versions. Keep the input JSON and raw captures
 beside the manifest for reproduction. Rendering libraries can change pixels;
 review hashes and full-size output after regeneration.
 
