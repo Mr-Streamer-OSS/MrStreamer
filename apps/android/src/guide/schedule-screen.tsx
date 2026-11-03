@@ -137,14 +137,16 @@ function Schedule({
     router.setParams({ day: from === null ? undefined : String(from) });
 
   // Nothing listed: a day without programmes, a guide still coming, or none to read (null).
-  const empty = schedule.loading
-    ? t("Loading schedule…")
-    : statuses.some((status) => status.availability === "available")
-      ? t("No programme information for this day")
-      : statuses.some((status) => status.activity === "loading") ||
-          !statuses.some((status) => status.error || status.availability === "none")
-        ? t("Loading guide…")
-        : null;
+  const empty = schedule.failed
+    ? null
+    : schedule.loading
+      ? t("Loading schedule…")
+      : statuses.some((status) => status.availability === "available")
+        ? t("No programme information for this day")
+        : statuses.some((status) => status.activity === "loading") ||
+            !statuses.some((status) => status.error || status.availability === "none")
+          ? t("Loading guide…")
+          : null;
 
   return (
     <FlatList

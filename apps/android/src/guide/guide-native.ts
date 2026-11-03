@@ -37,6 +37,7 @@ export interface Generation {
 export interface Activation {
   readonly lease: string;
   readonly generation: Generation | null;
+  readonly error?: GuideProblem | null;
 }
 
 export type Result<T> =

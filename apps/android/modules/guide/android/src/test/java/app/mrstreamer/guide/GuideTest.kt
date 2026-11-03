@@ -108,8 +108,14 @@ class GuideTest {
       readXml(file, GuideJob("lease"), listOf("uk"), listOf("uk")) { channel, _, _, _, _ -> assertEquals(id, channel); count++ }
       assertEquals(1, count)
     }
-    file.writeText(xml.replace("News", "name%20%73%65%63%72%65%74%oops"))
-    refused("xml") { readXml(file, GuideJob("lease"), listOf("name"), listOf("secret")) { _, _, _, _, _ -> fail() } }
+    file.writeText(xml.replace("News", "admin sport 2026"))
+    var accepted = 0
+    readXml(file, GuideJob("lease"), listOf("admin"), emptyList()) { _, _, _, _, _ -> accepted++ }
+    assertEquals(1, accepted)
+    file.writeText(xml.replace("News", "a secret value"))
+    refused("xml") { readXml(file, GuideJob("lease"), listOf("name", "secret"), emptyList()) { _, _, _, _, _ -> } }
+    file.writeText(xml.replace("News", "%73%65%63%72%65%74%oops"))
+    refused("xml") { readXml(file, GuideJob("lease"), listOf("name", "secret"), emptyList()) { _, _, _, _, _ -> fail() } }
   }
   @Test fun pastDayAndLastProgrammeStillRead() = fixture { root ->
     val at = guideTime("20261103120000 +0000")!!
@@ -147,7 +153,14 @@ class GuideTest {
     val broken = root.listFiles()!!.first { File(it, "owner").readText() == "custom:kept" }
     File(broken, "current.json").writeText("damaged")
     val restored = GuideOwner(root).restore(listOf("xtream:live", "custom:kept"), emptyList())
-    assertEquals(listOf("xtream:live"), restored.map { it["subscriptionId"] })
+    assertEquals(listOf("xtream:live", "custom:kept"), restored.map { it["subscriptionId"] })
+    val activation = restored.last()["activation"] as Map<*, *>
+    assertNull(activation["generation"]); assertEquals("disk", activation["error"])
+    assertEquals("damaged", File(broken, "current.json").readText())
+    val recovery = GuideOwner(root)
+    val lease = recovery.attach("custom:kept", 2)["lease"] as String
+    val candidate = prepared(recovery, lease, "repair", root)
+    assertEquals("ok", recovery.publish(lease, "repair", candidate)["kind"])
   }
   @Test fun revokedAndInterruptedGenerationsCannotReplaceLastGood() = fixture { root ->
     val owner = GuideOwner(root)
@@ -163,4 +176,44 @@ class GuideTest {
     assertEquals(id, (restored["generation"] as Map<*, *>)["id"])
     assertFalse(File(folder, "orphan.db").exists()); assertEquals("last good", File(folder, "$id.db").readText())
   }
+  @Test fun cdataAndCommentsPreserveDoctypeText() = fixture { root ->
+    val file = File(root, "guide.xml").apply {
+      writeText("<!DOCTYPE tv SYSTEM 'unused'>" + xml.replace("News", "<![CDATA[News <!DOCTYPE literal ]]>"))
+    }
+    var title = ""
+    readXml(file, GuideJob("lease"), emptyList(), emptyList()) { _, _, _, value, _ -> title = value }
+    assertEquals("News <!DOCTYPE literal", title)
+    file.writeText(xml.replace("News", "<!-- <!DOCTYPE literal -->News"))
+    readXml(file, GuideJob("lease"), emptyList(), emptyList()) { _, _, _, value, _ -> title = value }
+    assertEquals("News", title)
+  }
+  @Test fun heldReadersRetainDatabaseUntilCloseAndRefuseStaleAnswers() = fixture { root ->
+    val owner = GuideOwner(root); val lease = owner.attach("source", 1)["lease"] as String
+    val first = prepared(owner, lease, "first", root)
+    assertEquals("ok", owner.publish(lease, "first", first)["kind"])
+    val second = prepared(owner, lease, "second", root)
+    val entered = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    assertTrue(owner.begin(lease, "read"))
+    val read = owner.read(lease, first, "read") { entered.countDown(); release.await(5, java.util.concurrent.TimeUnit.SECONDS); mapOf("rows" to emptyList<Any>()) }
+    try {
+      assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+      assertEquals("ok", owner.publish(lease, "second", second)["kind"])
+      assertTrue(root.walkTopDown().any { it.name == "$first.db" })
+    } finally { release.countDown() }
+    assertEquals("changed", read.get(5, java.util.concurrent.TimeUnit.SECONDS)["kind"])
+    assertFalse(root.walkTopDown().any { it.name == "$first.db" })
+  }
+  @Test fun secondPassDatabaseCeilingIsBodyNotDisk() = fixture { root ->
+    val file = File(root, "guide.xml")
+    val at = guideTime("20261103120000 +0000")!!
+    file.writeText("<tv>" + (1..100).joinToString("") { n -> xml.removePrefix("<tv>").removeSuffix("</tv>").replace("BBCOne.uk", "channel$n").replace("</title>", "</title><desc>${"x".repeat(2000)}</desc>") } + "</tv>")
+    // Raw rows fit; copying those rows into the serving table exceeds this database ceiling.
+    refused("body") {
+      GuideIndex(File(root, "small.db"), GuideJob("lease"), GuideDisk(root), true, 150 * 4096L).use {
+        it.ingest(file, emptyList(), emptyList(), at, at - 86400000, at + 86400000)
+      }
+    }
+  }
+
 }

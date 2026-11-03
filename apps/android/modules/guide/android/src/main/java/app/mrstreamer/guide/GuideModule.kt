@@ -10,11 +10,14 @@ import java.util.concurrent.Executors
 class GuideModule : Module() {
   private val context get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
   private val workers = Executors.newFixedThreadPool(4)
-  private val available by lazy { runCatching { GuideOwner(File(context.noBackupFilesDir, "guides")) }.getOrNull() }
+  private var cached: GuideOwner? = null
+  private val available get() = synchronized(this) {
+    cached ?: runCatching { GuideOwner(File(context.noBackupFilesDir, "guides")) }.getOrNull()?.also { cached = it }
+  }
   private val owner get() = available ?: throw GuideFailure("unavailable")
-  private fun dispatch(promise: Promise, work: () -> Unit) {
+  private fun dispatch(promise: Promise, fallback: Any = mapOf("kind" to "failed", "error" to "unavailable"), work: () -> Unit) {
     workers.execute {
-      try { work() } catch (_: Exception) { promise.resolve(mapOf("kind" to "failed", "error" to "unavailable")) }
+      try { work() } catch (_: Exception) { promise.resolve(fallback) }
     }
   }
   override fun definition() = ModuleDefinition {
@@ -27,7 +30,7 @@ class GuideModule : Module() {
     AsyncFunction("restore") { ids: List<String>, kept: List<String> -> owner.restore(ids, kept) }
     AsyncFunction("attach") { id: String, revision: Int -> owner.attach(id, revision) }
     AsyncFunction("forget") { id: String, promise: Promise ->
-      dispatch(promise) { owner.forget(id).whenComplete { value, error -> promise.resolve(if (error == null) value else false) } }
+      dispatch(promise, false) { owner.forget(id).whenComplete { value, error -> promise.resolve(if (error == null) value else false) } }
     }
     AsyncFunction("cancel") { id: String -> owner.cancel(id) }
     // Object arguments avoid Expo's positional arity limit. The public JS adapter stays iOS-compatible.

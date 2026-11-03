@@ -13,3 +13,8 @@ it("does not treat known playlist settings as secrets", () => {
     ["hidden"],
   );
 });
+
+it("keeps raw ampersands in userinfo secrets", () => {
+  expect(playlistSecrets("https://name:&secret@fixture.test/list")).toContain("&secret");
+  expect(playlistSecrets("https://name:p&ss@fixture.test/list")).toContain("p&ss");
+});

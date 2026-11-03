@@ -23,8 +23,11 @@ const loginNames =
   /^(username|user|password|pass|pwd|login|token|access_token|auth|key|apikey|api_key|secret)$/i;
 
 function decode(value: string): string {
-  // URLSearchParams decodes valid escapes even when another escape is malformed.
-  return new URLSearchParams(`v=${value.replaceAll("+", "%2B")}`).get("v") ?? "";
+  const utf8 = new TextDecoder("utf-8", { ignoreBOM: true, fatal: false });
+
+  return value.replace(/(?:%[\da-f]{2})+/gi, (run) =>
+    utf8.decode(Uint8Array.from(run.slice(1).split("%"), (hex) => Number.parseInt(hex, 16))),
+  );
 }
 
 export function playlistSecrets(link: string): string[] {

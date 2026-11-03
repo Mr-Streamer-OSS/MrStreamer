@@ -249,3 +249,36 @@ describe("Android guide public service", () => {
     }
   });
 });
+
+it("distinguishes an authoritative missing programme from an unknown channel", async () => {
+  const { owner, control, key } = await setup();
+  control.query = async () => ({ kind: "ok", value: { guideId: null, rows: [], more: false } });
+  expect(await owner.programmeAt(key, programme.start)).toBeNull();
+  expect(await owner.programmeAt("missing", programme.start)).toBeUndefined();
+});
+
+it("keeps other channel listings and marks a failed preview", async () => {
+  const { owner, native, key, sourceId } = await setup();
+  const second = { id: "2", key: `${sourceId}:2`, title: "Sport" };
+  const first = owner.channel(key)!;
+  owner.setPart({
+    subscriptionId: sourceId,
+    byId: new Map([
+      ["1", first],
+      ["2", second],
+    ]),
+    guideIds: new Map([
+      ["1", ["news.tv"]],
+      ["2", ["sport.tv"]],
+    ]),
+  });
+  vi.spyOn(native, "query").mockImplementation(async (...args) =>
+    args[3].includes("news.tv")
+      ? { kind: "failed", error: "time" }
+      : { kind: "ok", value: { guideId: "sport.tv", rows: [programme], more: false } },
+  );
+  const listings = await owner.listings([key, second.key]);
+  expect(listings.has(key)).toBe(false);
+  expect(listings.get(second.key)?.now?.title).toBe("News");
+  expect(await owner.preview(key, "news.tv")).toBe("failed");
+});

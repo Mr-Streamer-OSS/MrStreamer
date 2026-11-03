@@ -175,6 +175,7 @@ export function useProgramme(key: string, start: number, detail?: string) {
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
+    setFailed(false);
     void (async () => {
       const byToken = detail ? await guide.programme(detail, { signal }) : null;
       const value = byToken ?? (await guide.programmeAt(key, start, { signal }));

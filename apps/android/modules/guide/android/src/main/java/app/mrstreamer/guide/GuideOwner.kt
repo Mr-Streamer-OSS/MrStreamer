@@ -29,7 +29,12 @@ class GuideOwner(root: File) {
     return File(disk.root, name).apply {
       if (!exists() && !mkdirs()) throw GuideFailure("disk")
       val metadata = File(this, "owner")
-      if (!metadata.exists()) metadata.writeText(id)
+      if (!metadata.exists()) {
+        val atomic = AtomicFile(metadata)
+        val stream = atomic.startWrite()
+        try { stream.write(id.toByteArray()); atomic.finishWrite(stream) }
+        catch (e: Exception) { atomic.failWrite(stream); throw e }
+      }
     }
   }
   private fun file(entry: Entry, generation: String) = File(folder(entry.id), "$generation.db")
@@ -57,9 +62,10 @@ class GuideOwner(root: File) {
     val old = entries[id]
     if (old != null && old.revision == revision) return mapOf("lease" to old.lease, "generation" to old.generation)
     revoke(id)
-    val entry = Entry(id, UUID.randomUUID().toString(), revision, receipt(id))
+    val saved = runCatching { receipt(id) }
+    val entry = Entry(id, UUID.randomUUID().toString(), revision, saved.getOrNull())
     entries[id] = entry
-    mapOf("lease" to entry.lease, "generation" to entry.generation)
+    mapOf("lease" to entry.lease, "generation" to entry.generation, "error" to if (saved.isFailure) "disk" else null)
   }
   fun restore(ids: List<String>, kept: List<String>): List<Map<String, Any?>> = synchronized(lock) {
     background(); entries.clear()

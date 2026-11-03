@@ -699,7 +699,7 @@ export function createGuide(
           update(value.subscriptionId, {
             availability: usable(entry.generation) ? "available" : "unknown",
             activity: "idle",
-            error: null,
+            error: value.activation.error ?? null,
           });
         }
       } catch {
@@ -758,7 +758,7 @@ export function createGuide(
         update(key, {
           availability: usable(entry.generation) ? "available" : "unknown",
           activity: "idle",
-          error: null,
+          error: activation.error ?? null,
         });
 
         if (status(key).stale) void refresh(key, false);
@@ -817,14 +817,23 @@ export function createGuide(
     },
     /**
      * What channel `key` shows now and next when mapped to `guideId`, and from which guide: its
-     * subscription's or an external guide's id. Null where no guide has current programmes for it.
+     * subscription's or an external guide's id. Null where no guide has current programmes for it;
+     * failed when a standing guide could not be read.
      */
     async preview(
       key: string,
       guideId: string,
       options?: { readonly signal?: AbortSignal },
-    ): Promise<{ readonly guide: string; readonly listing: Listing } | null> {
-      const read = await first(key, "listing", { from: 0, until: 0 }, options?.signal, guideId);
+    ): Promise<{ readonly guide: string; readonly listing: Listing } | "failed" | null> {
+      const read = await first(
+        key,
+        "listing",
+        { from: 0, until: 0 },
+        options?.signal,
+        guideId,
+      ).catch(() => "failed" as const);
+
+      if (read === "failed") return "failed";
 
       if (!read || options?.signal?.aborted || !validToken(read.captured)) return null;
 
@@ -1004,6 +1013,7 @@ export function createGuide(
 
       for (const entry of entries.values()) cancelEntry(entry);
     },
+    /** Failed channel reads have no map entry; successful empty reads have an empty listing. */
     async listings(
       keys: readonly string[],
       options?: { readonly signal?: AbortSignal },
@@ -1015,7 +1025,11 @@ export function createGuide(
       for (let offset = 0; offset < keys.length; offset += 2)
         await Promise.all(
           keys.slice(offset, offset + 2).map(async (key) => {
-            answers.set(key, await first(key, "listing", { from: 0, until: 0 }, options?.signal));
+            try {
+              answers.set(key, await first(key, "listing", { from: 0, until: 0 }, options?.signal));
+            } catch {
+              // An absent map entry marks an unavailable channel; other channels still answer.
+            }
           }),
         );
       const result = new Map<string, Listing>();
@@ -1122,6 +1136,8 @@ export function createGuide(
       start: number,
       options?: { readonly signal?: AbortSignal },
     ): Promise<Programme | null | undefined> {
+      let answered = false;
+
       for (const captured of candidates(key)) {
         const answer = await query(
           { ...captured, start },
@@ -1133,6 +1149,8 @@ export function createGuide(
         // `ask` answers null for a read aborted, or withdrawn meanwhile.
         if (!answer) return undefined;
 
+        answered = true;
+
         if (answer.guideId) {
           token({ ...captured, start, on: localDay(start).from });
 
@@ -1140,7 +1158,7 @@ export function createGuide(
         }
       }
 
-      return undefined;
+      return answered ? null : undefined;
     },
   };
 

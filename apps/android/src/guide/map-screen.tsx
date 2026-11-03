@@ -270,7 +270,7 @@ export function ChannelMapScreen() {
 /** What guide answered a Guide id for the channel, and its now and next; null for none. */
 interface Preview {
   readonly id: string;
-  readonly read: { readonly guide: string; readonly listing: Listing } | null;
+  readonly read: { readonly guide: string; readonly listing: Listing } | "failed" | null;
 }
 
 /**
@@ -308,7 +308,7 @@ function ChannelMap({
     const controller = new AbortController();
     guide
       .preview(channelKey, wanted, { signal: controller.signal })
-      .catch(() => null)
+      .catch(() => "failed" as const)
       .then((read) => {
         if (!controller.signal.aborted) setAnswered({ id: wanted, read });
       });
@@ -398,7 +398,9 @@ function ChannelMap({
           accessibilityLiveRegion="polite"
           style={{ gap: 8, paddingTop: 16, paddingBottom: 8, paddingHorizontal: inset }}
         >
-          {read ? (
+          {read === "failed" ? (
+            <Text style={text.secondary}>{t("Couldn't load programme")}</Text>
+          ) : read ? (
             <>
               <Text style={text.secondary}>{source(read.guide)}</Text>
               {(["now", "next"] as const).map((at) => {

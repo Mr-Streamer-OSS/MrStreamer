@@ -5,7 +5,7 @@ import java.io.File
 import java.text.Normalizer
 import java.util.Locale
 
-class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideDisk, create: Boolean = false) : AutoCloseable {
+class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideDisk, create: Boolean = false, databaseBytes: Long = GuideBudget.DATABASE) : AutoCloseable {
   private val db = SQLiteDatabase.openDatabase(file.path, null, if (create) SQLiteDatabase.CREATE_IF_NECESSARY else SQLiteDatabase.OPEN_READONLY)
   init {
     if (create) {
@@ -14,16 +14,26 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
       db.rawQuery("PRAGMA journal_mode=DELETE", null).use { it.moveToFirst() }
       db.execSQL("PRAGMA synchronous=FULL")
       val page = db.rawQuery("PRAGMA page_size", null).use { it.moveToFirst(); it.getLong(0) }
-      db.rawQuery("PRAGMA max_page_count=${GuideBudget.DATABASE / page}", null).use { it.moveToFirst() }
+      db.rawQuery("PRAGMA max_page_count=${databaseBytes / page}", null).use { it.moveToFirst() }
       db.execSQL("CREATE TABLE raw(channel TEXT,start INTEGER,stop INTEGER,title TEXT,description TEXT,PRIMARY KEY(channel,start)) WITHOUT ROWID")
     }
   }
   override fun close() = db.close()
+  // SQLite may roll a full transaction back itself. Cleanup must preserve the ingest failure.
+  private fun transaction(work: () -> Unit) {
+    db.beginTransaction()
+    var failure: Exception? = null
+    try { work(); db.setTransactionSuccessful() }
+    catch (e: Exception) { failure = e; throw e }
+    finally {
+      try { db.endTransaction() }
+      catch (e: Exception) { if (failure == null) throw e else failure.addSuppressed(e) }
+    }
+  }
   fun ingest(file: File, login: List<String>, uncertain: List<String>, now: Long, from: Long, until: Long): Long {
     // Reserve both the capped database and its rollback journal before any SQL growth.
     disk.check(GuideBudget.DATABASE * 2)
-    db.beginTransaction()
-    try {
+    transaction {
       db.compileStatement("INSERT OR IGNORE INTO raw VALUES(?,?,?,?,?)").use { stmt ->
         readXml(file, job, login, uncertain) { channel, start, stop, title, description ->
           job.check(); stmt.clearBindings(); stmt.bindString(1, channel); stmt.bindLong(2, start)
@@ -34,14 +44,12 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
           catch (_: android.database.sqlite.SQLiteException) { throw GuideFailure("disk") }
         }
       }
-      db.setTransactionSuccessful()
-    } finally { db.endTransaction() }
+    }
     job.check(); disk.check(GuideBudget.DATABASE * 2)
     db.execSQL("CREATE TABLE programmes(channel TEXT,start INTEGER,stop INTEGER,title TEXT,description TEXT,PRIMARY KEY(channel,start)) WITHOUT ROWID")
     var last = Long.MIN_VALUE
     var count = 0
-    db.beginTransaction()
-    try {
+    transaction {
       db.compileStatement("INSERT INTO programmes VALUES(?,?,?,?,?)").use { stmt ->
         db.rawQuery("SELECT channel,start,stop,title,description FROM raw ORDER BY channel,start", null).use { cursor ->
           var previous: Array<Any?>? = null
@@ -53,7 +61,10 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
             if (stop - start < 60000 || stop <= from || start >= until) return
             job.check(); stmt.clearBindings(); stmt.bindString(1, channel); stmt.bindLong(2, start); stmt.bindLong(3, stop)
             stmt.bindString(4, row[3] as String); (row[4] as String?)?.let { stmt.bindString(5, it) }
-            stmt.executeInsert(); last = maxOf(last, stop); count++
+            try { stmt.executeInsert() }
+            catch (_: android.database.sqlite.SQLiteFullException) { throw GuideFailure("body") }
+            catch (_: android.database.sqlite.SQLiteException) { throw GuideFailure("disk") }
+            last = maxOf(last, stop); count++
           }
           while (cursor.moveToNext()) {
             job.check()
@@ -63,8 +74,7 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
           save(null, null)
         }
       }
-      db.setTransactionSuccessful()
-    } finally { db.endTransaction() }
+    }
     if (count == 0) throw GuideFailure("empty")
     if (last <= now) throw GuideFailure("ended")
     db.execSQL("DROP TABLE raw")
