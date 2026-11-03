@@ -141,6 +141,10 @@ requires at least 99% fully transparent pixels inside the rounded cutout shrunk
 by a 2 px anti-alias band, and records the nontransparent (opaque) share in the manifest. It does not paint a bezel or repair the supplied frame's screen opening.
 Captures and frames must be static PNGs; animated PNGs are rejected.
 
+Generate on Linux. On the Mac mini on 3 November 2026, Sharp drew the headline
+in a system face instead of the bundled Inter file, while the manifest still
+records Inter, so a macOS run does not give the brand typography.
+
 ```sh
 node apps/ios/scripts/store-artwork.ts \
   --input .local/store-inputs/en-US.json \
