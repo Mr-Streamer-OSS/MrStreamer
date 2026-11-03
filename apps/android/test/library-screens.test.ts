@@ -31,7 +31,7 @@ vi.mock("expo-router", () => ({
       route.params = href.params;
       route.segments = ["(tabs)", route.destination, "library", "details"];
     },
-    navigate: () => {},
+    navigate: vi.fn(),
     back: () => {
       const stack = route.stacks[route.destination]!;
 
@@ -43,7 +43,9 @@ vi.mock("expo-router", () => ({
   },
 }));
 
-vi.mock("../src/bootstrap/sources.ts", () => ({ sources: {} }));
+const bootstrap = vi.hoisted(() => ({ sources: {} }));
+
+vi.mock("../src/bootstrap/sources.ts", () => bootstrap);
 
 vi.mock("../src/platform/storage.ts", () => ({
   readJson: () => ({}),
@@ -833,4 +835,281 @@ it("does not guess a movie when a details route omits its kind", async () => {
   await act(async () => {});
   expect(shown.textContent).toContain("This title isn't available");
   expect(shown.textContent).not.toContain("Provider story");
+});
+
+it("selects sheet sort and filters, clears quality alone and preserves choices on refresh", async () => {
+  const { model } = fixture(undefined, true);
+  await model.refresh();
+  route.params = { tab: "all" };
+  const node = () => createElement(BrowseScreen, { kind: "movie", model });
+  const shown = show(node());
+
+  const choose = (label: string) => {
+    press(shown, label);
+    act(() => root?.render(node()));
+  };
+
+  press(shown, "Sort & filter");
+  choose("Title");
+  choose("4K · 22");
+  expect(shown.querySelector('[aria-label="4K · 22"]')?.getAttribute("aria-checked")).toBe("true");
+  choose("English · 22");
+  choose("Any known track");
+  expect(shown.textContent).toContain("22 of 43 movies");
+
+  const filtered = Array.from(shown.querySelectorAll("button"))
+    .map((b) => b.getAttribute("aria-label"))
+    .filter((label) => label?.startsWith("Movie "));
+
+  expect(filtered).toEqual(
+    model
+      .made("movie")
+      .list("all", "title")
+      .filter((title) => Number(title.id) % 2 === 0)
+      .map((title) => title.title),
+  );
+  await act(async () => {
+    await model.refresh();
+  });
+  expect(shown.querySelector('[aria-label="4K · 22"]')?.getAttribute("aria-checked")).toBe("true");
+  expect(shown.querySelector('[aria-label="English · 22"]')?.getAttribute("aria-checked")).toBe(
+    "true",
+  );
+  choose("Any quality");
+  expect(shown.textContent).toContain("43 of 43 movies");
+  expect(shown.querySelector('[aria-label="English · 43"]')?.getAttribute("aria-checked")).toBe(
+    "true",
+  );
+  expect(shown.querySelector('[aria-label="Any quality"]')?.getAttribute("aria-checked")).toBe(
+    "true",
+  );
+  choose("Show 43 movies");
+
+  const titles = () =>
+    Array.from(shown.querySelectorAll("button"))
+      .map((b) => b.getAttribute("aria-label"))
+      .filter((label) => label?.startsWith("Movie "));
+
+  const expected = model
+    .made("movie")
+    .list("all", "title")
+    .map((title) => title.title);
+
+  expect(titles()).toEqual(expected);
+  await act(async () => {
+    await model.refresh();
+  });
+  expect(titles()).toEqual(expected);
+  press(shown, "Sort & filter");
+
+  for (const label of ["Title", "English · 43", "Any quality", "Any known track"]) {
+    expect(shown.querySelector(`[aria-label="${label}"]`)?.getAttribute("aria-checked")).toBe(
+      "true",
+    );
+  }
+});
+
+it("returns from a service collection to the parent's tab and filter", async () => {
+  const { about } = await import("./library-fixture.ts");
+
+  const { model } = fixture(
+    {
+      revision: () => 0,
+      subscribe: () => () => {},
+      about: async () => about,
+      facts: {
+        get: () => null,
+        name: () => null,
+        services: () => [{ id: 1, name: "Test service", priority: 1, ids: new Set(["10"]) }],
+      },
+    },
+    true,
+  );
+
+  await model.refresh();
+  route.params = { tab: "services", filters: JSON.stringify({ language: "en" }) };
+  const parent = { pathname: "/movies/index", params: route.params };
+  route.stacks.movies = [parent];
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model }));
+
+  const service = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Test service"),
+  )!;
+
+  act(() => service.click());
+  expect(route.opened.at(-1)?.params.collection).toBe("service:1");
+  expect(route.opened.at(-1)?.params.filters).toBe(parent.params.filters);
+  const { default: Collection } = await import("../src/app/(tabs)/movies/library/collection.tsx");
+  act(() => root?.render(createElement(Collection, { model })));
+  expect(shown.textContent).toContain("1 of 1 movie");
+  press(shown, "Back");
+  act(() => root?.render(createElement(BrowseScreen, { kind: "movie", model })));
+  expect(route.stacks.movies).toEqual([parent]);
+  expect(shown.querySelector('[aria-label="Services"]')?.getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(route.params.filters).toBe(JSON.stringify({ language: "en" }));
+});
+
+it("selects Season 2 and Specials exclusively and keeps the season on refresh", async () => {
+  const { model } = fixture(undefined, true);
+  await model.refresh();
+  route.params = { kind: "series", title: model.made("series").list("all")[0]!.key };
+  const node = () => createElement(DetailsScreen, { model });
+  const shown = show(node());
+  await act(async () => {});
+
+  for (const [season, episode, absent] of [
+    ["Season 2", "Second", "Special"],
+    ["Specials", "Special", "Second"],
+  ]) {
+    press(shown, season!);
+    act(() => root?.render(node()));
+    expect(shown.textContent).toContain(`1. ${episode}`);
+    expect(shown.textContent).not.toContain(`1. ${absent}`);
+    expect(shown.textContent).not.toContain("1. First");
+    await act(async () => {
+      await model.refresh();
+    });
+    expect(shown.textContent).toContain(`1. ${episode}`);
+    expect(shown.querySelector(`[aria-label="${season}"]`)?.getAttribute("aria-selected")).toBe(
+      "true",
+    );
+  }
+});
+
+it("retries failed provider details and recovers facts and episodes", async () => {
+  const f = fixture(undefined, true);
+  await f.model.refresh();
+  f.failDetails(true);
+  route.params = { kind: "series", title: f.model.made("series").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model: f.model }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("Couldn't load details.");
+  expect(shown.textContent).not.toContain("1. First");
+  f.failDetails(false);
+  await act(async () => press(shown, "Try again"));
+  await act(async () => {});
+  expect(shown.textContent).not.toContain("Couldn't load details.");
+  expect(shown.textContent).toContain("Provider story");
+  expect(shown.textContent).toContain("1. First");
+});
+
+it("recovers an empty failed list with Try again and opens Settings for lost login", async () => {
+  const f = fixture(undefined, true);
+  f.fail(true);
+  await f.model.refresh();
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model: f.model }));
+  expect(shown.textContent).toContain("Couldn't load movies and series");
+  f.fail(false);
+  await act(async () => press(shown, "Try again"));
+  expect(shown.textContent).toContain("Movie 0");
+  expect(shown.textContent).not.toContain("Couldn't load movies and series");
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      {
+        ...f.source,
+        needsLogin: true,
+        catalogue: async () => {
+          throw new Error("Login");
+        },
+      },
+    ],
+  });
+
+  await model.refresh();
+  act(() => root?.render(createElement(BrowseScreen, { kind: "movie", model })));
+  const { router } = await import("expo-router");
+  vi.mocked(router.navigate).mockClear();
+
+  const settings = Array.from(
+    shown.querySelectorAll<HTMLElement>('button[aria-label="Settings"]'),
+  ).at(-1)!;
+
+  act(() => settings.click());
+  expect(router.navigate).toHaveBeenCalledWith("/movies/settings");
+});
+
+it("replaces and removes metadata on mounted runtime details", async () => {
+  const { store } = await import("../src/platform/store.ts");
+  const { source } = fixture(undefined, true);
+
+  const reader = {
+    onDemandCatalogue: source.catalogue,
+    movieDetails: (id: string) => source.details("movie", id),
+    seriesDetails: (id: string) => source.details("series", id),
+  };
+
+  Object.assign(bootstrap.sources, {
+    state: store({ kind: "ready", sources: [{ id: "source", label: "Test", kind: "xtream" }] }),
+    onDemand: () => reader,
+  });
+  const { library, setLibraryMetadata } = await import("../src/library/runtime.ts");
+  const { about } = await import("./library-fixture.ts");
+  const first = vi.fn(async () => ({ ...about, overview: "First port facts" }));
+  const second = vi.fn(async () => ({ ...about, overview: "Second port facts" }));
+
+  const port = (read: typeof first) => ({
+    revision: () => 0,
+    subscribe: () => () => {},
+    about: read,
+  });
+
+  setLibraryMetadata(port(first));
+  await library().refresh();
+  route.params = { kind: "movie", title: library().made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen));
+
+  try {
+    await act(async () => {});
+    expect(shown.textContent).toContain("First port facts");
+    const reads = first.mock.calls.length;
+    await act(async () => {
+      setLibraryMetadata(port(second));
+    });
+    await act(async () => {});
+    expect(shown.textContent).not.toContain("First port facts");
+    expect(shown.textContent).toContain("Second port facts");
+    expect(second).toHaveBeenCalled();
+    await act(async () => {
+      setLibraryMetadata(undefined);
+    });
+    await act(async () => {});
+    expect(shown.textContent).not.toContain("Second port facts");
+    expect(shown.textContent).toContain("Provider story");
+    expect(first).toHaveBeenCalledTimes(reads);
+    const later = second.mock.calls.length;
+    await act(async () => {
+      await library().refresh();
+    });
+    expect(second).toHaveBeenCalledTimes(later);
+  } finally {
+    act(() => setLibraryMetadata(undefined));
+  }
+});
+
+it("keeps successor intent handler after the replaced owner's cleanup", async () => {
+  const { intentRegistry } = await import("../src/library/intents.ts");
+  const registry = intentRegistry();
+  const a = vi.fn();
+  const b = vi.fn();
+  const cleanupA = registry.register({ play: a });
+  const cleanupB = registry.register({ play: b });
+  cleanupA();
+
+  const action = {
+    kind: "title",
+    media: "movie",
+    sourceId: "source",
+    id: "10",
+    container: "mp4",
+    title: "Movie",
+  } as const;
+
+  registry.state.get().play?.(action);
+  expect(b).toHaveBeenCalledWith(action);
+  expect(a).not.toHaveBeenCalled();
+  cleanupB();
 });

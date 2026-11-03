@@ -4,7 +4,7 @@ import { libraryModel, type MetadataPort } from "../src/library/model.ts";
 import type { TitleAbout } from "@mrstreamer/core/metadata/tmdb";
 
 /** The real provider adapter reads fake HTTP responses. No file/stream endpoint exists. */
-export function fixture(metadata?: MetadataPort) {
+export function fixture(metadata?: MetadataPort, named = false) {
   let failed = false;
   let detailFailed = false;
 
@@ -16,7 +16,7 @@ export function fixture(metadata?: MetadataPort) {
     const rows = Array.from({ length: 43 }, (_, i) => ({
       stream_id: i + 10,
       series_id: i + 10,
-      name: `Movie ${i} (EN) 4K`,
+      name: named ? `Movie ${i} ${i % 2 ? "HD" : "4K"} (EN)` : `Movie ${i} (EN) 4K`,
       tmdb: String(i + 10),
       rating: "8",
       added: "1793700000",
@@ -34,15 +34,27 @@ export function fixture(metadata?: MetadataPort) {
             id: "special",
             season: 0,
             episode_num: 1,
-            title: "Special",
+            title: named ? "S00E01 Special" : "Special",
             container_extension: "mp4",
           },
         ],
         "2": [
-          { id: "second", season: 2, episode_num: 1, title: "Second", container_extension: "mp4" },
+          {
+            id: "second",
+            season: 2,
+            episode_num: 1,
+            title: named ? "S02E01 Second" : "Second",
+            container_extension: "mp4",
+          },
         ],
         "1": [
-          { id: "first", season: 1, episode_num: 1, title: "First", container_extension: "mp4" },
+          {
+            id: "first",
+            season: 1,
+            episode_num: 1,
+            title: named ? "S01E01 First" : "First",
+            container_extension: "mp4",
+          },
         ],
       },
     };
