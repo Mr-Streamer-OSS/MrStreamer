@@ -146,9 +146,10 @@ describe("every message in every language", () => {
     }
   });
 
-  // A language names a thing with one word everywhere. New messages kept bringing in a second
-  // word for the same thing, so each one a review caught is held to its established word here.
-  // Search terms list other words on purpose, so they are left out.
+  // A language names a thing with one word everywhere in core's catalogue, which desktop shows.
+  // New messages kept bringing in a second word for the same thing, so each one a review caught is
+  // held to its established word here. Search terms list other words on purpose, so they are left
+  // out.
   it.each([
     { locale: "de-DE", word: "Abonnement", other: /\bAbos?\b/ },
     { locale: "de-DE", word: "Programmführer", other: /\bGuide\b/ },
@@ -157,7 +158,9 @@ describe("every message in every language", () => {
   ])("$locale says $word, not $other", ({ locale, other }) => {
     const elsewhere = keys.filter(
       (key) =>
-        !key.startsWith("settings.search.") && other.test(say(locale, key, valuesFor(key, 2))),
+        !key.startsWith("settings.search.") &&
+        // Both the singular and the plural form of a message with a count.
+        [1, 2].some((count) => other.test(say(locale, key, valuesFor(key, count)))),
     );
     expect(elsewhere).toEqual([]);
   });
