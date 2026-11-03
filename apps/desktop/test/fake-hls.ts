@@ -4,7 +4,10 @@ import { fixture } from "./fake-provider.ts";
 
 export async function startFakeHls(
   options: {
+    /** Each segment is sent in parts over six seconds, as a provider sends at its rate. */
     readonly realtime?: boolean;
+    /** Or over this many milliseconds. */
+    readonly deliveryMs?: number;
     /**
      * Its playlists go on without end, a segment every `segmentMs` (3000 unless given), listing
      * the last four, each after a discontinuity.
@@ -160,8 +163,9 @@ export async function startFakeHls(
       return;
     }
     response.writeHead(200, { "Content-Type": "video/mp2t" });
-    if (!options.realtime) return response.end(body);
-    const step = Math.ceil(body.length / 120 / 188) * 188;
+    const deliveryMs = options.deliveryMs ?? (options.realtime ? 6000 : 0);
+    if (!deliveryMs) return response.end(body);
+    const step = Math.ceil(body.length / Math.ceil(deliveryMs / 50) / 188) * 188;
     let offset = 0;
     const timer = setInterval(() => {
       response.write(body.subarray(offset, offset + step));

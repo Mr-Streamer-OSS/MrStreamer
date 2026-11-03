@@ -3,7 +3,7 @@
 // what was written.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, get as httpGet, type IncomingMessage } from "node:http";
 import {
   chmod,
   cp,
@@ -1488,6 +1488,81 @@ describe.skipIf(!hasTools)("recordings", () => {
     const file = await fileOf(dataDir, done!);
     expect(probe(file.path)).toEqual(["h264", "aac"]);
     expect(decodes(file.path)).toBe(true);
+  }, 30_000);
+
+  it("records a shared HLS channel on while Watch's segment read stands paused or is dropped, and gives Watch that segment whole", async () => {
+    // Each segment comes in parts over most of its second, so Watch drops one mid-answer.
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, deliveryMs: 800 });
+    onTestFinished(() => host.close());
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library, playback } = await app(dataDir);
+    const { id: subscriptionId } = await subscriptions.add({
+      server: host.link,
+      username: "",
+      password: "",
+    });
+    await library.refresh(subscriptionId);
+    const channel = { subscriptionId, id: "compatible.test" };
+    const watching = await playback.open(channel, ["h264", "aac"]);
+    expect(watching.format).toBe("hls");
+    /** Watch asks for its playlist's newest segment and reads none of it until told to. */
+    const newest = async () => {
+      const text = await (await fetch(watching.url)).text();
+      const address = text.split("\n").findLast((line) => line && !line.startsWith("#"))!;
+      const answer = await new Promise<IncomingMessage>((resolve, reject) =>
+        httpGet(new URL(address, watching.url), resolve).on("error", reject),
+      );
+      answer.pause();
+      onTestFinished(() => void answer.destroy());
+      return answer;
+    };
+    /** All of a segment Watch reads on. */
+    const whole = async (answer: IncomingMessage) => {
+      const body: Buffer[] = [];
+      answer.on("data", (chunk: Buffer) => body.push(chunk));
+      await new Promise((resolve) => answer.once("end", resolve).resume());
+      return Buffer.concat(body);
+    };
+    await whole(await newest());
+    const answer = await recordings.start(channel, Date.now() + 60_000, {});
+    if (answer.kind !== "started") throw new Error("Not started");
+    const growing = async () => (await recordings.list())[0]?.bytes ?? 0;
+    const segment = fixture("h264-aac.mpegts").length;
+    /** The recording takes in `count` segments more. */
+    const grows = async (count: number) => {
+      const to = (await growing()) + count * segment;
+      expect(await until(growing, (bytes) => bytes >= to)).toBeGreaterThanOrEqual(to);
+    };
+    await grows(1);
+
+    // Paused: the recording reads that segment and the ones after it without waiting for Watch.
+    const paused = await newest();
+    expect(paused.statusCode).toBe(200);
+    await grows(3);
+    // Read again, Watch gets all of it.
+    expect((await whole(paused)).equals(fixture("h264-aac.mpegts"))).toBe(true);
+
+    // Dropped: the recording goes on as before.
+    (await newest()).destroy();
+    await grows(2);
+    await recordings.stop(answer.recording.id);
+    await playback.close(watching.sessionId);
+
+    // The provider sent each segment once, and nothing more once the last reader left.
+    const sequences = host
+      .requests()
+      .flatMap((path) => /^\/media\/compatible-(\d+)\.ts$/.exec(path)?.[1] ?? []);
+    expect(new Set(sequences).size).toBe(sequences.length);
+    expect(
+      await until(
+        async () => host.stats().active,
+        (active) => active === 0,
+      ),
+    ).toBe(0);
+    const [done] = await recordings.list();
+    expect(done?.status).toEqual({ kind: "stopped" });
+    expect(done?.gaps).toBeUndefined();
+    expect(decodes((await fileOf(dataDir, done!)).path)).toBe(true);
   }, 30_000);
 
   it("records the quality Watch plays of an HLS channel offered in several, holding Watch to it until the recording stops", async () => {
