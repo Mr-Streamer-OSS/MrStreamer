@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "./json.ts";
 // The update feed: updates.json at the root of the project's GitHub Pages site, naming the newest
 // release on each channel. The release workflow writes it after every release with
 // `scripts/release-plan.ts feed`; the app reads it to find updates and downloads them from GitHub
@@ -22,7 +23,7 @@ const PLATFORM_FILES = Object.values(UPDATE_METADATA);
 /** How the files people install end: the DMG, the setup .exe, the AppImage and the deb. */
 const INSTALLER_ENDINGS = [".dmg", ".exe", ".AppImage", ".deb"] as const;
 
-export interface UpdateFeed {
+export type UpdateFeed = {
   readonly schema: 1;
   /** When the feed was written, as an ISO time. */
   readonly generated: string;
@@ -34,9 +35,9 @@ export interface UpdateFeed {
    * stable release here, which later versions skip.
    */
   readonly nightly: FeedRelease | null;
-}
+};
 
-export interface FeedRelease {
+export type FeedRelease = {
   /** Stable immediately before this one, when known. Optional for schema-1 compatibility. */
   readonly previousStable?: string;
   /** Such as 0.0.2 or 0.0.3-nightly.20261002.14, without the tag's "v". */
@@ -60,7 +61,7 @@ export interface FeedRelease {
    * written before the list existed lack it.
    */
   readonly installers?: readonly string[];
-}
+};
 
 /** A release as GitHub lists it, with what the feed needs. */
 export interface GitHubRelease {
@@ -158,7 +159,7 @@ export function mergeFeeds(
 }
 
 /** Reads a feed from parsed JSON, such as the deployed one. Throws when it is not a schema 1 feed. */
-export function readFeed(json: unknown): UpdateFeed {
+export function readFeed(json: Json | undefined): UpdateFeed {
   if (!isRecord(json) || json["schema"] !== 1 || typeof json["generated"] !== "string") {
     throw new Error("This is not an update feed with schema 1.");
   }
@@ -184,7 +185,7 @@ function higher(current: FeedRelease | null, next: FeedRelease | null): FeedRele
   return was && now && compareVersions(now, was) < 0 ? current : next;
 }
 
-function readRelease(json: unknown, channel: Channel): FeedRelease | null {
+function readRelease(json: Json | undefined, channel: Channel): FeedRelease | null {
   if (json === null) return null;
   const malformed = new Error(`The feed's ${channel} release is malformed.`);
 
@@ -231,6 +232,6 @@ function isNames(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((name) => typeof name === "string");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: Json | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

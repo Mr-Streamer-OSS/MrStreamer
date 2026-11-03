@@ -139,13 +139,6 @@ const metaPath = (store: string) => join(store, "guide.json");
 const sourcePath = (store: string) => join(store, "guide-source.json");
 const sourcesPath = (store: string) => join(store, "sources.json");
 
-/** A failure as a record keeps it, or null for one this release can't read. */
-const failureOf = (kept: unknown) => {
-  const failure = DownloadFailure()(kept);
-
-  return failure instanceof type.errors ? null : failure;
-};
-
 /** A document as the service reads it, by its file's name. */
 const documentOf = (file: string, fetchedAt: number): GuideDocument => ({
   file,
@@ -257,6 +250,7 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
         );
 
         const { external } = file;
+        const failure = external ? DownloadFailure()(external.failure) : null;
 
         return {
           external: external && {
@@ -264,7 +258,7 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
             identity: external.identity,
             sealedAddress: external.sealedAddress,
             document: documentOf(external.document.file, external.document.fetchedAt),
-            failure: failureOf(external.failure),
+            failure: failure instanceof type.errors ? null : failure,
             source: external.source ?? null,
             since: external.since ?? null,
           },
@@ -310,13 +304,17 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
       try: async (): Promise<readonly StoredSource[]> => {
         const file = await readRecord(sourcesPath(store), SourcesFile());
 
-        return (file?.sources ?? []).map(({ label, document, failure, movedFrom, ...source }) => ({
-          ...source,
-          label: label ?? null,
-          document: document && documentOf(document.file, document.fetchedAt),
-          failure: failureOf(failure),
-          movedFrom: movedFrom ?? null,
-        }));
+        return (file?.sources ?? []).map(({ label, document, failure, movedFrom, ...source }) => {
+          const checked = DownloadFailure()(failure);
+
+          return {
+            ...source,
+            label: label ?? null,
+            document: document && documentOf(document.file, document.fetchedAt),
+            failure: checked instanceof type.errors ? null : checked,
+            movedFrom: movedFrom ?? null,
+          };
+        });
       },
       catch: failedWith,
     }),

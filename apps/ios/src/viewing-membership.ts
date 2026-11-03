@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -35,12 +36,12 @@ export type ReadMembership =
   | { readonly kind: "none" }
   | { readonly kind: "read"; readonly membership: Membership }
   /** Another version, or a version 1 this build can't trust: written back unchanged, unused. */
-  | { readonly kind: "kept"; readonly value: unknown };
+  | { readonly kind: "kept"; readonly value: Json };
 
 const Version1 = lazy(() => type({ version: "1", accounts: type.Record("string", "string[][]") }));
 
 /** Reads viewing.json's `favouriteMembership`, trusting only a well-formed version 1. */
-export function readMembership(value: unknown): ReadMembership {
+export function readMembership(value: Json | undefined): ReadMembership {
   if (value === undefined) return { kind: "none" };
   const parsed = Version1()(value);
 

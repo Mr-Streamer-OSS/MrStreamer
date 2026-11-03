@@ -1,4 +1,4 @@
-import type { Json } from "../../../../packages/contracts/src/json.ts";
+import { JsonValue, type Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { defined } from "@mrstreamer/core/defined";
@@ -8,11 +8,11 @@ export interface MainTransport {
   /** Must settle and release request resources within timeoutMs, as the shared Page does. */
   send(
     method: string,
-    params?: Record<string, unknown>,
+    params?: Record<string, Json | undefined>,
     timeoutMs?: number,
   ): Promise<{
-    result?: unknown;
-    error?: unknown;
+    result?: Json | undefined;
+    error?: Json | undefined;
   }>;
   on(method: string, listener: (params: Json | undefined) => void): () => void;
 }
@@ -36,7 +36,7 @@ export interface StartupPause {
   readonly scriptId: string;
   readonly pid: number;
   readonly reason: "Break on start";
-  readonly callFrame: Readonly<Record<string, unknown>>;
+  readonly callFrame: Readonly<Record<string, Json | undefined>>;
 }
 
 export interface ProbeOptions {
@@ -53,8 +53,8 @@ export interface ProbeOptions {
 
 const installed = new WeakSet<MainTransport>();
 
-const object = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const object = (value: unknown): value is Record<string, Json | undefined> =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
 
 function errorText(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
@@ -136,11 +136,11 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   let active = false;
   let sessionId: string | undefined;
   let nextId = 1;
-  let pause: Record<string, unknown> | undefined;
+  let pause: Record<string, Json | undefined> | undefined;
   let startup: StartupPause | undefined;
   let resumed = false;
   let controlling = false;
-  let debuggerReady: Promise<Outcome<Record<string, unknown>>> | undefined;
+  let debuggerReady: Promise<Outcome<Record<string, Json | undefined>>> | undefined;
   const errors: string[] = [];
   const scripts = new Map<string, string>();
   const tasks = new Set<Promise<unknown>>();
@@ -149,7 +149,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   const pending = new Map<
     number,
     {
-      finish: (reply: Record<string, unknown>) => void;
+      finish: (reply: Record<string, Json | undefined>) => void;
       fail: (error: Error) => void;
     }
   >();
@@ -167,7 +167,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     wake();
   }
 
-  function record(kind: string, data: unknown) {
+  function record(kind: string, data: Json | StartupPause) {
     const entry: Evidence = {
       at: new Date().toISOString(),
       kind,
@@ -211,7 +211,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return sessionId;
   }
 
-  async function mainSend(method: string, params: Record<string, unknown>) {
+  async function mainSend(method: string, params: Record<string, Json | undefined>) {
     const reply = await main.send(method, params, timeoutMs);
     record("main-reply", { method, reply });
 
@@ -222,12 +222,12 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return reply.result;
   }
 
-  async function workerSend(method: string, params: Record<string, unknown> = {}) {
+  async function workerSend(method: string, params: Record<string, Json | undefined> = {}) {
     const ownedSession = assertActive();
     const id = nextId++;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const reply = new Promise<Record<string, unknown>>((resolve, reject) => {
+    const reply = new Promise<Record<string, Json | undefined>>((resolve, reject) => {
       timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`${method} worker reply timed out`));
@@ -314,7 +314,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return verifiedMainPID;
   }
 
-  async function verifyPause(current: Record<string, unknown>) {
+  async function verifyPause(current: Record<string, Json | undefined>) {
     if (current.reason !== "Break on start") return;
     const frames = current.callFrames;
     const frame = Array.isArray(frames) ? frames[0] : undefined;
@@ -362,7 +362,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     wake();
   }
 
-  function listen(method: string, callback: (params: Record<string, unknown>) => void) {
+  function listen(method: string, callback: (params: Record<string, Json | undefined>) => void) {
     unsubscribe.push(
       main.on(method, (params) => {
         if (closed) return;

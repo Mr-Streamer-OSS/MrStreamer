@@ -925,7 +925,7 @@ describe("update feed", () => {
       published("v0.0.3-nightly.20261002.9", 1),
     ]);
 
-    const json: Record<string, unknown> = JSON.parse(JSON.stringify(feed));
+    const json: Record<string, Json | undefined> = JSON.parse(JSON.stringify(feed));
 
     expect(readFeed(json)).toEqual(feed);
     // A feed deployed before installers were listed reads as it is, without them, and so does

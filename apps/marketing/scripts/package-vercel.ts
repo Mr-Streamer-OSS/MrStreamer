@@ -1,3 +1,4 @@
+import { JsonValue, type Json, type JsonObject } from "../../../packages/contracts/src/json.ts";
 // Packs the built site as Vercel's Build Output API, version 3, in .vercel/output/, and checks
 // the package before anything deploys it: `vercel deploy --prebuilt` uploads exactly this folder.
 //
@@ -190,7 +191,11 @@ for (const link of new Set(links.filter((link) => !installer.test(link)))) {
 
 try {
   const [, json = ""] = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(home) ?? [];
-  const { "@type": type, screenshot }: Record<string, unknown> = JSON.parse(json);
+  const parsed = JsonValue.assert(JSON.parse(json));
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+    throw new Error("Invalid app metadata");
+  const { "@type": type, screenshot } = Object.fromEntries(Object.entries(parsed));
   const pictures = Array.isArray(screenshot) ? screenshot : [screenshot];
 
   if (
@@ -199,7 +204,7 @@ try {
       : type === "SoftwareApplication") ||
     pictures.length === 0 ||
     pictures.some(
-      (picture: unknown) =>
+      (picture: Json | undefined) =>
         typeof picture !== "string" ||
         !picture.startsWith(`${SITE}/`) ||
         !existsSync(join(files, picture.slice(SITE.length))),
@@ -214,26 +219,25 @@ try {
 // Search engines show FAQ answers only when the page shows the same questions: Home's FAQPage
 // data asks exactly the questions of its visible <summary> lines.
 const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)]
-  .map(([, json = ""]): unknown => {
+  .map(([, json = ""]): Json | undefined => {
     try {
-      return JSON.parse(json);
+      return JsonValue.assert(JSON.parse(json));
     } catch {
       return undefined;
     }
   })
   .find(
-    (data): data is Record<string, unknown> =>
+    (data): data is JsonObject =>
       typeof data === "object" && data !== null && "@type" in data && data["@type"] === "FAQPage",
   );
 
 if (!faq) {
   problems.push(`${LISTED["/"]} holds no FAQPage data that reads.`);
 } else {
-  const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map(
-    (question: unknown) =>
-      typeof question === "object" && question !== null && "name" in question
-        ? question.name
-        : undefined,
+  const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map((question: Json) =>
+    typeof question === "object" && question !== null && "name" in question
+      ? question.name
+      : undefined,
   );
 
   const shown = [...home.matchAll(/<summary>(.*?)<\/summary>/gs)].map(([, text = ""]) =>

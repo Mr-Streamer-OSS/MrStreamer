@@ -175,7 +175,6 @@ function probe(path: string, label: string) {
     throw new Error("Expected one video and one audio stream");
 
   const packets = result.packets.map((row) => {
-
     return {
       stream: numeric(row.stream_index),
       pts: ticks(row.pts_time),

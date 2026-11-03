@@ -716,9 +716,12 @@ function sameValue(a: Json | undefined, b: Json | undefined): boolean {
   if (a === b) return true;
 
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const left = Object.entries(a).filter(([, value]) => value !== undefined);
   const right = new Map(Object.entries(b).filter(([, value]) => value !== undefined));
 
-  return left.length === right.size && left.every(([key, value]) => sameValue(value, right.get(key)));
+  return (
+    left.length === right.size && left.every(([key, value]) => sameValue(value, right.get(key)))
+  );
 }

@@ -116,7 +116,13 @@ function fixture(build = builds[2]!) {
     },
   };
 
-  const updateReceipt = (value: Json | (Omit<PackageReceipt, "files"> & { files: readonly (PackageReceipt["files"][number] | undefined)[] })) => {
+  const updateReceipt = (
+    value:
+      | Json
+      | (Omit<PackageReceipt, "files"> & {
+          files: readonly (PackageReceipt["files"][number] | undefined)[];
+        }),
+  ) => {
     const bytes = zipSync({ "package-receipt.json": strToU8(JSON.stringify(value)) });
     archives.set(31, bytes);
     receiptArtifact.digest = `sha256:${sha256(bytes)}`;

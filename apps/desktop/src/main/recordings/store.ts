@@ -195,12 +195,18 @@ async function readOurs<S, A>(
 
 /** Reads recordings.json at `path`. */
 export function readRecordings(path: string): Promise<Read<StoredRecording>> {
-  return readOurs(path, File(), (parsed) => ({ version: parsed.version, items: parsed.recordings }));
+  return readOurs(path, File(), (parsed) => ({
+    version: parsed.version,
+    items: parsed.recordings,
+  }));
 }
 
 /** Reads schedules.json at `path`. */
 export function readSchedules(path: string): Promise<Read<KeptSchedule>> {
-  return readOurs(path, Schedules(), (parsed) => ({ version: parsed.version, items: parsed.schedules }));
+  return readOurs(path, Schedules(), (parsed) => ({
+    version: parsed.version,
+    items: parsed.schedules,
+  }));
 }
 
 export function writeSchedules(path: string, schedules: readonly KeptSchedule[]): Promise<void> {

@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json";
 // Finds the releases an update can install. The app reads a small static feed the release
 // workflow publishes (see @mrstreamer/contracts/update-feed): one request, and no share of
 // GitHub's API limit of 60 requests an hour per network address. When the feed is missing or
@@ -114,7 +115,7 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
     const answers: SourceAnswer[] = [];
 
     const fromFeed = await attempt("feed", signal, answers, async (response) => {
-      const feed = readFeed(await response.json());
+      const feed = readFeed(JsonValue.assert(await response.json()));
 
       return [feed.stable, feed.nightly].flatMap((entry): Offer[] => {
         const version = entry && parseVersion(entry.version);

@@ -67,29 +67,49 @@ export function analyticsStore(dataDir: string) {
       try {
         const parsed: unknown = JSON.parse(text);
         const legacy = FormatOne()(parsed);
-        const current = legacy instanceof type.errors ? parsed : {
-          ...legacy,
-          format: 2,
-          pending: legacy.pending.filter((item) => LegacySummary()(item) instanceof type.errors),
-        };
+
+        const current =
+          legacy instanceof type.errors
+            ? parsed
+            : {
+                ...legacy,
+                format: 2,
+                pending: legacy.pending.filter(
+                  (item) => LegacySummary()(item) instanceof type.errors,
+                ),
+              };
+
         migrated = current !== parsed;
         // Future optional diagnostic literals cannot discard valid consent or legacy work.
+
         const queue = type({
           pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
         })(current);
-        const diagnosticSafe = queue instanceof type.errors ? current : {
-          ...queue,
-          pending: queue.pending.map((item) => item.event.event !== "stream_error" ? item : {
-            ...item,
-            event: {
-              ...item.event,
-              properties: Object.fromEntries(Object.entries(item.event.properties).filter(
-                ([key, entry]) => !key.startsWith("diagnostic_") ||
-                  !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
-              )),
-            },
-          }),
-        };
+
+        const diagnosticSafe =
+          queue instanceof type.errors
+            ? current
+            : {
+                ...queue,
+                pending: queue.pending.map((item) =>
+                  item.event.event !== "stream_error"
+                    ? item
+                    : {
+                        ...item,
+                        event: {
+                          ...item.event,
+                          properties: Object.fromEntries(
+                            Object.entries(item.event.properties).filter(
+                              ([key, entry]) =>
+                                !key.startsWith("diagnostic_") ||
+                                !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
+                            ),
+                          ),
+                        },
+                      },
+                ),
+              };
+
         const checked = LegacyRecord()(diagnosticSafe);
 
         if (
@@ -192,4 +212,3 @@ export function analyticsStore(dataDir: string) {
     },
   };
 }
-

@@ -44,12 +44,17 @@ type Listed = Rendition & { default: boolean; forced: boolean; id: number };
 export type StandInData =
   | ErrorData
   | Listed
-  | Partial<Omit<ErrorData, "context" | "frag">> & {
+  | (Partial<Omit<ErrorData, "context" | "frag">> & {
       context?: { type: string; id: number } | undefined;
       frag?: { type: string; level?: number; start?: number; duration?: number } | undefined;
-    }
+    })
   | { id: number; details?: { targetduration: number; live: boolean } }
-  | { success: boolean; frag: { level: number; start: number; duration: number }; part: null; error?: Error }
+  | {
+      success: boolean;
+      frag: { level: number; start: number; duration: number };
+      part: null;
+      error?: Error;
+    }
   | { captions: readonly Rendition[] }
   | { audioTracks: Listed[] }
   | { subtitleTracks: Listed[] }

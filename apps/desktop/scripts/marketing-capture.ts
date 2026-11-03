@@ -301,11 +301,13 @@ try {
     if (!record(windows) || !Array.isArray(windows["windows"])) throw new Error("No window list.");
 
     const nativeWindow = type({ pid: "number", title: "string", window_id: "number" });
+
     const listed = windows["windows"].flatMap((entry) => {
       const window = nativeWindow(entry);
 
       return window instanceof type.errors ? [] : [window];
     });
+
     const owned = listed.find((entry) => entry.pid === app?.pid && entry.title === "Mr. Streamer");
 
     if (record(owned) && typeof owned["window_id"] === "number") windowId = owned["window_id"];

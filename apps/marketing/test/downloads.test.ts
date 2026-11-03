@@ -60,7 +60,7 @@ describe("the installers the open page takes from the feed", () => {
     expect(listedDownloads(feed("0.0.7", { installers: undefined }))).toBeNull();
   });
 
-  it.each<[string, Json | Error]>([
+  it.each<[string, Json]>([
     ["a nightly named as stable", feed("0.0.8-nightly.20261007.190")],
     ["a version that is a path", feed("../../../evil/releases/download/v1.0.0")],
     [

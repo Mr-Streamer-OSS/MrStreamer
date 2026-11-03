@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 // Plans releases for the release workflow: whether a run is a dry run, the commit it builds, its
 // version and tag, and whether a scheduled nightly is due. Right before publishing it checks the
 // release is complete and still new, and after publishing it writes the update feed the app reads.
@@ -703,7 +704,9 @@ export async function deployedFeed(url: string | undefined): Promise<UpdateFeed 
   if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}.`);
 
   try {
-    return readFeed(await response.json());
+    const json: Json = JSON.parse(await response.text());
+
+    return readFeed(json);
   } catch (error) {
     throw new Error(
       `${url} holds no feed this script can read. ${error instanceof Error ? error.message : String(error)}`,

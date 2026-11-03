@@ -177,7 +177,8 @@ function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<R[] | null> {
  * every row of every list. Nothing of it is answered until all have checked.
  */
 function* checked(
-  head: ReturnType<typeof Envelopes>["live"]["infer"] | ReturnType<typeof Envelopes>["titles"]["infer"],
+  head:
+    ReturnType<typeof Envelopes>["live"]["infer"] | ReturnType<typeof Envelopes>["titles"]["infer"],
   id: string,
   kind: SavedKind,
   mapping: string | null,

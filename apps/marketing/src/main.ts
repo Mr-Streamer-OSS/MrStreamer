@@ -1,3 +1,4 @@
+import { JsonValue } from "../../../packages/contracts/src/json.ts";
 // Every page runs website analytics (analytics.ts). Home moves; download and about keep release
 // links current:
 // - Each part comes in once as it scrolls into view. Nothing runs while the page sits still.
@@ -184,7 +185,7 @@ async function refreshDownloads(): Promise<void> {
   try {
     const response = await fetch(FEED, { signal: AbortSignal.timeout(8_000) });
 
-    if (response.ok) showFeedDownloads(document, await response.json());
+    if (response.ok) showFeedDownloads(document, JsonValue.assert(await response.json()));
   } catch {
     // Offline, blocked or not a feed.
   }

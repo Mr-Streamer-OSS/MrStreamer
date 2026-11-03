@@ -16,8 +16,8 @@ export function longNamed<C extends { readonly name: string }>(channel: C): C {
   return channel.name === "TEST | H.264 + AAC" ? { ...channel, name: LONG_NAME } : channel;
 }
 
-const check = (value: boolean, message: string, seen?: unknown) => {
-  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
+const check = (value: boolean, message: string, seen?: string) => {
+  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${seen}`}`);
 };
 
 const ROWS = "[...document.querySelectorAll('main [data-index]')]";
@@ -80,17 +80,17 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   check(
     long.every((row) => row.title === LONG_TITLE && row.nameClipped),
     "The long name isn't cut short in its cell",
-    long,
+    JSON.stringify(long),
   );
   check(
     new Set(sources).size === 2 && sources.every(Boolean),
     "The two copies' lines don't lead with their own subscription",
-    sources,
+    JSON.stringify(sources),
   );
   check(
     browse.every((row) => row.height === 3.5),
     "A row isn't 3.5rem high",
-    browse.map((row) => row.height),
+    JSON.stringify(browse.map((row) => row.height)),
   );
   await d.capture("names-browse");
 
@@ -110,7 +110,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   check(
     d.observed["hoverLabel"] === `${LONG_TITLE}\n${long[0]!.line}`,
     "The label doesn't show the full displayed name and its metadata",
-    d.observed["hoverLabel"],
+    JSON.stringify(d.observed["hoverLabel"]),
   );
   await d.capture("names-hover-long");
   const short = browse.find((row) => !row.clipped && row.name !== LONG_NAME);
@@ -138,7 +138,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
 
   const selected = (await rows()).find((row) => row.selected);
   d.observed["keyboardSelected"] = selected;
-  check(selected?.name === LONG_NAME, "Down didn't reach the long row", selected);
+  check(selected?.name === LONG_NAME, "Down didn't reach the long row", JSON.stringify(selected));
   await d.wait(() => d.exists(label(LONG_TITLE)), 5_000);
   await d.capture("names-keyboard-long");
   await d.key("Escape", 27);
@@ -165,7 +165,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   check(
     narrow.every((row) => row.height === 3.5),
     "A narrow row isn't 3.5rem high",
-    narrow.map((row) => row.height),
+    JSON.stringify(narrow.map((row) => row.height)),
   );
   const narrowLong = narrow.filter((row) => row.name === LONG_NAME);
   check(
@@ -180,7 +180,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
           .sort()
           .join("\n"),
     "The narrow long rows lost their clipped names or distinct metadata",
-    narrowLong,
+    JSON.stringify(narrowLong),
   );
 
   const narrowLayout = await d.evaluate<
@@ -220,7 +220,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
           line.contained,
       ),
     "The narrow metadata isn't visible below its name and contained in its cell and row",
-    narrowLayout,
+    JSON.stringify(narrowLayout),
   );
   await d.capture("names-narrow");
 
@@ -245,14 +245,18 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   );
 
   d.observed["playingDot"] = playing;
-  check(playing.dot.right <= playing.cell.right, "The playing dot left the name's cell", playing);
+  check(
+    playing.dot.right <= playing.cell.right,
+    "The playing dot left the name's cell",
+    JSON.stringify(playing),
+  );
   check(
     Math.abs(playing.dot.left - playing.name.right - playing.gap) <= 1 &&
       Math.abs(
         (playing.dot.top + playing.dot.bottom) / 2 - (playing.name.top + playing.name.bottom) / 2,
       ) <= 1,
     "The playing dot isn't beside the name on its first line",
-    playing,
+    JSON.stringify(playing),
   );
   await d.capture("names-playing");
 }

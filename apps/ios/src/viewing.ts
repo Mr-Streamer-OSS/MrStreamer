@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -96,7 +97,7 @@ export const useViewing = () => useStore(viewing);
 export const currentViewing = () => viewing.get();
 
 /** viewing.json as this launch read it. */
-const read = readJson(FILE);
+const read = JsonValue.assert(readJson(FILE));
 
 function snapshot(): ViewingSnapshot | null {
   return read && typeof read === "object" && "version" in read && read.version === 1

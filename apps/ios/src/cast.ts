@@ -1,7 +1,7 @@
+import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { defined } from "@mrstreamer/core/defined";
-import type { JsonObject } from "@mrstreamer/contracts/json";
 
 // Play on TV: an open Cast sender, with no Google SDK. `modules/cast` finds TVs on the local
 // network, opens the TLS connection to one and serves media from the phone; everything the
@@ -608,13 +608,13 @@ function fromBase64(text: string): Uint8Array {
   return out.subarray(0, at);
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
-function payloadOf(message: CastMessage): Record<string, unknown> {
+function payloadOf(message: CastMessage): JsonObject {
   try {
-    const value: unknown = JSON.parse(message.payload);
+    const value = JsonValue.assert(JSON.parse(message.payload));
 
     return isRecord(value) ? value : {};
   } catch {
@@ -622,11 +622,11 @@ function payloadOf(message: CastMessage): Record<string, unknown> {
   }
 }
 
-const numberOr = <T>(value: unknown, fallback: T) =>
+const numberOr = <T>(value: Json | undefined, fallback: T) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 /** A media status's `playerState`, and `idleReason` when idle, as a `TvStatus` state. */
-function stateOf(player: unknown, idle: unknown): TvStatus["state"] {
+function stateOf(player: Json | undefined, idle: Json | undefined): TvStatus["state"] {
   if (player === "PLAYING") return "playing";
 
   if (player === "PAUSED") return "paused";
@@ -660,7 +660,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   /** Each request waiting for its answer: told the answer, or failed when the channel goes. */
   const waiting = new Map<
     number,
-    { answer: (payload: Record<string, unknown>) => void; fail: (cause: Error) => void }
+    { answer: (payload: JsonObject) => void; fail: (cause: Error) => void }
   >();
 
   let transport: string | null = null;
@@ -699,7 +699,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   const ask = (to: string, namespace: string, payload: Payload, ms = TIMING.answer) => {
     const requestId = ++requests;
 
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
+    return new Promise<JsonObject>((resolve, reject) => {
       const timer = setTimeout(() => {
         waiting.delete(requestId);
         reject(new Error("The TV didn't answer."));
@@ -736,7 +736,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     if (by !== "us") lostNow(by);
   };
 
-  const receiverStatus = (payload: Record<string, unknown>) => {
+  const receiverStatus = (payload: JsonObject) => {
     const status = isRecord(payload["status"]) ? payload["status"] : {};
     const level = status["volume"];
 
@@ -760,7 +760,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   };
 
   /** `own` when it answers one of this load's requests, rather than the TV's own word. */
-  const mediaStatus = (payload: Record<string, unknown>, own: boolean) => {
+  const mediaStatus = (payload: JsonObject, own: boolean) => {
     const statuses = Array.isArray(payload["status"]) ? payload["status"] : [];
 
     const ids = statuses.map((status) =>
@@ -867,7 +867,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     const status = isRecord(launched["status"]) ? launched["status"] : {};
 
     const app = (Array.isArray(status["applications"]) ? status["applications"] : []).find(
-      (each): each is Record<string, unknown> => isRecord(each) && each["appId"] === MEDIA_RECEIVER,
+      (each): each is JsonObject => isRecord(each) && each["appId"] === MEDIA_RECEIVER,
     );
 
     if (
@@ -956,10 +956,10 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         ...defined({ currentTime: loaded.live ? undefined : loaded.from }),
       });
 
-      const firstOf = (answer: Record<string, unknown>) =>
+      const firstOf = (answer: JsonObject) =>
         (Array.isArray(answer["status"]) ? answer["status"] : []).find(isRecord);
 
-      const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const answer = await new Promise<JsonObject>((resolve, reject) => {
         const abort = () => {
           if (media === mine) media = null;
           reject(new Error("The load was given up."));

@@ -465,7 +465,8 @@ export function readTitle(
   return queued(`provider|${id}`, null, () =>
     load(
       new File(subscriptionFolder(id), titleName(kind, titleId)),
-      Records.title(), (record) => {
+      Records.title(),
+      (record) => {
         const same = record.subscriptionId === id && record.kind === kind && record.id === titleId;
 
         if (!same) throw new Error("Title identity differs");
@@ -517,7 +518,8 @@ export function readAbout(kind: TitleKind, tmdbId: string, language: string) {
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
-      Records.about(), (record): Saved<TitleAbout | null> => ({ at: record.at, value: record.value }),
+      Records.about(),
+      (record): Saved<TitleAbout | null> => ({ at: record.at, value: record.value }),
       TMDB_EXPIRE_MS,
       always,
     ),
@@ -545,7 +547,8 @@ export function readSeason(tmdbId: string, season: number, language: string) {
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
-      Records.season(), (record): Saved<readonly EpisodeAbout[] | null> => ({ at: record.at, value: record.value }),
+      Records.season(),
+      (record): Saved<readonly EpisodeAbout[] | null> => ({ at: record.at, value: record.value }),
       TMDB_EXPIRE_MS,
       always,
     ),
@@ -600,7 +603,8 @@ export function readFiles(
   return queued(`provider|${id}`, null, async () => {
     const record = await load(
       new File(subscriptionFolder(id), FILES_NAME),
-      Records.files(), (record) => {
+      Records.files(),
+      (record) => {
         if (record.subscriptionId !== id) throw new Error("Subscription identity differs");
 
         return record;

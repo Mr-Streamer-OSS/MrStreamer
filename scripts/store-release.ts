@@ -458,7 +458,9 @@ export function verifyPackage(
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
 export function isRecord(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value)
+  );
 }
 
 /** The release file `release` wrote, with the package once `verify` added it. */

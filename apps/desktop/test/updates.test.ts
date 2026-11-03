@@ -755,7 +755,18 @@ describe("finding releases", () => {
     };
   }
 
-  const json = (body: Json | { schema: number; generated: string; stable: Partial<NonNullable<UpdateFeed["stable"]>> | null; nightly: Partial<NonNullable<UpdateFeed["stable"]>> | null }, status = 200, headers: Record<string, string> = {}) =>
+  const json = (
+    body:
+      | Json
+      | {
+          schema: number;
+          generated: string;
+          stable: Partial<NonNullable<UpdateFeed["stable"]>> | null;
+          nightly: Partial<NonNullable<UpdateFeed["stable"]>> | null;
+        },
+    status = 200,
+    headers: Record<string, string> = {},
+  ) =>
     new Response(JSON.stringify(body), {
       status,
       headers: { "content-type": "application/json", ...headers },

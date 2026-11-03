@@ -19,8 +19,8 @@ const PROGRAMME = '[role=gridcell]:not([aria-label^="No programme information"])
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
 
-const expect = (value: boolean, message: string, seen?: unknown) => {
-  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
+const expect = (value: boolean, message: string, seen?: string) => {
+  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${seen}`}`);
 };
 
 /** What the grid shows: its rows, programmes, stretches without any, and the cursor's details. */
@@ -99,11 +99,11 @@ export async function guideGridCellsScenario(d: Driver) {
     d.observed[`shortCells-${scale}`] = before;
     // Retain the visible defect before failing a baseline build.
     await d.capture(`grid-short-cells-${scale}`);
-    expect(before.cells.length > 0, "No short programme cells were drawn", before);
+    expect(before.cells.length > 0, "No short programme cells were drawn", JSON.stringify(before));
     expect(
       before.cells.every((cell) => Math.abs(cell.width - cell.expected) < 0.05),
       "A short programme paints beyond its timeline width",
-      { ...before, cells: before.cells.slice(0, 8) },
+      JSON.stringify({ ...before, cells: before.cells.slice(0, 8) }),
     );
 
     const tiny = `(() => {
@@ -127,16 +127,16 @@ export async function guideGridCellsScenario(d: Driver) {
         details: ${DETAILS}.innerText };
     })()`);
 
-    expect(selected.width < 12, "The pointer missed the tiny programme", selected);
+    expect(selected.width < 12, "The pointer missed the tiny programme", JSON.stringify(selected));
     expect(
       selected.details.includes("Watch live"),
       "Tiny programme details have no live action",
-      selected,
+      JSON.stringify(selected),
     );
     expect(
       selected.label.includes("Catch-up") && selected.details.includes("Play from start"),
       "Tiny replay has no catch-up action",
-      selected,
+      JSON.stringify(selected),
     );
     d.observed[`tinySelection-${scale}`] = selected;
     await d.capture(`grid-tiny-details-${scale}`);
@@ -164,7 +164,7 @@ export async function guideGridCellsScenario(d: Driver) {
     expect(
       scrolled.cells.every((cell) => Math.abs(cell.width - cell.expected) < 0.05),
       "Fractional scrolling widened a short programme",
-      scrolled,
+      JSON.stringify(scrolled),
     );
     d.observed[`shortCellsScrolled-${scale}`] = scrolled;
     await d.capture(`grid-short-cells-scrolled-${scale}`);
@@ -205,7 +205,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   expect(
     opened.rows[0]?.includes("H.264 + AAC") ?? false,
     "Grid doesn't start on the list's first channel",
-    opened.rows,
+    JSON.stringify(opened.rows),
   );
   expect(!opened.overflow, "The page overflows at 1280 px");
   d.observed["gridOpened"] = opened;
@@ -224,7 +224,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   expect(
     moved.details?.includes("Watch live") === true && moved.selected !== null,
     "Details didn't open on the programme with the cursor",
-    moved,
+    JSON.stringify(moved),
   );
   d.observed["afterArrows"] = moved;
 
@@ -239,7 +239,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   expect(
     focus.focused && focus.selected && moved.selected === focus.active,
     "The grid doesn't name the cursor's cell as its active one",
-    focus,
+    JSON.stringify(focus),
   );
   await d.capture("grid-details-1280");
   await leftUntilEnded(d);
@@ -248,7 +248,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   expect(
     (await actions(d)).join() === "Watch live",
     "An aired programme without catch-up offers more than Watch live",
-    past,
+    JSON.stringify(past),
   );
   await d.capture("grid-past-1280");
 
@@ -258,7 +258,11 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   await leftUntilEnded(d);
   const catchup = { ...(await gridState(d)), actions: await actions(d) };
   d.observed["pastWithCatchup"] = catchup;
-  expect(catchup.actions.join() === "Play from start,Watch live", "No Play from start", catchup);
+  expect(
+    catchup.actions.join() === "Play from start,Watch live",
+    "No Play from start",
+    JSON.stringify(catchup),
+  );
   expect(
     await d.exists(`${GRID}.querySelector('[role=rowheader] [aria-label="Catch-up"]')`),
     "No catch-up sign beside the channel",
@@ -385,7 +389,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   await d.key("Home", 36);
   await d.wait(() => d.exists(DETAILS));
   const narrow = { ...(await gridState(d)), actions: await actions(d) };
-  expect(!narrow.overflow, "The page overflows at 900 px", narrow);
+  expect(!narrow.overflow, "The page overflows at 900 px", JSON.stringify(narrow));
   d.observed["narrow"] = narrow;
   await d.capture("grid-900");
   await leftUntilEnded(d);
@@ -422,10 +426,14 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
   await d.key("ArrowDown", 40);
   const after = await d.evaluate<string | null>(cursorRow);
   d.observed["tabGridDown"] = { before, after };
-  expect(!!after && after !== before, "Down on the grid Tab focused didn't move its cursor", {
-    before,
-    after,
-  });
+  expect(
+    !!after && after !== before,
+    "Down on the grid Tab focused didn't move its cursor",
+    JSON.stringify({
+      before,
+      after,
+    }),
+  );
   await d.capture("grid-tab-down-900");
   await d.key("Enter", 13);
   await d.wait(async () => (await picture(d)).watching);
@@ -436,7 +444,7 @@ export async function guideGridScenario(d: Driver, fixture: GridFixture) {
       watched.title.includes(after.replace(/^TEST \| /, "")) &&
       !watched.title.includes("Aired"),
     "Enter on the grid Tab focused didn't watch its cell's channel live",
-    watched,
+    JSON.stringify(watched),
   );
   await d.key("Escape", 27);
   await d.wait(() => d.exists(GRID));
@@ -488,7 +496,7 @@ async function watchesLive(
       (!fromRecording || after.streams.requests > before.streams.requests) &&
       after.streams.active === 1,
     `${label} didn't play the channel live on one connection`,
-    after,
+    JSON.stringify(after),
   );
 }
 
@@ -506,7 +514,11 @@ async function leftUntilEnded(d: Driver) {
     );
 
   for (let presses = 0; presses < 4 && !(await ended()); presses++) await d.key("ArrowLeft", 37);
-  expect(await ended(), "Left didn't reach a programme that has ended", await gridState(d));
+  expect(
+    await ended(),
+    "Left didn't reach a programme that has ended",
+    JSON.stringify(await gridState(d)),
+  );
 }
 
 /**
@@ -529,7 +541,7 @@ async function previewNamesRecording(d: Driver, area: string, title: string, cap
   expect(
     seen.text.includes(title) && !seen.text.includes(" left"),
     "The preview doesn't name the recording that plays",
-    seen,
+    JSON.stringify(seen),
   );
   await d.capture(capture);
 }
@@ -562,7 +574,7 @@ async function playAired(d: Driver, fixture: GridFixture, width: string): Promis
   expect(
     playing.archiveRequests.length >= 1 && playing.streams.active === 1,
     "The programme didn't play from the archive on one connection",
-    playing,
+    JSON.stringify(playing),
   );
 
   const shown = await d.evaluate<string>(
@@ -572,7 +584,7 @@ async function playAired(d: Driver, fixture: GridFixture, width: string): Promis
   expect(
     shown.includes(title) && shown.includes("Aired"),
     "Watch doesn't say the programme aired",
-    shown,
+    JSON.stringify(shown),
   );
 
   // The pointer wakes Watch's controls, so the picture shows what plays.
@@ -670,7 +682,7 @@ export async function guideGridScrollScenario(d: Driver) {
   const across = Array.from({ length: 30 }, () => ({ x: 120, y: 0 }));
   const list = "document.querySelector('main [data-index]').parentElement.parentElement";
   const listScroll = await measure("list-down", list, down);
-  expect(listScroll.scrolledTo.top > 0, "The list didn't scroll", listScroll);
+  expect(listScroll.scrolledTo.top > 0, "The list didn't scroll", JSON.stringify(listScroll));
   await d.capture("scroll-list");
 
   await d.key("g", 71);
@@ -679,13 +691,17 @@ export async function guideGridScrollScenario(d: Driver) {
     d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell][aria-selected]').length > 20`),
   );
   const gridDown = await measure("grid-down", GRID, down);
-  expect(gridDown.scrolledTo.top > 0, "The grid didn't scroll down", gridDown);
+  expect(gridDown.scrolledTo.top > 0, "The grid didn't scroll down", JSON.stringify(gridDown));
   await d.wait(() =>
     d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell][aria-selected]').length > 20`),
   );
   await d.capture("scroll-grid-down");
   const gridAcross = await measure("grid-across", GRID, across);
-  expect(gridAcross.scrolledTo.left > 0, "The grid didn't scroll across", gridAcross);
+  expect(
+    gridAcross.scrolledTo.left > 0,
+    "The grid didn't scroll across",
+    JSON.stringify(gridAcross),
+  );
   await d.wait(() =>
     d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell][aria-selected]').length > 20`),
   );

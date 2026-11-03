@@ -739,7 +739,10 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
  * status, status details and upload address, and each listing's "What's new" and, where the
  * package's name goes into it, title.
  */
-function metadata(submission: Submission, release: CheckedRelease): Record<string, Json | undefined> {
+function metadata(
+  submission: Submission,
+  release: CheckedRelease,
+): Record<string, Json | undefined> {
   const changing = ["applicationPackages", "status", "statusDetails", "fileUploadUrl"];
 
   const ours =
@@ -813,7 +816,10 @@ function listed(paths: readonly string[], clean: Session["clean"]): string {
  */
 function relisted(
   listings: Json | undefined,
-  change: (base: Record<string, Json | undefined>, language: string) => Record<string, Json | undefined>,
+  change: (
+    base: Record<string, Json | undefined>,
+    language: string,
+  ) => Record<string, Json | undefined>,
 ): Json | undefined {
   if (!isRecord(listings)) return listings;
 

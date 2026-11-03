@@ -1,4 +1,5 @@
-import type { Json } from "../../../../packages/contracts/src/json.ts";
+import { type } from "arktype";
+import { JsonValue, type Json } from "../../../../packages/contracts/src/json.ts";
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
 // host. Shared by the tests of a built app and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -11,6 +12,14 @@ import type { FakeProvider } from "../fake-provider.ts";
  */
 export const silent: readonly string[] =
   process.env["FIXTURE_SOUND"] === "1" ? [] : ["--mute-audio"];
+
+const DevToolsMessage = type({
+  "id?": "number",
+  "method?": "string",
+  "params?": JsonValue,
+  "result?": JsonValue,
+  "error?": JsonValue,
+});
 
 /** Starts the app with remote debugging on `port`, its data in `profile` and its sound `silent`. */
 export function launch(
@@ -87,18 +96,17 @@ export async function connect(
     socket.addEventListener("error", reject, { once: true });
   });
   let nextId = 1;
-  const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
+
+  const pending = new Map<
+    number,
+    (message: { result?: Json | undefined; error?: Json | undefined }) => void
+  >();
+
   const listeners = new Map<string, (params: Json | undefined) => void>();
   const closeListeners = new Set<() => void>();
   let closed = false;
   socket.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data)) as {
-      id?: number;
-      method?: string;
-      params?: Json;
-      result?: unknown;
-      error?: unknown;
-    };
+    const message = DevToolsMessage.assert(JSON.parse(String(event.data)));
 
     if (message.id !== undefined) pending.get(message.id)?.(message);
     else if (message.method) listeners.get(message.method)?.(message.params);
@@ -113,7 +121,7 @@ export async function connect(
   });
 
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
-    new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
+    new Promise<{ result?: Json | undefined; error?: Json | undefined }>((resolve) => {
       if (closed) {
         resolve({ error: "DevTools connection closed" });
 

@@ -1,3 +1,4 @@
+import { JsonValue, type Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -99,19 +100,19 @@ export const EMPTY_REGISTRY: Registry = {
 
 export type DemoMarker =
   | { readonly kind: "absent" | "active" | "erasing" }
-  | { readonly kind: "unreadable"; readonly raw: unknown };
+  | { readonly kind: "unreadable"; readonly raw: Json | undefined };
 
 export interface RegistryFile {
   readonly registry: Registry;
   readonly demo: DemoMarker;
-  readonly opaque: Readonly<Record<string, unknown>>;
+  readonly opaque: Readonly<Record<string, Json | undefined>>;
 }
 
 const DemoValue = lazy(() => type({ version: "1", state: "'active' | 'erasing'" }));
 
 /** A bad demo field never invalidates the unchanged personal envelope. */
 export function readRegistry(): RegistryFile | null {
-  const read = readJson(FILE);
+  const read = JsonValue.assert(readJson(FILE));
 
   if (!read || typeof read !== "object" || Array.isArray(read)) return null;
 
@@ -124,7 +125,7 @@ export function readRegistry(): RegistryFile | null {
     playlists,
     retiredPlaylists,
     ...extra
-  } = read as Record<string, unknown>;
+  } = read;
 
   const saved = readable(playlists, SavedPlaylist());
   const gone = readable(retiredPlaylists, RetiredPlaylist());
@@ -155,9 +156,9 @@ export function readRegistry(): RegistryFile | null {
 }
 
 /** The entries of `list` that `schema` reads, and those it doesn't, as they are. */
-function readable<A>(list: unknown, schema: Type<A>) {
+function readable<A>(list: Json | undefined, schema: Type<A>) {
   const read: A[] = [];
-  const unread: unknown[] = [];
+  const unread: Json[] = [];
 
   for (const each of Array.isArray(list) ? list : []) {
     const parsed = schema(each);
@@ -171,11 +172,11 @@ function readable<A>(list: unknown, schema: Type<A>) {
 
 /** `accounts` as the file lists them, each playlist back where it stood among them. */
 function withPlaylists(
-  accounts: unknown,
+  accounts: Json | undefined,
   playlists: readonly { readonly position: number }[],
-): unknown {
+): Json | undefined {
   if (!Array.isArray(accounts)) return accounts;
-  const all: unknown[] = [...accounts];
+  const all: Json[] = [...accounts];
 
   for (const { position, ...entry } of playlists.toSorted((a, b) => a.position - b.position))
     all.splice(position, 0, entry);
@@ -187,7 +188,7 @@ function withPlaylists(
 const placed = <A extends { readonly kind: string }>(accounts: readonly A[]) =>
   accounts.flatMap((entry, position) => (entry.kind === "m3u" ? [{ ...entry, position }] : []));
 
-const listed = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+const listed = (value: Json | undefined): readonly Json[] => (Array.isArray(value) ? value : []);
 
 /** Replaces the file, carrying every unknown top-level field unchanged. */
 export function writeRegistry({ registry, demo, opaque }: RegistryFile): void {
@@ -213,7 +214,7 @@ export function writeRegistry({ registry, demo, opaque }: RegistryFile): void {
 }
 
 /** The lists that hold something: a file without playlists is as builds before them wrote it. */
-const fields = (lists: Record<string, readonly unknown[]>) =>
+const fields = (lists: Record<string, readonly Json[]>) =>
   Object.fromEntries(Object.entries(lists).filter(([, list]) => list.length > 0));
 
 /** A personal account with the reserved id always keeps its ordinary restore and erase paths. */

@@ -1,6 +1,6 @@
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
-import type { JsonObject } from "@mrstreamer/contracts/json";
+import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
 // Built-app proof through the actual Settings control, with an isolated profile and loopback only.
 import { watch } from "node:fs";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -176,7 +176,7 @@ let profile = "";
 const profiles: string[] = [];
 let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
 let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
-const payloads: unknown[] = [];
+const payloads: Json[] = [];
 const payloadBytes: number[] = [];
 const rawBodies: { body: string; at: number; closedAt?: number }[] = [];
 let holdSummary = false;
@@ -309,7 +309,7 @@ const exits: Record<string, unknown>[] = [];
 const endTree: unknown[] = [];
 
 /** Validate a clone, then compare the complete raw wire body before any unknown-key deletion. */
-function captured(payload: unknown): CaptureEvent {
+function captured(payload: Json): CaptureEvent {
   const event = CaptureEvent()(structuredClone(payload));
 
   if (event instanceof type.errors) throw new Error("Invalid capture event.");
@@ -961,7 +961,7 @@ async function usageCount(key: UsageKey): Promise<number> {
         sha256: createHash("sha256").update(bytes).digest("hex"),
         stage: "parse",
       });
-      const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+      const parsed = JsonValue.assert(JSON.parse(bytes.toString("utf8")));
 
       if (!record(parsed)) throw new Error("Invalid analytics state.");
       kept = parsed;

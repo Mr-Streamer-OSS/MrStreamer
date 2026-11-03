@@ -80,7 +80,7 @@ function install(profile: string, delayMs: number) {
   const normalize = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
   const owned = normalize(native.realpathSync(profile));
 
-  const matches = (value: unknown, directory: boolean) => {
+  const matches = (value: unknown, directory: boolean): value is string => {
     if (typeof value !== "string" || (!directory && path.basename(value) !== "analytics.json"))
       return false;
 

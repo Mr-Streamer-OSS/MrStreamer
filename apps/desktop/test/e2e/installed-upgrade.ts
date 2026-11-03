@@ -1671,7 +1671,11 @@ export async function runCommand(args: string[]) {
     throw new Error(
       `${usage}\nThe root must be ${fleet ? "a new direct child of the owned task temp" : "a new folder under RUNNER_TEMP"}.`,
     );
-  const raw = JsonValue.assert(JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8")));
+
+  const raw = JsonValue.assert(
+    JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8")),
+  );
+
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
   check(repository, "A repository is required.");
 
@@ -1806,7 +1810,6 @@ export async function runCommand(args: string[]) {
     limits: [] as string[],
   };
 
-  
   const services = await startServices();
   const titles = fixtures(services.titles);
 
@@ -1841,7 +1844,7 @@ export async function runCommand(args: string[]) {
         throw new Error(`${pkg.file} changed since it was checked.`);
 
       if (pkg.stage !== "candidate-restart")
-        (proof.installs[pkg.stage] = await installPublished(runner, setup, pkg.version, previous));
+        proof.installs[pkg.stage] = await installPublished(runner, setup, pkg.version, previous);
       previous = pkg.version;
 
       const session = await start(
@@ -1854,7 +1857,7 @@ export async function runCommand(args: string[]) {
       );
 
       try {
-        (proof.starts[pkg.stage] = session.identity);
+        proof.starts[pkg.stage] = session.identity;
 
         if (
           pkg.stage === "candidate-restart" &&
@@ -1872,7 +1875,7 @@ export async function runCommand(args: string[]) {
 
           if (!shown.text.includes(pkg.version) || shown.source !== pkg.source)
             throw new Error(`About shows ${shown.source}, not ${pkg.version} from ${pkg.source}.`);
-          (proof.about[pkg.stage] = shown.source);
+          proof.about[pkg.stage] = shown.source;
         };
 
         if (pkg.stage !== "stable") await checkAbout();
@@ -1953,7 +1956,7 @@ export async function runCommand(args: string[]) {
         else if (pkg.stage === "candidate")
           upgraded = await upgradeToCandidate(session.d, titles, seeded!);
         else
-          (proof.stages[pkg.stage] = await restartCandidate(session.d, titles, upgraded!, offline));
+          proof.stages[pkg.stage] = await restartCandidate(session.d, titles, upgraded!, offline);
 
         if (pkg.stage === "candidate" && (await session.subtitleRequests()).length !== 0)
           throw new Error(
@@ -1968,17 +1971,17 @@ export async function runCommand(args: string[]) {
 
         if (pkg.stage === "stable") await checkAbout();
 
-        if (pkg.stage === "stable") (proof.stages["stable"] = seeded);
+        if (pkg.stage === "stable") proof.stages["stable"] = seeded;
 
         if (pkg.stage === "candidate")
-          (proof.stages[pkg.stage] = {
+          proof.stages[pkg.stage] = {
             kept: upgraded!.kept,
             inherited: upgraded!.inherited,
             savedSubtitle: upgraded!.savedSubtitle,
             played: upgraded!.played,
             copies: upgraded!.copies,
             after: upgraded!.after,
-          });
+          };
         await session.verifyWorker();
         session.tree.sample();
       } catch (error) {
@@ -1988,16 +1991,16 @@ export async function runCommand(args: string[]) {
 
       // Every process of this start ends before the next setup, or the chain stops here. A stage
       // that failed keeps its own error; a stop that fails after a passing stage is the failure.
-      (proof.actions[pkg.stage] = session.d.actions);
+      proof.actions[pkg.stage] = session.d.actions;
 
       try {
         const ended = await session.stop();
-        (proof.ends[pkg.stage] = ended);
+        proof.ends[pkg.stage] = ended;
 
         // Each start must close cleanly before the next setup or restart.
         if (!ended.graceful) failed ??= new Error("The installed app required forced termination.");
       } catch (error) {
-        (proof.ends[pkg.stage] = `failed: ${String(error)}`);
+        proof.ends[pkg.stage] = `failed: ${String(error)}`;
         failed = failed
           ? new AggregateError([failed, error], "Installed stage and cleanup failed")
           : error;

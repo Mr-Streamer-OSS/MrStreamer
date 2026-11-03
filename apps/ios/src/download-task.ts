@@ -1,3 +1,4 @@
+import { JsonValue, type Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -94,7 +95,7 @@ const AuthorizationView = lazy(() =>
 export type AuthorizationView = Infer<typeof AuthorizationView>;
 
 /** Receipts that read, and how many didn't: one bad entry hides no other. */
-function readable<T>(parse: Type<T>, values: unknown): T[] {
+function readable<T>(parse: Type<T>, values: Json | undefined): Type<T>["infer"][] {
   return (Array.isArray(values) ? values : []).flatMap((value) => {
     const parsed = parse(value);
 
@@ -110,9 +111,9 @@ const Envelope = lazy(() =>
     foregroundToken: "string | null",
     blocked: "'none' | 'locked' | 'storage' | 'corrupt' | 'capacity' | 'recovering'",
     sources: "string[]",
-    authorizations: "unknown[]",
-    receipts: "unknown[]",
-    legacy: { receipts: "unknown[]" },
+    authorizations: JsonValue.array(),
+    receipts: JsonValue.array(),
+    legacy: { receipts: JsonValue.array() },
   }),
 );
 
@@ -202,9 +203,9 @@ interface Subscription {
 }
 
 interface Native {
-  sourceState(sourceId: string): Promise<unknown>;
+  sourceState(sourceId: string): Promise<Json>;
   enableSource(command: SourceCommand): Promise<{ generation: string }>;
-  revokeSource(command: SourceCommand): Promise<unknown>;
+  revokeSource(command: SourceCommand): Promise<Json>;
   reserve(request: {
     id: string;
     ext: string;
@@ -216,19 +217,19 @@ interface Native {
     url: string;
     headers: Record<string, string>;
   }): Promise<void>;
-  cancelAuthorization(authorization: string, reason: "remove" | "abandon"): Promise<unknown>;
+  cancelAuthorization(authorization: string, reason: "remove" | "abandon"): Promise<Json>;
   holdAuthorization(authorization: string, held: boolean): Promise<void>;
   arrangeAuthorizations(authorizations: string[]): Promise<void>;
   drainDownload(id: string): Promise<void>;
-  acquirePlayback(request: { sourceId: string; lease: string }): Promise<unknown>;
+  acquirePlayback(request: { sourceId: string; lease: string }): Promise<Json>;
   releasePlayback(lease: string): Promise<void>;
-  reconcile(context: "first-foreground" | "background" | "ordinary"): Promise<unknown>;
+  reconcile(context: "first-foreground" | "background" | "ordinary"): Promise<Json>;
   finishForegroundReconcile(token: string): Promise<void>;
-  resetQueue(scope: { queueEpoch: string; knownSourceIds: string[] }): Promise<unknown>;
+  resetQueue(scope: { queueEpoch: string; knownSourceIds: string[] }): Promise<Json>;
   acknowledge(receipts: readonly string[]): Promise<void>;
   forgetResume(id: string): Promise<void>;
   importResume(id: string, url: string, data: string): Promise<void>;
-  addListener(event: "progress" | "receipt", listener: (body: unknown) => void): Subscription;
+  addListener(event: "progress" | "receipt", listener: (body: Json) => void): Subscription;
 }
 
 interface SourceCommand {
@@ -301,7 +302,7 @@ function bounded<A>(work: Promise<A>, ms = 6_000): Promise<A> {
   ]).finally(() => clearTimeout(timer));
 }
 
-function parsed<T>(parse: Type<T>, value: unknown): T {
+function parsed<T>(parse: Type<T>, value: Json | undefined): Type<T>["infer"] {
   const result = parse(value);
 
   if (result instanceof type.errors) throw refused("corrupt");
@@ -309,7 +310,7 @@ function parsed<T>(parse: Type<T>, value: unknown): T {
   return result;
 }
 
-function fenceOf(value: unknown): Fence {
+function fenceOf(value: Json | undefined): Fence {
   const body = typeof value === "object" && value !== null ? value : {};
   const durable = "durable" in body ? body.durable : null;
 

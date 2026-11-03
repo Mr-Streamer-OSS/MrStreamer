@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "../../packages/contracts/src/json.ts";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -92,12 +93,17 @@ export interface Evidence {
 
 /** Release consumers must authenticate the producer before passing its downloaded artifact here. */
 export function acceptsEvidence(
-  value: unknown,
+  value: Json | undefined,
   expected: { sha: string; identity: string },
   producer: Producer,
 ): boolean {
-  if (!value || typeof value !== "object") return false;
-  const evidence = value as Partial<Evidence>;
+  const object = (value: Json | undefined): value is JsonObject =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+  if (!object(value) || !object(value["identities"]) || !object(value["results"])) return false;
+  const evidence = value;
+  const identities = value["identities"];
+  const results = value["results"];
 
   return (
     producer.repository === "Mr-Streamer-OSS/MrStreamer" &&
@@ -107,15 +113,15 @@ export function acceptsEvidence(
     producer.conclusion === "success" &&
     producer.sha === expected.sha &&
     /^[a-f0-9]{40}$/.test(expected.sha) &&
-    evidence.version === 1 &&
-    evidence.sha === expected.sha &&
-    evidence.identity === expected.identity &&
-    evidence.profile === profile &&
-    evidence.identities?.check === expected.identity &&
-    evidence.identities.test === expected.identity &&
-    evidence.results?.check === "success" &&
-    evidence.results.test === "success" &&
-    ["success", "skipped"].includes(evidence.results.website ?? "")
+    evidence["version"] === 1 &&
+    evidence["sha"] === expected.sha &&
+    evidence["identity"] === expected.identity &&
+    evidence["profile"] === profile &&
+    identities["check"] === expected.identity &&
+    identities["test"] === expected.identity &&
+    results["check"] === "success" &&
+    results["test"] === "success" &&
+    (results["website"] === "success" || results["website"] === "skipped")
   );
 }
 

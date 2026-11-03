@@ -469,6 +469,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.CUES_PARSED, (_event, data) => {
     if (released) return;
     forgetOld();
+
     const cues = Array.isArray(data.cues)
       ? data.cues.flatMap((cue): Cue[] => {
           const parsed = ParsedCue(cue);
