@@ -5,6 +5,8 @@ import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
+  AppState,
+  BackHandler,
   Pressable,
   StatusBar,
   Text,
@@ -16,6 +18,8 @@ import { describeFailure } from "../connect/failure.ts";
 import { useStore } from "../platform/store.ts";
 import { player } from "../player/instance.ts";
 import { intentKey, linkedIntent } from "../player/intent.ts";
+import { t as mediaT } from "../player/copy.ts";
+import { MediaDialog, MediaRow, MediaSheets, type MediaSheet } from "../player/media-controls.tsx";
 import { LIVE_RED, playPause } from "../player/mini-player.tsx";
 import type { NativeFailure } from "../player/native.ts";
 import type { PlaybackFailure, Playing } from "../player/player.ts";
@@ -28,7 +32,8 @@ import { colors } from "../ui/theme.ts";
 // `play` param unless that already plays, so a Watch opened again from the mini player, a link or
 // a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
-// something else is shown or one of them has keyboard focus, and always while TalkBack runs.
+// something else is shown, a media sheet is open or one of them has keyboard focus, and always
+// while TalkBack runs. Picture in picture shows the picture alone.
 
 /** Paper A's secondary text over the picture, a step brighter than over black. */
 const DIM = "#D0D0D0";
@@ -39,6 +44,25 @@ const HIDE_AFTER_MS = 4000;
 const JUMP_MS = 10_000;
 
 export default function Watch() {
+  useEffect(() => {
+    player.media.reconcile();
+
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      player.media.cancelNext();
+
+      return false;
+    });
+
+    const app = AppState.addEventListener("change", (state) => {
+      if (state === "active") player.media.reconcile();
+    });
+
+    return () => {
+      back.remove();
+      app.remove();
+      player.media.cancelNext();
+    };
+  }, []);
   const { play } = useLocalSearchParams<{ play?: string }>();
   const intent = useMemo(() => linkedIntent(play), [play]);
   useEffect(() => {
@@ -53,6 +77,12 @@ export default function Watch() {
   // Stopped from elsewhere (a notification, Remove): nothing is left to watch. Only the showing
   // Watch leaves, so a screen opened over it is never the one taken away.
   const focused = useIsFocused();
+  const media = useStore(player.media.state);
+  useEffect(() => {
+    player.media.watch(focused);
+
+    return () => player.media.watch(false);
+  }, [focused]);
   const played = useRef(false);
   useEffect(() => {
     if (state.kind === "playing") played.current = true;
@@ -79,7 +109,19 @@ export default function Watch() {
     [],
   );
 
-  const kept = held || focusedControls > 0;
+  const [sheet, setSheet] = useState<MediaSheet | null>(null);
+
+  useEffect(() => {
+    if (media.pip) setSheet(null);
+  }, [media.pip]);
+
+  const open = (next: MediaSheet) => {
+    // A save or read that failed earlier is tried again as the viewer comes back to choose.
+    player.media.retryPreferences();
+    setSheet(next);
+  };
+
+  const kept = held || focusedControls > 0 || sheet !== null;
   // Kept controls count as shown, so letting go of them starts the full wait whatever hid or
   // showed them meanwhile (a pause elsewhere, then playing on).
   useEffect(() => {
@@ -93,7 +135,7 @@ export default function Watch() {
 
     return () => clearTimeout(timer);
   }, [shown, phase, touched, kept]);
-  const controls = shown || reader || kept || phase !== "playing";
+  const controls = !media.pip && (shown || reader || kept || phase !== "playing");
   // Rebuffering keeps play, pause and the jumps; only a start with nothing yet shows Loading.
   const loading = phase === "resolving" || phase === "preparing";
 
@@ -108,13 +150,13 @@ export default function Watch() {
           onPress={() => setShown((now) => !now)}
           style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
         />
-        {state.kind === "playing" && state.failure ? (
+        {!media.pip && state.kind === "playing" && state.failure ? (
           <Failed
             failure={state.failure}
             playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
             onRetry={() => player.retry()}
           />
-        ) : loading ? (
+        ) : !media.pip && loading ? (
           <Centre>
             <Text
               accessibilityLiveRegion="polite"
@@ -160,13 +202,20 @@ export default function Watch() {
               >
                 {state.kind === "playing" ? state.intent.title : ""}
               </Text>
+              {state.kind === "playing" && media.pipSupported ? (
+                <IconButton
+                  icon="picture-in-picture"
+                  label={mediaT("Picture in picture")}
+                  onPress={() => void player.media.enterPip()}
+                />
+              ) : null}
             </View>
             {state.kind === "playing" && !loading && !state.failure ? (
               <Centre>
                 <Transport now={state} onTouch={touch} />
               </Centre>
             ) : null}
-            {state.kind === "playing" && (state.live || state.seekable) ? (
+            {state.kind === "playing" && !loading && !state.failure ? (
               <View
                 pointerEvents="box-none"
                 style={{
@@ -181,9 +230,23 @@ export default function Watch() {
                   backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
                 }}
               >
-                <Progress now={state} onTouch={touch} onHold={setHeld} />
+                {state.live || state.seekable ? (
+                  <Progress now={state} onTouch={touch} onHold={setHeld} />
+                ) : null}
+                <MediaRow now={state} media={media} onOpen={open} />
               </View>
             ) : null}
+          </>
+        ) : null}
+        {!media.pip ? (
+          <>
+            <MediaSheets
+              open={sheet}
+              now={state.kind === "playing" ? state : null}
+              media={media}
+              onClose={() => setSheet(null)}
+            />
+            <MediaDialog error={media.error} />
           </>
         ) : null}
       </View>
@@ -193,6 +256,8 @@ export default function Watch() {
 
 /** Leaves Watch for the screen under it, or Live when a link opened the app here. */
 function leave() {
+  player.media.cancelNext();
+
   if (router.canGoBack()) router.back();
   else router.replace("/");
 }

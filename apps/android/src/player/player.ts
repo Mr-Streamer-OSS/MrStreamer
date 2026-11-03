@@ -12,6 +12,7 @@ import type {
   Release,
   Track,
 } from "./native.ts";
+import { mediaModel, type MediaModel, type MediaPersistence } from "./media.ts";
 import type { Resolve } from "./resolve.ts";
 
 // The app's one player, for Watch, the mini player and whatever plays next: it turns an intent
@@ -44,6 +45,22 @@ export interface Playing {
 
 export type PlayerState = { readonly kind: "idle" } | Playing;
 
+export type PreviewState =
+  | { readonly kind: "idle" }
+  | {
+      readonly kind: "previewing";
+      readonly attempt: string;
+      readonly intent: PlayIntent;
+      readonly phase: PlaybackPhase;
+      readonly positionMs: number;
+    };
+
+export interface Preview {
+  readonly attempt: string;
+  /** Ends this preview only; no-op once replaced. */
+  end(): Promise<void>;
+}
+
 /**
  * Where an attempt was when it paused, stopped, was replaced or ended: what history saves to
  * continue from.
@@ -57,6 +74,11 @@ export interface Settled {
 
 export interface PlayerOwner {
   readonly state: Store<PlayerState>;
+  readonly previewState: Store<PreviewState>;
+  preview(intent: PlayIntent): Preview | null;
+  /** Ends only the preview, leaving viewer playback and media state alone. */
+  endPreview(): Promise<void>;
+  readonly media: MediaModel;
   /** Plays `intent` in place of what plays, and returns its attempt. */
   play(intent: PlayIntent): string;
   /** Each answers false when nothing plays or the command doesn't apply, such as seeking live. */
@@ -105,17 +127,18 @@ interface Admitted {
   readonly intent: PlayIntent;
   /** Where its media's position 0 is in the intent: what a retry continues from. */
   readonly startMs: number;
+  readonly preview: boolean;
   /** The phase and position it last settled at, so an unchanged settle isn't reported twice. */
   settled: string | null;
   readonly released: Promise<Release>;
   readonly settle: (release: Release) => void;
 }
 
-function admittedOf(intent: PlayIntent, startMs: number): Admitted {
+function admittedOf(intent: PlayIntent, startMs: number, preview = false): Admitted {
   let settle!: (release: Release) => void;
   const released = new Promise<Release>((resolve) => (settle = resolve));
 
-  return { intent, startMs, settled: null, released, settle };
+  return { intent, startMs, preview, settled: null, released, settle };
 }
 
 /**
@@ -134,8 +157,13 @@ function continued(intent: PlayIntent, positionMs: number, startMs: number): Pla
   }
 }
 
-export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner {
+export function playerOwner(
+  native: NativePlayer,
+  resolve: Resolve,
+  persistence?: MediaPersistence,
+): PlayerOwner {
   const state = store<PlayerState>({ kind: "idle" });
+  const previewState = store<PreviewState>({ kind: "idle" });
   const settledListeners = new Set<(settled: Settled) => void>();
   let attempts = 0;
   /** The attempt under way while its address is worked out. */
@@ -156,6 +184,23 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
     const entry = admitted.get(observation.attempt);
 
     if (!entry) return;
+    const preview = previewState.get();
+
+    if (preview.kind === "previewing" && preview.attempt === observation.attempt) {
+      previewState.set(
+        observation.phase === "stopped"
+          ? { kind: "idle" }
+          : {
+              ...preview,
+              phase: observation.phase,
+              positionMs: observation.positionMs,
+            },
+      );
+
+      return;
+    }
+
+    if (entry.preview) return;
     const { phase } = observation;
     const settles = phase === "paused" || phase === "stopped" || phase === "ended";
     const key = settles ? `${phase}@${observation.positionMs}` : null;
@@ -173,7 +218,12 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       for (const listener of settledListeners) listener(settled);
     } else entry.settled = key;
 
-    if (phase === "stopped") return;
+    if (phase === "stopped") {
+      if (playing()?.attempt === observation.attempt) state.set({ kind: "idle" });
+
+      return;
+    }
+
     update(observation.attempt, (now) => ({
       ...now,
       phase,
@@ -194,14 +244,28 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
     admitted.delete(release.attempt);
   });
 
+  function endPreview() {
+    const now = previewState.get();
+
+    if (now.kind === "idle") return Promise.resolve();
+    resolving?.abort();
+    resolving = null;
+    previewState.set({ kind: "idle" });
+
+    return admitted.has(now.attempt) ? native.stop(now.attempt).then(() => {}) : Promise.resolve();
+  }
+
   /** Ends the current attempt: its address stops being worked out, or the native player stops it. */
   async function end() {
+    const previewEnded = endPreview();
+    owner.media.cancelNext();
     resolving?.abort();
     resolving = null;
     const now = playing();
     state.set({ kind: "idle" });
 
     if (now && admitted.has(now.attempt)) await native.stop(now.attempt);
+    await previewEnded;
   }
 
   const command = async (run: (attempt: string) => Promise<boolean>) => {
@@ -212,8 +276,79 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
   const owner: PlayerOwner = {
     state,
+    previewState,
+    endPreview,
+    preview(intent) {
+      if (state.get().kind !== "idle" || owner.media.watching) return null;
+      void endPreview();
+      const controller = new AbortController();
+      resolving = controller;
+      const attempt = `preview-${++attempts}-${Date.now().toString(36)}`;
+      previewState.set({ kind: "previewing", attempt, intent, phase: "resolving", positionMs: 0 });
+      resolve(intent, controller.signal).then(
+        async (request) => {
+          if (resolving !== controller) return;
+          resolving = null;
+          admitted.set(attempt, admittedOf(intent, request.startMs, true));
+
+          try {
+            const accepted = await native.admit({
+              ...request,
+              attempt,
+              title: intent.title,
+              preview: true,
+            });
+
+            if (accepted === false) {
+              admitted
+                .get(attempt)
+                ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+              admitted.delete(attempt);
+              previewState.set((now) =>
+                now.kind === "previewing" && now.attempt === attempt ? { kind: "idle" } : now,
+              );
+            }
+          } catch {
+            admitted
+              .get(attempt)
+              ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+            admitted.delete(attempt);
+            previewState.set((now) =>
+              now.kind === "previewing" && now.attempt === attempt
+                ? { ...now, phase: "failed" }
+                : now,
+            );
+          }
+        },
+        () => {
+          if (resolving !== controller) return;
+          resolving = null;
+          previewState.set((now) =>
+            now.kind === "previewing" && now.attempt === attempt
+              ? { ...now, phase: "failed" }
+              : now,
+          );
+        },
+      );
+
+      return {
+        attempt,
+        end: () => {
+          const now = previewState.get();
+
+          return now.kind === "previewing" && now.attempt === attempt
+            ? endPreview()
+            : Promise.resolve();
+        },
+      };
+    },
+    get media() {
+      return media;
+    },
 
     play(intent) {
+      void endPreview();
+      owner.media.cancelNext();
       const before = playing();
       resolving?.abort();
       const controller = new AbortController();
@@ -250,14 +385,19 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
           if (resolving !== controller) return;
           resolving = null;
           admitted.set(attempt, admittedOf(intent, request.startMs));
-          native.admit({ ...request, attempt }).catch((cause: unknown) => {
-            // Whatever the native player opened before it failed is unknown: say so.
-            admitted
-              .get(attempt)
-              ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
-            admitted.delete(attempt);
-            failed(cause);
-          });
+          native
+            .admit({ ...request, attempt, title: intent.title })
+            .then(() => {
+              if (playing()?.attempt === attempt) owner.media.admitted(attempt);
+            })
+            .catch((cause: unknown) => {
+              // Whatever the native player opened before it failed is unknown: say so.
+              admitted
+                .get(attempt)
+                ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
+              admitted.delete(attempt);
+              failed(cause);
+            });
         },
         (cause: unknown) => {
           if (resolving !== controller) return;
@@ -269,11 +409,19 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       return attempt;
     },
 
-    pause: () => command((attempt) => native.pause(attempt)),
+    pause: () => {
+      owner.media.cancelNext();
+
+      return command((attempt) => native.pause(attempt));
+    },
     resume: () => command((attempt) => native.resume(attempt)),
-    seek: (positionMs) => command((attempt) => native.seek(attempt, positionMs)),
-    setSpeed: (speed) => command((attempt) => native.setSpeed(attempt, speed)),
-    setQuality: (trackId) => command((attempt) => native.setQuality(attempt, trackId)),
+    seek: (positionMs) => {
+      owner.media.cancelNext();
+
+      return command((attempt) => native.seek(attempt, positionMs));
+    },
+    setSpeed: (speed) => owner.media.speed(speed),
+    setQuality: (trackId) => owner.media.quality(trackId),
     stop: end,
 
     retry() {
@@ -299,6 +447,9 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
     async release(matches) {
       // Taken before stopping: a release reported while the stop is under way is still counted.
       const holding = [...admitted.values()].filter((entry) => matches(holdOf(entry.intent)));
+      const preview = previewState.get();
+
+      if (preview.kind === "previewing" && matches(holdOf(preview.intent))) await endPreview();
       const now = playing();
 
       if (now && matches(holdOf(now.intent))) await end();
@@ -308,6 +459,8 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
     capabilities: () => native.capabilities(),
   };
+
+  const media = mediaModel(owner, native, persistence);
 
   return owner;
 }

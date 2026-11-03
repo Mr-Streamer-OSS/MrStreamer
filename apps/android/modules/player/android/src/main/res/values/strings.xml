@@ -1,0 +1,8 @@
+<resources>
+  <string name="player_back">Back 10</string>
+  <string name="player_forward">Forward 10</string>
+  <string name="player_pause">Pause</string>
+  <string name="player_play">Play</string>
+  <string name="player_next">Next episode</string>
+  <string name="player_close">Close</string>
+</resources>

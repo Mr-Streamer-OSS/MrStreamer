@@ -2,14 +2,28 @@ import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayIntent } from "../src/player/intent.ts";
+import type { MediaState } from "../src/player/media.ts";
+import type { Track } from "../src/player/native.ts";
 import type { Playing, PlayerState } from "../src/player/player.ts";
 
 // Watch as the viewer meets it: it plays the intent its link names unless that already plays,
-// leaves when it names none and nothing plays, words a failure with Try again, and keeps its
-// controls up while one has keyboard focus. The mini player, off Watch, says how far it covers
+// leaves when it names none and nothing plays, words a failure with Try again, keeps its
+// controls up while one has keyboard focus, and offers the media controls the player reports. The mini player, off Watch, says how far it covers
 // the screens' foot. Both render with React DOM on a happy-dom window; React Native's views are
 // elements that lay out once at a stand-in height, the router records what it is asked, and the
-// player is a store with play() that records each intent.
+// player is a store with play() that records each intent; its media model is a store whose
+// actions record what they were asked.
+
+/** What the media model holds before anything is known. */
+const still = vi.hoisted((): MediaState => ({
+  tracksKnown: false,
+  pip: false,
+  pipSupported: true,
+  automatic: true,
+  next: null,
+  remaining: null,
+  error: null,
+}));
 
 const scenario = vi.hoisted(() => ({
   params: {} as { play?: string },
@@ -17,6 +31,7 @@ const scenario = vi.hoisted(() => ({
   asked: [] as string[],
   played: [] as unknown[],
   retries: 0,
+  media: [] as string[],
 }));
 
 vi.mock("react-native", async () => {
@@ -25,6 +40,8 @@ vi.mock("react-native", async () => {
   type Props = {
     children?: ReactNode;
     accessibilityLabel?: string;
+    accessibilityRole?: string;
+    accessibilityState?: { checked?: boolean };
     onPress?: () => void;
     onFocus?: () => void;
     onBlur?: () => void;
@@ -33,7 +50,16 @@ vi.mock("react-native", async () => {
 
   const view =
     (tag: string) =>
-    ({ children, accessibilityLabel, onPress, onFocus, onBlur, onLayout }: Props) => {
+    ({
+      children,
+      accessibilityLabel,
+      accessibilityRole,
+      accessibilityState,
+      onPress,
+      onFocus,
+      onBlur,
+      onLayout,
+    }: Props) => {
       useLayoutEffect(
         () => onLayout?.({ nativeEvent: { layout: { width: 412, height: 72 } } }),
         [],
@@ -41,7 +67,15 @@ vi.mock("react-native", async () => {
 
       return h(
         tag,
-        { "aria-label": accessibilityLabel, onClick: onPress, onFocus, onBlur, tabIndex: -1 },
+        {
+          "aria-label": accessibilityLabel,
+          role: accessibilityRole === "radio" ? "radio" : undefined,
+          "aria-checked": accessibilityState?.checked,
+          onClick: onPress,
+          onFocus,
+          onBlur,
+          tabIndex: -1,
+        },
         children,
       );
     };
@@ -50,8 +84,16 @@ vi.mock("react-native", async () => {
     View: view("div"),
     Text: view("span"),
     Pressable: view("button"),
+    ScrollView: view("div"),
+    KeyboardAvoidingView: view("div"),
+    TextInput: () => null,
+    Modal: ({ visible, children }: { visible: boolean; children?: ReactNode }) =>
+      visible ? h("section", {}, children) : null,
+    Alert: { alert() {} },
     StatusBar: () => null,
     useWindowDimensions: () => ({ width: 412, height: 900 }),
+    AppState: { addEventListener: () => ({ remove() {} }) },
+    BackHandler: { addEventListener: () => ({ remove() {} }) },
     AccessibilityInfo: {
       isScreenReaderEnabled: () => new Promise<boolean>(() => {}),
       addEventListener: () => ({ remove() {} }),
@@ -61,9 +103,32 @@ vi.mock("react-native", async () => {
 
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
-vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
+vi.mock("react-native-safe-area-context", async () => {
+  const { createContext } = await import("react");
+
+  return {
+    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+    SafeAreaProvider: ({ children }: { children?: ReactNode }) => children,
+    SafeAreaInsetsContext: createContext(null),
+  };
+});
+
+vi.mock("../src/bootstrap/sources.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+
+  return { sources: { state: store({ kind: "ready", sources: [] }) } };
+});
+
+vi.mock("../src/live/runtime.ts", async () => {
+  const { listsOwner } = await import("../src/live/store.ts");
+
+  return {
+    lists: listsOwner({ readJson: () => null, writeJson() {} }, () => ({
+      kind: "ready",
+      sources: [],
+    })),
+  };
+});
 
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => scenario.params,
@@ -82,10 +147,38 @@ vi.mock("../src/player/surface.ts", () => ({ PlayerSurface: () => null }));
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
   const state = store<PlayerState>({ kind: "idle" });
+  const media = store<MediaState>(still);
+
+  // Each action records what it was asked, and the player accepts it.
+  const asked = (name: string) => (value?: unknown) => {
+    scenario.media.push(value === undefined ? name : `${name} ${String(value)}`);
+
+    return Promise.resolve(true);
+  };
 
   return {
     player: {
       state,
+      media: {
+        state: media,
+        speeds: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
+        watch() {},
+        reconcile() {},
+        retryPreferences() {},
+        audio: asked("audio"),
+        text: asked("text"),
+        speed: asked("speed"),
+        quality: asked("quality"),
+        enterPip: asked("pip"),
+        playNext: asked("play next"),
+        cancelNext() {
+          scenario.media.push("cancel next");
+          media.set((now) => ({ ...now, remaining: null }));
+        },
+        dismissError() {
+          media.set((now) => ({ ...now, error: null }));
+        },
+      },
       play(intent: PlayIntent) {
         scenario.played.push(intent);
         state.set(playing(intent));
@@ -116,6 +209,7 @@ const { MiniPlayer } = await import("../src/player/mini-player.tsx");
 const { footOverlay } = await import("../src/navigation/screen.tsx");
 const { player } = await import("../src/player/instance.ts");
 const { watchHref } = await import("../src/player/intent.ts");
+const { lists } = await import("../src/live/runtime.ts");
 
 const estuary: PlayIntent = {
   kind: "live",
@@ -163,7 +257,9 @@ beforeEach(() => {
   scenario.asked = [];
   scenario.played = [];
   scenario.retries = 0;
+  scenario.media = [];
   player.state.set({ kind: "idle" });
+  player.media.state.set(still);
 });
 
 afterEach(() => {
@@ -267,6 +363,187 @@ describe("Watch", () => {
     expect(find("Back")).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
     expect(find("Back")).toBeNull();
+  });
+});
+
+describe("Watch's media controls", () => {
+  const episode: PlayIntent = {
+    kind: "title",
+    sourceId: "source-1",
+    media: "episode",
+    id: "e3",
+    container: "mkv",
+    title: "Estuary Line",
+  };
+
+  const track = (change: Partial<Track> & Pick<Track, "id" | "type">): Track => ({
+    codec: null,
+    language: null,
+    label: null,
+    width: null,
+    height: null,
+    bitrate: null,
+    channels: null,
+    selected: false,
+    supported: true,
+    ...change,
+  });
+
+  const subtitles = [
+    track({
+      id: "nl",
+      type: "text",
+      language: "nl",
+      codec: "application/x-subrip",
+      selected: true,
+    }),
+    track({ id: "en", type: "text", language: "en", codec: "application/x-subrip" }),
+    track({ id: "de", type: "text", language: "de", codec: "application/pgs", supported: false }),
+  ];
+
+  const variants = [
+    track({ id: "fhd", type: "video", height: 1080, label: "Estuary Max FHD", selected: true }),
+    track({ id: "hd", type: "video", height: 720, label: "Estuary Max HD" }),
+  ];
+
+  const media = (change: Partial<MediaState>) =>
+    act(() => player.media.state.set((now) => ({ ...now, ...change })));
+
+  /** The buttons by what they show, as the viewer reads them. */
+  const labels = (shown: Element) =>
+    Array.from(shown.querySelectorAll("button")).map(
+      (button) => button.getAttribute("aria-label") ?? button.textContent,
+    );
+
+  const press = (shown: Element, label: string) => {
+    const button = Array.from(shown.querySelectorAll("button")).find(
+      (each) => (each.getAttribute("aria-label") ?? each.textContent) === label,
+    );
+
+    if (!(button instanceof window.HTMLButtonElement)) throw new Error(`No ${label}`);
+    act(() => button.click());
+  };
+
+  const ticked = (shown: Element) =>
+    Array.from(shown.querySelectorAll('[role="radio"][aria-checked="true"]')).map((row) =>
+      row.getAttribute("aria-label"),
+    );
+
+  it("offers a title's Audio, Subtitles and Speed, and Live's Automatic and star in place of Speed", () => {
+    player.state.set(playing(episode, { live: false, speed: 1.25 }));
+    let shown = open(episode);
+    expect(labels(shown)).toEqual(
+      expect.arrayContaining(["Audio", "Subtitles", "Speed 1.25×", "Picture in picture"]),
+    );
+    expect(labels(shown)).not.toContain("Next episode");
+
+    media({
+      next: { intent: { ...episode, id: "e4", media: "episode" }, label: "S1 E4 · High Water" },
+    });
+    press(shown, "Next episode");
+    expect(scenario.media).toEqual(["play next"]);
+    act(() => root?.unmount());
+
+    player.state.set(playing(estuary, { tracks: variants }));
+    media({ next: null, tracksKnown: true });
+    lists.read();
+    shown = open(estuary);
+    expect(labels(shown)).toEqual(
+      expect.arrayContaining(["Audio", "Subtitles", "Automatic", "Add to Favourites"]),
+    );
+    expect(labels(shown).filter((label) => label?.startsWith("Speed"))).toEqual([]);
+  });
+
+  it("ticks the subtitles the player reports, not the ones tapped, and names those it can't show", () => {
+    player.state.set(playing(episode, { live: false, tracks: subtitles }));
+    media({ tracksKnown: true });
+    const shown = open(episode);
+    press(shown, "Subtitles");
+    expect(ticked(shown)).toEqual(["Nederlands, SubRip"]);
+    expect(shown.textContent).toContain("Can't show here: Deutsch (PGS).");
+
+    press(shown, "English, SubRip");
+    expect(scenario.media).toEqual(["text en"]);
+    press(shown, "Subtitles");
+    expect(ticked(shown)).toEqual(["Nederlands, SubRip"]);
+
+    act(() =>
+      player.state.set(
+        playing(episode, {
+          live: false,
+          tracks: subtitles.map((each) => ({ ...each, selected: each.id === "en" })),
+        }),
+      ),
+    );
+    expect(ticked(shown)).toEqual(["English, SubRip"]);
+  });
+
+  it("says a channel's audio isn't known yet before its tracks are read", () => {
+    player.state.set(playing(estuary));
+    const shown = open(estuary);
+    press(shown, "Audio");
+    expect(shown.textContent).toContain("Not known yet. Try again in a moment.");
+    expect(ticked(shown)).toEqual([]);
+  });
+
+  it("ticks Automatic with the variant it plays, and ticks a variant once the player reports it chosen", () => {
+    player.state.set(playing(estuary, { tracks: variants }));
+    media({ tracksKnown: true });
+    const shown = open(estuary);
+    press(shown, "Automatic");
+    expect(ticked(shown)).toEqual(["Automatic"]);
+    expect(labels(shown)).toContain("Full HD · Estuary Max FHD, Playing");
+
+    media({ automatic: false });
+    expect(ticked(shown)).toEqual(["Full HD · Estuary Max FHD"]);
+  });
+
+  it("closes media sheets and suppresses dialogs in PiP, and hides unsupported PiP", () => {
+    player.state.set(playing(episode, { live: false }));
+    const shown = open(episode);
+    press(shown, "Subtitles");
+    media({ pip: true, error: "text" });
+    expect(shown.textContent).not.toContain("Couldn't show subtitles");
+    expect(shown.querySelector("section")).toBeNull();
+    media({ pip: false, error: null, pipSupported: false });
+    expect(shown.querySelector("section")).toBeNull();
+    expect(labels(shown)).not.toContain("Picture in picture");
+  });
+
+  it("names a Live quality with no reported label or height", () => {
+    player.state.set(
+      playing(estuary, { tracks: variants.map((t) => ({ ...t, label: null, height: null })) }),
+    );
+    media({ automatic: false });
+    expect(labels(open(estuary))).toContain("Quality");
+  });
+
+  it("says a refused change in a dialog that OK closes", () => {
+    player.state.set(playing(episode, { live: false }));
+    const shown = open(episode);
+    media({ error: "text" });
+    expect(shown.textContent).toContain("Couldn't show subtitles");
+    expect(shown.textContent).toContain("This phone refused the change. Try again.");
+
+    press(shown, "OK");
+    expect(shown.textContent).not.toContain("Couldn't show subtitles");
+  });
+
+  it("counts down to the next episode, and Cancel leaves Play again and Next episode", () => {
+    player.state.set(playing(episode, { live: false, phase: "ended" }));
+    media({
+      next: { intent: { ...episode, id: "e4", media: "episode" }, label: "S1 E4 · High Water" },
+      remaining: 8,
+    });
+    const shown = open(episode);
+    expect(shown.textContent).toContain("S1 E4 · High Water");
+    expect(shown.textContent).toContain("Plays in 8");
+    expect(labels(shown)).toContain("Play next");
+
+    press(shown, "Cancel");
+    expect(scenario.media).toEqual(["cancel next"]);
+    expect(shown.textContent).not.toContain("Plays in");
+    expect(labels(shown)).toEqual(expect.arrayContaining(["Play again", "Next episode"]));
   });
 });
 

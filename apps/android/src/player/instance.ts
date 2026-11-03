@@ -2,6 +2,7 @@ import { sources } from "../bootstrap/sources.ts";
 import { nativeCredentials } from "../platform/credentials.ts";
 import { nativePlayer } from "./native.ts";
 import { playerOwner, type PlayerOwner } from "./player.ts";
+import { mediaPersistence } from "./preferences.ts";
 import { sourceStreams } from "./resolve.ts";
 
 /** What the providers see the app as, as src/bootstrap/sources.ts names it. */
@@ -22,6 +23,7 @@ export const player: PlayerOwner = playerOwner(
     userAgent: USER_AGENT,
     now: Date.now,
   }),
+  mediaPersistence,
 );
 
 // A source that leaves the saved list (Remove) stops playing at once: no attempt goes on with a
