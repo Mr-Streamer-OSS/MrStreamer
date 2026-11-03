@@ -247,20 +247,73 @@ class MediaTest {
     } finally { player.release() }
   }
 
-  @Test fun leavingWatchRequestsNotificationPermissionOnce() {
-    val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-    val owner = PlayerHost.owner(activity)
-    try {
+  @Test fun leavingWatchRequestsNotificationPermissionOnceAcrossOwnerRecreation() {
+    var activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    fun playAndLeave() {
+      val owner = PlayerHost.owner(activity)
       owner.admit(Admission("permission", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
       PlayerPip.attach(activity)
       PlayerPip.started()
       PlayerPip.watch(true); PlayerPip.watch(false)
+    }
+    try {
+      playAndLeave()
       assertArrayEquals(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), shadowOf(activity).lastRequestedPermission.requestedPermissions)
       val first = shadowOf(activity).lastRequestedPermission
       PlayerPip.watch(true); PlayerPip.watch(false)
       assertSame(first, shadowOf(activity).lastRequestedPermission)
-      assertNotNull(owner.attempt)
-    } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
+      PlayerPip.detach(activity)
+      activity.finish()
+      resetPlayerState()
+      activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+      playAndLeave()
+      assertNull(shadowOf(activity).lastRequestedPermission)
+      assertNotNull(PlayerHost.existing()?.attempt)
+    } finally { PlayerPip.detach(activity); activity.finish() }
+  }
+
+  @org.robolectric.annotation.Implements(Activity::class)
+  class NotificationShadow : org.robolectric.shadows.ShadowActivity() {
+    var failure: RuntimeException? = null
+    var requests = 0
+    @org.robolectric.annotation.Implementation
+    override fun requestPermissions(permissions: Array<String>, requestCode: Int) {
+      requests++
+      failure?.let { throw it }
+      super.requestPermissions(permissions, requestCode)
+    }
+  }
+
+  @Test
+  @Config(shadows = [NotificationShadow::class])
+  fun thrownNotificationRequestsCanRetryAndIneligiblePlaybackDoesNotAsk() {
+    val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    val shadow = org.robolectric.shadow.api.Shadow.extract<NotificationShadow>(activity)
+    val owner = PlayerHost.owner(activity)
+    try {
+      PlayerPip.attach(activity)
+      PlayerPip.requestNotifications()
+      assertEquals(0, shadow.requests)
+      owner.admit(Admission("preview", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing"), preview = true))
+      PlayerPip.requestNotifications()
+      assertEquals(0, shadow.requests)
+      owner.stopAll()
+      owner.admit(Admission("normal", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      shadowOf(activity).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+      PlayerPip.requestNotifications()
+      assertEquals(0, shadow.requests)
+      shadowOf(activity).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+      for (failure in listOf(IllegalStateException(), SecurityException())) {
+        shadow.failure = failure
+        PlayerPip.requestNotifications()
+      }
+      assertEquals(2, shadow.requests)
+      shadow.failure = null
+      PlayerPip.requestNotifications()
+      assertEquals(3, shadow.requests)
+      PlayerPip.requestNotifications()
+      assertEquals(3, shadow.requests)
+    } finally { PlayerPip.detach(activity); activity.finish() }
   }
 
   class PipActivity : Activity() {

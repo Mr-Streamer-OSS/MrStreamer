@@ -41,7 +41,6 @@ export default function RootLayout() {
         <Stack.Protected guard={!signedIn}>
           <Stack.Screen name="connect" />
         </Stack.Protected>
-        <Stack.Screen name="offline" />
       </Stack>
       {signedIn ? <MiniPlayer /> : null}
     </ThemeProvider>

@@ -277,10 +277,10 @@ describe("the app", () => {
     expect(scenario.asked).toEqual(["restore"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [] };
-    expect(screens()).toEqual(["connect", "offline"]);
+    expect(screens()).toEqual(["connect"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
-    expect(screens()).toEqual(["(tabs)", "watch", "offline"]);
+    expect(screens()).toEqual(["(tabs)", "watch"]);
   });
 });
 
