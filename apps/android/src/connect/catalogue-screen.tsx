@@ -2,7 +2,8 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, type ComponentProps } from "react";
 import { Alert, FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { t } from "@mrstreamer/core/i18n";
+import { t as coreText } from "@mrstreamer/core/i18n";
+import { t } from "./copy.ts";
 import { describeFailure } from "./failure.ts";
 import type { ChannelRow, ConnectedSource, SourcesOwner } from "./sources.ts";
 
@@ -32,15 +33,17 @@ export function CatalogueScreen({
 
   const remove = (source: ConnectedSource) =>
     Alert.alert(
-      `Remove ${source.label}?`,
-      "Its login is erased from this phone.",
+      t("Remove {name}?", { name: source.label }),
+      t("Its login is erased from this phone."),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: t("Cancel"), style: "cancel" },
         {
-          text: "Remove",
+          text: t("Remove"),
           style: "destructive",
           onPress: () =>
-            void owner.remove(source.id).catch(() => Alert.alert("Couldn't remove this provider.")),
+            void owner
+              .remove(source.id)
+              .catch(() => Alert.alert(t("Couldn't remove this provider."))),
         },
       ],
       { cancelable: true },
@@ -68,9 +71,9 @@ export function CatalogueScreen({
             letterSpacing: -0.22,
           }}
         >
-          Channels
+          {t("Channels")}
         </Text>
-        <IconButton icon="add" label="Add provider" onPress={onAdd} />
+        <IconButton icon="add" label={t("Add provider")} onPress={onAdd} />
       </View>
       {sources.map((source) => {
         const { channels } = source;
@@ -106,22 +109,22 @@ export function CatalogueScreen({
               </Text>
               <Text style={{ color: failed ? "#FFFFFF" : SECONDARY, fontSize: 14, lineHeight: 18 }}>
                 {channels.kind === "loading"
-                  ? "Loading channels"
+                  ? t("Loading channels")
                   : channels.kind === "failed"
                     ? describeFailure(channels.error)
-                    : t("{count} channels", { count: channels.rows.length })}
+                    : coreText("{count} channels", { count: channels.rows.length })}
               </Text>
             </View>
             {channels.kind === "failed" && channels.error.kind !== "needs-secret" ? (
               <IconButton
                 icon="refresh"
-                label={`Try ${source.label} again`}
+                label={t("Try {name} again", { name: source.label })}
                 onPress={() => owner.retry(source.id)}
               />
             ) : null}
             <IconButton
               icon="delete-outline"
-              label={`Remove ${source.label}`}
+              label={t("Remove {name}", { name: source.label })}
               onPress={() => remove(source)}
             />
           </View>

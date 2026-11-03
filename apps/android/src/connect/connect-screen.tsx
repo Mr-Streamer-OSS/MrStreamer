@@ -1,3 +1,4 @@
+import { t } from "./copy.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useEffect, useRef, useState, type ComponentProps, type ComponentRef } from "react";
 import {

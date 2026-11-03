@@ -1,3 +1,5 @@
+import { currentLanguage, onLanguageChange } from "@mrstreamer/core/i18n";
+import { useSyncExternalStore } from "react";
 import { router } from "expo-router";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { NavigationBar, NavigationRail } from "../ui/navigation-bar.tsx";
@@ -20,6 +22,7 @@ export function DestinationBar({
   insets,
   layout,
 }: BottomTabBarProps & { layout: NavigationLayout }) {
+  useSyncExternalStore(onLanguageChange, currentLanguage);
   const focused = state.routes[state.index];
 
   const selected =

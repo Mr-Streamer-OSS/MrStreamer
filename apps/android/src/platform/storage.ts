@@ -32,3 +32,13 @@ export function writeJson(name: string, value: unknown): void {
   pending.writeSync(JSON.stringify(value));
   pending.moveSync(fileOf(name), { overwrite: true });
 }
+
+/** Preferences distinguish a missing file from a failed read and never reset one on failure. */
+export function readJsonStrict(name: string): unknown {
+  const file = fileOf(name);
+
+  if (file.exists) return JSON.parse(file.textSync()) as unknown;
+  const pending = pendingOf(name);
+
+  return pending.exists ? (JSON.parse(pending.textSync()) as unknown) : null;
+}
