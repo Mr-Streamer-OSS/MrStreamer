@@ -800,7 +800,7 @@ export async function runNativeTelemetry(c: Context) {
             const results = await probe.readers();
             c.observations.windowsRetryReaders = results;
             const result = results.find((item) => item.mode === mode)!;
-            assert(!result.captureError, result.captureError);
+            assert(!result.captureError, result.captureError ?? "Native capture failed");
             assert(
               result.attempts >= 1 && result.attempts <= 4,
               "Unbounded native rename attempts",

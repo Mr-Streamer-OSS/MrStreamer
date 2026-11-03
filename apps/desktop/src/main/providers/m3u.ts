@@ -90,12 +90,12 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
   let reading: { readonly inspecting: boolean; readonly promise: Promise<PlaylistRead> } | null =
     null;
 
-  /** Opens `url` and gives its body, turning network and HTTP failures into typed errors. */
+  /** Opens `url` as fetch’s non-shared byte chunks, turning network and HTTP failures into typed errors. */
   async function open(
     url: string,
     timeoutMs: number,
     signal?: AbortSignal,
-  ): Promise<{ body: ReadableStream<Uint8Array>; size: number | null }> {
+  ): Promise<{ body: ReadableStream<Uint8Array<ArrayBuffer>>; size: number | null }> {
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
 
@@ -147,9 +147,11 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
 
     const promise = (async () => {
       try {
-        const text = (await open(account.link, PLAYLIST_TIMEOUT_MS)).body.pipeThrough(
-          new TextDecoderStream(),
-        );
+        const body: ReadableStream<NodeJS.BufferSource> = (
+          await open(account.link, PLAYLIST_TIMEOUT_MS)
+        ).body;
+
+        const text = body.pipeThrough(new TextDecoderStream());
 
         const reader = m3uReader();
         const entries: PlaylistEntry[] = [];
@@ -232,9 +234,11 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
   async function firstLine(
     signal?: AbortSignal,
   ): Promise<{ readonly playlist: boolean; readonly guideUrl: string | null }> {
-    const text = (await open(account.link, CHECK_TIMEOUT_MS, signal)).body.pipeThrough(
-      new TextDecoderStream(),
-    );
+    const body: ReadableStream<NodeJS.BufferSource> = (
+      await open(account.link, CHECK_TIMEOUT_MS, signal)
+    ).body;
+
+    const text = body.pipeThrough(new TextDecoderStream());
 
     const reader = m3uReader();
     let characters = 0;
