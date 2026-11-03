@@ -42,13 +42,16 @@ serves() {
   grep -qxF "$3" "$out/runs/$(basename "$1")/$2"-*.vtt ||
     fail "$(basename "$1"): $2 serves no \"$3\""
 }
-# Whether rendition `$2` of the last run of file `$1` says it is too large in its first segment
-# only.
-warns_first() {
-  local warned
-  warned=$(grep -lxF "These subtitles are too large to show." "$out/runs/$(basename "$1")/$2"-*.vtt || true)
-  [[ $warned == "$out/runs/$(basename "$1")/$2-0.vtt" ]] ||
-    fail "$(basename "$1"): $2 too large in ${warned:-no segment}, not only the first"
+# Whether rendition `$2` of the last run of file `$1` says it is too large in exactly the
+# segments `$3`, such as "0 1".
+warns() {
+  local runs=$out/runs/$(basename "$1") warned=() i=0
+  while [[ -f $runs/$2-$i.vtt ]]; do
+    grep -qxF "These subtitles are too large to show." "$runs/$2-$i.vtt" && warned+=("$i")
+    i=$((i + 1))
+  done
+  [[ "${warned[*]}" == "$3" ]] ||
+    fail "$(basename "$1"): $2 too large in segments ${warned[*]:-none}, not $3"
 }
 subtitles() {
   local count
@@ -133,22 +136,31 @@ fi
 # says so, and only that segment: a later line still shows, the same in order, from the later
 # segment first, after fresh seeks and asked again after failed reads.
 many=$fixtures/subs-many.mkv
-check "$many" && warns_first "$many" s0
+check "$many" && warns "$many" s0 0
 later=$fixtures/subs-many-later.mkv
+# The line over the cut didn't fit in the first segment, which says so, but shows in the second.
+over() {
+  grep -qF "Par-dessus la coupe, encore" "$out/runs/subs-many-later.mkv/s0-1.vtt" ||
+    fail "subs-many-later.mkv: s0-1.vtt doesn't hold the line over the cut"
+}
 if check "$later" --faults; then
-  warns_first "$later" s0
+  warns "$later" s0 0
+  over
   serves "$later" s0 "Plus tard"
   grep -qE "^faults: [1-9][0-9]* reads failed, 0 segments differ when asked again$" "$log" ||
     fail "subs-many-later.mkv: no failed reads"
 fi
 if check "$later" --start 30; then
-  warns_first "$later" s0
+  warns "$later" s0 0
+  over
   serves "$later" s0 "Plus tard"
 fi
+# A line over the cut that no read can reach for the second segment: both say so.
+reach=$fixtures/subs-many-reach.mkv
+check "$reach" && warns "$reach" s0 "0 1"
 shared=$fixtures/subs-shared.mkv
 if check "$shared"; then
-  warns_first "$shared" s0
-  warns_first "$shared" s5
+  for track in s0 s1 s2 s3 s4 s5; do warns "$shared" "$track" 0; done
   serves "$shared" s5 "Plus tard"
 fi
 check "$fixtures/subs-huge.mkv" && serves "$fixtures/subs-huge.mkv" s0 "This line is too large to show."

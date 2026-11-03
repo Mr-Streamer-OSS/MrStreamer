@@ -45,10 +45,11 @@
 // - A text subtitle track is a WebVTT rendition cut at the picture's cuts. Every line read of it,
 //   in any segment's pass, after a seek too, is kept as cue text, within what a title keeps (see
 //   keep_cue); a segment holds each kept line on screen during it, so a line spanning segments is
-//   in each, as HLS has it. A segment one of whose lines wasn't kept is read again, with no other
-//   line kept, and says it is too large only if its lines still don't fit: whether they do doesn't
-//   depend on which segments were asked for before. The forced lines of a language are in its
-//   regular track's rendition too, which AVPlayer shows in place of the forced one once chosen.
+//   in each, as HLS has it. A segment one of whose lines wasn't kept is read again, from a seek,
+//   with the lines of other segments dropped, and says it is too large only if its lines still
+//   aren't all kept: whether they are doesn't depend on which segments were asked for before.
+//   The forced lines of a language are in its regular track's rendition too, which AVPlayer shows
+//   in place of the forced one once chosen.
 // - A file holds a line only where it begins, so a pass from a seek doesn't read the line on
 //   screen there, nor one a muxer stored ahead of its time. The file's index (Cues), which
 //   FFmpeg and mkvmerge write for every subtitle packet, says when each line begins, how long it
@@ -118,8 +119,8 @@
 #define TEXTS_MOST 16
 #define UNSHOWN_MOST 16
 /**
- * Bytes of cue text a track keeps at most, and the largest packet read as a line. A track with
- * more can't be shown: its segments are refused once chosen.
+ * Bytes of cue text a track keeps at most, and the largest packet read as a line. A segment with
+ * more lines than it keeps says it is too large to show.
  */
 #define TEXT_BYTES_MOST (4 * 1024 * 1024)
 #define LINE_BYTES_MOST (64 * 1024)
@@ -1099,10 +1100,21 @@ static int64_t title_ms(const TitleHls *title, int64_t ts, AVRational base) {
          av_rescale_q(title->cuts[0], title->video_base, (AVRational){1, 1000});
 }
 
+/** What keeping a line takes: its text and settings, and its own allocations. */
+static size_t line_cost(size_t length) { return length + sizeof(Cue) + 64; }
+
+/** Whether a line of the track from `from` to `to` shows in segment `index`, as write_vtt places it. */
+static int shows_in(const TitleHls *title, const Text *text, int64_t from, int64_t to, int index) {
+  int64_t a = title_ms(title, title->cuts[index], title->video_base);
+  int64_t b = title_ms(title, title->cuts[index + 1], title->video_base);
+  int64_t x = title_ms(title, from, text->base), y = title_ms(title, to, text->base);
+  return x < b && y > a && y > 0;
+}
+
 /**
- * Marks each segment a line of the track from `from` to `to` is on screen in, as write_vtt places
- * it, as missing a line. Before the plan there are no segments to mark; a line the index lists is
- * read again for the segment that holds it.
+ * Marks each segment a line of the track from `from` to `to` is on screen in as missing a line.
+ * Before the plan there are no segments to mark: a line read then, in the file's first clusters,
+ * is marked only where the index lists it and a segment's read finds it again.
  */
 static void unkept(TitleHls *title, Text *text, int64_t from, int64_t to) {
   if (!text->lost) return;
@@ -1167,8 +1179,7 @@ static int keep_cue(TitleHls *title, Text *text, const AVPacket *packet) {
   int at = first_from(text, from);
   while (at < text->count && by_cue(&text->cues[at], from, to, line.str) < 0) at++;
   if (at < text->count && by_cue(&text->cues[at], from, to, line.str) == 0) goto end;
-  // What a line takes, its own allocations too.
-  size_t cost = line.len + settings.len + sizeof(Cue) + 64;
+  size_t cost = line_cost(line.len + settings.len);
   if (text->bytes + cost > TEXT_BYTES_MOST || title->cue_bytes + cost > CUE_BYTES_MOST) {
     unkept(title, text, from, to);
     goto end;
@@ -1550,7 +1561,14 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   title->io->error = 0;
   title->io->eof_reached = 0;
   if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
-  // A line not found within reach is left out, as a read that doesn't reach it would.
+  // A line the read stopped short of, at RECALL_BYTES_MOST or AHEAD_PACKETS_MOST, is missing
+  // where it shows; one the read went past isn't there, and is left out, as a read that doesn't
+  // reach it would leave it.
+  if (!found && (over || error >= 0)) {
+    int64_t length =
+        listed->duration >= 0 ? listed->duration : llrint(UNTIMED_S / av_q2d(text->base));
+    unkept(title, text, listed->time, listed->time + length);
+  }
   if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
   // A read the source failed is made again when the segment is asked again.
   if (error == AVERROR(EIO)) listed->tried = 0;
@@ -1615,24 +1633,49 @@ static int passed(const TitleHls *title, int index) {
 }
 
 /**
- * Drops every track's kept lines, as if none had been read: a segment asked for after is passed
- * again, from a seek, and its listed lines recalled.
+ * Drops the kept lines of every track that aren't on screen in segment `index`, and how many it
+ * dropped. When it drops any, every segment is read again when next asked for, from a seek, its
+ * listed lines recalled and its lines marked missing anew, so what fits is what fits beside the
+ * lines of `index`.
  */
-static void forget_lines(TitleHls *title) {
+static int keep_only(TitleHls *title, int index) {
+  int dropped = 0;
   for (int t = 0; t < title->text_count; t++) {
     Text *text = &title->texts[t];
+    int kept = 0;
     for (int i = 0; i < text->count; i++) {
-      av_free(text->cues[i].text);
-      av_free(text->cues[i].settings);
+      Cue *cue = &text->cues[i];
+      if (shows_in(title, text, cue->from, cue->to, index)) {
+        text->cues[kept++] = *cue;
+        continue;
+      }
+      size_t cost = line_cost(strlen(cue->text) + (cue->settings ? strlen(cue->settings) : 0));
+      text->bytes -= cost;
+      title->cue_bytes -= cost;
+      av_free(cue->text);
+      av_free(cue->settings);
+      dropped++;
     }
-    text->count = 0;
-    text->bytes = 0;
+    text->count = kept;
+    // What the dropped lines held goes too: a track's lines stay within its bound between reads.
+    if (kept < text->capacity / 4) {
+      Cue *cues = kept ? av_realloc_array(text->cues, kept, sizeof(*cues)) : NULL;
+      if (cues || !kept) {
+        if (!kept) av_freep(&text->cues);
+        else text->cues = cues;
+        text->capacity = kept;
+      }
+    }
+  }
+  if (!dropped) return 0;
+  for (int t = 0; t < title->text_count; t++) {
+    Text *text = &title->texts[t];
     memset(text->lost, 0, (size_t)title->count / 8 + 1);
     for (int i = 0; i < text->listed_count; i++) text->listed[i].tried = 0;
   }
-  title->cue_bytes = 0;
   memset(title->passed, 0, (size_t)title->count / 8 + 1);
   title->next = -1;
+  return dropped;
 }
 
 /** A WebVTT time, from milliseconds. */
@@ -2386,8 +2429,10 @@ static int numbered(const char *name, const char *prefix, const char *suffix, co
 /**
  * Segment `index` of subtitle rendition `track`: the segment's pass is made first unless it was,
  * as for its other renditions, then the lines the index lists for it that no read found are read.
- * When a line on screen in it wasn't kept, every kept line is dropped and it is read once more:
- * only lines that don't fit beside its own make it say it is too large.
+ * When a line on screen in it wasn't kept, the lines of other segments are dropped and it is read
+ * once more, from a seek: it says it is too large only when what that read keeps still leaves one
+ * out. With none to drop, every line it misses was missed beside the same lines or fewer, and
+ * would be again.
  */
 static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, const uint8_t **data,
                                        size_t *size, const char **type, char *detail,
@@ -2395,7 +2440,6 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
   title->texts[track].wanted = 1;
   int error = 0, lost = 0;
   for (int again = 0; again < 2; again++) {
-    if (again) forget_lines(title);
     if (!passed(title, index)) {
       Made *made = NULL;
       TitleHlsResult result = make(title, index, &made, detail, detail_size);
@@ -2406,7 +2450,7 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
     lost = 0;
     for (int t = 0; t < title->text_count; t++)
       lost |= folds(title, track, t) && title->texts[t].lost[index / 8] >> (index % 8) & 1;
-    if (error < 0 || !lost) break;
+    if (error < 0 || !lost || again || !keep_only(title, index)) break;
   }
   // A line that couldn't be kept would be missing: the segment says so instead, over the
   // picture, which plays on.
