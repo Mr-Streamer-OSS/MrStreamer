@@ -65,7 +65,8 @@ for module in rn_modules.values():
 js = json.loads(subprocess.check_output(['pnpm', 'licenses', 'list', '--prod', '--json'], cwd=APP))
 known = {package['name'] for packages in js.values() for package in packages}
 for module in expo_modules:
-    if module['packageName'] in known or module['packageName'] == 'credentials': continue
+    # Repository-native modules share the app's licence notice below; Maven dependencies remain individual entries.
+    if module['packageName'] in known or module['packageName'] in {'credentials', 'player'}: continue
     folder = Path(module['projects'][0]['sourceDir']).parent
     metadata = json.loads((folder / 'package.json').read_text())
     js.setdefault(metadata['license'], []).append(dict(name=metadata['name'], paths=[str(folder)]))

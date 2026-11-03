@@ -21,6 +21,7 @@ import type { ConnectedSource } from "../connect/sources.ts";
 import { layoutFor } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { useStore } from "../platform/store.ts";
+import { player } from "../player/instance.ts";
 import { statistics } from "../telemetry/index.ts";
 import { Sheet } from "../ui/sheet.tsx";
 import { colors } from "../ui/theme.ts";
@@ -48,7 +49,7 @@ const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 /** From 840dp Diagnostics shows beside the list, as `Screen` places a detail pane. */
 const BESIDE = 840;
 
-const recovery = providerRecovery(sources, () => statistics.discard());
+const recovery = providerRecovery(sources, () => statistics.discard(), player);
 
 type Open =
   | { readonly kind: "language" }
@@ -92,14 +93,32 @@ export function SettingsScreen() {
   async function remove(source: ConnectedSource) {
     const result = await recovery.remove(source.id);
 
-    if (result === "refused" || result === "partial") {
-      notify({
-        text:
-          result === "refused"
-            ? t("Couldn't remove {name}. Its login is still saved.", { name: source.label })
-            : t("{name}'s login is erased, but it's still listed.", { name: source.label }),
-        action: { label: t("Try again"), run: () => void remove(source) },
-      });
+    const messages: string[] = [];
+
+    if (result.release.some(({ outcome }) => outcome === "unconfirmed"))
+      messages.push(
+        t(
+          "A playback reader was still open after ten seconds. The provider's connection may still be active.",
+        ),
+      );
+
+    if (result.erase === "refused")
+      messages.push(t("Couldn't remove {name}. Its login is still saved.", { name: source.label }));
+    else if (result.erase === "partial")
+      messages.push(t("{name}'s login is erased, but it's still listed.", { name: source.label }));
+    else {
+      if (messages.length)
+        messages.push(t("{name}'s login and saved entry are erased.", { name: source.label }));
+
+      if (result.erase === "statistics-not-cleared")
+        messages.push(t("The provider was removed, but its statistics could not be cleared."));
+    }
+
+    if (messages.length) {
+      const text = messages.join(" ");
+
+      if (result.erase === "removed") notify({ text });
+      else notify({ text, action: { label: t("Try again"), run: () => void remove(source) } });
     }
   }
 

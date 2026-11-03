@@ -9,6 +9,7 @@ import { t } from "../src/settings/copy.ts";
 import { androidAnalytics } from "../src/telemetry/analytics.ts";
 import { recoveryAction, providerRecovery } from "../src/settings/recovery.ts";
 import { store } from "../src/platform/store.ts";
+import type { PlayerOwner } from "../src/player/player.ts";
 import type { Sources } from "../src/connect/sources.ts";
 
 afterEach(() => setLanguage({ locale: "en-US", formats: "en-US" }));
@@ -104,13 +105,14 @@ it("reports a partial removal and only clears statistics once the last provider 
       },
     },
     discard,
+    { release: async () => [] },
   );
 
   expect(recoveryAction(source)).toBe("enter-login");
-  expect(await recovery.remove("source")).toBe("partial");
+  expect(await recovery.remove("source")).toMatchObject({ erase: "partial" });
   expect(discard).not.toHaveBeenCalled();
   fails = false;
-  expect(await recovery.remove("source")).toBe("removed");
+  expect(await recovery.remove("source")).toMatchObject({ erase: "removed" });
   expect(discard).toHaveBeenCalledOnce();
 });
 
@@ -204,3 +206,78 @@ it("uses the Android release major, version and build, with release-only product
   expect(analyticsTransport({ ...config, releaseBuild: undefined })).toBeNull();
   expect(analyticsTransport({ ...config, host: "https://example.invalid" })).toBeNull();
 });
+
+it.each(["removed", "partial", "refused"] as const)(
+  "awaits only this source's playback before erase, retaining unconfirmed release with %s",
+  async (erase) => {
+    const source = {
+      id: "source",
+      kind: "m3u" as const,
+      label: "example.invalid",
+      channels:
+        erase === "partial"
+          ? {
+              kind: "failed" as const,
+              error: { kind: "needs-secret" as const, subscriptionId: "source" },
+            }
+          : { kind: "ready" as const, rows: [] },
+    };
+
+    const state = store<Sources>({ kind: "ready", sources: [source] });
+    const events: string[] = [];
+    let finish!: () => void;
+
+    const waiting = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    const release: PlayerOwner["release"] = async (matches) => {
+      expect(matches({ kind: "source", sourceId: "source" })).toBe(true);
+      expect(matches({ kind: "source", sourceId: "other" })).toBe(false);
+      expect(matches({ kind: "file", path: "download" })).toBe(false);
+      events.push("release");
+      await waiting;
+      events.push("released");
+
+      return [
+        {
+          attempt: "attempt",
+          hold: { kind: "source", sourceId: "source" },
+          outcome: "unconfirmed",
+        },
+      ];
+    };
+
+    const recovery = providerRecovery(
+      {
+        state,
+        restore: async () => {},
+        connect: async () => ({ kind: "cancelled" }),
+        retry: () => {},
+        remove: async () => {
+          events.push("erase");
+
+          if (erase !== "removed") throw new Error("erase refused");
+          state.set({ kind: "ready", sources: [] });
+        },
+      },
+      () => true,
+      { release },
+    );
+
+    const pending = recovery.remove("source");
+    expect(events).toEqual(["release"]);
+    finish();
+    expect(await pending).toEqual({
+      erase,
+      release: [
+        {
+          attempt: "attempt",
+          hold: { kind: "source", sourceId: "source" },
+          outcome: "unconfirmed",
+        },
+      ],
+    });
+    expect(events).toEqual(["release", "released", "erase"]);
+  },
+);

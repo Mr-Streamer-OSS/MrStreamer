@@ -52,9 +52,13 @@ export interface ChannelRow {
 }
 
 export type Channels =
-  | { readonly kind: "loading" }
+  | { readonly kind: "loading"; readonly channels?: readonly ChannelRow[] }
   | { readonly kind: "ready"; readonly rows: readonly ChannelRow[] }
-  | { readonly kind: "failed"; readonly error: AppError };
+  | {
+      readonly kind: "failed";
+      readonly error: AppError;
+      readonly channels?: readonly ChannelRow[];
+    };
 
 export interface SavedSource {
   readonly id: string;
@@ -216,7 +220,9 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
 
     if (!read) return;
     const { login: reader, signal, stands } = read;
-    setChannels(id, { kind: "loading" });
+    const previous = listed().find((source) => source.id === id)?.channels;
+    const channels = previous?.kind === "ready" ? previous.rows : previous?.channels;
+    setChannels(id, channels ? { kind: "loading", channels } : { kind: "loading" });
     (checked ? Promise.resolve() : reader.authenticate(signal))
       .then(() => reader.liveCatalogue(signal))
       .then((catalogue) => rowsOf(id, catalogue, stands))
@@ -225,7 +231,13 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
           if (rows && stands()) setChannels(id, { kind: "ready", rows });
         },
         (cause: unknown) => {
-          if (stands()) setChannels(id, { kind: "failed", error: failureOf(cause) });
+          if (stands()) {
+            const error = failureOf(cause);
+            setChannels(
+              id,
+              channels ? { kind: "failed", error, channels } : { kind: "failed", error },
+            );
+          }
         },
       );
   }

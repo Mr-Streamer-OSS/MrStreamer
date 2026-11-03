@@ -20,6 +20,11 @@ export const t = catalogue(
     Remove: "Remove",
     "Remove {name}?": "Remove {name}?",
     "Its login is erased from this phone.": "Its login is erased from this phone.",
+    "A playback reader was still open after ten seconds. The provider's connection may still be active.":
+      "A playback reader was still open after ten seconds. The provider's connection may still be active.",
+    "{name}'s login and saved entry are erased.": "{name}'s login and saved entry are erased.",
+    "The provider was removed, but its statistics could not be cleared.":
+      "The provider was removed, but its statistics could not be cleared.",
     Cancel: "Cancel",
     "Try again": "Try again",
     "Couldn't save the language. Your previous choice is still saved.":
@@ -76,6 +81,12 @@ export const t = catalogue(
       Remove: "Verwijderen",
       "Remove {name}?": "{name} verwijderen?",
       "Its login is erased from this phone.": "De login wordt van deze telefoon gewist.",
+      "A playback reader was still open after ten seconds. The provider's connection may still be active.":
+        "Een afspeellezer was na tien seconden nog open. De verbinding bij de provider kan nog actief zijn.",
+      "{name}'s login and saved entry are erased.":
+        "De login en de opgeslagen vermelding van {name} zijn gewist.",
+      "The provider was removed, but its statistics could not be cleared.":
+        "De provider is verwijderd, maar de statistieken konden niet worden gewist.",
       Cancel: "Annuleren",
       "Try again": "Opnieuw proberen",
       "Couldn't save the language. Your previous choice is still saved.":

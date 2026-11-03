@@ -19,6 +19,8 @@ const scenario = vi.hoisted(() => {
     shared: [] as unknown[],
     /** The open modal's Back. */
     modalBack: null as (() => void) | null,
+    eraseRefused: false,
+    unconfirmed: false,
   };
 });
 
@@ -117,7 +119,8 @@ vi.mock("react-native-safe-area-context", async () => {
 
 vi.mock("expo-router", () => ({
   router: {
-    setParams: (params: object) => void scenario.asked.push(`params ${JSON.stringify(params)}`),
+    setParams: (params: Record<string, string | undefined>) =>
+      void scenario.asked.push(`params ${JSON.stringify(params)}`),
     push: (href: string) => void scenario.asked.push(`push ${href}`),
     navigate: (href: string) => void scenario.asked.push(`navigate ${href}`),
     back: () => void scenario.asked.push("back"),
@@ -126,6 +129,21 @@ vi.mock("expo-router", () => ({
   useSegments: () => ["(tabs)", "(live)", "settings"],
   usePathname: () => "/settings",
   useIsFocused: () => true,
+}));
+
+vi.mock("../src/player/instance.ts", () => ({
+  player: {
+    release: async () =>
+      scenario.unconfirmed
+        ? [
+            {
+              attempt: "attempt",
+              hold: { kind: "source", sourceId: "xtream:private-id" },
+              outcome: "unconfirmed",
+            },
+          ]
+        : [],
+  },
 }));
 
 vi.mock("expo-constants", () => ({
@@ -151,7 +169,9 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
       restore: async () => {},
       connect: async () => ({ kind: "cancelled" }),
       retry: () => {},
-      remove: async () => {},
+      remove: async () => {
+        if (scenario.eraseRefused) throw new Error("erase refused");
+      },
     },
   };
 });
@@ -165,7 +185,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: HTMLElement): { render(node: unknown): void; unmount(): void };
 };
 
 const { currentLanguage, setLanguage } = await import("@mrstreamer/core/i18n");
@@ -206,6 +226,8 @@ beforeEach(() => {
   scenario.asked = [];
   scenario.shared = [];
   scenario.modalBack = null;
+  scenario.eraseRefused = false;
+  scenario.unconfirmed = false;
 });
 
 afterEach(() => {
@@ -268,3 +290,37 @@ it("shares only the diagnostics text, with no provider's address", async () => {
   expect(JSON.stringify(scenario.shared)).not.toContain("example.invalid");
   expect(JSON.stringify(scenario.shared)).not.toContain("private-id");
 });
+
+it.each([
+  [
+    "en-US",
+    "Remove",
+    "A playback reader was still open after ten seconds.",
+    "Couldn't remove tv.example.invalid. Its login is still saved.",
+  ],
+  [
+    "nl-NL",
+    "Verwijderen",
+    "Een afspeellezer was na tien seconden nog open.",
+    "Kon tv.example.invalid niet verwijderen. De login is nog bewaard.",
+  ],
+] as const)(
+  "shows an unconfirmed release and refused erase together in %s",
+  async (locale, remove, releaseMessage, eraseMessage) => {
+    setLanguage({ locale, formats: locale });
+    scenario.eraseRefused = true;
+    scenario.unconfirmed = true;
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "tv.example.invalid");
+    press(shown, remove);
+    press(shown, remove);
+    await act(async () => {});
+    expect(shown.textContent).toContain(releaseMessage);
+    expect(shown.textContent).toContain(eraseMessage);
+    expect(shown.textContent).not.toContain(
+      locale === "en-US"
+        ? "saved entry are erased"
+        : "vermelding van tv.example.invalid zijn gewist",
+    );
+  },
+);
