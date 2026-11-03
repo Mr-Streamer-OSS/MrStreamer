@@ -1,5 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ComponentRef } from "react";
 import { BackHandler, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -49,14 +49,25 @@ export function ConnectScreen({
     setBusy(true);
     setFailure(null);
     const result = await owner.connect(login, controller.signal);
-    if (controller.signal.aborted) return;
+    if (controller.signal.aborted || result.kind === "cancelled") return;
     setBusy(false);
     if (result.kind === "connected") onConnected();
     else setFailure({ error: result.error, http: result.http });
   }
 
   // Fields and actions share one lane: a 24dp icon at 16dp, text at 56dp.
-  const field = (key: keyof LoginInput, label: string, icon: IconName, secret = false) => (
+  /** Each field's input, for the keyboard's Next to move on to. */
+  const inputs = useRef<Partial<Record<keyof LoginInput, ComponentRef<typeof TextInput> | null>>>(
+    {},
+  );
+
+  const field = (
+    key: keyof LoginInput,
+    label: string,
+    icon: IconName,
+    autoComplete: "url" | "username" | "password",
+    next?: keyof LoginInput,
+  ) => (
     <View
       style={{
         flexDirection: "row",
@@ -76,12 +87,18 @@ export function ConnectScreen({
         color={SECONDARY}
       />
       <TextInput
+        ref={(input) => void (inputs.current[key] = input)}
         accessibilityLabel={label}
         placeholder={label}
         placeholderTextColor={SECONDARY}
         value={input[key]}
         onChangeText={(text) => setInput((now) => ({ ...now, [key]: text }))}
-        secureTextEntry={secret}
+        secureTextEntry={autoComplete === "password"}
+        autoComplete={autoComplete}
+        inputMode={autoComplete === "url" ? "url" : "text"}
+        returnKeyType={next ? "next" : "go"}
+        submitBehavior={next ? "submit" : "blurAndSubmit"}
+        onSubmitEditing={() => (next ? inputs.current[next]?.focus() : void connect(input))}
         autoCapitalize="none"
         autoCorrect={false}
         editable={!busy}
@@ -171,9 +188,9 @@ export function ConnectScreen({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
       >
-        {field("server", "Server or M3U link", "link")}
-        {field("username", "Username", "person-outline")}
-        {field("password", "Password", "lock-outline", true)}
+        {field("server", "Server or M3U link", "link", "url", "username")}
+        {field("username", "Username", "person-outline", "username", "password")}
+        {field("password", "Password", "lock-outline", "password")}
         {failure ? (
           <View
             accessible

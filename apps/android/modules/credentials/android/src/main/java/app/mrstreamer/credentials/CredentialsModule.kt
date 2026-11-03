@@ -14,5 +14,6 @@ class CredentialsModule : Module() {
     AsyncFunction("read") { id: String -> Credentials.read(context, id) }
     AsyncFunction("write") { id: String, secret: String -> Credentials.write(context, id, secret) }
     AsyncFunction("remove") { id: String -> Credentials.remove(context, id) }
+    AsyncFunction("retain") { ids: List<String> -> Credentials.retain(context, ids) }
   }
 }

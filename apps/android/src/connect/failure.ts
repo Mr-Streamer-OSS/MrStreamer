@@ -3,8 +3,9 @@ import { t } from "@mrstreamer/core/i18n";
 
 /**
  * One sentence for the failures connecting and listing channels meet, in the desktop and iOS
- * apps' words, so all three say the same and share their translations. A provider's address
- * appears as its host only; no login reaches a failure.
+ * apps' words, so all three say the same and share their translations; the two about the login
+ * this phone keeps are Android's own. A provider's address appears as its host only; no login
+ * reaches a failure.
  */
 export function describeFailure(error: AppError): string {
   switch (error.kind) {
@@ -20,15 +21,16 @@ export function describeFailure(error: AppError): string {
           ? t("The provider reports this subscription as banned.")
           : t("The provider reports this subscription as disabled.");
     case "unreachable":
-      return `${t("Can't reach {server}.", { server: error.server.replace(/^https?:\/\//, "") })} ${error.detail}`;
+      // The host alone: an Xtream server's path can hold a token of its own.
+      return `${t("Can't reach {server}.", { server: URL.parse(error.server)?.host ?? "" })} ${error.detail}`;
     case "provider-error":
       return t("The provider answered with an error (HTTP {status}).", {
         status: String(error.status),
       });
     case "keychain-refused":
-      return t("Your system's keychain would not store your password.");
+      return "This phone would not keep the login safe. Nothing was saved.";
     case "needs-secret":
-      return t("This subscription needs its password or link again, in Settings.");
+      return "This phone no longer has its login. Add the provider again to sign in.";
     case "unexpected":
       return error.detail;
     default:

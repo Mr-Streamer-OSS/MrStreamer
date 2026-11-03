@@ -1,6 +1,7 @@
 import { type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
+import { isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeCatalogue } from "@mrstreamer/core/catalogue/normalize";
 import type { LiveCatalogue } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
@@ -19,9 +20,11 @@ import { playlistReader } from "./playlist.ts";
 // its id, kind and host, so nothing written to app storage, state or a failure carries a login.
 //
 // connect() checks a login with its provider before saving anything. restore() signs every saved
-// source in again at launch, from the credentials alone, and a source whose authority can't be read
-// stays listed as needing its login again. remove() stops the source's reads, erases its authority,
-// then forgets it; a refused erase keeps it listed so nothing claims a deletion that didn't happen.
+// source in again at launch, from the credentials alone, checking each login before listing its
+// channels; a source whose authority can't be read stays listed as needing its login again, and an
+// authority no listed source names (a damaged list, a connect cut short) is erased. remove() erases
+// the source's authority, then stops its reads and forgets it; a refused erase keeps it listed so
+// nothing claims a deletion that didn't happen.
 
 /** What a source answers for: checking its login and listing its channels. */
 export interface CatalogueReader {
@@ -62,6 +65,8 @@ export type Sources =
 
 export type Connected =
   | { readonly kind: "connected"; readonly id: string }
+  /** The signal aborted before anything was saved, while the provider checked or after. */
+  | { readonly kind: "cancelled" }
   /**
    * The provider refused, or couldn't be reached. `http` is the same login over plain http,
    * offered only when the viewer typed no scheme and https itself was the problem.
@@ -105,12 +110,23 @@ const failureOf = (cause: unknown): AppError =>
     ? cause.error
     : { kind: "unexpected", detail: cause instanceof Error ? cause.message : String(cause) };
 
-/** Channels to show, adults' left out until a setting can show them. */
+/**
+ * Channels to show. Adults' are left out until a setting can show them: those the provider marks,
+ * and those in a category named for adults, as the iOS app reads them (apps/ios/src/library.ts).
+ */
 function rowsOf(sourceId: string, catalogue: LiveCatalogue): readonly ChannelRow[] {
+  const adultCategories = new Set(
+    catalogue.categories.filter((each) => isAdultCategory(each.name)).map((each) => each.id),
+  );
+  const adult = new Set(
+    catalogue.channels
+      .filter((each) => each.adult || each.categoryIds.some((id) => adultCategories.has(id)))
+      .map((each) => each.id),
+  );
   const { categories, streams } = normalizeCatalogue(catalogue);
   const names = new Map(categories.map((category) => [category.id, category.name]));
   return streams
-    .filter((stream) => !stream.adult)
+    .filter((stream) => !adult.has(stream.id))
     .map((stream) => ({
       key: `${sourceId}:${stream.id}`,
       sourceId,
@@ -126,9 +142,9 @@ export interface SourcesOwner {
   restore(): Promise<void>;
   /** Checks `input` with its provider, then saves it and lists its channels. */
   connect(input: LoginInput, signal?: AbortSignal): Promise<Connected>;
-  /** Lists a source's channels again. */
+  /** Checks a source's login and lists its channels again. */
   retry(id: string): void;
-  /** Stops the source's reads, erases its authority, then forgets it. Throws when refused. */
+  /** Erases the source's authority, then stops its reads and forgets it. Throws when refused. */
   remove(id: string): Promise<void>;
 }
 
@@ -166,24 +182,30 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     );
   }
 
-  /** Lists `id`'s channels, dropping the answer of any read begun before. */
-  function load(id: string) {
+  /**
+   * Lists `id`'s channels, checking its login first unless connect() just did, and dropping the
+   * answer of any read begun before.
+   */
+  function load(id: string, checked = false) {
     const reader = readers.get(id);
     if (!reader) return;
     reads.get(id)?.abort();
     const controller = new AbortController();
     reads.set(id, controller);
     setChannels(id, { kind: "loading" });
-    reader.liveCatalogue(controller.signal).then(
-      (catalogue) => {
-        if (reads.get(id) === controller)
-          setChannels(id, { kind: "ready", rows: rowsOf(id, catalogue) });
-      },
-      (cause: unknown) => {
-        if (reads.get(id) === controller)
-          setChannels(id, { kind: "failed", error: failureOf(cause) });
-      },
-    );
+    const { signal } = controller;
+    (checked ? Promise.resolve() : reader.authenticate(signal))
+      .then(() => reader.liveCatalogue(signal))
+      .then((catalogue) => rowsOf(id, catalogue))
+      .then(
+        (rows) => {
+          if (reads.get(id) === controller) setChannels(id, { kind: "ready", rows });
+        },
+        (cause: unknown) => {
+          if (reads.get(id) === controller)
+            setChannels(id, { kind: "failed", error: failureOf(cause) });
+        },
+      );
   }
 
   function writeRegistry(sources: readonly SavedSource[]) {
@@ -199,20 +221,22 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     async restore() {
       const parsed = Registry(platform.readJson(REGISTRY) ?? { version: 1, sources: [] });
       const saved = parsed instanceof type.errors ? [] : parsed.sources;
+      // Best effort: what this misses, the next launch erases.
+      await platform.credentials.retain(saved.map((source) => source.id)).catch(() => {});
       const restoredSources = await Promise.all(
         saved.map(async (source): Promise<ConnectedSource> => {
-          let error: AppError;
-          try {
-            const authority = await platform.credentials.read(source.id);
-            if (authority) {
-              readers.set(source.id, readerOf(authority));
-              return { ...source, channels: { kind: "loading" } };
-            }
-            error = { kind: "needs-secret", subscriptionId: source.id };
-          } catch (cause) {
-            error = failureOf(cause);
-          }
-          return { ...source, channels: { kind: "failed", error } };
+          // A missing, unknown or unreadable authority all ask for the login again.
+          const authority = await platform.credentials.read(source.id).catch(() => null);
+          if (!authority)
+            return {
+              ...source,
+              channels: {
+                kind: "failed",
+                error: { kind: "needs-secret", subscriptionId: source.id },
+              },
+            };
+          readers.set(source.id, readerOf(authority));
+          return { ...source, channels: { kind: "loading" } };
         }),
       );
       state.set({ kind: "ready", sources: restoredSources });
@@ -232,6 +256,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       try {
         await reader.authenticate(signal);
       } catch (cause) {
+        if (signal?.aborted) return { kind: "cancelled" };
         const error = failureOf(cause);
         const http =
           schemeless && httpsUnavailable(error)
@@ -241,36 +266,45 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       }
       const saved = savedOf(authority);
       await ready;
+      if (signal?.aborted) return { kind: "cancelled" };
+      const others = listed().filter((source) => source.id !== saved.id);
+      const known = others.length < listed().length;
       try {
         await platform.credentials.write(saved.id, authority);
-        const others = listed().filter((source) => source.id !== saved.id);
-        writeRegistry([...others, saved]);
-        readers.set(saved.id, reader);
-        state.set({
-          kind: "ready",
-          sources: [...others, { ...saved, channels: { kind: "loading" } }],
-        });
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
       }
-      load(saved.id);
+      try {
+        writeRegistry([...others, saved]);
+      } catch (cause) {
+        // A new login no list names; the next launch erases it if this can't.
+        if (!known) await platform.credentials.remove(saved.id).catch(() => {});
+        return { kind: "failed", error: failureOf(cause), http: null };
+      }
+      readers.set(saved.id, reader);
+      state.set({
+        kind: "ready",
+        sources: [...others, { ...saved, channels: { kind: "loading" } }],
+      });
+      load(saved.id, true);
       return { kind: "connected", id: saved.id };
     },
 
-    retry: load,
+    retry: (id) => load(id),
 
     async remove(id) {
+      await platform.credentials.remove(id);
       reads.get(id)?.abort();
       reads.delete(id);
-      try {
-        await platform.credentials.remove(id);
-      } catch (cause) {
-        load(id);
-        throw cause;
-      }
       readers.delete(id);
       const others = listed().filter((source) => source.id !== id);
-      writeRegistry(others);
+      try {
+        writeRegistry(others);
+      } catch (cause) {
+        // Still listed, with nothing left to sign in with: Remove can be pressed again.
+        setChannels(id, { kind: "failed", error: { kind: "needs-secret", subscriptionId: id } });
+        throw cause;
+      }
       state.set({ kind: "ready", sources: others });
     },
   };

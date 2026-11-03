@@ -1,5 +1,5 @@
 import { AppFailure } from "@mrstreamer/contracts/errors";
-import { importPlaylist } from "@mrstreamer/core/playlist/import";
+import { importPlaylist, safeName } from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
 import { providerFetch, type LiveCatalogue, type ProviderLogin } from "@mrstreamer/core/provider";
 import { bodySize, describeNetworkError } from "@mrstreamer/core/xtream";
@@ -169,8 +169,27 @@ export function playlistReader(
         signal,
       );
       if (!playlist) throw notAPlaylist();
-      const { categories, channels } = importPlaylist(entries).live;
+      const { categories, channels } = importPlaylist(entries.map(unmappedEntry)).live;
       return { categories, channels };
     },
   };
 }
+
+/** `entry` with no address in what the catalogue shows of it, as the iOS app imports one. */
+const unmappedEntry = (entry: PlaylistEntry): PlaylistEntry => ({
+  ...entry,
+  name: safeName(entry.name),
+  group: entry.group === null ? null : eachGroup(entry.group),
+  attributes: {
+    ...entry.attributes,
+    ...Object.fromEntries(
+      (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
+        const value = entry.attributes[name];
+        return value === undefined ? [] : [[name, eachGroup(value)]];
+      }),
+    ),
+  },
+});
+
+/** `value` with each of several groups cleaned on its own. */
+const eachGroup = (value: string) => value.split(";").map(safeName).join(";");

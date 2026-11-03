@@ -3,9 +3,10 @@ package app.mrstreamer.credentials
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.AtomicFile
 import java.io.File
+import java.io.FileNotFoundException
 import java.security.KeyStore
-import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -16,7 +17,7 @@ import javax.crypto.spec.GCMParameterSpec
  * AES-GCM key the Android Keystore holds and never exports, one file per source id under
  * `noBackupFilesDir/credentials`. Nothing here is backed up or moved to another device, and
  * Android deletes it with the app. A sealed file names its id inside the seal, so one source's
- * file can't stand in for another's.
+ * file can't stand in for another's. Writes go through [AtomicFile]: a file is whole or absent.
  *
  * Native workers (downloads, guide refreshes, reminders) call [read] with the source id and get
  * the same JSON the app wrote, without a JS runtime: see apps/android/README.md for its shape.
@@ -31,9 +32,12 @@ object Credentials {
   /** The authority saved for [id], or null when none is. */
   @JvmStatic
   fun read(context: Context, id: String): String? = synchronized(this) {
-    val file = fileOf(context, id)
-    if (!file.exists()) return null
-    val sealed = file.readBytes()
+    val sealed =
+      try {
+        fileOf(context, id).readFully()
+      } catch (_: FileNotFoundException) {
+        return null
+      }
     require(sealed.size > IV_BYTES) { "A sealed credential is damaged." }
     val cipher = Cipher.getInstance(TRANSFORMATION)
     cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BITS, sealed, 0, IV_BYTES))
@@ -41,37 +45,52 @@ object Credentials {
     String(cipher.doFinal(sealed, IV_BYTES, sealed.size - IV_BYTES), Charsets.UTF_8)
   }
 
-  /** Saves [secret] for [id], replacing any before it. The file is whole or absent. */
+  /** Saves [secret] for [id], replacing any before it. */
   @JvmStatic
   fun write(context: Context, id: String, secret: String) = synchronized(this) {
     val cipher = Cipher.getInstance(TRANSFORMATION)
     cipher.init(Cipher.ENCRYPT_MODE, key())
     cipher.updateAAD(id.toByteArray(Charsets.UTF_8))
+    check(cipher.iv.size == IV_BYTES) { "The Keystore chose an IV this format can't hold." }
     val sealed = cipher.iv + cipher.doFinal(secret.toByteArray(Charsets.UTF_8))
     val file = fileOf(context, id)
-    val pending = File(file.parentFile, "${file.name}.next")
-    pending.writeBytes(sealed)
-    if (!pending.renameTo(file)) {
-      pending.delete()
-      error("A credential could not be saved.")
+    val stream = file.startWrite()
+    try {
+      stream.write(sealed)
+      file.finishWrite(stream)
+    } catch (cause: Throwable) {
+      file.failWrite(stream)
+      throw cause
     }
   }
 
-  /** Removes [id]'s authority. Removing one that isn't there succeeds. */
+  /** Removes [id]'s authority, with any write of it left halfway. */
   @JvmStatic
   fun remove(context: Context, id: String) = synchronized(this) {
-    val file = fileOf(context, id)
-    check(!file.exists() || file.delete()) { "A credential could not be removed." }
+    fileOf(context, id).delete()
+    check(!fileOf(context, id).baseFile.exists()) { "A credential could not be removed." }
+  }
+
+  /**
+   * Removes every authority whose id isn't in [ids]: those a list of sources no longer names,
+   * as after a launch that found it damaged, or an app killed between saving a login and listing it.
+   */
+  @JvmStatic
+  fun retain(context: Context, ids: Collection<String>) = synchronized(this) {
+    val kept = ids.map(::nameOf).toSet()
+    for (file in folder(context).listFiles().orEmpty()) {
+      if (file.name.substringBefore('.') !in kept) file.delete()
+    }
   }
 
   private fun folder(context: Context): File =
     File(context.noBackupFilesDir, "credentials").apply { mkdirs() }
 
-  /** A file name for any id: its SHA-256 in hex. */
-  private fun fileOf(context: Context, id: String): File {
-    val digest = MessageDigest.getInstance("SHA-256").digest(id.toByteArray(Charsets.UTF_8))
-    return File(folder(context), digest.joinToString("") { "%02x".format(it) })
-  }
+  /** A file name for any id: its UTF-8 bytes in hex. */
+  private fun nameOf(id: String): String =
+    id.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
+
+  private fun fileOf(context: Context, id: String) = AtomicFile(File(folder(context), nameOf(id)))
 
   private fun key(): SecretKey {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

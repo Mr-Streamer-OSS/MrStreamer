@@ -18,16 +18,19 @@ export type Authority = typeof Authority.infer;
 
 /** Protected authorities by source id. Every failure is `keychain-refused`. */
 export interface Credentials {
-  /** The authority saved for `id`, or null when none is or it no longer reads as one. */
+  /** The authority saved for `id`, null when none is or it isn't of a shape this build knows. */
   read(id: string): Promise<Authority | null>;
   write(id: string, authority: Authority): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Removes every authority whose id isn't in `ids`. */
+  retain(ids: readonly string[]): Promise<void>;
 }
 
 interface NativeCredentials {
   read(id: string): Promise<string | null>;
   write(id: string, secret: string): Promise<void>;
   remove(id: string): Promise<void>;
+  retain(ids: readonly string[]): Promise<void>;
 }
 
 async function refusedOnFailure<A>(operation: () => Promise<A>): Promise<A> {
@@ -52,5 +55,6 @@ export function nativeCredentials(
       }),
     write: (id, authority) => refusedOnFailure(() => native.write(id, JSON.stringify(authority))),
     remove: (id) => refusedOnFailure(() => native.remove(id)),
+    retain: (ids) => refusedOnFailure(() => native.retain(ids)),
   };
 }

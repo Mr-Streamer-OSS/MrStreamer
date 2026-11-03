@@ -8,6 +8,7 @@
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
+    "primaryColor": "#FFFFFF",
     "icon": "./assets/icon.png",
     "experiments": {
       "tsconfigPaths": false
@@ -19,11 +20,14 @@
       "permissions": ["android.permission.INTERNET"],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.VIBRATE",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
+      "./plugins/no-backup.cjs",
+      ["expo-splash-screen", { "backgroundColor": "#000000" }],
       [
         "expo-build-properties",
         {

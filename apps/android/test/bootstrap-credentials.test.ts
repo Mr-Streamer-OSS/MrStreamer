@@ -23,6 +23,10 @@ function native() {
       read: async (id: string) => (guard(), sealed.get(id) ?? null),
       write: async (id: string, secret: string) => void (guard(), sealed.set(id, secret)),
       remove: async (id: string) => void (guard(), sealed.delete(id)),
+      retain: async (ids: readonly string[]) => {
+        guard();
+        for (const id of sealed.keys()) if (!ids.includes(id)) sealed.delete(id);
+      },
     },
   };
 }

@@ -2,6 +2,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useMemo, type ComponentProps } from "react";
 import { Alert, FlatList, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { t } from "@mrstreamer/core/i18n";
 import { describeFailure } from "./failure.ts";
 import type { ChannelRow, ConnectedSource, SourcesOwner } from "./sources.ts";
 
@@ -101,7 +102,7 @@ export function CatalogueScreen({
                   ? "Loading channels"
                   : channels.kind === "failed"
                     ? describeFailure(channels.error)
-                    : `${channels.rows.length} channels`}
+                    : t("{count} channels", { count: channels.rows.length })}
               </Text>
             </View>
             {channels.kind === "failed" && channels.error.kind !== "needs-secret" ? (

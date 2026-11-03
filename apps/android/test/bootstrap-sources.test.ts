@@ -14,26 +14,51 @@ interface Phone {
   readonly files: Map<string, string>;
   /** Set to make the credentials refuse every operation, as an unusable Keystore key does. */
   refuse: boolean;
+  /** Set to make reading a credential fail, as a damaged sealed file does. */
+  unreadable: boolean;
+  /** Set to make the files folder refuse writes, as a full disk does. */
+  full: boolean;
 }
 
-const newPhone = (): Phone => ({ sealed: new Map(), files: new Map(), refuse: false });
+const newPhone = (): Phone => ({
+  sealed: new Map(),
+  files: new Map(),
+  refuse: false,
+  unreadable: false,
+  full: false,
+});
 
 function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
   const guard = () => {
     if (phone.refuse) throw new Error("refused");
   };
   const credentials: Credentials = {
-    read: async (id) => (guard(), phone.sealed.get(id) ?? null),
+    read: async (id) => {
+      guard();
+      if (phone.unreadable) throw new Error("damaged");
+      return phone.sealed.get(id) ?? null;
+    },
     write: async (id, authority) => void (guard(), phone.sealed.set(id, authority)),
     remove: async (id) => void (guard(), phone.sealed.delete(id)),
+    retain: async (ids) => {
+      guard();
+      for (const id of phone.sealed.keys()) if (!ids.includes(id)) phone.sealed.delete(id);
+    },
   };
   return sourcesOwner({
     credentials,
+    // As storage.ts reads: no file, or one that isn't JSON, is none.
     readJson: (name) => {
-      const text = phone.files.get(name);
-      return text === undefined ? null : (JSON.parse(text) as unknown);
+      try {
+        return JSON.parse(phone.files.get(name) ?? "null") as unknown;
+      } catch {
+        return null;
+      }
     },
-    writeJson: (name, value) => void phone.files.set(name, JSON.stringify(value)),
+    writeJson: (name, value) => {
+      if (phone.full) throw new Error("ENOSPC");
+      phone.files.set(name, JSON.stringify(value));
+    },
     fetch: fetchImpl,
     userAgent: "MrStreamer-Android/test",
   });
@@ -70,7 +95,8 @@ afterAll(async () => {
   await Promise.all([panel.close(), playlist.close()]);
 });
 
-const xtream = () => ({ server: panel.url, username: "viewer", password: PASSWORD });
+const xtreamAccount = () => ({ server: panel.url, username: "viewer", password: PASSWORD });
+const xtream = xtreamAccount;
 const m3u = () => ({ server: playlist.link, username: "", password: "" });
 
 describe("Android sources", () => {
@@ -91,6 +117,29 @@ describe("Android sources", () => {
         expect.objectContaining({ title: "TEST | Two sounds and subtitles" }),
       ]),
     });
+  });
+
+  it("leaves adults' channels out: those flagged and those in a category for adults", async () => {
+    const adults = await startFakeProvider({
+      username: "viewer",
+      password: PASSWORD,
+      channels: 20,
+      adultChannels: true,
+    });
+    try {
+      const owner = launch(newPhone());
+      await owner.restore();
+      await owner.connect({ ...xtream(), server: adults.url });
+
+      const [source] = await settled(owner);
+      const titles =
+        source?.channels.kind === "ready" ? source.channels.rows.map((row) => row.title) : [];
+      expect(titles.length).toBeGreaterThan(0);
+      for (const adult of ["After Hours", "Late Show", "Night Club"])
+        expect(titles).not.toContain(adult);
+    } finally {
+      await adults.close();
+    }
   });
 
   it("keeps logins in the protected credentials only, never in the files or the screens' state", async () => {
@@ -173,14 +222,17 @@ describe("Android sources", () => {
     );
   });
 
-  it("keeps a source whose login can't be read after a relaunch, asking for it again", async () => {
+  it.each([
+    ["missing", (phone: Phone) => phone.sealed.clear()],
+    ["unreadable", (phone: Phone) => void (phone.unreadable = true)],
+  ])("keeps a source whose login is %s after a relaunch, asking for it again", async (_, lose) => {
     const phone = newPhone();
     const first = launch(phone);
     await first.restore();
     await first.connect(xtream());
     await settled(first);
 
-    phone.sealed.clear();
+    lose(phone);
     const relaunched = launch(phone);
     await relaunched.restore();
 
@@ -193,6 +245,70 @@ describe("Android sources", () => {
     expect(rowCount((await settled(relaunched))[0])).toBeGreaterThan(0);
   });
 
+  it("checks each saved login again at launch", async () => {
+    const phone = newPhone();
+    const first = launch(phone);
+    await first.restore();
+    const connected = await first.connect(xtream());
+    if (connected.kind !== "connected") throw new Error("not connected");
+    await settled(first);
+
+    // The provider no longer accepts the saved password, as after it was changed elsewhere.
+    phone.sealed.set(connected.id, { kind: "xtream", ...xtreamAccount(), password: "changed" });
+    const relaunched = launch(phone);
+    await relaunched.restore();
+
+    expect((await settled(relaunched))[0]?.channels).toMatchObject({
+      kind: "failed",
+      error: { kind: "invalid-login" },
+    });
+  });
+
+  it("erases every saved login no source names at launch, as after a damaged list", async () => {
+    const phone = newPhone();
+    const first = launch(phone);
+    await first.restore();
+    await first.connect(xtream());
+    await settled(first);
+
+    phone.files.set("sources.json", "{ damaged");
+    const relaunched = launch(phone);
+    await relaunched.restore();
+
+    expect(listed(relaunched)).toEqual([]);
+    expect(phone.sealed.size).toBe(0);
+  });
+
+  it("keeps no login when the list of sources can't be written", async () => {
+    const phone = newPhone();
+    const owner = launch(phone);
+    await owner.restore();
+
+    phone.full = true;
+    expect(await owner.connect(xtream())).toMatchObject({ kind: "failed" });
+
+    expect(listed(owner)).toEqual([]);
+    expect(phone.sealed.size).toBe(0);
+  });
+
+  it("saves nothing when Connect is cancelled while the provider answers", async () => {
+    const phone = newPhone();
+    const cancel = new AbortController();
+    // Cancelled as the provider's answer to the login arrives.
+    const cancelling: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (String(input).includes("player_api.php") && !String(input).includes("action="))
+        cancel.abort();
+      return response;
+    };
+    const owner = launch(phone, cancelling);
+    await owner.restore();
+
+    expect(await owner.connect(xtream(), cancel.signal)).toEqual({ kind: "cancelled" });
+    expect(listed(owner)).toEqual([]);
+    expect(phone.sealed.size).toBe(0);
+  });
+
   it("removes a source: its read stops, its login is erased and a relaunch doesn't bring it back", async () => {
     const phone = newPhone();
     const owner = launch(phone);
@@ -201,7 +317,7 @@ describe("Android sources", () => {
     const connected = await owner.connect(xtream());
     if (connected.kind !== "connected") throw new Error("not connected");
 
-    // Removed while its channels still load: their late answer must not bring it back.
+    // Removed while its channels still load.
     await owner.remove(connected.id);
 
     const remaining = await settled(owner);
@@ -211,6 +327,29 @@ describe("Android sources", () => {
     const relaunched = launch(phone);
     await relaunched.restore();
     expect((await settled(relaunched)).map((source) => source.kind)).toEqual(["m3u"]);
+  });
+
+  it("keeps a source it erased but couldn't forget listed, and removes it on a second try", async () => {
+    const phone = newPhone();
+    const owner = launch(phone);
+    await owner.restore();
+    const connected = await owner.connect(xtream());
+    if (connected.kind !== "connected") throw new Error("not connected");
+    await settled(owner);
+
+    phone.full = true;
+    await expect(owner.remove(connected.id)).rejects.toThrow();
+    expect(phone.sealed.has(connected.id)).toBe(false);
+    expect(listed(owner)).toEqual([
+      expect.objectContaining({ channels: expect.objectContaining({ kind: "failed" }) }),
+    ]);
+
+    phone.full = false;
+    await owner.remove(connected.id);
+    expect(listed(owner)).toEqual([]);
+    const relaunched = launch(phone);
+    await relaunched.restore();
+    expect(listed(relaunched)).toEqual([]);
   });
 
   it("keeps a source listed when its login can't be erased", async () => {

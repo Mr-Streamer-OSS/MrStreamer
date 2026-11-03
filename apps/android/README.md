@@ -7,13 +7,14 @@ install, build or packages, and it shares no install, lockfile, native module or
 `apps/ios`.
 
 The bootstrap connects Xtream subscriptions and M3U playlist links, one or several, and lists
-every source's channels together. Connect checks the login with the provider before anything is
-saved; a refused or unreachable provider says why and saves nothing. An address typed without
+every source's channels together, leaving out channels for adults (flagged, or in a category
+named for them) until a setting can show them. Connect checks the login with the provider before
+anything is saved; a refused or unreachable provider says why and saves nothing. An address typed without
 `http://` or `https://` is tried over https first, and plain http is offered only when https
 itself failed. Each source shows whether its channels are loading, failed (with Try again) or
 listed, and Remove erases its login after a confirmation. At launch every saved source signs in
-again from its protected login; one whose login can't be read stays listed and asks for it again
-through Connect.
+again from its protected login, checking it with the provider before listing its channels, as Try
+again does; one whose login can't be read stays listed and asks for it again through Add provider.
 
 ## Its own install
 
@@ -21,7 +22,8 @@ through Connect.
 `pnpm-workspace.yaml` and lockfile. The shared packages are linked as source, and
 `metro.config.cjs` resolves their imports (arktype, effect) from this app, one copy of each, so
 keep those two at the versions the root lockfile holds. The workspace installs no peers on its
-own, so only the native modules named in `package.json` are linked into the build.
+own, so only the native modules named in `package.json`, and those they depend on (Expo's
+`expo-asset`, `expo-font` and `expo-keep-awake` among them), are linked into the build.
 
 ```sh
 cd apps/android
@@ -40,10 +42,12 @@ same change the iOS app carries: at runtime Expo installs a WHATWG `URL` that ha
 
 Pinned to the versions the iOS app already resolves, so the shared source compiles under one
 React Native: Expo 58.0.9, React Native 0.88.0-rc.4, React 19.3.0, and the native modules at the
-versions `expo@58.0.9` bundles (`node_modules/expo/bundledNativeModules.json`). React Native's
-Gradle catalogue (`node_modules/react-native/gradle/libs.versions.toml`) sets Kotlin 2.2.0,
-the Android Gradle Plugin 9.2.1 and NDK 27.1.12297006; the committed wrapper runs Gradle 9.4.1
-with JDK 17.
+versions `expo@58.0.9` bundles (`node_modules/expo/bundledNativeModules.json`). The build uses
+the Android Gradle Plugin 9.2.1 and NDK 27.1.12297006 from React Native's Gradle catalogue
+(`node_modules/react-native/gradle/libs.versions.toml`), Kotlin 2.2.10 as Gradle resolves it,
+and Gradle 9.4.1 from the committed wrapper. Nothing pins the JDK: the Mac mini builds with its
+JDK 17. Every native library in the Release
+APK is aligned for 16 KB pages.
 
 | Setting         | Value                             | Where                      |
 | --------------- | --------------------------------- | -------------------------- |
@@ -95,15 +99,20 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   { "kind": "m3u", "link": "https://lists.example/tv.m3u?token=…" }
   ```
 
-  A worker that holds a source's work removes it before the app erases the authority; the app
-  never logs either.
+  The app never logs either. Nothing native holds a source's work yet: the first card that adds
+  such a worker also adds the step that stops it before `remove` erases the authority.
 
 - **Storage.** `src/platform/storage.ts` reads and replaces whole JSON files in the app's files
   folder. Downloads and other durable native data choose their own private folders.
-- **Backup and network.** Backups are off (`allowBackup: false`): nothing of the app is restored
-  to another device, so a reinstall starts with no sources. Cleartext http is allowed for every
-  host, since viewers type their own providers' addresses; https keeps Android's default
-  certificate checks, system authorities only.
+- **Backup and network.** Nothing of the app is backed up or moved to another phone:
+  `allowBackup: false` up to Android 11, and from Android 12, whose device-to-device transfer
+  ignores it, `plugins/no-backup.cjs` excludes every domain from cloud backup and device
+  transfer. A reinstall or a new phone starts with no sources. Cleartext http is allowed for
+  every host, since viewers type their own providers' addresses; https keeps Android's default
+  certificate checks, system authorities only. Provider requests keep no HTTP cache and send or
+  store no cookies.
+- **Launch.** Restore erases every sealed authority that `sources.json` doesn't name, so a
+  damaged list or a connect cut short leaves no login behind.
 - **Temporary copies.** `src/connect/playlist.ts` reads M3U links under the iOS app's limits, and
   `src/platform/storage.ts` and `store.ts` follow the iOS app's. The card "Share mobile account
   and catalogue behavior without changing iOS outcomes" owns their one shared replacement.
