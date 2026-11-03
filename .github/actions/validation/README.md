@@ -3,7 +3,7 @@
 After checking out the exact candidate and trusted validation tools, call this composite action
 with `part: check`, `test`, or `website`, and a unique `report-name` when calling more than once.
 Run Check and Test in separate jobs, bounded at 10 and 15 minutes; Checks bounds each test shard at
-15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation.
+15 minutes and its merging Test at 10. Check includes the production desktop build and workflow validation. A pull request that only adds or edits Markdown and images doesn't call this action: its Check runs `pnpm fmt:check` alone.
 Test preserves the full suite, multimedia setup, JSON artifact and completeness gate,
 and installs ffmpeg alongside Node and the dependencies. It restores
 the native fixture's encoded media from an Actions cache keyed by the ffmpeg package set and the
