@@ -172,3 +172,16 @@ for name, source in [('invalid-lead', 'lead-source'), ('late-corrupt', 'late-sou
     for p, n in flac_frames(b)[:1500 if name == 'invalid-lead' else 1]:
         b[p+n//2] ^= 1
     (out / (name + '.mkv')).write_bytes(b)
+
+# Keep valid packets between rejected runs: the budget covers the whole operation.
+for name, source, selected in [
+    ('alternating-lead', 'lead-source', [i for i in range(1500) if i % 500 != 0]),
+    ('resume-corrupt', 'resume-source', range(30, 140)),
+    ('recall-corrupt', 'recall-source', range(100, 1750)),
+]:
+    b = bytearray((out / (source + '.mkv')).read_bytes())
+    source_frames = flac_frames(b)
+    for i in selected:
+        p, n = source_frames[i]
+        b[p+n//2] ^= 1
+    (out / (name + '.mkv')).write_bytes(b)

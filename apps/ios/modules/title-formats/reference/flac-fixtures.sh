@@ -31,4 +31,17 @@ ffmpeg -v error -y -itsoffset 12 -i "$out/picture.mkv" -f lavfi -i 'sine=sample_
 # Opening later has no nearby sound, but the lead held valid frames as well as one bad one.
 ffmpeg -v error -y -itsoffset 0.2 -i "$out/picture.mkv" -f lavfi -i 'sine=sample_rate=48000:duration=1' \
   -map 0:v -map 1:a -c:v copy -c:a flac -ac 2 -frame_size 4608 "$out/late-source.mkv"
+# Valid lead sound must not hide corrupt sound around the resume position.
+ffmpeg -v error -y -itsoffset 0.2 -i "$out/picture.mkv" -f lavfi -i 'sine=sample_rate=48000:duration=20.2' \
+  -map 0:v -map 1:a -c:v copy -c:a flac -ac 2 -frame_size 4608 "$out/resume-source.mkv"
+# A listed line stored before the next picture keyframe, beyond a long invalid stretch.
+cat >"$out/recall.srt" <<'SRT'
+1
+00:00:03,500 --> 00:00:15,000
+Line behind invalid FLAC
+SRT
+ffmpeg -v error -y -f lavfi -i 'testsrc2=size=160x90:rate=25:duration=20' \
+  -f lavfi -i 'sine=sample_rate=48000:duration=20' -i "$out/recall.srt" \
+  -map 0:v -map 1:a -map 2:s -c:v libx264 -preset ultrafast -g 250 -keyint_min 250 \
+  -sc_threshold 0 -c:a flac -frame_size 96 -c:s srt "$out/recall-source.mkv"
 python3 -I "$here/flac-fixtures.py" "$out"

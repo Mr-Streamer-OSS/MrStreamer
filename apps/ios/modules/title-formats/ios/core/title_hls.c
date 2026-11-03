@@ -29,8 +29,8 @@
 //   track's grid that has no packet gets a frame of silence: its rendition runs the whole
 //   title. The silence is built for AAC-LC and MP3, and encoded once with FFmpeg's encoder for
 //   AC-3 and E-AC-3 when that writes frames like the track's. A track without one may start or
-//   end EDGE_S inside the picture; a segment where it has a gap elsewhere is refused, with a
-//   reason, when that track is chosen, rather than left to stall. The session fails with it,
+//   end EDGE_S (or one FLAC frame, if longer) inside the picture; a segment with a gap elsewhere
+//   is refused, with a reason, when that track is chosen, rather than left to stall. The session fails with it,
 //   and opening the title again, from where it stopped, plays the default sound.
 // - FLAC is offered only without another playable sound family: fixed blocks, mono/stereo,
 //   16/24 bits and 44.1/48 kHz. Headers and CRCs are checked without decoding subframes.
@@ -123,6 +123,8 @@
 #define SOUNDS_MOST 8
 /** FLAC channels offered at most. */
 #define FLAC_CHANNELS_MOST 2
+/** Private read error: the operation exhausted its rejected FLAC budget. */
+#define FLAC_LIMIT FFERRTAG('F', 'L', 'A', 'C')
 /** Text subtitle tracks served at most, and other subtitle tracks named as unshown at most. */
 #define TEXTS_MOST 16
 #define UNSHOWN_MOST 16
@@ -231,10 +233,9 @@ struct TitleHls {
   TitleHlsSource source;
   /** Whether a FLAC frame was left out for failing its checks. */
   int flac_dropped;
-  /** Whether any FLAC frame passed its checks, even outside the starting segment. */
-  int flac_kept;
-  /** The last read stopped at the invalid FLAC stretch limit. */
-  int flac_limit;
+  /** Rejected FLAC packets and bytes in the current bounded read operation. */
+  int flac_rejected;
+  size_t flac_bytes;
   int64_t position;
   /** Bytes reading may still take, or -1 for no limit. */
   int64_t budget;
@@ -337,7 +338,7 @@ static int interrupted(void *opaque) {
 static TitleHlsResult failure(TitleHls *title, int error) {
   if (atomic_load(&title->interrupted) || error == AVERROR_EXIT) return TITLE_HLS_INTERRUPTED;
   if (error == AVERROR(ENOMEM)) return TITLE_HLS_NO_MEMORY;
-  if (error == AVERROR(EIO)) return TITLE_HLS_READ_FAILED;
+  if (error == AVERROR(EIO) || error == FLAC_LIMIT) return TITLE_HLS_READ_FAILED;
   return TITLE_HLS_UNSUPPORTED;
 }
 
@@ -397,7 +398,8 @@ static void flac_format(const uint8_t *info, int *rate, int *channels, int *bits
  * Why a FLAC track isn't offered, or NULL when it is: fixed blocking, mono or stereo, 16 or 24
  * bits, 44.1 or 48 kHz.
  */
-static const char *flac_unplayable(const AVCodecParameters *par) {
+static const char *flac_unplayable(const AVStream *stream) {
+  const AVCodecParameters *par = stream->codecpar;
   const uint8_t *x = flac_info(par);
   if (!x) return "Its FLAC sound has no readable STREAMINFO.";
   if (!flac_block(par)) return "Its FLAC sound has frames of more than one length.";
@@ -407,7 +409,9 @@ static const char *flac_unplayable(const AVCodecParameters *par) {
   if (bits != 16 && bits != 24) return "Its FLAC sound isn't 16 or 24 bit.";
   if (rate != 44100 && rate != 48000) return "Its FLAC sound isn't 44.1 or 48 kHz.";
   if (par->sample_rate != rate || par->ch_layout.nb_channels != channels)
-    return "Its FLAC track disagrees with STREAMINFO.";
+    return "Its FLAC sound has conflicting format details.";
+  if (av_compare_ts(flac_block(par), (AVRational){1, rate}, 2, stream->time_base) < 0)
+    return "Its FLAC sound has frames too short to time.";
   return NULL;
 }
 
@@ -602,8 +606,9 @@ static unsigned aac_type(const AVCodecParameters *par) {
  * Apple's HLS authoring specification lists it. A variant naming another AAC, such as AAC Main,
  * in its CODECS fails to open whole, the default sound with it; such a track isn't offered.
  */
-static int sound_playable(const AVCodecParameters *par) {
-  if (par->codec_id == AV_CODEC_ID_FLAC) return !flac_unplayable(par);
+static int sound_playable(const AVStream *stream) {
+  const AVCodecParameters *par = stream->codecpar;
+  if (par->codec_id == AV_CODEC_ID_FLAC) return !flac_unplayable(stream);
   if (!sound_copyable(par->codec_id)) return 0;
   if (par->codec_id != AV_CODEC_ID_AAC) return 1;
   unsigned type = aac_type(par);
@@ -817,8 +822,8 @@ static int64_t slot_at(const TitleHls *title, const Sound *sound, int64_t first,
  * `packets`, a segment's, stamped and in order, with the track's silence, adding its bytes to
  * `*bytes`: AVPlayer's clock stops where the chosen sound stops, so a rendition has sound for
  * the whole of every segment. A track without silence is left as it is; 1 when it has a gap
- * more than EDGE_S inside the title, which this segment can't be played through. The frames are
- * those of one segment, so the work is bounded by its length.
+ * more than EDGE_S (or one FLAC frame, if longer) inside the title, which this segment can't
+ * be played through. The frames are those of one segment, so the work is bounded by its length.
  */
 static int fill(const TitleHls *title, const Sound *sound, Packets *packets, int64_t from,
                 int64_t to, size_t *bytes) {
@@ -1340,13 +1345,11 @@ static void mark_read(Text *text, int64_t time) {
  * failed it fails too, until `make` or `recall` clears the error for its seek: FFmpeg reads on
  * past a failed read and may skip what that read held, and a seek alone doesn't clear it.
  * FLAC frames failing `flac_length` are left out, their slots empty for `fill` to refuse; the
- * others carry their length in samples as their duration, for `flac_grid`. A run of rejected
- * frames is bounded by LEAD_PACKETS_MOST and LEAD_BYTES_MOST and fails explicitly at either limit.
+ * others carry their length in samples as their duration, for `flac_grid`. Each read operation
+ * rejects at most LEAD_PACKETS_MOST packets or LEAD_BYTES_MOST bytes, then fails explicitly.
  */
 static int read_frame(TitleHls *title, AVPacket *packet) {
-  int error, dropped = 0;
-  size_t bytes = 0;
-  title->flac_limit = 0;
+  int error;
   for (;;) {
     error = av_read_frame(title->input, packet);
     if (error >= 0 && title->io->error < 0) {
@@ -1358,17 +1361,14 @@ static int read_frame(TitleHls *title, AVPacket *packet) {
     if (!par || par->codec_id != AV_CODEC_ID_FLAC) break;
     int length = flac_length(packet, flac_info(par));
     if (length && length <= flac_block(par)) {
-      title->flac_kept = 1;
       packet->duration = length;
       break;
     }
     title->flac_dropped = 1;
-    bytes += (size_t)packet->size;
+    title->flac_bytes += (size_t)packet->size;
     av_packet_unref(packet);
-    if (++dropped >= LEAD_PACKETS_MOST || bytes >= LEAD_BYTES_MOST) {
-      title->flac_limit = 1;
-      return AVERROR_INVALIDDATA;
-    }
+    if (++title->flac_rejected >= LEAD_PACKETS_MOST || title->flac_bytes >= LEAD_BYTES_MOST)
+      return FLAC_LIMIT;
   }
   Text *text = error < 0 ? NULL : text_of(title, packet);
   if (text && (error = keep_cue(title, text, packet)) < 0) av_packet_unref(packet);
@@ -1658,6 +1658,8 @@ static int kept_at(const Text *text, int64_t time) {
  * read on the way is kept. The read leaves the input elsewhere.
  */
 static int recall(TitleHls *title, Text *text, Listed *listed) {
+  title->flac_rejected = 0;
+  title->flac_bytes = 0;
   listed->tried = 1;
   AVStream *video = title->input->streams[title->video];
   const AVIndexEntry *from = NULL;
@@ -1696,8 +1698,8 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
   // A line not found within reach is left out, as a read that doesn't reach it would.
   if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
-  // A read the source failed is made again when the segment is asked again.
-  if (error == AVERROR(EIO)) listed->tried = 0;
+  // A failed source read or exhausted FLAC budget is retried with the segment.
+  if (error == AVERROR(EIO) || error == FLAC_LIMIT) listed->tried = 0;
   return error;
 }
 
@@ -1886,6 +1888,8 @@ static int next_packet(TitleHls *title, Packets *ahead, int *at, AVPacket **out)
  * `ahead`.
  */
 static int reach(TitleHls *title, int index, Packets *ahead) {
+  title->flac_rejected = 0;
+  title->flac_bytes = 0;
   for (int from = index; from >= 0 && from >= index - 1; from--) {
     clear(ahead);
     int error = av_seek_frame(title->input, title->video, title->cuts[from], AVSEEK_FLAG_BACKWARD);
@@ -1938,6 +1942,8 @@ static int reach(TitleHls *title, int index, Packets *ahead) {
  * most.
  */
 static int read_lead(TitleHls *title) {
+  title->flac_rejected = 0;
+  title->flac_bytes = 0;
   for (int read = 0; read < LEAD_PACKETS_MOST && title->lead.bytes < LEAD_BYTES_MOST; read++) {
     AVPacket *packet = av_packet_alloc();
     if (!packet) return AVERROR(ENOMEM);
@@ -2059,12 +2065,14 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     title->io->error = 0;
     title->io->eof_reached = 0;
     if ((error = recall_before(title, index)) < 0 || (error = reach(title, index, &title->ahead)) < 0) {
-      say(detail, detail_size, title->flac_limit
+      say(detail, detail_size, error == FLAC_LIMIT
           ? "Its FLAC sound has too many invalid frames in a row."
           : "The file couldn't be read at this point.");
       return failure(title, error);
     }
   }
+  title->flac_rejected = 0;
+  title->flac_bytes = 0;
   title->next = -1;
   int64_t start = title->cuts[index], end = title->cuts[index + 1];
   int64_t late = llrint(LATE_SOUND_S / av_q2d(title->video_base));
@@ -2083,7 +2091,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     if (error == AVERROR_EOF) break;
     if (error < 0) {
       result = failure(title, error);
-      say(detail, detail_size, title->flac_limit
+      say(detail, detail_size, error == FLAC_LIMIT
           ? "Its FLAC sound has too many invalid frames in a row."
           : "The file couldn't be read at this point.");
       goto end;
@@ -2228,6 +2236,8 @@ end:
  * it. A track with no packet there isn't offered.
  */
 static int sample(TitleHls *title, int index) {
+  title->flac_rejected = 0;
+  title->flac_bytes = 0;
   int error = reach(title, index, &title->ahead);
   if (error < 0) return error;
   for (int i = 0;; i++) {
@@ -2297,12 +2307,9 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
     const AVCodecParameters *par = title->input->streams[i]->codecpar;
     others |= par->codec_type == AVMEDIA_TYPE_AUDIO && par->codec_id != AV_CODEC_ID_FLAC &&
-              sound_playable(par) && par->sample_rate > 0;
-    const char *why = par->codec_id == AV_CODEC_ID_FLAC ? flac_unplayable(par) : NULL;
-    if (!why && par->codec_id == AV_CODEC_ID_FLAC &&
-        av_compare_ts(flac_block(par), (AVRational){1, par->sample_rate},
-                      2, title->input->streams[i]->time_base) < 0)
-      why = "Its FLAC frames are too short for the track's clock.";
+              sound_playable(title->input->streams[i]) && par->sample_rate > 0;
+    const char *why =
+        par->codec_id == AV_CODEC_ID_FLAC ? flac_unplayable(title->input->streams[i]) : NULL;
     if (why) flac_reason = why;
   }
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
@@ -2310,10 +2317,7 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     int offered = 0;
     if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
       any = 1;
-      if (sound_playable(st->codecpar) && st->codecpar->sample_rate > 0 &&
-          !(st->codecpar->codec_id == AV_CODEC_ID_FLAC &&
-            av_compare_ts(flac_block(st->codecpar), (AVRational){1, st->codecpar->sample_rate},
-                          2, st->time_base) < 0) &&
+      if (sound_playable(st) && st->codecpar->sample_rate > 0 &&
           !(others && st->codecpar->codec_id == AV_CODEC_ID_FLAC) &&
           title->sound_count < SOUNDS_MOST) {
         Sound *sound = &title->sounds[title->sound_count++];
@@ -2392,7 +2396,7 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   if ((result = choose(title, detail, detail_size)) != TITLE_HLS_OK) goto fail;
   if ((error = read_lead(title)) < 0) {
     result = failure(title, error);
-    say(detail, detail_size, title->flac_limit
+    say(detail, detail_size, error == FLAC_LIMIT
           ? "Its FLAC sound has too many invalid frames in a row."
           : "The file couldn't be read at its start.");
     goto fail;
@@ -2412,14 +2416,15 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   prune(title);
   double length = seconds(title->cuts[title->count] - title->cuts[0], title->video_base);
   title->start = start > 0 && start < length ? start : 0;
+  title->flac_dropped = 0;
   if ((error = sample(title, segment_at(title, title->start))) < 0) {
     result = failure(title, error);
-    say(detail, detail_size, title->flac_limit
+    say(detail, detail_size, error == FLAC_LIMIT
           ? "Its FLAC sound has too many invalid frames in a row."
           : "The file couldn't be read where it starts playing.");
     goto fail;
   }
-  if (title->sound_count == 0 && title->flac_dropped && !title->flac_kept) {
+  if (title->sound_count == 0 && title->flac_dropped) {
     result = TITLE_HLS_UNSUPPORTED;
     say(detail, detail_size, "Its FLAC sound has frames this can't play.");
     goto fail;

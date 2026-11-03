@@ -767,8 +767,8 @@ other playable sound family, it also offers fixed-block FLAC, mono or stereo, 16
 44.1 or 48 kHz, with each block lasting at least two ticks of the track's clock. Other FLAC
 variants fail with a reason. Invalid interior FLAC frames or changes in frame length stop the
 session with a gap message. Tracks with a supported silence frame fill gaps with silence.
-Other tracks, including FLAC, HE-AAC and E-AC-3 over 5.1, stop with a gap message. Try again
-uses the main sound; a gap in the main sound can fail again. A track AVPlayer doesn't play in
+Other tracks, including FLAC, HE-AAC and E-AC-3 over 5.1, stop with a gap message when chosen.
+Try again uses the main sound; a gap in the main sound can fail again. A track AVPlayer doesn't play in
 HLS, such as AAC Main, or one that starts more than
 five seconds after where playing starts, isn't offered. It needs the file's keyframe index
 (Matroska's Cues); other Matroska files fail as files Mr. Streamer can't play.
@@ -812,8 +812,9 @@ line, a 1 MB packet, 4 MB of lines alone, before a later line or in six tracks p
 one or 20 DVB tracks; `check.c` asks each subtitle segment of a title just opened, as after a seek,
 for `subs.mkv` and the file with the later line also with its reads failing from each one on, and
 `verify.py` checks every segment's lines against ffmpeg's own reading of the source.
-`subtitle-check.sh <out>` runs them all with what each must show, and fails on any miss. Whether
-AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
+`modules/title-formats/reference/flac-check.sh <out>` checks FLAC admission, gaps, bounded reads
+and subtitle retries on synthetic files. `subtitle-check.sh <out>` runs the subtitle fixtures
+with what each must show, and fails on any miss. Whether AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
 Matroska title's picture included, is still to be seen on the simulator and a phone.
 
 ### Online subtitles

@@ -14,6 +14,9 @@ fail() { echo "FAIL $1"; status=1; }
 for start in 0 7.3; do
   for file in "$out/fixtures/"*.mkv; do
     name=$(basename "$file" .mkv)
+    # The focused recall check below requests this line without reading the corrupt segment.
+    if [[ $name == recall-* ]]; then continue; fi
+    if [[ $start == 0 && $name == resume-corrupt ]]; then continue; fi
     # These controls isolate picture-only admission after the short sound track ends.
     if [[ $start == 0 && ( $name == late-corrupt || $name == late-source ) ]]; then continue; fi
     folder=$out/start-$start/$name
@@ -25,9 +28,10 @@ for start in 0 7.3; do
     if grep -Eq 'runtime error|ERROR: AddressSanitizer' "$log"; then fail "$name: sanitizer"; fi
     reason= segments=
     case $name in
-      tiny-block) reason="Its FLAC frames are too short for the track's clock." ;;
-      invalid-lead) reason='Its FLAC sound has too many invalid frames in a row.' ;;
-      track-rate|track-channels) reason='Its FLAC track disagrees with STREAMINFO.' ;;
+      tiny-block) reason="Its FLAC sound has frames too short to time." ;;
+      invalid-lead|alternating-lead) reason='Its FLAC sound has too many invalid frames in a row.' ;;
+      track-rate|track-channels) reason='Its FLAC sound has conflicting format details.' ;;
+      resume-corrupt) reason="Its FLAC sound has frames this can't play." ;;
       surround) reason='Its FLAC sound has more than two channels.' ;;
       rate96) reason="Its FLAC sound isn't 44.1 or 48 kHz." ;;
       variable-info) reason='Its FLAC sound has frames of more than one length.' ;;
@@ -38,7 +42,9 @@ for start in 0 7.3; do
     esac
     if [[ -n $reason ]]; then
       [[ $code == 1 ]] || fail "$name: expected open refusal, exit $code"
-      [[ $(sed -n 's/^open .* result=2 .*detail=//p' "$log") == "$reason" ]] || fail "$name: wrong open refusal"
+      result=2
+      if [[ $name == invalid-lead || $name == alternating-lead ]]; then result=3; fi
+      [[ $(sed -n "s/^open .* result=$result .*detail=//p" "$log") == "$reason" ]] || fail "$name: wrong open refusal"
     else
       [[ $code == 0 ]] || fail "$name: checker exit $code"
       actual=$(sed -n "s/^a0-\([0-9]*\)\.m4s refused: Its sound has a gap here that can't be played\.$/\1/p" "$log" | sort -nu | paste -sd ' ')
@@ -56,5 +62,13 @@ for start in 0 7.3; do
     fi
   done
 done
+# Exercise a failed indexed recall twice, then retry after repairing only the frame bytes.
+ff=$here/../../../vendor/ffmpeg/reference/prefix
+core=${FLAC_CHECK_CORE:-$here/../ios/core/title_hls.c}
+cc -std=c11 -O1 -g -fsanitize=address,undefined -I"$ff/include" \
+  "$here/flac-retry.c" "$core" -L"$ff/lib" -Wl,-rpath,"$ff/lib" \
+  -lavformat -lavcodec -lavutil -lm -o "$out/flac-retry"
+"$out/flac-retry" "$out/fixtures/recall-corrupt.mkv" "$out/fixtures/recall-source.mkv" \
+  >"$out/recall.log" 2>&1 || fail 'indexed subtitle: FLAC failure and recovery'
 [[ $status == 0 ]] && echo 'FLAC checks passed (faults, start 0 and 7.3).'
 exit "$status"
