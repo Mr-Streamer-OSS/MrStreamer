@@ -147,7 +147,7 @@ class PlayerOwnerTest {
 
   @Test
   fun sendsTheSourcesHeadersAndClosesItsConnectionsWhenStopped() {
-    val bytes = javaClass.classLoader!!.getResourceAsStream("media/h264-aac.ts")!!.readBytes()
+    val bytes = javaClass.classLoader!!.getResourceAsStream("media/h264-aac.m2ts")!!.readBytes()
     val server = MockWebServer().also { servers += it }
     server.dispatcher =
       WebServerDispatcher.forResources(
@@ -223,16 +223,16 @@ class PlayerOwnerTest {
     val expected =
       linkedMapOf(
         "h264-aac.mp4" to listOf("video/avc", "audio/mp4a-latm"),
-        "h264-aac.ts" to listOf("video/avc", "audio/mp4a-latm"),
-        "mpeg2-mp2.ts" to listOf("video/mpeg2", "audio/mpeg-L2"),
+        "h264-aac.m2ts" to listOf("video/avc", "audio/mp4a-latm"),
+        "mpeg2-mp2.m2ts" to listOf("video/mpeg2", "audio/mpeg-L2"),
         "hevc-ac3-eac3-srt.mkv" to listOf("video/hevc", "audio/ac3", "audio/eac3", "text"),
         "vp9-opus.webm" to listOf("video/x-vnd.on2.vp9", "audio/opus"),
         "hevc10-eac3.mp4" to listOf("video/hevc", "audio/eac3"),
         // An HLS stream that doesn't say it has no captions may carry them in its picture.
         "hls/index.m3u8" to listOf("video/avc", "audio/mp4a-latm", "text"),
       )
-    fixture("hls/segment0.ts")
-    fixture("hls/segment1.ts")
+    fixture("hls/segment0.m2ts")
+    fixture("hls/segment1.m2ts")
     expected.forEach { (name, codecs) ->
       val owner = owner()
       owner.admit(file(name, fixture(name), format = if (name.endsWith(".m3u8")) "hls" else "progressive"))

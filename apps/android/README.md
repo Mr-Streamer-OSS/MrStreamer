@@ -126,8 +126,28 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   { "kind": "m3u", "link": "https://lists.example/tv.m3u?token=…" }
   ```
 
-  The app never logs either. Nothing native holds a source's work yet: the first card that adds
-  such a worker also adds the step that stops it before `remove` erases the authority.
+  The app never logs either. The player is the first native worker that holds a source: it stops
+  playing a source the moment the source leaves the saved list. A Remove that should wait until
+  the player has let go first calls `player.release` (below) before `remove`.
+
+- **Player.** `modules/player` is the app's one Media3 ExoPlayer and MediaSession
+  (`PlayerHost`), and `src/player/instance.ts` its one JS owner, `player`. Screens play a
+  `PlayIntent` (`src/player/intent.ts`: live, catch-up, title or file), never an address:
+  `src/player/resolve.ts` works the address out from the source's protected login each time, and
+  it goes only to the native player. Each `play` is a new attempt that replaces the one before;
+  commands and observations name their attempt, so nothing late from a replaced one acts on its
+  successor. `player.state` holds what the native player observed (phase, position, duration,
+  buffer, live and seekable, speed, failure) and the tracks the media declares, each saying
+  whether this phone decodes it; `capabilities()` lists the decoders the phone declares.
+  `setSpeed` and `setQuality` take effect on titles, recordings and files; `onSettled` (see
+  `playerOwner`) reports where an attempt paused, stopped or ended, for history to save.
+  `release(matches)` stops what holds a source or file and resolves once the native player says
+  how it let go: `file-closed`, or `connections-closed`, after which whether the provider counts
+  the connection as ended can't be observed. Watch is `src/app/watch.tsx`, opened with
+  `watchHref(intent)` after `player.play(intent)`; the mini player shows while something plays
+  and Watch doesn't. `PlayerSurface` shows the picture: the newest one mounted has it.
+  Playlist channels are found by reading the playlist link again until their entry; the shared
+  playlist adapter can answer that from its catalogue instead.
 
 - **Long work.** `src/platform/tasks.ts` runs core's paced steps a few slices per task, as the iOS
   app does, so catalogue mapping and naming leave taps and Back responsive.

@@ -1,3 +1,4 @@
+import { sources } from "../bootstrap/sources.ts";
 import { nativeCredentials } from "../platform/credentials.ts";
 import { nativePlayer } from "./native.ts";
 import { playerOwner, type PlayerOwner } from "./player.ts";
@@ -19,4 +20,13 @@ export const player: PlayerOwner = playerOwner(nativePlayer(), {
     userAgent: USER_AGENT,
     now: Date.now,
   }),
+});
+
+// A source that leaves the saved list (Remove) stops playing at once: no attempt goes on with a
+// login the app no longer keeps.
+sources.state.subscribe(() => {
+  const now = sources.state.get();
+  if (now.kind !== "ready") return;
+  const saved = new Set(now.sources.map((source) => source.id));
+  void player.release((hold) => hold.kind === "source" && !saved.has(hold.sourceId));
 });
