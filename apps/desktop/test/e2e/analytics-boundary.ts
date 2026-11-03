@@ -208,7 +208,8 @@ async function install(profile: string, directory: string) {
       if (counted(after, reader.key) > counted(await read(destination), reader.key)) {
         // libuv include/uv/win.h: UV_FS_O_EXLOCK=0x10000000, src/win/fs.c maps it to share=0.
         // The actual Windows rejection/recovery below validates support in this Electron runtime.
-        const exported: unknown = Reflect.get(nativeFS.constants, "O_EXLOCK");
+        const constants = nativeFS.constants;
+        const exported = "O_EXLOCK" in constants ? constants.O_EXLOCK : undefined;
         recovering = {
           ...reader,
           flags:

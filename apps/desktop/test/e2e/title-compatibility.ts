@@ -16,6 +16,7 @@ import {
 import { fixture, startFakeProvider } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, login, silent, waitFor, type Page } from "./app.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const variant = process.argv[2] ?? "h264-10bit";
 if (
@@ -76,9 +77,7 @@ const app = spawn(executable, args, {
     MR_STREAMER_UPDATE_CHECKS: "off",
     MR_STREAMER_TMDB_API: tmdb.url,
     MR_STREAMER_TMDB_KEY: "test-key",
-    ...(process.env["MR_STREAMER_FFMPEG"]
-      ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-      : {}),
+    ...defined({ MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] || undefined }),
   },
 });
 const logs: string[] = [];

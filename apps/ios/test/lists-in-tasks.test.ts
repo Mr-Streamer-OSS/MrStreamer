@@ -9,6 +9,7 @@ import {
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { describe, expect, it, vi } from "vitest";
 import { inTasks } from "../src/library.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Long movie and series lists read and indexed a few slices per task, as the iOS app does: other
 // work runs between the tasks, the lists come out as reading and indexing them at once gives
@@ -69,7 +70,7 @@ function panel(rows: { readonly movies: unknown; readonly series: unknown }, tas
     { server: "http://panel.test", username: "fixture", password: "secret" },
     {
       userAgent: "fixture",
-      ...(tasks ? { inTasks } : {}),
+      ...defined({ inTasks: tasks ? inTasks : undefined }),
       fetch: async (input) => {
         const action = new URL(String(input)).searchParams.get("action") ?? "";
         if (action.endsWith("categories")) return Response.json(categories);

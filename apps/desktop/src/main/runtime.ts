@@ -56,6 +56,7 @@ import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
 import { Updates, type UpdatesConfig } from "./services/updates.ts";
 import { Watchlist } from "./services/watchlist.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export interface MainConfig {
   readonly dataDir: string;
@@ -137,7 +138,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       worker: config.catalogueWorker,
       tmdbKey: config.tmdbKey,
       region: config.region,
-      ...(config.tmdbApi ? { tmdbApi: config.tmdbApi } : {}),
+      ...defined({ tmdbApi: config.tmdbApi || undefined }),
     }),
     Playback.layer({
       userAgent: config.userAgent,
@@ -180,7 +181,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
                 ? { tmdbId }
                 : {
                     title: identity.title.slice(0, 512),
-                    ...(identity.year !== null ? { year: identity.year } : {}),
+                    ...defined({ year: identity.year ?? undefined }),
                   };
             const query =
               session.title.kind === "movie"

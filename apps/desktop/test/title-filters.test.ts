@@ -6,6 +6,7 @@ import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { Settings } from "../src/main/services/preferences.ts";
 import type { FakeProvider } from "./fake-provider.ts";
 import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** The app's services on `dir`, a new data folder unless given one, as a start of the app has them. */
 async function started(dir?: string) {
@@ -314,7 +315,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         id: "4k",
         offset: 0,
         limit: 20,
-        ...(filters ? { filters } : {}),
+        ...defined({ filters }),
       });
     expect((await collection()).titles[0]?.id).toBe("71001");
     const dutch = await collection({ language: "nl", verified: { kind: "audio", language: "nl" } });

@@ -9,6 +9,7 @@ import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defined } from "@mrstreamer/core/defined";
 
 // A film's details while the providers listing it change: a version picked from a provider that
 // is removed meanwhile gives way to one still listed. And its download: the button queues the
@@ -908,7 +909,7 @@ function seriesFacts(subscriptionId: string, order?: readonly string[]) {
         episodes: [at("201", 2, 1), at("202", 2, 2)],
       },
     ],
-    ...(order ? { episodeOrder: order } : {}),
+    ...defined({ episodeOrder: order }),
   };
 }
 

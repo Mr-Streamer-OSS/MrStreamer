@@ -995,12 +995,14 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
 
   it("carries only the progress, without waiting for the worker to say how the lists stand", async () => {
     const worker = new FakeWorker();
+    // The stand-in takes requests as a thread does and answers them as the worker's events.
+    const thread: Pick<Worker, "postMessage"> = worker;
     const provider = await fakeProvider();
     const runtime = runtimeFor(
       mainLayer({
         ...testConfig(await tempDir()),
         tmdbKey: "test-key",
-        catalogueWorker: () => worker as unknown as Worker,
+        catalogueWorker: () => thread as Worker,
       }),
     );
     try {

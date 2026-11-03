@@ -17,6 +17,7 @@
       "package": "app.mrstreamer.player",
       "versionCode": 1,
       "allowBackup": false,
+      "predictiveBackGestureEnabled": true,
       "permissions": ["android.permission.INTERNET"],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
@@ -26,6 +27,7 @@
       ]
     },
     "plugins": [
+      ["expo-router", { "root": "./src/app" }],
       "./plugins/no-backup.cjs",
       ["expo-splash-screen", { "backgroundColor": "#000000" }],
       [

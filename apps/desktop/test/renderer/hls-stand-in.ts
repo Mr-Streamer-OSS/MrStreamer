@@ -23,6 +23,7 @@
 //
 // A test plays the stream's part through `streams.latest()`.
 import type Hls from "hls.js";
+import { defined } from "@mrstreamer/core/defined";
 
 /** A rendition as a multivariant playlist declares it. */
 export interface Rendition {
@@ -204,9 +205,11 @@ export function standIn(real: typeof Hls) {
         success: false,
         frag,
         part: null,
-        ...(afterSuccess
-          ? { error: new Error("WebVTT failed before successful IMSC fallback") }
-          : {}),
+        ...defined({
+          error: afterSuccess
+            ? new Error("WebVTT failed before successful IMSC fallback")
+            : undefined,
+        }),
       });
     }
 

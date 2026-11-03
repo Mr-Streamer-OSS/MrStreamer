@@ -12,6 +12,7 @@
     "./catalogue/search": "./src/catalogue/search.ts",
     "./catalogue/variants": "./src/catalogue/variants.ts",
     "./catchup": "./src/catchup.ts",
+    "./defined": "./src/defined.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./downloads/series": "./src/downloads/series.ts",
     "./failure": "./src/failure.ts",

@@ -6,6 +6,7 @@ import type { ProviderDetails } from "@mrstreamer/core/provider";
 import { type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { holds, loginFrom, safeUrl, URL_LENGTH, type SourceLogin } from "./login-safety.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Title and season details the app has opened, kept in Caches/details so a launch shows them
 // before, or instead of, asking again: each provider's facts of a title, under its subscription,
@@ -580,7 +581,7 @@ export function writeFiles(
       .map((file) => ({
         kind: file.kind,
         id: file.id,
-        ...(file.seriesId === undefined ? {} : { seriesId: file.seriesId }),
+        ...defined({ seriesId: file.seriesId }),
         name: file.name,
         container: file.container,
         audio: [...file.audio],
@@ -654,7 +655,7 @@ const providerCopy = (details: ProviderDetails, art: Art) =>
       addedAt: episode.addedAt,
       container: episode.container,
     })),
-    ...(details.episodeOrder === undefined ? {} : { episodeOrder: details.episodeOrder }),
+    ...defined({ episodeOrder: details.episodeOrder }),
     container: details.container,
   }) satisfies ProviderDetails;
 

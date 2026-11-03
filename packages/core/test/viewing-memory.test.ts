@@ -14,6 +14,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { describe, expect, it } from "vitest";
+import { defined } from "../src/defined.ts";
 
 // The record service over the in-memory store, as iOS runs it: one subscription, its snapshot
 // kept by whoever saves it. Each `app` is one launch over the snapshot the last one saved. With a
@@ -41,7 +42,7 @@ function app(
         }),
         Layer.succeed(ViewingChannels, {
           lookup: () => Effect.succeed(() => undefined),
-          ...(favourite ? { favourite: () => Effect.succeed(favourite) } : {}),
+          ...defined({ favourite: favourite ? () => Effect.succeed(favourite) : undefined }),
         }),
         Layer.succeed(ViewingSeries, {
           identity: (series) =>

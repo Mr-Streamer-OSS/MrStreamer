@@ -19,6 +19,7 @@ import {
 } from "./app-attribution.ts";
 import { connect, type Page } from "./app.ts";
 import { runAppProbes } from "./app-probes.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -227,7 +228,7 @@ it("retains count and wall time for missing/partial timeline and script CPU", ()
     tid: 1,
     ts: 10,
     dur: 1000,
-    ...(tdur === undefined ? {} : { tdur }),
+    ...defined({ tdur }),
     args: { data: { functionName: name, lineNumber: 4 } },
   });
   const result = traceSummary(

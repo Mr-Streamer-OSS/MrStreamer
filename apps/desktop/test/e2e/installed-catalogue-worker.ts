@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Compatible with the verified main Page. This adapter owns its three NodeWorker listeners. */
 export interface MainTransport {
@@ -148,7 +149,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
       at: new Date().toISOString(),
       kind,
       data,
-      ...(sessionId === undefined ? {} : { sessionId }),
+      ...defined({ sessionId }),
     };
     try {
       evidence(entry);

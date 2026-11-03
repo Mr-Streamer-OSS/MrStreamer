@@ -8,6 +8,7 @@ import { useStore } from "../store.ts";
 import { Analytics, type PlaybackView } from "./analytics.ts";
 import { IosBuild, type IosAction, type IosFeature } from "./model.ts";
 import { analyticsTransport } from "./transport.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The app's statistics: one owner (analytics.ts), started once at launch, fed fixed
 // observations by the app's own state (its activity, the player and the screen on show). The
@@ -145,7 +146,7 @@ function build(): IosBuild {
     app_version: Constants.expoConfig?.version ?? "unknown",
     app_build: Constants.platform?.ios?.buildNumber ?? "unknown",
     os: "ios",
-    ...(Number.isInteger(major) ? { os_major: major } : {}),
+    ...defined({ os_major: Number.isInteger(major) ? major : undefined }),
   });
   return found instanceof type.errors
     ? { app_version: "unknown", app_build: "unknown", os: "ios" }

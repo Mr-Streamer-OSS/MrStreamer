@@ -24,6 +24,7 @@ import { Input } from "../../components/ui/input.tsx";
 import { appError, describeError } from "../../lib/errors.ts";
 import { hostOf } from "../../lib/format.ts";
 import { call } from "../../lib/ipc.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 export function LoginForm({
   beside = false,
@@ -62,7 +63,7 @@ export function LoginForm({
     ...(mode === "link"
       ? { server: address, username: "", password: "" }
       : { server: address, username, password }),
-    ...(beside && name.trim() ? { name: name.trim() } : {}),
+    ...defined({ name: beside && name.trim() ? name.trim() : undefined }),
   });
 
   function submit(event: FormEvent) {

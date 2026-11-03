@@ -6,6 +6,7 @@ import type {
 } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { streamFailure, type PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
+import { defined } from "@mrstreamer/core/defined";
 export { streamFailure } from "@mrstreamer/contracts/analytics";
 import { call, listen } from "../lib/ipc.ts";
 import type { EngineError } from "./engine.ts";
@@ -199,7 +200,7 @@ export class PlaybackObservation {
           token,
           binding,
           failure,
-          ...(diagnostic ? { diagnostic } : {}),
+          ...defined({ diagnostic }),
         }).catch(() => {});
     });
   }

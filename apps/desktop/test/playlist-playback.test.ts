@@ -10,6 +10,7 @@ import { Playback } from "../src/main/services/playback.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture } from "./fake-provider.ts";
 import { promised, runtimeFor, tempDir, testConfig, userAgent } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
@@ -64,7 +65,7 @@ async function host(unsupportedHeaders = false) {
       "Content-Length": end - start + 1,
       "Accept-Ranges": "bytes",
       ETag: `"${agent}"`,
-      ...(range ? { "Content-Range": `bytes ${start}-${end}/${body.length}` } : {}),
+      ...defined({ "Content-Range": range ? `bytes ${start}-${end}/${body.length}` : undefined }),
     });
     response.end(body.subarray(start, end + 1));
   });

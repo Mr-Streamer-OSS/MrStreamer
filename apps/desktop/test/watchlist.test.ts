@@ -16,6 +16,7 @@ import { Watchlist } from "../src/main/services/watchlist.ts";
 import type { FakeProvider, FakeTitles } from "./fake-provider.ts";
 import { startFakeTmdb, tmdbName, type FakeTmdb } from "./fake-tmdb.ts";
 import { collect, fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The first fake provider's titles the tests save, by the ids it lists them under.
 /** A film in two versions that share TMDB id 100000: `TWO_SOUNDS` and `TWO_SOUNDS_DUBBED`. */
@@ -125,8 +126,11 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
     const runtime = runtimeFor(
       mainLayer({
         ...config,
-        ...(locked ? { secrets: refusing } : {}),
-        ...(tmdb ? { tmdbKey: "test-key", tmdbApi: tmdb.url } : {}),
+        ...defined({
+          secrets: locked ? refusing : undefined,
+          tmdbKey: tmdb ? "test-key" : undefined,
+          tmdbApi: tmdb?.url,
+        }),
       }),
     );
     dispose = () => runtime.dispose();

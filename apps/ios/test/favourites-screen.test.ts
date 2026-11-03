@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import { buildLibrary, type Channel } from "../src/library.ts";
 import { native } from "./native-files.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Favourites as the viewer meets them: Live's Favourites row and its rows' stars, the list with
 // its editor, and Home's row. The real screens run with React DOM on a happy-dom window, as
@@ -55,7 +56,7 @@ vi.mock("react-native", async () => {
     },
     Alert: {
       alert: (title: string, _message: string, buttons?: Shown["buttons"]) =>
-        void scenario.alerts.push({ title, ...(buttons ? { buttons } : {}) }),
+        void scenario.alerts.push({ title, ...defined({ buttons }) }),
     },
   };
 });
@@ -229,13 +230,15 @@ function press(testID: string) {
 const disabled = (testID: string) => (find(testID) as { disabled?: boolean } | null)?.disabled;
 /** The favourites the list shows, in order. */
 const listed = () =>
-  [...container.querySelectorAll('[data-testid^="favourite-"]')]
-    .map((row) => row.getAttribute("data-testid")?.slice("favourite-".length) ?? "")
-    .filter((key) => !key.endsWith("-star"));
+  [...container.querySelectorAll('[data-testid^="favourite-"]')].flatMap((row) => {
+    const key = row.getAttribute("data-testid")?.slice("favourite-".length) ?? "";
+    return !key.endsWith("-star") ? [key] : [];
+  });
 const arranged = () =>
-  [...container.querySelectorAll('[data-testid^="arranged-"]')]
-    .map((row) => row.getAttribute("data-testid")?.slice("arranged-".length) ?? "")
-    .filter((key) => !key.endsWith("-up") && !key.endsWith("-down"));
+  [...container.querySelectorAll('[data-testid^="arranged-"]')].flatMap((row) => {
+    const key = row.getAttribute("data-testid")?.slice("arranged-".length) ?? "";
+    return !key.endsWith("-up") && !key.endsWith("-down") ? [key] : [];
+  });
 /** The record's favourites, as their subscriptions' ids. */
 const saved = () =>
   (viewing.currentViewing()?.favourites ?? []).map((each) => `${each.subscriptionId}:${each.id}`);

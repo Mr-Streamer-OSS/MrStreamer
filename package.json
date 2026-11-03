@@ -14,7 +14,7 @@
     "dev:marketing": "pnpm --filter mrstreamer-marketing dev",
     "build:marketing": "pnpm --filter mrstreamer-marketing build",
     "preview:marketing": "pnpm --filter mrstreamer-marketing preview",
-    "typecheck": "tsc --noEmit -p packages/contracts && tsc --noEmit -p packages/core && tsc --noEmit -p apps/desktop && tsc --noEmit -p apps/desktop/src/renderer && tsc --noEmit -p apps/marketing && tsc --noEmit -p tsconfig.json && tsc -p apps/review-provider/tsconfig.worker.json && tsc -p apps/review-provider/tsconfig.tools.json",
+    "typecheck": "tsc --noEmit -p packages/contracts && tsc --noEmit -p packages/core && tsc --noEmit -p apps/desktop && tsc --noEmit -p apps/desktop/src/renderer && tsc --noEmit -p apps/marketing && tsc --noEmit -p tsconfig.json && tsc -p apps/review-provider/tsconfig.worker.json && tsc -p apps/review-provider/tsconfig.tools.json && tsc --noEmit -p tools/oxlint/anti-slop",
     "test": "vitest run",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives",
     "lint:fix": "pnpm lint --fix",
@@ -33,6 +33,7 @@
   },
   "packageManager": "pnpm@11.24.0",
   "devDependencies": {
+    "@oxlint/plugins": "1.86.0",
     "@types/node": "^24.19.2",
     "happy-dom": "21.0.4",
     "knip": "6.38.0",

@@ -49,9 +49,10 @@ function panelTime(text: string): number | null {
   // Date.UTC rolls a day or hour past its end into the next, as 30 February into March.
   if (new Date(asUtc).toISOString().slice(0, 16) !== text.replace(/:(\d{2})-/, "T$1:")) return null;
   // The clock's offsets either side of the time, which differ only around a change.
-  const named = [-3, 3]
-    .map((hours) => asUtc - panelOffset(asUtc + hours * 60 * 60_000))
-    .filter((time) => time + panelOffset(time) === asUtc);
+  const named = [-3, 3].flatMap((hours) => {
+    const time = asUtc - panelOffset(asUtc + hours * 60 * 60_000);
+    return time + panelOffset(time) === asUtc ? [time] : [];
+  });
   return named.length > 0 ? Math.min(...named) : null;
 }
 

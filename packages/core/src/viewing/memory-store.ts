@@ -175,9 +175,9 @@ export function memoryViewingStore(deps: {
     marksIn: (account, seriesIds) => {
       const held = accounts.get(account);
       if (!held) return [];
-      const keys = [...held.series]
-        .filter(([, state]) => state.versions.some((id) => seriesIds.includes(id)))
-        .map(([key]) => key);
+      const keys = [...held.series].flatMap(([key, state]) =>
+        state.versions.some((id) => seriesIds.includes(id)) ? [key] : [],
+      );
       return marksOf(account, keys).flatMap(({ marks }) => marks);
     },
   };

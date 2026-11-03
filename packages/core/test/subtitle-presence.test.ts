@@ -22,7 +22,7 @@ it("recognizes the fixture's declared teletext page, but rejects filler, other p
   expect(teletextPagePresent(page.subarray(0, 30), 888)).toBe(false);
 });
 it("recognizes meaningful DVB page data and rejects clear pages, wrong pages and incomplete segments", () => {
-  const pages = packets.filter((packet) => packet.pid === 0x103).map((packet) => packet.payload);
+  const pages = packets.flatMap((packet) => (packet.pid === 0x103 ? [packet.payload] : []));
   expect(pages.some((page) => dvbPagePresent(page, 1))).toBe(true);
   expect(pages.some((page) => dvbPagePresent(page, 2))).toBe(false);
   expect(

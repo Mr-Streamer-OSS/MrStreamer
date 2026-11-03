@@ -69,6 +69,7 @@ import {
   type ViewingEvent,
   type ViewingState,
 } from "./record.ts";
+import { defined } from "../defined.ts";
 
 /** A saved subscription as the record knows it. */
 export interface ViewingOwner {
@@ -420,18 +421,18 @@ function listingOf(seasons: SeriesSeasons): SeriesListing {
   return seasons.map((season) => ({
     number: season.number,
     episodes: [...new Set(season.episodes.map((each) => each.number))],
-    ...(season.episodes.some((episode) => episode.exactVersion)
-      ? {
-          files: [
+    ...defined({
+      files: season.episodes.some((episode) => episode.exactVersion)
+        ? [
             ...new Set(
               season.episodes.flatMap((episode) => [
                 episode.id,
                 ...(episode.versions?.map((file) => file.id) ?? []),
               ]),
             ),
-          ],
-        }
-      : {}),
+          ]
+        : undefined,
+    }),
   }));
 }
 

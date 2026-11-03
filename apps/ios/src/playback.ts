@@ -11,9 +11,24 @@ import {
   type PlaybackObservation,
   type VideoPlayer,
 } from "expo-video";
+import {
+  connectTv,
+  onLeftApp,
+  serveOnRelay,
+  TvRefused,
+  type Relay,
+  type Tv,
+  type TvLink,
+  type TvLoaded,
+  type TvStatus,
+  type Volume,
+} from "./cast.ts";
+import { tvPath } from "./cast-media.ts";
 import { appError, describeError, withoutLogin } from "./errors.ts";
+import { t as tvText } from "./i18n/cast.ts";
 import { t } from "./i18n/watch.ts";
 import {
+  audioTarget,
   confirms,
   decideAudio,
   decideSubtitles,
@@ -47,6 +62,7 @@ import {
 import { currentSource, onSignedIn, type Source as SignedInSource } from "./sources.ts";
 import { store, useStore, type Store } from "./store.ts";
 import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-formats.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The app's one player and what it plays: a live channel, or a movie or an episode. Every surface
 // shows this player and no other: Home's preview, Watch, Picture in Picture and AirPlay, and the
@@ -80,6 +96,13 @@ import { openFormat, type FormatSession, type UnshownSubtitles } from "./title-f
 // An episode that plays to its end in Watch counts down to the episode that goes on, once its
 // save ended and its owner said which (`upNext`), and plays it at zero. Anything the viewer does
 // first ends the countdown for good: Pause, a seek, Close, Stop, any other request or screen.
+//
+// The player can play on a TV instead (`playOnTv`, cast.ts): one route at a time, so this phone,
+// AirPlay, Picture in Picture and a TV never play together. While a TV is chosen every play goes
+// there: the same admission, lease and readers, with the relay on the phone as the stream's
+// reader in AVPlayer's place, and a Matroska title's format session opened from its start. The
+// TV plays only while the app is open: leaving it stops the TV, and coming back shows where it
+// stopped. Disconnect plays here again, a title paused where the TV was, a channel live.
 
 /** What plays, as the screens name it. */
 export interface Playing {
@@ -113,6 +136,18 @@ export interface Playing {
   readonly subtitles?: SubtitleTitle;
 }
 
+/**
+ * The TV route: none, connecting to one, playing there, or ended by leaving the app or losing it,
+ * which Watch shows until the viewer plays again or chooses again.
+ */
+export type TvRoute =
+  | { readonly kind: "off" }
+  | { readonly kind: "connecting" | "on"; readonly tv: Tv }
+  | { readonly kind: "ended"; readonly tv: Tv; readonly why: TvEnd };
+
+/** Why a TV route ended: the app left the foreground, the TV went, or it stopped playing there. */
+type TvEnd = "left" | "lost" | "stopped";
+
 export type Phase =
   | { readonly kind: "idle" }
   | { readonly kind: "loading" | "playing" | "paused"; readonly item: Playing }
@@ -126,6 +161,8 @@ export interface Playback {
   readonly pip: boolean;
   /** It plays on an AirPlay receiver. */
   readonly external: boolean;
+  /** Where a TV stands as the route for what plays (`playOnTv`). */
+  readonly tv: TvRoute;
   /**
    * Watch gave way to Downloads or Settings with no Picture in Picture to take the picture over:
    * it waits, paused, for the accessory to bring Watch back (`setAside`).
@@ -233,6 +270,7 @@ const state = store<Playback>({
   watch: false,
   pip: false,
   external: false,
+  tv: { kind: "off" },
   aside: false,
   muted: true,
   closing: [],
@@ -413,6 +451,13 @@ let current: {
   resource: Resource;
 } | null = null;
 
+/** The open connection to the TV every play goes to while one is chosen; null plays here. */
+let link: TvLink | null = null;
+/** Rises with every change of route, so a connect that ends late never takes over a newer one. */
+let routes = 0;
+/** Settles once the latest connect to a TV did, and was closed if it came too late. */
+let connecting: Promise<void> = Promise.resolve();
+
 type FormatReader = ReturnType<typeof openFormat>;
 type Group = "audio" | "subtitles";
 interface PendingConfirmation {
@@ -474,6 +519,15 @@ interface Resource {
   lease: string | null;
   /** A source went to the native player or a format session: they may hold the connection. */
   submitted: boolean;
+  /** Set when it plays on the TV: its relay and load, and where the TV last said it was. */
+  tv: TvPlay | null;
+}
+
+interface TvPlay {
+  readonly link: TvLink;
+  relay: Relay | null;
+  loaded: TvLoaded | null;
+  status: TvStatus | null;
 }
 let attempts = 0;
 const closing = new Set<Resource>();
@@ -512,8 +566,8 @@ onSignedIn(() => {
 });
 
 const attended = () => {
-  const { watch, pip, external } = state.get();
-  return watch || pip || external;
+  const { watch, pip, external, tv } = state.get();
+  return watch || pip || external || tv.kind === "on";
 };
 
 const sourceStands = ({ item, epoch }: NonNullable<typeof current>) =>
@@ -545,17 +599,28 @@ function retire(resource: Resource) {
   }
   closing.add(resource);
   if (!resource.submitted) giveBack(resource);
-  resource.detach = Promise.resolve().then(() => player().detachObservedAsync(resource.id));
+  const { tv } = resource;
+  // A TV's stream never reached the player here: its readers are the relay's.
+  resource.detach = tv
+    ? null
+    : Promise.resolve().then(() => player().detachObservedAsync(resource.id));
   resource.settlement = (async () => {
-    const receipt = await resource.detach;
-    if (
-      receipt?.kind !== "detached" ||
-      receipt.attemptId !== resource.id ||
-      receipt.localItemExcluded !== true ||
-      receipt.appWorkDrained !== true ||
-      (resource.itemId !== null && receipt.itemId !== resource.itemId)
-    ) {
-      throw new Error("Player reader closure was not acknowledged.");
+    if (tv) {
+      await resource.opening;
+      // The TV stops its media before the relay goes, so it doesn't fail on a missing stream.
+      await tv.loaded?.stop();
+      await tv.relay?.revoke();
+    } else {
+      const receipt = await resource.detach;
+      if (
+        receipt?.kind !== "detached" ||
+        receipt.attemptId !== resource.id ||
+        receipt.localItemExcluded !== true ||
+        receipt.appWorkDrained !== true ||
+        (resource.itemId !== null && receipt.itemId !== resource.itemId)
+      ) {
+        throw new Error("Player reader closure was not acknowledged.");
+      }
     }
     await resource.opening;
     await Promise.all(resource.formats.map((format) => format.closed));
@@ -630,6 +695,18 @@ function giveBack(resource: Resource) {
   admission?.release(lease);
 }
 
+/** Seconds into the stream that plays: where the TV last said, else the player here. */
+function streamTime(): number {
+  const tv = current?.resource.tv;
+  return tv ? (tv.status?.time ?? current?.stoppedAt ?? 0) : player().currentTime;
+}
+
+/** The stream's length in seconds as whoever plays it knows it; NaN while unknown. */
+function streamLength(): number {
+  const tv = current?.resource.tv;
+  return tv ? (tv.status?.duration ?? Number.NaN) : player().duration;
+}
+
 /** Abort this pre-reader wait only. Downloads still settles the real acquisition. */
 async function acquireBeforeLookup(resource: Resource, subscriptionId: string) {
   if (!admission) return;
@@ -655,8 +732,7 @@ async function acquireBeforeLookup(resource: Resource, subscriptionId: string) {
  */
 function report(): Promise<Saved> {
   const save = current?.options.progress;
-  const made = player();
-  const duration = made.duration;
+  const duration = streamLength();
   if (
     !current?.loaded ||
     current.item.live ||
@@ -665,7 +741,7 @@ function report(): Promise<Saved> {
   ) {
     return saving.then(() => KEPT);
   }
-  const position = Math.min(made.currentTime, duration);
+  const position = Math.min(streamTime(), duration);
   saving = saving.then(async (): Promise<Saved> => {
     try {
       await save(position, duration);
@@ -708,6 +784,8 @@ export function player(): VideoPlayer {
     if (silent) made.muted = true;
     state.set((s) => ({ ...s, external: isExternalPlaybackActive, muted: silent || s.muted }));
     attentionChanged();
+    // AirPlay chosen while a TV plays takes over from the TV.
+    if (isExternalPlaybackActive && link) playHere(false);
   });
   created = made;
   return made;
@@ -723,7 +801,7 @@ function release(): Promise<Saved> {
     playingTime(current.epoch, false);
   }
   if (current?.loaded && !current.item.live) {
-    const at = Math.max(0, player().currentTime - current.offset);
+    const at = Math.max(0, streamTime() - current.offset);
     current.stoppedAt = current.item.past ? Math.min(at, lengthOf(current.item, null)) : at;
   }
   if (checkpoint) clearInterval(checkpoint);
@@ -1459,6 +1537,8 @@ async function start(choice: Choice, options: PlayOptions) {
       watch: options.watch || s.watch,
       aside: false,
       muted,
+      // Playing again after the TV ended plays here.
+      tv: s.tv.kind === "ended" ? { kind: "off" } : s.tv,
     };
   });
   await runAttempt(owned, resource);
@@ -1518,6 +1598,7 @@ function makeResource(choice: Choice, epoch: Epoch, automatic: boolean): Resourc
     holdInitialPlay: false,
     lease: null,
     submitted: false,
+    tv: link ? { link, relay: null, loaded: null, status: null } : null,
   };
   return resource;
 }
@@ -1587,13 +1668,14 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
         ? Math.max(0, (item.past.start - source.start) / 1000)
         : 0;
     if (!attemptStands(owned, resource)) return;
+    if (resource.tv) return await attachTv(owned, resource, source);
     resource.observed =
       plan.kind === "file" && !item.live && item.subscriptionId !== null
         ? (source.observed ?? null)
         : null;
     let playable: Parameters<typeof attach>[1] = {
       uri: source.url,
-      ...(source.headers ? { headers: { ...source.headers } } : {}),
+      ...defined({ headers: source.headers ? { ...source.headers } : undefined }),
       contentType: source.container === "m3u8" ? "hls" : "auto",
     };
     if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
@@ -1678,6 +1760,353 @@ function groupState(hold: TrackHold | undefined): GroupState {
   };
 }
 
+/**
+ * Gives a source to the TV in the player's place: through a format session opened from its start
+ * for Matroska, else as it is, on the phone's relay. A source the TV can't be given fails here
+ * with why, before anything reaches the TV.
+ */
+async function attachTv(owned: NonNullable<typeof current>, resource: Resource, source: Source) {
+  const tv = resource.tv!;
+  const { item, choice } = owned;
+  try {
+    const way = tvPath(source.container, item.live);
+    if (way.kind === "refused") throw new TvRefused(way.refusal);
+    resource.submitted = true;
+    let url = source.url;
+    let headers = source.headers;
+    let kind: Parameters<typeof serveOnRelay>[2] =
+      way.kind === "file"
+        ? { hls: false, contentType: way.contentType }
+        : { hls: true, strict: way.kind === "session" };
+    if (way.kind === "session") {
+      const opening = openFormat(source.url, source.headers, 0, resource.controller.signal);
+      resource.formats.push(opening);
+      void opening.closed.catch(() => undefined);
+      const opened = await opening.opened;
+      if (!attemptStands(owned, resource)) return opening.close();
+      if (opened.kind === "session") {
+        resource.session = opened.session;
+        resource.viaSession = true;
+        void opened.session.failed.then((failure) => {
+          if (stands(resource)) fail({ kind: "format", failure });
+        });
+        url = opened.session.playlist;
+        headers = undefined;
+      } else {
+        // An MP4 or MOV under another name goes as it is.
+        await opening.closed;
+        if (!attemptStands(owned, resource)) return;
+        kind = { hls: false, contentType: "video/mp4" };
+      }
+    }
+    const hold = choice.holds.audio;
+    const sound =
+      hold && "language" in hold ? hold.language : audioTarget(choice.policy.audio, choice.context);
+    tv.relay = await serveOnRelay(url, headers, kind, sound, resource.controller.signal);
+    if (!attemptStands(owned, resource)) return;
+    const from = owned.seek === null ? 0 : owned.seek + owned.offset;
+    owned.seek = null;
+    tv.loaded = await tv.link.load(
+      {
+        address: tv.relay.address,
+        contentType: tv.relay.contentType,
+        live: item.live,
+        segments: tv.relay.segments,
+        title: item.title,
+        subtitle: item.place,
+        from,
+        paused: pauseOnStart === "viewer" || resource.holdInitialPlay,
+      },
+      (status) => onTvStatus(owned, resource, status),
+      resource.controller.signal,
+    );
+    // A Pause pressed while the LOAD was on its way, after it left playing.
+    if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") tv.loaded.pause();
+  } catch (cause) {
+    if (!attemptStands(owned, resource)) return;
+    if (cause instanceof TvRefused) {
+      const category =
+        cause.refusal === "network"
+          ? "network"
+          : cause.refusal === "unreadable"
+            ? "unavailable"
+            : "unsupported";
+      failOnTv(owned, refusalText(cause.refusal), category);
+    } else
+      failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }), "unavailable");
+  }
+}
+
+function refusalText(refusal: TvRefused["refusal"]): string {
+  switch (refusal) {
+    case "format":
+      return tvText("This file type can't play on a TV.");
+    case "protected":
+      return tvText("Its stream is protected, so it can't play on a TV.");
+    case "codec":
+      return tvText("Its picture or sound can't play on a TV.");
+    case "stream":
+      return tvText("This channel's stream can't play on a TV.");
+    case "network":
+      return tvText("Connect this iPhone to Wi-Fi to play on a TV.");
+    case "unreadable":
+      return t("The connection to the provider failed.");
+  }
+}
+
+/** What the TV says of what it plays, as the player's own reports would. */
+function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, status: TvStatus) {
+  const tv = resource.tv;
+  if (!tv || current !== owned || !stands(resource)) return;
+  // Another sender's media there now, or a stop on the TV: the route ends where the title got to,
+  // and the TV is left to whoever plays there.
+  if (status.state === "stopped" || status.state === "taken") {
+    return void (link === tv.link && endTv("stopped"));
+  }
+  const before = tv.status?.state;
+  // An idle TV says 0 or nothing for where it was: the last real place stands, or the end.
+  const idle = status.state === "ended" || status.state === "failed";
+  const time = !idle
+    ? status.time
+    : status.state === "ended"
+      ? (status.duration ?? tv.status?.duration ?? tv.status?.time ?? 0)
+      : (tv.status?.time ?? 0);
+  tv.status = { ...status, time, duration: status.duration ?? tv.status?.duration ?? null };
+  clock.set(Math.max(0, time - owned.offset));
+  if (!owned.item.live && status.duration !== null) {
+    length.set(lengthOf(owned.item, status.duration));
+  }
+  if (status.state === "failed") {
+    return failOnTv(
+      owned,
+      tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }),
+      "unavailable",
+    );
+  }
+  const { phase } = state.get();
+  if (phase.kind === "idle" || phase.kind === "failed") return;
+  if (status.state === "ended") {
+    if (before === "ended") return;
+    // A channel the TV says finished has stopped coming.
+    if (owned.item.live) {
+      return failOnTv(owned, t("The stream stopped delivering data."), "network");
+    }
+    playingTime(owned.epoch, false);
+    const saved = report();
+    owned.options.ended?.();
+    state.set((s) => ({ ...s, phase: { kind: "paused", item: phase.item } }));
+    if (owned.item.next && state.get().watch && held?.by !== "viewer") countDown(owned, saved);
+    return;
+  }
+  const playing = status.state === "playing";
+  // The TV's report acknowledges the viewer's Pause, and playing again after it clears it, as
+  // the player's own reports do here.
+  if (status.state === "paused") {
+    if (held) held.acknowledged = true;
+    if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") pauseOnStart = false;
+  } else if (playing && held?.acknowledged) held = null;
+  // A programme from catch-up stops at its end, even where its recording sends on.
+  if (playing && owned.item.past && time - owned.offset >= lengthOf(owned.item, null)) {
+    tv.loaded?.pause();
+  }
+  // Paused from the start, as after Pause while connecting, its place on the TV still counts.
+  if (playing || status.state === "paused") owned.loaded = true;
+  if (playing && owned.epoch.playedOn === null) {
+    owned.epoch.playedOn = owned.epoch.candidate;
+    if (!owned.epoch.played) {
+      owned.epoch.played = true;
+      owned.options.outcome?.(true);
+      if (!stands(resource)) return;
+    }
+  }
+  playingTime(owned.epoch, playing);
+  if (playing) checkpoint ??= setInterval(report, CHECKPOINT_MS);
+  else if (checkpoint !== null) {
+    clearInterval(checkpoint);
+    checkpoint = null;
+  }
+  if (status.state === "paused" && phase.kind === "playing") report();
+  const kind = playing ? "playing" : status.state === "paused" ? "paused" : "loading";
+  if (kind !== phase.kind) state.set((s) => ({ ...s, phase: { kind, item: phase.item } }));
+}
+
+/** Ends this play on the TV with `message`; nothing tries again on its own. */
+function failOnTv(owned: NonNullable<typeof current>, message: string, category: AnalyticsFailure) {
+  const { epoch } = owned;
+  if (current !== owned || epoch.terminal) return;
+  epoch.terminal = true;
+  cancelEpoch(epoch);
+  playingTime(epoch, false);
+  release();
+  failed?.(category);
+  if (!epoch.played) owned.options.outcome?.(false);
+  owned.loaded = false;
+  state.set((s) => ({ ...s, phase: { kind: "failed", item: owned.item, error: message } }));
+}
+
+/** Where what plays is, in seconds of the title, to go on from on another route. */
+function handover(): number | undefined {
+  if (!current || current.item.live) return undefined;
+  if (current.loaded) return Math.max(0, streamTime() - current.offset);
+  return current.stoppedAt ?? current.options.from;
+}
+
+/** Plays what plays now again on the route now chosen, from `from`, paused when asked. */
+function replay(from: number | undefined, paused: boolean) {
+  if (!current || state.get().phase.kind === "idle") return;
+  const { choice, options } = current;
+  void start(choice, {
+    ...options,
+    watch: state.get().watch,
+    ...defined({ from }),
+  });
+  if (paused) {
+    held = { by: "viewer", acknowledged: false };
+    pauseOnStart = "viewer";
+  }
+}
+
+/** Closes a TV's connection once `readers`, the stream it played, closed. */
+async function closeAfter(ending: TvLink, readers: Promise<void> | null | undefined, stop = true) {
+  await readers?.catch(() => undefined);
+  await ending.close(stop);
+}
+
+/** The TV's volume while one is connected, as it last said. */
+const volume = store<Volume | null>(null);
+export const useTvVolume = () => useStore(volume);
+let unfollowVolume = () => {};
+
+/**
+ * Plays on `tv`: what plays now, a title from where it is and a channel live, and every play
+ * after it until the viewer plays here again. What plays here goes on until the TV is ready.
+ * Another TV closes the first. Resolves with what to tell the viewer when the TV can't be reached,
+ * else null.
+ */
+export async function playOnTv(tv: Tv): Promise<string | null> {
+  const route = state.get().tv;
+  if (route.kind === "on" && route.tv.id === tv.id && link) return null;
+  const mine = ++routes;
+  state.set((s) => ({ ...s, tv: { kind: "connecting", tv } }));
+  let settled!: () => void;
+  connecting = new Promise<void>((resolve) => (settled = resolve));
+  let opened: TvLink;
+  try {
+    opened = await connectTv(tv);
+  } catch {
+    settled();
+    if (mine !== routes) return null;
+    state.set((s) => ({ ...s, tv: link ? { kind: "on", tv: link.tv } : { kind: "off" } }));
+    return tvText("Couldn't connect to {tv}.", { tv: tv.name });
+  }
+  if (mine !== routes) {
+    await opened.close();
+    settled();
+    return null;
+  }
+  settled();
+  const before = link;
+  const from = handover();
+  link = opened;
+  follow(opened);
+  if (state.get().pip) endPictureInPicture?.();
+  state.set((s) => ({ ...s, tv: { kind: "on", tv }, pip: false }));
+  const playing = current?.resource;
+  // A Pause of the viewer's, even one pressed while the TV connected, holds on the TV too.
+  replay(from, held?.by === "viewer");
+  if (before) void closeAfter(before, playing?.settlement);
+  return null;
+}
+
+/** Follows a new link's volume, and its loss. */
+function follow(opened: TvLink) {
+  unfollowVolume();
+  volume.set(opened.volume.get());
+  unfollowVolume = opened.volume.subscribe(() => {
+    if (link === opened) volume.set(opened.volume.get());
+  });
+  void opened.lost.then((why) => {
+    if (link === opened) endTv(why);
+  });
+}
+
+/** Sets the TV's own volume, 0 to 1. */
+export function setTvVolume(level: number) {
+  link?.setVolume(level);
+}
+
+/** Lets go of the TV route, returning its link for the caller to close. */
+function dropLink() {
+  const ending = link;
+  routes++;
+  link = null;
+  unfollowVolume();
+  volume.set(null);
+  return ending;
+}
+
+/**
+ * Disconnect and play here: a title from where the TV was, paused unless AirPlay took over
+ * (`paused` false), and a channel live.
+ */
+export function playHere(paused = true) {
+  const from = handover();
+  const ending = dropLink();
+  state.set((s) => ({ ...s, tv: { kind: "off" } }));
+  if (!ending) return;
+  const playing = current?.resource;
+  replay(from, paused && !current?.item.live);
+  void closeAfter(ending, playing?.settlement);
+}
+
+/**
+ * The TV went: the app left the foreground, or the TV or the network was lost. Its stream stops,
+ * where a title got to is kept for playing again here, and Watch says why. `done` is told once
+ * the TV's readers and connection closed.
+ */
+function endTv(why: TvEnd, done?: () => void) {
+  const ending = link;
+  if (!ending) {
+    // Left while still connecting: the TV doesn't start once the app is away, and the time iOS
+    // gave lasts until the connect settled and was closed.
+    if (state.get().tv.kind === "connecting") {
+      routes++;
+      state.set((s) => ({ ...s, tv: { kind: "off" } }));
+      return void connecting.finally(() => done?.());
+    }
+    return done?.();
+  }
+  dropLink();
+  const owned = current;
+  const { phase } = state.get();
+  const message =
+    why === "left"
+      ? tvText("Stopped on the TV when you left the app.")
+      : why === "lost"
+        ? tvText("Lost {tv}.", { tv: ending.tv.name })
+        : tvText("{tv} stopped playing it.", { tv: ending.tv.name });
+  if (owned && phase.kind !== "idle") {
+    supersede();
+    cancelEpoch(owned.epoch);
+    owned.epoch.terminal = true;
+    release();
+    owned.loaded = false;
+  }
+  state.set((s) => ({
+    ...s,
+    tv: { kind: "ended", tv: ending.tv, why },
+    phase:
+      owned && s.phase.kind !== "idle"
+        ? { kind: "failed", item: owned.item, error: message }
+        : s.phase,
+  }));
+  // Ended on the TV, its receiver is idle or another sender's: only the connection closes.
+  void closeAfter(ending, owned?.resource.settlement, why !== "stopped").finally(() => done?.());
+}
+
+// The TV plays only while the app is open: leaving it stops the TV in the time iOS gives.
+onLeftApp((done) => endTv("left", done));
+
 /** The candidate actually playing, never a backoff or a failed override. */
 export function liveStream() {
   if (!current?.item.live || current.choice.plan.kind !== "live") return null;
@@ -1700,7 +2129,7 @@ export function retry() {
   void start(choice, {
     ...options,
     watch: state.get().watch,
-    ...(from === undefined ? {} : { from }),
+    ...defined({ from }),
   });
 }
 
@@ -1715,6 +2144,9 @@ export async function stop(): Promise<Saved> {
   const saved = release();
   const readers = current?.resource.settlement;
   current = null;
+  // Stop ends playing everywhere: the TV closes once its stream's readers did.
+  const ending = dropLink();
+  if (ending) void closeAfter(ending, readers);
   playSubtitles(null);
   endPictureInPicture?.();
   player().muted = true;
@@ -1729,6 +2161,7 @@ export async function stop(): Promise<Saved> {
     pip: false,
     aside: false,
     muted: true,
+    tv: { kind: "off" },
   }));
   // Saved says only whether progress was kept. Reader failure remains in closing and on the
   // captured reader handle, even when Stop returns its save result.
@@ -1746,6 +2179,20 @@ export function togglePause() {
   resumeOnReturn = false;
   cancelUpNext();
   const { phase } = state.get();
+  // On the TV, its own report of playing or paused follows the request.
+  const onTv = current?.resource.tv?.loaded;
+  if (onTv && phase.kind !== "idle" && phase.kind !== "failed") {
+    if (phase.kind === "paused") {
+      held = null;
+      pauseOnStart = false;
+      onTv.play();
+    } else {
+      held = { by: "viewer", acknowledged: false };
+      onTv.pause();
+    }
+    attentionChanged();
+    return;
+  }
   if (phase.kind === "playing" || phase.kind === "loading") {
     held = { by: "viewer", acknowledged: false };
     pauseOnStart = phase.kind === "loading" ? "viewer" : false;
@@ -1778,8 +2225,8 @@ export function setSpeed(next: Speed): boolean {
 
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
-  const at = player().currentTime - (current?.offset ?? 0) + seconds;
-  if (current?.item.past) return seekTo(Math.min(length.get(), at));
+  const at = streamTime() - (current?.offset ?? 0) + seconds;
+  if (current?.item.past || current?.resource.tv) return seekTo(Math.min(length.get() || at, at));
   moved(at);
   player().seekBy(seconds);
 }
@@ -1788,7 +2235,9 @@ export function seekBy(seconds: number) {
 export function seekTo(seconds: number) {
   const at = Math.max(0, seconds);
   moved(at);
-  player().currentTime = at + (current?.offset ?? 0);
+  const tv = current?.resource.tv;
+  if (tv) tv.loaded?.seek(at + (current?.offset ?? 0));
+  else player().currentTime = at + (current?.offset ?? 0);
   clock.set(at);
   endAtLength(state.get().phase.kind === "playing", at);
 }
@@ -1805,7 +2254,7 @@ function endAtLength(playing: boolean, at?: number) {
   if (ending) clearTimeout(ending);
   ending = null;
   const owned = current;
-  if (!playing || !owned?.item.past) return;
+  if (!playing || !owned?.item.past || owned.resource.tv) return;
   const left = (from = player().currentTime - owned.offset) => length.get() - from;
   ending = setTimeout(
     () => {
@@ -2038,8 +2487,8 @@ export function openWatch() {
  */
 export function closeWatch(): Promise<Saved> {
   supersede();
-  const { pip, external, phase, muted } = state.get();
-  const away = !pip && !external;
+  const { pip, external, phase, muted, tv } = state.get();
+  const away = !pip && !external && tv.kind !== "on";
   if (away) {
     if (phase.kind === "playing" || phase.kind === "loading") {
       held ??= { by: "away", acknowledged: false };
@@ -2066,8 +2515,8 @@ export function closeWatch(): Promise<Saved> {
  */
 export function setAside() {
   supersede();
-  const { phase, external } = state.get();
-  if (phase.kind === "idle" || external) return void closeWatch();
+  const { phase, external, tv } = state.get();
+  if (phase.kind === "idle" || external || tv.kind === "on") return void closeWatch();
   if (phase.kind === "playing" || phase.kind === "loading") {
     held ??= { by: "away", acknowledged: false };
   }

@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { zipSync, strToU8 } from "fflate";
 import type { Page } from "./app.ts";
 import type { Driver } from "./installed-upgrade.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Prove the inspector listener belongs to an already-pinned owned PID before waking main. */
 export async function inspectorOwner(port: number, ownedPids: readonly number[]) {
@@ -279,9 +280,10 @@ async function input(d: Driver, label: string, selector: string, value: string) 
       code: "KeyA",
       windowsVirtualKeyCode: 65,
       modifiers,
-      ...(process.platform === "darwin" && type === "rawKeyDown"
-        ? { commands: ["selectAll"] }
-        : {}),
+      ...defined({
+        commands:
+          process.platform === "darwin" && type === "rawKeyDown" ? ["selectAll"] : undefined,
+      }),
     });
   await d.type(label, value);
   await d.key("Tab", 9);

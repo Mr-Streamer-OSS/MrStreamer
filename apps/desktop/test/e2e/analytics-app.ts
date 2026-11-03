@@ -49,6 +49,7 @@ import {
   record,
   stop,
 } from "../../../../.cursor/skills/verify-mrstreamer/scripts/session.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const options = analyticsOptions(process.argv.slice(2));
@@ -111,13 +112,13 @@ const build = {
   appVersion: sourceAppVersion,
   sourceKind: builtDesktop ? "archived-source-build" : "checkout-source-build",
   sourceDirty: builtDesktop ? null : sourceDirty,
-  ...(!packagedExecutable
-    ? {
-        mainSha256: createHash("sha256")
+  ...defined({
+    mainSha256: !packagedExecutable
+      ? createHash("sha256")
           .update(await readFile(join(desktop, "out/main/index.js")))
-          .digest("hex"),
-      }
-    : {}),
+          .digest("hex")
+      : undefined,
+  }),
 };
 const bundleHashes: Record<string, string> = {};
 if (!packagedExecutable) {
@@ -411,7 +412,7 @@ async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
         MR_STREAMER_UPDATE_API: updateEndpoint,
         MR_STREAMER_TMDB_API: tmdb!.url,
         MR_STREAMER_TMDB_KEY: "test-key",
-        ...(localTransport ? { MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT: endpoint } : {}),
+        ...defined({ MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT: localTransport ? endpoint : undefined }),
       },
     },
   );
@@ -558,7 +559,7 @@ async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
     throw new Error("Renderer is outside the actual installed app");
   if (options.native && process.platform === "win32")
     nativeTree = ownedTree(disposableRunner(), app);
-  observations["instance"] = {
+  const instance = {
     port,
     inspectorPort,
     profile,
@@ -566,20 +567,21 @@ async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
     endpoint,
     ...nativeIdentity,
     expected: target,
-    ...(target.executable
-      ? {
-          executableSha256: createHash("sha256")
-            .update(await readFile(nativeIdentity.executable))
-            .digest("hex"),
-          launcherSha256: createHash("sha256")
-            .update(await readFile(target.executable))
-            .digest("hex"),
-          asarSha256: createHash("sha256")
-            .update(await readFile(asar!))
-            .digest("hex"),
-        }
-      : {}),
   };
+  observations["instance"] = target.executable
+    ? {
+        ...instance,
+        executableSha256: createHash("sha256")
+          .update(await readFile(nativeIdentity.executable))
+          .digest("hex"),
+        launcherSha256: createHash("sha256")
+          .update(await readFile(target.executable))
+          .digest("hex"),
+        asarSha256: createHash("sha256")
+          .update(await readFile(asar!))
+          .digest("hex"),
+      }
+    : instance;
   if (asar) {
     const digest = createHash("sha256")
       .update(await readFile(asar))

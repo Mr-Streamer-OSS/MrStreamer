@@ -16,6 +16,7 @@ import {
 import { cpus, loadavg, platform, release } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { type } from "arktype";
+import { defined } from "@mrstreamer/core/defined";
 
 const Metric = type({
   unit: "'ms' | 'MB' | 'count'",
@@ -175,15 +176,16 @@ export function metric(
   return {
     unit,
     samples,
-    ...(limit === undefined
-      ? {}
-      : {
-          budget: {
-            limit,
-            basis,
-            outcome: value < limit ? ("pass" as const) : ("warning" as const),
-          },
-        }),
+    ...defined({
+      budget:
+        limit === undefined
+          ? undefined
+          : {
+              limit,
+              basis,
+              outcome: value < limit ? ("pass" as const) : ("warning" as const),
+            },
+    }),
   };
 }
 
@@ -197,16 +199,21 @@ export function validateMeasurement(input: unknown): Measurement {
           100,
         )
       : 0;
+  const appMetrics = searchRuns
+    ? {
+        ...APP_METRICS,
+        ...(result.workload["searchResultCache"] === "uncached"
+          ? APP_UNCACHED_SEARCH_METRICS
+          : APP_SEARCH_METRICS),
+      }
+    : APP_METRICS;
   const expected =
     result.tool === "app"
       ? {
-          ...APP_METRICS,
-          ...(searchRuns
-            ? result.workload["searchResultCache"] === "uncached"
-              ? APP_UNCACHED_SEARCH_METRICS
-              : APP_SEARCH_METRICS
-            : {}),
-          ...(result.workload["coldSearch"] ? { "cold process exact title search": "ms" } : {}),
+          ...appMetrics,
+          ...defined({
+            "cold process exact title search": result.workload["coldSearch"] ? "ms" : undefined,
+          }),
         }
       : result.tool === "guide"
         ? GUIDE_METRICS

@@ -34,6 +34,7 @@ import * as Stream from "effect/Stream";
 import { WatchlistStore, type Membership } from "../platform/watchlist-store.ts";
 import { OnDemand } from "./ondemand.ts";
 import { sameSource, Subscriptions, type SavedSubscription } from "./subscription.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** Which page of the watchlist. */
 export interface WatchlistQuery {
@@ -189,7 +190,7 @@ function make() {
             sort,
             offset,
             limit,
-            ...(home ? { home } : {}),
+            ...defined({ home: home || undefined }),
           });
         }),
 

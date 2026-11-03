@@ -97,6 +97,7 @@ import {
   type TitleEngine,
   type TitleError,
 } from "./title-engine.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 /** How often progress is saved while a title plays. */
 const CHECKPOINT_MS = 60_000;
@@ -830,7 +831,7 @@ async function recover(
     ? await Promise.all([
         call("playback.failure", {
           sessionId: session.id,
-          ...(error.failure ? { selector: error.failure } : {}),
+          ...defined({ selector: error.failure }),
         }).catch(() => null),
         call("playback.diagnostic", { sessionId: session.id }).catch(() => null),
       ])
@@ -845,6 +846,7 @@ async function recover(
     error.rejectedTrack !== "video";
   const videoFallback = local && !soundFallback && !rejectedCopy && error.video === "copy";
   const fallback = soundFallback || videoFallback;
+  const copyRefused = local && !error.diagnosticReason && (rejectedCopy || error.video === "copy");
   if (!fallback)
     observation.failure(
       upstream ? streamFailure(upstream) : error.kind === "network" ? "network" : "unsupported",
@@ -852,12 +854,10 @@ async function recover(
         ? streamDiagnostic(upstream)
         : {
             ...engineDiagnostic(error, "mp4", convertSound ? "audio" : "none", context),
-            ...(local && !error.diagnosticReason && (rejectedCopy || error.video === "copy")
-              ? {
-                  diagnostic_stage: "decode" as const,
-                  diagnostic_reason: "copy_rejected" as const,
-                }
-              : {}),
+            ...defined({
+              diagnostic_stage: copyRefused ? ("decode" as const) : undefined,
+              diagnostic_reason: copyRefused ? ("copy_rejected" as const) : undefined,
+            }),
             diagnostic_fallback: rejectedCopy ? "video" : convertSound ? "audio" : "none",
           },
     );
@@ -946,7 +946,7 @@ async function openOnReceiver(
       call("output.openTitle", {
         title: now.title,
         since: openedAt,
-        ...(measurement ? { measurement } : {}),
+        ...defined({ measurement: measurement ?? undefined }),
       }),
       readPreferences().catch((): Preferences | null => null),
     ]);
@@ -1003,7 +1003,7 @@ async function loadOnReceiver(start: number, paused = false): Promise<void> {
     observation.remote();
     const media = await call("output.playTitle", {
       sessionId: receiver.sessionId,
-      ...(measurement ? { measurement } : {}),
+      ...defined({ measurement: measurement ?? undefined }),
       position: start,
       audio: audioId,
       subtitle: subtitle?.id ?? null,
@@ -1132,7 +1132,7 @@ function awaitReceiver(): number {
   store.setState({
     position: at,
     confirmed: null,
-    ...(ended ? {} : { phase: { kind: "opening" } }),
+    ...defined({ phase: ended ? undefined : { kind: "opening" } }),
   });
   return at;
 }
@@ -1206,7 +1206,7 @@ async function moveHere(): Promise<void> {
     const opened = await call("playback.openTitle", {
       title: now.title,
       decoders: [...titleDecoders],
-      ...(measurement ? { measurement } : {}),
+      ...defined({ measurement: measurement ?? undefined }),
     });
     if (mine !== generation) {
       void call("playback.close", { sessionId: opened.sessionId }).catch(() => {});
@@ -1330,7 +1330,10 @@ function keepSubtitleChoice(): void {
   subtitleSaving = subtitleSaving
     .then(() =>
       downloadedOn
-        ? call("subtitles.show", { sessionId: current.id, ...(selection ? { selection } : {}) })
+        ? call("subtitles.show", {
+            sessionId: current.id,
+            ...defined({ selection: selection || undefined }),
+          })
         : call("subtitles.hide", { sessionId: current.id }),
     )
     .then(
@@ -1427,12 +1430,12 @@ export const titlePlayer = {
           ? call("playback.openTitle", {
               title: now.title,
               decoders: [...titleDecoders],
-              ...(measurement ? { measurement } : {}),
+              ...defined({ measurement: measurement ?? undefined }),
             })
           : call("playback.openCopy", {
               copy: now.copy,
               decoders: [...titleDecoders],
-              ...(measurement ? { measurement } : {}),
+              ...defined({ measurement: measurement ?? undefined }),
             }),
         readPreferences().catch((): Preferences | null => null),
       ]);
@@ -1769,7 +1772,7 @@ export const titlePlayer = {
       call("subtitles.timing", {
         sessionId: current.id,
         timing: valid,
-        ...(saved.selection ? { selection: saved.selection } : {}),
+        ...defined({ selection: saved.selection || undefined }),
       }),
     );
     subtitleSaving = write.then(

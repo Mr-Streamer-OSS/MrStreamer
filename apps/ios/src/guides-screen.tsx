@@ -369,9 +369,10 @@ export function GuideMapScreen() {
     !words ||
     title.toLocaleLowerCase().includes(words) ||
     !!mapped?.toLocaleLowerCase().includes(words);
-  const mapped = [...mappings]
-    .map(([key, id]) => ({ ...describe(key, library), mapped: id }))
-    .filter(found);
+  const mapped = [...mappings].flatMap(([key, id]) => {
+    const row = { ...describe(key, library), mapped: id };
+    return found(row) ? [row] : [];
+  });
   const others = (library?.channels ?? [])
     .filter((channel) => !mappings.has(channel.key))
     .map((channel) => ({ ...describe(channel.key, library), mapped: null }))

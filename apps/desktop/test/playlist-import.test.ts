@@ -20,6 +20,7 @@ import { Roster } from "../src/main/services/roster.ts";
 import { VerifiedFiles } from "../src/main/platform/verified-files.ts";
 import { Watchlist } from "../src/main/services/watchlist.ts";
 import { promised, runtimeFor, tempDir, testConfig } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const closers: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -958,17 +959,17 @@ it.each([false, true])(
     const provider = playlistProvider(
       {
         link: "https://example.test/list",
-        ...(mapped
-          ? {
-              mapping: {
+        ...defined({
+          mapping: mapped
+            ? {
                 version: 1 as const,
                 groups: names.map((name) => ({
                   group: playlistGroupId(name),
                   mode: "movie" as const,
                 })),
-              },
-            }
-          : {}),
+              }
+            : undefined,
+        }),
       },
       {
         userAgent: "test",

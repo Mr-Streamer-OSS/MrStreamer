@@ -4,6 +4,7 @@ import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import type { Locale } from "@mrstreamer/contracts/language";
 import { formatPercent, setLanguage } from "@mrstreamer/core/i18n";
 import { afterEach, expect, it, vi } from "vitest";
+import { defined } from "@mrstreamer/core/defined";
 
 // Downloads in the interface language, as the viewer meets it: the screen's sections, states,
 // sheets and VoiceOver actions, and the top bar's Downloads button, in the language picked. A new
@@ -90,7 +91,7 @@ vi.mock("react-native", async () => {
         title?: string;
         options: readonly string[];
       }) => {
-        scenario.sheet = { ...(title ? { title } : {}), options };
+        scenario.sheet = { ...defined({ title: title || undefined }), options };
       },
     },
   };

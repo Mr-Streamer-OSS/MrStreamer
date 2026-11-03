@@ -2,6 +2,7 @@
 // them after a restart. The window stands in for public reads and UI input; the stages are real.
 import { describe, expect, it } from "vitest";
 import type { Download } from "../../../packages/contracts/src/downloads.ts";
+import type { IpcOutput } from "../../../packages/contracts/src/ipc.ts";
 import { SUBTITLE_CUE, SUBTITLE_TIMING } from "./e2e/installed-subtitles.ts";
 import {
   upgradeToCandidate,
@@ -72,7 +73,11 @@ function standIn(player: Player = PLAYER) {
     const progress = copies.find((each) => each.id === id)?.progress;
     return progress ? `${Math.round((progress.position / progress.duration) * 100)}%` : null;
   };
-  const d = {
+  // Only what these stages call; the real driver's other members are never reached.
+  const page: Partial<Driver["page"]> = {
+    evaluate: async <T>(expression: string) => (await shown(expression)) as T,
+  };
+  const driver: Partial<Driver> = {
     actions: [],
     requests: [],
     exists: () => Promise.resolve(true),
@@ -116,31 +121,33 @@ function standIn(player: Player = PLAYER) {
     async capture(name: string) {
       actions.push(`Capture ${name}`);
     },
-    read: (method: string) => Promise.resolve(answers[method]!()),
+    read: async (method, ..._args) => answers[method]!() as IpcOutput<typeof method>,
     video: () =>
       Promise.resolve({ time, width: 640, audio: 1000, paused: false, title: playing !== null }),
-    page: {
-      async evaluate(expression: string) {
-        if (expression.includes("innerText"))
-          return "Remove it from this device? Subscription removed, copy kept";
-        if (expression.includes("style.width"))
-          return shownWidth(/data-download="([^"]+)"/.exec(expression)?.[1] ?? "");
-        if (expression.includes("subtitle-offset")) return SUBTITLE_TIMING;
-        const caption = time >= CUE.start && time < CUE.end ? SUBTITLE_CUE.text : "";
-        if (expression.includes("currentTime")) return { time, caption };
-        if (expression.includes("data-subtitle-text")) return caption;
-        if (expression.includes(".map(")) return ["English 5.1", "Español Commentary"];
-        return true;
-      },
-    },
-  } as unknown as Driver;
+    page: page as Driver["page"],
+  };
+  /** What the page answers each expression the stages evaluate in it. */
+  async function shown(expression: string): Promise<unknown> {
+    if (expression.includes("innerText"))
+      return "Remove it from this device? Subscription removed, copy kept";
+    if (expression.includes("style.width"))
+      return shownWidth(/data-download="([^"]+)"/.exec(expression)?.[1] ?? "");
+    if (expression.includes("subtitle-offset")) return SUBTITLE_TIMING;
+    const caption = time >= CUE.start && time < CUE.end ? SUBTITLE_CUE.text : "";
+    if (expression.includes("currentTime")) return { time, caption };
+    if (expression.includes("data-subtitle-text")) return caption;
+    if (expression.includes(".map(")) return ["English 5.1", "Español Commentary"];
+    return true;
+  }
+  const d = driver as Driver;
   return { d, copies, state, actions };
 }
 
 /** The restart after an upgrade that left the long movie's copy at 55 s. */
 function restart(player: Player) {
   const { d, copies, state } = standIn(player);
-  const upgraded = { after: state, copies } as unknown as AfterCandidate;
+  const candidate: Partial<AfterCandidate> = { after: state, copies };
+  const upgraded = candidate as AfterCandidate;
   return restartCandidate(d, { long: "long-title", formats: [] }, upgraded, {
     cutOff: () => Promise.resolve({}),
     refused: () => [],

@@ -15,6 +15,7 @@ import { call } from "../../lib/ipc.ts";
 import type { SettingsControl } from "./catalogue.ts";
 import { focusSettingControl, SaveFeedback } from "./SaveFeedback.tsx";
 import { Row, RowForm, Section, Select } from "./Rows.tsx";
+import { defined } from "@mrstreamer/core/defined";
 
 export const subtitleSettingsQuery = {
   queryKey: ["subtitles", "settings"] as const,
@@ -36,7 +37,7 @@ export function OnlineSubtitlesSection() {
       preferences: OnlineSubtitlePreferences;
       credentials?: SubtitleCredentials;
       row: SettingsControl;
-    }) => call("subtitles.configure", { preferences, ...(credentials ? { credentials } : {}) }),
+    }) => call("subtitles.configure", { preferences, ...defined({ credentials }) }),
     onSuccess: (next, input) => {
       client.setQueryData(subtitleSettingsQuery.queryKey, next);
       if (input.credentials) {
@@ -65,7 +66,7 @@ export function OnlineSubtitlesSection() {
         languages: saved.languages,
         ...patch,
       },
-      ...(credentials ? { credentials } : {}),
+      ...defined({ credentials }),
     });
   };
   const feedback = (row: SettingsControl) =>

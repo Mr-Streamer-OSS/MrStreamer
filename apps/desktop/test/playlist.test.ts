@@ -19,6 +19,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { fixture } from "./fake-provider.ts";
 import { promised, runtimeFor, tempDir, testConfig, testSecrets } from "./support.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const CLIP = fixture("h264-aac.mpegts");
 const PLAYER = "Player/1.0 (X11, Linux)";
@@ -48,8 +49,10 @@ async function playlistHost() {
     const { pathname } = new URL(request.url ?? "/", "http://host");
     asked.push({
       path: pathname,
-      ...(request.headers["user-agent"] ? { userAgent: request.headers["user-agent"] } : {}),
-      ...(request.headers.referer ? { referer: request.headers.referer } : {}),
+      ...defined({
+        userAgent: request.headers["user-agent"] || undefined,
+        referer: request.headers.referer || undefined,
+      }),
     });
     const body = routes.get(pathname);
     if (body === undefined) return response.writeHead(404).end();

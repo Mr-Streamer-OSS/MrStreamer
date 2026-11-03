@@ -117,8 +117,7 @@ function skipTo(position: number): void {
 /** What the viewer reads over the picture where it is, top to bottom. */
 const onScreen = () =>
   [...subtitleLayer.querySelectorAll<HTMLElement>("[data-subtitle-text] > div")]
-    .filter((row) => row.style.visibility !== "hidden")
-    .map((row) => row.textContent)
+    .flatMap((row) => (row.style.visibility !== "hidden" ? [row.textContent] : []))
     .reverse();
 /** Whether CC says the chosen subtitles are loading. */
 const loading = () => player.state().subtitleLoading;

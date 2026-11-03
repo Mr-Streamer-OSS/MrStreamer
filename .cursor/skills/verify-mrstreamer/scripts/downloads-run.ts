@@ -19,6 +19,7 @@ import {
 import { startFakeTmdb, type FakeTmdb } from "../../../../apps/desktop/test/fake-tmdb.ts";
 import { SOURCE_LOCALE, type Locale } from "../../../../packages/contracts/src/language.ts";
 import { evidenceDirectory, freePort, record, stop } from "./session.ts";
+import { defined } from "../../../../packages/core/src/defined.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
@@ -119,7 +120,7 @@ function baseDriver(
         key: name,
         code: style === "series" && name.length === 1 ? `Key${name.toUpperCase()}` : name,
         windowsVirtualKeyCode: code,
-        ...(style === "series" ? { modifiers } : {}),
+        ...defined({ modifiers: style === "series" ? modifiers : undefined }),
       });
   };
   /** Enter or Space as a keyboard sends it, with its character, which presses a focused button. */
@@ -253,6 +254,13 @@ export async function ownedRun<D>(
             !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
         ),
       );
+      // A packaged build takes no --require: its main's requests are only the fixtures'.
+      if (which.kind === "candidate")
+        Object.assign(env, {
+          NODE_OPTIONS: `--require ${JSON.stringify(hook).slice(1, -1)}`,
+          VERIFY_NETWORK_LOG: networkLog,
+          VERIFY_IMAGES: picturesUrl,
+        });
       const executable = which.kind === "candidate" ? build.executable : which.executable;
       const app = spawn(
         executable,
@@ -275,23 +283,18 @@ export async function ownedRun<D>(
           stdio: ["ignore", "pipe", "pipe"],
           env: {
             ...env,
-            ...(which.kind === "candidate" && process.env["MR_STREAMER_FFMPEG"]
-              ? { MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] }
-              : {}),
+            ...defined({
+              MR_STREAMER_FFMPEG:
+                which.kind === "candidate" && process.env["MR_STREAMER_FFMPEG"]
+                  ? process.env["MR_STREAMER_FFMPEG"]
+                  : undefined,
+            }),
             // The system's language, as Linux reads it: System default shows the app in `locale`.
             LANGUAGE: system,
             LANG: `${system}.UTF-8`,
             MR_STREAMER_UPDATE_CHECKS: "off",
             MR_STREAMER_TMDB_API: owned.tmdb.url,
             MR_STREAMER_TMDB_KEY: "test-key",
-            // A packaged build takes no --require: its main's requests are only the fixtures'.
-            ...(which.kind === "candidate"
-              ? {
-                  NODE_OPTIONS: `--require ${JSON.stringify(hook).slice(1, -1)}`,
-                  VERIFY_NETWORK_LOG: networkLog,
-                  VERIFY_IMAGES: picturesUrl,
-                }
-              : {}),
           },
         },
       );

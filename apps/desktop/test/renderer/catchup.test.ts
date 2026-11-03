@@ -16,6 +16,7 @@ import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { canRetry, failureCopy } from "../../src/renderer/src/features/watch/problems.ts";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const HOUR = 60 * 60 * 1000;
 const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
@@ -30,7 +31,15 @@ const channel = (id: string, title: string, catchupDays: number | null): LiveCha
   logoUrl: null,
   categoryIds: ["uk"],
   catchupDays,
-  variants: [{ id, name: title, tags: [], quality: null, ...(catchupDays ? { catchupDays } : {}) }],
+  variants: [
+    {
+      id,
+      name: title,
+      tags: [],
+      quality: null,
+      ...defined({ catchupDays: catchupDays || undefined }),
+    },
+  ],
 });
 
 // happy-dom lays nothing out, and the list draws only the rows that fit.

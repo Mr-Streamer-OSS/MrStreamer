@@ -15,7 +15,7 @@ reviews:
   review_details: false
   auto_review:
     enabled: true
-    auto_incremental_review: true
+    auto_incremental_review: false
     auto_pause_after_reviewed_commits: 0
     drafts: false
   # Override the built-in pnpm lockfile exclusion without limiting other files.

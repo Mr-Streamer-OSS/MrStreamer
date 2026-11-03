@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import protobuf from "protobufjs";
 import type { Receiver } from "@mrstreamer/contracts/output";
 import type { CastDiscovery } from "../src/main/receivers/cast/discovery.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const CastMessage = protobuf
   .loadSync(fileURLToPath(new URL("./fixtures/cast/cast_channel.proto", import.meta.url)))
@@ -221,7 +222,9 @@ export class FakeCastReceiver {
       requestId: 0,
       status: {
         // As a TV with nothing running: no list at all.
-        ...(this.app ? { applications: [{ ...app, namespaces: [{ name: MEDIA }] }] } : {}),
+        ...defined({
+          applications: this.app ? [{ ...app, namespaces: [{ name: MEDIA }] }] : undefined,
+        }),
         volume: { controlType: "attenuation", stepInterval: 0.05, ...this.volume },
       },
     };
@@ -276,9 +279,7 @@ export class FakeCastReceiver {
 
   private framed(payload: object, sourceId: string | undefined, to: CastFields): Buffer {
     const body = this.encode(payload, {
-      ...(sourceId === undefined ? {} : { sourceId }),
-      ...(to.sourceId === undefined ? {} : { destinationId: to.sourceId }),
-      ...(to.namespace === undefined ? {} : { namespace: to.namespace }),
+      ...defined({ sourceId, destinationId: to.sourceId, namespace: to.namespace }),
     });
     const header = Buffer.alloc(4);
     header.writeUInt32BE(body.length);

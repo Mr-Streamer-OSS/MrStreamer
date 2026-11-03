@@ -18,6 +18,7 @@ import {
   type Login,
   type SourceLogin,
 } from "./login-safety.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Each subscription's last channel list and movie and series lists, as its provider gave them,
 // kept in Caches/catalogues so a launch can show them before, or instead of, asking again.
@@ -468,7 +469,7 @@ const channelCopy = (channel: ProviderChannel, art: Art) =>
     logoUrl: art(channel.logoUrl),
     categoryIds: [...channel.categoryIds],
     guideId: channel.guideId,
-    ...(channel.adult === undefined ? {} : { adult: channel.adult }),
+    ...defined({ adult: channel.adult }),
     catchupDays: channel.catchupDays,
   }) satisfies ProviderChannel;
 
@@ -484,7 +485,9 @@ const titleCopy = (title: ProviderTitle, art: Art) =>
     categoryIds: [...title.categoryIds],
     adult: title.adult,
     container: title.container,
-    ...(title.tmdbId === undefined ? {} : { tmdbId: title.tmdbId }),
-    ...(title.metadata === undefined ? {} : { metadata: title.metadata }),
-    ...(title.episodeFiles === undefined ? {} : { episodeFiles: [...title.episodeFiles] }),
+    ...defined({
+      tmdbId: title.tmdbId,
+      metadata: title.metadata,
+      episodeFiles: title.episodeFiles === undefined ? undefined : [...title.episodeFiles],
+    }),
   }) satisfies ProviderTitle;

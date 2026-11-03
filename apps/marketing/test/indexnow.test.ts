@@ -117,6 +117,12 @@ describe("IndexNow production notification HTTP contract", () => {
     expect(JSON.parse(f.requests.at(-1)?.body ?? "").urlList).toEqual(canonical);
   });
 
+  // What the public marker says in place of the packaged one, for the cases it differs in.
+  const published: Partial<Record<string, Partial<typeof manifest>>> = {
+    revision: { revision: "b".repeat(40) },
+    buildId: { buildId: "22222222-2222-4222-8222-222222222222" },
+    domain: { site: "https://preview.example.org" },
+  };
   it.each(["key", "revision", "buildId", "domain", "redirect"])(
     "never POSTs when the public %s differs",
     async (mismatch) => {
@@ -133,11 +139,7 @@ describe("IndexNow production notification HTTP contract", () => {
           res.end(
             JSON.stringify({
               ...manifest,
-              ...(mismatch === "revision" ? { revision: "b".repeat(40) } : {}),
-              ...(mismatch === "buildId"
-                ? { buildId: "22222222-2222-4222-8222-222222222222" }
-                : {}),
-              ...(mismatch === "domain" ? { site: "https://preview.example.org" } : {}),
+              ...published[mismatch],
             }),
           );
         return true;
@@ -181,6 +183,13 @@ describe("IndexNow production notification HTTP contract", () => {
     expect(f.requests).toHaveLength(0);
   });
 
+  // What the packaged marker says in place of a valid one, for the cases it is invalid in.
+  const packaged: Partial<Record<string, Partial<typeof manifest>>> = {
+    revision: { revision: "b".repeat(40) },
+    site: { site: "https://preview.example.org" },
+    key: { key: "bad" },
+    empty: { urlList: [] },
+  };
   it.each(["ownership", "revision", "site", "key", "empty"])(
     "rejects invalid packaged %s before HTTP",
     async (invalid) => {
@@ -191,10 +200,7 @@ describe("IndexNow production notification HTTP contract", () => {
           join(f.folder, INDEXNOW_MARKER),
           JSON.stringify({
             ...manifest,
-            ...(invalid === "revision" ? { revision: "b".repeat(40) } : {}),
-            ...(invalid === "site" ? { site: "https://preview.example.org" } : {}),
-            ...(invalid === "key" ? { key: "bad" } : {}),
-            ...(invalid === "empty" ? { urlList: [] } : {}),
+            ...packaged[invalid],
           }),
         );
       await expect(f.submit()).rejects.toThrow();

@@ -97,9 +97,11 @@ export function removalScope(title: RawTitleRef): string {
  */
 export function removedKeys(title: RawTitleRef, rows: readonly TitleRow[]): string[] {
   if (title.kind === "movie") return [titleKey(title)];
-  return rows
-    .filter((row) => row.title.kind === "episode" && row.title.seriesId === title.seriesId)
-    .map((row) => titleKey(row.title));
+  return rows.flatMap((row) =>
+    row.title.kind === "episode" && row.title.seriesId === title.seriesId
+      ? [titleKey(row.title)]
+      : [],
+  );
 }
 
 /**

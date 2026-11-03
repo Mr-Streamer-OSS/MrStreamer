@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Catalogue, Member } from "../src/account.ts";
 import { buildLibrary, type Channel } from "../src/library.ts";
 import { native } from "./native-files.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // Channel lists as the viewer meets them (custom-lists-screen.tsx): a row's sheet on Live and in
 // Favourites, Live's rows for the lists, and a list's screen with its editor. The real screens run
@@ -93,8 +94,7 @@ vi.mock("react-native", async () => {
       alert: (title: string, message?: string, buttons?: readonly Button[]) =>
         void scenario.alerts.push({
           title,
-          ...(message ? { message } : {}),
-          ...(buttons ? { buttons } : {}),
+          ...defined({ message: message || undefined, buttons }),
         }),
       prompt: (
         title: string,
@@ -102,7 +102,13 @@ vi.mock("react-native", async () => {
         buttons: readonly Button[],
         _type: string,
         typed: string,
-      ) => void scenario.prompts.push({ title, ...(message ? { message } : {}), buttons, typed }),
+      ) =>
+        void scenario.prompts.push({
+          title,
+          ...defined({ message: message || undefined }),
+          buttons,
+          typed,
+        }),
     },
     ActionSheetIOS: {
       showActionSheetWithOptions: (
@@ -113,7 +119,7 @@ vi.mock("react-native", async () => {
           title,
           options,
           choose,
-          ...(anchor === undefined ? {} : { anchor }),
+          ...defined({ anchor }),
         }),
     },
   };
@@ -276,9 +282,10 @@ function confirm(button: string) {
   React.act(() => alert.buttons?.find((each) => each.text === button)?.onPress?.());
 }
 const prefixed = (prefix: string, ...not: string[]) =>
-  [...container.querySelectorAll(`[data-testid^="${prefix}"]`)]
-    .map((row) => row.getAttribute("data-testid")!.slice(prefix.length))
-    .filter((id) => !not.some((suffix) => id.endsWith(suffix)));
+  [...container.querySelectorAll(`[data-testid^="${prefix}"]`)].flatMap((row) => {
+    const id = row.getAttribute("data-testid")!.slice(prefix.length);
+    return !not.some((suffix) => id.endsWith(suffix)) ? [id] : [];
+  });
 /** A list's rows on screen, by channel key, or entry for one that doesn't open. */
 const rows = () => prefixed("list-row-", "-remove");
 const arranged = () => prefixed("arranged-", "-up", "-down", "-remove");

@@ -147,18 +147,20 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
         </div>
       ) : (
         <nav ref={pages} className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-          {shown
-            .filter((entry) => !(folded && entry.view === "downloads"))
-            .map((entry) => (
-              <PageButton
-                key={entry.view}
-                ref={entry.view === "home" ? home : undefined}
-                view={entry.view}
-                current={entry.view === view}
-              >
-                {t(entry.label)}
-              </PageButton>
-            ))}
+          {shown.flatMap((entry) =>
+            !(folded && entry.view === "downloads")
+              ? [
+                  <PageButton
+                    key={entry.view}
+                    ref={entry.view === "home" ? home : undefined}
+                    view={entry.view}
+                    current={entry.view === view}
+                  >
+                    {t(entry.label)}
+                  </PageButton>,
+                ]
+              : [],
+          )}
         </nav>
       )}
       <div className="ml-auto flex items-center gap-1.5">

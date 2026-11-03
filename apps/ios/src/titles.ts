@@ -69,6 +69,7 @@ import { store, useStore } from "./store.ts";
 import { titlePolicy } from "./content-policy.ts";
 import { serveViewing } from "./viewing.ts";
 import { alignWatchlist, serveWatchlist } from "./watchlist.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The movie and series catalogue of every saved subscription together, as the desktop builds it:
 // each provider's lists, which account.ts loads, indexed by core as one (names, versions gathered
@@ -360,7 +361,7 @@ function askWith(yours: string) {
         await metadata.close().catch(() => undefined);
         metadata = metadataOf();
       }
-      client = key ? tmdb({ key, ...(TMDB_API ? { api: TMDB_API } : {}) }) : null;
+      client = key ? tmdb({ key, ...defined({ api: TMDB_API || undefined }) }) : null;
       keyInstalled = change;
       // Only now, so details asked with the old client while the store closed are let go too.
       if (fresh) {
@@ -824,7 +825,7 @@ export function* searchTitlesSteps(
       if (!title.tmdbId) return "";
       const shown = metadata.name(tk, title.tmdbId, viewerLanguage);
       return {
-        ...(shown ? { title: shown.name, original: shown.original } : {}),
+        ...defined({ title: shown?.name, original: shown?.original }),
         names: metadata.searchAliases(tk, title.tmdbId),
       };
     },
@@ -1021,7 +1022,7 @@ async function detailsUnder(
         ? undefined
         : ({ kind: "asking", savedAt: since } as const);
     if (show && stands() && currentLanguage(reading)) {
-      show({ ...shown(raw, known), ...(standing ? { about: standing } : {}) });
+      show({ ...shown(raw, known), ...defined({ about: standing }) });
     }
   };
   const fresh = saved && Date.now() - saved.at < PROVIDER_FRESH && saved.listedAt === listedAt(id);

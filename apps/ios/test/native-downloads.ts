@@ -720,6 +720,16 @@ function stopTask(task: Task, why: "pause" | "cancel") {
   );
 }
 
+/** Whether a task ends within one of a stream lease's five-second waits (`native.leaseDeadlines`). */
+function endsForLease(ended: Promise<void>) {
+  const deadlines = native.leaseDeadlines;
+  if (!deadlines) return within(ended, 5_000);
+  return Promise.race([
+    ended.then(() => true),
+    new Promise<boolean>((done) => deadlines.push(() => done(false))),
+  ]);
+}
+
 async function within(promise: Promise<void>, ms: number) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const ended = await Promise.race([
@@ -1052,9 +1062,9 @@ const module = {
     const task = background.task?.sourceId === sourceId ? background.task : null;
     if (task) {
       stopTask(task, "pause");
-      if (!(await within(task.ended, 5_000))) {
+      if (!(await endsForLease(task.ended))) {
         stopTask(task, "cancel");
-        if (!(await within(task.ended, 5_000))) {
+        if (!(await endsForLease(task.ended))) {
           const now = background.leases.get(lease);
           if (now) now.state = "refused";
           throw refused("ERR_DOWNLOADS_UNKNOWN_CLOSURE", "A download's request may still be open.");

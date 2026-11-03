@@ -19,6 +19,7 @@ import { GuidePage } from "../../src/renderer/src/features/live/GuidePage.tsx";
 import { DetailsView } from "../../src/renderer/src/features/titles/DetailsView.tsx";
 import { clockTime } from "../../src/renderer/src/lib/format.ts";
 import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 const subscription = (id: string, name: string): SubscriptionSummary => ({
   kind: "xtream",
@@ -209,7 +210,7 @@ async function filmSheet(played: readonly TitleProgress[], picks: Record<string,
   for (const { id } of [northline, holiday]) {
     client.setQueryData(queries.subscriptionPreferences(id).queryKey, {
       ...defaultSubscriptionPreferences,
-      ...(picks[id] ? { titleVersions: { "movie:603": picks[id] } } : {}),
+      ...defined({ titleVersions: picks[id] ? { "movie:603": picks[id] } : undefined }),
     });
   }
   const mounted = queryView(client);

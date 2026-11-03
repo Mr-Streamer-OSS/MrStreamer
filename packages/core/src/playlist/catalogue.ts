@@ -16,6 +16,7 @@ import type {
 } from "@mrstreamer/contracts/playlist";
 import { playlistCatchup, type PlaylistCatchup } from "./catchup.ts";
 import type { PlaylistEntry } from "./m3u.ts";
+import { defined } from "../defined.ts";
 
 /** Where a channel streams from. The address can hold a login, so it stays in the main process. */
 export interface PlaylistStream {
@@ -72,10 +73,12 @@ export function playlistCatalogue(entries: Iterable<PlaylistEntry>): PlaylistCat
       url: entry.url,
       format,
       headers: {
-        ...(entry.userAgent ? { "User-Agent": entry.userAgent } : {}),
-        ...(entry.referrer ? { Referer: entry.referrer } : {}),
+        ...defined({
+          "User-Agent": entry.userAgent || undefined,
+          Referer: entry.referrer || undefined,
+        }),
       },
-      ...(catchup ? { catchup } : {}),
+      ...defined({ catchup: catchup ?? undefined }),
     });
   }
   return { categories: [...categories.values()], channels, streams };

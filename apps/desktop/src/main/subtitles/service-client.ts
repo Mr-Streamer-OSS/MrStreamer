@@ -12,6 +12,7 @@ import { subtitleTextBytes, SUBTITLE_TEXT_LIMIT } from "@mrstreamer/core/subtitl
 import { type } from "arktype";
 import { Unzip, type UnzipDecoder, type UnzipFile } from "fflate";
 import { lazy } from "@mrstreamer/contracts/lazy";
+import { defined } from "@mrstreamer/core/defined";
 
 export type SubtitleQuery = {
   readonly tmdbId?: number;
@@ -199,24 +200,23 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   ): Promise<readonly SubtitleCandidate[]> => {
     const query = checkedQuery(input);
     const url = new URL("https://api.subdl.com/api/v1/subtitles");
-    url.search = new URLSearchParams({
+    const params = new URLSearchParams({
       api_key: credentials.apiKey,
       ...(query.tmdbId !== undefined
         ? { tmdb_id: String(query.tmdbId) }
         : { film_name: query.title! }),
-      ...(query.year !== undefined ? { year: String(query.year) } : {}),
+      ...defined({ year: query.year !== undefined ? String(query.year) : undefined }),
       type: query.kind === "movie" ? "movie" : "tv",
       languages: query.languages.join(",").toUpperCase(),
       subs_per_page: "30",
       unpack: "1",
       client: "custom_integration",
-      ...(query.kind === "episode"
-        ? {
-            season_number: String(query.season),
-            episode_number: String(query.episode),
-          }
-        : {}),
-    }).toString();
+    });
+    if (query.kind === "episode") {
+      params.set("season_number", String(query.season));
+      params.set("episode_number", String(query.episode));
+    }
+    url.search = params.toString();
     const reply = SubDLReply().assert(await api(url, {}, signal));
     if (!reply.status) throw new SubtitleRequestFailure("unavailable");
     // SubDL may broaden an unsuccessful match. Do not import another title's results.

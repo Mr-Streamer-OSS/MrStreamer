@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { Member } from "../src/account.ts";
 import { keychain } from "./keychain.ts";
+import { defined } from "@mrstreamer/core/defined";
 
 // The real Settings route rendered over native view/sheet doubles and a temporary disk.
 
@@ -45,7 +46,7 @@ vi.mock("react-native", async () => ({
   },
   Alert: {
     alert: (title: string, message: string, buttons?: readonly Button[]) => {
-      scenario.alerts.push({ title, message, ...(buttons ? { buttons } : {}) });
+      scenario.alerts.push({ title, message, ...defined({ buttons }) });
     },
     prompt: (_title: string, _message: string, buttons: NonNullable<typeof scenario.prompt>) => {
       scenario.prompt = buttons;
