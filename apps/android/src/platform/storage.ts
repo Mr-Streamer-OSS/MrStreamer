@@ -1,3 +1,6 @@
+import type { Json } from "@mrstreamer/contracts/json";
+import type { ConsentRecord } from "@mrstreamer/mobile/consent/statistics";
+import type { CaptureEvent } from "../telemetry/model.ts";
 import { File, Paths } from "expo-file-system";
 
 // Whole JSON files in the app's private files folder, which Android deletes with the app and,
@@ -25,7 +28,7 @@ export function readJson(name: string): unknown {
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
-export function writeJson(name: string, value: unknown): void {
+export function writeJson(name: string, value: Json | ConsentRecord<CaptureEvent>): void {
   const pending = pendingOf(name);
 
   if (!pending.exists) pending.create();

@@ -2,14 +2,14 @@ import { readJsonStrict, writeJson } from "./storage.ts";
 
 export interface PreferenceFiles {
   read(name: string): unknown;
-  write(name: string, value: unknown): void;
+  write(name: string, value: Parameters<typeof writeJson>[1]): void;
 }
 
 /** A write only succeeds when an independent read finds exactly what was requested. */
 export function preferences(files: PreferenceFiles = { read: readJsonStrict, write: writeJson }) {
   return {
     read: files.read,
-    write(name: string, value: unknown): boolean {
+    write(name: string, value: Parameters<typeof writeJson>[1]): boolean {
       try {
         files.write(name, value);
       } catch {
