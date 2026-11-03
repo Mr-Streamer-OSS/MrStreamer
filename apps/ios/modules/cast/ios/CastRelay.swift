@@ -214,8 +214,13 @@ final class CastRelay {
       setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
       _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
       lock.lock()
-      waiting.insert(client)
+      let full = waiting.count >= Self.headConnectionsMax
+      if !full { waiting.insert(client) }
       lock.unlock()
+      if full {
+        close(client)
+        continue
+      }
       DispatchQueue(label: "app.mrstreamer.cast.connection").async { [weak self] in
         self?.handle(client)
         close(client)
@@ -250,6 +255,8 @@ final class CastRelay {
 
   /// The most a request's head may take, however slowly it trickles in.
   private static let headDeadline: TimeInterval = 10
+  /// Bounds unauthenticated request heads; active streams no longer count.
+  private static let headConnectionsMax = 32
 
   private func handle(_ client: Int32) {
     var pending = Data()
@@ -319,6 +326,10 @@ final class CastRelay {
   /// JavaScript's rewriting of a playlist; nil when it refused it or didn't answer in time.
   private func rewrite(_ token: String, _ read: (url: String, body: String)) -> String? {
     lock.lock()
+    guard let served = tokens[token], !served.revoked else {
+      lock.unlock()
+      return nil
+    }
     requests += 1
     let request = "r\(requests)"
     var result: String?

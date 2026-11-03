@@ -603,7 +603,7 @@ function playOn(tv: Tv) {
 function OnTv({ top, bottom }: { top: number; bottom: number }) {
   const { tv, phase } = usePlayback();
   const shown =
-    tv.kind === "on"
+    tv.kind === "on" && phase.kind !== "failed"
       ? { title: tv.tv.name, line: tvT("Keep Mr. Streamer open while it plays.") }
       : tv.kind === "ended" && phase.kind === "failed"
         ? {

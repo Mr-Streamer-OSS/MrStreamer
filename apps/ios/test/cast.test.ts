@@ -14,8 +14,12 @@ vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => (resolve = done));
-  return { promise, resolve };
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, refuse) => {
+    resolve = done;
+    reject = refuse;
+  });
+  return { promise, resolve, reject };
 }
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise((done) => setTimeout(done, 0));
@@ -160,12 +164,16 @@ let wifi = true;
 let holding = false;
 /** The channel the sender opened last. */
 let channel = "";
+let openChannel = async () => {};
 
 Object.assign(globalThis, {
   expo: {
     modules: {
       Cast: {
-        connect: async (name: string) => void (channel = name),
+        connect: async (name: string) => {
+          channel = name;
+          await openChannel();
+        },
         write: (channel: string, data: string) => {
           for (const message of readFrames(Buffer.from(data, "base64"))) {
             sent.push(message);
@@ -265,9 +273,23 @@ beforeEach(async () => {
   tvTime = 0;
   tvState = "PLAYING";
   wifi = true;
+  openChannel = async () => {};
 });
 
 describe("Play on TV", () => {
+  it("does not report a superseded connection's late refusal", async () => {
+    const refused = deferred();
+    openChannel = () => refused.promise;
+    const first = playOnTv(tv);
+    openChannel = async () => {};
+    const other = { ...tv, id: "tv2", name: "Bedroom TV" };
+    expect(await playOnTv(other)).toBeNull();
+
+    refused.reject(new Error("No route to host"));
+    expect(await first).toBeNull();
+    expect(playbackState.get().tv).toEqual({ kind: "on", tv: other });
+  });
+
   it("gives the TV only the relay's address, and keeps the provider's address and login on the phone", async () => {
     void play(title("m1"), file("mp4"), options);
     await settle();

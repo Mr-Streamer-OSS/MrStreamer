@@ -1994,9 +1994,8 @@ export async function playOnTv(tv: Tv): Promise<string | null> {
     opened = await connectTv(tv);
   } catch {
     settled();
-    if (mine === routes) {
-      state.set((s) => ({ ...s, tv: link ? { kind: "on", tv: link.tv } : { kind: "off" } }));
-    }
+    if (mine !== routes) return null;
+    state.set((s) => ({ ...s, tv: link ? { kind: "on", tv: link.tv } : { kind: "off" } }));
     return tvText("Couldn't connect to {tv}.", { tv: tv.name });
   }
   if (mine !== routes) {
