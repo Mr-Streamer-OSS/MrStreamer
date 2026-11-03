@@ -124,7 +124,7 @@ vi.mock("../src/loading.tsx", async () => {
   return {
     Docked: pass,
     Placeholders: pass,
-    Shape: () => null,
+    Placeholder: () => null,
     PlaceholderLines: () => createElement("div", { "data-testid": "placeholder-lines" }),
     loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
   };

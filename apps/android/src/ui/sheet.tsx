@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Modal, Pressable, View } from "react-native";
+import { t } from "../navigation/copy.ts";
+import { Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "./theme.ts";
 
@@ -9,18 +10,21 @@ import { colors } from "./theme.ts";
  * it while it shows. Its content fills it under the drag handle, up to 560dp wide, and must pad
  * the system's navigation bar itself from `useSafeAreaInsets`, which here gives the sheet's own
  * window's insets. Paper A: a #141414 surface with 28dp top corners over a 60% black scrim, a
- * 32x4dp handle in a 36dp band.
+ * 32x4dp handle in a 36dp band. A form takes 88% of the window; a `fit` sheet (a picker, a row's
+ * actions) is as tall as its content, up to that.
  */
 export function Sheet({
   visible,
   label,
   onClose,
+  fit = false,
   children,
 }: {
   visible: boolean;
   /** What TalkBack calls the scrim that closes it. */
   label: string;
   onClose: () => void;
+  fit?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -37,7 +41,7 @@ export function Sheet({
       <SafeAreaProvider style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Close ${label}`}
+          accessibilityLabel={t("Close {label}", { label })}
           onPress={onClose}
           // TalkBack offers it; the keyboard skips it for the sheet's own controls.
           focusable={false}
@@ -45,7 +49,7 @@ export function Sheet({
         />
         <View
           style={{
-            height: "88%",
+            ...(fit ? { maxHeight: "88%" } : { height: "88%" }),
             width: "100%",
             maxWidth: 560,
             alignSelf: "center",
@@ -64,7 +68,7 @@ export function Sheet({
               style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.handle }}
             />
           </View>
-          {children}
+          {fit ? <ScrollView style={{ flexShrink: 1 }}>{children}</ScrollView> : children}
         </View>
       </SafeAreaProvider>
     </Modal>

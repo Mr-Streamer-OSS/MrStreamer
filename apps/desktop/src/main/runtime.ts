@@ -21,7 +21,6 @@ import {
   ViewingRecord,
   ViewingSeries,
 } from "@mrstreamer/core/viewing/service";
-import type * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { databaseLayer } from "./platform/database.ts";
@@ -372,9 +371,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
 }
 
 /** Maps the saved roster to viewing owners, keeping their transaction-time presence check. */
-export function viewingAccount(
-  subscriptions: Context.Service.Shape<typeof Subscriptions>,
-): Context.Service.Shape<typeof ViewingAccount> {
+export function viewingAccount(subscriptions: Subscriptions["Service"]): ViewingAccount["Service"] {
   return {
     owners: Effect.map(subscriptions.saved, (saved) =>
       saved.map((owner) => ({

@@ -45,7 +45,7 @@ const params = vi.hoisted(() => ({ id: "custom", country: "" }));
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => params,
   useIsFocused: () => true,
-  router: { back() {}, push() {} },
+  router: { back() {}, push: vi.fn() },
 }));
 
 vi.mock("../src/ui/focus.ts", () => ({
@@ -59,8 +59,6 @@ vi.mock("../src/ui/top-app-bar.tsx", () => ({ TopAppBar: () => null }));
 vi.mock("../src/ui/sheet.tsx", () => ({ Sheet: () => null }));
 
 vi.mock("../src/connect/connect-screen.tsx", () => ({ ConnectScreen: () => null }));
-
-vi.mock("../src/connect/catalogue-screen.tsx", () => ({ CatalogueScreen: () => null }));
 
 vi.mock("../src/navigation/screen.tsx", () => ({
   Screen: ({ children }: { children: ReactNode }) => children,
@@ -96,7 +94,8 @@ vi.mock("../src/player/instance.ts", () => ({ player: { play: vi.fn() } }));
 vi.mock("../src/live/ui.tsx", async (importOriginal) => ({
   Empty: ({ title, body, action }: { title: string; body?: string; action?: ReactNode }) =>
     h("div", {}, title, body, action),
-  NavRow: () => null,
+  NavRow: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    h("button", { onClick: onPress }, label),
   Channel: (await importOriginal<typeof import("../src/live/ui.tsx")>()).Channel,
   ListsSheet: () => null,
   StillRows: () => null,
@@ -209,4 +208,17 @@ it("keeps an unavailable favourite and its reason in For you with a country sele
   );
   expect(container.textContent).toContain("Saved News");
   expect(container.textContent).toContain("Its provider was removed.");
+});
+
+it("opens Settings from the Providers shortcut", async () => {
+  const { router } = await import("expo-router");
+  await act(async () => root.render(h(LiveScreen)));
+
+  const providers = [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === "Providers",
+  );
+
+  expect(providers).toBeDefined();
+  await act(async () => providers!.click());
+  expect(router.push).toHaveBeenCalledWith("/settings");
 });

@@ -1,0 +1,43 @@
+# Android notices
+
+The manifest combines exactly the packages owning sources in Metro's Android release bundle
+plus autolinked Gradle projects in the release report and Maven coordinates resolved by Gradle's release runtime classpath, including arrow-only
+coordinates such as Hermes. Tooling and optional packages appear only if Metro bundles their
+sources. The app and bundled workspace packages use the Android app version and repository
+licence. Settings imports only the small `summary.json`; the licences route loads full notices.
+
+After `pnpm install --frozen-lockfile` in `apps/android`, export the release bundle and its map,
+then regenerate the native report with JDK 17 and the Android SDK available:
+
+```sh
+cd apps/android
+pnpm exec expo export --platform android --source-maps --output-dir ../../.local/android-license-bundle
+cd android
+./gradlew :app:dependencies --configuration releaseRuntimeClasspath --console=plain > ../licenses/releaseRuntimeClasspath.txt
+cd ../../..
+python3 apps/android/scripts/licenses.py .local/android-license-bundle/_expo/static/js/android/*.map
+```
+
+The generator reads every supplied map and records their source paths in `bundle-sources.json`,
+the resolved JavaScript name@version list in `bundle-components.json`, and shipped autolinked
+projects in `native-projects.json`. Coverage tests check these inputs against the Android lockfile
+and Gradle report without an Android install. JavaScript versions come from Metro's pnpm path
+segment, or the lockfile importer for top-level node_modules paths. The summary counts each
+component once; native counts components not already included by JavaScript. Review and commit that input, the
+native report, manifest and summary when dependencies or bundled code change. Bundling and
+dependency resolution do not establish installed Android or runtime qualification.
+
+The generator reads installed package notices, Maven parent licences and Expo's npm-local Maven
+repositories. It stops on an unresolved notice instead of creating a partial manifest.
+`notice-sources.json` pins upstream notices for packages that omit them from npm. Downloads are
+cached in the checkout's ignored `.local/`, keyed by URL, lockfile, native report and source
+overrides; local files are always read afresh. Refresh provenance when those packages change.
+The overrides use React notices for its marker packages, Jimp 0.16.1 for the compact build,
+and pinned upstream notices added after publication for standard-navigation and structured-headers.
+
+For obsolete OSI MIT licence links, the full SPDX MIT text accompanies copyright headers
+retained from the published source archive. Licence templates do not replace bundled notices.
+
+Run `python3 apps/android/scripts/test_licenses.py` from the repository root to verify that an
+unresolvable notice exits non-zero and preserves all existing generated outputs. The fixture
+uses a temporary checkout and empty Expo discovery; it needs neither an Android install nor network access.

@@ -25,7 +25,13 @@ import { useLocale } from "../../../i18n/catalogue.ts";
 import { t } from "../../../i18n/library.ts";
 import { t as live } from "../../../i18n/live.ts";
 import type { Channel, Library } from "../../../library.ts";
-import { Docked, libraryStatus, Placeholders, Shape, useDockInset } from "../../../loading.tsx";
+import {
+  Docked,
+  libraryStatus,
+  Placeholder,
+  Placeholders,
+  useDockInset,
+} from "../../../loading.tsx";
 import {
   openWatch,
   player,
@@ -381,13 +387,13 @@ function OnNowPlaceholder() {
   return (
     <Placeholders style={styles.block} testID="home-on-now-placeholder">
       <View style={styles.head}>
-        <Shape style={styles.headShape} />
+        <Placeholder style={styles.headPlaceholder} />
       </View>
       <View style={[styles.tiles, styles.stillTiles]}>
         {Array.from({ length: 4 }, (_, index) => (
           <View key={index} style={styles.tile}>
-            <Shape style={[styles.tileLogo, styles.tileShape]} />
-            <Shape style={styles.tileNameShape} />
+            <Placeholder style={[styles.tileLogo, styles.tilePlaceholder]} />
+            <Placeholder style={styles.tileNamePlaceholder} />
           </View>
         ))}
       </View>
@@ -678,8 +684,8 @@ const styles = StyleSheet.create({
   tileLogo: { width: 112, height: 63 },
   tileName: { color: colors.text, fontSize: 13, marginTop: 6 },
   tileLine: { color: colors.dim, fontSize: 12, marginTop: 1 },
-  headShape: { width: 96, height: 16 },
+  headPlaceholder: { width: 96, height: 16 },
   stillTiles: { flexDirection: "row", overflow: "hidden" },
-  tileShape: { borderRadius: 6 },
-  tileNameShape: { width: 72, height: 10, marginTop: 8 },
+  tilePlaceholder: { borderRadius: 6 },
+  tileNamePlaceholder: { width: 72, height: 10, marginTop: 8 },
 });

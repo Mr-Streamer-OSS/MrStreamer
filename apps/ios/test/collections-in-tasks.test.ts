@@ -289,7 +289,7 @@ vi.mock("../src/loading.tsx", async () => {
         status ? createElement("span", { role: "status" }, status.text) : null,
       ),
     Placeholders: pass,
-    Shape: () => null,
+    Placeholder: () => null,
     libraryStatus: () => null,
     loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
     useDockInset: () => 0,

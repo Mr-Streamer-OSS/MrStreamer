@@ -425,7 +425,7 @@ describe("the keys as a reminder's row goes", () => {
     { to: "to the popup once every row went", out: ["A", "C", "D", "E", "B"], target: null },
   ];
 
-  it.each(orders.flatMap((order) => together.map((shape) => ({ order, ...shape }))))(
+  it.each(orders.flatMap((order) => together.map((scenario) => ({ order, ...scenario }))))(
     "hands them once, $to, past the rows going in the same change, $order",
     async ({ order, out, target }) => {
       const { page, rest, lose } = await takingOut(out);

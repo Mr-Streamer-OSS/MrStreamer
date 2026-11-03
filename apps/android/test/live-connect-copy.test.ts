@@ -103,8 +103,6 @@ vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: { children: ReactNode }) => children,
 }));
 
-vi.mock("../src/connect/catalogue-screen.tsx", () => ({ CatalogueScreen: () => null }));
-
 vi.mock("../src/navigation/screen.tsx", () => ({
   Screen: ({ children }: { children: ReactNode }) => children,
 }));

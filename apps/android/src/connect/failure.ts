@@ -1,5 +1,6 @@
+import { t } from "./copy.ts";
 import type { AppError } from "@mrstreamer/contracts/errors";
-import { t } from "@mrstreamer/core/i18n";
+import { t as coreText } from "@mrstreamer/core/i18n";
 
 /**
  * One sentence for the failures connecting and listing channels meet, in the desktop and iOS
@@ -13,24 +14,24 @@ export function describeFailure(error: AppError): string {
     case "invalid-input":
       return error.detail;
     case "invalid-login":
-      return t("The provider rejected this username or password.");
+      return coreText("The provider rejected this username or password.");
     case "account-inactive":
       return error.state === "expired"
-        ? t("The provider reports this subscription as expired.")
+        ? coreText("The provider reports this subscription as expired.")
         : error.state === "banned"
-          ? t("The provider reports this subscription as banned.")
-          : t("The provider reports this subscription as disabled.");
+          ? coreText("The provider reports this subscription as banned.")
+          : coreText("The provider reports this subscription as disabled.");
     case "unreachable":
       // The host alone: an Xtream server's path can hold a token of its own.
-      return `${t("Can't reach {server}.", { server: URL.parse(error.server)?.host ?? "" })} ${error.detail}`;
+      return `${coreText("Can't reach {server}.", { server: URL.parse(error.server)?.host ?? "" })} ${error.detail}`;
     case "provider-error":
-      return t("The provider answered with an error (HTTP {status}).", {
+      return coreText("The provider answered with an error (HTTP {status}).", {
         status: String(error.status),
       });
     case "keychain-refused":
-      return "This phone would not keep the login safe. Nothing was saved.";
+      return t("This phone would not keep the login safe. Nothing was saved.");
     case "needs-secret":
-      return "This phone no longer has its login. Add the provider again to sign in.";
+      return t("This phone no longer has its login. Add the provider again to sign in.");
     case "unexpected":
       return error.detail;
     default:
