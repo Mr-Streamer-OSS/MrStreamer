@@ -698,6 +698,7 @@ function TvSheet({ onClose }: { onClose: () => void }) {
   const { width, height } = useWindowDimensions();
   const wide = width >= 600;
   const connected = tv.kind === "on" ? tv.tv : null;
+  const others = connected ? found.filter((each) => each.id !== connected.id) : [];
   // The chooser keeps its height while it looks and lists, with the note at its foot.
   const listing = !connected && (looking ? !quiet : found.length > 0);
   const done = wide ? null : (
@@ -789,15 +790,12 @@ function TvSheet({ onClose }: { onClose: () => void }) {
               >
                 <Text style={styles.actionLabel}>{tvT("Disconnect and play here")}</Text>
               </Pressable>
-              {found.some((each) => each.id !== connected.id) ? (
+              {others.length > 0 ? (
                 <View style={styles.moveTo}>
                   <Text style={styles.moveLabel} accessibilityRole="header">
                     {tvT("Move to another TV")}
                   </Text>
-                  <TvRows
-                    tvs={found.filter((each) => each.id !== connected.id)}
-                    onChoose={choose}
-                  />
+                  <TvRows tvs={others} onChoose={choose} />
                 </View>
               ) : null}
             </>
@@ -939,12 +937,7 @@ function TvVolume() {
         accessibilityValue={{ min: 0, max: 100, now: Math.round(level * 100) }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={(event: AccessibilityActionEvent) =>
-          setTvVolume(
-            Math.min(
-              1,
-              Math.max(0, level + (event.nativeEvent.actionName === "increment" ? 0.1 : -0.1)),
-            ),
-          )
+          setTvVolume(level + (event.nativeEvent.actionName === "increment" ? 0.1 : -0.1))
         }
         testID="watch-tv-volume"
         {...responder.panHandlers}

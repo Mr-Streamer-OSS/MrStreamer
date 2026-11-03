@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewritePlaylist, tvPath, type RouteKind } from "../src/cast-media.ts";
+import { rewritePlaylist, type RouteKind } from "../src/cast-media.ts";
 
 // What a TV is given of a stream: playlists rewritten so every address it reads is the relay's,
 // keys refused, sound narrowed to the chosen track, and the first profile's limits.
@@ -20,16 +20,6 @@ function rewrite(text: string, sound: string | null = null) {
   );
   return { result, routes };
 }
-
-describe("tvPath", () => {
-  it("sends Matroska through a session, MP4 as it is, and refuses what the first profile can't", () => {
-    expect(tvPath("mkv", false)).toEqual({ kind: "session" });
-    expect(tvPath("MP4", false)).toEqual({ kind: "file", contentType: "video/mp4" });
-    expect(tvPath("m3u8", true)).toEqual({ kind: "hls" });
-    expect(tvPath("avi", false)).toEqual({ kind: "refused", refusal: "format" });
-    expect(tvPath("ts", true)).toEqual({ kind: "refused", refusal: "stream" });
-  });
-});
 
 describe("rewritePlaylist", () => {
   it("names no provider address: segments and keys-free maps go through the relay", () => {

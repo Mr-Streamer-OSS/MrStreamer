@@ -206,23 +206,23 @@ export function rewritePlaylist(
 
 /** The EXT-X-MEDIA sound lines kept: one per group, in the language chosen when one is. */
 function soundsKept(lines: readonly string[], sound: string | null): Set<string> {
-  const groups = new Map<string, string[]>();
+  const groups = new Map<string, Array<{ line: string; values: Map<string, string> }>>();
   for (const line of lines) {
     if (!line.startsWith("#EXT-X-MEDIA:")) continue;
     const values = attributes(line.slice(13));
     if (unquoted(values.get("TYPE")) !== "AUDIO") continue;
     const group = unquoted(values.get("GROUP-ID")) ?? "";
-    groups.set(group, [...(groups.get(group) ?? []), line]);
+    groups.set(group, [...(groups.get(group) ?? []), { line, values }]);
   }
   const kept = new Set<string>();
   for (const members of groups.values()) {
-    const language = (line: string) =>
-      languageCode(unquoted(attributes(line.slice(13)).get("LANGUAGE")));
     const chosen =
-      (sound === null ? undefined : members.find((line) => language(line) === sound)) ??
-      members.find((line) => unquoted(attributes(line.slice(13)).get("DEFAULT")) === "YES") ??
+      (sound === null
+        ? undefined
+        : members.find(({ values }) => languageCode(unquoted(values.get("LANGUAGE"))) === sound)) ??
+      members.find(({ values }) => unquoted(values.get("DEFAULT")) === "YES") ??
       members[0];
-    if (chosen) kept.add(chosen);
+    if (chosen) kept.add(chosen.line);
   }
   return kept;
 }

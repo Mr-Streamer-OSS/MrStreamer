@@ -779,7 +779,7 @@ export function player(): VideoPlayer {
     state.set((s) => ({ ...s, external: isExternalPlaybackActive, muted: silent || s.muted }));
     attentionChanged();
     // AirPlay chosen while a TV plays takes over from the TV.
-    if (isExternalPlaybackActive && link) moveHere(false);
+    if (isExternalPlaybackActive && link) playHere(false);
   });
   created = made;
   return made;
@@ -1957,14 +1957,13 @@ export async function playOnTv(tv: Tv): Promise<string | null> {
   }
   const before = link;
   const from = handover();
-  const readers = current?.resource.settlement ?? (current ? null : undefined);
   link = opened;
   follow(opened);
   if (state.get().pip) endPictureInPicture?.();
   state.set((s) => ({ ...s, tv: { kind: "on", tv }, pip: false }));
   const playing = current?.resource;
   replay(from, false);
-  if (before) void closeAfter(before, playing?.settlement ?? readers);
+  if (before) void closeAfter(before, playing?.settlement);
   return null;
 }
 
@@ -1985,18 +1984,23 @@ export function setTvVolume(level: number) {
   link?.setVolume(level);
 }
 
-/** Disconnect and play here: a title paused where the TV was, a channel live. */
-export function playHere() {
-  moveHere(true);
-}
-
-function moveHere(paused: boolean) {
-  routes++;
+/** Lets go of the TV route, returning its link for the caller to close. */
+function dropLink() {
   const ending = link;
-  const from = handover();
+  routes++;
   link = null;
   unfollowVolume();
   volume.set(null);
+  return ending;
+}
+
+/**
+ * Disconnect and play here: a title from where the TV was, paused unless AirPlay took over
+ * (`paused` false), and a channel live.
+ */
+export function playHere(paused = true) {
+  const from = handover();
+  const ending = dropLink();
   state.set((s) => ({ ...s, tv: { kind: "off" } }));
   if (!ending) return;
   const playing = current?.resource;
@@ -2012,10 +2016,7 @@ function moveHere(paused: boolean) {
 function endTv(why: "left" | "lost", done?: () => void) {
   const ending = link;
   if (!ending) return done?.();
-  routes++;
-  link = null;
-  unfollowVolume();
-  volume.set(null);
+  dropLink();
   const owned = current;
   const { phase } = state.get();
   const message =
@@ -2081,9 +2082,7 @@ export async function stop(): Promise<Saved> {
   const readers = current?.resource.settlement;
   current = null;
   // Stop ends playing everywhere: the TV closes once its stream's readers did.
-  const ending = link;
-  link = null;
-  routes++;
+  const ending = dropLink();
   if (ending) void closeAfter(ending, readers);
   playSubtitles(null);
   endPictureInPicture?.();

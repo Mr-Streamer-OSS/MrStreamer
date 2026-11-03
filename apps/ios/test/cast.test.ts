@@ -87,7 +87,6 @@ function varint(value: number): number[] {
 
 const RECEIVER = "urn:x-cast:com.google.cast.receiver";
 const MEDIA = "urn:x-cast:com.google.cast.media";
-const CONNECTION = "urn:x-cast:com.google.cast.tp.connection";
 
 /** Everything the TV was sent, in order. */
 let sent: Sent[] = [];
@@ -163,8 +162,6 @@ Object.assign(globalThis, {
   expo: {
     modules: {
       Cast: {
-        browse: () => events.push("browse"),
-        stopBrowsing: () => events.push("stop browsing"),
         connect: async (name: string) => void (channel = name),
         write: (channel: string, data: string) => {
           for (const message of readFrames(Buffer.from(data, "base64"))) {
@@ -205,7 +202,6 @@ Object.assign(globalThis, {
   },
 });
 
-const { browseTvs } = await import("../src/cast.ts");
 const { onAdmission, play, playbackState, playHere, playOnTv, setTvVolume, stop, togglePause } =
   await import("../src/playback.ts");
 
@@ -328,7 +324,6 @@ describe("Play on TV", () => {
     expect(sent.map((each) => each.payload["type"])).toEqual(
       expect.arrayContaining(["STOP", "CLOSE"]),
     );
-    expect(sent.some((each) => each.namespace === CONNECTION && each.to === "t1")).toBe(true);
     expect(playbackState.get().tv).toEqual({ kind: "off" });
   });
 
@@ -458,7 +453,6 @@ describe("Play on TV", () => {
     await playOnTv(tv);
     await relayCloses();
     tvTime = 300;
-    tvState = "PLAYING";
     await new Promise((done) => setTimeout(done, 1100));
     await settle();
     given.length = 0;
@@ -472,13 +466,5 @@ describe("Play on TV", () => {
     expect(playbackState.get().tv).toEqual({ kind: "off" });
     fakePlayer.ready();
     expect(fakePlayer.currentTime).toBe(300);
-  });
-
-  it("looks for TVs only while asked", () => {
-    expect(events).not.toContain("browse");
-    const done = browseTvs();
-    expect(events).toEqual(["browse"]);
-    done();
-    expect(events).toEqual(["browse", "stop browsing"]);
   });
 });

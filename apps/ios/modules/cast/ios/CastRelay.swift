@@ -380,12 +380,12 @@ final class CastRelay {
       headers["Content-Range"] = "bytes \(first)-\(last)/\(size)"
     }
     headers["Content-Length"] = "\(max(0, last - first + 1))"
-    guard send(Self.head(status, headers), to: client), !head else { return }
+    guard Self.send(Self.head(status, headers), to: client), !head else { return }
     try? handle.seek(toOffset: UInt64(first))
     var left = last - first + 1
     while left > 0 {
       guard let data = try? handle.read(upToCount: min(left, 256 * 1024)), !data.isEmpty,
-        send(data, to: client)
+        Self.send(data, to: client)
       else { return }
       left -= data.count
     }
@@ -396,7 +396,7 @@ final class CastRelay {
     if all["Content-Length"] == nil { all["Content-Length"] = "\(body?.count ?? 0)" }
     var out = Self.head(status, all)
     if let body { out.append(body) }
-    _ = send(out, to: client)
+    _ = Self.send(out, to: client)
   }
 
   fileprivate static func head(_ status: Int, _ headers: [String: String]) -> Data {
@@ -409,10 +409,6 @@ final class CastRelay {
     let reason = HTTPURLResponse.localizedString(forStatusCode: status).capitalized
     let lines = all.map { "\($0.key): \($0.value)" }.sorted().joined(separator: "\r\n")
     return Data("HTTP/1.1 \(status) \(reason)\r\n\(lines)\r\n\r\n".utf8)
-  }
-
-  fileprivate func send(_ data: Data, to client: Int32) -> Bool {
-    Self.send(data, to: client)
   }
 
   fileprivate static func send(_ data: Data, to client: Int32) -> Bool {
@@ -507,17 +503,17 @@ private final class Streaming: NSObject, URLSessionDataDelegate {
     let ok = (200..<300).contains(http.statusCode)
     if !ok { headers = ["Content-Length": "0"] }
     answered = true
-    let sent = CastRelay.shared.send(CastRelay.head(ok ? http.statusCode : 502, headers), to: client)
+    let sent = CastRelay.send(CastRelay.head(ok ? http.statusCode : 502, headers), to: client)
     completionHandler(sent && ok ? .allow : .cancel)
   }
 
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-    if !CastRelay.shared.send(data, to: client) { dataTask.cancel() }
+    if !CastRelay.send(data, to: client) { dataTask.cancel() }
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     if !answered {
-      _ = CastRelay.shared.send(CastRelay.head(502, ["Content-Length": "0"]), to: client)
+      _ = CastRelay.send(CastRelay.head(502, ["Content-Length": "0"]), to: client)
     }
     done.signal()
   }

@@ -271,7 +271,7 @@ export async function serveOnRelay(
     };
   }
   let next = 1;
-  let refused: Refusal | null = null;
+  /** Rewrites one playlist read from `base`, adding the routes it names to the token. */
   const rewrite = (base: string, body: string) => {
     const made: RelayRoute[] = [];
     const route = (target: string, kind: RouteKind) => {
@@ -280,11 +280,7 @@ export async function serveOnRelay(
       return `${id}.${kind === "playlist" ? "m3u8" : extension(target, "ts")}`;
     };
     const rewritten = rewritePlaylist(body, base, route, sound);
-    if (rewritten.kind === "refused") {
-      refused = rewritten.refusal;
-      return rewritten;
-    }
-    module.route(token, made);
+    if (rewritten.kind === "playlist") module.route(token, made);
     return rewritten;
   };
   relays.set(token, (base, body) => {
@@ -300,7 +296,7 @@ export async function serveOnRelay(
       if (!variant) throw new TvRefused("stream");
       first = rewrite(variant.url, variant.body);
     }
-    if (first.kind === "refused" || refused) throw new TvRefused(refused ?? "stream");
+    if (first.kind === "refused") throw new TvRefused(first.refusal);
     return {
       address: `${served.address}0.m3u8`,
       contentType: "application/x-mpegURL",
@@ -483,20 +479,30 @@ function fromBase64(text: string): Uint8Array {
   return out.subarray(0, at);
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(message.payload);
-    return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+    return isRecord(value) ? value : {};
   } catch {
     return {};
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 const numberOr = <T>(value: unknown, fallback: T) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+/** A media status's `playerState`, and `idleReason` when idle, as a `TvStatus` state. */
+function stateOf(player: unknown, idle: unknown): TvStatus["state"] {
+  if (player === "PLAYING") return "playing";
+  if (player === "PAUSED") return "paused";
+  if (player !== "IDLE") return "loading";
+  if (idle === "FINISHED") return "ended";
+  if (idle === "ERROR") return "failed";
+  return idle === "CANCELLED" || idle === "INTERRUPTED" ? "stopped" : "loading";
+}
 
 let made = 0;
 
@@ -588,25 +594,9 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       if (!isRecord(status) || !media) continue;
       const id = numberOr(status["mediaSessionId"], null);
       if (media.id !== null && id !== media.id) continue;
-      const player = status["playerState"];
-      const idle = status["idleReason"];
-      const state: TvStatus["state"] =
-        player === "PLAYING"
-          ? "playing"
-          : player === "PAUSED"
-            ? "paused"
-            : player === "IDLE"
-              ? idle === "FINISHED"
-                ? "ended"
-                : idle === "ERROR"
-                  ? "failed"
-                  : idle === "CANCELLED" || idle === "INTERRUPTED"
-                    ? "stopped"
-                    : "loading"
-              : "loading";
       const info = isRecord(status["media"]) ? status["media"] : {};
       media.status({
-        state,
+        state: stateOf(status["playerState"], status["idleReason"]),
         time: Math.max(0, numberOr(status["currentTime"], 0)),
         duration: numberOr(info["duration"], null),
       });
@@ -686,13 +676,12 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   const close = async () => {
     if (!open || closing) return;
     closing = true;
-    const stopping = ask(
+    await ask(
       PLATFORM,
       NAMESPACE.receiver,
       { type: "STOP", sessionId: session },
       TIMING.close,
-    );
-    await stopping.catch(() => undefined);
+    ).catch(() => undefined);
     send(to, NAMESPACE.connection, { type: "CLOSE" });
     send(PLATFORM, NAMESPACE.connection, { type: "CLOSE" });
     end("us");
