@@ -13,8 +13,19 @@ import { useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { Button } from "../../components/ui/button.tsx";
 import { cn } from "../../lib/utils.ts";
+import type { OutputState } from "../../player/output.ts";
+import type { PlayerState } from "../../player/player.ts";
+import type { TitlePlayerState } from "../../player/title-player.ts";
+import type { Note } from "./flash-state.ts";
 
-const closed = new WeakSet<object>();
+/** What a closable message is about: a player's failure, a receiver's refusal or a failed note. */
+export type Closable =
+  | Extract<PlayerState["phase"], { kind: "failed" }>
+  | Extract<TitlePlayerState["phase"], { kind: "failed" }>
+  | NonNullable<OutputState["refused"]>
+  | Note;
+
+const closed = new WeakSet<Closable>();
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -24,7 +35,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 /** Whether the viewer closed the message about `failure`; false while there is none. */
-export function useClosed<Failure extends object>(failure: Failure | null): boolean {
+export function useClosed(failure: Closable | null): boolean {
   return useSyncExternalStore(subscribe, () => failure !== null && closed.has(failure));
 }
 
@@ -42,7 +53,7 @@ export function pressesClose(event: KeyboardEvent): boolean {
  * on to the view's way to try again (`data-retry`), so it isn't left on nothing. A click leaves
  * focus where it was, as every button's does.
  */
-export function CloseMessage({ failure, className }: { failure: object; className?: string }) {
+export function CloseMessage({ failure, className }: { failure: Closable; className?: string }) {
   return (
     <Button
       variant="media"

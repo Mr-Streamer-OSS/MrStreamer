@@ -120,7 +120,10 @@ const AddedEntry = lazy(() => type({ id: FOLDER, key: "string", "name?": "string
 /** subscriptions.json. Entries are read one by one, so one this build can't read costs no other. */
 const Registry = lazy(() => type({ version: "1", subscriptions: "object[]" }));
 
-/** One of the registry's entries as the file holds it, whether or not this build can read it. */
+/**
+ * One of the registry's entries as the file holds it, unparsed: each is read on its own, and one
+ * this build can't read is kept as it is.
+ */
 type RegistryEntry = Infer<typeof Registry>["subscriptions"][number];
 
 /**

@@ -145,12 +145,16 @@ vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources })
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
 
-  /** What this navigator hands its bar: the parts of the tab bar's props the destination bar reads. */
+  /** What this navigator hands its bar: the tab bar props it builds for the destination bar. */
   type Bar = (props: {
     state: { index: number; routes: { key: string; name: string }[] };
     descriptors: Record<string, never>;
     insets: { top: number; bottom: number; left: number; right: number };
-    emitter: { emit: (event: { type: string; target: string }) => { defaultPrevented: boolean } };
+    emitter: {
+      emit: (event: { type: string; target: string; canPreventDefault?: boolean }) => {
+        defaultPrevented: boolean;
+      };
+    };
     navigateToTab: (key: string) => void;
   }) => ReactElement;
 

@@ -16,7 +16,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { appError } from "../lib/errors.ts";
 import { call, listen } from "../lib/ipc.ts";
 
-interface OutputState {
+export interface OutputState {
   readonly status: OutputStatus;
   /** When the connect under way began, as `Date.now()`; null while none is. */
   readonly connectingSince: number | null;

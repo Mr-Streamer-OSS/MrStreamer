@@ -11,7 +11,7 @@ import { Button } from "../../components/ui/button.tsx";
 import { Tooltip } from "../../components/ui/tooltip.tsx";
 import { cn } from "../../lib/utils.ts";
 import { outputs, useOutput } from "../../player/output.ts";
-import { CloseMessage, useClosed } from "./CloseMessage.tsx";
+import { CloseMessage, useClosed, type Closable } from "./CloseMessage.tsx";
 import { flash } from "./Flash.tsx";
 
 export function MiniControls({
@@ -25,7 +25,7 @@ export function MiniControls({
   /** Why there's no picture, as a few words; null while it plays. */
   status: string | null;
   /** The failure `status` says, whose word the viewer can close. */
-  failure?: object | null;
+  failure?: Closable | null;
   onClose: () => void;
   children: ReactNode;
 }) {
