@@ -144,8 +144,8 @@ Actual background and physical-device acceptance remain separate from source and
   holds what it still needs.
 - **Play on TV** ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691))
   is source after build 18, which doesn't have it: an open Cast sender without Google's SDK, and
-  the phone serving the stream on Wi-Fi ([below](#play-on-tv)). It hasn't been built or played on
-  a TV yet. More media formats have a researched route that hasn't been qualified on a device; its
+  the phone serving the stream on Wi-Fi ([below](#play-on-tv)). It builds for the simulator but
+  hasn't played on a TV yet. More media formats have a researched route that hasn't been qualified on a device; its
   delivery card is blocked
   ([formats](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196422)).
 - **Elsewhere:** the Mac App Store is a separate, planned desktop release whose sandbox feasibility comes first, with nothing submitted
@@ -353,7 +353,8 @@ CLOSE and the heartbeat), and `src/cast-media.ts` decides what a TV is given.
 
 - **One reader, on the phone.** A TV is a route of the one player (`playback.ts`): the same lease
   and readers, with the relay as the stream's reader in AVPlayer's place. This iPhone, AirPlay,
-  Picture in Picture and a TV never play together; AirPlay chosen while a TV plays plays here.
+  Picture in Picture and a TV never play together: while a TV plays, Watch hides AirPlay and
+  Picture in Picture, so Disconnect and play here comes first.
 - **What the TV gets:** `http://<phone's Wi-Fi IPv4>:<port>/<128-bit token>/0.<ext>` for one load,
   with the title and its line. The relay reads the provider with the source's headers, follows
   redirects itself and rewrites every playlist to opaque paths under the token, so no provider
@@ -365,22 +366,27 @@ CLOSE and the heartbeat), and `src/cast-media.ts` decides what a TV is given.
   CODECS name anything outside H.264 up to level 4.1, 1080p and AAC (a Matroska file's own
   playlist must name them). MP4 and MOV go as they are, byte ranges and every track, and a
   channel's variants that name no codecs go unchecked: a TV that can't play them says so, and
-  Watch says "<TV> couldn't play it." In a Matroska file with AAC and AC-3 tracks, the chosen
-  track is sent whichever it is. Watch hides Audio, Subtitles and Speed while a TV plays.
-- **Foreground only.** Leaving the app with a TV connected asks iOS for background time at once;
-  the TV's media and receiver stop, the token goes, readers close and then the lease returns, and
-  Watch says "Stopped on the TV when you left the app." Without that time, or once it ends,
+  Watch says "<TV> couldn't play it." A Matroska file with any sound outside AAC, even beside an
+  AAC track, is refused, since its renditions don't say which is which. Watch hides Audio,
+  Subtitles and Speed while a TV plays.
+- **Foreground only.** Leaving the app with a TV connected asks iOS for background time at once:
+  the TV's media stops, the token goes, readers close and the lease returns, then the receiver
+  stops and the connection closes, and Watch says "Stopped on the TV when you left the app." Without that time, or once it ends,
   the relay and the TV's connection close natively; a Matroska title's format session then
   closes when the app runs again, as one paused here does. The screen stays on while a TV is
   connected. There is no silent-audio keepalive. How long a TV plays what it buffered after the
   phone stops serving is unmeasured.
+- **Ending on the TV.** Its remote, another sender's load or its receiver quitting ends the route
+  where the title got to, says "<TV> stopped playing it." and leaves the TV to whoever plays
+  there; a lost connection says "Lost <TV>." A title that finished stays finished.
 - **Trust.** The TV isn't authenticated, as on the desktop: whatever answers the browse as a TV
   gets a TV's address and title, nothing more.
 
 `test/cast.test.ts` and `test/cast-media.test.ts` check the sender against a fake TV and the relay's
-rewriting on Linux. The Swift module hasn't been built yet, and nothing has played on a real TV
-or iPhone: native build, Local Network, TLS to a real receiver, playback, background timing and
-energy all still need a device.
+rewriting on Linux. The module builds and links for the iOS 27 simulator, where Watch shows the
+TV button and the chooser; nothing has played on a real TV or iPhone. Local Network on a
+physical iPhone, discovery of a real TV, TLS to a real receiver, the relay reached from a TV,
+playback, background timing and energy all still need a device.
 
 ## How it is built
 
