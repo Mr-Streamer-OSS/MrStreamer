@@ -544,9 +544,23 @@ describe("offline Next", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     const { details } = await seriesDetails(app, a);
     const [first, second] = details.seasons[0]!.episodes.slice(1, 3);
+    const asked = native.tasks.length;
     const from = await app.addDownload(episodeOf(first!));
     const to = await app.addDownload(episodeOf(second!));
-    await until(() => isComplete(app, from.id) && isComplete(app, to.id), "the episode copies");
+    // Each copy fetches its pictures in the background, its episode still last. Tests that spy on
+    // the network after a relaunch must not count those, so wait until both stills' requests end.
+    const ended = (url: string | null) =>
+      native.tasks
+        .slice(asked)
+        .some((each) => each.url === url && each.state !== "idle" && each.state !== "active");
+    await until(
+      () =>
+        isComplete(app, from.id) &&
+        isComplete(app, to.id) &&
+        ended(first!.stillUrl) &&
+        ended(second!.stillUrl),
+      "the episode copies and their pictures",
+    );
 
     return { app, a, from, to };
   }
