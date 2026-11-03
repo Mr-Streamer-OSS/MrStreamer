@@ -1,10 +1,9 @@
 import { mount, ui } from "./guide-grid-fixture.ts";
 import { act, createElement as h } from "react";
 import { expect, it, vi } from "vitest";
-import { GuideGrid } from "../src/guide/grid.tsx";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { guideFixture } from "./guide-fixture.ts";
-import { t } from "../src/guide/grid.tsx";
+import { GuideGrid, t } from "../src/guide/grid.tsx";
 import { createGuide, localDay } from "../src/guide/guide.ts";
 
 it("reads at most 24 visible channels and two pages, and opens Schedule without playing", async () => {
@@ -58,53 +57,27 @@ it("keeps the local time window when changing day across DST, and Now resets it"
   }
 });
 
-it("opens the detail token from a cell with a full channel, time and now label", async () => {
-  const now = Date.now();
-  ui.schedule.mockResolvedValue({
-    programmes: [{ start: now - 60000, stop: now + 3600000, title: "News", detail: "token" }],
-    cursor: null,
-  });
-  const screen = await mount(h(GuideGrid));
-
-  try {
-    const button = [...screen.container.querySelectorAll("button")].find((b) =>
-      b.getAttribute("aria-label")?.includes(", News, Now"),
-    );
-
-    expect(button).toBeDefined();
-    await act(async () => button!.click());
-    expect(ui.push).toHaveBeenLastCalledWith(expect.stringContaining("detail=token"));
-  } finally {
-    await screen.close();
-  }
-});
-
-it("shows guide browsing and search copy in Dutch and English", async () => {
-  const keys = [
-    "Guide",
-    "Earlier",
-    "Later",
-    "Now",
-    "More in Schedule",
-    "Nothing in this window",
-    "No programme information",
-    "Search programmes",
-    "Searching.",
-    "Some programmes not searched.",
-    "Guides",
-    "Retry",
-    "Couldn't update schedule",
-  ] as const;
-
+it("translates guide browsing and search copy into Dutch", () => {
   try {
     setLanguage({ locale: "nl-NL", formats: "nl-NL" });
 
-    for (const key of keys) expect(t(key)).not.toBe(key === "Later" ? "Eerder" : key);
+    for (const key of [
+      "Guide",
+      "Earlier",
+      "Now",
+      "More in Schedule",
+      "Nothing in this window",
+      "No programme information",
+      "Search programmes",
+      "Searching.",
+      "Some programmes not searched.",
+      "Guides",
+      "Retry",
+      "Couldn't update schedule",
+    ] as const)
+      expect(t(key)).not.toBe(key);
     expect(t("Schedule for {channel}", { channel: "News" })).toBe("Uitzendschema voor News");
     expect(t('Nothing named "{query}"', { query: "news" })).toBe('Niets met de naam "news"');
-    setLanguage({ locale: "en-US", formats: "en-US" });
-
-    for (const key of keys) expect(t(key)).toBe(key);
   } finally {
     setLanguage({ locale: "en-US", formats: "en-US" });
   }

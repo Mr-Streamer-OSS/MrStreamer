@@ -3,15 +3,10 @@ import { act, createElement as h, type ReactNode } from "react";
 import { vi } from "vitest";
 
 const ui = vi.hoisted(() => ({
-  width: 400,
-  fontScale: 1,
   params: { query: "news", country: "" },
   push: vi.fn(),
   schedule: vi.fn(),
   search: vi.fn(),
-  visible: 30,
-  stale: false,
-  revision: 0,
   swipe: (_dx: number, _dy: number) => {},
 }));
 
@@ -88,7 +83,7 @@ vi.mock("react-native", () => ({
   BackHandler: { addEventListener: () => ({ remove() {} }) },
   Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
   ScrollView: ({ children }: { children: ReactNode }) => h("div", {}, children),
-  useWindowDimensions: () => ({ width: ui.width, fontScale: ui.fontScale }),
+  useWindowDimensions: () => ({ width: 400, fontScale: 1 }),
   PanResponder: {
     create: (handlers: {
       onMoveShouldSetPanResponder: (event: null, gesture: { dx: number; dy: number }) => boolean;
@@ -122,7 +117,7 @@ vi.mock("react-native", () => ({
         {
           onClick: () =>
             onViewableItemsChanged?.({
-              viewableItems: data.slice(0, ui.visible).map((item) => ({ item })),
+              viewableItems: data.slice(0, 30).map((item) => ({ item })),
             }),
         },
         "Show visible",
@@ -144,7 +139,7 @@ vi.mock("../src/guide/guide-sources.ts", () => ({ guides: { useLinks: () => [] }
 
 vi.mock("../src/guide/hooks.ts", () => ({
   useGuideStart() {},
-  useListingRevision: () => ui.revision,
+  useListingRevision: () => 0,
   useProgramme: () => ({ pending: false, value: null, failed: false }),
 }));
 
@@ -165,7 +160,7 @@ vi.mock("../src/guide/runtime.ts", () => ({
     channel: (key: string) => ({ title: `Channel ${key.split(":").at(-1)}` }),
     withdrawals: { subscribe: () => () => {} },
     withdrawn: () => 0,
-    status: () => ({ availability: "available", stale: ui.stale, error: null }),
+    status: () => ({ availability: "available", stale: false, error: null }),
     schedule: ui.schedule,
     search: ui.search,
   },
@@ -196,7 +191,6 @@ export async function mount(node: ReactNode) {
 
   return {
     container,
-    render: async (node: ReactNode) => act(async () => root.render(node)),
     close: async () => act(async () => root.unmount()),
     click: async (label: string) =>
       act(async () => {

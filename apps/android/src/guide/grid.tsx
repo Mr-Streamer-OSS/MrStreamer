@@ -65,11 +65,7 @@ export const t = catalogue(
   },
 );
 
-export const browseHref = (
-  destination: DestinationRoute,
-  screen: "grid" | "search",
-  country = "",
-) =>
+const browseHref = (destination: DestinationRoute, screen: "grid" | "search", country = "") =>
   `${destination === "(live)" ? "" : `/${destination}`}/guide/${screen}?${new URLSearchParams({ country })}`;
 
 /** Reads only a visible row, with no more than two owner pages for its local day. */
@@ -189,9 +185,13 @@ export function GuideGrid({
     );
   }, [state, country, revision]);
 
+  // Each country keeps its own scroll, restored on a country change and on layout (rotation, resizing).
+  const restore = () =>
+    list.current?.scrollToOffset({ offset: scroll.current.get(country) ?? 0, animated: false });
+
   useEffect(() => {
     setVisible([]);
-    list.current?.scrollToOffset({ offset: scroll.current.get(country) ?? 0, animated: false });
+    restore();
   }, [country]);
   const large = fontScale >= 1.8;
   const day = localDay(chosen ?? now);
@@ -337,12 +337,7 @@ export function GuideGrid({
         viewabilityConfig={{ itemVisiblePercentThreshold: 1 }}
         onScroll={(e) => scroll.current.set(country, e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={100}
-        onLayout={() =>
-          list.current?.scrollToOffset({
-            offset: scroll.current.get(country) ?? 0,
-            animated: false,
-          })
-        }
+        onLayout={restore}
         // Live's body already pads the bottom inset; a pushed grid pads its own.
         contentContainerStyle={{ paddingBottom: (pushed ? insets.bottom : 0) + 16 }}
         ListEmptyComponent={
@@ -440,6 +435,9 @@ const nameText = {
   fontWeight: "500",
 } as const;
 
+/** A cell's or row message's left hairline. */
+const edge = { borderLeftWidth: 1, borderColor: guideColors.hairline } as const;
+
 const rowNote = { color: guideColors.secondary, fontSize: 14, lineHeight: 18 } as const;
 
 /** An icon button of the day row: a 24dp icon in its 48dp target, 32dp at large text. */
@@ -479,15 +477,12 @@ function Move({
   label,
   onPress,
   strong = false,
-  bright = strong,
   wide = false,
 }: {
   label: string;
   onPress: () => void;
-  /** Bold, as Now while following now. */
+  /** Bold and white, as Now while following now; otherwise grey. */
   strong?: boolean;
-  /** White rather than grey. */
-  bright?: boolean;
   wide?: boolean;
 }) {
   return (
@@ -498,7 +493,7 @@ function Move({
     >
       <Text
         style={{
-          color: bright ? guideColors.text : guideColors.secondary,
+          color: strong ? guideColors.text : guideColors.secondary,
           fontSize: 14,
           lineHeight: 18,
           fontWeight: strong ? "700" : "500",
@@ -705,17 +700,13 @@ function GridRow({
 
   const message = failed
     ? t("Couldn't update schedule")
-    : !read
+    : !read || (!read.page.programmes.length && status.availability !== "none" && waiting)
       ? guideText("Loading guide…")
-      : status.availability === "none" && !read.page.programmes.length
-        ? guideText("Guide unavailable")
-        : !read.page.programmes.length
-          ? waiting
-            ? guideText("Loading guide…")
-            : t("No programme information")
-          : t("Nothing in this window");
-
-  const edge = { borderLeftWidth: 1, borderColor: guideColors.hairline } as const;
+      : read.page.programmes.length
+        ? t("Nothing in this window")
+        : status.availability === "none"
+          ? guideText("Guide unavailable")
+          : t("No programme information");
 
   return (
     <View style={{ borderBottomWidth: 1, borderColor: guideColors.hairline }}>
@@ -898,9 +889,7 @@ function GridRow({
             <View style={{ flexGrow: 1 }} />
           )}
           {failed ? <Move label={t("Retry")} strong onPress={retry} /> : null}
-          {more && (items.length || failed) ? (
-            <Move label={t("More in Schedule")} strong onPress={onSchedule} />
-          ) : null}
+          {more ? <Move label={t("More in Schedule")} strong onPress={onSchedule} /> : null}
         </View>
       ) : null}
     </View>

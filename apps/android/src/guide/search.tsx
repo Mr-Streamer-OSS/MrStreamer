@@ -76,15 +76,14 @@ export function GuideSearchScreen() {
   const value = read?.query === query ? read.value : null;
   const now = Date.now();
 
+  // Up to 20 programmes on now or later: those on now first, then by start.
   const found = (value?.found ?? [])
     .filter((f) => f.programme.stop > now)
-    .slice()
-    .sort((a, b) => {
-      const aNow = a.programme.start <= now,
-        bNow = b.programme.start <= now;
-
-      return Number(bNow) - Number(aNow) || a.programme.start - b.programme.start;
-    })
+    .sort(
+      (a, b) =>
+        Number(b.programme.start <= now) - Number(a.programme.start <= now) ||
+        a.programme.start - b.programme.start,
+    )
     .slice(0, 20);
 
   const identityOf = (key: string): ChannelIdentity | null => {
