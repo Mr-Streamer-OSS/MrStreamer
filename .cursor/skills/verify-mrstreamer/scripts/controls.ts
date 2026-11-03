@@ -20,7 +20,7 @@ const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
 
-interface Shape {
+interface Appearance {
   /** Computed `border-radius`, one value per corner where they differ. */
   readonly radius: string;
   readonly height: number;
@@ -35,10 +35,10 @@ interface Highlight {
 }
 
 export async function controlsScenario(d: Driver): Promise<void> {
-  const shapes: Record<string, Shape | null> = {};
+  const appearances: Record<string, Appearance | null> = {};
   const menus: string[] = [];
   const highlights: Record<string, { before: Highlight; after: Highlight }> = {};
-  d.observed["shapes"] = shapes;
+  d.observed["shapes"] = appearances;
   d.observed["menus"] = menus;
   d.observed["highlights"] = highlights;
 
@@ -53,8 +53,8 @@ export async function controlsScenario(d: Driver): Promise<void> {
   };
 
   /** Records how `element`, or the field around it, is drawn: an observation, never a check. */
-  const shape = async (name: string, element: string, field = false) => {
-    shapes[name] = await d.evaluate<Shape | null>(`(() => {
+  const appearance = async (name: string, element: string, field = false) => {
+    appearances[name] = await d.evaluate<Appearance | null>(`(() => {
       const found = ${element};
       const e = ${field} ? found?.closest('label') ?? found : found;
       if (!e) return null;
@@ -112,8 +112,8 @@ export async function controlsScenario(d: Driver): Promise<void> {
     });
     highlights[name] = { before, after: await highlight(popup) };
     const item = `${popup}?.querySelector(':is([data-highlighted], :focus)')`;
-    await shape(`${name} menu`, popup);
-    await shape(`${name} highlighted row`, item);
+    await appearance(`${name} menu`, popup);
+    await appearance(`${name} highlighted row`, item);
     await d.capture(`menu-${name.replaceAll(" ", "-")}`);
     await d.key("Escape", 27);
     await d.wait(async () => !(await d.exists(popup)));
@@ -133,11 +133,11 @@ export async function controlsScenario(d: Driver): Promise<void> {
   await d.click("Set up SubDL", shown("[data-setting=subdl] button"));
   const subdl = shown('input[aria-label="SubDL API key"]');
   await d.wait(() => d.exists(subdl));
-  await shape("settings rail current", query('nav button[aria-current="page"]'));
-  await shape("settings search", query("nav input[type=search]"), true);
-  await shape("settings select", shown('select[aria-label="Subtitles"]'));
-  await shape("settings checkbox", online);
-  await shape("settings key field", subdl);
+  await appearance("settings rail current", query('nav button[aria-current="page"]'));
+  await appearance("settings search", query("nav input[type=search]"), true);
+  await appearance("settings select", shown('select[aria-label="Subtitles"]'));
+  await appearance("settings checkbox", online);
+  await appearance("settings key field", subdl);
   await d.capture("settings-subtitles-1440");
 
   // Movies and series at the 960 x 600 minimum with TMDB's own key form open.
@@ -146,8 +146,8 @@ export async function controlsScenario(d: Driver): Promise<void> {
   await d.click("Open the own TMDB key form", shown("[data-setting=tmdb] button"));
   const tmdb = shown('input[aria-label="Your own TMDB key"]');
   await d.wait(() => d.exists(tmdb));
-  await shape("settings TMDB field", tmdb);
-  await shape("settings Use button", button("main:not([hidden]) form button", "Use"));
+  await appearance("settings TMDB field", tmdb);
+  await appearance("settings Use button", button("main:not([hidden]) form button", "Use"));
   await d.capture("settings-movies-960");
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(tmdb)));
@@ -169,8 +169,8 @@ export async function controlsScenario(d: Driver): Promise<void> {
     `document.querySelector('main:not([hidden]) button[aria-label^="Edit "]')`,
   );
   await d.wait(() => d.exists(shown("form input")));
-  await shape("subscription edit field", shown("form input"));
-  await shape("subscription Save button", button("main:not([hidden]) form button", "Save"));
+  await appearance("subscription edit field", shown("form input"));
+  await appearance("subscription Save button", button("main:not([hidden]) form button", "Save"));
   await d.capture("settings-subscription-edit");
   await d.click("Cancel the edit", button("main:not([hidden]) form button", "Cancel"));
   await d.wait(async () => !(await d.exists(shown("form input"))));
@@ -179,13 +179,13 @@ export async function controlsScenario(d: Driver): Promise<void> {
   await d.click("Open Guides", button("nav button", "Guides"));
   const guide = shown('input[aria-label="Address of an XMLTV guide"]');
   await d.wait(() => d.exists(guide));
-  await shape("guide address field", guide);
+  await appearance("guide address field", guide);
   await d.capture("settings-guides");
   await d.click("Open About", button("nav button", "About"));
   await d.click("Open licences", shown("[data-setting=licences]"));
   const licences = query('[aria-label="Search the licences"]');
   await d.wait(() => d.exists(licences));
-  await shape("licence search", licences, true);
+  await appearance("licence search", licences, true);
   await d.capture("settings-licences");
   await d.key("Escape", 27);
   await d.wait(() => d.exists(shown("[data-setting=licences]")));
@@ -221,7 +221,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
   );
   const language = query('select[aria-label="Subtitle search language"]');
   await d.wait(() => d.exists(language));
-  await shape("CC panel select", language);
+  await appearance("CC panel select", language);
   await d.capture("title-cc-panel");
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(language)));
@@ -271,8 +271,8 @@ export async function controlsScenario(d: Driver): Promise<void> {
   const rail = query('[role=navigation][aria-label="Channel categories"]');
   await d.wait(() => d.exists(rail));
   const category = query('input[aria-label="Find a category"]');
-  await shape("category search", category, true);
-  await shape("category current", `${rail}?.querySelector('[aria-current=true]')`);
+  await appearance("category search", category, true);
+  await appearance("category current", `${rail}?.querySelector('[aria-current=true]')`);
   await d.capture("live-list");
   await d.click("Find a category", category);
   d.action("Type TEST into Find a category");
@@ -295,7 +295,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
 
   d.action("Point at a channel row");
   await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
-  await shape("channel row pointed", `(${row}).querySelector('[role=button]')`);
+  await appearance("channel row pointed", `(${row}).querySelector('[role=button]')`);
   await d.capture("live-row-pointed");
   await d.click(
     "Open the row's later programmes",
@@ -303,8 +303,11 @@ export async function controlsScenario(d: Driver): Promise<void> {
   );
   const open = `[...document.querySelectorAll('[data-index]')].find(r => r.querySelector('button[aria-label="Hide later programmes"]'))`;
   await d.wait(() => d.exists(open));
-  await shape("channel row opened", `(${open}).querySelector('[role=button]')`);
-  await shape("opened schedule", `(${open}).querySelector('[role=button]').nextElementSibling`);
+  await appearance("channel row opened", `(${open}).querySelector('[role=button]')`);
+  await appearance(
+    "opened schedule",
+    `(${open}).querySelector('[role=button]').nextElementSibling`,
+  );
   await d.capture("live-schedule-open");
   await d.click(
     "Close the row's later programmes",
@@ -334,7 +337,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
   await d.key("ArrowLeft", 37);
   const playingRow = `[...document.querySelectorAll('[data-view=watch] [aria-label="Playing"]')].map(e => e.closest('[role=button]')).find(Boolean)`;
   await d.wait(() => d.exists(playingRow));
-  await shape("Watch playing row", playingRow);
+  await appearance("Watch playing row", playingRow);
   await d.capture("watch-channel-list");
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(playingRow)));

@@ -87,7 +87,7 @@ vi.mock("../src/loading.tsx", async () => {
   return {
     Docked: box,
     Placeholders: box,
-    Shape: () => null,
+    Placeholder: () => null,
     useDockInset: () => 0,
     libraryStatus: () => null,
     loadingStatus: () => null,

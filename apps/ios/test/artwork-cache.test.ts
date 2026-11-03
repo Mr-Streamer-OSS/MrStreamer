@@ -30,7 +30,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 vi.mock("../src/loading.tsx", () => ({
   Placeholders: () => null,
-  Shape: () => null,
+  Placeholder: () => null,
   useDockInset: () => 0,
 }));
 
