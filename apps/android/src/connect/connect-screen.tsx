@@ -1,5 +1,12 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { useEffect, useRef, useState, type ComponentProps, type ComponentRef } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ComponentRef,
+  type ReactNode,
+} from "react";
 import {
   AccessibilityInfo,
   BackHandler,
@@ -33,11 +40,13 @@ export function ConnectScreen({
   title = t("Add provider"),
   onDone,
   onConnected,
+  footer,
 }: {
   owner: SourcesOwner;
   title?: string | undefined;
   onDone?: () => void;
   onConnected: () => void;
+  footer?: ReactNode;
 }) {
   useLocale();
   const insets = useSafeAreaInsets();
@@ -244,6 +253,7 @@ export function ConnectScreen({
               )
             : null}
         </View>
+        {footer}
       </ScrollView>
     </View>
   );

@@ -1,0 +1,17 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+group = 'app.mrstreamer'
+version = '0.1.0'
+android {
+  namespace 'app.mrstreamer.transfers'
+  defaultConfig { versionCode 1; versionName '0.1.0' }
+  testOptions { unitTests.includeAndroidResources = true }
+}
+dependencies {
+  implementation project(':credentials')
+  implementation 'androidx.work:work-runtime-ktx:2.12.0'
+  testImplementation 'junit:junit:4.13.2'
+  testImplementation 'org.robolectric:robolectric:4.17'
+}
