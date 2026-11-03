@@ -83,6 +83,7 @@ export function fixture(metadata?: MetadataPort) {
 
   return {
     model,
+    source,
     fetchImpl,
     fail: (value: boolean) => {
       failed = value;

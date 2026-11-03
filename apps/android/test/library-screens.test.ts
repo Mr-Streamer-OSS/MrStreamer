@@ -1,7 +1,9 @@
-import { Window } from "happy-dom";
+import { Window, type HTMLElement } from "happy-dom";
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { fixture } from "./library-fixture.ts";
+import { ownedKey } from "@mrstreamer/contracts/subscription";
+import { libraryModel } from "../src/library/model.ts";
 import { libraryIntents } from "../src/library/intents.ts";
 import { setLanguage, resolveLanguage } from "@mrstreamer/core/i18n";
 
@@ -100,7 +102,7 @@ Object.assign(globalThis, { window, document: window.document, IS_REACT_ACT_ENVI
 const reactDom = "react-dom/client";
 
 const { createRoot } = (await import(reactDom)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: HTMLElement): { render(node: unknown): void; unmount(): void };
 };
 
 let root: ReturnType<typeof createRoot> | undefined;
@@ -199,20 +201,37 @@ it("shows seasons and translated copy, and only exposes actions while their owne
   });
   press(shown, "Play");
   press(shown, "Download");
-  expect(intents).toEqual([
-    expect.objectContaining({
-      action: "play",
-      media: expect.objectContaining({
-        kind: "episode",
-        episodeId: "first",
+
+  try {
+    expect(intents).toEqual([
+      {
+        kind: "title",
+        media: "episode",
         sourceId: "source",
-        titleKey: title.key,
-        titleId: title.id,
-        version: expect.objectContaining({ id: title.id }),
-      }),
-    }),
-    expect.objectContaining({ action: "download" }),
-  ]);
+        id: "first",
+        container: "mp4",
+        title: "Episode 1",
+      },
+      {
+        action: "download",
+        media: {
+          kind: "episode",
+          episodeId: "first",
+          sourceId: "source",
+          titleKey: title.key,
+          titleId: title.id,
+          version: expect.objectContaining({ id: title.id }),
+        },
+      },
+    ]);
+  } catch (error) {
+    act(() => {
+      stopPlay();
+      stopDownload();
+    });
+    throw error;
+  }
+
   // Each owner's stop removes only its own action.
   act(() => stopPlay());
   expect(button("Play")).toBeNull();
@@ -223,3 +242,101 @@ it("shows seasons and translated copy, and only exposes actions while their owne
   act(() => setLanguage(resolveLanguage("nl-NL", [])));
   expect(shown.textContent).toContain("Seizoen 1");
 });
+
+it("labels versions with saved source names and plays the selected movie file", async () => {
+  const { source } = fixture();
+
+  const second = {
+    ...source,
+    id: "internal-second",
+    label: "Living room",
+    catalogue: async () => {
+      const catalogue = await source.catalogue();
+
+      return {
+        ...catalogue,
+        movies: catalogue.movies.map((m) => ({ ...m, id: `second-${m.id}`, container: "mkv" })),
+      };
+    },
+  };
+
+  const model = libraryModel({ sources: () => [source, second], language: () => "en" });
+  await model.refresh();
+  const title = model.made("movie").list("all")[0]!;
+  const version = title.versions.find((v) => v.subscriptionId === second.id)!;
+  route.params = { kind: "movie", title: title.key, version: ownedKey(version) };
+  const shown = show(createElement(DetailsScreen, { model }));
+  await act(async () => {});
+
+  const versionButton = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Version:"),
+  )!;
+
+  act(() => versionButton.click());
+  const sheet = shown.querySelector("dialog")!;
+  expect(sheet.textContent).toContain("Test provider");
+  expect(sheet.textContent).toContain("Living room");
+  expect(sheet.textContent).not.toContain(second.id);
+  const intents: unknown[] = [];
+  let stop = () => {};
+
+  try {
+    act(() => {
+      stop = libraryIntents.register({ play: (intent) => intents.push(intent) });
+    });
+    press(shown, "Play");
+    expect(intents).toEqual([
+      {
+        kind: "title",
+        sourceId: second.id,
+        media: "movie",
+        id: version.id,
+        container: "mkv",
+        title: title.title,
+      },
+    ]);
+  } finally {
+    act(() => stop());
+  }
+});
+
+it.each(["movie", "series"] as const)(
+  "hides Play for a %s file without a known container",
+  async (kind) => {
+    const { source } = fixture();
+
+    const unknown = {
+      ...source,
+      catalogue: async () => {
+        const catalogue = await source.catalogue();
+
+        return { ...catalogue, movies: catalogue.movies.map((m) => ({ ...m, container: null })) };
+      },
+      details: async (media: "movie" | "series", id: string) => {
+        const details = await source.details(media, id);
+
+        return {
+          ...details,
+          container: null,
+          episodes: details.episodes.map((e) => ({ ...e, container: "" })),
+        };
+      },
+    };
+
+    const model = libraryModel({ sources: () => [unknown], language: () => "en" });
+    await model.refresh();
+    route.params = { kind, title: model.made(kind).list("all")[0]!.key };
+    let stop = () => {};
+
+    try {
+      act(() => {
+        stop = libraryIntents.register({ play: () => {} });
+      });
+      const shown = show(createElement(DetailsScreen, { model }));
+      await act(async () => {});
+      expect(shown.querySelector('button[aria-label="Play"]')).toBeNull();
+    } finally {
+      act(() => stop());
+    }
+  },
+);

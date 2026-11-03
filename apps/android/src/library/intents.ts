@@ -1,4 +1,5 @@
 import type { TitleVersion } from "@mrstreamer/contracts/ondemand";
+import type { PlayIntent } from "../player/intent.ts";
 import { store } from "../platform/store.ts";
 
 /** Provider ids stay opaque. A series action always names an episode as well as its version. */
@@ -8,11 +9,6 @@ export type MediaIdentity = {
   readonly titleId: string;
   readonly version: TitleVersion;
 } & ({ readonly kind: "movie" } | { readonly kind: "episode"; readonly episodeId: string });
-
-export interface PlayIntent {
-  readonly action: "play";
-  readonly media: MediaIdentity;
-}
 
 export interface DownloadIntent {
   readonly action: "download";

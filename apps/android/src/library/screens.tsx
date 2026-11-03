@@ -638,7 +638,7 @@ function FilterSheet({
   );
 }
 
-/** The identity a Play or Download intent carries, for a movie or one of a series' episodes. */
+/** The identity a Download intent carries, for a movie or one of a series' episodes. */
 function mediaOf(title: Title, episode?: Episode): MediaIdentity {
   return {
     sourceId: title.subscriptionId,
@@ -650,7 +650,7 @@ function mediaOf(title: Title, episode?: Episode): MediaIdentity {
 }
 
 /** A movie's Play and Download, each only while its later owner handles it. */
-function MovieActions({ title }: { title: Title }) {
+function MovieActions({ title, container }: { title: Title; container: string | undefined }) {
   const { play, download } = useStore(libraryIntents.state);
 
   if (!play && !download) return null;
@@ -658,11 +658,20 @@ function MovieActions({ title }: { title: Title }) {
 
   return (
     <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
-      {play ? (
+      {play && container ? (
         <FilledButton
           label={t("Play")}
           icon="play-arrow"
-          onPress={() => play({ action: "play", media })}
+          onPress={() =>
+            play({
+              kind: "title",
+              sourceId: title.subscriptionId,
+              media: "movie",
+              id: title.id,
+              container,
+              title: title.title,
+            })
+          }
         />
       ) : null}
       {download ? (
@@ -678,7 +687,17 @@ function MovieActions({ title }: { title: Title }) {
 }
 
 /** An episode's row: its still, number and name, length, and the actions its owners handle. */
-function EpisodeRow({ title, episode, wide }: { title: Title; episode: Episode; wide: boolean }) {
+function EpisodeRow({
+  title,
+  episode,
+  container,
+  wide,
+}: {
+  title: Title;
+  episode: Episode;
+  container: string | undefined;
+  wide: boolean;
+}) {
   const { play, download } = useStore(libraryIntents.state);
   const media = () => mediaOf(title, episode);
 
@@ -706,11 +725,20 @@ function EpisodeRow({ title, episode, wide }: { title: Title; episode: Episode; 
           </Text>
         ) : null}
       </View>
-      {play ? (
+      {play && container ? (
         <RowAction
           icon="play-arrow"
           label={t("Play")}
-          onPress={() => play({ action: "play", media: media() })}
+          onPress={() =>
+            play({
+              kind: "title",
+              sourceId: episode.subscriptionId,
+              media: "episode",
+              id: episode.id,
+              container,
+              title: episode.title,
+            })
+          }
         />
       ) : null}
       {download ? (
@@ -868,7 +896,12 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
         </View>
         <Icon name="arrow-drop-down" />
       </Press>
-      {shown && kind === "movie" ? <MovieActions title={shown} /> : null}
+      {shown && kind === "movie" ? (
+        <MovieActions
+          title={shown}
+          container={shown.container?.trim() || details?.containers.get(shown.id)}
+        />
+      ) : null}
       {!details ? <DetailNotice message={t("Loading…")} /> : null}
       {details?.providerFailed ? (
         <DetailNotice
@@ -919,6 +952,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
               key={`${episode.subscriptionId}:${episode.id}`}
               title={shown}
               episode={episode}
+              container={details?.containers.get(episode.id)}
               wide={beside}
             />
           ))
@@ -980,7 +1014,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
                     group.quality,
                     group.label,
                     group.versions.length > 1 ? formatNumber(at + 1) : "",
-                    multiSource ? v.subscriptionId : "",
+                    multiSource ? model.sourceLabel(v.subscriptionId) : "",
                   ]
                     .filter(Boolean)
                     .join(" · ")}

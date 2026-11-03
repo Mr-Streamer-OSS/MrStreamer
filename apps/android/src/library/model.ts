@@ -33,6 +33,8 @@ export interface ListState {
 
 export interface DetailState {
   readonly value: TitleDetails | null;
+  /** Containers by exact stream id, from this selected version's provider details. */
+  readonly containers: ReadonlyMap<string, string>;
   readonly providerFailed: boolean;
   readonly metadataFailed: boolean;
 }
@@ -99,6 +101,9 @@ export function libraryModel(options: {
   return {
     state,
     made,
+    sourceLabel(id: string) {
+      return options.sources().find((source) => source.id === id)?.label;
+    },
     async refresh() {
       const run = ++generation;
       state.set((s) => ({ ...s, loading: true }));
@@ -189,7 +194,15 @@ export function libraryModel(options: {
       const about = saved && now() - saved.at < TMDB_EXPIRE_MS ? saved.value : null;
       const details = provided.get(key);
 
+      const files =
+        title.kind === "movie"
+          ? [{ id: title.id, container: details?.container }]
+          : (details?.episodes ?? []);
+
       return {
+        containers: new Map(
+          files.flatMap((file) => (file.container?.trim() ? [[file.id, file.container]] : [])),
+        ),
         value: !details
           ? null
           : title.kind === "movie"
