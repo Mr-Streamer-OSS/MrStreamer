@@ -10,6 +10,7 @@ import {
 import { formatList } from "@mrstreamer/core/i18n";
 import { sources } from "../bootstrap/sources.ts";
 import { layoutFor, type NavigationLayout } from "../navigation/destinations.ts";
+import { footOverlay } from "../navigation/screen.tsx";
 import { useOpenShared } from "../navigation/open.ts";
 import { useStore } from "../platform/store.ts";
 import { useKeyboardFocus } from "../ui/focus.ts";
@@ -48,8 +49,8 @@ export function useFrame() {
 
 /**
  * The frame of a Live screen that draws its own top app bar: `bar` over `children`, which pad only
- * the bottom inset left to them, as under `Screen`. `Body` pads it for a screen. It doesn't add
- * what the root layout lays over the screen's foot (the mini player) to that inset.
+ * the bottom inset left to them, as under `Screen`. `Body` pads it for a screen. It adds
+ * the measured mini player height from `footOverlay` to that inset.
  */
 export function Frame({
   framed,
@@ -60,10 +61,14 @@ export function Frame({
   bar: ReactNode;
   children: ReactNode;
 }) {
+  const overlaid = useStore(footOverlay);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       {bar}
-      <SafeAreaInsetsContext.Provider value={{ ...framed, top: 0, left: 0, right: 0 }}>
+      <SafeAreaInsetsContext.Provider
+        value={{ ...framed, top: 0, left: 0, right: 0, bottom: framed.bottom + overlaid }}
+      >
         <View style={{ flex: 1, paddingLeft: framed.left, paddingRight: framed.right }}>
           {children}
         </View>

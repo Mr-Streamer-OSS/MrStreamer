@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChannelRow, Sources } from "../src/connect/sources.ts";
-import { draftOf, identity, move, remove, resolve, step } from "../src/live/model.ts";
+import { draftOf, identity, move, playIntent, remove, resolve, step } from "../src/live/model.ts";
 import { FAVOURITES, listsOwner } from "../src/live/store.ts";
 import { discover, findGroups } from "../src/live/discovery.ts";
 
@@ -187,4 +187,20 @@ it("discovery retains loaded rows and counts alongside partial failures and load
   expect(findGroups(view.categories, "NEWS")[0]?.rows).toEqual([row, other]);
   expect(view.countries[0]?.name).toBe("Belgium");
   expect(discover({ kind: "restoring" }).restoring).toBe(true);
+});
+
+it("plays only a current unambiguous channel identity, with its current title", () => {
+  const entry = identity(row);
+  const renamed = { ...row, title: "News now" };
+
+  expect(playIntent(entry, catalogue([renamed]))).toEqual({
+    kind: "live",
+    sourceId: "source",
+    channelId: "channel:1",
+    title: "News now",
+  });
+  expect(playIntent(entry, catalogue([]))).toBeNull();
+  expect(playIntent(entry, catalogue([row, row]))).toBeNull();
+  expect(playIntent(entry, { kind: "restoring" })).toBeNull();
+  expect(playIntent({ ...entry, sourceId: "removed" }, catalogue())).toBeNull();
 });

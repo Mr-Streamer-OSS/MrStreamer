@@ -1,3 +1,4 @@
+import type { PlayIntent } from "../player/intent.ts";
 import type { ChannelRow, Sources } from "../connect/sources.ts";
 
 export interface Identity {
@@ -56,6 +57,13 @@ export function resolve(entry: Identity, sources: Sources): Resolution {
   return rows.length === 1
     ? { kind: "listed", row: rows[0]! }
     : { kind: rows.length ? "ambiguous" : "missing" };
+}
+
+/** A row plays only its currently unique channel, with the catalogue's current title. */
+export function playIntent(entry: Identity, sources: Sources): PlayIntent | null {
+  const current = resolve(entry, sources);
+
+  return current.kind === "listed" ? { ...identity(current.row), kind: "live" } : null;
 }
 
 /** Includes current resolution, so provider changes during editing refuse the entire save. */

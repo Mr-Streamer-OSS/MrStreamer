@@ -1,9 +1,12 @@
+import { router } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useState, type ReactNode } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import { sources } from "../bootstrap/sources.ts";
 import type { Sources } from "../connect/sources.ts";
+import { player } from "../player/instance.ts";
+import { watchHref } from "../player/intent.ts";
 import { useStore } from "../platform/store.ts";
 import { useKeyboardFocus } from "../ui/focus.ts";
 import { IconButton, type IconName } from "../ui/icon-button.tsx";
@@ -11,7 +14,7 @@ import { colors } from "../ui/theme.ts";
 import { useLocale } from "./catalogue.ts";
 import { Dialog, FitSheet, RAISED_RULE, RED, SheetRow, TextButton, useGaps } from "./chrome.tsx";
 import { t } from "./copy.ts";
-import { identity, resolve, same, type Entry, type Resolution } from "./model.ts";
+import { identity, playIntent, resolve, same, type Entry, type Resolution } from "./model.ts";
 import { intentHandlers } from "./intents.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
@@ -146,8 +149,7 @@ export function Lines({
 /**
  * A channel's 72dp row, one TalkBack stop: its name and what's on, with actions Add to or Remove
  * from Favourites and Lists. Holding it opens the Lists sheet; the star stars it and plays
- * nothing. Only a current, uniquely matched channel with a registered Play handler is a button;
- * until one is registered a tap does nothing and nothing announces Play. A saved channel that
+ * nothing. A current, uniquely matched channel plays and opens Watch on activation. A saved channel that
  * doesn't show says why, plays nothing, and offers Remove (when `onRemove` is given) only once
  * its provider no longer lists it.
  */
@@ -206,15 +208,15 @@ export function Channel({
 
   const title = found.row.title;
   const now = t("No programme information");
-  const playable = !!handlers.play;
   const schedule = !!handlers.schedule;
   const favourite = t(starred ? "Remove from Favourites" : "Add to Favourites");
 
   const play = () => {
-    const current = resolve(entry, sources.state.get());
+    const intent = playIntent(entry, sources.state.get());
 
-    if (current.kind !== "listed") return failure(new Error("identity"), entry.title);
-    intentHandlers.get().play?.({ ...identity(current.row), kind: "live" });
+    if (!intent) return;
+    player.play(intent);
+    router.push(watchHref(intent));
   };
 
   const star = () => {
@@ -235,17 +237,17 @@ export function Channel({
   return (
     <Pressable
       accessible
-      accessibilityRole={playable ? "button" : undefined}
+      accessibilityRole="button"
       accessibilityLabel={`${title}, ${now}`}
       // Android's click label: TalkBack says "Double-tap to play" for a playable row.
       accessibilityActions={[
-        ...(playable ? [{ name: "activate", label: t("Play") }] : []),
+        { name: "activate", label: t("Play") },
         { name: "star", label: favourite },
         { name: "lists", label: t("Lists") },
         ...(schedule ? [{ name: "schedule", label: t("Schedule") }] : []),
       ]}
       onAccessibilityAction={({ nativeEvent }) => {
-        if (nativeEvent.actionName === "activate" && playable) play();
+        if (nativeEvent.actionName === "activate") play();
 
         if (nativeEvent.actionName === "star") star();
 
@@ -253,7 +255,7 @@ export function Channel({
 
         if (nativeEvent.actionName === "schedule") scheduleNow();
       }}
-      onPress={playable ? play : undefined}
+      onPress={play}
       onLongPress={() => onLists(entry)}
       {...focus}
       android_ripple={{ color: colors.ripple }}

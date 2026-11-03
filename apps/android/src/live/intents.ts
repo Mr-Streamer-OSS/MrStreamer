@@ -1,12 +1,5 @@
 import { store } from "../platform/store.ts";
 
-export interface PlayIntent {
-  readonly kind: "live";
-  readonly sourceId: string;
-  readonly channelId: string;
-  readonly title: string;
-}
-
 export interface ScheduleIntent {
   readonly kind: "schedule";
   readonly sourceId: string;
@@ -14,7 +7,6 @@ export interface ScheduleIntent {
 }
 
 interface Handlers {
-  readonly play?: (intent: PlayIntent) => void;
   readonly schedule?: (intent: ScheduleIntent) => void;
 }
 
