@@ -19,7 +19,7 @@ export interface Load<Login> {
   stands(): boolean;
 }
 
-export interface SignIns<Login extends object> {
+export interface SignIns<Login> {
   /** `id`'s login, if signed in. */
   current(id: string): Login | undefined;
   /** `id`'s login, or a `needs-secret` failure when it has none. */
@@ -36,29 +36,19 @@ export interface SignIns<Login extends object> {
   drop(id: string): void;
   /** Begins loading `id`'s `list` under its login, ending the load of it before; null when signed out. */
   begin(id: string, list: string): Load<Login> | null;
-  /** Ends `id`'s loads: of `list` when given, else all. */
-  stop(id: string, list?: string): void;
 }
 
-export function signIns<Login extends object>(): SignIns<Login> {
+export function signIns<Login>(): SignIns<Login> {
   const logins = new Map<string, Login>();
   /** The load under way of each source's lists, by source id, then list. */
   const loads = new Map<string, Map<string, AbortController>>();
   const listeners = new Set<() => void>();
   let replaced = 0;
 
-  const stop = (id: string, list?: string) => {
-    const lists = loads.get(id);
-
-    if (!lists) return;
-
-    for (const [each, controller] of lists) {
-      if (list !== undefined && each !== list) continue;
-      controller.abort();
-      lists.delete(each);
-    }
-
-    if (lists.size === 0) loads.delete(id);
+  /** Ends every load of `id`'s lists. */
+  const stop = (id: string) => {
+    for (const controller of loads.get(id)?.values() ?? []) controller.abort();
+    loads.delete(id);
   };
 
   const changed = () => {
@@ -101,15 +91,15 @@ export function signIns<Login extends object>(): SignIns<Login> {
       const login = logins.get(id);
 
       if (!login) return null;
-      stop(id, list);
-      const controller = new AbortController();
       const lists = loads.get(id) ?? new Map<string, AbortController>();
+      lists.get(list)?.abort();
+      const controller = new AbortController();
       lists.set(list, controller);
       loads.set(id, lists);
       const { signal } = controller;
 
-      return { login, signal, stands: () => !signal.aborted && logins.get(id) === login };
+      // Every sign-in again and sign-out aborts, so the signal alone tells.
+      return { login, signal, stands: () => !signal.aborted };
     },
-    stop,
   };
 }
