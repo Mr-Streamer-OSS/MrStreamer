@@ -42,9 +42,7 @@ for start in 0 7.3; do
     esac
     if [[ -n $reason ]]; then
       [[ $code == 1 ]] || fail "$name: expected open refusal, exit $code"
-      result=2
-      if [[ $name == invalid-lead || $name == alternating-lead ]]; then result=3; fi
-      [[ $(sed -n "s/^open .* result=$result .*detail=//p" "$log") == "$reason" ]] || fail "$name: wrong open refusal"
+      [[ $(sed -n "s/^open .* result=2 .*detail=//p" "$log") == "$reason" ]] || fail "$name: wrong open refusal"
     else
       [[ $code == 0 ]] || fail "$name: checker exit $code"
       actual=$(sed -n "s/^a0-\([0-9]*\)\.m4s refused: Its sound has a gap here that can't be played\.$/\1/p" "$log" | sort -nu | paste -sd ' ')

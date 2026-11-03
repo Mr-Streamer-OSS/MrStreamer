@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
   for (int attempt = 0; attempt < 2; attempt++) {
     TitleHlsResult result = title_hls_get(title, "s0-1.vtt", &data, &size, &type, detail, sizeof(detail));
     printf("subtitle attempt %d: result=%d detail=%s\n", attempt + 1, result, detail);
-    if (result != TITLE_HLS_READ_FAILED ||
+    if (result != TITLE_HLS_UNSUPPORTED ||
         strcmp(detail, "Its FLAC sound has too many invalid frames in a row.")) goto done;
   }
   // Repair only the frame bytes, keeping timestamps, lengths and indexes identical.

@@ -123,7 +123,7 @@
 #define SOUNDS_MOST 8
 /** FLAC channels offered at most. */
 #define FLAC_CHANNELS_MOST 2
-/** Private read error: the operation exhausted its rejected FLAC budget. */
+/** Private error: an operation rejected too many FLAC frames, so the title is unsupported. */
 #define FLAC_LIMIT FFERRTAG('F', 'L', 'A', 'C')
 /** Text subtitle tracks served at most, and other subtitle tracks named as unshown at most. */
 #define TEXTS_MOST 16
@@ -338,7 +338,7 @@ static int interrupted(void *opaque) {
 static TitleHlsResult failure(TitleHls *title, int error) {
   if (atomic_load(&title->interrupted) || error == AVERROR_EXIT) return TITLE_HLS_INTERRUPTED;
   if (error == AVERROR(ENOMEM)) return TITLE_HLS_NO_MEMORY;
-  if (error == AVERROR(EIO) || error == FLAC_LIMIT) return TITLE_HLS_READ_FAILED;
+  if (error == AVERROR(EIO)) return TITLE_HLS_READ_FAILED;
   return TITLE_HLS_UNSUPPORTED;
 }
 
