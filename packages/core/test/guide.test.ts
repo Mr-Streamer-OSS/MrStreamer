@@ -72,7 +72,7 @@ async function text(document: AsyncIterable<Uint8Array>): Promise<string> {
 async function refusal(work: Promise<unknown>): Promise<unknown> {
   const cause = await work.then(
     () => null,
-    (thrown: unknown) => thrown,
+    (cause: unknown) => cause,
   );
 
   return cause instanceof AppFailure && cause.error.kind === "guide" ? cause.error.failure : cause;

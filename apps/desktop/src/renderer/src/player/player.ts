@@ -1247,9 +1247,9 @@ function saveVolume(): void {
         if (pendingVolume === draft)
           savedSound = { volume: preferences.volume, muted: preferences.muted };
       })
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (pendingVolume === draft)
-          flashNote(`${t("Volume")}: ${describeError(appError(error))}`, true);
+          flashNote(`${t("Volume")}: ${describeError(appError(cause))}`, true);
       })
       .finally(() => {
         if (pendingVolume !== draft) return;
@@ -1574,8 +1574,8 @@ export const player = {
     store.setState({ audioId: id });
 
     if (track.language) {
-      void updatePreferences({ audioLanguage: track.language }).catch((error: unknown) => {
-        flashNote(`${t("Sound")}: ${describeError(appError(error))}`, true);
+      void updatePreferences({ audioLanguage: track.language }).catch((cause: unknown) => {
+        flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
       });
     }
 

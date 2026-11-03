@@ -8,7 +8,7 @@ Object.assign(globalThis, { window, document: window.document });
 
 export const { document, Event } = window;
 
-export type Root = { render(node: unknown): void; unmount(): void };
+export type Root = { render(node: import("react").ReactNode): void; unmount(): void };
 
 const REACT_DOM = "react-dom/client";
 

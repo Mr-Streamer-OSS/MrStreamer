@@ -1025,7 +1025,7 @@ describe("a memory this build can't read, when a provider's history is deleted",
   ];
 
   /** viewing.json with `unread` as its memory, then a relaunch with both providers. */
-  async function withUnread(unread: unknown) {
+  async function withUnread(unread: import("@mrstreamer/contracts/json").Json | undefined) {
     memory.files.set(
       "/documents/viewing.json",
       JSON.stringify({ ...file(), favouriteMembership: unread }),

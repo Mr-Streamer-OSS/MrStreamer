@@ -39,7 +39,7 @@ const parameter = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : "";
 
 /** A chosen day as a route's `day` carries it: its first instant, or null for Today. */
-export const dayOf = (value: unknown) => {
+export const dayOf = (value: string | readonly string[] | undefined) => {
   const day = typeof value === "string" ? Number(value) : NaN;
 
   return Number.isFinite(day) && day > 0 ? day : null;

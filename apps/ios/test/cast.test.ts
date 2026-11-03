@@ -122,7 +122,9 @@ let tvTime = 0;
 let tvState = "PLAYING";
 
 const listeners = new Map<string, (event: never) => void>();
-const emit = (event: string, payload: unknown) => listeners.get(event)?.(payload as never);
+
+const emit = (event: string, payload: { channel: string; data?: string } | Record<string, never>) =>
+  listeners.get(event)?.(payload as never);
 
 const tvSays = (channel: string, from: string, namespace: string, payload: Payload) =>
   emit("onData", { channel, data: frame(from, namespace, payload) });

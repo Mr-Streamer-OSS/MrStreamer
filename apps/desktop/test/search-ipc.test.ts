@@ -7,14 +7,24 @@ import * as Effect from "effect/Effect";
 import { registerIpc, type IpcHandlers } from "../src/main/ipc.ts";
 
 const boundary = vi.hoisted(
-  () => new Map<string, (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>>(),
+  () =>
+    new Map<
+      string,
+      (
+        event: IpcMainInvokeEvent,
+        input: import("@mrstreamer/contracts/json").Json | undefined,
+      ) => Promise<Result<unknown>>
+    >(),
 );
 
 vi.mock("electron", () => ({
   ipcMain: {
     handle: (
       method: string,
-      handler: (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>,
+      handler: (
+        event: IpcMainInvokeEvent,
+        input: import("@mrstreamer/contracts/json").Json | undefined,
+      ) => Promise<Result<unknown>>,
     ) => boundary.set(method, handler),
   },
 }));
@@ -28,7 +38,11 @@ function sender(id: number) {
   }) as WebContents;
 }
 
-function invoke(method: IpcMethod, from: WebContents, input: unknown) {
+function invoke(
+  method: IpcMethod,
+  from: WebContents,
+  input: import("@mrstreamer/contracts/json").Json | undefined,
+) {
   return boundary.get(method)!(
     { sender: from, senderFrame: from.mainFrame } as IpcMainInvokeEvent,
     input,

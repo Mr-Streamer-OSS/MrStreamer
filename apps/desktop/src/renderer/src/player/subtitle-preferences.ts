@@ -9,7 +9,7 @@ export function rememberSubtitles(track: SubtitleTrack | null): void {
   const language = track ? track.language : "off";
 
   if (language === null) return;
-  void updatePreferences({ subtitleLanguage: language }).catch((error: unknown) => {
-    flashNote(`${t("Subtitles")}: ${describeError(appError(error))}`, true);
+  void updatePreferences({ subtitleLanguage: language }).catch((cause: unknown) => {
+    flashNote(`${t("Subtitles")}: ${describeError(appError(cause))}`, true);
   });
 }

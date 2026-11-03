@@ -16,14 +16,24 @@ import { CustomLists } from "../src/main/services/custom-lists.ts";
 import { runtimeFor, tempDir, testConfig } from "./support.ts";
 
 const boundary = vi.hoisted(
-  () => new Map<string, (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>>(),
+  () =>
+    new Map<
+      string,
+      (
+        event: IpcMainInvokeEvent,
+        input: import("@mrstreamer/contracts/json").Json | undefined,
+      ) => Promise<Result<unknown>>
+    >(),
 );
 
 vi.mock("electron", () => ({
   ipcMain: {
     handle: (
       method: string,
-      handler: (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>,
+      handler: (
+        event: IpcMainInvokeEvent,
+        input: import("@mrstreamer/contracts/json").Json | undefined,
+      ) => Promise<Result<unknown>>,
     ) => boundary.set(method, handler),
   },
 }));
@@ -80,7 +90,7 @@ async function start() {
   const call = (
     method: IpcMethod,
     senderFrame: WebFrameMain | null,
-    input?: unknown,
+    input?: import("@mrstreamer/contracts/json").Json,
     sender = window,
   ) => boundary.get(method)!({ sender, senderFrame } as IpcMainInvokeEvent, input);
 
@@ -90,7 +100,12 @@ async function start() {
 const search = { view: "palette", id: "first" };
 
 /** Representative methods, with what their handler notes when one runs. */
-const methods: { name: string; method: IpcMethod; input: unknown; noted: string | null }[] = [
+const methods: {
+  name: string;
+  method: IpcMethod;
+  input: import("@mrstreamer/contracts/json").Json | undefined;
+  noted: string | null;
+}[] = [
   {
     name: "customLists.create",
     method: "customLists.create",

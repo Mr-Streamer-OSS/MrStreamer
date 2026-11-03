@@ -96,7 +96,7 @@ function relisted(listings: unknown, title?: string): unknown {
 async function refusal(attempt: Promise<unknown>): Promise<string> {
   const error: unknown = await attempt.then(
     () => new Error("It went through."),
-    (reason: unknown) => reason,
+    (cause: unknown) => cause,
   );
 
   expect(error).toBeInstanceOf(StoreError);

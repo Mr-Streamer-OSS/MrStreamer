@@ -136,9 +136,9 @@ const start = async () => {
   return { helper, provider, port, main };
 };
 
-const { helper, provider, port, main } = await start().catch(async (error: unknown) => {
+const { helper, provider, port, main } = await start().catch(async (cause: unknown) => {
   await takeDown();
-  throw error;
+  throw cause;
 });
 
 interface Box {

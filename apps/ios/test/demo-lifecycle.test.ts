@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { guideFixture } from "./native-guide.ts";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
@@ -97,7 +98,7 @@ const registry = () =>
 const downloads = () =>
   json("downloads.json") as { items: Array<Record<string, unknown>>; forgetting: string[] };
 
-const save = (name: string, value: unknown) => disk(name).writeSync(JSON.stringify(value));
+const save = (name: string, value: Json) => disk(name).writeSync(JSON.stringify(value));
 
 const personal = (id = "personal") => ({
   id,

@@ -131,7 +131,10 @@ Object.assign(globalThis, { window, document: window.document, IS_REACT_ACT_ENVI
 const reactDom = "react-dom/client";
 
 const { createRoot } = (await import(reactDom)) as {
-  createRoot(container: HTMLElement): { render(node: unknown): void; unmount(): void };
+  createRoot(container: HTMLElement): {
+    render(node: import("react").ReactNode): void;
+    unmount(): void;
+  };
 };
 
 let root: ReturnType<typeof createRoot> | undefined;

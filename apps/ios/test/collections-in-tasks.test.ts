@@ -87,7 +87,8 @@ vi.mock("../src/account.ts", async () => {
     readingSaved: () => false,
     onReadingSaved: () => () => undefined,
     onSavable: () => () => undefined,
-    savable: (id: string, source: unknown) => edges.sources.get(id) === source,
+    savable: (id: string, source: import("../src/sources.ts").Source) =>
+      edges.sources.get(id) === source,
   };
 });
 
@@ -319,7 +320,11 @@ const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
 interface FakeProvider {
   readonly url: string;
   readonly titles: unknown;
-  serveTitles(select: (all: unknown) => unknown): void;
+  serveTitles(
+    select: (
+      all: import("../../desktop/test/fake-provider.ts").FakeTitles,
+    ) => import("../../desktop/test/fake-provider.ts").FakeTitles,
+  ): void;
   close(): Promise<void>;
 }
 
@@ -329,7 +334,10 @@ const { startFakeProvider, measurementTitles } = (await import(FAKE_PROVIDER)) a
     readonly password: string;
     readonly titles: number;
   }): Promise<FakeProvider>;
-  measurementTitles(all: unknown, anchor: number): { readonly titles: unknown };
+  measurementTitles(
+    all: import("../../desktop/test/fake-provider.ts").FakeTitles,
+    anchor: number,
+  ): { readonly titles: unknown };
 };
 
 /**
@@ -893,7 +901,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     const window = new Window();
     const REACT_DOM = "react-dom/client";
 
-    type Root = { render(node: unknown): void; unmount(): void };
+    type Root = { render(node: import("react").ReactNode): void; unmount(): void };
 
     let root: Root;
     let container: ReturnType<typeof window.document.createElement>;

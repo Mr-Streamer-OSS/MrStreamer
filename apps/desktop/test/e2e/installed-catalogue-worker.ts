@@ -161,8 +161,8 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     for (const notify of [...waiters]) notify();
   };
 
-  function fail(error: unknown) {
-    errors.push(errorText(error));
+  function fail(cause: unknown) {
+    errors.push(errorText(cause));
     wake();
   }
 
@@ -186,10 +186,10 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
       .then(work)
       .then(
         (value): Outcome<T> => ({ ok: true, value }),
-        (error: unknown): Outcome<T> => {
-          fail(error);
+        (cause: unknown): Outcome<T> => {
+          fail(cause);
 
-          return { ok: false, error: errorText(error) };
+          return { ok: false, error: errorText(cause) };
         },
       );
 
@@ -252,9 +252,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     const delivery = mainSend("NodeWorker.sendMessageToWorker", {
       sessionId: ownedSession,
       message: JSON.stringify(message),
-    }).catch((error: unknown) => {
-      pending.get(id)?.fail(new Error(errorText(error)));
-      throw error;
+    }).catch((cause: unknown) => {
+      pending.get(id)?.fail(new Error(errorText(cause)));
+      throw cause;
     });
 
     try {

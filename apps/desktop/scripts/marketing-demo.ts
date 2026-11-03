@@ -654,9 +654,9 @@ async function listen(
   const server = createServer((request, response) => {
     Promise.resolve()
       .then(() => handler(request, response))
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (!response.headersSent) response.writeHead(502);
-        response.end(String(error));
+        response.end(String(cause));
       });
   });
 

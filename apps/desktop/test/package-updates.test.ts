@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Synthetic published releases exercise preparation, without claiming native package acceptance.
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -178,7 +179,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
       name: `package-receipt-${platform}-direct-${version}-attempt-${attempt}`,
     };
 
-    const updateReceipt = (receipt: unknown) => {
+    const updateReceipt = (receipt: Json) => {
       const bytes = zipSync({ "package-receipt.json": strToU8(JSON.stringify(receipt)) });
       archives.set(receiptArtifact.id, bytes);
       receiptArtifact.digest = `sha256:${sha256(bytes)}`;

@@ -1,3 +1,4 @@
+import type { IpcInput, IpcMethod } from "@mrstreamer/contracts/ipc";
 // Checks the XMLTV sources of Settings > Guides in a built app, against the fake provider and a
 // fake host for guides: what the suite can't, because the window, the player and the main
 // process meet only there. It connects, plays a channel, then checks, in order:
@@ -103,7 +104,11 @@ function report(name: string, problems: readonly string[]): void {
   failed ||= problems.length > 0;
 }
 
-const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T> => {
+const invoke = async <T>(
+  page: Page,
+  method: IpcMethod,
+  input?: IpcInput<IpcMethod>,
+): Promise<T> => {
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );

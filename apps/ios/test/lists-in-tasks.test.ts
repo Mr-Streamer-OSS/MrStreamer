@@ -138,8 +138,12 @@ describe("movie and series lists read and indexed in tasks", () => {
     const sameFilm = (count: number, offset: number) => {
       const rows = panelRows(count, offset);
 
-      const film = (row: unknown) => ({
-        ...(row as object),
+      const film = (
+        row:
+          | ReturnType<typeof panelRows>["movies"][number]
+          | ReturnType<typeof panelRows>["series"][number],
+      ) => ({
+        ...row,
         tmdb: "42",
         is_adult: 0,
         category_id: "films",

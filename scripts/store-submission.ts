@@ -1550,11 +1550,11 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main().catch((error: unknown) => {
+  await main().catch((cause: unknown) => {
     // This script's own messages hold nothing secret. Any other is cleaned like Microsoft's text.
-    const message = error instanceof Error ? error.message : String(error);
+    const message = cause instanceof Error ? cause.message : String(cause);
     const clean = cleaner([process.env["STORE_CLIENT_SECRET"] ?? ""]);
-    console.log(`::error::${error instanceof StoreError ? message : clean(message)}`);
+    console.log(`::error::${cause instanceof StoreError ? message : clean(message)}`);
     process.exit(1);
   });
 }

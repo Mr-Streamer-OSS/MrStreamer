@@ -44,7 +44,7 @@ vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ channel: scenario.channel }),
   useNavigation: () => ({ setOptions: () => undefined }),
   router: {
-    push: (to: unknown) => scenario.calls.push(`push ${JSON.stringify(to)}`),
+    push: (to: import("expo-router").Href) => scenario.calls.push(`push ${JSON.stringify(to)}`),
     back: () => scenario.calls.push("back"),
   },
 }));

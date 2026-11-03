@@ -57,7 +57,7 @@ Object.assign(globalThis, {
   expo: {
     modules: {
       TitleFormats: {
-        create: (id: string, url: string, _headers: unknown, start: number) =>
+        create: (id: string, url: string, _headers: Record<string, string>, start: number) =>
           sessions.push({
             id,
             url,

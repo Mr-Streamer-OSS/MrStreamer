@@ -711,10 +711,10 @@ export async function openSession(
 
       load = current;
 
-      const taken = await answer.catch((error: unknown) => {
+      const taken = await answer.catch((cause: unknown) => {
         // The receiver may take it yet, after the service heard it didn't.
         current.dropped = true;
-        throw error;
+        throw cause;
       });
 
       if (taken.type !== "MEDIA_STATUS") {

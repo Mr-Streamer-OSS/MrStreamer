@@ -1,3 +1,4 @@
+import type { IpcInput, IpcMethod } from "@mrstreamer/contracts/ipc";
 // Checks the watchlist in a built app, against two fake providers and the fake TMDB: what the
 // suite can't, because happy-dom lays nothing out, moves no real focus and plays nothing. The
 // first provider's subscription is saved alone at first. In order:
@@ -114,7 +115,11 @@ function report(name: string, problems: readonly string[]): void {
   failed ||= problems.length > 0;
 }
 
-const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T> => {
+const invoke = async <T>(
+  page: Page,
+  method: IpcMethod,
+  input?: IpcInput<IpcMethod>,
+): Promise<T> => {
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
@@ -747,7 +752,9 @@ try {
           : { ...all, movies: all.movies.filter((movie) => String(movie.id) !== DROPPED.id) },
       );
 
-      return invoke(page, "ondemand.refresh", { subscriptionId: one?.id });
+      if (!one) throw new Error("The login saved no subscription.");
+
+      return invoke(page, "ondemand.refresh", { subscriptionId: one.id });
     };
 
     const tile = `[...document.querySelectorAll("[data-remove]")].find((each) => each.getAttribute("aria-label") === ${JSON.stringify(`Remove ${name} from Watchlist`)})?.parentElement.querySelector("button")`;
@@ -880,7 +887,9 @@ try {
             },
       );
 
-      return invoke(page, "ondemand.refresh", { subscriptionId: one?.id });
+      if (!one) throw new Error("The login saved no subscription.");
+
+      return invoke(page, "ondemand.refresh", { subscriptionId: one.id });
     };
 
     await showAdults(true);

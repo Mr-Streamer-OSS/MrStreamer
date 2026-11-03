@@ -1,3 +1,4 @@
+import type { IpcInput, IpcMethod } from "@mrstreamer/contracts/ipc";
 // Checks marking episodes watched and unwatched in a built app, against two fake providers and
 // the fake TMDB: what the suite can't, because happy-dom moves no real focus, lays nothing out
 // and keeps no database between starts. The first provider's subscription is saved alone at
@@ -75,7 +76,11 @@ function report(name: string, problems: readonly string[]): void {
   failed ||= problems.length > 0;
 }
 
-const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T> => {
+const invoke = async <T>(
+  page: Page,
+  method: IpcMethod,
+  input?: IpcInput<IpcMethod>,
+): Promise<T> => {
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );

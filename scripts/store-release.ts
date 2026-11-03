@@ -712,8 +712,8 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main().catch((error: unknown) => {
-    console.log(`::error::${error instanceof Error ? error.message : String(error)}`);
+  await main().catch((cause: unknown) => {
+    console.log(`::error::${cause instanceof Error ? cause.message : String(cause)}`);
     process.exit(1);
   });
 }

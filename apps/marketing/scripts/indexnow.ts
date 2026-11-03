@@ -72,7 +72,10 @@ export function readIndexNowBuild(text: string, revision: string, sitemap: strin
 }
 
 function isStrings(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry: unknown) => typeof entry === "string");
+  return (
+    Array.isArray(value) &&
+    value.every((entry: unknown): entry is string => typeof entry === "string")
+  );
 }
 
 interface NotificationOptions {

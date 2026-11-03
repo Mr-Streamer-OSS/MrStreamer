@@ -84,7 +84,11 @@ vi.mock("expo-file-system", () => import("./native-files.ts"));
 vi.mock("expo-router", async () => {
   const { createContext, useContext } = await import("react");
   state.focusContext = createContext(true);
-  const navigation = { dispatch: (action: unknown) => state.did.push(action) };
+
+  const navigation = {
+    dispatch: (action: import("@react-navigation/native").NavigationAction) =>
+      state.did.push(action),
+  };
 
   return {
     useIsFocused: () => useContext(state.focusContext!) && state.focused,
@@ -92,9 +96,10 @@ vi.mock("expo-router", async () => {
     useNavigation: () => navigation,
     useRootNavigationState: () => state.stack,
     router: {
-      push: (href: unknown) => state.did.push(href),
-      navigate: (href: unknown) => state.did.push(href),
-      setParams: (params: unknown) => state.did.push({ setParams: params }),
+      push: (href: import("expo-router").Href) => state.did.push(href),
+      navigate: (href: import("expo-router").Href) => state.did.push(href),
+      setParams: (params: { channel?: string; detail?: string }) =>
+        state.did.push({ setParams: params }),
     },
   };
 });
@@ -115,7 +120,10 @@ vi.mock("../src/account.ts", () => ({
 
 vi.mock("../src/header.tsx", () => ({
   tabHref: (tab: string, name: string) => (tab === "live" ? `/live/${name}` : `/${name}`),
-  tabStack: (_state: unknown, tab: string) => (tab === "live" ? state.stack : undefined),
+  tabStack: (
+    _state: ReturnType<typeof import("expo-router").useRootNavigationState>,
+    tab: string,
+  ) => (tab === "live" ? state.stack : undefined),
 }));
 
 vi.mock("../src/loading.tsx", async () => {
@@ -216,8 +224,8 @@ vi.mock("react-native", async () => {
       children,
     );
 
-  const node = (value: unknown) =>
-    !value ? null : isValidElement(value) ? value : createElement(value as React.ComponentType);
+  const node = (value: React.ReactElement | React.ComponentType | null | undefined) =>
+    !value ? null : isValidElement(value) ? value : createElement(value);
 
   return {
     ...reactNative,

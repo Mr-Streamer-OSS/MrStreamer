@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // A fake Xtream Codes provider for tests. Its catalogue has the messiness of real panels:
 // prefixed names, separator entries, numbers sent as strings and missing logos. It allows one
 // connection at a time by default, like most subscriptions. The category "TEST | Formats and
@@ -1813,7 +1814,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-function json(response: ServerResponse, body: unknown): void {
+function json(response: ServerResponse, body: Json): void {
   response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 

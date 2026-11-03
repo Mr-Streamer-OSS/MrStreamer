@@ -1,8 +1,9 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { describe, expect, it } from "vitest";
 import { xtreamProvider } from "../src/main/providers/xtream.ts";
 
 /** A provider whose panel answers every request with `body`. */
-const answering = (body: unknown) =>
+const answering = (body: Json) =>
   xtreamProvider(
     { server: "https://panel.test", username: "fixture", password: "fixture" },
     { userAgent: "fixture", fetch: async () => Response.json(body) },

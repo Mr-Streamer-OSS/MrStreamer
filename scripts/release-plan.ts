@@ -645,8 +645,8 @@ async function reportChannels(
     return `builds ${plan.version} from ${plan.sha}.`;
   };
 
-  const refused = (error: unknown) =>
-    `is refused. ${error instanceof Error ? error.message : String(error)}`;
+  const refused = (cause: unknown) =>
+    `is refused. ${cause instanceof Error ? cause.message : String(cause)}`;
 
   const sha = await repo.commitOf(repo.defaultBranch);
 
@@ -687,9 +687,9 @@ export async function deployedFeed(url: string | undefined): Promise<UpdateFeed 
   latest.searchParams.set("at", String(Date.now()));
 
   const response = await fetch(latest, { signal: AbortSignal.timeout(20_000) }).catch(
-    (error: unknown) => {
+    (cause: unknown) => {
       throw new Error(
-        `${url} is unreachable, so the deployed feed can't be compared. Run this again. ${error instanceof Error ? error.message : String(error)}`,
+        `${url} is unreachable, so the deployed feed can't be compared. Run this again. ${cause instanceof Error ? cause.message : String(cause)}`,
       );
     },
   );
@@ -842,8 +842,8 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main().catch((error: unknown) => {
-    console.log(`::error::${error instanceof Error ? error.message : String(error)}`);
+  await main().catch((cause: unknown) => {
+    console.log(`::error::${cause instanceof Error ? cause.message : String(cause)}`);
     process.exit(1);
   });
 }

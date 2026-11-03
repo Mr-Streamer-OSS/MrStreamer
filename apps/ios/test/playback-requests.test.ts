@@ -70,7 +70,7 @@ vi.mock("../src/viewing.ts", () => ({
     new Promise<readonly TitleProgress[]>((resolve, reject) =>
       held.progress.push({ resolve, reject }),
     ),
-  recordProgress: (_title: unknown, position: number) => {
+  recordProgress: (_title: import("@mrstreamer/contracts/ondemand").Title, position: number) => {
     saves.asked.push(position);
 
     return saves.answer();
@@ -174,7 +174,7 @@ const progressAt = (kind: "movie" | "episode", id: string, position: number): Ti
 
 /** The next save of progress waits until the test calls what this returns; later ones don't. */
 function holdNextSave() {
-  let answer: (refused?: unknown) => void = () => {};
+  let answer: (cause?: unknown) => void = () => {};
 
   saves.answer = () => {
     saves.answer = async () => undefined;
@@ -184,7 +184,7 @@ function holdNextSave() {
     });
   };
 
-  return (refused?: unknown) => answer(refused);
+  return (cause?: unknown) => answer(cause);
 }
 
 /** The player is ready and seeks to where the play starts; answers where that is. */

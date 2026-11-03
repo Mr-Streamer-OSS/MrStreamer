@@ -124,7 +124,7 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
 
     const outcome = run().then(
       () => undefined,
-      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+      (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))),
     );
 
     // The public API starts asynchronous codesign, ditto and notary commands before stapling.

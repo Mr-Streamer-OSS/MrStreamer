@@ -57,7 +57,10 @@ for (const [key, field] of [
     get(this: NativePlayer) {
       return this[field];
     },
-    set(this: NativePlayer, value: unknown) {
+    set(
+      this: NativePlayer,
+      value: import("expo-video").AudioTrack | import("expo-video").SubtitleTrack | null,
+    ) {
       writes++;
       this[field] = value;
     },

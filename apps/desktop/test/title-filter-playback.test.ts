@@ -187,7 +187,7 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
       // Attach rejection handling before changing the source.
       const settled = opening.then(
         () => null,
-        (error: unknown) => error,
+        (cause: unknown) => cause,
       );
 
       await held.arrived;

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { describe, expect, it, vi } from "vitest";
 import { strToU8, Zip, ZipDeflate, zipSync } from "fflate";
 import {
@@ -13,7 +14,7 @@ const keys = {
 const signal = () => new AbortController().signal;
 const srt = "1\n00:00:10,000 --> 00:00:12,000\nHallo\n\n";
 
-const json = (data: unknown) =>
+const json = (data: Json) =>
   new Response(JSON.stringify(data), {
     headers: { "content-type": "application/json" },
   });

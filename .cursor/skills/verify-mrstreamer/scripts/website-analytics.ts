@@ -1124,7 +1124,7 @@ app.on('window-all-closed', () => app.quit());
         throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
 
       // Measurements are bounded numbers in their units, and each leave carries all three.
-      const share = (value: unknown) =>
+      const share = (value: unknown): value is number =>
         typeof value === "number" &&
         value >= 0 &&
         value <= 1 &&

@@ -42,7 +42,7 @@ const scenario = vi.hoisted(() => ({
 vi.mock("expo-file-system", () => import("./native-files.ts"));
 
 vi.mock("expo-router", () => ({
-  router: { push: (href: unknown) => scenario.pushed.push(href) },
+  router: { push: (href: import("expo-router").Href) => scenario.pushed.push(href) },
   useIsFocused: () => true,
   useLocalSearchParams: () => scenario.params,
 }));

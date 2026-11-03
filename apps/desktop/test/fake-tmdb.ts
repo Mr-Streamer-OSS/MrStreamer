@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // A stand-in for TMDB's API: every film and series it is asked about exists, with genres, a
 // language and names that follow from its id (see `tmdbName`), every series has two seasons whose
 // episodes are named the same way (see `tmdbEpisodeName`), and one streaming service streams the
@@ -80,7 +81,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   const held: (() => void)[] = [];
   const streamed: Record<string, readonly string[]> = { movie: [], tv: [] };
 
-  const json = (response: import("node:http").ServerResponse, body: unknown, status = 200) =>
+  const json = (response: import("node:http").ServerResponse, body: Json, status = 200) =>
     response.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 
   const server = createServer((request, response) => {

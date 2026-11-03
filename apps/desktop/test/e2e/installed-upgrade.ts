@@ -1321,13 +1321,13 @@ async function start(
 
     const ended = await tree
       .stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve())
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (workerError)
           throw new AggregateError(
-            [workerError, error],
+            [workerError, cause],
             "Worker and installed process cleanup failed",
           );
-        throw error;
+        throw cause;
       });
 
     const exit = { code: app.exitCode, signal: app.signalCode };
@@ -2075,7 +2075,7 @@ export async function runCommand(args: string[]) {
 const reaches = (url: string): Promise<{ url: string; status: number | null; error?: string }> =>
   fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(20_000) }).then(
     (response) => ({ url, status: response.status }),
-    (error: unknown) => ({ url, status: null, error: String(error) }),
+    (cause: unknown) => ({ url, status: null, error: String(cause) }),
   );
 
 /** The window's request to a public address, which the block must stop. */

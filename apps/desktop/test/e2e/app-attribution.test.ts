@@ -485,7 +485,7 @@ it.each(["stop", "disable", "write"])(
     });
     peer.page.send = vi.fn(peer.page.send);
     const record = steadyRecord();
-    const result = steadyProfiles(peer.context, record).catch((error: unknown) => error);
+    const result = steadyProfiles(peer.context, record).catch((cause: unknown) => cause);
     await vi.runAllTimersAsync();
     const error = await result;
     expect(error).toBeInstanceOf(AggregateError);
@@ -534,7 +534,7 @@ it("preserves both targets' stop and disable failures alongside IPC restoration 
     });
   }
 
-  const result = steadyProfiles(peer.context, steadyRecord()).catch((error: unknown) => error);
+  const result = steadyProfiles(peer.context, steadyRecord()).catch((cause: unknown) => cause);
   await vi.runAllTimersAsync();
   const error = await result;
   expect(error).toBeInstanceOf(AggregateError);
@@ -542,8 +542,8 @@ it("preserves both targets' stop and disable failures alongside IPC restoration 
 
   for (const failure of failures.values()) expect(String(error)).toContain(failure.message);
 
-  const causes = (error: unknown): unknown[] =>
-    error instanceof AggregateError ? error.errors.flatMap(causes) : [error];
+  const causes = (cause: unknown): unknown[] =>
+    cause instanceof AggregateError ? cause.errors.flatMap(causes) : [cause];
 
   expect(causes(error)).toEqual(expect.arrayContaining([...failures.values()]));
   expect(String(error)).toContain("IPC restore failed");
@@ -566,7 +566,7 @@ it.each(["data-loss", "close-error", "read-and-close-error"])(
   async (mode) => {
     const peer = capture(mode);
     const record = steadyRecord();
-    const error = steadyProfiles(peer.context, record).catch((error: unknown) => error);
+    const error = steadyProfiles(peer.context, record).catch((cause: unknown) => cause);
     await vi.runAllTimersAsync();
     const rejected = await error;
     expect(rejected).toBeInstanceOf(Error);
@@ -665,7 +665,7 @@ it.each(["steady", "retention"])(
       kind === "steady"
         ? steadyProfiles(peer.context, steadyRecord())
         : queryRetention(peer.context, retentionRecord())
-    ).catch((error: unknown) => error);
+    ).catch((cause: unknown) => cause);
 
     await vi.runAllTimersAsync();
     const error = String(await result);
@@ -776,7 +776,7 @@ it("runs the live-profile workflow after steady profiles end on Home without ret
     steadyProfile: true,
     queryRetention: false,
     hostCondition: "fixture",
-  }).catch((error: unknown) => error);
+  }).catch((cause: unknown) => cause);
 
   await vi.runAllTimersAsync();
   expect(await result).toBeUndefined();
@@ -854,7 +854,7 @@ it.each(["available", "empty", "missing"])(
     };
 
     const record = retentionRecord();
-    const result = queryRetention(peer.context, record).catch((error: unknown) => error);
+    const result = queryRetention(peer.context, record).catch((cause: unknown) => cause);
     await vi.runAllTimersAsync();
     const error = await result;
 

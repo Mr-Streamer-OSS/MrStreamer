@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // The language scenario: the interface language picked in Settings, through the real window, at
 // the smallest window the app allows. It changes the app's own text at once, keeps the title,
 // sound and subtitle languages, survives a restart, follows the system when set to System
@@ -361,13 +362,16 @@ async function liveTv(d: Driver, locale: Locale) {
   await d.wait(() => d.evaluate("!!document.activeElement?.closest('[data-item]')"));
   await d.key("ArrowDown", 40);
   await d.key("ArrowDown", 40);
-  d.observed[`moreFocus-${locale}`] = await d.evaluate<string | null>(
+
+  const moreFocus = await d.evaluate<string | null>(
     "document.activeElement?.getAttribute('aria-label') ?? null",
   );
+
+  d.observed[`moreFocus-${locale}`] = moreFocus;
   expect(
-    more.includes(String(d.observed[`moreFocus-${locale}`])),
+    more.includes(String(moreFocus)),
     `The keyboard walks More's rows in ${locale}`,
-    d.observed[`moreFocus-${locale}`],
+    moreFocus,
   );
   await d.capture(`more-${locale}`);
   await d.key("Escape", 27);
@@ -683,7 +687,7 @@ async function smallestWindow(d: Driver) {
   d.observed["viewport"] = await d.evaluate<object>("({ width: innerWidth, height: innerHeight })");
 }
 
-function expect(condition: boolean, what: string, seen?: unknown): asserts condition {
+function expect(condition: boolean, what: string, seen?: Json): asserts condition {
   if (!condition)
     throw new Error(`Expected: ${what}${seen ? `, saw ${JSON.stringify(seen)}` : ""}`);
 }

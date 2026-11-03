@@ -160,7 +160,7 @@ it.each(["before", "after"])(
       audioLanguage: null,
     });
     let failure: unknown;
-    engine.started.catch((error: unknown) => (failure = error));
+    engine.started.catch((cause: unknown) => (failure = cause));
 
     if (when === "before") engine.fix?.(high.uri);
     await vi.dynamicImportSettled();
@@ -228,7 +228,7 @@ it("starts as it would alone when hls.js doesn't list the held quality", async (
     audioLanguage: "es",
   });
   let failure: unknown;
-  engine.started.catch((error: unknown) => (failure = error));
+  engine.started.catch((cause: unknown) => (failure = cause));
   engine.fix?.("http://localhost/twin.m3u8");
   await vi.dynamicImportSettled();
   fixture.parsed();

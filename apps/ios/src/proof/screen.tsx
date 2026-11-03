@@ -19,11 +19,11 @@ interface HermesRuntime {
 const uncaught: string[] = [];
 const previousHandler = ErrorUtils.getGlobalHandler();
 
-ErrorUtils.setGlobalHandler((error: unknown, fatal?: boolean) => {
+ErrorUtils.setGlobalHandler((cause: unknown, fatal?: boolean) => {
   uncaught.push(
-    error instanceof Error ? `${error.name}: ${error.message}\n${error.stack}` : String(error),
+    cause instanceof Error ? `${cause.name}: ${cause.message}\n${cause.stack}` : String(cause),
   );
-  previousHandler(error, fatal);
+  previousHandler(cause, fatal);
 });
 
 async function prove() {
@@ -39,7 +39,7 @@ async function prove() {
 
   const keychain = await keychainProof(keychainSecrets).then(
     (value) => ({ value }),
-    (error: unknown) => ({ thrown: String(error) }),
+    (cause: unknown) => ({ thrown: String(cause) }),
   );
 
   results.push({ name: "keychain", compare: "record", ms: Date.now() - started, ...keychain });
@@ -76,9 +76,9 @@ export function ProofScreen() {
             (r) => `${r.thrown ? "threw" : "ran"}  ${r.name}${r.thrown ? `: ${r.thrown}` : ""}`,
           ),
         ),
-      (error: unknown) =>
+      (cause: unknown) =>
         setLines([
-          `Proof failed: ${error instanceof Error ? `${String(error)}\n${error.stack}` : String(error)}`,
+          `Proof failed: ${cause instanceof Error ? `${String(cause)}\n${cause.stack}` : String(cause)}`,
         ]),
     );
   }, []);

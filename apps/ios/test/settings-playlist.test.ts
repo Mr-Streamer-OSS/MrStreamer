@@ -39,7 +39,7 @@ vi.mock("react-native", async () => ({
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
 
 vi.mock("expo-router", () => ({
-  router: { push: (to: unknown) => scenario.pushed.push(to) },
+  router: { push: (to: import("expo-router").Href) => scenario.pushed.push(to) },
   useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
   useNavigation: () => ({ setOptions: () => undefined }),
 }));

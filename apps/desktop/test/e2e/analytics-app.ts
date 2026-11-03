@@ -469,9 +469,9 @@ async function launch(readDelayMs = options.slowStartup ? 1700 : 0) {
   await new Promise<void>((resolve, reject) => {
     app!.once("error", reject);
     app!.once("spawn", resolve);
-  }).catch((error: unknown) => {
+  }).catch((cause: unknown) => {
     app = undefined;
-    throw error;
+    throw cause;
   });
 
   for (const stream of [app.stdout, app.stderr])

@@ -59,8 +59,10 @@ const scenario = vi.hoisted(() => ({
    * How each read of the film's details answers, given the version read and what shows facts
    * known before the answer; by default, never.
    */
-  details: (_version: string, _show: (facts: unknown) => void): Promise<unknown> =>
-    new Promise(() => undefined),
+  details: (
+    _version: string,
+    _show: (facts: import("../src/titles.ts").ShownDetails) => void,
+  ): Promise<unknown> => new Promise(() => undefined),
 }));
 
 vi.mock("react-native", async () => ({
@@ -157,7 +159,7 @@ vi.mock("../src/titles.ts", () => ({
   useMetadataVersion: () => 0,
   titleOf: (index: IndexedCatalogue, kind: "movie" | "series", version: OwnedId) =>
     byIds(index, kind, [version])[0],
-  detailsOf: (title: OwnedId, show: (facts: unknown) => void) =>
+  detailsOf: (title: OwnedId, show: (facts: import("../src/titles.ts").ShownDetails) => void) =>
     scenario.details(`${title.subscriptionId}:${title.id}`, show),
   useCollections: () => null,
   episodesOf: async () => [],
@@ -166,9 +168,11 @@ vi.mock("../src/titles.ts", () => ({
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
-  playMovie: (_title: unknown, version: OwnedId) => scenario.played.push(version),
+  playMovie: (_title: import("@mrstreamer/contracts/ondemand").Title, version: OwnedId) =>
+    scenario.played.push(version),
   playEpisode: () => undefined,
-  resumeMovie: (_title: unknown, version: OwnedId) => scenario.played.push(version),
+  resumeMovie: (_title: import("@mrstreamer/contracts/ondemand").Title, version: OwnedId) =>
+    scenario.played.push(version),
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));
@@ -858,7 +862,7 @@ describe("a film's download", () => {
 describe("a film's facts", () => {
   it("offer Try again when they couldn't be read, and show as loading until it answers", async () => {
     providers("a");
-    let answer: (facts: unknown) => void = () => undefined;
+    let answer: (facts: import("../src/titles.ts").ShownDetails) => void = () => undefined;
     scenario.details = () => Promise.reject(new Error("The provider didn't answer"));
     const page = mount();
     await React.act(async () => undefined);
@@ -878,7 +882,7 @@ describe("a film's facts", () => {
 
   it("show saved facts while fresh ones are asked, then the fresh ones", async () => {
     providers("a");
-    let answer: (facts: unknown) => void = () => undefined;
+    let answer: (facts: import("../src/titles.ts").ShownDetails) => void = () => undefined;
     scenario.details = (_version, show) => {
       show(factsOf("The story saved on the phone."));
 
@@ -897,7 +901,7 @@ describe("a film's facts", () => {
 
   it("never show what a read of another version shows once that version is left", async () => {
     providers("a", "b");
-    const shows = new Map<string, (facts: unknown) => void>();
+    const shows = new Map<string, (facts: import("../src/titles.ts").ShownDetails) => void>();
     scenario.details = (version, show) => {
       shows.set(version, show);
 

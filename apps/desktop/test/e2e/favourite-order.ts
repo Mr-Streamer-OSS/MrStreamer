@@ -1,3 +1,4 @@
+import type { IpcInput, IpcMethod } from "@mrstreamer/contracts/ipc";
 // Checks putting the favourites in another order in a built app, against the fake provider: what
 // the suite can't, because happy-dom lays nothing out, scrolls nothing and moves no real focus.
 // It stars forty channels, among them one in three qualities, one for adults that the lists hide
@@ -70,7 +71,11 @@ interface Channel extends OwnedId {
   readonly variants: readonly { readonly id: string }[];
 }
 
-const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T> => {
+const invoke = async <T>(
+  page: Page,
+  method: IpcMethod,
+  input?: IpcInput<IpcMethod>,
+): Promise<T> => {
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );

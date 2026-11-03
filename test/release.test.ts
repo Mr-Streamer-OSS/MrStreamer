@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1105,7 +1106,7 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
 });
 
 /** A stored ZIP fixture with one JSON file, without an additional test tool dependency. */
-function validationArchive(value: unknown): Buffer {
+function validationArchive(value: Json): Buffer {
   const name = Buffer.from("validation.json");
   const data = Buffer.from(JSON.stringify(value));
   let crc = 0xffffffff;

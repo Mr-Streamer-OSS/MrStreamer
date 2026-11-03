@@ -403,14 +403,14 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
 
     const current = a.service.details("series", a.series).then(
       (details) => ({ details }),
-      (error: unknown) => ({ error }),
+      (cause: unknown) => ({ error: cause }),
     );
 
     await gate.arrived;
 
     const joined = a.service.file(a.episode).then(
       (file) => ({ file }),
-      (error: unknown) => ({ error }),
+      (cause: unknown) => ({ error: cause }),
     );
 
     // A captured refresh can arrive after its saved source has already been replaced.
@@ -504,7 +504,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
 
       const pending = a.service.season(a.series, 1).then(
         (episodes) => ({ episodes }),
-        (error: unknown) => ({ error }),
+        (cause: unknown) => ({ error: cause }),
       );
 
       await Promise.all([about.arrived, season.arrived]);
@@ -553,7 +553,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
 
     const pending = a.service.season(a.series, 1).then(
       () => null,
-      (error: unknown) => error,
+      (cause: unknown) => cause,
     );
 
     await expect.poll(() => a.remote!.seasonRequests().length).toBe(1);
