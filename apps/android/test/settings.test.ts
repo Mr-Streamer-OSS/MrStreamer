@@ -176,6 +176,7 @@ it("clears statistics only once the last provider is removed", async () => {
       restore: async () => {},
       connect: async () => ({ kind: "cancelled" }),
       retry: () => {},
+      onDemand: () => null,
       remove: async (id) => {
         const now = state.get();
 
@@ -243,6 +244,7 @@ it.each(["removed", "partial", "refused"] as const)(
         restore: async () => {},
         connect: async () => ({ kind: "cancelled" }),
         retry: () => {},
+        onDemand: () => null,
         remove: async () => {
           events.push("erase");
 
@@ -374,6 +376,7 @@ it("releases a play started during removal's wait and deduplicates removal", asy
     restore: async () => {},
     connect: async () => ({ kind: "cancelled" as const }),
     retry: () => {},
+    onDemand: () => null,
     remove,
   };
 
@@ -403,6 +406,7 @@ it("keeps the provider when playback release rejects and permits retry", async (
       restore: async () => {},
       connect: async () => ({ kind: "cancelled" as const }),
       retry: () => {},
+      onDemand: () => null,
       remove,
     },
     () => true,
@@ -637,6 +641,7 @@ it("does not claim an invalid login was erased when deletion was refused", async
       restore: async () => {},
       connect: async () => ({ kind: "cancelled" }),
       retry: () => {},
+      onDemand: () => null,
       remove: async () => {
         throw Error("refused");
       },
@@ -664,6 +669,7 @@ it.each([false, true])(
         restore: async () => {},
         connect: async () => ({ kind: "cancelled" }),
         retry: () => {},
+        onDemand: () => null,
         remove,
       },
       () => true,

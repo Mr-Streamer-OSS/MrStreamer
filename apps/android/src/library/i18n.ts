@@ -1,4 +1,4 @@
-import { catalogue } from "./catalogue.ts";
+import { catalogue } from "@mrstreamer/mobile/language";
 
 const english = {
   "For you": "For you",
