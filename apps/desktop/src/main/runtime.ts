@@ -45,6 +45,7 @@ import { Library } from "./services/library.ts";
 import { OnDemand, type OnDemandDeps } from "./services/ondemand.ts";
 import { Output, type OutputDeps } from "./services/output.ts";
 import { appNotices, Licences } from "./services/licences.ts";
+import { historyFolder, LiveCaptures } from "./playback/live-capture.ts";
 import { PlaybackCoordination } from "./services/playback-coordination.ts";
 import { Playback } from "./services/playback.ts";
 import { Recordings } from "./services/recordings.ts";
@@ -158,7 +159,9 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         verifiedFiles,
         savedSubtitles,
         detailCache,
-        PlaybackCoordination.layer,
+        LiveCaptures.layer({ folder: historyFolder(dataDir) }).pipe(
+          Layer.provideMerge(PlaybackCoordination.layer),
+        ),
       ),
     ),
   );

@@ -42,7 +42,7 @@ import { nextEpisodeScenario } from "./next-episode.ts";
 import { posterGridScenario } from "./poster-grid.ts";
 import { B_SERIES, detailsBackScenario, withSecondSeason } from "./details-back.ts";
 import { removeDuringGuideScenario } from "./remove-during-guide.ts";
-import { recordingsScenario } from "./recordings.ts";
+import { longStreams, recordingsHlsScenario, recordingsScenario } from "./recordings.ts";
 import { schedulesScenario } from "./schedules.ts";
 import { remindersScenario } from "./reminders.ts";
 import {
@@ -55,6 +55,7 @@ import {
 } from "./session.ts";
 import { connect, silent, type Page } from "../../../../apps/desktop/test/e2e/app.ts";
 import {
+  liveStreams,
   QUALITY_STREAM_IDS,
   startFakeProvider,
   type FakeChannel,
@@ -91,6 +92,8 @@ const scenarios = [
   "guide-grid-scroll",
   "reminders",
   "recordings",
+  "recordings-hls",
+  "recordings-hls-qualities",
   "schedules",
   "titles",
   "details-back",
@@ -127,6 +130,13 @@ function scenarioProvider(scenario: Scenario): FakeProviderOptions {
     case "guide-grid-cells":
       return { guideHours: { past: 6, ahead: 24 }, guideLengths: [1, 2, 30], channelOf: gridded };
     case "recordings":
+      return {
+        // Half-hour programmes, so Record offers When it ends.
+        guideHours: { past: 1, ahead: 3 },
+        guideLengths: [30],
+        channelOf: guided,
+        streams: (channel, out, signal) => longStreams(channel, out, signal, liveStreams),
+      };
     case "schedules":
       // Half-hour programmes, so Record offers When it ends.
       return { guideHours: { past: 1, ahead: 3 }, guideLengths: [30], channelOf: guided };
@@ -367,6 +377,13 @@ async function run(scenario: Scenario, prior?: string) {
     if (scenario === "live-categories") other!.serveCategories(browseFixtureLanguages);
 
     if (scenario.startsWith("hls-compatibility")) playlist = await startFakeHls({ realtime: true });
+
+    // A live playlist, whose address sends on to one under a token.
+    if (scenario === "recordings-hls") playlist = await startFakeHls({ live: {}, tokens: true });
+
+    // A live playlist offered in 1080 and 720 lines.
+    if (scenario === "recordings-hls-qualities")
+      playlist = await startFakeHls({ live: {}, qualities: ["hd", "sd"] });
 
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
 
@@ -1207,6 +1224,25 @@ async function run(scenario: Scenario, prior?: string) {
             active: provider!.activeStreams(),
           }),
         },
+      );
+    } else if (scenario === "recordings-hls" || scenario === "recordings-hls-qualities") {
+      await recordingsHlsScenario(
+        {
+          profile,
+          observed,
+          evaluate: livePage.evaluate,
+          send,
+          wait,
+          exists,
+          click,
+          key,
+          capture,
+          action,
+          launch,
+          quit,
+        },
+        { requests: () => playlist!.requests() },
+        scenario === "recordings-hls-qualities",
       );
     } else if (scenario === "reminders") {
       await remindersScenario(

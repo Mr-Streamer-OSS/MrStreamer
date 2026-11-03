@@ -878,6 +878,7 @@ async function start(): Promise<void> {
   forward(playback.fileReplaced, "playback.fileReplaced", (sessionId) => ({ sessionId }));
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
+  forward(playback.fixed, "playback.fixed", (change) => change);
   // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
   let awake: number | null = null;
   runtime.runFork(

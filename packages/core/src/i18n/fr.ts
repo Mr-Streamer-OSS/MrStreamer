@@ -1505,12 +1505,16 @@ export const fr: Translation = {
   "Every connection is in use.": "Toutes les connexions sont utilisées.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Utilise 1 connexion. {used} sur {limit} utilisées.",
+  "Shares the connection playing here.": "Partage la connexion de la lecture en cours.",
   "Ends 2 min after the guide time.": "S'arrête 2 min après l'heure du guide.",
   "Stop playing and record": "Arrêter la lecture et enregistrer",
   "Start recording": "Démarrer l'enregistrement",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Un enregistrement utilise la connexion de cet abonnement. Arrêtez-le dans Enregistrements pour regarder.",
   "Stop recording {title}": "Arrêter l’enregistrement de {title}",
+  "Stop recording": "Arrêter l’enregistrement",
+  "{channel} · to {time}": "{channel} · jusqu’à {time}",
+  "Quality stays fixed while this records.": "La qualité reste fixe pendant cet enregistrement.",
   "The provider refused the stream. Another device may be using your connection.":
     "Le fournisseur a refusé le flux. Un autre appareil utilise peut-être votre connexion.",
   "The channel has no stream right now.": "La chaîne n’a pas de flux pour le moment.",

@@ -95,6 +95,7 @@ import {
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
+import { LiveCaptures, streamKey } from "../playback/live-capture.ts";
 import { Settings } from "./preferences.ts";
 import { Subscriptions } from "./subscription.ts";
 
@@ -180,8 +181,15 @@ export class Recordings extends Context.Service<
   {
     /** Every recording, newest first. Fails while recordings.json can't be read. */
     readonly list: Effect.Effect<readonly Recording[], Failed>;
-    /** What holds the subscription's connections now, against the account's limit. */
-    connections(subscriptionId: string): Effect.Effect<RecordingConnections, Failed>;
+    /**
+     * What holds the subscription's connections now, against the account's limit, and with
+     * `of`, a channel by its own id and its streams to try, whether recording them would share
+     * what plays.
+     */
+    connections(
+      subscriptionId: string,
+      of?: { readonly channel: string; readonly variants: readonly string[] },
+    ): Effect.Effect<RecordingConnections, Failed>;
     /**
      * Records `channel` from now until `stop`, through the first of its streams to try whose
      * stream has a program table. Busy, starting nothing, while every connection the account
@@ -344,6 +352,7 @@ function make(deps: RecordingsDeps) {
     const guide = yield* Guide;
     const playback = yield* Playback;
     const coordination = yield* PlaybackCoordination;
+    const captures = yield* LiveCaptures;
     const settings = yield* Settings;
     const savedSubtitles = yield* SavedSubtitles;
     const root = join(deps.dataDir, "recordings");
@@ -1042,10 +1051,21 @@ function make(deps: RecordingsDeps) {
 
         if (options.stopPlaying) yield* playback.closeOf(subscriptionId);
 
+        // A stream of the channel that plays now, under this login, is recorded from what it
+        // reads: that stream alone, on the connection it holds.
+        const keyed = streams.map((each) => ({
+          ...each,
+          key: streamKey(subscriptionId, source.revision, listed.id, each.id, each.stream),
+        }));
+
+        const shared = keyed.find((each) => each.key !== null && captures.reading(each.key));
+        const tried = shared ? [shared] : keyed;
+
         const admitted = yield* coordination.hold(
           subscriptionId,
           limitOf(subscriptionId),
           options.stopPlaying ?? false,
+          shared?.key ?? undefined,
         );
 
         if (admitted.kind === "busy")
@@ -1109,14 +1129,22 @@ function make(deps: RecordingsDeps) {
           )
           .then(() =>
             startCapture(
-              streams.map(({ stream: { url, format, headers } }) => ({
+              tried.map(({ key, stream: { url, format, headers } }) => ({
                 url,
                 format,
                 headers: headers ?? {},
+                shared: key,
+                joining: shared !== undefined,
+                variant: key === null ? null : captures.joins(key),
               })),
               fileOf(record),
               {
                 request: source.provider.request,
+                captures: {
+                  request: captures.request,
+                  resource: captures.resource,
+                  owner: held.id,
+                },
                 userAgent: deps.userAgent,
                 until: stop,
                 signal: controller.signal,
@@ -1155,6 +1183,8 @@ function make(deps: RecordingsDeps) {
                 (opened) => opened.ended,
                 () => {},
               );
+              // What it read last ends its provider request before the connection counts free.
+              await captures.idle(held.id);
               held.release();
             }).pipe(Effect.andThen(resumes ? Effect.void : dropStart(record))),
           ),
@@ -1184,7 +1214,7 @@ function make(deps: RecordingsDeps) {
                 ),
               }),
             }
-          : { ...record, variants: [streams[capture.source]!.id] };
+          : { ...record, variants: [tried[capture.source]!.id] };
 
         records.set(id, started);
         beginning.delete(id);
@@ -1192,7 +1222,8 @@ function make(deps: RecordingsDeps) {
         remeasure(started);
         settle();
         void capture.ended
-          .then((end) => {
+          .then(async (end) => {
+            await captures.idle(held.id);
             held.release();
 
             return Effect.runPromise(ended(id, end, live));
@@ -2213,11 +2244,35 @@ function make(deps: RecordingsDeps) {
 
     return {
       list: usable.pipe(Effect.andThen(look), Effect.andThen(shown)),
-      connections: (subscriptionId: string) =>
+      connections: (
+        subscriptionId: string,
+        of?: { readonly channel: string; readonly variants: readonly string[] },
+      ) =>
         Effect.gen(function* () {
           const limit = yield* limitOf(subscriptionId);
+          const uses = yield* coordination.uses(subscriptionId);
 
-          return { limit, uses: yield* coordination.uses(subscriptionId) };
+          // A source that can't be read, as without its login, still gets the count, unshared.
+          const source = of?.variants.length
+            ? yield* Effect.orElseSucceed(subscriptions.sourceOf(subscriptionId), () => null)
+            : null;
+
+          if (!of || !source) return { limit, uses };
+
+          const streams = yield* Effect.forEach(of.variants, (id) =>
+            Effect.promise(async () => ({
+              id,
+              stream: await source.provider.liveStream(id).catch(() => null),
+            })),
+          );
+
+          const shares = streams.some(({ id, stream }) => {
+            const key = streamKey(subscriptionId, source.revision, of.channel, id, stream);
+
+            return key !== null && captures.reading(key);
+          });
+
+          return { limit, uses, shares };
         }),
       start,
       stop: (id: string) =>
