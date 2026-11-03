@@ -915,7 +915,8 @@ function GuideGrid({
     [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
 
-  const saved = gridScroll.get(scope);
+  // Restore only on mount; replaying native scroll events can override navigation's inset changes.
+  const [saved] = useState(() => gridScroll.get(scope));
 
   return (
     <FlatList
