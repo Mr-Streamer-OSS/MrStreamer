@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { packageVersion } from "../packages/contracts/src/package-version.ts";
@@ -65,7 +66,7 @@ function checked(version = "0.0.5", built: Partial<Built> = {}): CheckedRelease 
  * `listings` as a submission sends them back: every language's "What's new" replaced, its title
  * too when the submission gives it `title`, and nothing else.
  */
-function relisted(listings: unknown, title?: string): unknown {
+function relisted(listings: Json | undefined, title?: string): Json | undefined {
   if (!isRecord(listings)) return listings;
 
   return Object.fromEntries(
@@ -613,7 +614,7 @@ describe("putting a release in a draft made in Partner Center", () => {
     ]);
   });
 
-  it.each<[string, Record<string, unknown>, string]>([
+  it.each<[string, Record<string, Json | undefined>, string]>([
     [
       "a search term",
       { keywords: ["iptv"] },

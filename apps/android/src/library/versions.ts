@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 
@@ -24,7 +25,7 @@ export function chosenVersion(
 
 export function versionMemory(storage: {
   readJson(name: string): unknown;
-  writeJson(name: string, value: unknown): void;
+  writeJson(name: string, value: Json): void;
 }) {
   const file = "library-versions.json";
   let raw: unknown;

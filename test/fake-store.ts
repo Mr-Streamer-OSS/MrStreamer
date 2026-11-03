@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 // A stand-in for Microsoft that the Store scripts' tests talk to in place of the network: Entra's
 // token endpoint, the Store submission API for one app, and the Azure storage a package is
 // uploaded to. It behaves as Microsoft's documentation describes: a new submission copies the
@@ -18,10 +19,10 @@ const TOKEN = "eyJ0eXAiOiJKV1Qi.eyJhdWQiOiJzdG9yZSJ9.c2lnbmF0dXJl";
 const SIGNATURE = "c2FzLXNpZ25hdHVyZQ%3D%3D";
 const API = `https://manage.devcenter.microsoft.com/v1.0/my/applications/${STORE_APP.id}`;
 
-type Submission = Record<string, unknown> & {
+type Submission = Record<string, Json | undefined> & {
   id: string;
   status: string;
-  applicationPackages: Record<string, unknown>[];
+  applicationPackages: Record<string, Json | undefined>[];
 };
 
 /**
@@ -98,13 +99,13 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   /** The uploaded ZIP per upload address, and the blocks it is made of. */
   const blobs = new Map<string, { blocks: Map<string, Buffer>; zip: Buffer | null }>();
   const requests: string[] = [];
-  const sent = new Map<string, unknown>();
+  const sent = new Map<string, Json | undefined>();
   const faults: { request: string; fault: Fault; body: string }[] = [];
   /** What a committed submission goes through, one step per read of its status. */
   let progress: Verdict[] = [];
   const waits: number[] = [];
 
-  let app: Record<string, unknown> = {
+  let app: Record<string, Json | undefined> = {
     id: STORE_APP.id,
     primaryName: "Mr. Streamer",
     packageIdentityName: STORE_APP.identityName,
@@ -115,7 +116,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   let pendingId: string | null = null;
   let nextId = 1002;
   /** What Microsoft keeps of a listing in place of what an update sends, per language. */
-  const rewrites: Record<string, Record<string, unknown>> = {};
+  const rewrites: Record<string, Record<string, Json | undefined>> = {};
   /** What someone else does at Microsoft as a request arrives, by the request's name. */
   const meanwhile = new Map<string, () => void>();
 
@@ -209,7 +210,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   }
 
   /** The base listing of `submission` in `language`, which holds its title, texts and images. */
-  function baseListing(submission: Record<string, unknown>, language: string) {
+  function baseListing(submission: Record<string, Json | undefined>, language: string) {
     const { listings } = submission;
     const listing = isRecord(listings) ? listings[language] : undefined;
     const base = isRecord(listing) ? listing["baseListing"] : undefined;
@@ -219,7 +220,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     return base;
   }
 
-  const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+  const json = (status: number, body: Json | undefined, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), {
       status,
       headers: { "MS-CorrelationId": "6f1c2a34-0000-4000-8000-00000000c0de", ...headers },
@@ -272,7 +273,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     };
   }
 
-  function api(method: string, path: string, body: unknown): Response {
+  function api(method: string, path: string, body: Json | undefined): Response {
     const [, id, action] = /^\/submissions(?:\/(\d+))?(?:\/(\w+))?$/.exec(path) ?? [];
     const submission = id ? submissions.get(id) : undefined;
 
@@ -316,7 +317,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
         statusDetails,
         fileUploadUrl,
         friendlyName,
-        applicationPackages: files.filter(isRecord),
+        applicationPackages: files.filter((file): file is Record<string, Json | undefined> =>
+          isRecord(file),
+        ),
       };
 
       for (const [language, kept] of Object.entries(rewrites)) {
@@ -401,7 +404,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     } else if (request.headers["Authorization"] !== `Bearer ${TOKEN}`) {
       response = refused(401, "Unauthorized", "The token is missing or wrong.");
     } else {
-      const parsed: unknown = typeof body === "string" ? JSON.parse(body) : undefined;
+      const parsed: Json | undefined = typeof body === "string" ? JSON.parse(body) : undefined;
 
       if (parsed !== undefined) sent.set(name, structuredClone(parsed));
       response = api(method, address.slice(API.length), parsed);
@@ -431,7 +434,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
       ...overrides,
     }),
     /** The JSON body of the last request called `name`. */
-    sent(name: string): Record<string, unknown> {
+    sent(name: string): Record<string, Json | undefined> {
       const body = sent.get(name);
 
       if (!isRecord(body)) throw new Error(`No ${name} carried a JSON object.`);
@@ -450,11 +453,11 @@ export function fakeStore({ title = STORE_NAME } = {}) {
       progress = steps;
     },
     /** Changes what the account says the application is. */
-    rename(identity: Record<string, unknown>): void {
+    rename(identity: Record<string, Json | undefined>): void {
       app = { ...app, ...identity };
     },
     /** Changes the published submission, as someone would in Partner Center. */
-    edit(changes: Record<string, unknown>): void {
+    edit(changes: Record<string, Json | undefined>): void {
       Object.assign(submissions.get(publishedId)!, changes);
     },
     /** A submission someone started in Partner Center, holding `fileName` at `status`. */
@@ -468,11 +471,11 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     /** The submission in progress, as Microsoft holds it now. */
     pending: inProgress,
     /** Changes the `language` listing of the submission in progress, as someone would there. */
-    relist(language: string, changes: Record<string, unknown>): void {
+    relist(language: string, changes: Record<string, Json | undefined>): void {
       Object.assign(baseListing(inProgress(), language), changes);
     },
     /** From now on Microsoft keeps `kept` of the `language` listing, whatever an update sends. */
-    rewriting(language: string, kept: Record<string, unknown>): void {
+    rewriting(language: string, kept: Record<string, Json | undefined>): void {
       rewrites[language] = kept;
     },
     /** Has `act` happen at Microsoft just as the next request called `name` arrives. */

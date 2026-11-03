@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { readFile } from "node:fs/promises";
 import { connect, Socket } from "node:net";
 import { join } from "node:path";
@@ -93,7 +94,7 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
 }
 
 /** The parts of the login `value` holds, as the window or a file would receive it. */
-function loginIn(value: unknown): string[] {
+function loginIn(value: Json): string[] {
   const text = typeof value === "string" ? value : JSON.stringify(value);
 
   return [LOGIN.username, LOGIN.password].filter((secret) => text.includes(secret));

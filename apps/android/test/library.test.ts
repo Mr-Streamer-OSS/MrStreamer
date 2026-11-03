@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { describe, expect, it } from "vitest";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { indexCatalogue } from "@mrstreamer/core/ondemand/catalogue";
@@ -145,7 +146,7 @@ describe("Android library public behavior", () => {
 
     const storage = {
       readJson: () => saved,
-      writeJson: (_: string, value: unknown) => {
+      writeJson: (_: string, value: Json) => {
         if (refused) throw new Error("Read only");
         saved = value;
       },
@@ -296,7 +297,7 @@ it("persists and restores the first version choice on a fresh install", () => {
 
   const storage = {
     readJson: () => saved,
-    writeJson: (_name: string, value: unknown) => {
+    writeJson: (_name: string, value: Json) => {
       saved = value;
     },
   };
