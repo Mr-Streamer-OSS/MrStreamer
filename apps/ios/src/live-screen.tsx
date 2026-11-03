@@ -1,7 +1,7 @@
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActionSheetIOS,
   FlatList,
@@ -915,9 +915,10 @@ function GuideGrid({
     [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
 
-  // Read once, on mount: native applies a changed contentOffset again on any render, which put back
-  // an offset recorded while a push or pop changed the insets and left the grid 54 points low.
-  const [saved] = useState(() => gridScroll.get(scope));
+  // Restore after layout, once: mounting contentOffset clamps shallow positions before the
+  // automatic header inset is applied. Never replay an inset change recorded during a push/pop.
+  const saved = useRef(gridScroll.get(scope));
+  const list = useRef<FlatList<Channel>>(null);
 
   return (
     <FlatList
@@ -1015,8 +1016,19 @@ function GuideGrid({
       getItemLayout={(_, index) => ({ length: height, offset: top + height * index, index })}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ paddingBottom: inset }}
-      {...(saved === undefined ? {} : { contentOffset: { x: 0, y: saved } })}
-      onScroll={(event) => gridScroll.set(scope, event.nativeEvent.contentOffset.y)}
+      ref={list}
+      scrollToOverflowEnabled
+      onLayout={() => {
+        if (saved.current === undefined) return;
+        list.current?.scrollToOffset({ offset: saved.current, animated: false });
+        saved.current = undefined;
+      }}
+      onScroll={({ nativeEvent }) => {
+        // Fabric marks user drags and momentum, excluding layout and navigation inset changes.
+        if ("responderIgnoreScroll" in nativeEvent && nativeEvent.responderIgnoreScroll === false) {
+          gridScroll.set(scope, nativeEvent.contentOffset.y);
+        }
+      }}
       scrollEventThrottle={100}
       onViewableItemsChanged={onVisible}
       viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
