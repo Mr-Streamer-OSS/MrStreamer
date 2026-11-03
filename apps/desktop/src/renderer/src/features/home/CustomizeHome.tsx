@@ -32,6 +32,7 @@ export function CustomizeHome() {
   const [pendingHomeRows, setPendingHomeRows] = useState<Preferences["homeRows"]>();
   const rows = homeRows(pendingHomeRows ?? preferences.data?.homeRows);
   const writing = useRef(false);
+
   const save = useMutation({
     mutationKey: HOME_ROW_WRITE,
     mutationFn: (homeRows: NonNullable<Preferences["homeRows"]>) =>
@@ -41,6 +42,7 @@ export function CustomizeHome() {
       setPendingHomeRows(undefined);
     },
   });
+
   // Switching Settings tabs or closing Settings does not release an outstanding preference write.
   const latest = useMutationState({
     filters: { mutationKey: HOME_ROW_WRITE, exact: true },
@@ -51,38 +53,49 @@ export function CustomizeHome() {
       rows: mutation.state.variables as NonNullable<Preferences["homeRows"]> | undefined,
     }),
   }).at(-1);
+
   const busy = save.isPending || latest?.status === "pending";
+
   const persist = (change: ((rows: HomeRow[]) => HomeRow[]) | null) => {
     // The ref covers repeated presses; rendered pending state covers the completion/render gap.
     if (writing.current || busy || client.isMutating({ mutationKey: HOME_ROW_WRITE, exact: true }))
       return;
     const saved = client.getQueryData(queries.preferences().queryKey)?.preferences;
+
     if (!saved) return;
     const settledRows = homeRows(saved.homeRows);
     const changed = change === null ? homeRows(undefined) : change(settledRows);
+
     if (changed === settledRows) return;
+
     const next = [
       ...changed,
       ...(saved.homeRows ?? []).filter((row) => !settledRows.some((known) => known.id === row.id)),
     ];
+
     setPendingHomeRows(next);
     writing.current = true;
     save.mutate(next);
   };
+
   const move = (id: HomeRowId, step: number) =>
     persist((rows) => {
       const index = rows.findIndex((row) => row.id === id);
+
       if (index + step < 0 || index + step >= rows.length) return rows;
       const next = [...rows];
       [next[index], next[index + step]] = [next[index + step]!, next[index]!];
+
       return next;
     });
+
   return (
     <section aria-label={t("Customize Home")} aria-busy={busy} className="mb-10">
       <h2 className="mb-1 text-[0.9375rem] font-semibold">{t("Rows")}</h2>
       <ol>
         {rows.map((row, index) => {
           const label = t(LABELS[row.id]);
+
           return (
             <li
               key={row.id}

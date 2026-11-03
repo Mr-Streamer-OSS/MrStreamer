@@ -32,6 +32,7 @@ export function indexNames(
 export function nameQuery(text: string): NameQuery {
   const spellings = searchSpellings(text);
   const words = searchWords(text);
+
   return {
     spellings,
     words: [...new Set(words)],
@@ -56,6 +57,7 @@ export function scoreNames(
 ): number | undefined {
   if (query.words.length === 0) return undefined;
   const preferred = metadata?.displayed.length ? metadata.displayed : names.displayed;
+
   const best = Math.min(
     scoreName(query, preferred, 0),
     preferred !== names.displayed ? scoreName(query, names.displayed, 1) : Infinity,
@@ -64,7 +66,9 @@ export function scoreNames(
     scoreGroup(query, names.aliases, 2),
     scoreGroup(query, metadata?.aliases, 2),
   );
+
   if (best !== Infinity) return best;
+
   // A match spanning names has recall but cannot outrank a match contained in one name.
   return query.words.every(
     (word) => holdsWord(names, word) || (metadata && holdsWord(metadata, word)),
@@ -87,14 +91,18 @@ function scoreGroup(
   preference: number,
 ): number {
   let best = Infinity;
+
   for (const name of names ?? []) best = Math.min(best, scoreName(query, name, preference));
+
   return best;
 }
 
 function scoreName(query: NameQuery, name: Name, preference: number): number {
   let best = Infinity;
+
   for (const form of name) {
     if (!query.words.every((word) => form.includes(word))) continue;
+
     const quality = query.spellings.includes(form)
       ? 0
       : query.unrepeated.includes(form)
@@ -105,10 +113,12 @@ function scoreName(query: NameQuery, name: Name, preference: number): number {
           : query.words.every((word) => ` ${form}`.includes(` ${word}`))
             ? 3
             : 4;
+
     // Normalized spellings win an otherwise equal punctuation alternative.
     const alternative = form !== name[0] || (quality === 0 && form !== query.spellings[0]) ? 1 : 0;
     best = Math.min(best, quality * 6 + preference * 2 + alternative);
   }
+
   return best;
 }
 
@@ -121,9 +131,12 @@ export function yearQuery(
   text: string,
 ): { readonly year: number; readonly query: NameQuery } | null {
   const compatible = text.normalize("NFKC");
+
   if (searchWords(compatible).length < 2) return null;
   const term = [...compatible.matchAll(/(?<![\p{L}\p{N}])[12]\d{3}(?![\p{L}\p{N}])/gu)].at(-1);
+
   if (!term) return null;
+
   return {
     year: Number(term[0]),
     query: nameQuery(

@@ -83,6 +83,7 @@ export function useEpisodeMarks(
     const undoing = revision !== undefined;
     setChange(undoing ? { ...marking, step: "undoing", revision } : { ...marking, step: "saving" });
     const { episode, watched, commandId } = marking;
+
     const stored: Promise<EpisodeMark | null> = undoing
       ? call("viewing.undoMark", { commandId, series, revision })
       : call("viewing.markEpisode", {
@@ -97,15 +98,18 @@ export function useEpisodeMarks(
             episode: episode.number,
           },
         });
+
     void stored
       .then(
         async (mark): Promise<Change | null> => {
           // The rows are read again first, so they show what was stored as the line says so.
           await client.invalidateQueries({ queryKey: queries.episodes(series).queryKey });
+
           return mark ? { ...marking, step: "saved", revision: mark.revision } : null;
         },
         (cause: unknown): Change => {
           const error = appError(cause);
+
           return undoing
             ? { ...marking, step: "undo-failed", revision, error }
             : { ...marking, step: "failed", error };
@@ -113,11 +117,13 @@ export function useEpisodeMarks(
       )
       .then((next) => {
         underWay.current = false;
+
         if (mine === sent.current) setChange(next);
       });
   };
 
   const mine = change?.series === key ? change : null;
+
   const stale =
     mine?.step === "saved" && standing !== undefined && standing.undoable !== mine.revision;
 
@@ -132,6 +138,7 @@ export function useEpisodeMarks(
     },
     retry: () => {
       if (mine?.step === "failed") send(mine);
+
       if (mine?.step === "undo-failed") send(mine, mine.revision);
     },
   };
@@ -155,6 +162,7 @@ export function EpisodeMenu({
   marks: EpisodeMarks;
 }) {
   const saving = marks.busy && marks.change?.episode.id === episode.id;
+
   return (
     <Menu.Root>
       <Menu.Trigger
@@ -241,11 +249,13 @@ function MarkItem({
  */
 export function MarkNotice({ marks, source }: { marks: EpisodeMarks; source: string | null }) {
   const { change } = marks;
+
   if (!change || change.step === "saving") return null;
   const episode = episodeLabel(change.episode.season, change.episode.number);
   const failed = change.step === "failed" || change.step === "undo-failed";
   // An Undo the record refused can't be tried again: the series moved on.
   const action = !failed ? t("Undo") : change.error.kind === "mark-changed" ? null : t("Retry");
+
   /** "S1 E3 marked watched on Holiday house". */
   const marked = () => {
     if (change.watched) {
@@ -253,10 +263,12 @@ export function MarkNotice({ marks, source }: { marks: EpisodeMarks; source: str
         ? t("{episode} marked watched on {source}", { episode, source })
         : t("{episode} marked watched", { episode });
     }
+
     return source
       ? t("{episode} marked unwatched on {source}", { episode, source })
       : t("{episode} marked unwatched", { episode });
   };
+
   /** "Couldn't mark S1 E3 watched on Holiday house." */
   const notMarked = () => {
     if (change.watched) {
@@ -264,10 +276,12 @@ export function MarkNotice({ marks, source }: { marks: EpisodeMarks; source: str
         ? t("Couldn't mark {episode} watched on {source}.", { episode, source })
         : t("Couldn't mark {episode} watched.", { episode });
     }
+
     return source
       ? t("Couldn't mark {episode} unwatched on {source}.", { episode, source })
       : t("Couldn't mark {episode} unwatched.", { episode });
   };
+
   return (
     <p
       role={failed ? "alert" : "status"}

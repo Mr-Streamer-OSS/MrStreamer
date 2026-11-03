@@ -67,12 +67,14 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** How many results a search returns. Enough to scroll, small enough to send per keystroke. */
 const SEARCH_LIMIT = 200;
+
 /**
  * A refresh that returns fewer than this share of the channels before counts as possibly
  * incomplete. It replaces the catalogue only when a second fetch confirms it.
  */
 const SHRINK_CONFIRM_SHARE = 0.5;
 const SHRINK_CONFIRM_DELAY: Duration.Input = "3 seconds";
+
 /** How many subscriptions' catalogues are fetched at a time. */
 const FETCHES_AT_ONCE = 2;
 
@@ -251,6 +253,7 @@ function make(options: LibraryOptions) {
     const fetchOne = (yield* Semaphore.make(FETCHES_AT_ONCE)).withPermits(1);
     /** Each subscription's catalogue, by its id, once read from disk or fetched. */
     const catalogues = new Map<string, IndexedCatalogue>();
+
     /** Concurrent first reads share one disk read, without tying its life to one caller. */
     const loading = new Map<
       string,
@@ -260,6 +263,7 @@ function make(options: LibraryOptions) {
         readonly fiber: Fiber.Fiber<IndexedCatalogue | null>;
       }
     >();
+
     const refreshing = new Map<
       string,
       {
@@ -268,13 +272,16 @@ function make(options: LibraryOptions) {
         readonly fiber: Fiber.Fiber<CatalogueStatus, Failed>;
       }
     >();
+
     /** Why a subscription's refreshes fail, and since when, until one succeeds. */
     const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
+
     /** The lists last made, with and without the channels for adults. */
     const made: { all: Combined | null; ordinary: Combined | null } = {
       all: null,
       ordinary: null,
     };
+
     /** Each subscription's channels as the guide reads them, kept while the lists are the same. */
     const guideViews = new WeakMap<Combined, Map<string, CatalogueChannels>>();
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
@@ -285,25 +292,31 @@ function make(options: LibraryOptions) {
     const cached = (subscription: SavedSubscription) =>
       Effect.gen(function* () {
         const kept = catalogues.get(subscription.id);
+
         if (kept) return kept;
         const under = loading.get(subscription.id);
+
         let running =
           under &&
           sameSource(subscription, under.subscription) &&
           subscription.importRevision === under.subscription.importRevision
             ? under
             : null;
+
         if (!running) {
           if (under) {
             loading.delete(subscription.id);
             yield* Fiber.interrupt(under.fiber);
           }
+
           const token = {};
+
           const fiber = yield* Effect.forkIn(
             Effect.gen(function* () {
               const stored = yield* Effect.promise(() =>
                 readJsonFile(cachePath(subscription), CachedCatalogue()),
               );
+
               if (
                 stored?.key !== subscription.key ||
                 loading.get(subscription.id)?.token !== token ||
@@ -311,10 +324,13 @@ function make(options: LibraryOptions) {
               )
                 return null;
               const file = readCatalogue(stored);
+
               // A refresh accepted while disk was being read takes precedence.
               const now =
                 catalogues.get(subscription.id) ?? index(file, subscription.id, file.outdated);
+
               catalogues.set(subscription.id, now);
+
               return now;
             }).pipe(
               Effect.ensuring(
@@ -326,19 +342,25 @@ function make(options: LibraryOptions) {
             ),
             scope,
           );
+
           running = { subscription, token, fiber };
           loading.set(subscription.id, running);
         }
+
         // Removal or a newer source can stop this owned read. A waiting caller still cancels
         // independently while awaiting it; only the read's own interruption means a cache miss.
         const result = yield* Fiber.await(running.fiber);
+
         if (Exit.isSuccess(result)) return result.value;
+
         if (Cause.hasInterruptsOnly(result.cause)) return null;
+
         return yield* Effect.failCause(result.cause);
       });
 
     const statusOf = (subscriptionId: string, shown: IndexedCatalogue | null): CatalogueStatus => {
       const failure = failures.get(subscriptionId);
+
       return {
         subscriptionId,
         channelCount: shown?.channels.length ?? 0,
@@ -355,6 +377,7 @@ function make(options: LibraryOptions) {
     const statusNow = (subscription: SavedSubscription) =>
       Effect.gen(function* () {
         const found = yield* cached(subscription);
+
         return statusOf(subscription.id, found && ((yield* adults) ? found : withoutAdults(found)));
       });
 
@@ -362,8 +385,10 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         const refreshed = options.usage?.action("playlist_refreshed");
         const fetched = yield* complete(source, yield* cached(source), playlist);
+
         // Dropped when the subscription went, or its login changed, while it downloaded.
         if (!(yield* subscriptions.stands(source))) return yield* switched;
+
         const file: CatalogueFile = {
           version: 4,
           key: source.key,
@@ -372,9 +397,11 @@ function make(options: LibraryOptions) {
           categories: fetched.categories,
           channels: fetched.channels,
         };
+
         // Written before it is used: the next start must not find an older catalogue on disk.
         // Native writes cannot be cancelled. Keep the refresh alive until this one settles.
         yield* Effect.uninterruptible(Effect.promise(() => writeJsonFile(cachePath(source), file)));
+
         // Nor is it shown for a subscription that went while it was written.
         if (!(yield* subscriptions.stands(source))) return yield* switched;
         catalogues.set(source.id, index(file, source.id, false));
@@ -382,6 +409,7 @@ function make(options: LibraryOptions) {
         const status = yield* statusNow(source);
         yield* PubSub.publish(updates, status);
         refreshed?.();
+
         return status;
       }).pipe(
         fetchOne,
@@ -407,24 +435,33 @@ function make(options: LibraryOptions) {
       Effect.gen(function* () {
         if (!(yield* subscriptions.stands(source))) return yield* switched;
         const under = refreshing.get(source.id);
+
         if (under && !sameSource(source, under.source)) {
           // Leave ownership visible while its admitted write settles. Other refreshes must
           // wait too, then re-read the owner and the saved login before admitting another.
           yield* Fiber.interrupt(under.fiber);
+
           // An owner interrupted before its first run never installed its cleanup.
           if (refreshing.get(source.id) === under) refreshing.delete(source.id);
+
           return yield* refreshOf(source, playlist);
         }
+
         // A mapped combined refresh needs its own snapshot after an earlier independent fetch.
         // Unmapped Live has no titles to align and can keep joining the fetch already running.
         if (playlist && source.playlistMapped && under && sameSource(source, under.source)) {
           yield* Fiber.await(under.fiber);
+
           if (!(yield* subscriptions.stands(source))) return yield* switched;
+
           return yield* refreshOf(source, playlist);
         }
+
         let running = under && sameSource(source, under.source) ? under : null;
+
         if (!running) {
           const token = {};
+
           const fiber = yield* Effect.forkIn(
             fetchAndStore(source, playlist).pipe(
               Effect.ensuring(
@@ -435,12 +472,17 @@ function make(options: LibraryOptions) {
             ),
             scope,
           );
+
           running = { source, token, fiber };
           refreshing.set(source.id, running);
         }
+
         const exit = yield* Fiber.await(running.fiber);
+
         if (Exit.isSuccess(exit)) return exit.value;
+
         if (Cause.hasInterruptsOnly(exit.cause)) return yield* switched;
+
         return yield* Effect.failCause(exit.cause);
       });
 
@@ -459,19 +501,24 @@ function make(options: LibraryOptions) {
           try: (signal) => source.provider.liveCatalogue(signal),
           catch: failedWith,
         });
+
         const fetched = playlist ? (yield* playlist.read).live : yield* fetch;
         const before = previous?.channels.length ?? 0;
         const received = fetched.channels.length;
+
         if (source.playlistMapped || before === 0 || received >= before * SHRINK_CONFIRM_SHARE)
           return fetched;
+
         if (received > 0) {
           yield* Effect.sleep(options.confirmDelay ?? SHRINK_CONFIRM_DELAY);
           const again = yield* fetch;
           const difference = Math.abs(again.channels.length - received);
+
           if (again.channels.length > 0 && difference <= Math.max(10, received * 0.05)) {
             return again;
           }
         }
+
         return yield* new Failed({
           error: { kind: "incomplete-catalogue", received, previous: before },
         });
@@ -485,26 +532,33 @@ function make(options: LibraryOptions) {
     const current = Effect.gen(function* () {
       const saved = yield* subscriptions.saved;
       const [first] = saved;
+
       if (!first) return yield* noSubscription;
       const found = yield* Effect.forEach(saved, cached);
       const loaded = found.flatMap((each) => each ?? []);
       const missing = (yield* subscriptions.sources).filter((each) => !catalogues.has(each.id));
+
       if (loaded.length > 0) {
         for (const source of missing) {
           // One that failed waits for its own Retry, or the next start.
           if (!failures.has(source.id))
             yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
         }
+
         return loaded;
       }
+
       const failed = yield* Effect.forEach(
         missing,
         (source) =>
           Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
         { concurrency: "unbounded" },
       );
+
       const fetched = (yield* subscriptions.saved).flatMap((each) => catalogues.get(each.id) ?? []);
+
       if (fetched.length > 0) return fetched;
+
       return yield* failed.find((each) => each !== null) ??
         new Failed({ error: { kind: "needs-secret", subscriptionId: first.id } });
     });
@@ -513,7 +567,9 @@ function make(options: LibraryOptions) {
     const listsOf = (slot: "all" | "ordinary", loaded: readonly IndexedCatalogue[]) => {
       const members = slot === "all" ? loaded : loaded.map(withoutAdults);
       const kept = made[slot];
+
       if (kept && sameMembers(kept.members, members)) return kept;
+
       return (made[slot] = combine(members));
     };
 
@@ -523,6 +579,7 @@ function make(options: LibraryOptions) {
      */
     const visible = Effect.gen(function* () {
       const loaded = yield* current;
+
       return {
         lists: listsOf((yield* adults) ? "all" : "ordinary", loaded),
         search: listsOf("ordinary", loaded),
@@ -533,6 +590,7 @@ function make(options: LibraryOptions) {
     const memberOf = (subscriptionId: string) =>
       Effect.flatMap(visible, ({ lists }) => {
         const member = lists.members.find((each) => each.subscriptionId === subscriptionId);
+
         return member ? Effect.succeed({ member, lists }) : Effect.fail(noSubscription);
       });
 
@@ -547,8 +605,10 @@ function make(options: LibraryOptions) {
           const subscription = (yield* subscriptions.saved).find(
             (each) => each.id === subscriptionId,
           );
+
           const existing = subscription ? yield* cached(subscription) : null;
           const now = yield* Clock.currentTimeMillis;
+
           return (
             !existing ||
             existing.outdated ||
@@ -562,19 +622,24 @@ function make(options: LibraryOptions) {
           const views = guideViews.get(lists) ?? new Map<string, CatalogueChannels>();
           guideViews.set(lists, views);
           const kept = views.get(subscriptionId);
+
           if (kept) return kept;
+
           const view: CatalogueChannels = {
             all: member.channels.map((channel) => lists.shown(channel)),
             searchNames: member.searchNames,
             channel: (channelId) => {
               const found = member.byId.get(channelId);
+
               return found && lists.shown(found);
             },
             // Of the whole catalogue: a channel the lists only hide is still the provider's.
             listed: (channelId) => catalogues.get(subscriptionId)?.byId.has(channelId) ?? false,
             guideIdsOf: member.guide.guideIdsOf,
           };
+
           views.set(subscriptionId, view);
+
           return view;
         }),
 
@@ -592,12 +657,15 @@ function make(options: LibraryOptions) {
       channels: (filter: ChannelFilter) =>
         Effect.map(visible, ({ lists, search: searched }) => {
           const query = normalize(filter.query ?? "");
+
           if (filter.channels) {
             // Those of a subscription that isn't saved are in no catalogue, whatever their ids.
             const byId = new Map(lists.members.map((each) => [each.subscriptionId, each.byId]));
+
             const found = filter.channels.flatMap(
               ({ subscriptionId, id }) => byId.get(subscriptionId)?.get(id) ?? [],
             );
+
             if (query)
               return stampSearchGroups(
                 matchingSearchGroups(searchIndex(searched.channels), found)
@@ -605,16 +673,21 @@ function make(options: LibraryOptions) {
                   .flatMap((group) => group.copies),
                 searched.channels,
               );
+
             return plainChannels([...new Set(found)].map(lists.shown));
           }
+
           if (query) return search(searched.channels, filter.query ?? "");
+
           if (!filter.category) return plainChannels(lists.channels);
+
           return plainChannels(lists.byCategory.get(ownedKey(filter.category)) ?? []);
         }),
 
       channel: (channel: OwnedId) =>
         Effect.flatMap(memberOf(channel.subscriptionId), ({ member, lists }) => {
           const found = member.byId.get(channel.id);
+
           return found
             ? Effect.succeed(lists.shown(found))
             : Effect.fail(
@@ -627,7 +700,9 @@ function make(options: LibraryOptions) {
           const subscription = (yield* subscriptions.saved).find(
             (each) => each.id === subscriptionId,
           );
+
           if (subscription) yield* cached(subscription);
+
           return (channelId: string) =>
             subscription ? catalogues.get(subscriptionId)?.byId.get(channelId) : undefined;
         }),
@@ -642,13 +717,17 @@ function make(options: LibraryOptions) {
             refresh = refreshing.get(subscription.id)
           ) {
             yield* Fiber.interrupt(refresh.fiber);
+
             if (refreshing.get(subscription.id) === refresh) refreshing.delete(subscription.id);
           }
+
           const pending = loading.get(subscription.id);
           loading.delete(subscription.id);
+
           if (pending) yield* Fiber.interrupt(pending.fiber);
           catalogues.delete(subscription.id);
           failures.delete(subscription.id);
+
           // An added subscription's cache went with its folder.
           if (subscription.original) {
             yield* Effect.promise(() => removeFile(cachePath(subscription)));
@@ -680,37 +759,50 @@ function index(file: CatalogueFile, subscriptionId: string, outdated: boolean): 
   // A channel is for adults when one of its streams is.
   const isAdult = adultIn(file.categories);
   const adultStreams = new Set(file.channels.filter(isAdult).map((channel) => channel.id));
+
   const joinedChannels = logical.channels.map((channel): LiveChannel =>
     channel.variants.some((variant) => adultStreams.has(variant.id))
       ? { subscriptionId, ...channel, adult: true }
       : { subscriptionId, ...channel },
   );
+
   const topics = browseCategories(file.categories);
   const streamById = new Map(streams.map((stream) => [stream.id, stream]));
+
   const channels = joinedChannels.map((channel) => ({
     ...channel,
     browse: browseMetadata(channel, topics, streamById),
   }));
+
   const byId = new Map<string, LiveChannel>();
+
   for (const channel of channels) {
     byId.set(channel.id, channel);
+
     for (const variant of channel.variants) byId.set(variant.id, channel);
   }
+
   // A channel shows in each of its streams' categories, once, where its first stream there is.
   const byCategory = new Map<string, LiveChannel[]>();
   const placed = new Set<string>();
+
   for (const stream of streams) {
     const channel = byId.get(stream.id);
+
     if (!channel) continue;
+
     for (const categoryId of stream.categoryIds) {
       const key = `${categoryId}\n${channel.id}`;
+
       if (placed.has(key)) continue;
       placed.add(key);
       const list = byCategory.get(categoryId);
+
       if (list) list.push(channel);
       else byCategory.set(categoryId, [channel]);
     }
   }
+
   return {
     subscriptionId,
     fetchedAt: file.fetchedAt,
@@ -744,12 +836,15 @@ const adultless = new WeakMap<IndexedCatalogue, IndexedCatalogue>();
 function withoutAdults(found: IndexedCatalogue): IndexedCatalogue {
   if (!found.channels.some((channel) => channel.adult)) return found;
   const known = adultless.get(found);
+
   if (known) return known;
   const kept = (channel: LiveChannel | undefined) => channel !== undefined && !channel.adult;
   const keep = [...found.channels.keys()].filter((at) => kept(found.channels[at]));
+
   const byCategory = new Map(
     [...found.byCategory].map(([id, channels]) => [id, channels.filter(kept)] as const),
   );
+
   const made: IndexedCatalogue = {
     ...found,
     categories: found.categories
@@ -765,7 +860,9 @@ function withoutAdults(found: IndexedCatalogue): IndexedCatalogue {
         kept(found.byId.get(channelId)) ? found.guide.guideIdsOf(channelId) : [],
     },
   };
+
   adultless.set(found, made);
+
   return made;
 }
 
@@ -778,31 +875,39 @@ function withoutAdults(found: IndexedCatalogue): IndexedCatalogue {
 function combine(members: readonly IndexedCatalogue[]): Combined {
   /** Which subscription lists a name, or null once a second one does. */
   const listedBy = new Map<string, string | null>();
+
   for (const { subscriptionId, titles } of members) {
     for (const title of titles) {
       const owner = listedBy.get(title);
+
       if (owner === undefined) listedBy.set(title, subscriptionId);
       else if (owner !== subscriptionId) listedBy.set(title, null);
     }
   }
+
   const marked = new Map<LiveChannel, LiveChannel>();
+
   for (const { channels, titles } of members) {
     for (const [at, channel] of channels.entries()) {
       if (listedBy.get(titles[at] ?? "") === null)
         marked.set(channel, { ...channel, ambiguous: true });
     }
   }
+
   const shown = (channel: LiveChannel) => marked.get(channel) ?? channel;
+
   /** A subscription's channels as lists show them: its own array while none of them is marked. */
   const shownAll = (channels: readonly LiveChannel[]) =>
     marked.size === 0 ? channels : channels.map(shown);
 
   const joined = new Map<string, { category: Category; channels: Set<LiveChannel> }>();
+
   for (const member of members) {
     for (const { adult, ...category } of member.categories) {
       const listed = shownAll(member.byCategory.get(category.id) ?? []);
       const key = `${category.group ?? ""}\n${category.title}\n${adult}`;
       const known = joined.get(key);
+
       if (!known) {
         joined.set(key, {
           category: { ...category, members: [ownedId(category)] },
@@ -810,6 +915,7 @@ function combine(members: readonly IndexedCatalogue[]): Combined {
         });
         continue;
       }
+
       // A channel may belong to several raw categories that show under the same name.
       for (const channel of listed) known.channels.add(channel);
       known.category = {
@@ -819,12 +925,17 @@ function combine(members: readonly IndexedCatalogue[]): Combined {
       };
     }
   }
+
   const byCategory = new Map<string, readonly LiveChannel[]>();
+
   for (const { category, channels } of joined.values()) {
     const listed = [...channels];
+
     for (const member of category.members) byCategory.set(ownedKey(member), listed);
   }
+
   const [only] = members;
+
   return {
     members,
     categories: [...joined.values()].map(({ category }) => category),
@@ -850,6 +961,7 @@ const rankedNames = new WeakMap<readonly LiveChannel[], readonly SearchNames[]>(
 function search(channels: readonly LiveChannel[], query: string): readonly LiveChannel[] {
   const asked = nameQuery(query);
   let names = rankedNames.get(channels);
+
   if (!names) {
     names = channels.map((channel) =>
       indexNames(
@@ -859,25 +971,34 @@ function search(channels: readonly LiveChannel[], query: string): readonly LiveC
     );
     rankedNames.set(channels, names);
   }
+
   const ranked: { channel: LiveChannel; rank: number; order: number }[] = [];
+
   for (const [order, channel] of channels.entries()) {
     const fields = names[order];
     const rank = fields && scoreNames(asked, fields);
+
     if (rank === undefined) continue;
     ranked.push({ channel, rank, order });
   }
+
   ranked.sort((a, b) => a.rank - b.rank || a.order - b.order);
+
   // Limit display groups, retaining all their real copies and stream variants.
   const groups = matchingSearchGroups(
     searchIndex(channels),
     ranked.map((entry) => entry.channel),
   ).slice(0, SEARCH_LIMIT);
+
   const copies = groups.flatMap((group) => group.copies);
   const selected = new Set(copies.map(ownedKey));
+
   const matched = ranked.flatMap(({ channel }) =>
     selected.has(ownedKey(channel)) ? [channel] : [],
   );
+
   const matchedKeys = new Set(matched.map(ownedKey));
+
   return stampSearchGroups(
     [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],
     channels,
@@ -889,14 +1010,17 @@ const plainResponses = new WeakMap<readonly LiveChannel[], readonly LiveChannel[
 /** Ordinary lists need neither display groups nor canonical grouping identities. */
 function plainChannels(channels: readonly LiveChannel[]): readonly LiveChannel[] {
   let response = plainResponses.get(channels);
+
   if (!response) {
     response = channels.map(({ searchIdentity: _identity, ...channel }) => channel);
     plainResponses.set(channels, response);
   }
+
   return response;
 }
 
 const searchIndexes = new WeakMap<readonly LiveChannel[], LiveSearchIndex>();
+
 const stampedSearchResponses = new WeakMap<
   LiveSearchIndex,
   {
@@ -909,10 +1033,12 @@ const stampedSearchResponses = new WeakMap<
 function searchGroupCache(all: readonly LiveChannel[]) {
   const index = searchIndex(all);
   let cache = stampedSearchResponses.get(index);
+
   if (!cache) {
     const groups = index.groups
       .filter((group) => group.copies.length > 1)
       .map((group) => ({ key: group.key, copies: group.copies.map(ownedKey) }));
+
     cache = {
       groups,
       stamps: Object.fromEntries(
@@ -923,6 +1049,7 @@ function searchGroupCache(all: readonly LiveChannel[]) {
     };
     stampedSearchResponses.set(index, cache);
   }
+
   return cache;
 }
 
@@ -932,6 +1059,7 @@ function stampSearchGroups(
   all: readonly LiveChannel[],
 ): readonly LiveChannel[] {
   const cache = searchGroupCache(all);
+
   return channels.map(({ searchIdentity: _identity, ...channel }) => ({
     ...channel,
     searchGroup: cache.stamps[ownedKey(channel)] ?? { key: ownedKey(channel), order: 0 },
@@ -940,15 +1068,18 @@ function stampSearchGroups(
 
 function searchIndex(channels: readonly LiveChannel[]): LiveSearchIndex {
   let index = searchIndexes.get(channels);
+
   if (!index) {
     index = indexLiveSearch(channels);
     searchIndexes.set(channels, index);
   }
+
   return index;
 }
 
 function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
   const { scope, filters } = query;
+
   const channels =
     scope.kind === "all"
       ? lists.channels
@@ -961,55 +1092,74 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
                 const channel = lists.members
                   .find((member) => member.subscriptionId === subscriptionId)
                   ?.byId.get(id);
+
                 return channel ? lists.shown(channel) : [];
               }),
             ),
           ];
+
   const facets = {
     browseTopics: new Map<string, number>(),
     countries: new Map<string, number>(),
     languages: new Map<string, number>(),
     subscriptions: new Map<string, number>(),
   };
+
   const counts = { browseTopics: 0, countries: 0, languages: 0, subscriptions: 0 };
+
   const filtered =
     filters.browseTopics.length > 0 ||
     filters.countries.length > 0 ||
     filters.languages.length > 0 ||
     filters.subscriptions.length > 0;
+
   const selected: LiveChannel[] = [];
   let total = 0;
+
   for (const channel of channels) {
     const topics = channel.browse?.topics ?? ["other"];
     const country = channel.browse?.country;
     const language = channel.browse?.language;
+
     const topicMatches =
       filters.browseTopics.length === 0 ||
       topics.some((id) => filters.browseTopics.some((asked) => asked === id));
+
     const countryMatches =
       filters.countries.length === 0 || (!!country && filters.countries.includes(country));
+
     const languageMatches =
       filters.languages.length === 0 || (!!language && filters.languages.includes(language));
+
     const sourceMatches =
       filters.subscriptions.length === 0 || filters.subscriptions.includes(channel.subscriptionId);
+
     if (topicMatches) total++;
+
     if (filtered && topicMatches && countryMatches && languageMatches && sourceMatches)
       selected.push(channel);
+
     // Each facet applies the other three filters. Keep the finite dimensions explicit rather
     // than allocating an object and four entry arrays for every channel.
     if (countryMatches && languageMatches && sourceMatches) {
       counts.browseTopics++;
+
       for (const topic of topics)
         facets.browseTopics.set(topic, (facets.browseTopics.get(topic) ?? 0) + 1);
     }
+
     if (topicMatches && languageMatches && sourceMatches) {
       counts.countries++;
+
       if (country) facets.countries.set(country, (facets.countries.get(country) ?? 0) + 1);
     }
+
     if (topicMatches && countryMatches && sourceMatches) {
       counts.languages++;
+
       if (language) facets.languages.set(language, (facets.languages.get(language) ?? 0) + 1);
     }
+
     if (topicMatches && countryMatches && languageMatches) {
       counts.subscriptions++;
       facets.subscriptions.set(
@@ -1018,8 +1168,10 @@ function browse(lists: Combined, query: LiveBrowseQuery): LiveBrowseResult {
       );
     }
   }
+
   const counted = (values: ReadonlyMap<string, number>): readonly BrowseFacet[] =>
     [...values].map(([value, count]) => ({ value, count }));
+
   return {
     // An unfiltered accepted list also reuses its existing plain-response cache.
     channels: plainChannels(filtered ? selected : channels),

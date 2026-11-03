@@ -37,28 +37,36 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { addSubscription, connect, delay, key, launch, login, waitFor, type Page } from "./app.ts";
 
 const [given, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!given) {
   throw new Error("Usage: node test/e2e/episode-marks.ts <app executable> [-- args]");
 }
+
 const executable: string = given;
 
 /** The series both providers list, by a part of its name and by the first's Dutch version. */
 const SERIES = { name: "TEST | Formats", id: "80000" };
+
 /** What the second subscription is called in Settings. */
 const SECOND = "Holiday house";
 
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
 const provider = await startFakeProvider({ channels: 60 });
+
 // Another provider beside it, which lists the series under the same series and episode ids.
 const second = await startFakeProvider({ channels: 60, second: true });
 const tmdb = await startFakeTmdb();
+
 process.env["MR_STREAMER_TMDB_API"] = tmdb.url;
+
 process.env["MR_STREAMER_TMDB_KEY"] = "test-key";
+
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
 let port = randomPort();
 let app = launch(executable, rest, { port, profile });
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, problems: readonly string[]): void {
   console.log(
@@ -71,7 +79,9 @@ const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
+
   if (!result.ok) throw new Error(`${method}: ${JSON.stringify(result.error)}`);
+
   return result.value;
 };
 
@@ -90,6 +100,7 @@ const marks = async (page: Page, subscriptionId: string) =>
 /** Whether every saved subscription's movie and series lists are loaded. */
 async function listsLoaded(page: Page): Promise<boolean> {
   const { lists } = await invoke<OnDemandStatus>(page, "ondemand.status");
+
   return lists.length > 0 && lists.every((each) => each.fetchedAt !== null);
 }
 
@@ -98,31 +109,39 @@ const sent = () => [provider.fileRequests(), provider.streamRequests(), provider
 
 // Expressions the page evaluates to an element, or nothing.
 const SHEET = `document.querySelector('[role="dialog"]')`;
+
 const withText = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find((each) => each.textContent.trim() === ${JSON.stringify(text)})`;
+
 /** The dots on the row of an episode, named as "S1 E2". */
 const dots = (episode: string) => `document.querySelector('[aria-label="More for ${episode}"]')`;
+
 /** That row, and the button on it that plays the episode. */
 const row = (episode: string) => `${dots(episode)}?.closest(".group")`;
 const playOf = (episode: string) => `${row(episode)}?.querySelector("button")`;
 const ITEMS = `[...document.querySelectorAll('[role="menuitem"]')]`;
 
 const exists = (page: Page, element: string) => page.evaluate<boolean>(`!!${element}`);
+
 const textOf = (page: Page, element: string) =>
   page.evaluate<string>(`${element}?.innerText ?? ""`);
+
 /** What has the keyboard: its words, or its label. */
 const focused = (page: Page) =>
   page.evaluate<string>(
     `document.activeElement?.textContent?.trim() || document.activeElement?.getAttribute("aria-label") || ""`,
   );
+
 /** Whether an episode's row shows its check. */
 const checked = (page: Page, episode: string) =>
   exists(page, `${row(episode)}?.querySelector('[aria-label="Watched"]')`);
+
 /** What the sheet's main action reads: "Play S1 E2". */
 const mainAction = (page: Page) =>
   page.evaluate<string>(
     `[...document.querySelectorAll('[role="dialog"] button')].map((each) => each.textContent.trim()).find((text) => /^(Play|Resume|Replay) S\\d/.test(text)) ?? ""`,
   );
+
 /** The line under the season tabs about the last mark. */
 const notice = (page: Page) => textOf(page, `${SHEET}?.querySelector('[role="status"]')`);
 
@@ -133,13 +152,16 @@ async function click(page: Page, element: string): Promise<void> {
   });
   await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
   await delay(150);
+
   const point = await page.evaluate<{ x: number; y: number }>(`(() => {
     const box = ${element}.getBoundingClientRect();
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   })()`);
+
   for (const type of ["mousePressed", "mouseReleased"]) {
     await page.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
   }
+
   await delay(150);
 }
 
@@ -175,6 +197,7 @@ async function restart(page: Page): Promise<Page> {
   await delay(1500);
   port = randomPort();
   app = launch(executable, rest, { port, profile });
+
   return ready(await connect(port));
 }
 
@@ -183,6 +206,7 @@ async function ready(page: Page): Promise<Page> {
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await page.send("Network.enable");
   await page.send("Network.setBlockedURLs", { urls: ["*image.tmdb.org*", "*image.example*"] });
+
   return page;
 }
 
@@ -190,6 +214,7 @@ try {
   let page = await ready(await connect(port));
   await login(page, provider);
   const [one] = await invoke<SubscriptionSummary[]>(page, "subscription.list");
+
   if (!one) throw new Error("The login saved no subscription.");
   // The movie and series lists load after the channels.
   await waitFor(() => listsLoaded(page), 60_000);
@@ -199,21 +224,26 @@ try {
     const problems: string[] = [];
     const before = sent();
     const first = await mainAction(page);
+
     if (first !== "Play S1 E1") problems.push(`the series starts at "${first}"`);
     await page.evaluate(`${playOf("S1 E1")}.focus()`);
     await key(page, "Tab", 9);
+
     if ((await focused(page)) !== "More for S1 E1") {
       problems.push(`Tab from the row reached "${await focused(page)}"`);
     }
+
     await enter(page);
     await waitFor(() => page.evaluate<boolean>(`${ITEMS}.length === 2`), 10_000);
     const offered = await page.evaluate<string[]>(`${ITEMS}.map((each) => each.innerText.trim())`);
+
     if (offered.join() !== "Mark watched,Mark unwatched") problems.push(`it offers ${offered}`);
     // The menu can be drawn before its opening focus transfer has finished.
     await waitFor(
       () => page.evaluate<boolean>(`document.activeElement?.getAttribute("role") === "menuitem"`),
       10_000,
     );
+
     if ((await focused(page)) !== "Mark watched") await key(page, "ArrowDown", 40);
     await waitFor(
       () =>
@@ -226,18 +256,23 @@ try {
     await waitFor(() => checked(page, "S1 E1"), 15_000).catch(() => {
       problems.push("the row got no check");
     });
+
     if ((await focused(page)) !== "More for S1 E1") {
       problems.push(`the keyboard went to "${await focused(page)}"`);
     }
+
     if ((await notice(page)) !== "S1 E1 marked watched\nUndo") {
       problems.push(`the line reads "${await notice(page)}"`);
     }
+
     if ((await mainAction(page)) !== "Play S1 E2") {
       problems.push(`Play reads "${await mainAction(page)}"`);
     }
+
     if ((await marks(page, one.id)).join() !== "1:1 watched") {
       problems.push(`the record holds ${await marks(page, one.id)}`);
     }
+
     if (sent().join() !== before.join()) problems.push(`the provider was asked: ${sent()}`);
     report(
       "The keyboard reaches an episode's dots and marks it watched, with the focus kept and nothing played",
@@ -251,10 +286,13 @@ try {
     await waitFor(async () => !(await checked(page, "S1 E1")), 15_000).catch(() => {
       problems.push("the row kept its check");
     });
+
     if ((await mainAction(page)) !== "Play S1 E1") {
       problems.push(`Play reads "${await mainAction(page)}"`);
     }
+
     if (await notice(page)) problems.push(`the line still reads "${await notice(page)}"`);
+
     if ((await marks(page, one.id)).length > 0) problems.push("the record kept the mark");
     report("Undo puts the episode and the series back", problems);
   }
@@ -266,30 +304,37 @@ try {
     await waitFor(() => checked(page, "S1 E1"), 15_000).catch(() => {
       problems.push("the row got no check");
     });
+
     if (await exists(page, "document.querySelector('video[src]')")) {
       problems.push("something began to play");
     }
+
     if (sent().join() !== before.join()) problems.push(`the provider was asked: ${sent()}`);
+
     if (!(await exists(page, SHEET))) problems.push("the details closed");
     report("A click on the dots marks, and plays nothing", problems);
   }
 
   {
     const problems: string[] = [];
+
     // The second episode stopped a third of the way in, as a play would have saved it.
     const details = await invoke<TitleDetails>(page, "ondemand.details", {
       kind: "series",
       version: { subscriptionId: one.id, id: SERIES.id },
     });
+
     const file =
       details.kind === "series"
         ? details.seasons
             .flatMap((season) => season.episodes)
             .find((each) => each.season === 1 && each.number === 2)
         : undefined;
+
     if (!file) throw new Error("The series lists no second episode.");
     /** A checkpoint of the play of it that began just now. */
     const began = Date.now();
+
     const checkpoint = (position: number) =>
       invoke(page, "viewing.recordProgress", {
         commandId: crypto.randomUUID(),
@@ -305,41 +350,53 @@ try {
         duration: 2700,
         since: began,
       });
+
     await checkpoint(900);
     await waitFor(async () => (await mainAction(page)) === "Resume S1 E2", 15_000).catch(() => {
       problems.push("the details don't offer Resume");
     });
     const partway = await textOf(page, row("S1 E2"));
+
     if (!partway.includes("30 min left")) problems.push(`the row reads "${partway}"`);
     await click(page, dots("S1 E2"));
     await waitFor(() => page.evaluate<boolean>(`${ITEMS}.length === 2`), 10_000);
+
     const disabled = await page.evaluate<number>(
       `${ITEMS}.filter((each) => each.hasAttribute("data-disabled")).length`,
     );
+
     if (disabled > 0) problems.push("an episode stopped partway doesn't offer both marks");
     await click(page, `${ITEMS}.find((each) => each.innerText.startsWith("Mark unwatched"))`);
     await waitFor(async () => (await mainAction(page)) === "Play S1 E2", 15_000).catch(() => {
       problems.push("the series didn't go back to the episode's beginning");
     });
+
     if ((await textOf(page, row("S1 E2"))).includes("min left")) {
       problems.push("the row kept its resume point");
     }
+
     // The play that was going saves on: the mark stands, and its Undo stays.
     await checkpoint(1500);
+
     if ((await mainAction(page)) !== "Play S1 E2" || !(await notice(page)).endsWith("Undo")) {
       problems.push(`a play from before the mark changed it: "${await mainAction(page)}"`);
     }
+
     await click(page, withText('[role="dialog"] button', "Undo"));
     await waitFor(async () => (await mainAction(page)) === "Resume S1 E2", 15_000).catch(() => {
       problems.push("Undo didn't bring Resume back");
     });
+
     if (!(await textOf(page, row("S1 E2"))).includes("30 min left")) {
       problems.push("the row lost where the episode stopped");
     }
+
     const { progress } = await standing(page, one.id);
+
     if (progress.length !== 1 || progress[0]?.position !== 900) {
       problems.push(`the record holds ${JSON.stringify(progress)}`);
     }
+
     report("An episode stopped partway resets, and Undo brings its Resume back", problems);
   }
 
@@ -351,9 +408,11 @@ try {
     page = await restart(page);
     await waitFor(() => exists(page, "document.querySelector('header')"), 60_000);
     await waitFor(() => listsLoaded(page), 60_000);
+
     if ((await marks(page, one.id)).join() !== kept.join()) {
       problems.push(`the record holds ${await marks(page, one.id)}`);
     }
+
     const { marked } = await invoke<Viewing>(page, "viewing.get");
     // Home's first row offers the series where its last mark said.
     await waitFor(
@@ -364,6 +423,7 @@ try {
       30_000,
     ).catch(() => problems.push("Home has no Continue watching row"));
     const next = marked[0]?.next;
+
     if (!next) problems.push("the record says the series goes nowhere");
     else if (
       !(await page.evaluate<boolean>(
@@ -372,14 +432,18 @@ try {
     ) {
       problems.push(`Home doesn't offer S${next.season} E${next.episode}`);
     }
+
     await openSeries(page);
+
     if (!(await checked(page, "S1 E1")) || !(await checked(page, "S1 E2"))) {
       problems.push("the rows lost their checks");
     }
+
     // The details go on with the episode Home offered.
     if (next && (await mainAction(page)) !== `Play S${next.season} E${next.episode}`) {
       problems.push(`the details read "${await mainAction(page)}"`);
     }
+
     report("The marks are there after a restart, in the details and on Home", problems);
   }
 
@@ -406,6 +470,7 @@ try {
     );
     await waitFor(async () => {
       const { marked } = await invoke<Viewing>(page, "viewing.get");
+
       return marked[0]?.next?.season === 2 && marked[0].next.episode === 1;
     }, 15_000).catch(() => problems.push("the record still goes on with the episode that went"));
     await key(page, "Escape", 27);
@@ -414,9 +479,11 @@ try {
       () => page.evaluate<boolean>(`document.body.innerText.includes("S2 E1")`),
       15_000,
     ).catch(() => problems.push("Home doesn't offer S2 E1"));
+
     if (await page.evaluate<boolean>(`document.body.innerText.includes("S1 E3")`)) {
       problems.push("Home still offers S1 E3");
     }
+
     report("Home and the details go on past an episode the provider took out", problems);
   }
 
@@ -426,9 +493,11 @@ try {
     await addSubscription(page, second, SECOND);
     await key(page, "Escape", 27);
     await waitFor(() => listsLoaded(page), 60_000);
+
     const two = (await invoke<SubscriptionSummary[]>(page, "subscription.list")).find(
       (each) => each.name === SECOND,
     );
+
     if (!two) throw new Error("The second subscription wasn't saved.");
     const mine = await marks(page, one.id);
     await openSeries(page, "S2 E1");
@@ -451,29 +520,37 @@ try {
     await click(page, dots("S1 E1"));
     await waitFor(() => page.evaluate<boolean>(`${ITEMS}.length === 2`), 10_000);
     const named = await page.evaluate<string[]>(`${ITEMS}.map((each) => each.innerText)`);
+
     if (!named.every((each) => each.includes(SECOND))) problems.push(`the dots offer ${named}`);
     await click(page, `${ITEMS}.find((each) => each.innerText.startsWith("Mark watched"))`);
     await waitFor(() => checked(page, "S1 E1"), 15_000).catch(() => {
       problems.push("the row got no check");
     });
+
     if (!(await notice(page)).startsWith(`S1 E1 marked watched on ${SECOND}`)) {
       problems.push(`the line reads "${await notice(page)}"`);
     }
+
     if ((await marks(page, two.id)).join() !== "1:1 watched") {
       problems.push(`the second's record holds ${await marks(page, two.id)}`);
     }
+
     if ((await marks(page, one.id)).join() !== mine.join()) {
       problems.push(`the first's record changed to ${await marks(page, one.id)}`);
     }
+
     await click(page, withText('[role="dialog"] button', "Undo"));
     await waitFor(async () => (await marks(page, two.id)).length === 0, 15_000).catch(() => {
       problems.push("the second's mark wasn't taken back");
     });
+
     if ((await marks(page, one.id)).join() !== mine.join()) {
       problems.push(`Undo changed the first's record to ${await marks(page, one.id)}`);
     }
+
     report("Each subscription keeps its own marks of a series both list, and says whose", problems);
   }
+
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -484,4 +561,5 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);

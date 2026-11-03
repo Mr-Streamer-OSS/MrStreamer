@@ -26,11 +26,13 @@ describe("recording a master", () => {
   it("replaces only the selected captures' entries, each as soon as it is written", () => {
     folder = mkdtempSync(join(tmpdir(), "marketing-captures-"));
     const file = join(folder, "marketing-capture.json");
+
     const before = {
       capturedAt: "2026-10-11T09:28:01.610Z",
       appSource: "7b54b526",
       captures: [entry("library", "old-library"), entry("live-tv", "old-live-tv")],
     };
+
     writeFileSync(file, JSON.stringify(before, null, 2) + "\n");
     const read = () => JSON.parse(readFileSync(file, "utf8"));
 

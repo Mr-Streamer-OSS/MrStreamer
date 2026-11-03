@@ -41,6 +41,7 @@ function TimingField({
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   const shown = String(Number(value.toFixed(digits)));
+
   return (
     <Input
       id={id}
@@ -55,6 +56,7 @@ function TimingField({
         setDraft(text);
         // Either decimal mark, as the viewer's language writes it.
         const number = Number(text.replace(",", "."));
+
         if (text.trim() && Number.isFinite(number) && number >= min && number <= max)
           onChange(number);
       }}
@@ -80,6 +82,7 @@ function DownloadedTiming() {
   const timing = useTitlePlayer((state) => state.savedSubtitle?.timing ?? DEFAULT_SUBTITLE_TIMING);
   const [drift, setDrift] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   // No note over the picture as G and H leave: the section shows the offset and the drift itself.
   const change = (next: SubtitleTiming) => {
     setError(null);
@@ -87,12 +90,14 @@ function DownloadedTiming() {
       .setDownloadedTiming(next)
       .catch(() => setError(t("Timing could not be saved.")));
   };
+
   // A button beside a field that is being typed in: the field lets go, so it reads what the
   // button set and not the text typed before.
   const press = (next: SubtitleTiming) => {
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
     change(next);
   };
+
   const step = (by: number) => (
     <Button
       key={by}
@@ -110,6 +115,7 @@ function DownloadedTiming() {
       {t("{seconds} s", { seconds: `${by > 0 ? "+" : ""}${formatNumber(by)}` })}
     </Button>
   );
+
   return (
     <PanelSection
       title={t("Timing")}

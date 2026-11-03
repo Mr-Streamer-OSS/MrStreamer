@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { restoreAudioInput } from "./e2e/installed-upgrade-audio.ts";
 
 type AudioDriver = Parameters<typeof restoreAudioInput>[0];
+
 type AudioEvidence = Parameters<Parameters<typeof restoreAudioInput>[1]>[0];
+
 const windows: Window[] = [];
+
 afterEach(async () => {
   await Promise.all(windows.splice(0).map((window) => window.happyDOM.close()));
 });
@@ -22,6 +25,7 @@ function standIn() {
       <option value="nl">Nederlands</option><option value="fr">Français</option>
     </select><select aria-label="Subtitles"><option>Français</option></select>`;
   const select = window.document.querySelector("select")!;
+
   const app = {
     window,
     select,
@@ -38,81 +42,102 @@ function standIn() {
     budgets: [] as number[],
     written: [] as AudioEvidence[],
   };
+
   select.addEventListener("change", () => {
     if (app.acknowledge) app.publicAudio = select.value;
+
     if (app.revert) select.value = "es";
   });
   const added = vi.spyOn(select, "addEventListener");
   const removed = vi.spyOn(select, "removeEventListener");
+
   const typeahead = (prefix: string) => {
     const options = [...select.options];
+
     const ordered = [
       ...options.slice(select.selectedIndex + 1),
       ...options.slice(0, select.selectedIndex + 1),
     ];
+
     const next = ordered.find(
       (o) =>
         !o.disabled &&
         o.parentElement?.getAttribute("disabled") === null &&
         (o.getAttribute("label") || o.text).trim().toLowerCase().startsWith(prefix.toLowerCase()),
     );
+
     if (!next || next.value === select.value) return;
     select.value = next.value;
+
     for (const type of ["input", "change"])
       select.dispatchEvent(new window.Event(type, { bubbles: true }));
   };
+
   Object.assign(window, {
     mrStreamer: {
       async invoke(method: string) {
         expect(method).toBe("preferences.get");
         app.onPublicRead();
+
         if (app.diagnosticReadError) throw app.diagnosticReadError;
+
         return { ok: true, value: { audioLanguage: app.publicAudio } };
       },
     },
   });
+
   // Use one context for the scoped observer and clone results as CDP returnByValue does.
   const context = {
     window,
     document: window.document,
     HTMLSelectElement: window.HTMLSelectElement,
   };
+
   const d: AudioDriver = {
     actions: [],
     page: {
       async evaluate<T>(expression: string, timeout?: number): Promise<T> {
         if (timeout !== undefined) app.budgets.push(timeout);
+
         return structuredClone(await runInNewContext(expression, context)) as T;
       },
       async send(method, params = {}) {
         app.commands.push({ method, params });
         expect(method).toBe("Input.dispatchKeyEvent");
+
         if (app.inputError) throw app.inputError;
+
         if (params["type"] === "keyDown" && typeof params["text"] === "string") {
           expect(window.document.activeElement).toBe(select);
           typeahead(params["text"]);
         }
+
         if (params["type"] === "rawKeyDown" && params["key"] === "Tab")
           window.document.querySelectorAll("select")[1]?.focus();
+
         return {};
       },
     },
     async wait(check, timeout = 30_000, what = "condition") {
       app.waits.push({ what, timeout });
+
       for (let attempt = 0; attempt < 4; attempt++) {
         if (await check().catch(() => false)) return;
         app.onRejectedPoll(what, attempt);
       }
+
       const error = new Error(`Timed out waiting for ${what}`);
       app.timeouts.push(error);
       throw error;
     },
     async read(method) {
       expect(method).toBe("preferences.get");
+
       return { audioLanguage: app.publicAudio };
     },
     async key(name, code) {
       d.actions.push({ at: new Date().toISOString(), action: `Press ${name}` });
+
       for (const type of ["rawKeyDown", "keyUp"])
         await d.page.send("Input.dispatchKeyEvent", {
           type,
@@ -122,9 +147,11 @@ function standIn() {
         });
     },
   };
+
   const write = vi.fn(async (trace: AudioEvidence) => {
     app.written.push(structuredClone(trace));
   });
+
   return { window, select, d, write, added, removed, typeahead, state: app };
 }
 
@@ -142,6 +169,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
     app.state.onRejectedPoll = (what, attempt) => {
       expect(what).toBe("Settings showing the saved Audio in");
       expect(app.state.commands).toEqual([]);
+
       if (attempt === 1) app.select.value = "es";
     };
 
@@ -195,11 +223,13 @@ describe("installed-upgrade's original Dutch audio restore", () => {
       { type: "change", isTrusted: false, value: "nl", selectedIndex: 2, focused: true },
     ]);
     expect(trace.truncated).toBe(false);
+
     for (const event of trace.events) {
       expect(event.at).toBeGreaterThanOrEqual(trace.keys[0]!.at);
       expect(event.at).toBeLessThanOrEqual(trace.keys[1]!.at);
       expect(event.timeStamp).toEqual(expect.any(Number));
     }
+
     expect(trace.keys.map(({ type, key }) => ({ type, key }))).toEqual([
       { type: "keyDown", key: "N" },
       { type: "keyUp", key: "N" },
@@ -214,8 +244,10 @@ describe("installed-upgrade's original Dutch audio restore", () => {
     "fails readiness without native input for %s",
     async (state) => {
       const app = standIn();
+
       if (state === "mismatched public state") app.state.publicAudio = "fr";
       else app.select.value = "nl";
+
       if (state === "no saved alternate") app.state.publicAudio = "nl";
       await expect(restoreAudioInput(app.d, app.write)).rejects.toThrow(
         "Timed out waiting for Settings showing the saved Audio in",
@@ -321,6 +353,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
       if (app.window.document.activeElement === app.select)
         app.select.insertAdjacentHTML("beforeend", '<option value="no">Norsk</option>');
     };
+
     await expect(restoreAudioInput(app.d, app.write)).rejects.toThrow(
       "N does not uniquely identify",
     );
@@ -358,8 +391,10 @@ describe("installed-upgrade's original Dutch audio restore", () => {
     app.state.acknowledge = false;
     app.state.onRejectedPoll = (what) => {
       if (what !== "the original saved audio preference") return;
+
       for (let i = 0; i < 150; i++) app.select.dispatchEvent(new app.window.Event("change"));
     };
+
     await expect(restoreAudioInput(app.d, app.write)).rejects.toThrow(
       "the original saved audio preference",
     );
@@ -375,6 +410,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
     async (which) => {
       const app = standIn();
       const primary = new Error("original native input failure");
+
       if (which === "native input") {
         app.state.inputError = primary;
         app.d.page.send = async () => {
@@ -388,6 +424,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
             app.state.diagnosticReadError = new Error("diagnostic read failed");
         };
       }
+
       app.write.mockRejectedValue(new Error("diagnostic write failed"));
       app.removed.mockImplementation(() => {
         throw new Error("diagnostic cleanup failed");

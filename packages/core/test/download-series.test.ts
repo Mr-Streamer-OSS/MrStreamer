@@ -114,6 +114,7 @@ describe("the copy after another", () => {
       episode("older", 1, 2, { status: { kind: "queued" } }),
       episode("b", 1, 2),
     ];
+
     expect(nextCopy(list(files), "a")).toMatchObject({ kind: "copy", copy: files[2] });
   });
 
@@ -134,6 +135,7 @@ describe("the copy after another", () => {
       ],
       sourceOrder: true,
     };
+
     const items = [episode("a", 1, 1), episode("s", 0, 1), episode("b", 2, 1), episode("c", 1, 2)];
     const of = (id: string) => nextCopy(list(items, { harbour: playlist }), id);
     expect(of("a")).toEqual({ kind: "copy", copy: items[1], season: 0, episode: 1 });
@@ -169,6 +171,7 @@ describe("the copy after another", () => {
       episode("same-name-elsewhere", 1, 2, { subscription: null }, "harbour-other-account"),
       episode("legacy", 1, 2, {}, null),
     ];
+
     const series = { harbour, "harbour-en": harbour, "harbour-other-account": harbour };
     expect(nextCopy(list(items, series), "a")).toEqual({ kind: "missing", season: 1, episode: 2 });
   });
@@ -195,6 +198,7 @@ describe("the copies on this computer", () => {
       episode("s2e1", 2, 1, { status: { kind: "missing" } }),
       episode("queued", 1, 3, { status: { kind: "queued" } }),
     ];
+
     const [shelf] = copyShelf(list(items));
     expect(shelf).toMatchObject({ kind: "series", copies: [items[0], items[1], items[2]] });
     expect(shelf?.kind === "series" && shelf.seasons).toMatchObject([
@@ -224,6 +228,7 @@ describe("the copies on this computer", () => {
       episode("gone-s4", 4, 1),
       episode("gone-s3", 3, 5),
     ];
+
     const [shelf] = copyShelf(list(items));
     expect(
       shelf?.kind === "series" &&
@@ -248,6 +253,7 @@ describe("the copies on this computer", () => {
       ],
       sourceOrder: true,
     };
+
     const items = [episode("c", 1, 3), episode("a", 1, 1)];
     const [shelf] = copyShelf(list(items, { harbour: playlist }));
     expect(shelf?.kind === "series" && shelf.seasons).toMatchObject([
@@ -266,8 +272,10 @@ describe("the copies on this computer", () => {
   it("names each run apart from the others, the same while copies before it or in it come and go", () => {
     const keys = (items: readonly Download[], series = harbour) => {
       const [shelf] = copyShelf(list(items, { harbour: series }));
+
       return shelf?.kind === "series" ? shelf.seasons.map((season) => season.key) : [];
     };
+
     const later = [episode("s2e2", 2, 2), episode("s2e3", 2, 3), episode("gone-s3", 3, 5)];
     const [second, unlisted] = keys(later);
     const withEarlier = keys([...later, episode("s1e1", 1, 1)]);
@@ -284,6 +292,7 @@ describe("the copies on this computer", () => {
       ],
       sourceOrder: true,
     };
+
     const items = [episode("a", 1, 1), episode("b", 2, 1), episode("c", 1, 3), episode("d", 1, 4)];
     const [first, between, again] = keys(items, playlist);
     expect(new Set([first, between, again]).size).toBe(3);
@@ -298,6 +307,7 @@ describe("the copies on this computer", () => {
       episode("nl2", 1, 2),
       episode("en2", 1, 2, {}, "harbour-en"),
     ];
+
     const shelf = copyShelf(list(items, { harbour, "harbour-en": harbour }));
     expect(shelf.map((item) => item.kind === "series" && item.key)).toEqual([
       "harbour",

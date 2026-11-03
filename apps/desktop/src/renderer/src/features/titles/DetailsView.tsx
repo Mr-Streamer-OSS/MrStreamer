@@ -119,14 +119,17 @@ export function DetailsView({
   const listed = useQuery(queries.titles(target.kind, [target]));
   const title = listed.data?.[0] ?? null;
   const versions = title?.versions ?? [];
+
   const progress = useQuery({
     ...queries.progress(target.kind === "movie" ? { movies: versions } : { series: versions }),
     enabled: versions.length > 0,
   });
+
   // A pick is kept by the subscription of the version picked.
   const picks = useSubscriptionPreferences();
   const remembered = title ? pickedVersion(title, picks) : null;
   const [chosenHere, setChosenHere] = useState<OwnedId | null | undefined>(undefined);
+
   const chooseVersion = (version: OwnedId | null) => {
     setChosenHere(version);
     // App remounts the sheet after playback or Settings. The explicit menu choice then wins.
@@ -136,6 +139,7 @@ export function DetailsView({
         : {},
     );
   };
+
   // A filtered or 4K tile asks for a particular real version. A later menu choice in this
   // sheet can still replace it and is remembered by the usual subscription preference owner.
   const picked =
@@ -146,11 +150,14 @@ export function DetailsView({
       : chosenHere && versions.some((version) => sameOwned(version, chosenHere))
         ? chosenHere
         : null;
+
   const automatic = title
     ? automaticVersion(title, progress.data ?? [], target, target.asked)
     : ownedId(target);
+
   const playing = picked ?? automatic;
   const known = !listed.isPending && (!title || !progress.isPending) && picks !== undefined;
+
   // Another version's details replace these once they arrive; nothing plays from them meanwhile.
   // A new target mounts a new sheet (see App), so these are only ever the same title's.
   const details = useQuery({
@@ -158,6 +165,7 @@ export function DetailsView({
     enabled: known,
     placeholderData: keepPreviousData,
   });
+
   // How a series' episodes stand in the subscription of the version that plays: read beside its
   // details, so the sheet opens on where the series goes on and never on a guess. When it can't
   // be read the sheet opens all the same, and says so in place of where the series goes on.
@@ -166,15 +174,18 @@ export function DetailsView({
     enabled: known && target.kind === "series",
     placeholderData: keepPreviousData,
   });
+
   // Once it answered, or failed, the sheet stays up while it is read again.
   const ready = target.kind !== "series" || !standing.isPending || standing.isFetched;
   const failure = details.error ? appError(details.error) : null;
   // The version that plays is of a subscription whose password or link the keychain lost.
   const subscriptions = useSubscriptions();
+
   const locked =
     failure?.kind === "needs-secret"
       ? subscriptions.find((each) => each.id === failure.subscriptionId)
       : undefined;
+
   const playlist = locked?.kind === "m3u";
   // Saving needs the title from the lists alone, so it works while the details are on their way.
   const saving = useSaveToggle(target.kind, target, title !== null);
@@ -185,11 +196,14 @@ export function DetailsView({
   useEffect(() => {
     if (returned) useUi.setState({ place: null });
   }, [returned]);
+
   // Settings closes the sheet over it; the season picked shows again as it closes, once.
   const [held] = useState(() => {
     const { heldSeason, visit } = useUi.getState();
+
     return heldSeason?.visit === visit ? heldSeason.season : null;
   });
+
   useEffect(() => {
     if (held !== null) useUi.setState({ heldSeason: null });
   }, [held]);
@@ -201,12 +215,14 @@ export function DetailsView({
   useEffect(
     () => () => {
       const { settings, visit } = useUi.getState();
+
       if (settings !== null && seasonNow.current !== null)
         useUi.setState({ heldSeason: { visit, season: seasonNow.current } });
     },
     [],
   );
   const scroller = useRef<HTMLDivElement>(null);
+
   const place: SheetPlace = {
     season,
     onSeason: setSeason,
@@ -214,14 +230,17 @@ export function DetailsView({
     returnTo: returned?.related ?? null,
     onReturn: (tile) => {
       const sheet = scroller.current;
+
       if (!returned || !sheet) return;
       sheet.scrollTop = returned.scroll;
+
       if (!tile)
         return sheet.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true });
       tile.focus({ preventScroll: true });
       tile.scrollIntoView({ block: "nearest", inline: "nearest" });
     },
   };
+
   return (
     <Sheet onClose={closeDetails} bar={bar} scroller={scroller}>
       {details.data && ready ? (
@@ -383,7 +402,9 @@ function Header({
 function Credits({ details }: { details: TitleDetails }) {
   const cast = details.cast.slice(0, 8);
   const makers = details.directors.slice(0, 2);
+
   if (cast.length === 0 && makers.length === 0) return null;
+
   return (
     <div className="mt-6 flex gap-5 overflow-x-auto pb-1">
       {cast.map((person) => (
@@ -409,6 +430,7 @@ function CastMember({ person }: { person: Person }) {
   // A photo that doesn't load leaves the initials.
   const [failed, setFailed] = useState(false);
   const photo = failed ? null : person.photoUrl;
+
   return (
     <div className="w-[5.5rem] flex-none text-center">
       <div className="mx-auto size-16 overflow-hidden rounded-full bg-white/8 ring-1 ring-white/10">
@@ -437,6 +459,7 @@ function CastMember({ person }: { person: Person }) {
 /** "AL" for Ada Lovelace. */
 function initials(name: string): string {
   const words = name.split(/\s+/).filter(Boolean);
+
   return (
     (words[0]?.[0] ?? "") + (words.length > 1 ? (words.at(-1)?.[0] ?? "") : "")
   ).toUpperCase();
@@ -461,6 +484,7 @@ function MovieActions({
   const now = movieNow({ ...details.title, ...versions.playing }, details.backdropUrl);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
+
   return (
     <Actions
       versions={versions}
@@ -489,6 +513,7 @@ function ownProgress(
   version: { readonly subscriptionId: string },
 ): readonly TitleProgress[] {
   if (!progress) return NO_PROGRESS;
+
   return progress.filter((entry) => entry.title.subscriptionId === version.subscriptionId);
 }
 
@@ -501,6 +526,7 @@ function useStanding(details: SeriesDetails) {
   // The sheet asked as it opened: a read that failed is tried again when the viewer says so, or
   // the record changes, and not by each part of the sheet that shows up.
   const read = useQuery({ ...queries.episodes(ownedId(details.title)), retryOnMount: false });
+
   return {
     standing: read.data,
     error: read.data || !read.error ? null : appError(read.error),
@@ -523,6 +549,7 @@ function SeriesActions({
   const namedVersion = useVersionNames(versions.title)(versions.playing);
   const removal = useRemoveFromContinue();
   const listed = useInContinueWatching(details.title);
+
   const download = (
     <SeriesDownload
       key={ownedKey(versions.playing)}
@@ -533,6 +560,7 @@ function SeriesActions({
       disabled={switching}
     />
   );
+
   if (!standing) {
     // Where the series goes on can't be said: nothing offers to play or resume on a guess. The
     // episodes below still play, each from its beginning.
@@ -554,7 +582,9 @@ function SeriesActions({
       </div>
     );
   }
+
   const target = continuation(details, standing.progress, standing.marks);
+
   if (!target) {
     // Nothing to play yet, and still a series to save for when there is.
     return (
@@ -568,15 +598,19 @@ function SeriesActions({
       </div>
     );
   }
+
   const { episode, resume: partly, replay } = target;
   // Replay once every numbered episode is watched: the first of them, from its beginning.
   const which = { episode: episodeLabel(episode.season, episode.number) };
+
   const label = replay
     ? t("Replay {episode}", which)
     : partly
       ? t("Resume {episode}", which)
       : t("Play {episode}", which);
+
   const now = episodeNow(details, episode);
+
   return (
     <Actions
       versions={versions}
@@ -625,6 +659,7 @@ function Actions({
   const named = useVersionNames(title);
   const said = named(playing);
   const several = title !== null && all.length > 1;
+
   return (
     <div className="mt-6">
       {progress && (
@@ -700,6 +735,7 @@ function useVersionNames(
   const nameOf = useSubscriptionNames();
   const all = title?.versions ?? [];
   const owners = [...new Set(all.map((version) => version.subscriptionId))];
+
   const labels = new Map(
     versionOptions(all, title?.originalLanguage ?? null, owners).flatMap((group) =>
       group.versions.map(
@@ -717,9 +753,12 @@ function useVersionNames(
       ),
     ),
   );
+
   return (version) => {
     const label = labels.get(ownedKey(version));
+
     if (label === undefined) return null;
+
     return { label, source: owners.length > 1 ? nameOf(version.subscriptionId) : null };
   };
 }
@@ -730,6 +769,7 @@ const GUESTS_SHOWN = 2;
 /** "5 Mar 2024" from "2024-03-05"; a date written another way stays as it is. */
 function airDate(text: string): string {
   const day = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+
   return day
     ? formatDate(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3])), "calendarDay")
     : text;
@@ -739,6 +779,7 @@ function airDate(text: string): string {
 function creditsOf(episode: Partial<EpisodeDetails>): string {
   const directors = episode.directors ?? [];
   const guests = (episode.cast ?? []).slice(0, GUESTS_SHOWN).map((person) => person.name);
+
   return [
     directors.length > 0 ? t("Directed by {names}", { names: directors.join(", ") }) : null,
     guests.length > 0 ? t("With {names}", { names: guests.join(", ") }) : null,
@@ -751,7 +792,9 @@ function creditsOf(episode: Partial<EpisodeDetails>): string {
 function EpisodeTransfer({ title }: { title: Extract<TitleRef, { kind: "episode" }> }) {
   const download = useDownloadOf(title.subscriptionId, title);
   const done = download ? transferred(download) : null;
+
   if (done === null) return null;
+
   return (
     <span aria-hidden className="absolute right-0 bottom-0 left-0 h-[3px] bg-white/20">
       <span
@@ -770,6 +813,7 @@ function EpisodeFacts({
   facts: string;
 }) {
   const download = useDownloadOf(title.subscriptionId, title);
+
   return (
     <>
       <EpisodeDownloadStatus download={download} />
@@ -801,14 +845,17 @@ function Episodes({
   // The season picked here, else the one being watched once progress has loaded.
   const season = picked ?? target?.episode.season ?? details.seasons[0]?.number ?? 1;
   const shown = details.seasons.find((each) => each.number === season) ?? details.seasons[0];
+
   // TMDB's details for the season shown, asked for as it shows. The provider's episodes stand
   // until they come, and the rows grow once, together.
   const enriched = useQuery({
     ...queries.season(details.title, shown?.number ?? season),
     enabled: shown !== undefined,
   });
+
   if (!shown) return null;
   const episodes: readonly (Episode & Partial<EpisodeDetails>)[] = enriched.data ?? shown.episodes;
+
   // A mark can move the series on to another season. The season in view stays, so the row just
   // marked keeps its place, with its dots and the keyboard's focus on them.
   const marks = {
@@ -818,6 +865,7 @@ function Episodes({
       marking.mark(episode, watched);
     },
   };
+
   return (
     <section className="mt-10">
       {details.seasons.length > 1 && (
@@ -845,12 +893,15 @@ function Episodes({
       <div>
         {episodes.map((episode) => {
           const state = stateOf?.(episode);
+
           const current =
             target?.episode &&
             sameOwned(target.episode, episodeFileVersion(episode, target.episode.id));
+
           const partly = state?.kind === "partial" ? state.progress : undefined;
           const file = episodeRef(episodeFileVersion(episode, partly?.title.id));
           const saving = marks.busy && marks.change?.episode.id === episode.id;
+
           const facts = [
             episode.airDate ? airDate(episode.airDate) : null,
             timeLeftOf(partly) ?? (episode.duration ? runtime(episode.duration) : null),
@@ -858,7 +909,9 @@ function Episodes({
           ]
             .filter(Boolean)
             .join(" · ");
+
           const credits = creditsOf(episode);
+
           return (
             // The row plays, and the dots beside it mark: two buttons side by side, neither
             // inside the other. Rows hold their top as they grow, so what is in view stays put.
@@ -985,6 +1038,7 @@ function EpisodeVersionMenu({
       }
       onPick={(version) => {
         if (!version) return;
+
         const state = episodeStates(
           progress,
           marks,
@@ -998,6 +1052,7 @@ function EpisodeVersionMenu({
           }),
           exactVersion: true,
         });
+
         playTitle(
           episodeNow(details, episodeFileVersion(episode, version.id)),
           resumePoint(state.kind === "partial" ? state.progress : undefined),

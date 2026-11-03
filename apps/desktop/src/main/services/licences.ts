@@ -30,6 +30,7 @@ const CREDITS = "LICENSES.chromium.html";
  */
 export function appNotices(): NoticeFiles {
   const executable = process.execPath;
+
   return {
     manifest: join(import.meta.dirname, "../licences/third-party.json"),
     credits: [
@@ -66,9 +67,11 @@ function make(files: NoticeFiles) {
   const notices = Effect.tryPromise({
     try: async () => {
       const manifest = NoticeManifest()(JSON.parse(await readFile(files.manifest, "utf8")));
+
       if (manifest instanceof type.errors) {
         throw new Error(`${files.manifest}: ${manifest.summary}`);
       }
+
       return manifest.notices.map((notice) => ({
         ...notice,
         id: fill(notice.id),
@@ -87,7 +90,9 @@ function make(files: NoticeFiles) {
     Effect.tryPromise({
       try: async () => {
         const path = files.credits.find((candidate) => existsSync(candidate));
+
         if (!path) throw new Error(`Chromium's credits page (${CREDITS}) is missing.`);
+
         return creditsText(await readFile(path, "utf8"), project);
       },
       catch: failedWith,
@@ -98,7 +103,9 @@ function make(files: NoticeFiles) {
     text: (id: string) =>
       Effect.flatMap(notices, (all) => {
         const notice = all.find((candidate) => candidate.id === id);
+
         if (!notice) return Effect.fail(unexpected(`No third-party notice is called ${id}.`));
+
         return typeof notice.text === "string"
           ? Effect.succeed(notice.text)
           : credits(notice.text.credits);
@@ -123,15 +130,21 @@ function creditsText(html: string, project: string): string {
       licence,
     }),
   );
+
   const text = (licence: string) => decoded(licence.replace(/\r\n?/g, "\n")).trim();
+
   if (project === "*") {
     if (projects.length === 0) throw new Error(`${CREDITS} lists no projects.`);
+
     return projects
       .map(({ title, homepage, licence }) => `${title}\n${homepage}\n\n${text(licence)}`)
       .join("\n\n---\n\n");
   }
+
   const found = projects.find(({ title }) => title === project);
+
   if (!found) throw new Error(`${CREDITS} has no section for ${project}.`);
+
   return text(found.licence);
 }
 
@@ -146,11 +159,14 @@ const ENTITIES: Readonly<Record<string, string>> = {
 /** HTML text with its character references, `&quot;` and `&#x27;` for instance, decoded. */
 function decoded(html: string): string {
   if (!html.includes("&")) return html;
+
   return html.replace(
     /&(?:#x([0-9a-fA-F]+)|#(\d+)|([a-z]+));/g,
     (entity: string, hex?: string, decimal?: string, name?: string) => {
       if (hex) return String.fromCodePoint(parseInt(hex, 16));
+
       if (decimal) return String.fromCodePoint(Number(decimal));
+
       return (name && ENTITIES[name]) ?? entity;
     },
   );

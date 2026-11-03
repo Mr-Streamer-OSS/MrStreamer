@@ -12,6 +12,7 @@ const fakePlayer = nativePlayer();
 const emit = fakePlayer.emit;
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
 
 const {
@@ -29,10 +30,12 @@ const {
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (cause: unknown) => void;
+
   const promise = new Promise<T>((done, fail) => {
     resolve = done;
     reject = fail;
   });
+
   return { promise, resolve, reject };
 }
 
@@ -45,18 +48,23 @@ const movie = (id: string, live = false) => ({
   next: false,
   versions: false,
 });
+
 const open = async () => ({ url: `file:${Math.random()}`, container: "mp4" });
 const settle = () => new Promise((done) => setTimeout(done, 0));
 
 /** Each save a title's owner was asked for, in order, with its answer to give. */
 let saves: Array<{ id: string; position: number; answer: ReturnType<typeof deferred<void>> }> = [];
+
 /** Saves how far `id` got, as its owner would. */
 const saverOf = (id: string) => (position: number) => {
   const answer = deferred<void>();
   saves.push({ id, position, answer });
+
   return answer.promise;
 };
+
 const progress = saverOf("m1");
+
 /** The player reports it plays, or stopped playing. */
 const playing = (isPlaying = true) => fakePlayer.state(isPlaying);
 
@@ -79,11 +87,14 @@ beforeEach(async () => {
   emit("isExternalPlaybackActiveChange", { isExternalPlaybackActive: false });
   // Answers every save the last test left waiting, and those each asked for after it.
   let answered = -1;
+
   while (answered !== saves.length) {
     answered = saves.length;
+
     for (const save of saves) save.answer.resolve();
     await settle();
   }
+
   saves = [];
   fakePlayer.pause.mockClear();
   fakePlayer.play.mockClear();
@@ -104,11 +115,13 @@ describe("Close", () => {
 
   it("pauses a title still connecting as soon as it starts, and doesn't play it later", async () => {
     const source = deferred<{ url: string; container: string }>();
+
     const starting = play(
       movie("m1"),
       { kind: "file", originalLanguage: null, open: () => source.promise },
       { watch: true, login: [], progress },
     );
+
     fakePlayer.pause.mockClear();
     void closeWatch();
     source.resolve({ url: "file:m1", container: "mp4" });
@@ -294,6 +307,7 @@ describe("after Close", () => {
     );
     fakePlayer.currentTime = 0;
     playing(false);
+
     for (const save of saves) save.answer.resolve();
     await settle();
     expect(saves.map(({ id, position }) => `${id}@${position}`)).toEqual(["m1@120", "m1@120"]);
@@ -311,6 +325,7 @@ describe("a refused save", () => {
     saves[0]!.answer.reject(new AppFailure({ kind: "no-subscription" }));
     await expect(closing).resolves.toEqual({ saved: false, error: { kind: "no-subscription" } });
     expect(told).not.toHaveBeenCalled();
+
     // A refusal, then a subscription gone, then a refusal again: one run, told once.
     for (const refusal of [
       new Error("disk full"),
@@ -324,6 +339,7 @@ describe("a refused save", () => {
       saves.at(-1)!.answer.reject(refusal);
       await settle();
     }
+
     expect(told).toHaveBeenCalledOnce();
   });
 

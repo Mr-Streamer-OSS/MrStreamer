@@ -49,27 +49,35 @@ import { defined } from "@mrstreamer/core/defined";
 export type Saved =
   | { readonly kind: "live"; readonly catalogue: LiveCatalogue; readonly fetchedAt: number }
   | { readonly kind: "titles"; readonly catalogue: OnDemandCatalogue; readonly fetchedAt: number };
+
 type SavedKind = Saved["kind"];
 
 const VERSION = 1;
+
 /** A file larger than this isn't read or kept. */
 const FILE_BYTES = 64 * 1024 * 1024;
+
 /** Rows a list may have: categories, channels, movies or series. */
 const ROWS = 250_000;
+
 /** What every file together may take; the oldest go first past it. */
 const TOTAL_BYTES = 256 * 1024 * 1024;
+
 /** A copy older than this, or from further ahead than the clock may drift, isn't shown. */
 const MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 const MAX_AHEAD = 10 * 60 * 1000;
 
 const folder = () => new Directory(Paths.cache, "catalogues");
+
 /** A file name per id: letters, digits and "-" as they are, every other UTF-16 unit as "_" and hex. */
 const nameOf = (id: string, kind: SavedKind) =>
   `${id.replace(/[^A-Za-z0-9-]/g, (unit) => `_${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)}.${kind}.json`;
+
 const fileOf = (id: string, kind: SavedKind) => new File(folder(), nameOf(id, kind));
 const pendingOf = (id: string, kind: SavedKind) => new File(folder(), `${nameOf(id, kind)}.next`);
 
 const Url = lazy(() => type(`string <= ${URL_LENGTH}`).or("null"));
+
 /**
  * A row's number, or none. JSON reads `1e400` as Infinity, which ArkType's "number" lets through,
  * while a copy this module writes never holds one (JSON writes it as null): a file that does was
@@ -80,7 +88,9 @@ const Finite = lazy(() =>
     .narrow((value, ctx) => Number.isFinite(value) || ctx.mustBe("a finite number"))
     .or("null"),
 );
+
 const Category = lazy(() => type({ "+": "reject", id: "string", name: "string" }));
+
 const Channel = lazy(() =>
   type({
     "+": "reject",
@@ -94,6 +104,7 @@ const Channel = lazy(() =>
     catchupDays: Finite(),
   }),
 );
+
 const Title = lazy(() =>
   type({
     "+": "reject",
@@ -112,6 +123,7 @@ const Title = lazy(() =>
     "episodeFiles?": "string[]",
   }),
 );
+
 const Head = {
   "+": "reject",
   version: `${VERSION}`,
@@ -119,8 +131,10 @@ const Head = {
   fetchedAt: "number",
   "mapping?": "string",
 } as const;
+
 /** A list as the envelope checks it: an array within the row bound. `rows` checks each row. */
 const List = lazy(() => type("unknown[]").atMostLength(ROWS));
+
 /** Each file's envelope and its lists; the rows are checked a slice at a time, each by its own schema. */
 const Envelopes = lazy(() => ({
   live: type({
@@ -148,12 +162,15 @@ function* rows<R>(
 ): Steps<R[] | null> {
   const due = pacer();
   const checked: R[] = [];
+
   for (const each of list) {
     if (due()) yield;
     const result = row(each);
+
     if (result instanceof type.errors) return null;
     checked.push(result);
   }
+
   return checked;
 }
 
@@ -169,6 +186,7 @@ function* checked(
 ): Steps<Saved | "invalid"> {
   const stands = (head: { subscriptionId: string; fetchedAt: number; mapping?: string }) => {
     const age = Date.now() - head.fetchedAt;
+
     return (
       head.subscriptionId === id &&
       (head.mapping ?? null) === mapping &&
@@ -176,26 +194,38 @@ function* checked(
       age >= -MAX_AHEAD
     );
   };
+
   if (kind === "live") {
     const head = Envelopes().live(json);
+
     if (head instanceof type.errors || !stands(head)) return "invalid";
     const categories = yield* rows(head.catalogue.categories, Category());
+
     if (!categories) return "invalid";
     const channels = yield* rows(head.catalogue.channels, Channel());
+
     if (!channels) return "invalid";
+
     return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
   }
+
   const head = Envelopes().titles(json);
+
   if (head instanceof type.errors || !stands(head)) return "invalid";
   const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
+
   if (!movieCategories) return "invalid";
   const movies = yield* rows(head.catalogue.movies, Title());
+
   if (!movies) return "invalid";
   const seriesCategories = yield* rows(head.catalogue.seriesCategories, Category());
+
   if (!seriesCategories) return "invalid";
   const series = yield* rows(head.catalogue.series, Title());
+
   if (!series) return "invalid";
   const catalogue = { movieCategories, movies, seriesCategories, series };
+
   return { kind, catalogue, fetchedAt: head.fetchedAt };
 }
 
@@ -207,6 +237,7 @@ function queued<A>(id: string, kind: SavedKind, fallback: A, operation: () => Pr
   const name = nameOf(id, kind);
   const run = (queues.get(name) ?? Promise.resolve()).then(operation).catch(() => fallback);
   queues.set(name, run);
+
   return run;
 }
 
@@ -232,18 +263,24 @@ async function load(
   wanted: () => boolean,
 ): Promise<Saved | "none" | "stopped"> {
   if (!file.exists) return "none";
+
   try {
     if (file.size > FILE_BYTES) throw new RangeError("Too large");
+
     // In this order: every schema, each built on its first use, before the text as it was when
     // the rows were checked at once; the text; one parse; then the envelope and the rows.
     for (const schema of [Envelopes, Category, Channel, Title]) schema();
     const json: unknown = JSON.parse(await file.text());
     const saved = await inTasks(checked(json, id, kind, mapping), wanted);
+
     if (saved === null) return "stopped";
+
     if (saved === "invalid") throw new TypeError();
+
     return saved;
   } catch {
     discard(file);
+
     return "none";
   }
 }
@@ -263,20 +300,30 @@ export function readList(
   return queued(id, kind, null, async () => {
     const pending = pendingOf(id, kind);
     const kept = await load(fileOf(id, kind), id, kind, mapping, stands);
+
     if (kept === "stopped") return null;
+
     if (kept !== "none") {
       discard(pending);
+
       return kept;
     }
+
     const left = await load(pending, id, kind, mapping, stands);
+
     if (left === "stopped") return null;
+
     if (left === "none" || !stands()) {
       discard(pending);
+
       return null;
     }
+
     await pending.move(fileOf(id, kind), { overwrite: true });
+
     if (stands()) return left;
     discard(fileOf(id, kind));
+
     return null;
   });
 }
@@ -295,21 +342,26 @@ export function writeList(
   stands: () => boolean,
 ): Promise<void> {
   const { kind } = saved;
+
   return queued(id, kind, undefined, async () => {
     if (!stands()) return;
     // Stopped once `stands` fails, or not kept when the password is in the provider's text.
     const text = await inTasks(textOf(id, saved, login, mapping), stands);
+
     if (text === null || text === false) return;
     folder().create({ intermediates: true, idempotent: true });
     const pending = pendingOf(id, kind);
+
     try {
       pending.create({ overwrite: true });
       await pending.write(text);
+
       if (!stands() || pending.size > FILE_BYTES) return discard(pending);
       await pending.move(fileOf(id, kind), { overwrite: true });
     } catch {
       return discard(pendingOf(id, kind));
     }
+
     if (!stands()) return discard(fileOf(id, kind));
     shed(nameOf(id, kind), false);
   });
@@ -325,11 +377,14 @@ export async function dropLists(id: string): Promise<boolean> {
     (["live", "titles"] as const).map((kind) =>
       queued(id, kind, false, async () => {
         const files = [fileOf(id, kind), pendingOf(id, kind)];
+
         for (const file of files) if (file.exists) file.delete();
+
         return files.every((file) => !file.exists);
       }),
     ),
   );
+
   return gone.every(Boolean);
 }
 
@@ -340,7 +395,9 @@ export async function dropLists(id: string): Promise<boolean> {
 export function pruneLists(ids: readonly string[]): void {
   try {
     const at = folder();
+
     if (!at.exists) return;
+
     const kept = new Set(
       ids.flatMap((id) =>
         (["live", "titles"] as const).flatMap((kind) => [
@@ -349,9 +406,11 @@ export function pruneLists(ids: readonly string[]): void {
         ]),
       ),
     );
+
     for (const entry of at.list()) {
       if (!kept.has(entry.name)) entry.delete();
     }
+
     shed(null, true);
   } catch {
     // Tried again at the next launch.
@@ -368,9 +427,12 @@ function shed(keep: string | null, pending: boolean) {
   const files = folder()
     .list()
     .filter((entry) => entry instanceof File);
+
   let total = files.reduce((sum, file) => sum + file.size, 0);
+
   if (total <= TOTAL_BYTES) return;
   const order = (file: File) => (file.name.includes(".titles.json") ? 0 : 1);
+
   const copies = files
     .filter(
       (file) =>
@@ -380,6 +442,7 @@ function shed(keep: string | null, pending: boolean) {
     .toSorted(
       (a, b) => order(a) - order(b) || (a.modificationTime ?? 0) - (b.modificationTime ?? 0),
     );
+
   for (const file of copies) {
     if (total <= TOTAL_BYTES) return;
     total -= file.size;
@@ -402,26 +465,34 @@ function* textOf(
   const known = loginFrom(login);
   const art = (url: string | null) => safeUrl(url, known);
   let catalogue: LiveCatalogue | OnDemandCatalogue;
+
   if (saved.kind === "live") {
     const categories = yield* copies(saved.catalogue.categories, categoryCopy, known);
+
     if (!categories) return false;
+
     const channels = yield* copies(
       saved.catalogue.channels,
       (each) => channelCopy(each, art),
       known,
     );
+
     if (!channels) return false;
     catalogue = { categories, channels } satisfies LiveCatalogue;
   } else {
     const { movieCategories, movies, seriesCategories, series } = saved.catalogue;
     const titleOf = (each: ProviderTitle) => titleCopy(each, art);
     const movieCopies = yield* copies(movieCategories, categoryCopy, known);
+
     if (!movieCopies) return false;
     const movieRows = yield* copies(movies, titleOf, known);
+
     if (!movieRows) return false;
     const seriesCopies = yield* copies(seriesCategories, categoryCopy, known);
+
     if (!seriesCopies) return false;
     const seriesRows = yield* copies(series, titleOf, known);
+
     if (!seriesRows) return false;
     catalogue = {
       movieCategories: movieCopies,
@@ -430,6 +501,7 @@ function* textOf(
       series: seriesRows,
     } satisfies OnDemandCatalogue;
   }
+
   return JSON.stringify({
     version: VERSION,
     subscriptionId: id,
@@ -448,12 +520,15 @@ function* copies<A, B extends object>(
 ): Steps<B[] | false> {
   const due = pacer();
   const copied: B[] = [];
+
   for (const each of list) {
     if (due()) yield;
     const row = copy(each);
+
     if (holds(row, login)) return false;
     copied.push(row);
   }
+
   return copied;
 }
 

@@ -92,12 +92,15 @@ export function mappedChannels(
 ): MappedChannels {
   const mapped = new Map<string, GuideMapping>();
   const unlisted = new Map<string, GuideMapping>();
+
   for (const [key, mapping] of Object.entries(mappings)) {
     const channel = channels.channel(key);
+
     if (channel) mapped.set(channel.id, mapping);
     // One the lists only hide for now is neither shown nor gone.
     else if (!channels.listed(key)) unlisted.set(key, mapping);
   }
+
   return { ...channels, mapped, unlisted };
 }
 
@@ -132,10 +135,12 @@ export function guidesOf(
 ): Guides {
   const ends = new Float64Array(parts.reduce((sum, part) => sum + part.index.ends.length, 0));
   let at = 0;
+
   for (const part of parts) {
     ends.set(part.index.ends, at);
     at += part.index.ends.length;
   }
+
   return { parts, sources, ends: ends.sort() };
 }
 
@@ -147,6 +152,7 @@ export function guideRef(source: string, guideId: string): string {
 /** What `guideRef` named, or null for what it can't have. */
 export function parseGuideRef(ref: string): { source: string; guideId: string } | null {
   const at = ref.indexOf(":");
+
   return at > 0 && at < ref.length - 1
     ? { source: ref.slice(0, at), guideId: ref.slice(at + 1) }
     : null;
@@ -166,11 +172,14 @@ export function listingsAt(
   at: number,
 ): Record<string, Listing> {
   const result: Record<string, Listing> = {};
+
   for (const channelId of channelIds) {
     const shown = shownChannel(guides, channels, channelId, at);
     const listing = shown && shown.part.index.listing(shown.channel, at);
+
     if (listing) result[channelId] = listing;
   }
+
   return result;
 }
 
@@ -203,17 +212,23 @@ export function coverage(
     const bySource = new Map<string, number>();
     let count = 0;
     let changes: number | null = null;
+
     for (const channel of channels.all) {
       const shown = shownChannel(guides, channels, channel.id, at);
+
       if (shown) {
         count++;
         bySource.set(shown.part.source, (bySource.get(shown.part.source) ?? 0) + 1);
         const until = shown.channel.until;
+
         if (until !== null && (changes === null || until < changes)) changes = until;
       }
+
       const rest = slice();
+
       if (rest) await rest;
     }
+
     return { covered: count, bySource, changes };
   });
 }
@@ -234,6 +249,7 @@ export function scheduleAt(
   until: number,
 ): readonly Programme[] {
   const shown = shownChannel(guides, channels, channelId, at);
+
   return shown ? shown.part.index.schedule(shown.channel, at, from, until) : [];
 }
 
@@ -257,19 +273,25 @@ export async function rangeAt(
   const slice = slicer();
   const read = new Map<IndexedChannel, readonly GuideSlot[]>();
   const result: Record<string, readonly GuideSlot[]> = {};
+
   for (const channelId of channelIds) {
     const shown = shownChannel(guides, channels, channelId, at);
+
     if (!shown) continue;
     let slots = read.get(shown.channel);
+
     if (!slots) {
       const guide = guideRef(shown.part.source, shown.channel.id);
       slots = shown.part.index.range(shown.channel, from, to).map((slot) => ({ ...slot, guide }));
       read.set(shown.channel, slots);
       const rest = slice();
+
       if (rest) await rest;
     }
+
     result[channelId] = slots;
   }
+
   return result;
 }
 
@@ -288,6 +310,7 @@ export function programmeAt(
   at: number,
 ): Programme | null {
   const shown = shownChannel(guides, channels, channelId, at);
+
   return shown && guideRef(shown.part.source, shown.channel.id) === ref
     ? shown.part.index.programme(shown.channel, start)
     : null;
@@ -309,6 +332,7 @@ export function startingAt(
   if (!channels.channel(channelId)) return { kind: "unknown" };
   const shown = shownChannel(guides, channels, channelId, at);
   const programme = shown?.part.index.programme(shown.channel, start) ?? null;
+
   return programme ? { kind: "found", programme } : { kind: "none" };
 }
 
@@ -333,23 +357,31 @@ export async function searchAt(
   signal: AbortSignal,
 ): Promise<readonly ProgrammeMatch[]> {
   const words = searchWords(query);
+
   if (words.length === 0) return [];
   const shown = await searchable(guides, channels, at);
   const matches: ProgrammeMatch[] = [];
+
   for (const [place, part] of guides.parts.entries()) {
     const keys = shown[place];
+
     if (!keys || keys.size === 0) continue;
+
     // Each guide's own first fifty hold every one of the first fifty of them all.
     const found = await search.first(
       { path: part.path, words, at, channels: [...keys.keys()], limit: SEARCH_LIMIT },
       signal,
     );
+
     for (const { channel, programme } of found) {
       const shownOn = keys.get(channel);
+
       if (shownOn) matches.push({ channel: shownOn, programme });
     }
   }
+
   const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
+
   return matches
     .sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start)
     .slice(0, SEARCH_LIMIT);
@@ -367,13 +399,17 @@ function searchable(
 ): Promise<readonly ReadonlyMap<number, LiveChannel>[]> {
   return remembered(shownBy, guides, channels, at, slicer(), async (slice) => {
     const shown = guides.parts.map(() => new Map<number, LiveChannel>());
+
     for (const channel of channels.all) {
       const found = channel.adult ? undefined : shownChannel(guides, channels, channel.id, at);
       const keys = found && shown[guides.parts.indexOf(found.part)];
+
       if (found && keys && !keys.has(found.channel.key)) keys.set(found.channel.key, channel);
       const rest = slice();
+
       if (rest) await rest;
     }
+
     return shown;
   });
 }
@@ -402,36 +438,49 @@ export async function searchChannelsAt(
   signal: AbortSignal,
 ): Promise<Record<string, ListingMatch>> {
   const words = searchWords(query);
+
   if (words.length === 0) return {};
   // A list may hold tens of thousands of channels: what is worked out of each, before and after
   // the worker searches, lets other work in between slices.
   const slice = slicer();
   const showing = guides.parts.map(() => new Map<number, string[]>());
+
   for (const channelId of channelIds) {
     const shown = shownChannel(guides, channels, channelId, at);
     const keys = shown && showing[guides.parts.indexOf(shown.part)];
+
     if (shown && keys) {
       const ids = keys.get(shown.channel.key);
+
       if (ids) ids.push(channelId);
       else keys.set(shown.channel.key, [channelId]);
     }
+
     const rest = slice();
+
     if (rest) await rest;
   }
+
   const result: Record<string, ListingMatch> = {};
+
   for (const [place, part] of guides.parts.entries()) {
     const keys = showing[place];
+
     if (!keys || keys.size === 0) continue;
+
     const found = await search.each(
       { path: part.path, words, at, until, channels: [...keys.keys()] },
       signal,
     );
+
     for (const { channel, now, later } of eachMatch(found)) {
       for (const channelId of keys.get(channel) ?? []) result[channelId] = { now, later };
       const rest = slice();
+
       if (rest) await rest;
     }
   }
+
   return result;
 }
 
@@ -441,14 +490,18 @@ export async function searchChannelsAt(
  */
 export function unresolvedMappings(guides: Guides, channels: MappedChannels): number {
   let count = channels.unlisted.size;
+
   for (const mapping of channels.mapped.values()) {
     if (mapping.source !== OWN_GUIDE && !guides.sources.has(mapping.source)) {
       count++;
       continue;
     }
+
     const part = guides.parts.find((each) => each.source === mapping.source);
+
     if (part && !part.index.channels.has(mapping.guideId)) count++;
   }
+
   return count;
 }
 
@@ -461,6 +514,7 @@ export function mapChannel(
 ): MapChannel {
   const shown = shownChannel(guides, channels, channel.id, at);
   const mapping = channels.mapped.get(channel.id);
+
   return {
     id: channel.id,
     number: channel.number,
@@ -497,20 +551,27 @@ export function mapChannelsAt(
   at: number,
 ): { readonly total: number; readonly channels: readonly MapChannel[] } {
   const words = searchWords(query);
+
   const found = (name: string, number: number | null) =>
     words.every((word) => name.includes(word) || String(number) === word);
+
   const rows: MapChannel[] = [];
   let total = 0;
+
   const take = (row: () => MapChannel) => {
     if (total >= offset && rows.length < limit) rows.push(row());
     total++;
   };
+
   for (const [position, channel] of channels.all.entries()) {
     if (!found(channels.searchNames[position] ?? "", channel.number)) continue;
+
     if (filter === "mapped" && !channels.mapped.has(channel.id)) continue;
+
     if (filter === "without" && shownChannel(guides, channels, channel.id, at)) continue;
     take(() => mapChannel(guides, channels, channel, at));
   }
+
   if (filter === "mapped") {
     for (const [id, mapping] of channels.unlisted) {
       if (!found(normalize(mapping.name), null)) continue;
@@ -524,6 +585,7 @@ export function mapChannelsAt(
       }));
     }
   }
+
   return { total, channels: rows };
 }
 
@@ -542,9 +604,11 @@ export function guideChannelsAt(
 ): GuideChannelPage {
   const words = searchWords(query);
   const whole = words.join(" ");
+
   const all = guides.parts.flatMap((part) =>
     [...part.index.channels.values()].map((channel) => ({ part, channel })),
   );
+
   const matches =
     words.length === 0
       ? all
@@ -556,6 +620,7 @@ export function guideChannelsAt(
               Number(!a.channel.folded.startsWith(whole)) -
               Number(!b.channel.folded.startsWith(whole)),
           );
+
   return {
     total: matches.length,
     listed: all.length,
@@ -574,6 +639,7 @@ function mappingOf(
   channelId: string,
 ): GuideMapping | undefined {
   const mapping = channels.mapped.get(channels.channel(channelId)?.id ?? channelId);
+
   return mapping && (mapping.source === OWN_GUIDE || guides.sources.has(mapping.source))
     ? mapping
     : undefined;
@@ -594,21 +660,28 @@ function shownChannel(
   after: number,
 ): Shown | undefined {
   const mapping = mappingOf(guides, channels, channelId);
+
   if (mapping) {
     const part = guides.parts.find((each) => each.source === mapping.source);
     const channel = part?.index.channels.get(mapping.guideId);
+
     return part && channel && channel.until !== null && channel.until > after
       ? { part, channel }
       : undefined;
   }
+
   const guideIds = channels.guideIdsOf(channelId);
+
   if (guideIds.length === 0) return undefined;
+
   for (const part of guides.parts) {
     for (const guideId of guideIds) {
       const channel = part.index.channels.get(guideId);
+
       if (channel && channel.until !== null && channel.until > after) return { part, channel };
     }
   }
+
   return undefined;
 }
 
@@ -624,11 +697,14 @@ function endedBy(guides: Guides, at: number): number {
   const { ends } = guides;
   let low = 0;
   let high = ends.length;
+
   while (low < high) {
     const middle = (low + high) >> 1;
+
     if ((ends[middle] ?? 0) <= at) low = middle + 1;
     else high = middle;
   }
+
   return low;
 }
 
@@ -647,9 +723,11 @@ function remembered<A>(
   work: (slice: Slice) => Promise<A>,
 ): Promise<A> {
   let byChannels = cache.get(guides);
+
   if (!byChannels) cache.set(guides, (byChannels = new WeakMap()));
   const ended = endedBy(guides, at);
   const kept = byChannels.get(channels);
+
   if (kept?.ended === ended) return kept.value;
   const value = work(slice);
   const remembering = byChannels;
@@ -657,6 +735,7 @@ function remembered<A>(
   value.catch(() => {
     if (remembering.get(channels)?.value === value) remembering.delete(channels);
   });
+
   return value;
 }
 
@@ -673,8 +752,10 @@ export type Slice = () => Promise<void> | undefined;
 export function slicer(): Slice {
   let began = performance.now();
   let count = 0;
+
   return () => {
     if ((++count & 7) !== 0 || performance.now() - began < SLICE_MS) return undefined;
+
     return new Promise<void>((resolve) =>
       setImmediate(() => {
         began = performance.now();

@@ -88,6 +88,7 @@ const EntryRow = lazy(() =>
     saved_at: "number",
   }),
 );
+
 const VersionRow = lazy(() => type({ entry_id: "string", version_id: "string" }));
 
 /** What an account saved of a title: a row of its own, under its own id. */
@@ -161,10 +162,13 @@ export const watchlistStoreLayer: Layer.Layer<WatchlistStore, never, Database> =
   WatchlistStore,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return closed(opened.failure);
     const { db } = opened;
+
     return yield* Effect.try(() => {
       db.exec(SCHEMA);
+
       return storeOn(db);
     }).pipe(
       Effect.catchTag("UnknownError", (failure) =>
@@ -178,6 +182,7 @@ export const watchlistStoreLayer: Layer.Layer<WatchlistStore, never, Database> =
 
 function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
   const noSubscription = new Failed({ error: { kind: "no-subscription" } });
+
   const statements = {
     entries: db.prepare("select rowid, * from watchlist where account = ?"),
     // In the order they were written, which is the order the lists showed them in.
@@ -213,13 +218,17 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
     const byEntry = Map.groupBy(
       versions.flatMap((raw) => {
         const row = VersionRow()(raw);
+
         return row instanceof type.errors ? [] : [row];
       }),
       (row) => row.entry_id,
     );
+
     return rows.flatMap((raw) => {
       const row = EntryRow()(raw);
+
       if (row instanceof type.errors) return [];
+
       return [
         {
           id: row.id,
@@ -252,6 +261,7 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
     const found = facts.versionIds.flatMap((id) =>
       statements.byVersion.all(account, facts.kind, id).map((each) => String(each["id"])),
     );
+
     return [...new Set([...sharing(account, facts), ...found])]
       .flatMap((id) => row(account, id))
       .filter((saved) => sameTitle(saved, facts));
@@ -283,6 +293,7 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
       entry.savedAt,
     );
     statements.dropVersions.run(account, entry.id);
+
     for (const versionId of entry.versionIds) {
       statements.writeVersion.run(account, entry.id, entry.kind, versionId);
     }
@@ -295,14 +306,18 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
   const take = (account: string, facts: TitleFacts): SavedTitle | null => {
     const matches = matching(account, facts);
     const made = settled(matches, facts);
+
     if (!made) return null;
     const { kept, dropped } = made;
     // Most rows are as the lists describe them: those are left as they are.
     const stored = matches.find((entry) => entry.id === kept.id);
+
     if (dropped.length === 0 && stored && sameFacts(stored, kept)) return kept;
+
     // First, so the row kept can take a TMDB id one of them held.
     for (const id of dropped) drop(account, id);
     write(account, kept);
+
     return kept;
   };
 
@@ -324,10 +339,12 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
           // The entry keeps the place it has, whichever account's row gave it that, and the
           // id: a row written now stands behind that one, with the same time.
           const savedAt = saved(listed)[0]?.savedAt ?? at;
+
           for (const { account, facts } of listed) {
             if (facts.versionIds.length === 0 || take(account, facts)) continue;
             write(account, { ...facts, id: randomUUID(), savedAt });
           }
+
           return saved(listed)[0] ?? null;
         }),
       ),
@@ -336,8 +353,10 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
         transaction(db, () => {
           if (!stands()) throw noSubscription;
           const [named] = row(account, id);
+
           if (!named) return;
           drop(account, id);
+
           // What the other accounts saved of the same film is the same entry, and goes with it.
           for (const other of accounts()) {
             for (const found of sharing(other, named).flatMap((each) => row(other, each))) {
@@ -350,6 +369,7 @@ function storeOn(db: DatabaseSync): WatchlistStore["Service"] {
       attempt(() =>
         transaction(db, () => {
           if (!stands()) throw noSubscription;
+
           for (const facts of titles) take(account, facts);
         }),
       ),
@@ -371,6 +391,7 @@ function sameFacts(entry: SavedTitle, facts: TitleFacts): boolean {
 /** A store for when the database can't open: every call reports why. */
 function closed(detail: string): WatchlistStore["Service"] {
   const fail = unavailable(detail);
+
   return {
     entries: () => fail,
     find: () => fail,

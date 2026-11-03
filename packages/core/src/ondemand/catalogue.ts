@@ -63,6 +63,7 @@ export function indexCatalogue(
 ): IndexedCatalogue {
   const movies = once(() => finish(indexKind("movie", sources, language)));
   const series = once(() => finish(indexKind("series", sources, language)));
+
   return {
     language,
     get movies() {
@@ -85,6 +86,7 @@ export function* indexSteps(
 ): Steps<IndexedCatalogue> {
   const movies = yield* indexKind("movie", sources, language);
   const series = yield* indexKind("series", sources, language);
+
   return { language, movies, series };
 }
 
@@ -105,18 +107,23 @@ const namedRows = new WeakMap<OnDemandCatalogue, Partial<Record<TitleKind, reado
 /** A catalogue's rows of a kind, each id once; kept only once every row is read. */
 function* namedOf(catalogue: OnDemandCatalogue, kind: TitleKind): Steps<readonly Named[]> {
   const kept = namedRows.get(catalogue)?.[kind];
+
   if (kept) return kept;
   const due = pacer();
+
   const [categories, raw] =
     kind === "movie"
       ? [catalogue.movieCategories, catalogue.movies]
       : [catalogue.seriesCategories, catalogue.series];
+
   // The adult flag is a standard field; a category named for adults also counts.
   const isAdult = adultIn(categories);
   const seen = new Set<string>();
   const named: Named[] = [];
+
   for (const [listedOrder, item] of raw.entries()) {
     if (due()) yield;
+
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     named.push({
@@ -126,7 +133,9 @@ function* namedOf(catalogue: OnDemandCatalogue, kind: TitleKind): Steps<readonly
       adult: isAdult(item),
     });
   }
+
   namedRows.set(catalogue, { ...namedRows.get(catalogue), [kind]: named });
+
   return named;
 }
 
@@ -141,28 +150,35 @@ function* indexKind(
   // go with it.
   const groups: Listed[][] = [];
   const byTmdbId = new Map<string, Listed[]>();
+
   for (const { subscriptionId, catalogue } of sources) {
     for (const row of yield* namedOf(catalogue, kind)) {
       if (due()) yield;
       const listed = { ...row, subscriptionId };
       const key = row.item.tmdbId && !row.adult ? row.item.tmdbId : null;
       const group = key ? byTmdbId.get(key) : undefined;
+
       if (group) {
         group.push(listed);
         continue;
       }
+
       const created = [listed];
       groups.push(created);
+
       if (key) byTmdbId.set(key, created);
     }
   }
+
   const titles: Title[] = [];
   /** Every version's name, title by title, for search. */
   const names: string[][] = [];
   const byId = new Map<string, Title>();
+
   // A title can gather thousands of versions, so the work pauses between slices of versions.
   for (const group of groups) {
     const versions: Version[] = [];
+
     for (const listed of group) {
       if (due()) yield;
       versions.push({
@@ -171,12 +187,14 @@ function* indexKind(
         fit: group.length === 1 ? 1 : suitability(listed.name.tags, language),
       });
     }
+
     // The version suiting the language best first, then the newest; equals keep the order of
     // the subscriptions. One sort, without a pause: it is short next to the rest, 25,000 versions
     // of one film in about 10 ms in Node.
     if (versions.length > 1) {
       versions.sort((a, b) => b.fit - a.fit || (b.item.addedAt ?? 0) - (a.item.addedAt ?? 0));
     }
+
     const first = versions[0] as Version;
     // What the first version lacks, another may have; one pass, as most films have one version.
     let year = first.name.year;
@@ -186,18 +204,22 @@ function* indexKind(
     // New when a version the viewer would watch arrived, not a dub into another language.
     let addedAt = 0;
     let anyAddedAt = 0;
+
     for (const { item, name, fit } of versions) {
       if (due()) yield;
       year ??= name.year;
       posterUrl ??= item.posterUrl;
       backdropUrl ??= item.backdropUrl;
       rating = Math.max(rating, item.rating ?? 0);
+
       if (fit > 0) addedAt = Math.max(addedAt, item.addedAt ?? 0);
       anyAddedAt = Math.max(anyAddedAt, item.addedAt ?? 0);
     }
+
     const shown = { subscriptionId: first.subscriptionId, id: first.item.id };
     const tmdbId = first.item.tmdbId ?? null;
     const listedVersions: TitleVersion[] = [];
+
     for (const { subscriptionId, item, name, listedOrder } of versions) {
       if (due()) yield;
       listedVersions.push({
@@ -211,6 +233,7 @@ function* indexKind(
         ...defined({ episodeFiles: item.episodeFiles }),
       });
     }
+
     const title: Title = {
       kind,
       // The TMDB id names it wherever versions gather under one, whichever shows first.
@@ -231,33 +254,44 @@ function* indexKind(
       genres: [],
       versions: listedVersions,
     };
+
     titles.push(title);
     const spelled: string[] = [];
+
     for (const { item, name } of group) {
       if (due()) yield;
       spelled.push(name.title, item.name);
     }
+
     names.push(spelled);
   }
+
   const shown = sources.length > 1 ? yield* marked(titles) : titles;
+
   for (const title of shown) {
     for (const version of title.versions) {
       if (due()) yield;
       byId.set(ownedKey(version), title);
     }
   }
+
   const folded: SearchNames[] = [];
+
   function* searchNamesSteps(): Steps<readonly SearchNames[]> {
     const due = pacer();
+
     while (folded.length < shown.length) {
       if (due()) yield;
       // Read the cursor after yielding: another search may have prepared names meanwhile.
       const at = folded.length;
       const title = shown[at];
+
       if (title) folded.push(indexNames(title.title, names[at] ?? []));
     }
+
     return folded;
   }
+
   return {
     titles: shown,
     byId,
@@ -284,30 +318,40 @@ function* marked(titles: readonly Title[]): Steps<readonly Title[]> {
   const due = pacer();
   /** Which subscription lists what shows as this, or null once a second one does. */
   const listedBy = new Map<string, string | null>();
+
   const reads = (title: Title) =>
     `${title.adult}\n${title.year ?? ""}\n${title.title.toLowerCase()}`;
+
   for (const title of titles) {
     const key = reads(title);
+
     for (const { subscriptionId } of title.versions) {
       if (due()) yield;
       const owner = listedBy.get(key);
+
       if (owner === undefined) listedBy.set(key, subscriptionId);
       else if (owner !== subscriptionId) listedBy.set(key, null);
     }
   }
+
   const shown: Title[] = [];
+
   for (const title of titles) {
     const { subscriptionId } = title;
     let own = true;
+
     for (const version of title.versions) {
       if (due()) yield;
+
       if (version.subscriptionId !== subscriptionId) {
         own = false;
         break;
       }
     }
+
     shown.push(own && listedBy.get(reads(title)) === null ? { ...title, ambiguous: true } : title);
   }
+
   return shown;
 }
 
@@ -322,6 +366,7 @@ export function byIds(
   versions: readonly OwnedId[],
 ): Title[] {
   const { byId } = kindOf(catalogue, kind);
+
   return versions.flatMap((version) => byId.get(ownedKey(version)) ?? []);
 }
 
@@ -350,11 +395,15 @@ function aliasNames(title: Title, alias: string | TitleSearchAliases): SearchNam
   const displayed = typeof alias === "string" ? "" : (alias.title ?? "");
   const original = typeof alias === "string" ? null : (alias.original ?? null);
   const names = typeof alias === "string" ? (alias ? [alias] : []) : alias.names;
+
   if (!displayed && !original && names.length === 0) {
     preparedAliases.delete(title);
+
     return undefined;
   }
+
   const kept = preparedAliases.get(title);
+
   if (
     kept &&
     kept.title === displayed &&
@@ -365,6 +414,7 @@ function aliasNames(title: Title, alias: string | TitleSearchAliases): SearchNam
     return kept.indexed;
   const indexed = indexNames(displayed, original ? [original] : [], names);
   preparedAliases.set(title, { title: displayed, original, names: [...names], indexed });
+
   return indexed;
 }
 
@@ -411,6 +461,7 @@ export function* searchPageSteps(
 ): Steps<{ readonly titles: Title[]; readonly total: number; readonly unfiltered?: number }> {
   const due = pacer();
   const asked = nameQuery(query);
+
   if (asked.words.length === 0)
     return { titles: [], total: 0, ...defined({ unfiltered: selection ? 0 : undefined }) };
   const qualified = yearQuery(query);
@@ -424,39 +475,52 @@ export function* searchPageSteps(
   let worst: Ranked | undefined;
   let total = 0;
   let unfiltered = 0;
+
   for (const [index, title] of titles.entries()) {
     if (due()) yield;
+
     if (title.adult) continue;
     const extra = aliasNames(title, aliases(title));
     const names = searchNames[index];
+
     if (!names) continue;
     let rank = scoreNames(asked, names, extra);
+
     if (qualified && title.year === qualified.year) {
       const withYear = scoreNames(qualified.query, names, extra);
+
       if (withYear !== undefined) rank = Math.min(rank ?? Infinity, withYear);
     }
+
     if (rank === undefined) continue;
     unfiltered++;
+
     const selected = selection
       ? filterTitles([title], selection.filters, selection.files)[0]
       : title;
+
     if (!selected) continue;
     total++;
+
     // Ambiguous numeric names retain literal recall, after matches with the requested year.
     const entry = {
       title: selected,
       rank,
       yearRank: qualified && title.year !== qualified.year ? 1 : 0,
     };
+
     if (worst && compareRanked(entry, worst) >= 0) continue;
     ranked.push(entry);
+
     if (ranked.length >= 2 * limit) {
       ranked.sort(compareRanked);
       ranked.length = limit;
       worst = ranked[limit - 1];
     }
   }
+
   ranked.sort(compareRanked);
+
   return {
     titles: ranked.slice(0, limit).map((entry) => entry.title),
     total,
@@ -488,5 +552,6 @@ interface Version extends Listed {
 
 function once<A>(make: () => A): () => A {
   let value: { readonly made: A } | null = null;
+
   return () => (value ??= { made: make() }).made;
 }

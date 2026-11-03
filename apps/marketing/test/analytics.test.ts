@@ -13,16 +13,19 @@ import { ENTRY } from "../src/referrals.ts";
 // metrics shaped as web-vitals reports them, attribution and all.
 
 type Report = (metric: Record<string, unknown>) => void;
+
 const vitals = vi.hoisted(() => ({
   LCP: [] as Report[],
   CLS: [] as Report[],
   INP: [] as Report[],
 }));
+
 vi.mock("web-vitals", () => ({
   onLCP: (report: Report) => vitals.LCP.push(report),
   onCLS: (report: Report) => vitals.CLS.push(report),
   onINP: (report: Report) => vitals.INP.push(report),
 }));
+
 /** web-vitals reporting a metric to the page that started last. */
 const report = (name: "LCP" | "CLS" | "INP", value: number) =>
   vitals[name].at(-1)?.({
@@ -40,8 +43,10 @@ const report = (name: "LCP" | "CLS" | "INP", value: number) =>
 const root = join(import.meta.dirname, "..");
 const home = readFileSync(join(root, "index.html"), "utf8");
 const missing = readFileSync(join(root, "404.html"), "utf8");
+
 /** The download page, where every installer link and the Store sit. */
 const download = renderPage("download/index.html", null, null);
+
 /** A production build's capture: the site's own route to PostHog. */
 const CAPTURE = {
   endpoint: "https://mrstreamer.app/ingest/i/v0/e/",
@@ -54,6 +59,7 @@ const pending = (_url: string, init: RequestInit) =>
   new Promise<Response>((_, reject) =>
     init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))),
   );
+
 let fetchMock = vi.fn(pending);
 let stop = (): void => {};
 
@@ -83,34 +89,46 @@ const sent = () =>
       properties: Record<string, unknown>;
     },
   }));
+
 const events = () => sent().map(({ body }) => [body.event, body.properties]);
+
 /** What a visitor reads in a switch: its text without hidden parts. */
 const shown = (selector: string) => {
   const copy = document.querySelector(selector)?.cloneNode(true);
+
   if (!(copy instanceof Element)) return undefined;
+
   for (const hidden of copy.querySelectorAll("[hidden]")) hidden.remove();
+
   return copy.textContent?.replace(/\s+/g, " ").trim();
 };
+
 const footer = () => shown('[data-site-analytics="footer"]');
+
 const button = () =>
   document.querySelector<HTMLButtonElement>('[data-site-analytics="footer"] button');
+
 const click = (selector: string) =>
   document
     .querySelector<HTMLElement>(selector)
     ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
 /** A leave's scroll depth: its deepest scroll and view as shares of the page. */
 const depth = (route: string, scroll: number, content: number) => ({
   $prev_pageview_pathname: route,
   $prev_pageview_max_scroll_percentage: scroll,
   $prev_pageview_max_content_percentage: content,
 });
+
 /** Hides the page as a browser does when it is switched away from or closed. */
 const hide = () => {
   Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
   document.dispatchEvent(new Event("visibilitychange"));
 };
+
 /** Where a visit entered when nothing says: a typed address, a bookmark or a hidden referrer. */
 const unknown = { entry_source: "unknown", entry_medium: "unknown", entry_campaign: "none" };
+
 /** What every event carries besides its own properties, for a page at `route`. */
 const fixed = (route: string) => ({
   $current_url: `https://mrstreamer.app${route}`,
@@ -127,6 +145,7 @@ const fixed = (route: string) => ({
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+
   for (const reports of Object.values(vitals)) reports.length = 0;
   fetchMock = vi.fn(pending);
   vi.stubGlobal("fetch", fetchMock);
@@ -138,12 +157,14 @@ afterEach(() => {
   stop();
   vi.useRealTimers();
   stop = () => {};
+
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   Reflect.deleteProperty(navigator, "globalPrivacyControl");
   Reflect.deleteProperty(navigator, "doNotTrack");
   Reflect.deleteProperty(document, "visibilityState");
   Reflect.deleteProperty(document, "referrer");
+
   for (const name of ["scrollHeight", "clientHeight"])
     Reflect.deleteProperty(document.documentElement, name);
   Reflect.deleteProperty(window, "scrollY");
@@ -255,6 +276,7 @@ describe("website analytics", () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => frames.push(frame));
     vi.stubGlobal("cancelAnimationFrame", () => {});
+
     /** A page `height` tall seen through a view `view` tall, scrolled to `top`. */
     const page = (height: number, view: number, top: number) => {
       Object.defineProperty(document.documentElement, "scrollHeight", {
@@ -267,10 +289,12 @@ describe("website analytics", () => {
       });
       Object.defineProperty(window, "scrollY", { value: top, configurable: true });
     };
+
     start(home);
     page(3000, 1000, 0);
     expect(frames).toHaveLength(0);
     page(3000, 1000, 1000);
+
     for (let wheel = 0; wheel < 5; wheel++) dispatchEvent(new Event("scroll"));
     expect(frames).toHaveLength(1);
     frames.shift()?.(0);
@@ -299,6 +323,7 @@ describe("website analytics", () => {
     hide();
     report("CLS", 0.123456);
     report("INP", 208);
+
     for (const value of [Number.NaN, Number.POSITIVE_INFINITY, -1, 15 * 60_000])
       report("LCP", value);
     const measured = sent().filter(({ body }) => body.event === "$web_vitals");
@@ -363,6 +388,7 @@ describe("website analytics", () => {
 
   it("send at most a fixed number of requests from one page", () => {
     start(home);
+
     for (let attempt = 0; attempt < MAX_EVENTS + 10; attempt++)
       click('footer a[href="https://github.com/Mr-Streamer-OSS/MrStreamer"]');
     expect(fetchMock).toHaveBeenCalledTimes(MAX_EVENTS);
@@ -465,6 +491,7 @@ describe("website analytics", () => {
     const fail = () => {
       throw new Error("Storage unavailable");
     };
+
     vi.stubGlobal("localStorage", { getItem: fail, setItem: fail, removeItem: fail });
     start(home);
     expect(footer()).toBe("Site analytics: off. What's counted");
@@ -490,6 +517,7 @@ describe("website analytics", () => {
     // An observer that reports what the test says is in view, for the parts it watches.
     const watched = new Set<Element>();
     let inView = (_target: Element): void => {};
+
     vi.stubGlobal(
       "IntersectionObserver",
       class implements IntersectionObserver {
@@ -522,11 +550,14 @@ describe("website analytics", () => {
     });
     start(renderPage("faq/index.html", null, null), "/faq");
     const question = document.querySelector<HTMLDetailsElement>("#free");
+
     if (!question) throw new Error("No #free question");
+
     const toggle = (open: boolean) => {
       question.open = open;
       question.dispatchEvent(new Event("toggle"));
     };
+
     const counted = () => events().filter(([event]) => event === "faq_question_viewed");
 
     inView(question);
@@ -585,6 +616,7 @@ describe("where a visit entered the site", () => {
         properties["entry_medium"],
         properties["entry_campaign"],
       ]);
+
   const bodies = () => sent().map(({ init }) => String(init.body));
 
   it("take a listed campaign's codes and nothing else from the address", () => {
@@ -799,6 +831,7 @@ describe("where a visit entered the site", () => {
     const fail = () => {
       throw new Error("Storage unavailable");
     };
+
     vi.stubGlobal("sessionStorage", { getItem: fail, setItem: fail, removeItem: fail });
     start(home, "/?utm_source=github", "https://github.com/");
     start(download, "/download", "https://mrstreamer.app/");
@@ -853,6 +886,7 @@ describe("website analytics build configuration", () => {
     expect(route.test(endpoint.pathname)).toBe(true);
     expect(INGEST_ROUTE.methods).toEqual(["POST"]);
     expect(INGEST_ROUTE.dest).toBe("https://eu.i.posthog.com/i/v0/e/");
+
     for (const path of [
       "/ingest/i/v0/e",
       "/ingest/i/v0/e/x",
@@ -870,6 +904,7 @@ describe("website analytics build configuration", () => {
       { MR_STREAMER_SITE_ANALYTICS_LOCAL_ENDPOINT: "http://127.0.0.1:4555/i/v0/e/" },
       false,
     );
+
     open(home);
     stop = startSiteAnalytics(local);
     expect(sent()[0]?.url).toBe("http://127.0.0.1:4555/i/v0/e/");
@@ -881,11 +916,13 @@ describe("website analytics build configuration", () => {
       ...release,
       MR_STREAMER_SITE_ANALYTICS_LOCAL_ENDPOINT: "http://127.0.0.1:4555/i/v0/e/",
     };
+
     expect(siteAnalyticsConfiguration(local, true)).toEqual({
       endpoint: "http://127.0.0.1:4555/i/v0/e/",
       token: "mrstreamer-local-verification",
       apiHost: null,
     });
+
     for (const endpoint of [
       "http://example.com:4555/i/v0/e/",
       "http://127.0.0.1/i/v0/e/",

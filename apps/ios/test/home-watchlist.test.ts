@@ -21,12 +21,16 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+
 vi.mock("expo-router", () => ({
   useIsFocused: () => true,
   router: { push: (href: string) => scenario.did.push(`push ${href}`) },
 }));
+
 vi.mock("expo-video", () => ({ VideoView: () => null }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
@@ -35,6 +39,7 @@ vi.mock("../src/account.ts", () => ({
   retry: () => undefined,
   retryChannels: () => undefined,
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
   titleLists: () => scenario.lists,
@@ -44,12 +49,14 @@ vi.mock("../src/titles.ts", () => ({
   useHasTitles: () => false,
   named: (title: Title) => title,
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: (title: Title) =>
     scenario.did.push(`details ${title.kind} ${title.subscriptionId}:${title.id}`),
   resume: () => undefined,
   useContinueWatching: () => [],
 }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({ phase: { kind: "idle" } }),
   channelStatus: () => null,
@@ -58,18 +65,26 @@ vi.mock("../src/playback.ts", () => ({
   retry: () => undefined,
   setMuted: () => undefined,
 }));
+
 vi.mock("../src/storage.ts", () => ({ useSavedState: () => ({}) }));
+
 vi.mock("../src/viewing.ts", () => ({
   removeFromContinue: async () => undefined,
   useViewing: () => null,
 }));
+
 vi.mock("../src/errors.ts", () => ({ failureOf: () => ({ headline: "", advice: "" }) }));
+
 vi.mock("../src/header.tsx", () => ({ tabHref: (_tab: string, screen: string) => `/${screen}` }));
+
 vi.mock("../src/glass.tsx", () => ({ Glass: () => null, IconButton: () => null }));
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   const pass = ({ children }: { children?: React.ReactNode }) =>
     createElement(Fragment, null, children);
+
   return {
     Docked: pass,
     Placeholders: () => null,
@@ -78,14 +93,17 @@ vi.mock("../src/loading.tsx", async () => {
     useDockInset: () => 0,
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#A1A1A6", line: "#2C2C2E" },
   ChannelLogo: () => null,
   Message: () => null,
   Notice: () => null,
 }));
+
 vi.mock("../src/titles-ui.tsx", async () => {
   const { createElement } = await import("react");
+
   /** A heading as its accessibility label says it, opening all of it when it can. */
   const head = (name: string, total: number, onAll?: () => void) =>
     createElement(
@@ -93,6 +111,7 @@ vi.mock("../src/titles-ui.tsx", async () => {
       { "data-testid": `head-${name}`, onClick: onAll },
       onAll ? `${name}, all ${total}` : name,
     );
+
   return {
     PlaceholderShelf: () => null,
     ShelfHead: ({ name, total, onAll }: { name: string; total: number; onAll?: () => void }) =>
@@ -146,13 +165,16 @@ const movie = (id: string, name: string, tmdbId: string | null = null): Provider
   container: "mp4",
   tmdbId,
 });
+
 const lists = (movies: readonly ProviderTitle[]): OnDemandCatalogue => ({
   movieCategories: [],
   movies,
   seriesCategories: [],
   series: [],
 });
+
 type Standing = Member["titles"];
+
 const ready = (value: OnDemandCatalogue): Standing =>
   ({ kind: "ready", value, from: "provider", fetchedAt: 0, took: 1 }) as Standing;
 
@@ -169,47 +191,60 @@ const member = (id: string, titles: Standing, needsSecret = false): Member =>
 /** The providers as they stand, their lists that show indexed together as the app does. */
 function providers(...each: { id: string; titles: Standing; lost?: boolean }[]) {
   scenario.members = each.map(({ id, titles, lost }) => member(id, titles, lost));
+
   const listed = each.flatMap(({ id, titles }) => {
     const catalogue =
       titles.kind === "ready" ? titles.value : "last" in titles ? titles.last : null;
+
     return catalogue ? [{ subscriptionId: id, catalogue }] : [];
   });
+
   const index = indexCatalogue(listed, "en");
   scenario.lists = { kind: "ready", index };
   React.act(() => watchlist.setWatchlistOwners(each.map(({ id }) => id)));
   draw();
+
   return index;
 }
 
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function draw() {
   if (!root) {
     container = document.createElement("div");
     root = createRoot(container);
   }
+
   React.act(() => root!.render(React.createElement(Home)));
 }
+
 /** The watchlist's posters, by the version each opens with. */
 const posters = () =>
   [...container.querySelectorAll('[data-shelf="Watchlist"] [data-testid^="poster-"]')].map(
     (poster) => poster.getAttribute("data-testid")!.slice("poster-".length),
   );
+
 const heading = () => container.querySelector('[data-testid="head-Watchlist"]');
+
 function press(testID: string) {
   const button = container.querySelector(`[data-testid="${testID}"]`) as {
     click(): void;
   } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
 }
+
 const dune = (index: ReturnType<typeof indexCatalogue>) =>
   kindOf(index, "movie").titles.find((title) => title.tmdbId === "100")!;
 
 beforeEach(() => {
   scenario.did = [];
+
   for (const id of ["a", "b"]) watchlist.eraseWatchlist(id);
 });
+
 afterEach(() => {
   if (root) React.act(() => root!.unmount());
   root = null;
@@ -257,12 +292,14 @@ describe("Home's watchlist", () => {
     const shown = lists([movie("7", "Dune", "100")]);
     const index = providers({ id: "a", titles: ready(shown) });
     React.act(() => watchlist.saveTitle(dune(index)));
+
     const failed = {
       kind: "failed",
       error: { kind: "unexpected", detail: "" },
       last: shown,
       since: 0,
     } as Standing;
+
     providers({ id: "a", titles: failed });
     expect(posters()).toEqual(["a:7"]);
     expect(heading()?.textContent).toBe("Watchlist, all 1");

@@ -21,16 +21,22 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
   useRootNavigationState: () => undefined,
   useIsFocused: () => true,
 }));
+
 vi.mock("../src/playback.ts", () => ({ usePlayback: () => ({ watch: false }) }));
+
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+
 // The top bar's queue button, which header.tsx brings, has separate coverage.
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: [livingRoom] }),
   playlistReport: () => scenario.reports.shift()!(),
@@ -79,6 +85,7 @@ const report = (kids: PlaylistMode | null): PlaylistReport => ({
 });
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   scenario.reports.length = 0;
@@ -93,6 +100,7 @@ async function mount(view: PlaylistView) {
   );
   unmount = () => React.act(() => root.unmount());
   const button = (id: string) => container.querySelector(`[data-testid="${id}"]`)!;
+
   return {
     text: () => container.textContent,
     button,

@@ -47,13 +47,16 @@ export function dvbDecoder(page: number | null) {
       // A data identifier of 0x20 and a stream id of 0, then segments.
       if (payload[0] !== 0x20 || payload[1] !== 0x00) return null;
       let change: SubtitleChange | null = null;
+
       for (let offset = 2; offset + 6 <= payload.length && payload[offset] === 0x0f;) {
         const type = payload[offset + 1]!;
         const pageId = (payload[offset + 2]! << 8) | payload[offset + 3]!;
         const length = (payload[offset + 4]! << 8) | payload[offset + 5]!;
         const body = payload.subarray(offset + 6, offset + 6 + length);
         offset += 6 + length;
+
         if (page !== null && pageId !== page) continue;
+
         switch (type) {
           case 0x10:
             pageComposition(body);
@@ -84,6 +87,7 @@ export function dvbDecoder(page: number | null) {
             break;
         }
       }
+
       return change;
     },
   };
@@ -91,10 +95,12 @@ export function dvbDecoder(page: number | null) {
   function pageComposition(body: Uint8Array): void {
     if (body.length < 2) return;
     const state = (body[1]! >> 2) & 0x03;
+
     // A mode change or acquisition point starts afresh: regions and colours are sent again.
     if (state === 1 || state === 2) epoch = { ...newEpoch(), display: epoch.display };
     epoch.timeOut = body[0]!;
     epoch.page = [];
+
     for (let offset = 2; offset + 6 <= body.length; offset += 6) {
       epoch.page.push({
         regionId: body[offset]!,
@@ -113,9 +119,12 @@ export function dvbDecoder(page: number | null) {
     const depthCode = (body[6]! >> 2) & 0x07;
     const depth = depthCode === 1 ? 2 : depthCode === 2 ? 4 : 8;
     const clut = body[7]!;
+
     const background =
       depth === 8 ? body[8]! : depth === 4 ? body[9]! >> 4 : (body[9]! >> 2) & 0x03;
+
     let region = epoch.regions.get(id);
+
     if (!region || region.width !== width || region.height !== height) {
       region = {
         width,
@@ -129,12 +138,15 @@ export function dvbDecoder(page: number | null) {
       };
       epoch.regions.set(id, region);
     }
+
     region.depth = depth;
     region.clut = clut;
     region.background = background;
     region.fill = fill;
+
     if (fill) region.pixels.fill(background);
     region.objects = [];
+
     for (let offset = 10; offset + 6 <= body.length;) {
       const objectId = (body[offset]! << 8) | body[offset + 1]!;
       const objectType = body[offset + 2]! >> 6;
@@ -150,6 +162,7 @@ export function dvbDecoder(page: number | null) {
     const id = body[0]!;
     const clut = epoch.cluts.get(id) ?? defaultClut();
     epoch.cluts.set(id, clut);
+
     for (let offset = 2; offset + 2 <= body.length;) {
       const entry = body[offset]!;
       const flags = body[offset + 1]!;
@@ -158,6 +171,7 @@ export function dvbDecoder(page: number | null) {
       let cr: number;
       let cb: number;
       let t: number;
+
       if (fullRange) {
         if (offset + 6 > body.length) break;
         [y, cr, cb, t] = [
@@ -176,9 +190,13 @@ export function dvbDecoder(page: number | null) {
         t = (packed & 0x03) * 85;
         offset += 4;
       }
+
       const colour = y === 0 ? 0 : rgba(y, cr, cb, 255 - t);
+
       if (flags & 0x80 && entry < 4) clut[2][entry] = colour;
+
       if (flags & 0x40 && entry < 16) clut[4][entry] = colour;
+
       if (flags & 0x20) clut[8][entry] = colour;
     }
   }
@@ -187,13 +205,16 @@ export function dvbDecoder(page: number | null) {
     if (body.length < 3) return;
     const id = (body[0]! << 8) | body[1]!;
     const method = (body[2]! >> 2) & 0x03;
+
     // Only pixel objects; character objects are text DVB never carries in practice.
     if (method !== 0 || body.length < 7) return;
     const topLength = (body[3]! << 8) | body[4]!;
     const bottomLength = (body[5]! << 8) | body[6]!;
     const top = body.subarray(7, 7 + topLength);
+
     const bottom =
       bottomLength > 0 ? body.subarray(7 + topLength, 7 + topLength + bottomLength) : top;
+
     for (const region of epoch.regions.values()) {
       for (const placed of region.objects) {
         if (placed.id !== id) continue;
@@ -211,6 +232,7 @@ export function dvbDecoder(page: number | null) {
       x: 0,
       y: 0,
     };
+
     // A window places the subtitles inside the display.
     if (body[0]! & 0x08 && body.length >= 13) {
       epoch.display.x = (body[5]! << 8) | body[6]!;
@@ -221,19 +243,24 @@ export function dvbDecoder(page: number | null) {
   /** The page's regions as pictures, leaving out the ones that are all clear. */
   function render(): SubtitlePicture[] {
     const pictures: SubtitlePicture[] = [];
+
     for (const placed of epoch.page) {
       const region = epoch.regions.get(placed.regionId);
+
       if (!region) continue;
       const colours = (epoch.cluts.get(region.clut) ?? defaultClut())[region.depth];
       const rgbaPixels = new Uint8ClampedArray(region.width * region.height * 4);
       const view = new DataView(rgbaPixels.buffer);
       let visible = false;
+
       for (let index = 0; index < region.pixels.length; index++) {
         const colour = colours[region.pixels[index]!]!;
+
         if ((colour & 0xff) === 0) continue;
         visible = true;
         view.setUint32(index * 4, colour);
       }
+
       if (!visible) continue;
       pictures.push({
         x: epoch.display.x + placed.x,
@@ -243,6 +270,7 @@ export function dvbDecoder(page: number | null) {
         rgba: rgbaPixels,
       });
     }
+
     return pictures;
   }
 }
@@ -252,8 +280,10 @@ function* pageCompositions(
   payload: Uint8Array,
 ): Generator<{ pageId: number; state: number; regions: number }> {
   if (payload[0] !== 0x20 || payload[1] !== 0x00) return;
+
   for (let offset = 2; offset + 6 <= payload.length && payload[offset] === 0x0f;) {
     const length = (payload[offset + 4]! << 8) | payload[offset + 5]!;
+
     if (payload[offset + 1] === 0x10 && length >= 2) {
       yield {
         pageId: (payload[offset + 2]! << 8) | payload[offset + 3]!,
@@ -261,6 +291,7 @@ function* pageCompositions(
         regions: Math.floor((length - 2) / 6),
       };
     }
+
     offset += 6 + length;
   }
 }
@@ -277,12 +308,14 @@ export function dvbStartsAfresh(payload: Uint8Array, page: number | null): boole
       return composition.state === 1 || composition.state === 2;
     }
   }
+
   return false;
 }
 
 /** Whether a PES payload shows a page without regions: what ffmpeg writes to end a picture. */
 export function dvbClears(payload: Uint8Array): boolean {
   const [composition] = pageCompositions(payload);
+
   return composition?.regions === 0;
 }
 
@@ -308,16 +341,21 @@ function drawField(region: Region, x0: number, y0: number, data: Uint8Array): vo
   let map2to4 = [0x0, 0x7, 0x8, 0xf];
   let map2to8 = [0x00, 0x77, 0x88, 0xff];
   let map4to8 = Array.from({ length: 16 }, (_, index) => index * 0x11);
+
   const put = (colour: number, run: number) => {
     if (y >= region.height) return;
     const end = Math.min(x + run, region.width);
+
     for (let px = x; px < end; px++) region.pixels[y * region.width + px] = colour;
     x += run;
   };
+
   const full = () => x >= region.width;
+
   for (let offset = 0; offset < data.length;) {
     const type = data[offset++]!;
     const bits = new BitReader(data, offset);
+
     switch (type) {
       case 0x10: {
         const map = region.depth === 8 ? map2to8 : region.depth === 4 ? map2to4 : [0, 1, 2, 3];
@@ -325,12 +363,14 @@ function drawField(region: Region, x0: number, y0: number, data: Uint8Array): vo
         offset = bits.byteAligned();
         break;
       }
+
       case 0x11: {
         const map = region.depth === 8 ? map4to8 : null;
         fourBit(bits, (code, run) => put(map ? map[code]! : code, run), full);
         offset = bits.byteAligned();
         break;
       }
+
       case 0x12:
         eightBit(bits, (code, run) => put(code, run), full);
         offset = bits.byteAligned();
@@ -371,19 +411,23 @@ function twoBit(
 ): void {
   while (!full()) {
     const code = bits.read(2);
+
     if (code !== 0) {
       run(code, 1);
       continue;
     }
+
     if (bits.read(1) === 1) {
       const length = bits.read(3) + 3;
       run(bits.read(2), length);
       continue;
     }
+
     if (bits.read(1) === 1) {
       run(0, 1);
       continue;
     }
+
     switch (bits.read(2)) {
       case 0:
         return;
@@ -395,12 +439,14 @@ function twoBit(
         run(bits.read(2), length);
         break;
       }
+
       case 3: {
         const length = bits.read(8) + 29;
         run(bits.read(2), length);
         break;
       }
     }
+
     if (bits.done) return;
   }
 }
@@ -412,21 +458,26 @@ function fourBit(
 ): void {
   while (!full()) {
     const code = bits.read(4);
+
     if (code !== 0) {
       run(code, 1);
       continue;
     }
+
     if (bits.read(1) === 0) {
       const length = bits.read(3);
+
       if (length === 0) return;
       run(0, length + 2);
       continue;
     }
+
     if (bits.read(1) === 0) {
       const length = bits.read(2) + 4;
       run(bits.read(4), length);
       continue;
     }
+
     switch (bits.read(2)) {
       case 0:
         run(0, 1);
@@ -439,12 +490,14 @@ function fourBit(
         run(bits.read(4), length);
         break;
       }
+
       case 3: {
         const length = bits.read(8) + 25;
         run(bits.read(4), length);
         break;
       }
     }
+
     if (bits.done) return;
   }
 }
@@ -456,18 +509,22 @@ function eightBit(
 ): void {
   while (!full()) {
     const code = bits.read(8);
+
     if (code !== 0) {
       run(code, 1);
       continue;
     }
+
     if (bits.read(1) === 0) {
       const length = bits.read(7);
+
       if (length === 0) return;
       run(0, length);
     } else {
       const length = bits.read(7);
       run(bits.read(8), length);
     }
+
     if (bits.done) return;
   }
 }
@@ -488,14 +545,17 @@ class BitReader {
 
   read(count: number): number {
     let value = 0;
+
     for (let index = 0; index < count; index++) {
       const byte = this.data[this.offset] ?? 0;
       value = (value << 1) | ((byte >> (7 - this.bit)) & 1);
+
       if (++this.bit === 8) {
         this.bit = 0;
         this.offset++;
       }
     }
+
     return value;
   }
 
@@ -509,18 +569,23 @@ class BitReader {
 function defaultClut(): Clut {
   const colour = (r: number, g: number, b: number, alpha = 255) =>
     ((r << 24) | (g << 16) | (b << 8) | alpha) >>> 0;
+
   const two = Uint32Array.of(0, colour(255, 255, 255), colour(0, 0, 0), colour(127, 127, 127));
   const four = new Uint32Array(16);
+
   for (let index = 1; index < 16; index++) {
     const level = index < 8 ? 255 : 127;
     four[index] = colour(index & 1 ? level : 0, index & 2 ? level : 0, index & 4 ? level : 0);
   }
+
   const eight = new Uint32Array(256);
+
   for (let index = 1; index < 256; index++) {
     if (index < 8) {
       eight[index] = colour(index & 1 ? 255 : 0, index & 2 ? 255 : 0, index & 4 ? 255 : 0, 63);
       continue;
     }
+
     const level = (bit: number, high: number) => (index & bit ? high : 0);
     eight[index] = colour(
       level(1, 170) + level(16, 85),
@@ -529,6 +594,7 @@ function defaultClut(): Clut {
       index & 0x88 ? 255 : 127,
     );
   }
+
   return { 2: two, 4: four, 8: eight };
 }
 
@@ -538,6 +604,7 @@ function rgba(y: number, cr: number, cb: number, alpha: number): number {
   const r = clamp(c + 1.596 * (cr - 128));
   const g = clamp(c - 0.813 * (cr - 128) - 0.391 * (cb - 128));
   const b = clamp(c + 2.018 * (cb - 128));
+
   return ((r << 24) | (g << 16) | (b << 8) | clamp(alpha)) >>> 0;
 }
 
@@ -552,26 +619,35 @@ function clamp(value: number): number {
  */
 export function dvbPagePresent(payload: Uint8Array, page: number | null): boolean {
   if (payload[0] !== 0x20 || payload[1] !== 0) return false;
+
   for (let offset = 2; offset + 6 <= payload.length && payload[offset] === 0x0f;) {
     const type = payload[offset + 1]!;
     const pageId = (payload[offset + 2]! << 8) | payload[offset + 3]!;
     const length = (payload[offset + 4]! << 8) | payload[offset + 5]!;
     const end = offset + 6 + length;
+
     if (end > payload.length) return false;
     const body = payload.subarray(offset + 6, end);
     offset = end;
+
     if (page !== null && pageId !== page) continue;
+
     if (type === 0x10 && body.length >= 8 && (body.length - 2) % 6 === 0) return true;
+
     if (type === 0x11 && body.length >= 10) {
       const width = (body[2]! << 8) | body[3]!;
       const height = (body[4]! << 8) | body[5]!;
+
       if (width > 0 && height > 0 && (body.length >= 16 || (body[1]! & 0x08) !== 0)) return true;
     }
+
     if (type === 0x13 && body.length >= 7 && ((body[2]! >> 2) & 3) === 0) {
       const top = (body[3]! << 8) | body[4]!;
       const bottom = (body[5]! << 8) | body[6]!;
+
       if (top + bottom > 0 && body.length >= 7 + top + bottom) return true;
     }
   }
+
   return false;
 }

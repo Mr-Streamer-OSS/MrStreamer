@@ -15,6 +15,7 @@ import type { FakeProvider } from "../../desktop/test/fake-provider.ts";
 export function liveLists(provider: Pick<FakeProvider, "catalogue" | "serveChannels">) {
   const known = new Set(provider.catalogue.channels.map((each) => String(each.streamId)));
   let unlisted = new Set<string>();
+
   const state = () => ({
     unlisted: [...unlisted].toSorted(),
     listed: known.size - unlisted.size,
@@ -25,15 +26,20 @@ export function liveLists(provider: Pick<FakeProvider, "catalogue" | "serveChann
     unlisted: (id: string) => unlisted.has(id),
     control(method: string, url: URL): { status: number; body: unknown } | undefined {
       if (url.pathname !== "/live-lists") return undefined;
+
       if (method === "GET") return { status: 200, body: state() };
+
       if (method !== "POST") return undefined;
       const asked = url.searchParams.get("unlist");
+
       if (asked === null) return { status: 400, body: null };
       const ids = asked.split(",").filter(Boolean);
+
       if (ids.some((id) => !known.has(id))) return { status: 400, body: null };
       unlisted = new Set(ids);
       const left = unlisted;
       provider.serveChannels((all) => all.filter((each) => !left.has(String(each.streamId))));
+
       return { status: 200, body: state() };
     },
   };

@@ -16,6 +16,7 @@ import { STABLE_PLAYBACK_MS, type PlaybackProblem, type PlayerState } from "../.
 import { receiverProblem } from "./Output.tsx";
 
 export type FailedPhase = Extract<PlayerState["phase"], { kind: "failed" }>;
+
 export type ReconnectingPhase = Extract<PlayerState["phase"], { kind: "reconnecting" }>;
 
 /** Which of a channel's streams its last try got to, by the names the quality menu gives them. */
@@ -30,11 +31,14 @@ export interface Tried {
 export function triedStreams(channel: LiveChannel, stream: LivePlaying | null): Tried | null {
   if (!stream) return null;
   const ids = new Set(stream.failed.map(({ variantId }) => variantId));
+
   if (stream.variantId) ids.add(stream.variantId);
   const choices = qualityChoices(channel);
+
   const names = [...ids].flatMap(
     (id) => choices.find(({ variant }) => variant.id === id)?.name ?? [],
   );
+
   return { names, untried: channel.variants.length - names.length };
 }
 
@@ -53,9 +57,11 @@ export function canRetry(problem: PlaybackProblem): boolean {
   if (problem.kind === "receiver") {
     return receiverProblem(problem.failure, problem.lost, outputs.failedOn(), null).retry;
   }
+
   if (problem.kind === "app") {
     return !["invalid-login", "needs-secret", "catch-up"].includes(problem.error.kind);
   }
+
   return problem.kind !== "unsupported";
 }
 
@@ -91,9 +97,11 @@ export function failureCopy(
   const named = source?.several ? source.name : null;
   const name = channel.title;
   const stays = chosen ? ` ${t("Your choice stays {quality}.", { quality: chosen })}` : "";
+
   const its = chosen
     ? t("{name}'s {quality} stream", { name, quality: chosen })
     : t("{name}'s stream", { name });
+
   switch (problem.kind) {
     case "unavailable":
       if (chosen) {
@@ -110,6 +118,7 @@ export function failureCopy(
             stays,
         };
       }
+
       if (tried && tried.names.length > 1 && tried.untried === 0) {
         return {
           title: t("No stream right now"),
@@ -121,6 +130,7 @@ export function failureCopy(
             : t("The provider lists {name} but sent no stream for any of its qualities.", { name }),
         };
       }
+
       return {
         title: t("No stream right now"),
         body: named
@@ -141,6 +151,7 @@ export function failureCopy(
               ),
         };
       }
+
       return {
         title: named ? t("Refused by {source}", { source: named }) : t("Refused by the provider"),
         body:
@@ -178,10 +189,12 @@ export function failureCopy(
               body: t("{stream} sent no picture or sound.", { stream: its }) + stays,
             };
       }
+
       if (recovery.relapses > 0) {
         const other = !chosen && channel.variants.length > 1;
         const seconds = STABLE_PLAYBACK_MS / 1000;
         const relapses = recovery.relapses;
+
         return {
           title: t("Keeps dropping"),
           body:
@@ -202,6 +215,7 @@ export function failureCopy(
                   })) + (other ? ` ${t("Another quality may hold better.")}` : stays),
         };
       }
+
       return {
         title: t("Lost the stream"),
         body:
@@ -212,6 +226,7 @@ export function failureCopy(
     case "app":
       if (problem.error.kind === "needs-secret") {
         const subscription = source?.name;
+
         return {
           title: subscription
             ? playlist
@@ -223,6 +238,7 @@ export function failureCopy(
           body: t("Its channels play once you enter it. The lists show what it loaded before."),
         };
       }
+
       return problem.error.kind === "invalid-login"
         ? { title: t("Login not accepted"), body: describeError(problem.error) }
         : { title: t("Can't open this channel"), body: describeOpening(problem.error) };
@@ -237,6 +253,7 @@ export function failureCopy(
  */
 function refusalCheck(status: number, playlist: boolean): string {
   if (status !== 401 && status !== 403) return "";
+
   return ` ${
     playlist
       ? t("Some playlist channels only play in certain countries.")
@@ -258,6 +275,7 @@ const QUOTES_NOTHING = new Set<AppError["kind"]>([
 /** Why a channel's session didn't open, without what an error quotes: a server's name or an engine's words. */
 function describeOpening(error: AppError): string {
   if (QUOTES_NOTHING.has(error.kind)) return describeError(error);
+
   return error.kind === "unreachable"
     ? t("The provider can't be reached.")
     : t("Mr. Streamer couldn't open it.");
@@ -274,6 +292,7 @@ export function failureEvidence(
 ): string {
   if (problem.kind === "app" || problem.kind === "receiver") return "";
   const { chosen, tried } = context;
+
   return [
     "status" in problem ? `HTTP ${problem.status}` : null,
     chosen
@@ -299,6 +318,7 @@ export function failureTitle(failed: FailedPhase, channel: LiveChannel): string 
  */
 export function failureLine(failed: FailedPhase, channel: LiveChannel): string {
   const title = failureTitle(failed, channel);
+
   return "status" in failed.problem ? `${title} · HTTP ${failed.problem.status}` : title;
 }
 

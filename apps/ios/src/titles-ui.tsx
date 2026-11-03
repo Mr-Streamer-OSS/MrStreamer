@@ -26,7 +26,9 @@ import { colors } from "./ui.tsx";
 /** A hue from a name, the desktop's `hueOf`, so a title has the same tint everywhere. */
 function hueOf(text: string): number {
   let hash = 0;
+
   for (const char of text) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 360;
+
   return hash;
 }
 
@@ -52,6 +54,7 @@ export function Artwork({
 }) {
   const picture = useArtwork(url === null ? null : sized(url, width));
   const hue = hueOf(name);
+
   return (
     <View style={[styles.art, { backgroundColor: `hsl(${hue}, 28%, 14%)` }, style]}>
       {plain || picture.kind === "shown" || picture.kind === "pending" ? null : (
@@ -79,6 +82,7 @@ export function Artwork({
 /** How far a title got, as a thin line under its picture. */
 export function ProgressLine({ done }: { done: number | null }) {
   if (done === null || !(done > 0)) return null;
+
   return (
     <View style={styles.track}>
       <View style={[styles.done, { width: `${Math.min(100, Math.round(done * 100))}%` }]} />
@@ -90,6 +94,7 @@ export function ProgressLine({ done }: { done: number | null }) {
 export function usePosterWidth(columns = 3): number {
   const width = useContentWidth();
   const fit = Math.floor((width - 32 - (columns - 1) * 10) / columns);
+
   return Math.min(fit, 160);
 }
 
@@ -110,6 +115,7 @@ export const PosterTile = memo(function PosterTile({
   onLongPress?: (title: Title) => void;
 }) {
   const shown = line ?? (title.year ? String(title.year) : "");
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -159,6 +165,7 @@ export function Shelf({
   done?: (title: Title) => number | null;
 }) {
   const width = Math.min(usePosterWidth(3), 120);
+
   return (
     <View style={styles.shelf}>
       <ShelfHead name={name} total={total ?? titles.length} onAll={onAll} />
@@ -199,6 +206,7 @@ export function ShelfHead({
   testID?: string;
 }) {
   useLocale();
+
   return (
     <Pressable
       accessibilityRole={onAll ? "button" : "header"}
@@ -219,6 +227,7 @@ export function ShelfHead({
 /** A shelf's place while its titles first come: a still heading and a few still posters. */
 export function PlaceholderShelf() {
   const width = Math.min(usePosterWidth(3), 120);
+
   return (
     <Placeholders style={styles.shelf} testID="placeholder-shelf">
       <View style={styles.shelfHead}>
@@ -262,6 +271,7 @@ export function TextTabs<T extends string>({
       {lead ? <View style={styles.lead}>{lead}</View> : null}
       {tabs.map((tab) => {
         const selected = tab.value === value;
+
         return (
           <Pressable
             key={tab.value}
@@ -282,6 +292,7 @@ export function TextTabs<T extends string>({
 /** A grid's place while its titles first come: what goes above it, then three rows of posters. */
 export function PlaceholderGrid({ header }: { header?: ReactNode }) {
   const width = usePosterWidth(3);
+
   return (
     <ScrollView
       style={styles.screen}
@@ -315,6 +326,7 @@ export function PosterGrid({
 }) {
   const width = usePosterWidth(3);
   const inset = useDockInset();
+
   return (
     <FlatList
       style={styles.screen}
@@ -349,6 +361,7 @@ export function CollectionTileView({
   onPress: () => void;
 }) {
   const tile = Math.floor((useContentWidth() - 42) / 2);
+
   return (
     <Pressable
       accessibilityRole="button"

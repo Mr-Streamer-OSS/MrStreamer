@@ -62,8 +62,10 @@ describe("the native verification fixture", () => {
   let out: string;
   let panel: string;
   let control: string;
+
   const provider = () =>
     xtreamProvider({ server: panel, ...login }, { userAgent: "fixture", live: "hls" });
+
   const post = (route: string) => fetch(`${control}${route}`, { method: "POST" });
   const text = async (url: string) => (await fetch(url)).text();
 
@@ -72,6 +74,7 @@ describe("the native verification fixture", () => {
     const [port, controlPort] = [await freePort(), await freePort()];
     panel = `http://127.0.0.1:${port}`;
     control = `http://127.0.0.1:${controlPort}`;
+
     // The default fixture, whatever FIXTURE_ settings the shell running the tests has, but for
     // the media cache CI gives, which serves the same media without encoding it again.
     const env = Object.fromEntries(
@@ -79,6 +82,7 @@ describe("the native verification fixture", () => {
         ([name]) => !name.startsWith("FIXTURE_") || name === "FIXTURE_MEDIA_CACHE",
       ),
     );
+
     server = spawn(
       process.execPath,
       [join(root, "apps/ios/scripts/fixture-server.ts"), String(port), String(controlPort)],
@@ -101,6 +105,7 @@ describe("the native verification fixture", () => {
       server.kill();
       await exited;
     }
+
     if (out) rmSync(out, { recursive: true, force: true });
   });
 
@@ -110,6 +115,7 @@ describe("the native verification fixture", () => {
     expect(tracks).toMatchObject({ id: "7999", categoryIds: ["1"] });
 
     const { url } = await provider().liveStream("7999");
+
     const probed = JSON.parse(
       execFileSync(
         "ffprobe",
@@ -125,6 +131,7 @@ describe("the native verification fixture", () => {
         { encoding: "utf8", timeout: 60_000 },
       ),
     ) as { streams: { codec_type: string; codec_name: string; tags?: { language?: string } }[] };
+
     expect(
       probed.streams.map((each) =>
         `${each.codec_type} ${each.codec_name} ${each.tags?.language ?? ""}`.trim(),
@@ -133,6 +140,7 @@ describe("the native verification fixture", () => {
     // ffprobe 6.1, which CI installs, leaves HLS subtitles out, so they are followed as listed.
     const listed = await text(url);
     expect(listed).toMatch(/#EXT-X-STREAM-INF:.*SUBTITLES="subtitles"/);
+
     for (const [language, name] of [
       ["en", "English"],
       ["nl", "Nederlands"],
@@ -140,6 +148,7 @@ describe("the native verification fixture", () => {
       const declared = new RegExp(
         `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",.*LANGUAGE="${language}".*URI="([^"]+)"`,
       ).exec(listed)?.[1];
+
       const playlist = new URL(declared ?? "", url);
       const segment = /^[^#\s].*$/m.exec(await text(playlist.href))?.[0];
       const cues = await text(new URL(segment ?? "", playlist).href);
@@ -154,6 +163,7 @@ describe("the native verification fixture", () => {
           /MEDIA-SEQUENCE:(\d+)/.exec(await text(`${panel}/hls/7999/${rendition}.m3u8`))?.[1],
       ),
     );
+
     // Fetched apart, they can straddle a new segment.
     const numbers = sequences.map(Number);
     expect(Math.max(...numbers) - Math.min(...numbers)).toBeLessThanOrEqual(1);
@@ -165,14 +175,19 @@ describe("the native verification fixture", () => {
   it("serves silence in the tracks and codecs its media has, and TEST clips already silent as they are", async () => {
     const { channels } = await provider().liveCatalogue();
     const { movies } = await provider().onDemandCatalogue();
+
     const titleUrl = async (name: string) => {
       const movie = movies.find((each) => each.name === name);
+
       if (!movie?.container) throw new Error(`no movie ${name}`);
+
       return (await provider().titleFile("movie", movie.id, movie.container)).url;
     };
+
     const ac3 = channels.find((channel) => channel.name === "TEST | H.264 + AC-3");
     const ordinary = movies.find((movie) => !movie.name.startsWith("TEST"));
     const tracks = await titleUrl("TEST | Two sound tracks and subtitles (MULTI)");
+
     for (const url of [
       `${panel}/hls/2014/0.ts`,
       `${panel}/hls/1000/past/0.ts`,
@@ -195,6 +210,7 @@ describe("the native verification fixture", () => {
         ],
         { encoding: "utf8" },
       );
+
     const fixtures = join(root, "apps/desktop/test/fixtures");
     expect(streams(tracks)).toBe(streams(join(fixtures, "title-h264-eac3-subs.mkv")));
     expect(streams(`${panel}/hls/${ac3?.id}/0.ts`)).toMatch(/codec_name=ac3\|.*codec_type=audio/);
@@ -207,12 +223,15 @@ describe("the native verification fixture", () => {
 
   it("answers catch-up as HLS recordings of programmes within the days kept, never as Live", async () => {
     const now = Date.now();
+
     /** The catch-up playlist of `channel` from `start` to `end`, at the HLS address core makes. */
     const past = async (channel: string, start: number, end: number) => {
       const { url, format } = await provider().archiveStream(channel, { start, end });
       expect(format).toBe("hls");
+
       return fetch(url);
     };
+
     const seconds = (playlist: string) =>
       [...playlist.matchAll(/#EXTINF:([\d.]+)/g)].reduce((sum, [, each]) => sum + Number(each), 0);
 
@@ -255,6 +274,7 @@ describe("the native verification fixture", () => {
   it("sends title files at a pace, breaks one off, resumes it, and restarts one that changed", async () => {
     const { movies } = await provider().onDemandCatalogue();
     const movie = movies.find((each) => !each.name.startsWith("TEST"));
+
     if (!movie?.container) throw new Error("no movie");
     const { url } = await provider().titleFile("movie", movie.id, movie.container);
     const whole = await download(url);
@@ -277,10 +297,12 @@ describe("the native verification fixture", () => {
       `bytes 100000-${whole.body.length - 1}/${whole.body.length}`,
     );
     expect(sha256(Buffer.concat([broken.body, resumed.body]))).toBe(sha256(whole.body));
+
     const logged = (await (await fetch(`${control}/requests`)).json()) as {
       kind: string;
       range?: string;
     }[];
+
     expect(logged).toContainEqual(
       expect.objectContaining({ kind: "title", range: "bytes=100000-" }),
     );
@@ -319,12 +341,14 @@ describe("the native verification fixture", () => {
     await post("/title-transfers?rate=1024");
     const probed = Date.now();
     const connection = new Agent({ keepAlive: true, maxSockets: 1 });
+
     for (const _ of [1, 2]) {
       expect(await download(url, { Range: "bytes=0-1" }, connection)).toMatchObject({
         status: 206,
         broke: false,
       });
     }
+
     connection.destroy();
     // Well under the 64 seconds a full piece's wait held each probe for.
     expect(Date.now() - probed).toBeLessThan(10_000);
@@ -340,10 +364,12 @@ describe("the native verification fixture", () => {
         files: { sha256: string }[];
       }[];
     };
+
     expect(declared.source.commit).toBe(
       execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     );
     expect(JSON.parse(readFileSync(join(out, "provenance.json"), "utf8"))).toEqual(declared);
+
     for (const { inputs } of declared.artifacts) {
       for (const input of inputs) {
         if ("file" in input) {
@@ -352,14 +378,18 @@ describe("the native verification fixture", () => {
         }
       }
     }
+
     const hashes = new Set(
       declared.artifacts.flatMap(({ files }) => files.map((file) => file.sha256)),
     );
+
     // A TEST movie's clip, which the server sends as a copy whose sound is silent.
     const { movies } = await provider().onDemandCatalogue();
     const clip = movies.find((each) => each.name === "TEST | Index at the end (NL)");
+
     if (!clip?.container) throw new Error("no TEST movie");
     const { url } = await provider().titleFile("movie", clip.id, clip.container);
+
     for (const path of [
       "/hls/7999/subtitles-nl/0.vtt",
       "/hls/7999/sound-nl/0.ts",
@@ -376,6 +406,7 @@ describe("the native verification fixture", () => {
 
 describe("catch-up around the panel's clock changes", () => {
   const media = { dir: "", segments: [{ file: "000.ts", seconds: 2 }] };
+
   /** Where the recording of half an hour from `start` begins, asked for at `now`, if anywhere. */
   const begins = (start: string, now: string) =>
     /PROGRAM-DATE-TIME:(\S+)/.exec(

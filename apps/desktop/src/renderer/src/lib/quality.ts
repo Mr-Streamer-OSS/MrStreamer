@@ -36,6 +36,7 @@ export function shortQuality(variant: ChannelVariant | undefined): string | null
 export function qualitiesLine(channel: LiveChannel): string {
   if (channel.variants.length < 2) return "";
   const known = new Set(channel.variants.flatMap(({ quality }) => quality ?? []));
+
   return QUALITIES.filter((quality) => known.has(quality))
     .map((quality) => SHORT[quality])
     .join(" · ");
@@ -50,13 +51,16 @@ export function qualityChoices(
 ): { readonly variant: ChannelVariant; readonly name: string }[] {
   const rank = ({ quality }: ChannelVariant) =>
     quality ? QUALITIES.indexOf(quality) : QUALITIES.length;
+
   const seen = new Map<string, number>();
+
   return channel.variants
     .toSorted((a, b) => rank(a) - rank(b))
     .map((variant) => {
       const name = qualityName(variant);
       const count = (seen.get(name) ?? 0) + 1;
       seen.set(name, count);
+
       return { variant, name: count > 1 ? `${name} ${count}` : name };
     });
 }

@@ -21,15 +21,19 @@ export interface Source {
 }
 
 const sources = new Map<string, Source>();
+
 /** Told after every login set or dropped. */
 const changes = new Set<() => void>();
+
 /** How many logins were replaced or dropped in this process. */
 let retired = 0;
 
 /** The signed-in source of `subscriptionId`, or a typed failure when it has none. */
 export function sourceOf(subscriptionId: string): Source {
   const found = sources.get(subscriptionId);
+
   if (!found) throw new AppFailure({ kind: "needs-secret", subscriptionId });
+
   return found;
 }
 
@@ -56,17 +60,20 @@ export const retiredLogins = (): number => retired;
 /** Calls `listener` after each login set or dropped; answers how to stop. */
 export function onSignedIn(listener: () => void): () => void {
   changes.add(listener);
+
   return () => void changes.delete(listener);
 }
 
 export function setSource(subscriptionId: string, source: Source): void {
   if (sources.has(subscriptionId)) retired++;
   sources.set(subscriptionId, source);
+
   for (const listener of changes) listener();
 }
 
 export function dropSource(subscriptionId: string): void {
   if (!sources.delete(subscriptionId)) return;
   retired++;
+
   for (const listener of changes) listener();
 }

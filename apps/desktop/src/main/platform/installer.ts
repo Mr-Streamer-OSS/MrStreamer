@@ -49,6 +49,7 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
     const cancel = () => token.cancel();
     signal.addEventListener("abort", cancel, { once: true });
     const progress = (info: { percent: number }) => onProgress(Math.floor(info.percent));
+
     try {
       signal.throwIfAborted();
       updater.allowDowngrade = target.allowDowngrade;
@@ -57,6 +58,7 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
       signal.throwIfAborted();
       // The metadata has to describe the release the service chose, not whatever sits there.
       const offered = result?.updateInfo.version;
+
       if (offered !== target.version) {
         throw new Error(
           offered
@@ -67,6 +69,7 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
             : t("The release offers nothing instead of {version}.", { version: target.version }),
         );
       }
+
       updater.on("download-progress", progress);
       await updater.downloadUpdate(token);
       signal.throwIfAborted();
@@ -80,6 +83,7 @@ export function electronInstaller(updater: Updater = electronUpdater.autoUpdater
     download(target, onProgress, signal) {
       const next = previous.then(() => downloadOne(target, onProgress, signal));
       previous = next.catch(() => {});
+
       return next;
     },
 

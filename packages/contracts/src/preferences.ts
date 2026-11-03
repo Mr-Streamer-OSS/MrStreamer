@@ -63,8 +63,11 @@ export const Preferences = lazy(() =>
     "liveView?": "'list' | 'grid'",
   }),
 );
+
 export type Preferences = Infer<typeof Preferences>;
+
 export type SubtitleLook = NonNullable<Preferences["subtitleLook"]>;
+
 export type LiveView = NonNullable<Preferences["liveView"]>;
 
 /**
@@ -87,6 +90,7 @@ export const SubscriptionPreferences = lazy(() =>
     "channelVariants?": "Record<string, string>",
   }),
 );
+
 export type SubscriptionPreferences = Infer<typeof SubscriptionPreferences>;
 
 /** Subtitles as Chromium draws text cues: its own size, on a box, at the foot of the picture. */

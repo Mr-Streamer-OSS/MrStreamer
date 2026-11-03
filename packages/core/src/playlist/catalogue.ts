@@ -44,19 +44,24 @@ export function playlistCatalogue(entries: Iterable<PlaylistEntry>): PlaylistCat
   const categories = new Map<string, ProviderCategory>();
   const channels: ProviderChannel[] = [];
   const streams = new Map<string, PlaylistStream>();
+
   for (const entry of entries) {
     const format = streamFormat(entry.url);
+
     if (!format) continue;
     const guideId = entry.attributes["tvg-id"] || null;
     const name = entry.name || entry.attributes["tvg-name"] || `Channel ${channels.length + 1}`;
     const id = unusedId(streams, guideId ?? name, name);
+
     const groups = (entry.attributes["group-title"] || entry.group || "")
       .split(";")
       .map((group) => group.trim())
       .filter(Boolean);
+
     for (const group of groups) {
       if (!categories.has(group)) categories.set(group, { id: group, name: group });
     }
+
     const logo = entry.attributes["tvg-logo"];
     const number = Number(entry.attributes["tvg-chno"]);
     const catchup = playlistCatchup(entry);
@@ -81,6 +86,7 @@ export function playlistCatalogue(entries: Iterable<PlaylistEntry>): PlaylistCat
       ...defined({ catchup: catchup ?? undefined }),
     });
   }
+
   return { categories: [...categories.values()], channels, streams };
 }
 
@@ -90,9 +96,12 @@ export function playlistCatalogue(entries: Iterable<PlaylistEntry>): PlaylistCat
  */
 export function streamFormat(url: string): StreamFormat | null {
   const parsed = URL.parse(url);
+
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return null;
   const path = parsed.pathname.toLowerCase();
+
   if (path.endsWith(".mpd")) return null;
+
   return path.endsWith(".m3u8") || path.endsWith(".m3u") || /m3u8/i.test(parsed.search)
     ? "hls"
     : "mpegts";
@@ -101,7 +110,9 @@ export function streamFormat(url: string): StreamFormat | null {
 function unusedId(taken: ReadonlyMap<string, unknown>, base: string, name: string): string {
   if (!taken.has(base)) return base;
   const named = `${base}|${name}`;
+
   if (!taken.has(named)) return named;
+
   for (let count = 2; ; count++) {
     if (!taken.has(`${named}|${count}`)) return `${named}|${count}`;
   }

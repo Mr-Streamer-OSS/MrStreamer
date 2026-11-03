@@ -8,6 +8,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       const schema = Preferences();
+
       return {
         good: plain(schema({ volume: 0.5, muted: true })),
         badRejected: !schema.allows({ volume: "loud", muted: false }),
@@ -19,6 +20,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       const schema = TitleFilters();
+
       return {
         good: plain(schema({ quality: "4k", verified: { kind: "audio", language: "nl" } })),
         badRejected: !schema.allows({ quality: "8k" }),

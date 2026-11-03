@@ -7,6 +7,7 @@ import { t as failure } from "./i18n/failures.ts";
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
 export function appError(cause: unknown): AppError {
   if (cause instanceof AppFailure) return cause.error;
+
   return { kind: "unexpected", detail: cause instanceof Error ? cause.message : String(cause) };
 }
 
@@ -27,6 +28,7 @@ export function describeError(error: AppError): string {
           date: formatDate(Date.parse(error.expiresAt), "date"),
         });
       }
+
       return error.state === "expired"
         ? t("The provider reports this subscription as expired.")
         : error.state === "banned"
@@ -83,7 +85,9 @@ function describeStreamFailure(failure: StreamFailure): string {
 /** The desktop's reading of a provider's HTTP status for a stream or a file. */
 export function statusFailure(status: number): StreamFailure {
   if ([401, 403, 429, 458, 509].includes(status)) return { kind: "refused", status };
+
   if (status === 404 || status === 410) return { kind: "unavailable", status };
+
   return { kind: "provider-error", status };
 }
 
@@ -109,6 +113,7 @@ export function hostOf(server: string): string {
  */
 export function failureOf(error: AppError, server: string): Failure {
   const host = hostOf(error.kind === "unreachable" ? error.server : server);
+
   switch (error.kind) {
     case "unreachable":
       return {
@@ -131,6 +136,7 @@ export function failureOf(error: AppError, server: string): Failure {
           advice: failure("Renew it with {host}, then try again.", { host }),
         };
       }
+
       return {
         headline:
           error.state === "banned"
@@ -180,26 +186,35 @@ export function withoutLogin(
       // The longest first, so a part inside a longer spelling doesn't leave the rest behind.
       .toSorted((a, b) => b.length - a.length)
       .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
   const known = spellings(login);
+
   const shown =
     known.length === 0
       ? withoutAddresses(text)
       : withoutAddresses(text).replace(new RegExp(known.join("|"), "gi"), "…");
+
   const words = spellings(uncertain);
+
   if (words.length === 0) return shown;
   const name = /[\p{L}\p{N}\-._~]/u;
+
   // Lookahead visits overlapping occurrences, including after a rejected boundary.
   return words.reduce((text, word) => {
     let result = "";
     let through = 0;
+
     for (const match of text.matchAll(new RegExp(`(?=(${word}))`, "gi"))) {
       const part = match[1];
       const at = match.index;
+
       if (!part || name.test(text[at - 1] ?? "") || name.test(text[at + part.length] ?? ""))
         continue;
+
       if (at >= through) result += text.slice(through, at) + "…";
       through = Math.max(through, at + part.length);
     }
+
     return result + text.slice(through);
   }, shown);
 }

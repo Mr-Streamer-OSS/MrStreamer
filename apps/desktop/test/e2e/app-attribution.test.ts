@@ -22,9 +22,11 @@ import { runAppProbes } from "./app-probes.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 const directories: string[] = [];
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -32,6 +34,7 @@ afterEach(() => {
 it("reports CDP session closure, supports listener disposal and settles pending commands", async () => {
   vi.useFakeTimers();
   const sockets: EventTarget[] = [];
+
   class Socket extends EventTarget {
     constructor() {
       super();
@@ -43,6 +46,7 @@ it("reports CDP session closure, supports listener disposal and settles pending 
       this.dispatchEvent(new Event("close"));
     }
   }
+
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("fetch", async () => ({
     json: async () => [
@@ -85,6 +89,7 @@ function profile(): CpuProfile {
     endTime: 1010,
   };
 }
+
 const metadata: TraceEvent = {
   name: "thread_name",
   ph: "M",
@@ -93,6 +98,7 @@ const metadata: TraceEvent = {
   ts: 0,
   args: { name: "CrRendererMain" },
 };
+
 const task: TraceEvent = { name: "RunTask", ph: "X", pid: 7, tid: 1, ts: 0, dur: 4000, tdur: 3000 };
 
 it("counts empty-URL prototype names as ordinary function self time", () => {
@@ -106,6 +112,7 @@ it("counts empty-URL prototype names as ordinary function self time", () => {
     "(root)",
     "(idle)",
   ];
+
   const result = profileSummary({
     nodes: names.map((functionName, index) => ({
       id: index + 1,
@@ -116,6 +123,7 @@ it("counts empty-URL prototype names as ordinary function self time", () => {
     startTime: 0,
     endTime: 11600,
   });
+
   expect(result).toMatchObject({
     sampledUs: 11600,
     idleUs: 1400,
@@ -231,10 +239,12 @@ it("retains count and wall time for missing/partial timeline and script CPU", ()
     ...defined({ tdur }),
     args: { data: { functionName: name, lineNumber: 4 } },
   });
+
   const result = traceSummary(
     [metadata, task, call("missing"), call("partial", 300), call("partial")],
     7,
   );
+
   expect(result.rendererMainTimeline).toEqual([
     {
       name: "FunctionCall",
@@ -260,10 +270,12 @@ it("retains count and wall time for missing/partial timeline and script CPU", ()
       cpu: { status: "unsupported", observedMs: 0, observedEvents: 0, missingEvents: 1 },
     },
   ]);
+
   const ranked = traceSummary(
     [metadata, task, call("partial", 3000), call("partial"), call("supported", 100)],
     7,
   );
+
   expect(ranked.rendererMainScripts[0]).toMatchObject({
     name: "FunctionCall supported:5",
     cpuMs: 0.1,
@@ -284,6 +296,7 @@ it("counts equal-start nested tasks outermost first regardless of event order", 
 it("keeps observed outer-task CPU and missing wall time separate from complete totals", () => {
   const missing = { ...task };
   delete missing.tdur;
+
   const result = traceSummary(
     [
       metadata,
@@ -296,6 +309,7 @@ it("keeps observed outer-task CPU and missing wall time separate from complete t
     ],
     7,
   );
+
   expect(result.threads.map((t) => t.cpu)).toEqual([
     { status: "supported", ms: 0.1 },
     { status: "partial", observedMs: 8, observedTasks: 1, missingTasks: 1, missingWallMs: 4 },
@@ -321,13 +335,18 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
   const calls: string[] = [];
   const closeTimeouts: number[] = [];
   let clock = 0;
+
   const page: Page = {
     async send(method, _params, timeoutMs) {
       calls.push(method);
+
       if (method === "IO.close") closeTimeouts.push(timeoutMs!);
+
       if (method === "Profiler.stop") return { result: { profile: capturedProfile } };
+
       if (method === "Tracing.end") {
         if (mode === "end-error") return { error: "end refused" };
+
         if (mode === "invalid-completion") listeners.get("Tracing.tracingComplete")?.({});
         else if (mode === "closed") for (const listener of closes) listener();
         else if (mode !== "missing-completion")
@@ -336,39 +355,50 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
             dataLossOccurred: mode === "data-loss",
           });
       }
+
       if (method === "IO.read") {
         if (mode === "read-error" || mode === "read-and-close-error")
           return { error: "read refused" };
+
         if (mode === "stream-deadline") {
           vi.advanceTimersByTime(60_001);
+
           return { result: { data: "partial", eof: false } };
         }
+
         return { result: { data: JSON.stringify({ traceEvents: events }), eof: true } };
       }
+
       if (method === "IO.close" && mode.includes("close-error")) return { error: "close refused" };
+
       return { result: {} };
     },
     on(method, listener) {
       listeners.set(method, listener);
+
       return () => {
         listeners.delete(method);
       };
     },
     onClose(listener) {
       closes.add(listener);
+
       return () => {
         closes.delete(listener);
       };
     },
     async evaluate<T>(expression: string): Promise<T> {
       let result: unknown = true;
+
       if (expression.includes("querySelectorAll('video')"))
         result = [{ currentTime: ++clock, paused: false, width: 1280 }];
       else if (expression.includes("Object.fromEntries")) result = {};
+
       return result as T;
     },
     close: vi.fn(),
   };
+
   const context: AttributionContext = {
     page,
     main: page,
@@ -380,6 +410,7 @@ function capture(mode = "success", capturedProfile = profile(), events = [metada
     list: vi.fn(),
     metrics: async () => [],
   };
+
   return { context, page, directory, calls, closeTimeouts, listeners, closes };
 }
 
@@ -401,6 +432,7 @@ it.each([
     expect(peer.page.close).toHaveBeenCalledOnce();
     expect(peer.listeners.size).toBe(0);
     expect(peer.closes.size).toBe(0);
+
     if (mode === "read-error" || mode === "stream-deadline")
       expect(peer.calls).toContain("IO.close");
   },
@@ -426,6 +458,7 @@ it("retains both raw profiles and disables both targets before rejecting a malfo
   expect(
     JSON.parse(readFileSync(`${peer.context.output}.steady-live.renderer.cpuprofile`, "utf8")),
   ).toEqual(profile());
+
   for (const target of [peer.context.main, peer.page])
     expect(vi.mocked(target.send).mock.calls.map(([method]) => method)).toEqual(
       expect.arrayContaining(["Profiler.stop", "Profiler.disable"]),
@@ -441,11 +474,13 @@ it.each(["stop", "disable", "write"])(
     const peer = capture();
     const ipc = ipcPeer(peer);
     const mainPath = `${peer.context.output}.steady-live.main.cpuprofile`;
+
     if (failure === "write") mkdirSync(mainPath);
     const primary = new Error(`main ${failure} failed`);
     const send = peer.context.main.send;
     peer.context.main.send = vi.fn(async (method, params, timeoutMs) => {
       if (method === `Profiler.${failure}`) throw primary;
+
       return send(method, params, timeoutMs);
     });
     peer.page.send = vi.fn(peer.page.send);
@@ -458,8 +493,10 @@ it.each(["stop", "disable", "write"])(
     expect(
       JSON.parse(readFileSync(`${peer.context.output}.steady-live.renderer.cpuprofile`, "utf8")),
     ).toEqual(profile());
+
     if (failure === "disable")
       expect(JSON.parse(readFileSync(mainPath, "utf8"))).toEqual(profile());
+
     for (const target of [peer.context.main, peer.page])
       expect(vi.mocked(target.send).mock.calls.map(([method]) => method)).toEqual(
         expect.arrayContaining(["Profiler.stop", "Profiler.disable"]),
@@ -474,6 +511,7 @@ it("preserves both targets' stop and disable failures alongside IPC restoration 
   const peer = capture();
   ipcPeer(peer);
   const failures = new Map<string, Error>();
+
   for (const [role, target] of [
     ["main", peer.context.main],
     ["renderer", peer.page],
@@ -483,23 +521,30 @@ it("preserves both targets' stop and disable failures alongside IPC restoration 
       if (method === "Profiler.stop" || method === "Profiler.disable") {
         const error = new Error(`${role} ${method} failed`);
         failures.set(`${role} ${method}`, error);
+
         if (method === "Profiler.stop")
           peer.context.main.evaluate = async () => {
             throw new Error("IPC restore failed");
           };
+
         throw error;
       }
+
       return send(method, params, timeoutMs);
     });
   }
+
   const result = steadyProfiles(peer.context, steadyRecord()).catch((error: unknown) => error);
   await vi.runAllTimersAsync();
   const error = await result;
   expect(error).toBeInstanceOf(AggregateError);
   expect(failures.size).toBe(4);
+
   for (const failure of failures.values()) expect(String(error)).toContain(failure.message);
+
   const causes = (error: unknown): unknown[] =>
     error instanceof AggregateError ? error.errors.flatMap(causes) : [error];
+
   expect(causes(error)).toEqual(expect.arrayContaining([...failures.values()]));
   expect(String(error)).toContain("IPC restore failed");
   expect(vi.getTimerCount()).toBe(0);
@@ -525,8 +570,11 @@ it.each(["data-loss", "close-error", "read-and-close-error"])(
     await vi.runAllTimersAsync();
     const rejected = await error;
     expect(rejected).toBeInstanceOf(Error);
+
     if (mode === "data-loss") expect(String(rejected)).toContain("data loss");
+
     if (mode.includes("close-error")) expect(String(rejected)).toContain("close refused");
+
     if (mode === "read-and-close-error") expect(String(rejected)).toContain("read refused");
     else
       expect(
@@ -543,13 +591,17 @@ it.each(["data-loss", "close-error", "read-and-close-error"])(
 /** Executes the probe's actual main-process expressions against an owned IPC registry. */
 function ipcPeer(peer: ReturnType<typeof capture>) {
   let sizings = 0;
+
   const handler = async () => ({
     toJSON() {
       sizings++;
+
       return ["channels"];
     },
   });
+
   const handlers = new Map([["library.browse", handler]]);
+
   const runtime = createContext({
     Buffer,
     Map,
@@ -560,12 +612,14 @@ function ipcPeer(peer: ReturnType<typeof capture>) {
       memoryUsage: () => ({}),
     },
   });
+
   peer.context.main = {
     ...peer.page,
     async evaluate<T>(expression: string): Promise<T> {
       return (await runInContext(expression, runtime)) as T;
     },
   };
+
   return { handlers, handler, sizings: () => sizings };
 }
 
@@ -578,11 +632,13 @@ it.each(["steady", "retention"])(
       await ipc.handlers.get("library.browse")!();
       throw new Error("list failed");
     };
+
     const result = expect(
       kind === "steady"
         ? steadyProfiles(peer.context, steadyRecord())
         : queryRetention(peer.context, retentionRecord()),
     ).rejects.toThrow("list failed");
+
     await vi.runAllTimersAsync();
     await result;
     expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
@@ -601,13 +657,16 @@ it.each(["steady", "retention"])(
       peer.context.main.evaluate = async () => {
         throw new Error("IPC cleanup unavailable");
       };
+
       throw new Error("primary capture failed");
     };
+
     const result = (
       kind === "steady"
         ? steadyProfiles(peer.context, steadyRecord())
         : queryRetention(peer.context, retentionRecord())
     ).catch((error: unknown) => error);
+
     await vi.runAllTimersAsync();
     const error = String(await result);
     expect(error).toContain("primary capture failed");
@@ -623,6 +682,7 @@ it("records ISO wall-clock brackets for each profile and the separate trace", as
   await vi.runAllTimersAsync();
   await result;
   expect(record.windows).toHaveLength(3);
+
   for (const window of record.windows as {
     startedAt: string;
     endedAt: string;
@@ -630,13 +690,16 @@ it("records ISO wall-clock brackets for each profile and the separate trace", as
     trace: { startedAt: string; endedAt: string };
   }[]) {
     expect(Date.parse(window.endedAt) - Date.parse(window.startedAt)).toBe(60_000);
+
     for (const profile of window.profiles) {
       expect(new Date(profile.startedAt).toISOString()).toBe(profile.startedAt);
       expect(Date.parse(profile.endedAt) - Date.parse(profile.startedAt)).toBe(60_000);
     }
+
     expect(Date.parse(window.trace.startedAt)).toBeGreaterThanOrEqual(Date.parse(window.endedAt));
     expect(Date.parse(window.trace.endedAt) - Date.parse(window.trace.startedAt)).toBe(20_000);
   }
+
   expect(peer.listeners.size + peer.closes.size).toBe(0);
   expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
 });
@@ -652,6 +715,7 @@ it("runs the live-profile workflow after steady profiles end on Home without ret
   const executable = join(runtime, "fake-electron");
   writeFileSync(executable, "protocol fixture only");
   const url = pathToFileURL(join(appDirectory, "out", "renderer", "index.html")).href;
+
   const metrics = [process.pid, 7].map((pid) => ({
     pid,
     creationTime: 1,
@@ -659,35 +723,46 @@ it("runs the live-profile workflow after steady profiles end on Home without ret
     cpu: { cumulativeCPUUsage: 0 },
     memory: { workingSetSize: 0 },
   }));
+
   const mainEvaluate = peer.context.main.evaluate;
   peer.context.main.evaluate = async <T>(expression: string): Promise<T> => {
     let result: unknown;
+
     if (expression.includes("return { pid: process.pid"))
       result = { pid: process.pid, rendererPid: 7, userData: peer.directory, metrics };
     else if (expression.includes("return { mainPid: process.pid"))
       result = { mainPid: process.pid, rendererPid: 7, window: {}, metrics };
     else if (expression.includes("while (performance.now() - start < 150)")) result = 150;
     else return mainEvaluate<T>(expression);
+
     return result as T;
   };
+
   const browser = new Window();
   const picked: string[] = [];
+
   const show = (view: string) => {
     browser.document.body.innerHTML = `<header><button>Live TV</button><button>Home</button><button>Watch</button></header>
       ${view === "Live TV" ? '<nav role="navigation" aria-label="Channel categories"><button title="All channels">All channels</button><button title="TEST | Formats and failures">TEST | Formats and failures</button></nav>' : ""}`;
+
     for (const button of browser.document.querySelectorAll("header button"))
       button.addEventListener("click", () => show(button.textContent!));
+
     for (const button of browser.document.querySelectorAll("nav button"))
       button.addEventListener("click", () => picked.push(button.textContent!));
   };
+
   show("Live TV");
   const evaluate = peer.page.evaluate;
   peer.page.evaluate = async <T>(expression: string): Promise<T> => {
     if (expression === "location.href") return url as T;
+
     if (expression.includes("Channel categories") || expression.includes("const buttons"))
       return browser.eval(expression) as T;
+
     return evaluate<T>(expression);
   };
+
   const result = runAppProbes({
     page: peer.page,
     main: peer.context.main,
@@ -702,6 +777,7 @@ it("runs the live-profile workflow after steady profiles end on Home without ret
     queryRetention: false,
     hostCondition: "fixture",
   }).catch((error: unknown) => error);
+
   await vi.runAllTimersAsync();
   expect(await result).toBeUndefined();
   const report = JSON.parse(readFileSync(peer.context.output, "utf8"));
@@ -724,10 +800,12 @@ it.each(["available", "empty", "missing"])(
         : `<button data-browse-filter="countries">Countries</button>`;
     const filters: string[][] = [];
     const trigger = browser.document.querySelector("button");
+
     if (trigger)
       trigger.onclick = () => {
         const menu = browser.document.createElement("div");
         menu.setAttribute("role", "menu");
+
         for (const country of [
           "Any",
           ...(countryFilter === "available" ? ["United Kingdom"] : []),
@@ -739,15 +817,20 @@ it.each(["available", "empty", "missing"])(
             filters.push(country === "Any" ? [] : [country]);
             menu.remove();
           };
+
           menu.append(option);
         }
+
         browser.document.body.append(menu);
       };
+
     peer.context.list = async () => {
       await ipc.handlers.get("library.browse")!();
     };
+
     peer.page.evaluate = async <T>(expression: string): Promise<T> => {
       let result: unknown = true;
+
       if (expression.includes("new Promise")) {
         if (expression.includes('=== "Live TV"')) {
           const before = ipc.sizings();
@@ -766,12 +849,15 @@ it.each(["available", "empty", "missing"])(
         expression.includes("[data-browse-filter=countries]")
       )
         result = browser.eval(expression);
+
       return result as T;
     };
+
     const record = retentionRecord();
     const result = queryRetention(peer.context, record).catch((error: unknown) => error);
     await vi.runAllTimersAsync();
     const error = await result;
+
     if (countryFilter !== "available") {
       expect(error).toBeInstanceOf(Error);
       expect(String(error)).toContain(
@@ -781,8 +867,10 @@ it.each(["available", "empty", "missing"])(
       expect(record.workload).toBeNull();
       expect(ipc.handlers.get("library.browse")).toBe(ipc.handler);
       expect(vi.getTimerCount()).toBe(0);
+
       return;
     }
+
     expect(error).toBeUndefined();
     expect(filters).toEqual([["United Kingdom"], []]);
     expect(record.returnTiming).toMatchObject({

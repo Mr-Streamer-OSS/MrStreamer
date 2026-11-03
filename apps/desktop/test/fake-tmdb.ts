@@ -35,9 +35,13 @@ export interface FakeTmdb {
 export function tmdbName(id: number, language: string): { name: string; original: string } {
   const madeIn = id % 3 === 0 ? "nl" : "en";
   const original = madeIn === "nl" ? `Origineel ${id}` : `Original ${id}`;
+
   if (language === madeIn) return { name: original, original };
+
   if (language === "en" && id % 5 !== 0) return { name: `English ${id}`, original };
+
   if (language === "nl" && id % 7 !== 0) return { name: `Nederlands ${id}`, original };
+
   return { name: original, original };
 }
 
@@ -50,9 +54,13 @@ export function tmdbName(id: number, language: string): { name: string; original
 function tmdbEpisodeName(id: number, season: number, episode: number, language: string): string {
   const madeIn = id % 3 === 0 ? "nl" : "en";
   const numbered = `${season}x${episode}`;
+
   if (language === madeIn) return `${madeIn === "nl" ? "Origineel" : "Original"} ${numbered}`;
+
   if (language === "en" && episode % 2 === 1) return `English ${numbered}`;
+
   if (language === "nl") return `Nederlands ${numbered}`;
+
   return `Episode ${episode}`;
 }
 
@@ -71,29 +79,38 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
   /** Answers to a title's details as it opens, waiting while they are held. */
   const held: (() => void)[] = [];
   const streamed: Record<string, readonly string[]> = { movie: [], tv: [] };
+
   const json = (response: import("node:http").ServerResponse, body: unknown, status = 200) =>
     response.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://tmdb");
     const opened = url.searchParams.get("append_to_response") === "credits";
+
     if (opened) about++;
+
     if (refused) return json(response, { status_code: 7 }, 401);
     const season = /^\/3\/tv\/(\d+)\/season\/(\d+)$/.exec(url.pathname);
+
     if (season) {
       const language = url.searchParams.get("language") ?? "en";
       const id = Number(season[1]);
       const number = Number(season[2]);
       seasons.push(`${id}/${number}/${language}`);
+
       const answer = (): void => {
         if (seasonFailure === "hold") return void heldSeasons.push(answer);
+
         if (seasonFailure !== null) return void json(response, { status_code: 11 }, seasonFailure);
         const count = SEASON_EPISODES[number - 1];
+
         if (count === undefined) return void json(response, { status_code: 34 }, 404);
         json(response, {
           season_number: number,
           episodes: Array.from({ length: count }, (_, index) => {
             const episode = index + 1;
             const name = tmdbEpisodeName(id, number, episode, language);
+
             return {
               episode_number: episode,
               season_number: number,
@@ -117,15 +134,19 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
           }),
         });
       };
+
       return answer();
     }
+
     const title = /^\/3\/(movie|tv)\/(\d+)$/.exec(url.pathname);
+
     if (title) {
       const language = url.searchParams.get("language") ?? "en";
       details.set(language, (details.get(language) ?? 0) + 1);
       const id = Number(title[2]);
       const { name, original } = tmdbName(id, language);
       const series = title[1] === "tv";
+
       const answer = () => {
         const listed = {
           ...(series
@@ -140,6 +161,7 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
           belongs_to_collection: null,
           backdrop_path: `/backdrop-${id}.jpg`,
         };
+
         // What a title's details ask for when it opens.
         return json(
           response,
@@ -159,10 +181,14 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
             : listed,
         );
       };
+
       if (opened && aboutHeld) return void held.push(answer);
+
       return answer();
     }
+
     const services = /^\/3\/watch\/providers\/(movie|tv)$/.exec(url.pathname);
+
     if (services) {
       return json(response, {
         results: [
@@ -171,30 +197,38 @@ export async function startFakeTmdb(): Promise<FakeTmdb> {
         ],
       });
     }
+
     const discover = /^\/3\/discover\/(movie|tv)$/.exec(url.pathname);
+
     if (discover) {
       const kind = discover[1] ?? "movie";
       const ids = url.searchParams.get("with_watch_providers") === "8" ? streamed[kind] : [];
+
       return json(response, {
         page: 1,
         total_pages: 1,
         results: (ids ?? []).map((id) => ({ id: Number(id) })),
       });
     }
+
     json(response, { status_code: 34 }, 404);
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as { port: number };
+
   return {
     url: `http://127.0.0.1:${port}/3`,
     aboutRequests: () => about,
     seasonRequests: () => [...seasons],
     failSeasons: (answer) => {
       seasonFailure = answer;
+
       if (answer !== "hold") for (const held of heldSeasons.splice(0)) held();
     },
     holdAbout: (hold) => {
       aboutHeld = hold;
+
       if (!hold) for (const answer of held.splice(0)) answer();
     },
     detailRequests: (language) =>

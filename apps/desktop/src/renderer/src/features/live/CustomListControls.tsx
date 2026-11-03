@@ -31,6 +31,7 @@ const keep = (event: SyntheticEvent) => event.stopPropagation();
 function failureOf(state: ChangeState): { readonly text: string; readonly retry: boolean } | null {
   if (state.status !== "failed") return null;
   const { error } = state;
+
   return error.kind === "list-name-taken" ||
     error.kind === "no-list" ||
     error.kind === "list-changed"
@@ -52,7 +53,9 @@ export function ChangeNotice({
   onDismiss: () => void;
 }) {
   const failure = failureOf(state);
+
   if (!failure) return null;
+
   return (
     <p role="alert" className="flex items-baseline gap-4 px-9 pb-2.5 text-sm">
       <span className="min-w-0 text-foreground/85">{failure.text}</span>
@@ -85,6 +88,7 @@ export function ListOptions({
   onDelete: () => void;
 }) {
   const item = cn(menuItem, "flex h-9 items-center px-2 data-disabled:opacity-40");
+
   return (
     <Menu.Root>
       <Menu.Trigger
@@ -137,11 +141,15 @@ export function RenameList({ list, onDone }: { list: CustomList; onDone: () => v
   const change = useListChange();
   const saving = change.state.status === "saving";
   const failure = failureOf(change.state);
+
   const save = async () => {
     if (saving) return;
+
     if (name.trim() === list.name || name.trim() === "") return onDone();
+
     if (await change.run(() => call("customLists.rename", { id: list.id, name }))) onDone();
   };
+
   return (
     <>
       <Input
@@ -156,6 +164,7 @@ export function RenameList({ list, onDone }: { list: CustomList; onDone: () => v
         onChange={(event) => setName(event.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
+
           if (event.key === "Enter") void save();
           else if (event.key === "Escape") {
             if (!saving) onDone();
@@ -202,9 +211,11 @@ export function DeleteList({
   const failure = failureOf(change.state);
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
+
   const remove = async () => {
     if (!saving && (await change.run(removeList(client, list.id)))) onDeleted();
   };
+
   return (
     <div
       role="group"
@@ -263,6 +274,7 @@ export function ListMenu({
     },
     [onOpenChange],
   );
+
   return (
     <span onClick={keep} onKeyDown={keep}>
       <Menu.Root
@@ -351,6 +363,7 @@ export function UnlistedRows({
   onRemove: (member: string) => void;
 }) {
   if (channels.length === 0) return null;
+
   return (
     <div role="list" aria-label={t("Not listed now")}>
       {channels.map((channel) => (
@@ -389,6 +402,7 @@ export function UnlistedRows({
  */
 export function AwayNote({ count }: { count: number }) {
   if (count === 0) return null;
+
   return (
     <p className="px-9 pb-2.5 text-sm text-muted-foreground">
       {t("{count} channels are from a subscription that isn't saved.", { count })}

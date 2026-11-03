@@ -85,6 +85,7 @@ type Tab = "for-you" | "categories" | "all" | "guide";
 
 /** How many channels a shelf of For you shows. */
 const TILES = 12;
+
 /** How many categories For you shows as shelves; Categories has every one. */
 const SHELVES = 6;
 
@@ -148,6 +149,7 @@ const detail = store<Detail | null>(null);
 const text = (params: object | undefined, name: string) => {
   // Navigation keeps its params as plain serializable objects, so each one is an own value.
   const value: unknown = params && Object.getOwnPropertyDescriptor(params, name)?.value;
+
   return typeof value === "string" && value !== "" ? value : null;
 };
 
@@ -161,6 +163,7 @@ const text = (params: object | undefined, name: string) => {
  */
 export function LiveTab() {
   const { split, width } = useListWidth();
+
   return (
     <View style={styles.split}>
       <View style={{ width }}>
@@ -178,6 +181,7 @@ export function LiveTab() {
  */
 function Handover({ split }: { split: boolean }) {
   useHandover(split);
+
   return null;
 }
 
@@ -202,6 +206,7 @@ function useHandover(split: boolean) {
     const alone = text(chosen?.params, "channel");
     const token = text(chosen?.params, "detail");
     const start = Number(text(chosen?.params, "start"));
+
     if (alone && (token || start > 0)) {
       detail.set({
         channel: alone,
@@ -211,10 +216,14 @@ function useHandover(split: boolean) {
         alone: true,
       });
       navigation.dispatch({ type: "POP_TO_TOP", target });
+
       return;
     }
+
     const channel = text(schedule?.params, "channel");
+
     if (schedule?.name !== "schedule" || !channel || rest.length > 0) return;
+
     if (programme && programme.name !== "programme") return;
     detail.set({
       channel,
@@ -229,10 +238,13 @@ function useHandover(split: boolean) {
   useEffect(() => {
     if (split || !shown || !target) return;
     detail.set(null);
+
     if (!atRoot) return;
     const day = shown.day === null ? {} : { day: String(shown.day) };
+
     const push = (name: string, params: object) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
+
     if (shown.alone) {
       push(
         "programme",
@@ -240,9 +252,12 @@ function useHandover(split: boolean) {
           ? { channel: shown.channel, detail: shown.programme }
           : { channel: shown.channel, start: String(shown.start) },
       );
+
       return;
     }
+
     push("schedule", { channel: shown.channel, ...day });
+
     if (shown.programme) push("programme", { channel: shown.channel, detail: shown.programme });
   }, [navigation, target, atRoot, split, shown]);
 }
@@ -256,6 +271,7 @@ function LiveDetail() {
   useLocale();
   const shown = useStore(detail);
   const { gutter } = useListWidth();
+
   if (!shown) {
     // On the Schedule title's line, so choosing one puts the channel's name where this was.
     return (
@@ -269,6 +285,7 @@ function LiveDetail() {
       </ScrollView>
     );
   }
+
   if (shown.alone) {
     return (
       <View style={styles.detail} testID="live-detail">
@@ -284,6 +301,7 @@ function LiveDetail() {
       </View>
     );
   }
+
   return (
     <View style={styles.detail} testID="live-detail">
       <View style={shown.programme ? styles.hidden : styles.screen}>
@@ -320,8 +338,10 @@ function LiveDetail() {
  */
 export function closeDetail(): boolean {
   const shown = detail.get();
+
   if (!shown) return false;
   detail.set(shown.programme && !shown.alone ? { ...shown, programme: null } : null);
+
   return true;
 }
 
@@ -353,6 +373,7 @@ export function LiveHome() {
 /** Live's Reminders row, after Favourites and the viewer's lists, with how many are set. */
 function RemindersEntry() {
   const list = useReminders();
+
   return (
     <Entry
       name={t("Reminders")}
@@ -370,6 +391,7 @@ function RemindersEntry() {
 function Entries() {
   // LiveHome hands it to Channels made once, so the language reaches it here.
   useLocale();
+
   return (
     <>
       <FavouritesEntry />
@@ -396,6 +418,7 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
       {(library) => {
         const found = library.regions.find((each) => each.name === region);
         const shelf = found?.shelves.find((each) => each.title === name);
+
         if (!found || !shelf) {
           return (
             <Still>
@@ -403,6 +426,7 @@ export function CategoryScreen({ region, name }: { region: string; name: string 
             </Still>
           );
         }
+
         return (
           <ChannelList
             library={library}
@@ -437,6 +461,7 @@ function Channels({
   const providers = roster.kind === "ready" ? roster.members : [];
   // One provider is named; several are "your providers".
   const host = providers.length === 1 && providers[0] ? providers[0].label : "";
+
   // With no channels at all, the failure has the screen to itself instead.
   const status =
     catalogue.kind === "failed"
@@ -447,6 +472,7 @@ function Channels({
           retry,
           settings: openSettings,
         });
+
   if (catalogue.kind === "loading") {
     return (
       <Docked status={status ?? loadingStatus("channels")}>
@@ -457,8 +483,10 @@ function Channels({
       </Docked>
     );
   }
+
   if (catalogue.kind === "failed") {
     const failure = failureOf(catalogue.error, catalogue.member.entry.server);
+
     return (
       <Still>
         {lead}
@@ -475,6 +503,7 @@ function Channels({
       </Still>
     );
   }
+
   if (catalogue.library.regions.length === 0) {
     return (
       <Docked status={status}>
@@ -493,6 +522,7 @@ function Channels({
       </Docked>
     );
   }
+
   return <Docked status={status}>{children(catalogue.library)}</Docked>;
 }
 
@@ -503,6 +533,7 @@ function Channels({
  */
 function Still({ children }: { children: ReactNode }) {
   const inset = useDockInset();
+
   return (
     <ScrollView
       style={styles.screen}
@@ -516,10 +547,12 @@ function Still({ children }: { children: ReactNode }) {
 
 function Browse({ library }: { library: Library }) {
   const kept = useStore(place);
+
   const region =
     kept.region === null
       ? null
       : (library.regions.find((each) => each.name === kept.region) ?? null);
+
   // Categories within the country chosen, or every country's: as many as the provider lists.
   const categories = useMemo(
     () =>
@@ -528,12 +561,14 @@ function Browse({ library }: { library: Library }) {
       ),
     [library, region],
   );
+
   // With one category or none in every country together, a shelf or tile would only repeat All.
   // A country chosen with one keeps the tab Live showed, as Find countries or categories does; one
   // with none, as Other channels, shows All, the tab kept for when it is cleared.
   const browsable =
     (region === null || region.shelves.length > 0) &&
     library.regions.reduce((count, each) => count + each.shelves.length, 0) > 1;
+
   const tabs: readonly { value: Tab; label: string }[] = browsable
     ? [
         { value: "for-you", label: t("For you") },
@@ -545,6 +580,7 @@ function Browse({ library }: { library: Library }) {
         { value: "all", label: t("All") },
         { value: "guide", label: t("Guide") },
       ];
+
   const tab = browsable || kept.tab === "guide" ? kept.tab : "all";
   // A country chosen before is kept by name: one a refresh took away says so until another is.
   const gone = kept.region !== null && region === null ? kept.region : null;
@@ -575,16 +611,19 @@ function Browse({ library }: { library: Library }) {
   );
 
   const key = `${tab}\n${region?.name ?? ""}`;
+
   if (tab === "for-you") {
     return (
       <ForYou key={key} library={library} region={region} categories={categories} header={header} />
     );
   }
+
   if (tab === "categories") {
     return (
       <CategoryGrid key={key} categories={categories} chosen={region !== null} header={header} />
     );
   }
+
   if (tab === "guide") {
     return (
       <GuideGrid
@@ -596,6 +635,7 @@ function Browse({ library }: { library: Library }) {
       />
     );
   }
+
   return (
     <ChannelList
       key={key}
@@ -623,35 +663,43 @@ function ChannelList({
   testID: string;
 }) {
   const { fontScale } = useWindowDimensions();
+
   // The rows' height as ChannelRow lays them out, so getItemLayout places them where they draw.
   const height =
     useRowHeight() + Math.round(58 * fontScale) + (largeText(fontScale) ? stackedActions : 0);
+
   const inset = useDockInset();
   const locale = useLocale();
   const playing = channelStatus(usePlayback().phase);
   const favourites = useFavouriteKeys();
   const [top, setTop] = useState(0);
+
   const [visible, setVisible] = useState<readonly string[]>(() =>
     channels.slice(0, 12).map((channel) => channel.key),
   );
+
   const onVisible = useCallback(
     ({ viewableItems }: { viewableItems: { item: Channel; isViewable: boolean }[] }) => {
       const keys = viewableItems
         .filter((item) => item.isViewable)
         .slice(0, 40)
         .map((item) => item.item.key);
+
       setVisible((before) => (before.join("\n") === keys.join("\n") ? before : keys));
     },
     [],
   );
+
   const read = useGuideListings(visible, library);
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
   // Rows draw again when a star, what plays or the interface language changes.
   const playingNow = playing && `${playing.id} ${playing.word}`;
+
   const extraData = useMemo(
     () => ({ favourites, playingNow, read: read.value, locale }),
     [favourites, playingNow, read.value, locale],
   );
+
   return (
     <FlatList
       style={styles.screen}
@@ -666,12 +714,15 @@ function ChannelList({
         const place = library.placeOf.get(item.key) ?? "";
         const programme = programmePresentation(read.value?.get(item.key), read.now);
         const showsProgramme = programme.line !== null || programme.next !== null;
+
         // Without programme data, the existing category/place line already names the provider.
         const category =
           provider && place.endsWith(` · ${provider}`)
             ? place.slice(0, -provider.length - 3)
             : place;
+
         const fallback = showsProgramme ? category : place;
+
         return (
           <ChannelRow
             channel={item}
@@ -745,6 +796,7 @@ const gridPlace = store<{
   readonly offset: number | null;
   readonly chosen: { readonly channel: string; readonly start: number } | null;
 }>({ day: null, offset: null, chosen: null });
+
 const moveGrid = (next: Partial<ReturnType<typeof gridPlace.get>>) =>
   gridPlace.set((current) => ({ ...current, ...next }));
 
@@ -766,6 +818,7 @@ function gridWindow(
   const latest = day.until - day.from - length;
   const around = Math.floor((now - day.from - length / 4) / (15 * MINUTE)) * 15 * MINUTE;
   const offset = Math.max(0, Math.min(latest, place.offset ?? (place.day === null ? around : 0)));
+
   return { day, offset, latest, from: day.from + offset, until: day.from + offset + length };
 }
 
@@ -802,9 +855,11 @@ function GuideGrid({
   const shown = useStore(detail);
   const scheduled = split && shown && !shown.alone ? shown.channel : null;
   const [top, setTop] = useState(0);
+
   const [visible, setVisible] = useState<readonly string[]>(() =>
     channels.slice(0, GRID_ROWS).map((channel) => channel.key),
   );
+
   const onVisible = useCallback(
     ({ viewableItems }: { viewableItems: { item: Channel; isViewable: boolean }[] }) => {
       const keys = viewableItems.filter((item) => item.isViewable).map((item) => item.item.key);
@@ -812,6 +867,7 @@ function GuideGrid({
     },
     [],
   );
+
   // An hour, or 45 minutes where an hour leaves a quarter hour too narrow for its title.
   const span = large || room(strip / 4, fontScale) < ROOM.title ? 45 : 60;
   // The grid draws again on the owner's minute tick, which moves now and a window following it.
@@ -820,6 +876,7 @@ function GuideGrid({
   const { day, offset, latest, from, until } = gridWindow(place, now, span);
   const read = useGuideGrid(visible, day, library);
   const step = 30 * MINUTE;
+
   const messages = [
     ...new Set(
       visible
@@ -827,6 +884,7 @@ function GuideGrid({
         .filter((message) => message !== null),
     ),
   ];
+
   const onProgramme = useCallback(
     (channel: string, programme: ScheduleItem) => {
       moveGrid({ chosen: { channel, start: programme.start } });
@@ -834,7 +892,9 @@ function GuideGrid({
     },
     [split],
   );
+
   const onSchedule = useCallback((channel: Channel) => showSchedule(split, channel), [split]);
+
   // Rows draw again as the window, the day read, the mark, the width or the language change.
   const extraData = useMemo(
     () => ({
@@ -851,7 +911,9 @@ function GuideGrid({
     }),
     [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
+
   const saved = gridScroll.get(scope);
+
   return (
     <FlatList
       style={styles.screen}
@@ -914,6 +976,7 @@ function GuideGrid({
         const said = guideMessage(read.snapshot.get(item.subscriptionId));
         const reason = said === "Guide may be out of date" ? null : said && t(said);
         const shown = row?.programmes.some((each) => each.stop > from && each.start < until);
+
         return (
           <GridRow
             channel={item}
@@ -1002,22 +1065,27 @@ function TimeAxis({
   // A label's width, over-estimated from its characters at 13 points so any locale's times fit.
   const wide = (label: string) => label.length * 8 * scale;
   const nowLabel = programmeTime(now);
+
   // Now's label starts a little before its line, kept within the strip.
   const nowAt =
     now >= from && now < until
       ? Math.max(0, Math.min(strip - wide(nowLabel), across(now, from, until, strip) - 18 * scale))
       : null;
+
   const labels: { at: number; left: number }[] = [];
   let free = 0;
+
   for (let at = day + Math.ceil((from - day) / half) * half; at < until; at += half) {
     const left = across(at, from, until, strip) + 6;
     const right = left + wide(programmeTime(at));
     // A half hour that would touch the one before it, now's label or the strip's end is left out.
     const clear = nowAt === null || right + 8 <= nowAt || left >= nowAt + wide(nowLabel) + 8;
+
     if (left < free || right > strip || !clear) continue;
     labels.push({ at, left });
     free = right + 8;
   }
+
   return (
     <View
       accessibilityElementsHidden
@@ -1085,6 +1153,7 @@ const GridRow = memo(function GridRow({
   // Memoised on its props, so the language reaches it here.
   useLocale();
   const inWindow = (programmes ?? []).filter((each) => each.stop > from && each.start < until);
+
   return (
     <View style={[styles.guideRow, { height }, large && styles.stackedRow]}>
       <Pressable
@@ -1120,12 +1189,14 @@ const GridRow = memo(function GridRow({
           const airing = programme.start <= now && programme.stop > now;
           const time = programmeRange(programme);
           const words = room(span, scale);
+
           const title = [
             styles.cellTitle,
             words < ROOM.title && styles.initials,
             airing && styles.airing,
             programme.stop <= now && styles.past,
           ];
+
           return (
             <Pressable
               // A start and its place, as two programmes can share a start in bad data.
@@ -1209,29 +1280,38 @@ function ForYou({
   const inset = useDockInset();
   const playing = channelStatus(usePlayback().phase);
   const { recentChannels } = useSavedState();
+
   const recent = useMemo(() => {
     // By the channel each key names: a key can be one of its streams'.
     const seen = new Set<string>();
     const found: Channel[] = [];
+
     for (const key of recentChannels ?? []) {
       const channel = library.byKey.get(key);
+
       if (!channel || seen.has(channel.key)) continue;
       seen.add(channel.key);
       found.push(channel);
     }
+
     const listed =
       region && found.length > 0 ? new Set(region.channels.map((channel) => channel.key)) : null;
+
     const shown = listed ? found.filter((channel) => listed.has(channel.key)) : found;
     const last = found[0];
+
     return { lead: last && shown[0] === last ? last : null, shown };
   }, [library, region, recentChannels]);
+
   const onPress = useCallback((channel: Channel) => watch(library, channel), [library]);
+
   const lineOf = (channel: Channel, otherwise: string) =>
     channel.key === playing?.id
       ? t(playing.word)
       : channel.ambiguous
         ? (library.labels.get(channel.subscriptionId) ?? otherwise)
         : otherwise;
+
   return (
     <ScrollView
       style={styles.screen}
@@ -1342,6 +1422,7 @@ function Tiles({
       >
         {channels.map((channel) => {
           const shown = line(channel);
+
           return (
             <Pressable
               key={channel.key}
@@ -1384,6 +1465,7 @@ function CategoryGrid({
   const { width } = useListWidth();
   const tile = Math.floor((width - 42) / 2);
   const cell = Math.floor((tile - 4) / 2);
+
   return (
     <FlatList
       style={styles.screen}
@@ -1395,12 +1477,14 @@ function CategoryGrid({
       ListHeaderComponent={header ? <View style={styles.gridHead}>{header}</View> : undefined}
       renderItem={({ item }) => {
         const count = item.shelf.channels.length;
+
         const line = [
           chosen || item.shelf.title === item.region.name ? null : item.region.name,
           formatNumber(count),
         ]
           .filter(Boolean)
           .join(" · ");
+
         return (
           <Pressable
             accessibilityRole="button"
@@ -1453,6 +1537,7 @@ function Country({
   onChoose: (region: Region | null) => void;
 }) {
   const name = chosen?.name ?? t("All countries");
+
   const open = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -1467,9 +1552,11 @@ function Country({
       (index) => {
         if (index === 0) onChoose(null);
         const next = regions[index - 1];
+
         if (next) onChoose(next);
       },
     );
+
   return (
     <View style={styles.country}>
       <Pressable

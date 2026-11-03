@@ -121,6 +121,7 @@ describe("Xtream details", () => {
         [episode({ id: "2", season: 2 })],
       ],
     }).seriesDetails("1");
+
     expect(
       listed.episodes.map(({ id, season, duration, airDate }) => [id, season, duration, airDate]),
     ).toEqual([
@@ -151,6 +152,7 @@ describe("Xtream details", () => {
       },
       movie_data: { container_extension: " mkv " },
     });
+
     expect(await movie.movieDetails("1")).toMatchObject({
       plot: "Told.",
       duration: 6000,
@@ -159,6 +161,7 @@ describe("Xtream details", () => {
       seasons: [],
       episodes: [],
     });
+
     for (const body of [
       { info: [], movie_data: [] },
       { info: null, movie_data: null },

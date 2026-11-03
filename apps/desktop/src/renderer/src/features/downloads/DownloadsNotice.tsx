@@ -31,13 +31,16 @@ type Progress =
 function progressOf({ items }: DownloadList): Progress | null {
   for (const { status } of items) {
     if (status.kind !== "transferring") continue;
+
     return status.size
       ? { kind: "percent", percent: Math.floor((status.received / status.size) * 100) }
       : { kind: "received", bytes: status.received };
   }
+
   for (const kind of ["waiting", "queued", "paused"] as const) {
     if (items.some((item) => item.status.kind === kind)) return { kind };
   }
+
   return items.some((item) => item.status.kind === "failed" && item.subscription)
     ? { kind: "stopped" }
     : null;
@@ -67,7 +70,9 @@ export type DownloadsStatus = { readonly text: string; readonly quiet: boolean }
 export function useDownloadsStatus(): DownloadsStatus | null {
   // Only what the notice says: a progress event that changes nothing else renders nothing.
   const progress = useQuery({ ...downloadsQuery(), select: progressOf }).data;
+
   if (!progress) return null;
+
   return {
     text: words(progress),
     quiet: progress.kind === "waiting" || progress.kind === "queued" || progress.kind === "paused",
@@ -108,6 +113,7 @@ export function DownloadsNotice({
   compact?: boolean;
 }) {
   if (!status && !page) return null;
+
   return (
     <Tooltip label={status?.text ?? t("Downloads")} side="bottom" disabled={!compact}>
       <Button

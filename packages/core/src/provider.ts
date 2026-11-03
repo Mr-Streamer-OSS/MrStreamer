@@ -225,6 +225,7 @@ export interface ProviderOptions {
 }
 
 const REDIRECTS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+
 /** As many redirects as fetch follows. */
 const MAX_REDIRECTS = 20;
 
@@ -253,11 +254,13 @@ export function providerFetch(fetchImpl: typeof fetch, login: ProviderLogin) {
     secrets: login.secrets.filter(Boolean),
     uncertain: login.uncertain?.filter(Boolean) ?? [],
   };
+
   return async (url: string, init: RequestInit = {}, from = url): Promise<Response> => {
     try {
       const admitted = new URL(from);
       const headers = new Headers(init.headers);
       let target = new URL(url);
+
       for (let redirects = 0; ; redirects++) {
         if (exposesLogin(admitted, target, known)) {
           throw new TypeError(
@@ -270,12 +273,15 @@ export function providerFetch(fetchImpl: typeof fetch, login: ProviderLogin) {
                 ),
           );
         }
+
         const response = await fetchImpl(target.href, {
           ...init,
           headers: sentWith(headers, admitted, target, known),
           redirect: "manual",
         });
+
         const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+
         if (location === null) return response;
         void response.body?.cancel().catch(() => {});
         target = new URL(
@@ -305,23 +311,28 @@ export function nextProviderRedirect(input: {
   if (input.followed >= MAX_REDIRECTS) throw new TypeError(t("It redirected too many times."));
   let start: URL;
   let next: URL;
+
   try {
     start = new URL(input.original);
     next = new URL(input.location, input.current);
   } catch {
     throw new TypeError(t("The server address is not a valid URL."));
   }
+
   if (!["http:", "https:"].includes(next.protocol)) {
     throw new TypeError(t("The server address must start with http or https."));
   }
+
   // A list is secrets alone, as an Xtream account's username and password.
   const login: ProviderLogin =
     "secrets" in input.login ? input.login : { secrets: input.login.filter(Boolean) };
+
   if (exposesLogin(start, next, login)) {
     throw new TypeError(
       t("It redirected to an unencrypted address with your login in it, so Mr. Streamer stopped."),
     );
   }
+
   return next.href;
 }
 
@@ -336,6 +347,7 @@ function exposesLogin(admitted: URL, target: URL, login: ProviderLogin): boolean
   if (admitted.protocol !== "https:" || target.protocol !== "http:") return false;
   const { username, password, pathname, search, searchParams } = target;
   const written: Carried[] = [{ text: username }, { text: password }, { text: pathname }];
+
   // Uncertain values count in the query's values only: its names, as the `ts` of
   // `?ts=1700000000`, name settings.
   return holdsLogin(
@@ -352,18 +364,22 @@ function exposesLogin(admitted: URL, target: URL, login: ProviderLogin): boolean
  */
 function sentWith(headers: Headers, admitted: URL, target: URL, login: ProviderLogin): Headers {
   if (target.origin === admitted.origin) return headers;
+
   // A header reads as written, its "+" a plus; one that is an address, as a Referer is, has a
   // query as well.
   const holds = (text: string) =>
     holdsLogin(login, [{ text }, { text: URL.parse(text)?.search ?? "", query: true }]);
+
   const sent = new Headers();
   headers.forEach((value, name) => {
     if (!holds(value)) sent.set(name, value);
     else if (name === "referer") {
       const origin = URL.parse(value)?.origin;
+
       if (origin && origin !== "null" && !holds(origin)) sent.set(name, `${origin}/`);
     }
   });
+
   return sent;
 }
 
@@ -384,10 +400,12 @@ interface Carried {
  */
 function holdsLogin(login: ProviderLogin, anywhere: readonly Carried[], parts = anywhere): boolean {
   const { secrets, uncertain = [] } = login;
+
   return (
     (secrets.length > 0 &&
       anywhere.some(({ text, query }) => {
         const { forms, deeper } = decodings(text, query);
+
         return deeper || forms.some((form) => secrets.some((secret) => form.includes(secret)));
       })) ||
     parts.some(({ text, query }) =>
@@ -411,15 +429,20 @@ function decodings(
   query = false,
 ): { readonly forms: readonly string[]; readonly deeper: boolean } {
   const forms = new Set([text]);
+
   for (let layer = [text], times = 0; ; times++) {
     const next = new Set<string>();
+
     for (const form of layer) {
       for (const spaces of query ? [false, true] : [false]) {
         const read = decoded(form, spaces);
+
         if (!forms.has(read)) next.add(read);
       }
     }
+
     if (next.size === 0 || times === DECODINGS) return { forms: [...forms], deeper: next.size > 0 };
+
     for (const form of next) forms.add(form);
     layer = [...next];
   }
@@ -437,6 +460,7 @@ export function whole(text: string, value: string): boolean {
   for (let at = text.indexOf(value); at !== -1; at = text.indexOf(value, at + 1)) {
     if (!NAME.test(text[at - 1] ?? "") && !NAME.test(text[at + value.length] ?? "")) return true;
   }
+
   return false;
 }
 
@@ -448,6 +472,7 @@ export function whole(text: string, value: string): boolean {
  */
 function decoded(text: string, spaces: boolean): string {
   const utf8 = new TextDecoder("utf-8", { ignoreBOM: true, fatal: false });
+
   return (spaces ? text.replaceAll("+", " ") : text).replace(/(?:%[\da-f]{2})+/gi, (run) =>
     utf8.decode(Uint8Array.from(run.slice(1).split("%"), (hex) => Number.parseInt(hex, 16))),
   );
@@ -460,6 +485,7 @@ function decoded(text: string, spaces: boolean): string {
 export function withoutAddresses(text: string): string {
   return text.replace(/\b([a-z][a-z\d+.-]*):\/\/[^\s"'<>]+/gi, (address, scheme: string) => {
     const origin = URL.parse(address)?.origin;
+
     return origin && origin !== "null" ? `${origin}/…` : `${scheme}://…`;
   });
 }
@@ -469,6 +495,8 @@ function withoutAddress(cause: unknown): unknown {
   const messages = [cause, cause instanceof Error ? cause.cause : null].map((each) =>
     each instanceof Error ? each.message : "",
   );
+
   if (!messages.some((message) => message.includes("://"))) return cause;
+
   return new TypeError(withoutAddresses(messages[0] ?? ""));
 }

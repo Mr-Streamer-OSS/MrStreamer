@@ -42,9 +42,11 @@ export function SavedTile({
   // The lists were there to look in, so an entry without a title is one no provider lists.
   // Without them, nothing says so.
   const unavailable = entry.listed && !title;
+
   const facts = [kindLabel(entry.kind), title?.year ?? entry.year, title && sourceOf(title)].filter(
     Boolean,
   );
+
   return (
     <div className="group relative min-w-0">
       <button

@@ -19,6 +19,7 @@ const file: SubtitleFile = {
   kind: "movie",
   id: "4k",
 };
+
 const subtitle: DownloadedSubtitle = {
   service: "subdl",
   language: "en",
@@ -42,6 +43,7 @@ describe("saved exact-file subtitles", () => {
       timing: { offset: -480.1, speed: 24 / 25 },
       subtitle,
     });
+
     for (const other of [
       { ...file, id: "hd" },
       { ...file, kind: "episode" as const },
@@ -80,6 +82,7 @@ describe("saved exact-file subtitles", () => {
       subtitle,
     });
     expect(await restored.read({ ...file, id: "hd" })).toBeNull();
+
     for (const other of [
       { ...file, account: "another" },
       { ...file, sourceStamp: "changed-source" },
@@ -122,6 +125,7 @@ describe("saved exact-file subtitles", () => {
       const runtime = runtimeFor(
         savedSubtitlesLayer.pipe(Layer.provide(databaseLayer(await tempDir()))),
       );
+
       const saved = await promised(runtime, SavedSubtitles);
       await saved.timing(file, { offset: 21, speed: 25 / 24 });
       await saved.remember(file, subtitle, "old-result");
@@ -151,10 +155,12 @@ describe("saved exact-file subtitles", () => {
 
   it("account erasure removes cues and timing permanently while retaining other accounts", async () => {
     const dir = await tempDir();
+
     const layer = () =>
       Layer.mergeAll(savedSubtitlesLayer, viewingStoreLayer, watchlistStoreLayer).pipe(
         Layer.provide(databaseLayer(dir)),
       );
+
     const first = runtimeFor(layer());
     const saved = await promised(first, SavedSubtitles);
     const other = { ...file, account: "other" };
@@ -171,16 +177,20 @@ describe("saved exact-file subtitles", () => {
 describe("bounded downloaded-result cache", () => {
   it("retains eight recent results, restores each correction and erases every cached result with its account", async () => {
     const dir = await tempDir();
+
     const runtime = runtimeFor(
       Layer.mergeAll(savedSubtitlesLayer, viewingStoreLayer, watchlistStoreLayer).pipe(
         Layer.provide(databaseLayer(dir)),
       ),
     );
+
     const saved = await promised(runtime, SavedSubtitles);
+
     for (let index = 0; index < 9; index++) {
       await saved.remember(file, { ...subtitle, release: `Cut ${index}` }, `result-${index}`);
       await saved.timing(file, { offset: index, speed: 1 });
     }
+
     expect(await saved.result(file, "result-0")).toBeNull();
     expect((await saved.result(file, "result-1"))?.timing.offset).toBe(1);
     const cached = (await saved.result(file, "result-1"))!;

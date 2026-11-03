@@ -53,18 +53,22 @@ export async function connect(
   const target = kind === "page" ? "window" : "inspector";
   let url: string | undefined;
   const until = performance.now() + 30000;
+
   while (performance.now() < until && !url) {
     await delay(pollMs);
+
     if (app && (app.exitCode !== null || app.signalCode !== null))
       throw new Error(
         `The app exited (${app.signalCode ?? `code ${app.exitCode}`}) before opening a ${target}.`,
       );
+
     try {
       const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as {
         type: string;
         url: string;
         webSocketDebuggerUrl: string;
       }[];
+
       // Electron exposes its initial blank page before loading the app. Observing that page
       // loses the pending measurement when navigation destroys its execution context.
       url = targets.find(
@@ -74,6 +78,7 @@ export async function connect(
       )?.webSocketDebuggerUrl;
     } catch {}
   }
+
   if (!url) throw new Error(`The app opened no ${target} within 30 s.`);
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
@@ -93,31 +98,40 @@ export async function connect(
       result?: unknown;
       error?: unknown;
     };
+
     if (message.id !== undefined) pending.get(message.id)?.(message);
     else if (message.method) listeners.get(message.method)?.(message.params);
   });
   socket.addEventListener("close", () => {
     closed = true;
+
     for (const resolve of pending.values()) resolve({ error: "DevTools connection closed" });
+
     for (const listener of closeListeners) listener();
     closeListeners.clear();
   });
+
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
     new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
       if (closed) {
         resolve({ error: "DevTools connection closed" });
+
         return;
       }
+
       const id = nextId++;
+
       const timer = setTimeout(() => {
         pending.delete(id);
         resolve({ error: `${method} timed out` });
       }, timeoutMs);
+
       pending.set(id, (message) => {
         clearTimeout(timer);
         pending.delete(id);
         resolve(message);
       });
+
       try {
         socket.send(JSON.stringify({ id, method, params }));
       } catch (error) {
@@ -126,11 +140,13 @@ export async function connect(
         resolve({ error: String(error) });
       }
     });
+
   return {
     send,
     /** Calls `listener` with each event of this name, as `Fetch.requestPaused`. */
     on(method: string, listener: (params: unknown) => void): () => void {
       listeners.set(method, listener);
+
       return () => {
         if (listeners.get(method) === listener) listeners.delete(method);
       };
@@ -139,6 +155,7 @@ export async function connect(
     onClose(listener: () => void): () => void {
       if (closed) listener();
       else closeListeners.add(listener);
+
       return () => {
         closeListeners.delete(listener);
       };
@@ -153,9 +170,12 @@ export async function connect(
         },
         timeoutMs,
       );
+
       if (reply.error) throw new Error(JSON.stringify(reply.error));
       const result = reply.result as { result: { value: T }; exceptionDetails?: unknown };
+
       if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+
       return result.result.value;
     },
     close: () => socket.close(),
@@ -279,6 +299,7 @@ export async function press(page: Page, label: string): Promise<void> {
   const button = `[...document.querySelectorAll("button")].find((b) =>
     b.textContent.trim().startsWith(${JSON.stringify(label)}) ||
     b.getAttribute("aria-label") === ${JSON.stringify(label)})`;
+
   await waitFor(() => page.evaluate<boolean>(`!!${button}`), 20_000);
   await page.evaluate(`${button}.click()`);
 }
@@ -290,26 +311,32 @@ export async function revealFixtureList(
 ): Promise<boolean> {
   const picker = `document.querySelector('[role="navigation"][aria-label="Channel categories"]')`;
   const target = `[...(${picker}?.querySelectorAll('button') ?? [])].find(b => b.title === ${JSON.stringify(label)} || b.textContent.trim().startsWith(${JSON.stringify(label)}))`;
+
   if (await page.evaluate<boolean>(`!!${target}`)) return false;
+
   const navigation =
     label === "All channels"
       ? `${picker}?.querySelector('button[aria-label="Back to topics"]')`
       : `${picker}?.querySelector('button[title="Provider lists"]')`;
+
   await page.evaluate(`(() => {
     const button = ${navigation};
     if (!button) throw new Error('No navigation to fixture list ' + ${JSON.stringify(label)});
     button.click();
   })()`);
   await waitFor(() => page.evaluate<boolean>(`!!${target}`));
+
   return true;
 }
 
 export async function waitFor(check: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {
   const until = Date.now() + timeoutMs;
+
   while (Date.now() < until) {
     if (await check().catch(() => false)) return;
     await delay(250);
   }
+
   throw new Error(`Timed out: ${check.toString()}`);
 }
 
@@ -354,9 +381,11 @@ export function observe(
  * There is deliberately no action argument: user actions must never run twice. */
 export async function observeAcrossLoad(page: Page, condition: string, started: number) {
   let navigationObserved = false;
+
   for (;;) {
     try {
       await observe(page, condition);
+
       return { elapsedMs: performance.now() - started, navigationObserved };
     } catch (error) {
       if (
@@ -382,6 +411,7 @@ export async function calibrate(page: Page) {
     observationErrorMs: number;
     overheadMs: number;
   }[] = [];
+
   for (const mutations of [true, false]) {
     for (const knownDelayMs of [5, 10, 20, 50]) {
       for (let run = 0; run < 3; run++) {
@@ -390,6 +420,7 @@ export async function calibrate(page: Page) {
           const marker = document.createElement("div"); marker.id = "measurement-calibration";
           marker.hidden = true; document.documentElement.append(marker);
         })()`);
+
         const elapsed = await observe(
           page,
           `document.querySelector("#measurement-calibration").dataset.ready === "yes"`,
@@ -398,6 +429,7 @@ export async function calibrate(page: Page) {
              document.querySelector("#measurement-calibration").dataset.ready = "yes"; }, ${knownDelayMs})`,
           mutations,
         );
+
         const actualDelayMs = await page.evaluate<number>("window.__calibrationActual");
         samples.push({
           method: mutations ? "mutation-and-probe" : "probe-only",
@@ -409,6 +441,8 @@ export async function calibrate(page: Page) {
       }
     }
   }
+
   await page.evaluate('document.querySelector("#measurement-calibration").remove()');
+
   return samples;
 }

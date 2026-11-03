@@ -23,29 +23,43 @@ import "./styles.css";
 const client = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
 });
+
 const stopPreferences = syncPreferences(
   client,
   (preferences) => player.hydrate(preferences),
   closeTitleSheets,
 );
+
 window.addEventListener("beforeunload", stopPreferences, { once: true });
+
 if (import.meta.hot) import.meta.hot.dispose(stopPreferences);
+
 syncLibraryUpdates(client);
+
 syncOnDemand(client);
+
 syncGuideUpdates(client);
+
 syncViewing(client);
+
 syncWatchlist(client);
+
 syncCustomLists(client);
+
 syncUpdates(client);
+
 syncDownloads(client);
+
 syncReminders(client);
 
 const root = document.getElementById("root");
+
 if (!root) throw new Error("index.html is missing #root");
 
 /** The app, rendered again whole when the interface language changes. */
 function Root() {
   useLocale();
+
   return (
     <QueryClientProvider client={client}>
       <TooltipProvider delay={400}>
@@ -56,6 +70,7 @@ function Root() {
 }
 
 await loadLanguage(client);
+
 createRoot(root).render(
   <StrictMode>
     <Root />

@@ -12,19 +12,23 @@ import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { SettingsPage } from "../../src/renderer/src/features/settings/SettingsPage.tsx";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
 async function about(distribution: Distribution = "direct") {
   ipc.reset();
   vi.stubGlobal("__BUILD_COMMIT__", "abcdef0123456789");
   useUi.setState({ settings: "about" });
   const client = new QueryClient();
+
   const status: UpdateStatus = {
     version: "0.0.9",
     distribution,
@@ -35,19 +39,25 @@ async function about(distribution: Distribution = "direct") {
     nextCheckAt: null,
     dismissed: null,
   };
+
   client.setQueryData(["updates"], status);
   ipc.always("updates.status", status);
   const mounted = queryView(client);
   const { container } = mounted;
   await mounted.render(createElement(SettingsPage));
   unmount = mounted.unmount;
+
   return container;
 }
+
 function button(container: HTMLElement, name: string) {
   const found = [...container.querySelectorAll("button")].find((item) => item.textContent === name);
+
   if (!found) throw new Error(`Missing button: ${name}`);
+
   return found;
 }
+
 async function click(container: HTMLElement, name: string) {
   await act(async () => {
     button(container, name).click();
@@ -59,10 +69,13 @@ it.each(["direct", "store"] as const)(
   "offers rating only for Store copies (%s)",
   async (distribution) => {
     const view = await about(distribution);
+
     const rating = [...view.querySelectorAll("button")].find(
       (item) => item.textContent === "Rate in the Microsoft Store",
     );
+
     expect(Boolean(rating)).toBe(distribution === "store");
+
     if (rating) {
       ipc.always("updates.rateStore", null);
       await click(view, "Rate in the Microsoft Store");
@@ -74,6 +87,7 @@ it.each(["direct", "store"] as const)(
 it("previews on request and saves the inspected text without treating dialog cancellation as success", async () => {
   const view = await about();
   expect(ipc.methods()).not.toContain("diagnostics.preview");
+
   const report: DiagnosticsPreview = {
     id: "snapshot-one",
     version: "0.0.9",
@@ -88,6 +102,7 @@ it("previews on request and saves the inspected text without treating dialog can
     checked: "none",
     text: "The inspected text",
   };
+
   ipc.always("diagnostics.preview", report);
   await click(view, "Diagnostics…");
   expect(document.activeElement?.textContent).toBe("Diagnostics export");

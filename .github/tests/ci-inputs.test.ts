@@ -22,6 +22,7 @@ test("select expensive work by known inputs; shared, unknown and incomplete chan
     desktop: true,
     website: true,
   });
+
   for (const path of [
     "docs/privacy.md",
     "docs/about.md",
@@ -42,6 +43,7 @@ test("a complete multi-commit diff includes deleted paths and both sides of rena
   const previous = process.cwd();
   const dir = mkdtempSync(join(tmpdir(), "ci-inputs-"));
   const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
+
   try {
     process.chdir(dir);
     git("init", "-q");

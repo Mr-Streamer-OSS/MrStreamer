@@ -208,6 +208,7 @@ export type GuideFailure =
 
 /** Which of a subscription's channels the mapping list shows. */
 export const MAP_FILTERS = ["without", "mapped", "all"] as const;
+
 export type MapFilter = (typeof MAP_FILTERS)[number];
 
 /** A guide channel of one of a subscription's guides: which guide, and its id there. */

@@ -158,7 +158,9 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
     choosing = null;
     clearTimeout(mine.timer);
     quiet({ cmd: "hidePicker" });
+
     if (!live) quiet({ cmd: "unload" });
+
     if (outcome instanceof ReceiverFailed) mine.outcome.reject(outcome);
     else mine.outcome.resolve(outcome);
   };
@@ -167,6 +169,7 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
   const released = () => {
     settling = undefined;
     const was = live;
+
     if (!was) return;
     live = null;
     quiet({ cmd: "unload" });
@@ -178,9 +181,11 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
     /** While this is still the connection; a receiver that is gone takes nothing. */
     const send = (command: HelperCommand) =>
       live === mine ? on.helper.send(command) : Promise.reject(unreachable());
+
     /** For the load the receiver holds; one about an earlier load resolves and does nothing. */
     const about = (generation: number, command: HelperCommand) =>
       generation === mine.generation ? send(command) : Promise.resolve();
+
     const mine: Live = {
       generation: null,
       failed: false,
@@ -196,6 +201,7 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
           const { generation } = media;
           mine.generation = generation;
           mine.failed = false;
+
           const taken = send({
             cmd: "load",
             generation,
@@ -205,13 +211,17 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
             live: media.live,
             subtitles: media.subtitles,
           });
+
           // Given up from here: the helper may hold it by now, so it is told to stop it.
           const dropped = Promise.withResolvers<never>();
+
           const drop = () => {
             quiet({ cmd: "stop", generation });
             dropped.reject(unreachable());
           };
+
           signal.addEventListener("abort", drop, { once: true });
+
           try {
             await Promise.race([taken, dropped.promise]);
           } finally {
@@ -226,10 +236,12 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         stop: (generation) => about(generation, { cmd: "stop", generation }),
         async disconnect() {
           if (live !== mine) return;
+
           if (choosing) settle(choosing, unreachable());
           live = null;
           clearTimeout(settling);
           settling = undefined;
+
           // No call takes a route back. The helper's process ending is what surely lets go of
           // the receiver; a new one starts when the adapter still scans.
           if (run === on) run = null;
@@ -237,14 +249,18 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         },
       },
     };
+
     if (volume) emit({ type: "volume", ...volume });
+
     return mine;
   };
 
   /** Settles the connect that waits, once what the helper said decides it. */
   const judge = (on: Run) => {
     const mine = choosing;
+
     if (!mine) return;
+
     if (on.external && (mine.fresh || mine.closed)) {
       live ??= connected(on);
       settle(mine, live.connection);
@@ -257,30 +273,39 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
     switch (event.type) {
       case "routes":
         if (scanning) tellRoutes(event.available);
+
         return;
       case "picker": {
         const mine = choosing;
+
         if (!mine || event.request !== mine.request) return;
         clearTimeout(mine.timer);
         mine.timer = undefined;
+
         if (event.state === "manual") {
           mine.timer = setTimeout(() => settle(mine, null), timings.button);
         } else if (event.state === "closed") {
           mine.closed = true;
           judge(on);
         }
+
         return;
       }
+
       case "external":
         on.external = event.active;
+
         if (event.active) {
           clearTimeout(settling);
           settling = undefined;
         } else {
           if (choosing) choosing.fresh = true;
+
           if (live) settling ??= setTimeout(released, timings.settle);
         }
+
         judge(on);
+
         return;
       case "status":
         if (!live) return;
@@ -295,19 +320,24 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
             duration: event.duration,
           },
         });
+
         return;
       case "failed":
         if (!live) return;
+
         if (event.generation === live.generation) live.failed = true;
         emit({
           type: "media-failed",
           generation: event.generation,
           failure: { kind: "media", detail: withoutAddresses(event.message) },
         });
+
         return;
       case "volume":
         volume = { level: event.level, muted: event.muted };
+
         if (live) emit({ type: "volume", ...volume });
+
         return;
     }
   };
@@ -315,37 +345,49 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
   /** A helper's process is gone. What depended on it goes with it, and another may start. */
   const ended = (was: Run, end: HelperEnd) => {
     running.delete(was.helper);
+
     if (run === was) run = null;
+
     if (closed) return;
+
     if (end !== "asked") {
       const failure = { kind: "unavailable", detail: "the AirPlay helper stopped" } as const;
+
       if (choosing) settle(choosing, new ReceiverFailed(failure));
       clearTimeout(settling);
       settling = undefined;
+
       // An AirPlay session lives in the helper's process, so no restart brings a receiver back.
       if (live) {
         live = null;
         emit({ type: "lost", failure });
       }
+
       stops = Date.now() - was.since >= timings.steady ? 1 : stops + 1;
+
       if (end === "unusable" || stops > RESTARTS) {
         down =
           end === "unusable"
             ? "the AirPlay helper can't start"
             : "the AirPlay helper keeps stopping";
+
         if (routes) tellRoutes(false);
+
         return;
       }
     }
+
     if (scanning) ensure();
   };
 
   /** The helper that runs, started when none does. Throws where there is none to start. */
   const ensure = (): Run => {
     if (run) return run;
+
     if (closed || down !== null || options.helper === null) {
       throw unavailable(down ?? "AirPlay is closed");
     }
+
     const started: Run = {
       since: Date.now(),
       external: false,
@@ -362,9 +404,12 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         onEnd: (end) => ended(started, end),
       }),
     };
+
     run = started;
     running.add(started.helper);
+
     if (scanning) quiet({ cmd: "detect", on: true });
+
     return started;
   };
 
@@ -376,7 +421,9 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
     scan(on) {
       if (closed || down !== null || scanning === on) return;
       scanning = on;
+
       if (!on) routes = null;
+
       if (run) quiet({ cmd: "detect", on });
       else if (on) ensure();
     },
@@ -385,10 +432,13 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
       if (request.kind !== "picker") {
         throw unavailable("AirPlay receivers are picked in the system's list");
       }
+
       if (signal.aborted) throw unreachable();
       const on = ensure();
+
       // One list at a time: a connect that still waits gives way to this one.
       if (choosing) settle(choosing, unreachable());
+
       const mine: Choosing = {
         request: ++requests,
         outcome: Promise.withResolvers(),
@@ -396,6 +446,7 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         closed: false,
         timer: undefined,
       };
+
       choosing = mine;
       const abort = () => settle(mine, unreachable());
       signal.addEventListener("abort", abort, { once: true });
@@ -404,6 +455,7 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
         .catch((refusal: unknown) =>
           settle(mine, refusal instanceof ReceiverFailed ? refusal : unreachable()),
         );
+
       try {
         return await mine.outcome.promise;
       } finally {

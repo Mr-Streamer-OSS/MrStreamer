@@ -104,7 +104,9 @@ const SENTENCES = {
 
 const sentence = (verb: Verb, what: Lists, from: readonly string[], several: boolean) => {
   const said = t(SENTENCES[verb][what], { providers: formatList(from) });
+
   if (verb !== "stale") return said;
+
   return `${said} ${several ? t("Showing the last lists.") : t("Showing the last list.")}`;
 };
 
@@ -155,26 +157,34 @@ export function libraryStatus(
       failures.push({ id: member.entry.id, label: member.label, kind: "password" });
       continue;
     }
+
     const lists = [
       ...(shows.channels ? [["channels", member.live] as const] : []),
       ...(shows.titles ? [["movies and series", member.titles] as const] : []),
     ];
+
     const byVerb = new Map<Verb, Lists[]>();
+
     for (const [noun, list] of lists) {
       const verb = verbOf(list);
+
       if (verb) byVerb.set(verb, [...(byVerb.get(verb) ?? []), noun]);
     }
+
     if (byVerb.has("stale") || byVerb.has("failed")) {
       failures.push({ id: member.entry.id, label: member.label, kind: "unavailable" });
     }
+
     for (const [verb, nouns] of byVerb) {
       const what = nouns.length > 1 ? "channels, movies and series" : nouns[0]!;
       const group = groups.get(verb) ?? new Map<Lists, string[]>();
       group.set(what, [...(group.get(what) ?? []), member.label]);
       groups.set(verb, group);
+
       if (verb === "stale" || verb === "failed") failed.push(member.entry.id);
     }
   }
+
   const sentences = [
     ...VERBS.flatMap((verb) =>
       [...(groups.get(verb) ?? [])].map(([what, from]) =>
@@ -183,7 +193,9 @@ export function libraryStatus(
     ),
     ...passwords,
   ];
+
   if (sentences.length === 0) return null;
+
   if (failures.length > 0 && shows.usableContent) {
     return {
       text: [...(groups.get("loading") ?? [])]
@@ -194,7 +206,9 @@ export function libraryStatus(
       providerFailures: { failures, settings: shows.settings },
     };
   }
+
   const ids = [...new Set(failed)];
+
   return {
     text: sentences.join(" "),
     inline: failures.length > 0,
@@ -208,30 +222,38 @@ export function libraryStatus(
 /** Resolve provider notices before measuring or announcing a composed status, as Search does. */
 export function useProviderStatus(status: Status | null): Status | null {
   const incidents = useProviderNotices();
+
   if (!status?.providerFailures) return status;
   const { providerFailures, ...normal } = status;
+
   const visible = providerFailures.failures.flatMap((failure) => {
     const incident = incidents.get(failure.id);
+
     return incident?.kind === failure.kind && !incident.acknowledged
       ? [{ ...failure, token: incident.token }]
       : [];
   });
+
   if (visible.length === 0) {
     return normal.text || normal.progress !== undefined || normal.actions?.length ? normal : null;
   }
+
   const words = (["unavailable", "password"] as const).flatMap((kind) => {
     const names = visible
       .filter((failure) => failure.kind === kind)
       .map((failure) => failure.label);
+
     if (names.length === 0) return [];
     const providers = formatList(names);
     const count = names.length;
+
     return [
       kind === "password"
         ? t("{providers} need passwords", { providers, count })
         : t("{providers} unavailable", { providers, count }),
     ];
   });
+
   return {
     ...normal,
     text: [...words, normal.text].filter(Boolean).join(". "),
@@ -279,6 +301,7 @@ export function Docked({
   const [space, setSpace] = useState(0);
   const [height, setHeight] = useState(0);
   const shown = status !== null && space > GAP * 2;
+
   if (status?.inline) {
     return (
       <DockInset.Provider value={0}>
@@ -295,6 +318,7 @@ export function Docked({
       </DockInset.Provider>
     );
   }
+
   return (
     <DockInset.Provider value={shown ? height : 0}>
       <View style={styles.fill} collapsable={false}>
@@ -326,6 +350,7 @@ export function Docked({
 
 /** Space between the status line and content above it, and the screen's edge under it. */
 const GAP = 8;
+
 /** The share of its host's height the whole line may take: content keeps the rest. */
 const SHARE = 0.4;
 
@@ -341,6 +366,7 @@ const TEXT_PADDING = 24;
 export function useStatusFits(space: number): boolean {
   const { fontScale } = useWindowDimensions();
   const line = Math.max(44, Math.ceil(TEXT_SIZE * fontScale * 1.2) + TEXT_PADDING);
+
   return space * SHARE >= line;
 }
 
@@ -356,7 +382,9 @@ export function StatusLine({ status: supplied, space }: { status: Status; space?
   const status = useProviderStatus(supplied);
   const { text = "", actions = [], progress, announce = true, dismiss } = status ?? {};
   useStatusAnnouncement(status ? text || null : null, announce);
+
   if (!status) return null;
+
   const body = (
     <>
       <Text style={[styles.text, dismiss && styles.compactText]}>{text}</Text>
@@ -383,10 +411,12 @@ export function StatusLine({ status: supplied, space }: { status: Status; space?
       ) : null}
     </>
   );
+
   const plain = dismiss !== undefined || status.inline;
   const Surface = plain ? View : Glass;
   const surfaceStyle = plain ? styles.notice : styles.glass;
   const lineStyle = [styles.line, dismiss && styles.compactLine];
+
   if (space === undefined) {
     return (
       <Surface style={surfaceStyle}>
@@ -396,8 +426,11 @@ export function StatusLine({ status: supplied, space }: { status: Status; space?
       </Surface>
     );
   }
+
   const most = Math.max(0, space * SHARE);
+
   if (most === 0) return null;
+
   return (
     <Surface style={surfaceStyle}>
       <ScrollView
@@ -439,24 +472,28 @@ function useShown(): boolean {
   const focused = useIsFocused();
   const { watch } = usePlayback();
   const active = useForeground();
+
   return focused && !watch && active;
 }
 
 /** Whether the app is in front, not in the background or behind the app switcher. */
 const foreground = store(true);
 let following = false;
+
 function useForeground(): boolean {
   if (!following) {
     following = true;
     foreground.set(AppState.currentState === "active");
     AppState.addEventListener("change", (state) => foreground.set(state === "active"));
   }
+
   return useStore(foreground);
 }
 
 /** One cycle: the band crosses in the first 1.1 s, then waits off the shape. */
 const CYCLE = 2700;
 const SWEEP = 1100 / CYCLE;
+
 /** Ease in and out across the sweep, as points the native driver can follow. */
 const TIMES = [0, 0.2, 0.4, 0.6, 0.8, 1].map((at) => at * SWEEP);
 const EASED = [0, 0.104, 0.352, 0.648, 0.896, 1];
@@ -485,6 +522,7 @@ export function Placeholders({
   const moving = shown && motion;
   useEffect(() => {
     if (!moving) return;
+
     const loop = Animated.loop(
       Animated.timing(clock, {
         toValue: 1,
@@ -493,12 +531,15 @@ export function Placeholders({
         useNativeDriver: true,
       }),
     );
+
     loop.start();
+
     return () => {
       loop.stop();
       clock.setValue(0);
     };
   }, [clock, moving]);
+
   return (
     <Clock.Provider value={moving ? clock : null}>
       <View
@@ -518,6 +559,7 @@ export function Placeholders({
 export function Shape({ style }: { style?: StyleProp<ViewStyle> }) {
   const clock = useContext(Clock);
   const [width, setWidth] = useState(0);
+
   return (
     <View
       style={[styles.shape, style]}
@@ -530,6 +572,7 @@ export function Shape({ style }: { style?: StyleProp<ViewStyle> }) {
 
 function Band({ clock, width }: { clock: Animated.Value; width: number }) {
   const band = Math.max(24, Math.round(width * 0.45));
+
   const translateX = useMemo(
     () =>
       clock.interpolate({
@@ -538,6 +581,7 @@ function Band({ clock, width }: { clock: Animated.Value; width: number }) {
       }),
     [clock, width, band],
   );
+
   return <Animated.View style={[styles.band, { width: band, transform: [{ translateX }] }]} />;
 }
 

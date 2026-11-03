@@ -16,6 +16,7 @@ interface Button {
   readonly text: string;
   readonly onPress?: () => void;
 }
+
 interface Shown {
   readonly title: string;
   readonly message: string;
@@ -53,31 +54,41 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
   useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
   useNavigation: () => ({ setOptions: () => undefined }),
 }));
+
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 // Downloads open from a row of their own, which this test leaves out.
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 // This screen's native header is outside the renderer; its queue button has separate coverage.
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#8E8E93", line: "#38383A" },
   ChannelLogo: () => null,
   TextButton: () => null,
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   useStatistics: () => ({ enabled: false, transport: "production" }),
   setStatistics: async () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
@@ -88,12 +99,15 @@ vi.mock("../src/account.ts", () => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () =>
   keychain(() => {
     if (scenario.locked) throw new Error("The Keychain is locked");
+
     return scenario.keychain;
   }),
 );
+
 // The actual Settings route imports the real preferences owner. Native views and OS sheets
 // are the only UI doubles. The base-revision control must render before a missing row fails.
 let Settings: typeof import("../src/app/(tabs)/(home)/settings.tsx").default;
@@ -101,6 +115,7 @@ const { native } = await import("./native-files.ts");
 
 let unmount = () => {};
 let container: ReturnType<typeof document.createElement>;
+
 beforeEach(async () => {
   vi.resetModules();
   rmSync(join(native.root, "documents"), { force: true, recursive: true });
@@ -112,31 +127,40 @@ beforeEach(async () => {
   scenario.locked = false;
   native.sync = null;
 });
+
 afterEach(() => {
   unmount();
   native.sync = null;
   vi.restoreAllMocks();
   scenario.sheet = null;
 });
+
 function render() {
   container = document.createElement("div");
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(Settings)));
   unmount = () => React.act(() => root.unmount());
 }
+
 function row(name: string) {
   const found = container.querySelector(`[data-testid="settings-${name}"]`);
+
   if (!found) throw new Error(`Rendered Settings has no ${name} row: ${container.textContent}`);
+
   return found;
 }
+
 function choose(name: string, label: string) {
   React.act(() => row(name).dispatchEvent(new Event("click", { bubbles: true })));
   const sheet = scenario.sheet;
+
   if (!sheet) throw new Error("No system sheet");
   const at = sheet.options.indexOf(label);
+
   if (at < 0) throw new Error(`Missing choice ${label}`);
   React.act(() => sheet.pick(at));
 }
+
 it("renders four native Media rows with accepted defaults and the device language", () => {
   render();
   expect(row("title-language").textContent).toContain("System default (");
@@ -144,6 +168,7 @@ it("renders four native Media rows with accepted defaults and the device languag
   expect(row("subtitles").textContent).toContain("Only when forced");
   expect(row("live-quality").textContent).toContain("Full HD");
 });
+
 it("persists choices through the real rows and restores them on a cold remount", async () => {
   render();
   choose("title-language", "Nederlands");
@@ -160,6 +185,7 @@ it("persists choices through the real rows and restores them on a cold remount",
   expect(row("subtitles").textContent).toContain("Off");
   expect(row("live-quality").textContent).toContain("4K");
 });
+
 it("Cancel leaves the row and saved bytes unchanged", () => {
   render();
   choose("title-language", "Français");
@@ -170,12 +196,14 @@ it("Cancel leaves the row and saved bytes unchanged", () => {
   expect(readFileSync(path, "utf8")).toBe(before);
   expect(scenario.alerts).toEqual([]);
 });
+
 it("a lost atomic write keeps the accepted row and reports a safe failure", async () => {
   render();
   choose("title-language", "Nederlands");
   native.sync = (step) => {
     if (step === "move") throw new Error("private disk path/login detail");
   };
+
   choose("title-language", "Deutsch");
   expect(row("title-language").textContent).toContain("Nederlands");
   expect(scenario.alerts).toEqual([
@@ -221,9 +249,11 @@ it("saves a typed SubDL key to the Keychain only, shows only that one is saved, 
   expect(row("subdl-key").textContent).toContain("Saved");
   expect(container.textContent).not.toContain("k-123");
   const documents = join(native.root, "documents");
+
   const written = readdirSync(documents, { recursive: true, withFileTypes: true })
     .filter((each) => each.isFile())
     .map((each) => readFileSync(join(each.parentPath, each.name), "utf8"));
+
   expect(written.join()).not.toContain("k-123");
 
   React.act(() => row("subdl-key").dispatchEvent(new Event("click", { bubbles: true })));

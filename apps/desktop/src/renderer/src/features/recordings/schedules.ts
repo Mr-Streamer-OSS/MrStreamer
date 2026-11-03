@@ -38,6 +38,7 @@ export function useSchedules() {
 }
 
 const MINUTE_MS = 60_000;
+
 /** The most a recording's minutes and padding may add up to. */
 const MAX_MINUTES = RECORDING_MAX_MS / MINUTE_MS;
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6] as const;
@@ -45,6 +46,7 @@ const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6] as const;
 /** Minutes after local midnight of `at`. */
 function minuteOfDay(at: number): number {
   const date = new Date(at);
+
   return date.getHours() * 60 + date.getMinutes();
 }
 
@@ -58,9 +60,12 @@ export function scheduleAt(
   start: number,
 ): ScheduledRecording | undefined {
   const day = new Date(start);
+
   return list?.find(({ plan }) => {
     if (!sameOwned(plan.channel, channel)) return false;
+
     if (plan.kind === "programme") return plan.start === start;
+
     const at = new Date(
       day.getFullYear(),
       day.getMonth(),
@@ -68,6 +73,7 @@ export function scheduleAt(
       Math.floor(plan.at / 60),
       plan.at % 60,
     );
+
     return plan.days.includes(day.getDay()) && at.getTime() === start;
   });
 }
@@ -81,6 +87,7 @@ export function recordsAt(schedule: ScheduledRecording | undefined, start: numbe
   if (!schedule || schedule.status.kind === "changed" || schedule.status.kind === "gone")
     return false;
   const { next, plan } = schedule;
+
   return next !== null && start - plan.padding.before * MINUTE_MS >= next.start;
 }
 
@@ -129,6 +136,7 @@ export function basisOfSchedule(
   programme?: { readonly start: number; readonly stop: number; readonly title: string },
 ): ScheduleBasis {
   if (plan.kind === "programme") return basisOfProgramme(plan.channel, plan);
+
   return {
     channel: plan.channel,
     title: plan.title,
@@ -146,16 +154,19 @@ export function basisOfSchedule(
 
 export function repeatOf(plan: RecordingPlan): Repeat {
   if (plan.kind === "programme") return "once";
+
   return plan.days.length === EVERY_DAY.length ? "every" : "day";
 }
 
 /** The plan that records `basis` as `repeat` asks, with `padding`. */
 export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingPadding): PlanInput {
   const { channel, title } = basis;
+
   // A programme longer than a recording may run records what it may, as main follows it.
   if (repeat === "once" && basis.programme) {
     const { start, stop } = basis.programme;
     const longest = start + (MAX_MINUTES - padding.before - padding.after) * MINUTE_MS;
+
     return {
       kind: "programme",
       channel,
@@ -164,6 +175,7 @@ export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingP
       padding,
     };
   }
+
   return {
     kind: "slot",
     channel,
@@ -178,6 +190,7 @@ export function planOf(basis: ScheduleBasis, repeat: Repeat, padding: RecordingP
 /** Minutes of padding `plan` has room for, both sides together, within RECORDING_MAX_MS. */
 export function paddingRoom(plan: PlanInput): number {
   const minutes = plan.kind === "slot" ? plan.minutes : (plan.stop - plan.start) / MINUTE_MS;
+
   return Math.max(0, Math.floor(MAX_MINUTES - minutes));
 }
 
@@ -190,6 +203,7 @@ const WEEKDAYS = [
   "Fridays",
   "Saturdays",
 ] as const satisfies readonly PlainKey[];
+
 const EVERY_WEEKDAY = [
   "Every Sunday",
   "Every Monday",
@@ -208,8 +222,11 @@ export function weekdays(days: readonly number[]): string {
 /** "Once", "Every Friday" or "Every day", as a schedule's row says how often it records. */
 export function repeatText(plan: RecordingPlan): string {
   if (plan.kind === "programme") return t("Once");
+
   if (plan.days.length === EVERY_DAY.length) return t("Every day");
+
   if (plan.days.length === 1) return t(EVERY_WEEKDAY[plan.days[0] ?? 0] ?? "Every Sunday");
+
   return weekdays(plan.days);
 }
 
@@ -221,6 +238,7 @@ export function holderText(holder: ConnectionHolder): { what: string; until: str
       until: "",
     };
   const until = t("until {time}", { time: formatDate(holder.until, "time") });
+
   return holder.kind === "recording"
     ? { what: t("Recording {title}", { title: holder.title }), until }
     : { what: t("Scheduled {title}", { title: holder.title }), until };

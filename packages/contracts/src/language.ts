@@ -3,6 +3,7 @@
 
 /** The interface languages, as the Store lists them. English is the source and the fallback. */
 export const LOCALES = ["en-US", "nl-NL", "fr-FR", "de-DE", "es-ES"] as const;
+
 export type Locale = (typeof LOCALES)[number];
 
 /** English: the language every message is written in first, and the one a missing one shows in. */

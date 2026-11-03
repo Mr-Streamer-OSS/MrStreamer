@@ -10,10 +10,12 @@ import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
 const GRID = "document.querySelector('[role=grid]')";
 const DETAILS = "document.querySelector('[role=grid] [role=region]')";
 const PANEL = "document.querySelector('[role=grid] [role=group]')";
+
 /** The cursor's programme lies whole under the grid's sticky times, its first child's first. */
 const CURSOR_SHOWN = `(() => {
   const grid = ${GRID};
@@ -23,6 +25,7 @@ const CURSOR_SHOWN = `(() => {
   return !!cell && cell.top >= times.bottom - 0.5 &&
     cell.bottom <= grid.getBoundingClientRect().bottom + 0.5;
 })()`;
+
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -102,11 +105,13 @@ export async function schedulesScenario(d: Driver) {
   );
   await d.wait(async () => (await text(d, PANEL)).includes("6 min late"));
   await d.wait(async () => (await text(d, PANEL)).includes("days "));
+
   // Arrows inside the panel step the padding, and the grid stays where it is.
   const selected = () =>
     d.evaluate<string>(
       `document.querySelector('[role=grid] [role=gridcell][aria-selected=true]')?.getAttribute('aria-label') ?? ''`,
     );
+
   const before = await selected();
   await d.evaluate(`${PANEL}.querySelector('[role=spinbutton]').focus()`);
   await d.key("ArrowUp", 38);
@@ -173,14 +178,17 @@ export async function schedulesScenario(d: Driver) {
     if (!first) throw new Error('No saved schedule');
     return first.plan.channel;
   })()`);
+
   await d.quit();
   const root = join(d.profile, "recordings");
   await mkdir(root, { recursive: true });
   const path = join(root, "recordings.json");
+
   const kept = await readFile(path, "utf8").then(
     (raw) => JSON.parse(raw) as { version: number; recordings: unknown[] },
     () => ({ version: 1, recordings: [] as unknown[] }),
   );
+
   const now = Date.now();
   const hour = 3_600_000;
   await mkdir(join(root, "late1"), { recursive: true });
@@ -256,6 +264,7 @@ export async function schedulesScenario(d: Driver) {
   await d.capture("10-recordings-edit-960");
   await d.key("Escape", 27);
   await d.click("Live TV at 960", named("header button", "Live TV"));
+
   if (!(await d.exists(GRID))) await d.key("g", 71);
   await d.wait(() => d.exists(GRID));
   await d.wait(() => d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell]').length > 4`));

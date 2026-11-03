@@ -25,6 +25,7 @@ const episodes: Episode[] = Array.from({ length: 520 }, (_, index) => ({
   stillUrl: null,
   airDate: null,
 }));
+
 const details: SeriesDetails = {
   kind: "series",
   title: {
@@ -62,6 +63,7 @@ const details: SeriesDetails = {
     episodes: episodes.slice(index * 26, (index + 1) * 26),
   })),
 };
+
 const download = (id: string): Download => ({
   id,
   title: { kind: "movie", id },
@@ -78,7 +80,9 @@ const download = (id: string): Download => ({
   progress: null,
   series: null,
 });
+
 const completed = Array.from({ length: 2000 }, (_, index) => download(`unrelated-${index}`));
+
 const snapshot = (received: number): DownloadList => ({
   // Clone the complete payload as IPC does. QueryClient's normal structural sharing stays on.
   items: structuredClone([
@@ -114,6 +118,7 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
   let commits = 0;
   let renderMs = 0;
   const settle = () => act(() => vi.advanceTimersByTimeAsync(10));
+
   try {
     await act(async () =>
       root.render(
@@ -136,11 +141,13 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
         ),
       ),
     );
+
     for (let i = 0; i < 20 && !document.body.textContent?.includes("Episode 26"); i++)
       await settle();
     expect(document.body.textContent).toContain("Episode 26");
     expect(document.body.querySelectorAll('[aria-label^="Download S1 E"]')).toHaveLength(26);
     const samples = [];
+
     for (let i = 1; i <= 35; i++) {
       const value = snapshot(i);
       commits = 0;
@@ -151,6 +158,7 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
       await settle();
       const elapsedMs = performance.now() - start;
       const used = process.cpuUsage(cpu);
+
       if (i > 5)
         samples.push({
           sample: i - 5,
@@ -161,6 +169,7 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
         });
       expect(document.body.querySelectorAll('[aria-label^="Download S1 E"]')).toHaveLength(26);
     }
+
     // Positive control: matching progress must still reach the row and series aggregate.
     const own = {
       ...download("own"),
@@ -173,6 +182,7 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
       },
       status: { kind: "transferring" as const, received: 42, size: 100, rate: 1, restarted: false },
     };
+
     await act(async () =>
       ipc.emit("downloads.changed", { ...snapshot(36), items: [...completed, own] }),
     );
@@ -180,6 +190,7 @@ it("records 30 bounded full-snapshot updates on actual long-series details", asy
     expect(document.body.textContent).toContain("Downloading 42%");
     expect(document.body.querySelector('[aria-label="Cancel download of S1 E1"]')).not.toBeNull();
     const output = process.env["DOWNLOAD_PROBE_OUTPUT"];
+
     if (!output) throw new Error("DOWNLOAD_PROBE_OUTPUT is required to retain all observations");
     writeFileSync(
       output,

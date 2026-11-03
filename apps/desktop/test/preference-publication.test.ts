@@ -12,6 +12,7 @@ import { runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
 async function setup() {
   const dataDir = await tempDir();
+
   const runtime = runtimeFor(
     Settings.layer(dataDir).pipe(
       Layer.provide(
@@ -19,8 +20,10 @@ async function setup() {
       ),
     ),
   );
+
   const settings = await runtime.runPromise(Settings);
   const events: PreferenceSnapshot[] = [];
+
   const state = {
     consent: true,
     consentGate: Promise.resolve(),
@@ -29,11 +32,14 @@ async function setup() {
     readFailure: false,
     stale: 0,
   };
+
   const original = new Error("disk write defect");
+
   const publication = await Effect.runPromise(
     preferencePublication({
       read: Effect.gen(function* () {
         if (state.readFailure) return yield* Effect.die(new Error("composed read defect"));
+
         return { ...(yield* settings.get), analyticsEnabled: state.consent };
       }),
       write: (patch) => (state.writeFailure ? Effect.die(original) : settings.update(patch)),
@@ -47,6 +53,7 @@ async function setup() {
       stale: () => state.stale++,
     }),
   );
+
   return { publication, state, events, original, dataDir };
 }
 
@@ -82,17 +89,21 @@ describe("composed preference publication", () => {
       const { publication, state } = await setup();
       await Effect.runPromise(publication.get);
       const gate = Promise.withResolvers<void>();
+
       if (owner === "consent") state.consentGate = gate.promise;
       else state.reconfigureGate = gate.promise;
+
       const save = Effect.runPromise(
         publication.update(
           owner === "consent" ? { analyticsEnabled: false } : { tmdbKey: "fixture" },
         ),
       );
+
       try {
         const result = await Effect.runPromise(
           publication.get.pipe(Effect.timeout("1 second")),
         ).then((snapshot) => ({ snapshot }));
+
         expect(result.snapshot.preferences.volume).toBe(1);
         const other = await Effect.runPromise(publication.update({ muted: true }));
         expect(other.preferences.muted).toBe(true);
@@ -107,9 +118,11 @@ describe("composed preference publication", () => {
     const { publication, state, events, original } = await setup();
     await Effect.runPromise(publication.get);
     state.writeFailure = true;
+
     const failed = await Effect.runPromiseExit(
       publication.update({ analyticsEnabled: false, muted: true }),
     );
+
     expect(Exit.isFailure(failed)).toBe(true);
     expect(failed).toEqual(await Effect.runPromiseExit(Effect.die(original)));
     expect(events.at(-1)).toEqual({
@@ -142,9 +155,11 @@ describe("composed preference publication", () => {
     const first = await Effect.runPromise(publication.get);
     state.writeFailure = true;
     state.readFailure = true;
+
     const result = await Effect.runPromiseExit(
       publication.update({ analyticsEnabled: false, muted: true }),
     );
+
     const expected = await Effect.runPromiseExit(Effect.die(original));
     expect(result).toEqual(expected);
     expect(events).toEqual([first]);

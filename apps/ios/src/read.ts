@@ -28,21 +28,26 @@ export function useRead<A>(
   const [held, setHeld] = useState<{ readonly key: string; readonly loaded: Loaded<A> } | null>(
     null,
   );
+
   useEffect(() => {
     if (key === null) return;
     let current = true;
+
     const show = (value: A) => {
       if (current) setHeld({ key, loaded: { kind: "ready", value } });
     };
+
     read(show).then(
       show,
       (cause: unknown) =>
         current &&
         setHeld({ key, loaded: { kind: "failed", error: describeError(appError(cause)) } }),
     );
+
     return () => {
       current = false;
     };
   }, [key, read, again]);
+
   return key !== null && held?.key === key ? held.loaded : LOADING;
 }

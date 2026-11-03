@@ -12,6 +12,7 @@ import { electronExecutable, freePort, record, stop } from "./session.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const marketing = join(root, "apps/marketing");
+
 if (process.argv.includes("--help")) {
   console.log(
     "Usage: pnpm verify:website, after pnpm build:marketing. On headless Linux: xvfb-run -a pnpm verify:website. Proof stays in .local/verification/website-<unique>/.",
@@ -23,6 +24,7 @@ if (process.argv.includes("--help")) {
 async function run() {
   const executable = await electronExecutable();
   const html = await readFile(join(marketing, "dist/index.html"));
+
   if (process.platform === "linux" && !process.env["DISPLAY"])
     throw new Error("No display. Use xvfb-run -a pnpm verify:website.");
   await mkdir(join(root, ".local/verification"), { recursive: true });
@@ -39,18 +41,22 @@ async function run() {
   let failure: unknown;
   const logs: string[] = [];
   const actions: { action: string; at: string }[] = [];
+
   const observed: Record<string, unknown> = {
     buildSha256: createHash("sha256").update(html).digest("hex"),
   };
+
   try {
     const serverPort = await freePort();
     const origin = `http://127.0.0.1:${serverPort}`;
+
     const env = Object.fromEntries(
       Object.entries(process.env).filter(
         ([name]) =>
           name !== "ELECTRON_RUN_AS_NODE" && name !== "GH_TOKEN" && name !== "GITHUB_TOKEN",
       ),
     );
+
     const launch = (binary: string, args: string[], cwd: string) => {
       const child = spawn(binary, args, {
         cwd,
@@ -58,13 +64,17 @@ async function run() {
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
+
       child.on("error", (error) => {
         logs.push(String(error));
       });
+
       for (const stream of [child.stdout, child.stderr])
         stream?.on("data", (chunk: Buffer) => logs.push(chunk.toString()));
+
       return child;
     };
+
     server = launch(
       process.execPath,
       [
@@ -78,15 +88,20 @@ async function run() {
       ],
       marketing,
     );
+
     const wait = async (check: () => Promise<boolean>) => {
       for (let attempt = 0; attempt < 100; attempt++) {
         abort.signal.throwIfAborted();
+
         if (await check().catch(() => false)) return;
         await delay(100, undefined, { signal: abort.signal });
       }
+
       throw new Error(`Website readiness timed out: ${check.toString()}`);
     };
+
     await wait(async () => (await fetch(origin, { signal: AbortSignal.timeout(1000) })).ok);
+
     if (server.exitCode !== null || server.signalCode !== null)
       throw new Error("Owned preview server exited.");
     const browserPort = await freePort();
@@ -121,12 +136,16 @@ app.on('window-all-closed', () => app.quit());
     );
     page = await connect(browserPort);
     const livePage = page;
+
     const send = async (method: string, params: Record<string, unknown> = {}) => {
       abort.signal.throwIfAborted();
       const reply = await livePage.send(method, params);
+
       if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
       return reply.result;
     };
+
     const doctor = async () => {
       if (
         browser?.exitCode !== null ||
@@ -137,6 +156,7 @@ app.on('window-all-closed', () => app.quit());
         throw new Error("Owned website session exited.");
       const identity = await send("Browser.getBrowserCommandLine");
       const browserArgs = record(identity) ? identity["arguments"] : undefined;
+
       if (
         !Array.isArray(browserArgs) ||
         ![shell, `--user-data-dir=${profile}`, `--remote-debugging-port=${browserPort}`].every(
@@ -145,6 +165,7 @@ app.on('window-all-closed', () => app.quit());
       )
         throw new Error("Website CDP belongs to another browser.");
       const url = await livePage.evaluate<string>("location.origin");
+
       if (url !== origin) throw new Error("Browser left our local website.");
       observed["doctor"] = {
         browserPid: browser?.pid,
@@ -155,6 +176,7 @@ app.on('window-all-closed', () => app.quit());
         origin,
       };
     };
+
     await wait(() =>
       livePage.evaluate<boolean>(
         `location.origin === ${JSON.stringify(origin)} && document.readyState === 'complete'`,
@@ -163,6 +185,7 @@ app.on('window-all-closed', () => app.quit());
     await doctor();
     let lastCapture = "";
     let pageScriptsDisabled = false;
+
     const capture = async (name: string) => {
       // Script-disabled pages cannot schedule the animation-frame callback.
       if (!pageScriptsDisabled)
@@ -171,6 +194,7 @@ app.on('window-all-closed', () => app.quit());
         );
       await delay(500, undefined, { signal: abort.signal });
       const screenshot = await send("Page.captureScreenshot", { format: "png" });
+
       if (!record(screenshot) || typeof screenshot["data"] !== "string")
         throw new Error("No website screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(screenshot["data"], "base64"));
@@ -180,6 +204,7 @@ app.on('window-all-closed', () => app.quit());
       );
       lastCapture = name;
     };
+
     await wait(() =>
       livePage.evaluate<boolean>(
         "document.readyState === 'complete' && !!document.querySelector('h1')",
@@ -199,13 +224,17 @@ app.on('window-all-closed', () => app.quit());
       mobile: true,
     });
     await delay(250, undefined, { signal: abort.signal });
+
     const mobile = await livePage.evaluate<{ width: number; contentWidth: number }>(
       "({ width: innerWidth, contentWidth: document.documentElement.scrollWidth })",
     );
+
     observed["mobileHome"] = mobile;
+
     if (mobile.contentWidth > mobile.width + 1)
       throw new Error("Homepage overflows horizontally at 390px.");
     await capture("home-mobile");
+
     const visit = async (href: string, expected: string, name: string) => {
       // A link inside a closed section has a box but isn't shown: checkVisibility() says so.
       const element = `[...document.querySelectorAll(${JSON.stringify(`a[href="${href}"]`)})].find(a => { const box = a.getBoundingClientRect(); return a.checkVisibility() && box.width > 0 && box.height > 0; })`;
@@ -216,6 +245,7 @@ app.on('window-all-closed', () => app.quit());
         const box = await livePage.evaluate<{ y: number; height: number }>(
           `(() => { const box = ${element}.getBoundingClientRect(); return { y: box.y, height: box.height }; })()`,
         );
+
         if (box.y >= 0 && box.y + box.height <= 844) return true;
         const deltaY = Math.max(-650, Math.min(650, box.y + box.height / 2 - 422));
         scrolled = true;
@@ -227,19 +257,25 @@ app.on('window-all-closed', () => app.quit());
           deltaX: 0,
           deltaY,
         });
+
         return false;
       });
+
       // Navigation already captured this viewport. Capture again only after user scrolling.
       if (scrolled) await capture(`${name}-before-click`);
+
       const point = await livePage.evaluate<{ x: number; y: number }>(
         `(() => { const box = ${element}.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`,
       );
+
       const target = await livePage.evaluate<{ label: string; region: string; hit: boolean }>(
         `(() => { const el = ${element}; const hit = document.elementFromPoint(${point.x}, ${point.y}); return { label: el.textContent.trim(), region: el.closest('footer') ? 'footer' : el.closest('nav') ? 'navigation' : 'content', hit: hit === el || el.contains(hit) }; })()`,
       );
+
       if (!target.hit) throw new Error(`Pointer target obscured for ${href}`);
       observed[`${name}-before-click`] = { ...target, ...point, capture: lastCapture };
       actions.push({ action: `Click visible ${href}`, at: new Date().toISOString() });
+
       for (const type of ["mousePressed", "mouseReleased"])
         await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
       await wait(() =>
@@ -248,7 +284,9 @@ app.on('window-all-closed', () => app.quit());
         ),
       );
       const response = await fetch(origin + href);
+
       if (response.status !== 200) throw new Error(`${href} answered ${response.status}`);
+
       const route = await livePage.evaluate<{
         path: string;
         title: string;
@@ -260,20 +298,25 @@ app.on('window-all-closed', () => app.quit());
       }>(
         "({ path: location.pathname, title: document.title, heading: document.querySelector('h1')?.textContent, canonical: document.querySelector('link[rel=canonical]')?.href, width: innerWidth, height: innerHeight, contentWidth: document.documentElement.scrollWidth })",
       );
+
       if (route.width !== 390 || route.height !== 844 || route.contentWidth > 391)
         throw new Error(`Route does not fit the 390px viewport: ${JSON.stringify(route)}`);
       observed[name] = { ...route, status: response.status };
       await capture(name);
       await doctor();
     };
+
     // FAQ answers sit in collapsed questions: open one with the pointer, as a reader does.
     const openQuestion = async (id: string) => {
       const summary = `document.querySelector(${JSON.stringify(`#${id} > summary`)})`;
       await livePage.evaluate(`${summary}.scrollIntoView({ block: 'center' })`);
+
       const point = await livePage.evaluate<{ x: number; y: number }>(
         `(() => { const box = ${summary}.getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`,
       );
+
       actions.push({ action: `Click FAQ question #${id}`, at: new Date().toISOString() });
+
       for (const type of ["mousePressed", "mouseReleased"])
         await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
       await wait(() =>
@@ -281,12 +324,14 @@ app.on('window-all-closed', () => app.quit());
       );
       await capture(`faq-${id}-open`);
     };
+
     await visit("/faq", "Questions", "faq");
     await openQuestion("download");
     await visit("/docs/downloads", "Downloads", "downloads-guide");
     await visit("/docs", "Guides", "guides");
     await visit("/docs/subscriptions", "Subscriptions", "subscriptions-guide");
     await visit("/download", "Download", "downloads");
+
     const downloads = await livePage.evaluate<{
       version: string;
       installers: { kind: string; href: string }[];
@@ -294,18 +339,23 @@ app.on('window-all-closed', () => app.quit());
     }>(
       "({ version: document.querySelector('[data-release-selected]')?.dataset.releaseSelected ?? '', installers: [...document.querySelectorAll('a[data-installer]')].map(a => ({ kind: a.dataset.installer, href: a.href })), store: [...document.querySelectorAll('a[href]')].filter(a => a.textContent.trim() === 'Microsoft Store').map(a => a.href) })",
     );
+
     const release = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
+
     const targets = {
       dmg: "mac-arm64.dmg",
       exe: "win-x64-setup.exe",
       appImage: "linux-x86_64.AppImage",
       deb: "linux-amd64.deb",
     };
+
     if (downloads.version && !/^\d+\.\d+\.\d+$/.test(downloads.version))
       throw new Error("Download page names an invalid stable version.");
+
     for (const [kind, filename] of Object.entries(targets)) {
       const links = downloads.installers.filter((link) => link.kind === kind);
       const installer = `${release}/download/v${downloads.version}/Mr-Streamer-${downloads.version}-${filename}`;
+
       if (
         !links.length ||
         links.some(
@@ -314,6 +364,7 @@ app.on('window-all-closed', () => app.quit());
       )
         throw new Error(`Missing or incorrect ${kind} installer target.`);
     }
+
     if (
       !downloads.store.length ||
       downloads.store.some(
@@ -342,15 +393,18 @@ app.on('window-all-closed', () => app.quit());
     await visit("/docs/downloads", "Downloads", "downloads-guide-without-scripts");
     const missing = await fetch(origin + "/verification-missing-page");
     observed["missingRouteStatus"] = missing.status;
+
     if (missing.status !== 404) throw new Error("Unknown route does not answer 404.");
     observed["blockedExternalRequests"] = logs.filter((line) =>
       line.includes("Blocked external request:"),
     );
   } catch (error) {
     failure = error;
+
     const screenshot = await page
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
+
     if (record(screenshot?.result) && typeof screenshot.result["data"] === "string")
       await writeFile(
         join(evidence, "failure.png"),
@@ -358,21 +412,27 @@ app.on('window-all-closed', () => app.quit());
       );
   } finally {
     const errors: string[] = [];
+
     for (const child of [browser, server]) {
       if (!child) continue;
+
       try {
         await stop(child, child === browser ? page : undefined);
       } catch (error) {
         errors.push(String(error));
       }
     }
+
     page?.close();
+
     const exited = (child: ChildProcess | undefined) =>
       !child || child.exitCode !== null || child.signalCode !== null;
+
     if (exited(browser) && exited(server))
       await rm(scratch, { recursive: true, force: true, maxRetries: 5 }).catch((error) =>
         errors.push(String(error)),
       );
+
     if (errors.length) failure ??= new Error(errors.join("\n"));
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", interrupt);
@@ -409,5 +469,6 @@ app.on('window-all-closed', () => app.quit());
     console.log(`${failure ? "FAIL" : "PASS"} website: ${evidence}`);
     await access(join(evidence, "proof.json"));
   }
+
   if (failure) throw failure;
 }

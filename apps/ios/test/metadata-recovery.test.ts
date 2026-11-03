@@ -45,9 +45,11 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({
   default: { expoConfig: { version: "0.2.0" }, platform: { ios: { buildNumber: "21" } } },
 }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => ({
     addListener: () => undefined,
@@ -56,48 +58,66 @@ vi.mock("expo-video", () => ({
     pause: () => undefined,
   }),
 }));
+
 vi.mock("expo-secure-store", () => {
   const items = keychain(() => memory.keychain);
+
   return {
     ...items,
     getItemAsync: async (key: string) => {
       if (key === "s.metadata.tmdb") await memory.readKey?.();
+
       if (memory.locked && key === "s.metadata.tmdb")
         throw new Error("User interaction is not allowed.");
+
       return items.getItemAsync(key);
     },
     setItemAsync: async (key: string, value: string) => {
       if (memory.indexFails && key === "index") throw new Error("The Keychain failed.");
+
       return items.setItemAsync(key, value);
     },
   };
 });
+
 vi.mock("react-native", () => ({ Platform: { OS: "ios", Version: "26.1" } }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const REFUSED_KEY = "refused-key";
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   if (!memory.tmdb || !input.startsWith(memory.tmdb)) {
     if (memory.panelDown) throw new TypeError(`Network request to ${input} failed`);
     const url = new URL(input);
+
     if (memory.password && url.searchParams.get("password") === memory.password)
       url.searchParams.set("password", LOGIN.password);
+
     return passThrough(url, init);
   }
+
   const url = new URL(input);
   const key = url.searchParams.get("api_key") ?? "";
   memory.keys.push(key);
   // Only details ask for a title's credits with it.
   const to = url.searchParams.has("append_to_response") ? "details" : "catalogue";
+
   if (to === "details") memory.abouts.push(key);
+
   if (to === "catalogue" && memory.catalogueRefused)
     return Response.json({ status_code: 7 }, { status: 401 });
+
   if (memory.offline) throw new TypeError("Network request failed");
+
   for (const held of memory.holds) if (held.key === key && held.to === to) await held.until;
+
   if (key === REFUSED_KEY) return Response.json({ status_code: 7 }, { status: 401 });
   const id = /^\/3\/(?:movie|tv)\/(\d+)$/.exec(url.pathname)?.[1];
+
   if (id && memory.unknown.has(id)) return Response.json({ status_code: 34 }, { status: 404 });
+
   return passThrough(input, init);
 });
 
@@ -107,13 +127,16 @@ interface FakeProvider {
   readonly url: string;
   close(): Promise<void>;
 }
+
 interface FakeTmdb {
   readonly url: string;
   close(): Promise<void>;
 }
+
 /** The fakes are typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
 const FAKE_TMDB = "../../desktop/test/fake-tmdb.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -127,17 +150,20 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
     ) => T;
   }): Promise<FakeProvider>;
 };
+
 const { startFakeTmdb } = (await import(FAKE_TMDB)) as { startFakeTmdb(): Promise<FakeTmdb> };
 
 const LOGIN = { username: "canaryuser", password: "canary+Pw@1" };
 let panel: FakeProvider;
 let tmdb: FakeTmdb;
+
 beforeAll(async () => {
   [panel, tmdb] = await Promise.all([
     startFakeProvider({ ...LOGIN, channels: 4, titles: 12 }),
     startFakeTmdb(),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([panel.close(), tmdb.close()]);
 });
@@ -146,6 +172,7 @@ beforeEach(async () => {
   rmSync(join(native.root, "documents"), { recursive: true, force: true });
   rmSync(join(native.root, "cache"), { recursive: true, force: true });
   const { Directory, Paths } = await import("./native-files.ts");
+
   for (const each of [Paths.document, Paths.cache])
     new Directory(each).create({ idempotent: true });
   memory.keychain.clear();
@@ -162,6 +189,7 @@ beforeEach(async () => {
   memory.holds.length = 0;
   memory.indexFails = false;
 });
+
 afterEach(async () => {
   await drained();
   vi.useRealTimers();
@@ -171,7 +199,9 @@ afterEach(async () => {
 /** Holds TMDB's answers for `key`, to details or to the catalogue, until the returned release. */
 function hold(key: string, to: "details" | "catalogue") {
   let release = () => {};
+
   memory.holds.push({ key, to, until: new Promise<void>((done) => (release = done)) });
+
   return () => release();
 }
 
@@ -185,6 +215,7 @@ async function until(ready: () => boolean, what = "the condition", limit = 8_000
 
 /** Every launch's app, whose metadata stops fetching before another launch or test. */
 const launched: App[] = [];
+
 /** Resolves once no launch's metadata is fetching, so none writes into the next. */
 async function drained() {
   for (const app of launched.splice(0)) {
@@ -204,8 +235,10 @@ async function launch({ appKey = "" } = {}): Promise<App> {
   await account.restore();
   const app = { ...account, ...titles, ...diagnostics };
   launched.push(app);
+
   return app;
 }
+
 type App = typeof import("../src/account.ts") &
   typeof import("../src/titles.ts") &
   typeof import("../src/diagnostics.ts");
@@ -219,9 +252,12 @@ async function added(app: App) {
 /** The first movie the lists show with a TMDB id. */
 function firstMovie(app: App): Title {
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No lists");
   const found = kindOf(lists.index, "movie").titles.find((title) => title.tmdbId && !title.adult);
+
   if (!found) throw new Error("No movie");
+
   return found;
 }
 
@@ -350,6 +386,7 @@ it("finds the viewer's saved key once a locked Keychain answers, without a relau
   await app.detailsOf(firstMovie(app));
   await until(() => {
     const standing = app.metadataStanding();
+
     return "key" in standing && standing.key === "yours";
   }, "the viewer's key");
   await settled(app, "answered");
@@ -362,12 +399,16 @@ it("shows no old season when its login changes while the Keychain answers", asyn
   await added(app);
   await settled(app, "answered");
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No lists");
   const series = kindOf(lists.index, "series").titles.find((title) => title.tmdbId && !title.adult);
+
   if (!series) throw new Error("No series");
   const details = await app.detailsOf(series);
+
   if (details.kind !== "series") throw new Error("Not a series");
   const [season] = details.seasons;
+
   if (!season) throw new Error("No season");
   expect(season.episodes.length).toBeGreaterThan(0);
 
@@ -379,9 +420,11 @@ it("shows no old season when its login changes while the Keychain answers", asyn
     held = true;
     await untilReleased;
   };
+
   const shown: unknown[] = [];
   const reading = app.episodesOf(series, season, (episodes) => shown.push(episodes));
   const result = reading.catch((cause: unknown) => cause);
+
   try {
     await until(() => held, "the Keychain read");
     memory.password = "changed-password";
@@ -391,10 +434,12 @@ it("shows no old season when its login changes while the Keychain answers", asyn
     memory.readKey = null;
     release();
   }
+
   expect(await result).toMatchObject({ error: { kind: "no-subscription" } });
   expect(shown).toEqual([]);
 
   const current = await app.detailsOf(series);
+
   if (current.kind !== "series" || !current.seasons[0]) throw new Error("No current season");
   expect((await app.episodesOf(series, current.seasons[0])).length).toBeGreaterThan(0);
 });
@@ -455,6 +500,7 @@ it("says when no listed title has a TMDB id", { timeout: 20_000 }, async () => {
   // A TMDB id of "0" is none, as panels list it.
   const unlinked = <A extends object>(titles: readonly A[]) =>
     titles.map((title) => ({ ...title, tmdb: "0" }));
+
   const bare = await startFakeProvider({
     ...LOGIN,
     channels: 2,
@@ -465,6 +511,7 @@ it("says when no listed title has a TMDB id", { timeout: 20_000 }, async () => {
       series: unlinked(built.series),
     }),
   });
+
   try {
     const app = await launch({ appKey: "app-key" });
     await app.add({ server: bare.url, ...LOGIN });
@@ -492,6 +539,7 @@ it("shares diagnostics of kinds and counts alone: no address, login, name or fai
   // Its panel stops answering: the failure's own words carry its address and login.
   memory.panelDown = true;
   const [member] = app.members();
+
   if (!member) throw new Error("No provider");
   app.reloadChannels(member.entry.id);
   await until(() => app.members()[0]?.live.kind === "failed", "the failed reload");
@@ -511,6 +559,7 @@ it("shares diagnostics of kinds and counts alone: no address, login, name or fai
   expect(text).toContain(
     "Addresses, logins, provider and title names, viewing history and file paths are left out.",
   );
+
   for (const secret of [
     panel.url,
     new URL(panel.url).host,
@@ -523,5 +572,6 @@ it("shares diagnostics of kinds and counts alone: no address, login, name or fai
   ]) {
     expect(text).not.toContain(secret);
   }
+
   for (const member of app.members()) expect(text).not.toContain(member.label);
 });

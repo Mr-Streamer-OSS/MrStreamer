@@ -13,10 +13,12 @@ export const TextSource = type({
   path: "string",
   "lines?": ["number", "number"],
 });
+
 export type TextSource = typeof TextSource.infer;
 
 /** A line `file`, relative to apps/ios, must hold for the manifest to describe the build. */
 const Pin = type({ file: "string", text: "string" });
+
 type Pin = typeof Pin.infer;
 
 const Manifest = type({
@@ -49,6 +51,7 @@ const Manifest = type({
   },
   packages: type({ "[string]": { reason: "string", texts: TextSource.array() } }),
 });
+
 export type Manifest = typeof Manifest.infer;
 
 export const PackageJson = type({
@@ -68,18 +71,22 @@ const VERSION = "{version}";
  */
 export function readManifest(file = join(app, "licences/manifest.json")): Manifest {
   const manifest = Manifest.assert(JSON.parse(readFileSync(file, "utf8")));
+
   const unpinned = manifest.components.filter(
     ({ pins }) => !pins.some(({ text }) => text.includes(VERSION)),
   );
+
   if (unpinned.length) {
     throw new Error(
       `${unpinned.map(({ name }) => name).join(", ")} in ${file} pin no version: give a pin "${VERSION}" where its version is set`,
     );
   }
+
   return {
     ...manifest,
     components: manifest.components.map((entry) => {
       const at = (text: string) => text.replaceAll(VERSION, entry.version);
+
       return {
         ...entry,
         source: at(entry.source),
@@ -94,17 +101,23 @@ export function readManifest(file = join(app, "licences/manifest.json")): Manife
 export const pinProblems = (owner: string, pins: readonly Pin[]): string[] =>
   pins.flatMap(({ file, text }) => {
     const path = join(app, file);
+
     if (!existsSync(path)) return [`${owner}'s pin ${file} is missing`];
+
     if (readFileSync(path, "utf8").includes(text)) return [];
+
     return [`${file} no longer has "${text}": ${owner} changed. Update licences/manifest.json.`];
   });
 
 /** The directory of the package a path inside node_modules belongs to. */
 export function packageRoot(file: string): string | null {
   const at = file.lastIndexOf(`node_modules${sep}`);
+
   if (at < 0) return null;
   const [scope, name] = file.slice(at + `node_modules${sep}`.length).split(sep);
+
   if (!scope) return null;
+
   return (
     file.slice(0, at) + join("node_modules", scope.startsWith("@") ? `${scope}/${name}` : scope)
   );
@@ -113,6 +126,8 @@ export function packageRoot(file: string): string | null {
 /** The name of the npm package an existing path is in, if any. */
 export function packageNameAt(path: string): string | null {
   const root = packageRoot(realpathSync(path));
+
   if (!root) return null;
+
   return PackageJson.assert(JSON.parse(readFileSync(join(root, "package.json"), "utf8"))).name;
 }

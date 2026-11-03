@@ -7,7 +7,9 @@ import type {
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { streamFailure, type PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { defined } from "@mrstreamer/core/defined";
+
 export { streamFailure } from "@mrstreamer/contracts/analytics";
+
 import { call, listen } from "../lib/ipc.ts";
 import type { EngineError } from "./engine.ts";
 
@@ -28,6 +30,7 @@ export function engineDiagnostic(
           : context?.diagnostic_delivery === "direct"
             ? "copy_rejected"
             : "decode_rejected")));
+
   return {
     diagnostic_container: container,
     diagnostic_delivery: "unknown",
@@ -67,6 +70,7 @@ export class PlaybackObservation {
       if (!this.active || this.onRemote) return;
       const session = this.session;
       this.begin(true);
+
       if (session) this.bind(session);
     });
   }
@@ -103,18 +107,22 @@ export class PlaybackObservation {
     this.binding = (async () => {
       if (!measurement || generation !== this.generation) return null;
       const token = measurement.control;
+
       const binding = await call("analytics.playbackBind", {
         kind: this.kind,
         measurement,
         sessionId: session,
       }).catch(() => null);
+
       if (generation !== this.generation) return null;
+
       if (binding) {
         await call("analytics.playbackEligible", { token, eligible: this.eligible }).catch(
           () => {},
         );
         this.note(this.state);
       }
+
       return binding;
     })();
   }
@@ -159,6 +167,7 @@ export class PlaybackObservation {
     this.eligible = eligible;
     const generation = this.generation;
     const token = this.control?.control;
+
     if (token && generation === this.generation && !this.onRemote)
       void call("analytics.playbackEligible", { token, eligible }).catch(() => {});
   }
@@ -209,6 +218,7 @@ export class PlaybackObservation {
     const token = this.control?.control;
     this.unbind();
     this.active = false;
+
     if (token) void call("analytics.playbackEnd", { token }).catch(() => {});
     this.control = null;
   }
@@ -236,27 +246,34 @@ export function playbackFailure(error: AppError): AnalyticsFailure {
       return "app";
   }
 }
+
 /** Reports bounded facts only. Playing requires unpaused clock progress after a seek/wait. */
 export function observeMediaPlayback(video: HTMLVideoElement) {
   let listener: ((state: AnalyticsPlaybackState) => void) | null = null;
   let position = video.currentTime;
   let state: AnalyticsPlaybackState = "waiting";
   let stopped = false;
+
   const say = (next: AnalyticsPlaybackState) => {
     state = next;
     listener?.(next);
   };
+
   const waiting = () => say("waiting");
   const paused = () => say("paused");
+
   const seeking = () => {
     position = video.currentTime;
     say("seeking");
   };
+
   const seeked = () => {
     position = video.currentTime;
     waiting();
   };
+
   const ended = () => say("stopped");
+
   const timer = setInterval(() => {
     const now = video.currentTime;
     say(
@@ -272,11 +289,13 @@ export function observeMediaPlayback(video: HTMLVideoElement) {
     );
     position = now;
   }, 1000);
+
   video.addEventListener("waiting", waiting);
   video.addEventListener("pause", paused);
   video.addEventListener("seeking", seeking);
   video.addEventListener("seeked", seeked);
   video.addEventListener("ended", ended);
+
   return {
     listen(next: (state: AnalyticsPlaybackState) => void) {
       listener = next;

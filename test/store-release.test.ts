@@ -21,12 +21,14 @@ import { removeArtifacts, writeArtifact, type Built } from "./fake-store.ts";
 
 const COMMIT = "5f3a9c".padEnd(40, "0");
 const MAIN = "refs/heads/main";
+
 const PUBLISHED: TaggedRelease = {
   draft: false,
   prerelease: false,
   publishedAt: "2026-10-05T10:00:00Z",
   notes: "**Stable**",
 };
+
 /** A stable release run: started by hand, from main, in the repository itself. */
 const STABLE_RUN: WorkflowRun = {
   path: ".github/workflows/release.yml",
@@ -58,6 +60,7 @@ function github(overrides: Partial<Fixture> = {}): GitHub {
     environment: ["main"],
     ...overrides,
   };
+
   return {
     repository: "owner/app",
     defaultBranch: "main",
@@ -66,12 +69,16 @@ function github(overrides: Partial<Fixture> = {}): GitHub {
     },
     async commitOf(tag) {
       const commit = fixture.commits[tag];
+
       if (!commit) throw new Error(`Unknown tag ${tag}`);
+
       return commit;
     },
     async compare(base, head) {
       const history = fixture.histories[`${base}...${head}`];
+
       if (!history) throw new Error(`Unexpected comparison ${base}...${head}`);
+
       return history;
     },
     async run(id) {
@@ -152,6 +159,7 @@ function builtWith(manifest: string): { dir: string; sha256: string } {
   const described: Record<string, string> = JSON.parse(readFileSync(`${path}.json`, "utf8"));
   writeFileSync(path, file);
   writeFileSync(`${path}.json`, JSON.stringify({ ...described, sha256 }));
+
   return { dir, sha256 };
 }
 
@@ -227,6 +235,7 @@ describe("the release a submission is for", () => {
 
   it("is never a nightly, a draft, a pre-release or a version without a release", async () => {
     const nightly = "0.0.6-nightly.20261005.40";
+
     const repo = github({
       releases: {
         [`v${nightly}`]: { ...PUBLISHED, prerelease: true },
@@ -234,6 +243,7 @@ describe("the release a submission is for", () => {
         "v0.0.7": { ...PUBLISHED, prerelease: true },
       },
     });
+
     const refused = (version: string) =>
       expect(storeRelease(repo, { version, withPackage: false })).rejects;
 
@@ -285,6 +295,7 @@ describe("the run a package comes from", () => {
       expired,
       createdAt: `2026-10-0${day}T10:00:00Z`,
     });
+
     const repo = github({
       runs: { 70: STABLE_RUN, 77: STABLE_RUN, 80: { ...STABLE_RUN, branch: "feature" } },
       artifacts: { "msix-0.0.5": [at(1, 70), at(2, 77), at(3, 80), at(4, 81), at(5, 77, true)] },
@@ -383,6 +394,7 @@ describe("the package a run kept", () => {
 
 describe("the package a stable release or dry run builds", () => {
   const msix = Buffer.from("the package's bytes");
+
   const storeManifest = (wrong: Parameters<typeof builderManifest>[0] = {}) =>
     builderManifest({ name: STORE_NAME, ...wrong });
 

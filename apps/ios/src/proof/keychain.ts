@@ -3,6 +3,7 @@ import type { SecretStore } from "../secrets.ts";
 
 const RELAUNCH = "proof:relaunch";
 const ROUND_TRIP = "proof:round trip/ü";
+
 /** Ids that an escape-shaped id or a character outside the BMP once mapped onto the same item. */
 const LOOKALIKES = [
   ["proof:pair/a", "proof:pair_2f_a"],
@@ -25,6 +26,7 @@ export async function keychainProof(store: SecretStore): Promise<Observed> {
   const afterRemove = await store.read(ROUND_TRIP);
 
   const lookalikes: Observed[] = [];
+
   for (const [first, second] of LOOKALIKES) {
     await store.write(first, "first-secret");
     await store.write(second, "second-secret");
@@ -32,13 +34,16 @@ export async function keychainProof(store: SecretStore): Promise<Observed> {
     await store.remove(first);
     const afterRemovingFirst = [await store.read(first), await store.read(second)];
     await store.remove(second);
+
     const isolated =
       both[0] === "first-secret" &&
       both[1] === "second-secret" &&
       afterRemovingFirst[0] === null &&
       afterRemovingFirst[1] === "second-secret";
+
     lookalikes.push({ first, second, both, afterRemovingFirst, isolated });
   }
+
   return {
     previous,
     launch,

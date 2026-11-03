@@ -12,6 +12,7 @@ import { subscriptionName, useSubscriptions } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 
 const DIMENSIONS = ["countries", "languages", "subscriptions"] as const;
+
 const LABELS = {
   countries: "Country",
   languages: "Language",
@@ -35,49 +36,65 @@ export function BrowseFilters({
   const [open, setOpen] = useState<keyof LiveFilters | null>(null);
   useLayoutEffect(() => {
     onOpenChange?.(open !== null);
+
     return () => onOpenChange?.(false);
   }, [open, onOpenChange]);
   const box = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const active = DIMENSIONS.some((dimension) => filters[dimension].length > 0);
+
   const label = (dimension: keyof LiveFilters, value: string) => {
     if (dimension === "languages") return formatLanguageName(value) ?? value;
+
     if (dimension !== "subscriptions") return value;
     const source = subscriptions.find((each) => each.id === value);
+
     return source ? subscriptionName(source) : t("Source unavailable");
   };
+
   const change = (next: LiveFilters) => useUi.setState({ list: { ...list, filters: next } });
+
   const close = () => {
     if (open) triggers.current.get(open)?.focus();
     setOpen(null);
   };
+
   useLayoutEffect(() => {
     menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [open]);
   useLayoutEffect(() => {
     if (!open) return;
+
     const position = () => {
       const popup = menu.current;
+
       if (!popup) return;
       popup.style.transform = "";
       const bounds = popup.getBoundingClientRect();
       const shift = Math.max(8 - bounds.left, Math.min(0, window.innerWidth - 8 - bounds.right));
       popup.style.transform = `translateX(${shift}px)`;
     };
+
     position();
     window.addEventListener("resize", position);
+
     return () => window.removeEventListener("resize", position);
   }, [open, filters, result]);
   useEffect(() => {
     if (!open) return;
+
     const outside = (event: PointerEvent) => {
       if (event.target instanceof Node && !box.current?.contains(event.target)) setOpen(null);
     };
+
     window.addEventListener("pointerdown", outside);
+
     return () => window.removeEventListener("pointerdown", outside);
   }, [open]);
+
   if (summaryOnly && !active) return null;
+
   return (
     <div
       ref={box}
@@ -90,12 +107,15 @@ export function BrowseFilters({
       onKeyDown={(event) => {
         if (!open) return;
         event.stopPropagation();
+
         if (event.key === "Escape") {
           event.preventDefault();
           close();
         }
+
         const buttons = [...(menu.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+
         const next =
           event.key === "ArrowDown"
             ? (index + 1) % buttons.length
@@ -106,6 +126,7 @@ export function BrowseFilters({
                 : event.key === "End"
                   ? buttons.length - 1
                   : undefined;
+
         if (next !== undefined) {
           event.preventDefault();
           buttons[next]?.focus();
@@ -114,11 +135,14 @@ export function BrowseFilters({
     >
       {DIMENSIONS.map((dimension) => {
         const selected = filters[dimension];
+
         if (dimension === "languages" && selected.length === 0 && !result?.facets.languages.length)
           return null;
+
         const text = selected.length
           ? selected.map((value) => label(dimension, value)).join(", ")
           : t("Any");
+
         if (summaryOnly)
           return selected.length ? (
             <span key={dimension}>
@@ -126,7 +150,9 @@ export function BrowseFilters({
             </span>
           ) : null;
         const options = new Map(result?.facets[dimension].map((each) => [each.value, each.count]));
+
         for (const value of selected) if (!options.has(value)) options.set(value, 0);
+
         return (
           <div key={dimension} className="relative min-w-0">
             <button

@@ -22,6 +22,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   let playing = false;
   let failure = (_error: TitleError) => {};
   let ended = () => {};
+
   const entry = {
     run,
     position: run.start,
@@ -29,6 +30,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     destroyed: false,
     start() {
       playing = true;
+
       if (run.paused) video.pause();
       else void video.play();
       resolve();
@@ -39,7 +41,9 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
       else reject(error);
     },
   };
+
   runs.push(entry);
+
   return {
     started,
     onFailure(listener) {

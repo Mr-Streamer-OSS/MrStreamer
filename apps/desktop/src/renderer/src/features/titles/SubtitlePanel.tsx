@@ -29,11 +29,14 @@ const failureText = {
   unavailable: "Service unavailable",
   unsupported: "Unsupported subtitle",
 } as const satisfies Record<SubtitleServiceFailure, PlainKey>;
+
 /** When the service's allowance starts again, as it said: a time in the interface's own words. */
 function resetTime(said: string): string {
   const at = Date.parse(said);
+
   return Number.isNaN(at) ? said : comingTime(at, Date.now());
 }
+
 /** The word beside the chosen track for what `useSubtitleNote` says. */
 export function subtitleChoiceNote(note: ReturnType<typeof useSubtitleNote>): string | null {
   return note === "loading" ? t("Loading") : note === "unavailable" ? t("Unavailable") : null;
@@ -55,17 +58,21 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
   const [forgetError, setForgetError] = useState(false);
   useEffect(() => {
     onlineSubtitles.bind(sessionId);
+
     return () => onlineSubtitles.bind(null);
   }, [sessionId]);
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement;
     root.current?.querySelector<HTMLElement>("[aria-pressed=true]")?.focus();
+
     return () => {
       onlineSubtitles.dismissPending();
+
       // Settings opened from here covers the title: focus on a button underneath would show its
       // tooltip, which takes the first Escape from Settings.
       if (useUi.getState().settings) return;
+
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, [open]);
@@ -77,20 +84,27 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
   close.current = onClose;
   useEffect(() => {
     if (!open) return;
+
     const onKey = (event: KeyboardEvent) => {
       const ui = useUi.getState();
+
       if (event.key !== "Escape" || event.defaultPrevented) return;
+
       if (ui.searchOpen || ui.settings || ui.updateDialog) return;
       event.preventDefault();
       event.stopPropagation();
       close.current();
     };
+
     window.addEventListener("keydown", onKey, { capture: true });
+
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [open]);
+
   if (!open) return null;
   const downloaded = downloadedOn && saved?.subtitle != null;
   const settingsFor = subtitleSettingsFor(tracks, subtitle, downloaded);
+
   return (
     <aside
       ref={root}
@@ -109,6 +123,7 @@ export function SubtitlePanel({ open, onClose }: { open: boolean; onClose: () =>
       </Choice>
       {tracks.map((track) => {
         const chosen = !downloadedOn && subtitle?.id === track.id && subtitle.page === track.page;
+
         return (
           <Choice
             key={`${track.id}:${track.page}`}

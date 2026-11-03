@@ -67,6 +67,7 @@ export function writeArtifact(built: Built): { dir: string; sha256: string } {
     `Version="${built.manifestVersion ?? built.packageVersion}"`,
     `ProcessorArchitecture="${built.architecture ?? STORE_APP.architecture}"`,
   ].join(" ");
+
   const properties = `<Properties>\n    <DisplayName>${built.displayName ?? STORE_NAME}</DisplayName>\n  </Properties>`;
   const manifest = `<?xml version="1.0" encoding="utf-8"?>\n<Package>\n  <Identity ${identity} />\n  ${properties}\n</Package>${" ".repeat(built.padding ?? 0)}`;
   const file = storedZip("AppxManifest.xml", Buffer.from(manifest));
@@ -84,6 +85,7 @@ export function writeArtifact(built: Built): { dir: string; sha256: string } {
       sha256,
     }),
   );
+
   return { dir, sha256 };
 }
 
@@ -101,12 +103,14 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   /** What a committed submission goes through, one step per read of its status. */
   let progress: Verdict[] = [];
   const waits: number[] = [];
+
   let app: Record<string, unknown> = {
     id: STORE_APP.id,
     primaryName: "Mr. Streamer",
     packageIdentityName: STORE_APP.identityName,
     publisherName: STORE_APP.publisher,
   };
+
   let publishedId = "1001";
   let pendingId: string | null = null;
   let nextId = 1002;
@@ -181,6 +185,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   /** Makes a copy of the published submission the one in progress, as a draft. */
   function copy(): Submission {
     const id = String(nextId++);
+
     const draft: Submission = {
       ...structuredClone(submissions.get(publishedId)!),
       id,
@@ -188,14 +193,18 @@ export function fakeStore({ title = STORE_NAME } = {}) {
       fileUploadUrl: uploadUrl(id),
       friendlyName: `Submission ${id}`,
     };
+
     submissions.set(id, draft);
     pendingId = id;
+
     return draft;
   }
 
   function inProgress(): Submission {
     const submission = submissions.get(pendingId ?? "");
+
     if (!submission) throw new Error("No submission is in progress.");
+
     return submission;
   }
 
@@ -204,7 +213,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     const { listings } = submission;
     const listing = isRecord(listings) ? listings[language] : undefined;
     const base = isRecord(listing) ? listing["baseListing"] : undefined;
+
     if (!isRecord(base)) throw new Error(`No listing in ${language}.`);
+
     return base;
   }
 
@@ -213,6 +224,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
       status,
       headers: { "MS-CorrelationId": "6f1c2a34-0000-4000-8000-00000000c0de", ...headers },
     });
+
   const refused = (status: number, code: string, message: string) =>
     json(status, { code, message, source: "Ingestion Api" });
 
@@ -220,15 +232,18 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   function versionIn(zip: Buffer | null, fileName: string): string | null {
     const file = zip && readZipEntry(zip, fileName);
     const manifest = file && readZipEntry(file, "AppxManifest.xml")?.toString("utf8");
+
     return (manifest && /\sVersion="([^"]*)"/.exec(manifest)?.[1]) || null;
   }
 
   /** What Microsoft makes of a committed submission's files once it looks at them. */
   function check(submission: Submission): void {
     const zip = blobs.get(submission.id)?.zip ?? null;
+
     for (const file of submission.applicationPackages) {
       if (file["fileStatus"] !== "PendingUpload") continue;
       const version = versionIn(zip, String(file["fileName"]));
+
       if (version) {
         file["version"] = version;
       } else {
@@ -238,14 +253,17 @@ export function fakeStore({ title = STORE_NAME } = {}) {
           warnings: [],
           certificationReports: [],
         };
+
         return;
       }
     }
+
     move(submission, progress.shift() ?? "PreProcessing");
   }
 
   function move(submission: Submission, verdict: Verdict): void {
     submission.status = typeof verdict === "string" ? verdict : verdict.status;
+
     if (typeof verdict === "string") return;
     submission["statusDetails"] = {
       errors: verdict.errors,
@@ -257,6 +275,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   function api(method: string, path: string, body: unknown): Response {
     const [, id, action] = /^\/submissions(?:\/(\d+))?(?:\/(\w+))?$/.exec(path) ?? [];
     const submission = id ? submissions.get(id) : undefined;
+
     if (method === "GET" && path === "") {
       return json(200, {
         ...app,
@@ -264,23 +283,32 @@ export function fakeStore({ title = STORE_NAME } = {}) {
         ...(pendingId && { pendingApplicationSubmission: { id: pendingId } }),
       });
     }
+
     if (method === "POST" && path === "/submissions") {
       if (pendingId) return refused(409, "InvalidState", "A submission is in progress already.");
+
       return json(201, copy());
     }
+
     if (!submission || !id) return refused(404, "NotFound", "No such submission.");
+
     if (method === "GET" && !action) return json(200, submission);
+
     if (method === "GET" && action === "status") {
       if (submission.status === "CommitStarted") check(submission);
       else if (id === pendingId && progress.length > 0) move(submission, progress.shift()!);
+
       return json(200, { status: submission.status, statusDetails: submission["statusDetails"] });
     }
+
     if (id !== pendingId || submission.status !== "PendingCommit") {
       return refused(409, "InvalidState", "The submission can't change in its current state.");
     }
+
     if (method === "PUT" && !action && isRecord(body)) {
       const { status, statusDetails, fileUploadUrl, friendlyName } = submission;
       const files = Array.isArray(body["applicationPackages"]) ? body["applicationPackages"] : [];
+
       const updated: Submission = {
         ...body,
         id,
@@ -290,61 +318,78 @@ export function fakeStore({ title = STORE_NAME } = {}) {
         friendlyName,
         applicationPackages: files.filter(isRecord),
       };
+
       for (const [language, kept] of Object.entries(rewrites)) {
         Object.assign(baseListing(updated, language), kept);
       }
+
       submissions.set(id, updated);
+
       return json(200, updated);
     }
+
     if (method === "POST" && action === "commit") {
       submission.status = "CommitStarted";
+
       return json(202, { status: "CommitStarted" });
     }
+
     return refused(405, "MethodNotAllowed", "Not supported.");
   }
 
   function storage(url: URL, body: string | Uint8Array | undefined): Response {
     const id = url.pathname.replace("/ingestion/upload-", "");
+
     if (encodeURIComponent(url.searchParams.get("sig") ?? "") !== SIGNATURE) {
       return new Response("AuthenticationFailed", { status: 403 });
     }
+
     const blob = blobs.get(id) ?? { blocks: new Map<string, Buffer>(), zip: null };
     blobs.set(id, blob);
+
     if (url.searchParams.get("comp") === "block") {
       blob.blocks.set(url.searchParams.get("blockid") ?? "", Buffer.from(body ?? ""));
     } else {
       const listed = [...String(body).matchAll(/<Latest>([^<]+)<\/Latest>/g)];
       blob.zip = Buffer.concat(listed.map(([, block]) => blob.blocks.get(block ?? "")!));
     }
+
     return new Response(null, { status: 201 });
   }
 
   const send: Send = async (address, request) => {
     const url = new URL(address);
     const { method, body } = request;
+
     const name =
       url.hostname === "login.microsoftonline.com"
         ? "POST token"
         : url.hostname.endsWith(".blob.core.windows.net")
           ? `PUT ${url.searchParams.get("comp")}`
           : `${method} ${address.slice(API.length) || "/"}`;
+
     requests.push(name);
     meanwhile.get(name)?.();
     meanwhile.delete(name);
     const fault = faults.findIndex((each) => each.request === name);
     const { fault: kind, body: answer } = fault === -1 ? {} : faults.splice(fault, 1)[0]!;
+
     if (kind === "unanswered") throw new TypeError(`fetch failed: ${address}`);
+
     if (typeof kind === "number") return new Response(answer, { status: kind });
 
     let response: Response;
+
     if (name === "POST token") {
       const form = new URLSearchParams(String(body));
+
       const known =
         url.pathname === `/${TENANT}/oauth2/token` &&
         form.get("grant_type") === "client_credentials" &&
         form.get("client_id") === CLIENT &&
         form.get("client_secret") === KEY &&
         form.get("resource") === "https://manage.devcenter.microsoft.com";
+
       response = known
         ? json(200, { token_type: "Bearer", expires_in: "3599", access_token: TOKEN })
         : json(401, {
@@ -357,10 +402,13 @@ export function fakeStore({ title = STORE_NAME } = {}) {
       response = refused(401, "Unauthorized", "The token is missing or wrong.");
     } else {
       const parsed: unknown = typeof body === "string" ? JSON.parse(body) : undefined;
+
       if (parsed !== undefined) sent.set(name, structuredClone(parsed));
       response = api(method, address.slice(API.length), parsed);
     }
+
     if (kind === "lost") throw new TypeError(`fetch failed: ${address}`);
+
     return response;
   };
 
@@ -385,7 +433,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     /** The JSON body of the last request called `name`. */
     sent(name: string): Record<string, unknown> {
       const body = sent.get(name);
+
       if (!isRecord(body)) throw new Error(`No ${name} carried a JSON object.`);
+
       return body;
     },
     published: () => submissions.get(publishedId)!,
@@ -410,6 +460,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     /** A submission someone started in Partner Center, holding `fileName` at `status`. */
     start(status: string, fileName: string, version = ""): string {
       const packages = [{ id: "9100", fileName, fileStatus: "PendingUpload", version }];
+
       return Object.assign(copy(), { status, applicationPackages: packages }).id;
     },
     /** A draft someone made in Partner Center and left as Microsoft copied it. */
@@ -435,6 +486,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     advance(verdict: Verdict): void {
       const submission = inProgress();
       move(submission, verdict);
+
       if (submission.status !== "Published") return;
       submission.applicationPackages = submission.applicationPackages
         .filter((file) => file["fileStatus"] !== "PendingDelete")

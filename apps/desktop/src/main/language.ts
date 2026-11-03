@@ -17,6 +17,7 @@ export function languageFor(saved: string | undefined): InterfaceLanguage {
 /** Shows main's text, and on macOS the menu bar, in `language`. */
 export function applyLanguage(language: InterfaceLanguage): void {
   setLanguage(language);
+
   if (process.platform === "darwin") {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(macMenu(app.name, () => void shell.openExternal(WEBSITE))),

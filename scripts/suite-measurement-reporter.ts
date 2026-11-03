@@ -5,6 +5,7 @@ import type { Reporter, Vitest } from "vitest/node";
 export default class SuiteMeasurementReporter implements Reporter {
   onInit(ctx: Vitest): void {
     const output = process.env["MR_STREAMER_SUITE_POLICY"];
+
     if (!output) throw new Error("Suite measurement policy output is required");
     writeFileSync(
       output,

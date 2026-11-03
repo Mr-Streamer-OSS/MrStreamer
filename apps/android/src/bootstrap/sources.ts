@@ -15,6 +15,7 @@ export const sources: SourcesOwner = sourcesOwner({
   fetch: (input, init) => {
     const headers = new Headers(init?.headers);
     headers.set("Cache-Control", "no-store");
+
     return fetch(input, { ...init, headers, credentials: "omit" });
   },
   userAgent: USER_AGENT,

@@ -67,19 +67,24 @@ export type Picks = ReadonlyMap<string, SubscriptionPreferences>;
 export function pickedVersion(title: Title, picks: Picks | undefined): OwnedId | null {
   if (!title.tmdbId || !picks) return null;
   const key = `${title.kind}:${title.tmdbId}`;
+
   const picked = title.versions.find(
     ({ subscriptionId, id }) => picks.get(subscriptionId)?.titleVersions?.[key] === id,
   );
+
   return picked ? ownedId(picked) : null;
 }
 
 /** The picks the page holds for the subscriptions that list `title`, without asking for any. */
 function heldPicks(client: QueryClient, title: Title): Picks {
   const held = new Map<string, SubscriptionPreferences>();
+
   for (const { subscriptionId } of title.versions) {
     const left = client.getQueryData(queries.subscriptionPreferences(subscriptionId).queryKey);
+
     if (left) held.set(subscriptionId, left);
   }
+
   return held;
 }
 
@@ -90,9 +95,11 @@ function heldPicks(client: QueryClient, title: Title): Picks {
  */
 export function usePickVersion(): (title: Title, version: OwnedId | null) => void {
   const client = useQueryClient();
+
   return (title, version) => {
     if (!title.tmdbId) return;
     const key = `${title.kind}:${title.tmdbId}`;
+
     for (const subscriptionId of new Set(title.versions.map((each) => each.subscriptionId))) {
       const picks = queries.subscriptionPreferences(subscriptionId);
       // The picks as saved, so one never replaces the others.
@@ -101,6 +108,7 @@ export function usePickVersion(): (title: Title, version: OwnedId | null) => voi
         .then(async (previous) => {
           const { [key]: old, ...others } = previous.titleVersions ?? {};
           const mine = version?.subscriptionId === subscriptionId ? version.id : undefined;
+
           if (old === mine) return;
           const titleVersions = mine === undefined ? others : { ...others, [key]: mine };
           client.setQueryData(picks.queryKey, { ...previous, titleVersions });
@@ -126,6 +134,7 @@ export function useRemoveFromContinue() {
   return useMutation({
     mutationFn: (title: Title) => {
       const versions = title.versions.map(ownedId);
+
       return call("viewing.removeFromContinue", {
         commandId: crypto.randomUUID(),
         titles: title.kind === "movie" ? { movies: versions } : { series: versions },
@@ -141,11 +150,13 @@ export function useRemoveFromContinue() {
 export function useInContinueWatching(title: Title): boolean {
   const viewing = useQuery(queries.viewing());
   const versions = new Set(title.versions.map(ownedKey));
+
   const played = (viewing.data?.continueWatching ?? []).some(({ title: played }) =>
     played.kind === "movie"
       ? title.kind === "movie" && versions.has(ownedKey(played))
       : title.kind === "series" && versions.has(ownedKey(seriesOf(played))),
   );
+
   const marked = (viewing.data?.marked ?? []).some(
     ({ series, kept, next }) =>
       title.kind === "series" &&
@@ -153,6 +164,7 @@ export function useInContinueWatching(title: Title): boolean {
       versions.has(ownedKey(series)) &&
       seriesIdentity(series, title).keys.includes(kept),
   );
+
   return played || marked;
 }
 
@@ -174,37 +186,46 @@ export function useContinueWatching(
   // All the record offers: the limit applies to what is left to show.
   const items = enabled ? (viewing.data?.continueWatching ?? []) : [];
   const marks = enabled ? (viewing.data?.marked ?? []) : [];
+
   /** The version each entry played: the movie, or the episode's series. */
   const played = ({ title }: TitleProgress): OwnedId =>
     title.kind === "movie" ? ownedId(title) : seriesOf(title);
+
   const versions = (kind: "movie" | "episode") =>
     items.flatMap((item) => (item.title.kind === kind ? [played(item)] : []));
+
   const movieVersions = versions("movie");
   const seriesVersions = [...versions("episode"), ...marks.map((mark) => mark.series)];
+
   const movies = useQuery({
     ...queries.continuing("movie", movieVersions),
     enabled: visible && movieVersions.length > 0,
     placeholderData: keepPreviousData,
   });
+
   const series = useQuery({
     ...queries.continuing("series", seriesVersions),
     enabled: visible && seriesVersions.length > 0,
     placeholderData: keepPreviousData,
   });
+
   const byVersion = new Map(
     [...(movies.data ?? []), ...(series.data ?? [])].flatMap((title) =>
       title.versions.map((version) => [`${title.kind}:${ownedKey(version)}`, title] as const),
     ),
   );
+
   const loading =
     viewing.isPending ||
     (movies.isPending && movies.fetchStatus !== "idle") ||
     (series.isPending && series.fetchStatus !== "idle");
+
   const entries = continueEntries(
     { continueWatching: items, marked: marks },
     (kind, version) => byVersion.get(`${kind}:${ownedKey(version)}`),
     limit,
   );
+
   return { entries, loading, error: viewing.error };
 }
 
@@ -217,6 +238,7 @@ let resuming = 0;
  */
 function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
   const now = useUi.getState();
+
   return (
     now.account === from.account &&
     now.view === from.view &&
@@ -240,17 +262,21 @@ function stillThere(from: ReturnType<typeof useUi.getState>): boolean {
  */
 export function useResume(): (entry: ContinueEntry) => void {
   const client = useQueryClient();
+
   return ({ title, version, progress }) => {
     // A version picked since in the same subscription plays instead, from the same point.
     const pick = pickedVersion(title, heldPicks(client, title));
     const picked = pick?.subscriptionId === version.subscriptionId ? pick : null;
+
     if (progress) {
       playTitle(
         movieNow({ ...title, ...(picked ?? version) }, title.backdropUrl),
         resumePoint(progress),
       );
+
       return;
     }
+
     const series = picked ?? version;
     const mine = ++resuming;
     const from = useUi.getState();
@@ -262,8 +288,10 @@ export function useResume(): (entry: ContinueEntry) => void {
     ]).then(
       ([found, standing]) => {
         if (!wanted()) return;
+
         const goesOn =
           found.kind === "series" ? continuation(found, standing.progress, standing.marks) : null;
+
         if (found.kind !== "series" || !goesOn || goesOn.replay) return open();
         playTitle(episodeNow(found, goesOn.episode), resumePoint(goesOn.resume));
       },

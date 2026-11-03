@@ -40,6 +40,7 @@ export function Sheet({
           overSettings && "z-50",
         ),
   );
+
   const content = (
     // The outer frame clips the scrollbar as well as the content at its rounded edge.
     <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -53,6 +54,7 @@ export function Sheet({
       </Dialog.Close>
     </div>
   );
+
   return (
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>

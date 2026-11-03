@@ -9,6 +9,7 @@ import { registerIpc, type IpcHandlers } from "../src/main/ipc.ts";
 const boundary = vi.hoisted(
   () => new Map<string, (event: IpcMainInvokeEvent, input: unknown) => Promise<Result<unknown>>>(),
 );
+
 vi.mock("electron", () => ({
   ipcMain: {
     handle: (
@@ -20,24 +21,30 @@ vi.mock("electron", () => ({
 
 function sender(id: number) {
   const events = new EventEmitter();
+
   return Object.assign(events, {
     id,
     mainFrame: { processId: id, routingId: 1 },
   }) as WebContents;
 }
+
 function invoke(method: IpcMethod, from: WebContents, input: unknown) {
   return boundary.get(method)!(
     { sender: from, senderFrame: from.mainFrame } as IpcMainInvokeEvent,
     input,
   );
 }
+
 const request = (view = "palette", id = "first") => ({ view, id });
+
 const search = (from: WebContents, metadata = request()) =>
   invoke("guide.search", from, { query: "fixture", request: metadata });
+
 const cancel = (from: WebContents, metadata = request()) =>
   invoke("guide.cancelSearch", from, metadata);
 
 beforeEach(() => boundary.clear());
+
 function start(handler: IpcHandlers["guide.search"] = () => Effect.never) {
   // Only these public methods are exercised; registerIpc still registers all contracts.
   const handlers: Partial<IpcHandlers> = {
@@ -45,17 +52,21 @@ function start(handler: IpcHandlers["guide.search"] = () => Effect.never) {
     "guide.searchList": () => Effect.never,
     "guide.cancelSearch": () => Effect.succeed(null),
   };
+
   registerIpc(Effect.runPromiseExit, handlers as IpcHandlers, () => true);
 }
 
 describe("owned guide-search IPC", () => {
   it("cancels only the named sender and view, with no failure diagnostics", async () => {
     start();
+
     const a = sender(1),
       b = sender(2);
+
     const first = search(a),
       otherView = search(a, request("live")),
       otherWindow = search(b);
+
     await cancel(a);
     expect(await first).toMatchObject({ ok: false });
     expect(a.listenerCount("destroyed")).toBe(1);
@@ -68,16 +79,21 @@ describe("owned guide-search IPC", () => {
 
   it("keeps file cleanup held until interrupted work has stopped", async () => {
     let release = () => {};
+
     const ending = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     let stopped = false;
     start(() => Effect.never.pipe(Effect.onInterrupt(() => Effect.promise(() => ending))));
     const a = sender(1);
+
     const pending = search(a).then((answer) => {
       stopped = true;
+
       return answer;
     });
+
     await cancel(a);
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(stopped).toBe(false);
@@ -95,6 +111,7 @@ describe("owned guide-search IPC", () => {
       const pending = [search(a), search(a, request("live"))];
       a.emit(event, { isMainFrame: true, isSameDocument: false });
       await Promise.all(pending);
+
       for (const name of ["destroyed", "render-process-gone", "did-start-navigation"])
         expect(a.listenerCount(name)).toBe(0);
     },

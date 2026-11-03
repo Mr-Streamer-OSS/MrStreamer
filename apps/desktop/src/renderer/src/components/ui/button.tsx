@@ -42,6 +42,7 @@ export function Button({ className, variant, size, render, ...props }: ButtonPro
     // player, and a focused button would swallow them. Tab still reaches every button.
     onMouseDown: (event: MouseEvent) => event.preventDefault(),
   };
+
   return useRender({
     defaultTagName: "button",
     render,

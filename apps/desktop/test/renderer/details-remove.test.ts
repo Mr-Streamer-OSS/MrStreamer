@@ -75,9 +75,11 @@ const button = (page: HTMLElement, label: string) =>
   [...page.querySelectorAll("button")].find((each) => each.textContent?.trim() === label);
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -103,13 +105,16 @@ async function openDetails(): Promise<HTMLElement> {
     stopSync();
     view.unmount();
   };
+
   await act(async () => listed.resolve([film]));
   await act(async () => progress.resolve([halfway]));
   await act(async () => record.resolve(viewing(5, [halfway])));
   await settle();
   await act(async () => opened.resolve(details));
+
   // The sheet draws its actions once the details and the record are in.
   for (let tries = 0; tries < 50 && !button(document.body, REMOVE); tries++) await settle();
+
   return document.body;
 }
 

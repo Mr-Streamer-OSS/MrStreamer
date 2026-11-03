@@ -34,6 +34,7 @@ const INSTALLERS = {
 } as const;
 
 type Installer = keyof typeof INSTALLERS;
+
 export const installers = Object.keys(INSTALLERS) as Installer[];
 
 /** A stable release and the installers known to be there. */
@@ -57,7 +58,9 @@ const urlOf = (version: string, installer: Installer): string =>
 function stableOf(feed: unknown): { version: string; listed: unknown } | null {
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
+
   if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) return null;
+
   return files === `${RELEASES}/download/v${version}` ? { version, listed } : null;
 }
 
@@ -69,7 +72,9 @@ function stableOf(feed: unknown): { version: string; listed: unknown } | null {
 export function listedDownloads(feed: unknown): Downloads | null {
   const stable = stableOf(feed);
   const listed = stable?.listed;
+
   if (!stable || !Array.isArray(listed)) return null;
+
   return {
     version: stable.version,
     installers: installers.filter((installer) =>
@@ -89,6 +94,7 @@ export async function verifiedDownloads(
 ): Promise<Downloads | null> {
   // A complete history with no eligible stable release is authoritative, not a network failure.
   if (released === null) return null;
+
   // The API history is freshly read during the build. Pages may cache its feed for ten minutes.
   // If the history is unavailable, preserve the verified feed fallback used by earlier builds.
   const feed = released
@@ -99,7 +105,9 @@ export async function verifiedDownloads(
       })
         .then((response): Promise<unknown> | null => (response.ok ? response.json() : null))
         .catch(() => null);
+
   const published = released && Date.parse(released.published);
+
   const stable =
     released &&
     /^\d+\.\d+\.\d+$/.test(released.version) &&
@@ -107,7 +115,9 @@ export async function verifiedDownloads(
     Number.isFinite(published)
       ? { version: released.version }
       : stableOf(feed);
+
   if (!stable) return null;
+
   // GitHub answers 302 for an installer that exists and 404 for one that doesn't. Other redirects
   // don't count: a renamed repository redirects every address, a missing file's too.
   const answers = await Promise.all(
@@ -122,6 +132,7 @@ export async function verifiedDownloads(
       ),
     ),
   );
+
   return {
     version: stable.version,
     installers: installers.filter((_, index) => answers[index]),
@@ -133,21 +144,25 @@ export function showFeedDownloads(page: ParentNode, feed: unknown): void {
   const release = page.querySelector<HTMLElement>("[data-release-verified]");
   const minimum = release?.dataset["releaseVerified"];
   const downloads = listedDownloads(feed);
+
   if (minimum !== undefined) {
     const generated =
       isRecord(feed) && typeof feed["generated"] === "string" ? Date.parse(feed["generated"]) : NaN;
+
     if (
       !Number.isFinite(generated) ||
       (generated < Number(minimum) && downloads?.version !== release?.dataset["releaseSelected"])
     )
       return;
   }
+
   if (downloads) showDownloads(page, downloads);
 }
 
 /** Where an installer link goes: its file when the release is known to hold it. */
 function hrefOf(downloads: Downloads, installer: string | undefined): string {
   const known = downloads.installers.find((each) => each === installer);
+
   return known ? urlOf(downloads.version, known) : LATEST;
 }
 
@@ -161,6 +176,7 @@ function releaseVersion(downloads: Downloads): string {
 function releaseLink(downloads: Downloads, kind: string | undefined): string {
   if (!downloads.installers.length) return LATEST;
   const release = `${RELEASES}/tag/v${downloads.version}`;
+
   return kind === "notes" ? release : `${release}#assets`;
 }
 
@@ -176,16 +192,20 @@ export function showDownloads(page: ParentNode, downloads: Downloads): void {
   for (const link of page.querySelectorAll<HTMLAnchorElement>("a[data-installer]")) {
     link.href = hrefOf(downloads, link.dataset["installer"]);
   }
+
   for (const line of page.querySelectorAll<HTMLElement>("[data-release-version]")) {
     line.textContent = releaseVersion(downloads);
   }
+
   for (const link of page.querySelectorAll<HTMLAnchorElement>("a[data-release-link]")) {
     link.href = releaseLink(downloads, link.dataset["releaseLink"]);
   }
+
   for (const title of page.querySelectorAll("[data-download-title]")) {
     if (title instanceof HTMLMetaElement) title.content = downloadTitle(downloads);
     else title.textContent = downloadTitle(downloads);
   }
+
   for (const script of page.querySelectorAll('script[type="application/ld+json"]')) {
     script.textContent = writeSoftwareVersion(script.textContent ?? "", downloads);
   }
@@ -194,9 +214,12 @@ export function showDownloads(page: ParentNode, downloads: Downloads): void {
 /** The version describes verified/listed installers, rather than an unreleased package version. */
 function writeSoftwareVersion(json: string, downloads: Downloads): string {
   const data: unknown = JSON.parse(json);
+
   if (!isRecord(data)) return json;
+
   if (downloads.installers.length) data["softwareVersion"] = downloads.version;
   else delete data["softwareVersion"];
+
   return JSON.stringify(data, null, 2);
 }
 
@@ -218,7 +241,9 @@ export function writeDownloads(
           : ` data-release-verified="${verifiedAt}" data-release-selected="${downloads?.version ?? ""}">`,
       ),
   );
+
   if (!downloads) return stamped;
+
   return stamped
     .replace(/<a\s[^>]*\bdata-installer="(\w+)"[^>]*>/g, (tag, installer: string) =>
       tag.replace(/\shref="[^"]*"/, ` href="${hrefOf(downloads, installer)}"`),

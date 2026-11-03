@@ -53,6 +53,7 @@ import {
 
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
+
 const TRACKS = "TEST | Subtitles and two sound tracks";
 
 /** A release the update sources offer. */
@@ -77,6 +78,7 @@ async function app(dataDir: string, secrets = testSecrets) {
       },
     }),
   );
+
   return {
     recordings: await promised(runtime, Recordings),
     downloads: await promised(runtime, Downloads),
@@ -100,22 +102,29 @@ async function connected(options: FakeProviderOptions = {}) {
     slotReleaseMs: 0,
     ...options,
   });
+
   const dataDir = await tempDir();
   const started = await app(dataDir);
   const { id: subscriptionId } = await started.subscriptions.add(demoLogin(provider));
   await started.library.refresh(subscriptionId);
+
   const channel = (name: string) => {
     const found = provider.catalogue.channels.find((each) => each.name === name);
+
     if (!found) throw new Error(`No channel ${name}`);
+
     return { subscriptionId, id: String(found.streamId) };
   };
+
   return { provider, dataDir, subscriptionId, channel, ...started };
 }
 
 async function until<A>(read: () => Promise<A>, done: (value: A) => boolean, ms = 10_000) {
   const deadline = Date.now() + ms;
+
   for (;;) {
     const value = await read();
+
     if (done(value) || Date.now() > deadline) return value;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -135,18 +144,23 @@ async function allClosed(provider: { activeStreams(): number }) {
 async function fileOf(dataDir: string, recording: Recording) {
   const folder = join(dataDir, "recordings", recording.id);
   const name = (await readdir(folder)).find((each) => each.endsWith(".ts"));
+
   if (!name) throw new Error("No file");
+
   return { name, path: join(folder, name), size: (await stat(join(folder, name))).size };
 }
 
 /** Recording folders, and records in recordings.json, a failed start would leave behind. */
 async function leftBehind(dataDir: string) {
   const root = join(dataDir, "recordings");
+
   const folders = (await readdir(root).catch(() => [])).filter(
     (name) => !name.startsWith("recordings.json"),
   );
+
   const kept = await readFile(join(root, "recordings.json"), "utf8").catch(() => null);
   const records = kept ? (JSON.parse(kept) as { recordings: unknown[] }).recordings : [];
+
   return [...folders, ...records];
 }
 
@@ -157,13 +171,16 @@ function probe(path: string): string[] {
     ["-v", "error", "-show_entries", "stream=codec_name", "-of", "json", path],
     { encoding: "utf8" },
   );
+
   const { streams } = JSON.parse(result.stdout) as { streams: { codec_name: string }[] };
+
   return streams.map((each) => each.codec_name);
 }
 
 /** Whether ffmpeg decodes the file's picture and every sound track to its end. */
 function decodes(path: string): boolean {
   const args = ["-v", "fatal", "-i", path, "-map", "0:v", "-map", "0:a", "-f", "null", "-"];
+
   return spawnSync("ffmpeg", args).status === 0;
 }
 
@@ -172,6 +189,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { provider, dataDir, channel, recordings, playback } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
     expect(answer.kind).toBe("started");
+
     if (answer.kind !== "started") return;
     expect(answer.recording).toMatchObject({
       title: "Subtitles and two sound tracks",
@@ -204,6 +222,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { provider, channel, subscriptionId, recordings, playback } = await connected({
       slotReleaseMs: 300,
     });
+
     const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
@@ -219,6 +238,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {
       stopPlaying: true,
     });
+
     expect(started.kind).toBe("started");
     expect(await playback.playing(watching.sessionId)).toBeNull();
     await expect(playback.open(channel(TRACKS), ["h264", "aac"])).rejects.toMatchObject({
@@ -232,6 +252,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { channel, subscriptionId, recordings, playback } = await connected({
       maxConnections: 2,
     });
+
     await playback.open(channel(TRACKS), ["h264", "aac"]);
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 2, uses: ["watch"] });
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
@@ -253,30 +274,38 @@ describe.skipIf(!hasTools)("recordings", () => {
       // The provider takes two; its login answer says what `limit` says, as a changed plan would.
       const provider = await fakeProvider({ live: true, maxConnections: 2, slotReleaseMs: 0 });
       let limit = admitted;
+
       const host = createServer(async (request, response) => {
         const url = new URL(request.url ?? "/", provider.url);
+
         if (url.pathname !== "/player_api.php" || url.searchParams.has("action")) {
           response.writeHead(307, { Location: url.href }).end();
+
           return;
         }
+
         const answer = (await (await fetch(url)).json()) as { user_info: object };
         const user_info = { ...answer.user_info, max_connections: String(limit) };
         response
           .writeHead(200, { "Content-Type": "application/json" })
           .end(JSON.stringify({ ...answer, user_info }));
       });
+
       await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
       onTestFinished(() => {
         host.closeAllConnections();
         host.close();
       });
       const address = host.address();
+
       if (!address || typeof address === "string") throw new Error("No address");
       const { subscriptions, library, recordings, playback } = await app(await tempDir());
+
       const { id: subscriptionId } = await subscriptions.add({
         ...demoLogin(provider),
         server: `http://127.0.0.1:${address.port}`,
       });
+
       await library.refresh(subscriptionId);
       const found = provider.catalogue.channels.find((each) => each.name === TRACKS)!;
       const channel = { subscriptionId, id: String(found.streamId) };
@@ -289,6 +318,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         uses: ["recording"],
       });
       const opening = playback.open(channel, ["h264", "aac"]);
+
       if (watch === "opens") await expect(opening).resolves.toBeTruthy();
       else await expect(opening).rejects.toMatchObject({ error: { kind: "recording-holds" } });
     },
@@ -297,6 +327,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("stops once its request ended and its file closed, keeping what it captured", async () => {
     const { provider, dataDir, channel, subscriptionId, recordings } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
 
@@ -316,6 +347,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("stops with its subscription, before its login goes", async () => {
     const { provider, channel, subscriptionId, recordings, roster } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     await roster.remove(subscriptionId, false);
@@ -329,6 +361,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { provider, channel, subscriptionId, recordings, roster } = await connected({
       streams: (_source, out) => out.write(Buffer.alloc(0)),
     });
+
     const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
     starting.catch(() => {});
     await until(
@@ -343,25 +376,32 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("stops with its subscription when it becomes active as the subscription goes", async () => {
     let source: Writable | undefined;
+
     const { provider, dataDir, channel, subscriptionId, recordings } = await connected({
       streams: (_channel, out) => {
         source = out;
         out.write(Buffer.alloc(0));
       },
     });
+
     const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     const started = starting.then(
       () => true,
       () => false,
     );
+
     const openingDeadline = Date.now() + 10_000;
+
     while (!source) {
       if (Date.now() >= openingDeadline) throw new Error("No stream opened");
       await new Promise((resolve) => setImmediate(resolve));
     }
+
     source.write(fixture("h264-aac.mpegts"));
     // Its program table is being written: it becomes active while the subscription goes.
     const folder = join(dataDir, "recordings");
+
     const writing = () =>
       readdirSync(folder, { withFileTypes: true }).some(
         (entry) =>
@@ -370,11 +410,14 @@ describe.skipIf(!hasTools)("recordings", () => {
             (file) => statSync(join(folder, entry.name, file)).size > 0,
           ),
       );
+
     const writingDeadline = Date.now() + 10_000;
+
     while (!existsSync(folder) || !writing()) {
       if (Date.now() >= writingDeadline) throw new Error("No program table was written");
       await new Promise((resolve) => setImmediate(resolve));
     }
+
     await recordings.subscriptionGone(subscriptionId);
     expect(provider.activeStreams()).toBe(0);
     expect(await started).toBe(true);
@@ -389,13 +432,16 @@ describe.skipIf(!hasTools)("recordings", () => {
     let held: Promise<void> | null = null;
     const asked = Promise.withResolvers<void>();
     const answer = Promise.withResolvers<void>();
+
     const host = createServer(async (_request, response) => {
       if (held) {
         asked.resolve();
         await held;
       }
+
       response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
     });
+
     await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
     onTestFinished(() => {
       answer.resolve();
@@ -403,14 +449,17 @@ describe.skipIf(!hasTools)("recordings", () => {
       host.close();
     });
     const address = host.address();
+
     if (!address || typeof address === "string") throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
+
     const { id: subscriptionId } = await before.subscriptions.add({
       server: `http://127.0.0.1:${address.port}/playlist.m3u`,
       username: "",
       password: "",
     });
+
     await before.library.refresh(subscriptionId);
     const channel = (await before.library.channels({})).find((each) => each.title === TRACKS)!;
     await before.quit();
@@ -430,23 +479,30 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("pauses when the provider's stream breaks off, then records the rest of its time after the gap", async () => {
     // Half the recording, then the provider closes the stream; asked again, it sends on.
     let asked = 0;
+
     const half = (() => {
       const recording = fixture(TRACKS_FIXTURE);
+
       return recording.subarray(0, Math.floor(recording.length / 188 / 2) * 188);
     })();
+
     const breaking = (source: Parameters<typeof liveStreams>[0], out: Writable) => {
       asked++;
+
       if (asked === 1) out.end(half);
       else out.write(fixture(source.fixture ?? "h264-aac.mpegts"));
     };
+
     const { dataDir, channel, recordings, provider } = await connected({ streams: breaking });
     const stop = Date.now() + 3000;
     const answer = await recordings.start(channel(TRACKS), stop, {});
     expect(answer.kind).toBe("started");
+
     const [ended] = await until(
       recordings.list,
       ([first]) => first?.status.kind !== "recording" && first?.status.kind !== "paused",
     );
+
     // Its time ran to the stop, with what broke off missed in between: nothing filled it.
     expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
     expect(ended?.ended).toBeGreaterThanOrEqual(stop);
@@ -463,15 +519,19 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("never goes on with a paused recording the viewer stopped", async () => {
     let asked = 0;
+
     const { channel, recordings, provider, subscriptionId } = await connected({
       streams: (_source, out) => {
         asked++;
+
         // The first answer breaks off; every later one is refused while it pauses.
         if (asked === 1) out.end(fixture("h264-aac.mpegts"));
         else out.destroy();
       },
     });
+
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => first?.status.kind === "paused");
     await recordings.stop(answer.recording.id);
@@ -488,15 +548,19 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("lists a paused recording whose time ran out as not saved while its end can't be written", async () => {
     let asked = 0;
+
     const { dataDir, channel, recordings } = await connected({
       streams: (_source, out) => {
         asked++;
+
         // The first answer breaks off; every later one is refused, so it stays paused.
         if (asked === 1) out.end(fixture("h264-aac.mpegts"));
         else out.destroy();
       },
     });
+
     const answer = await recordings.start(channel(TRACKS), Date.now() + 2000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => first?.status.kind === "paused");
     const manifest = join(dataDir, "recordings", "recordings.json");
@@ -515,22 +579,28 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("ends a recording whose provider keeps answering with a short clip", async () => {
     let asked = 0;
+
     const { channel, recordings } = await connected({
       streams: (_source, out) => {
         asked++;
         out.end(fixture("h264-aac.mpegts"));
       },
     });
+
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
+
     // Each check asks again at once, as a wake does.
     const [ended] = await until(
       async () => {
         await recordings.check();
+
         return recordings.list();
       },
       ([first]) => first?.status.kind !== "recording" && first?.status.kind !== "paused",
     );
+
     expect(ended?.status).toEqual({ kind: "partial", cut: "stream" });
     expect(asked).toBe(3);
   });
@@ -539,6 +609,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     for (const how of ["stopped", "quit"] as const) {
       const first = Promise.withResolvers<Writable>();
       let answers = 0;
+
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
         streams: (_source, out) => {
           if (++answers === 1) {
@@ -547,21 +618,27 @@ describe.skipIf(!hasTools)("recordings", () => {
           } else out.end(fixture("h264-aac.mpegts"));
         },
       });
+
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       const manifest = join(dataDir, "recordings", "recordings.json");
       await rename(manifest, `${manifest}.saved`);
       await mkdir(manifest);
       // It can only end after the manifest write is refused, even if setup was delayed.
       (await first.promise).end();
+
       const [ended] = await until(
         async () => {
           await recordings.check();
+
           return recordings.list();
         },
         ([first]) => first?.status.kind === "partial" && first.unsaved === true,
       );
+
       expect(ended).toMatchObject({ status: { kind: "partial", cut: "stream" }, unsaved: true });
+
       if (how === "stopped")
         await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
           error: { kind: "unexpected", detail: "Recordings could not be saved." },
@@ -585,6 +662,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("pauses from what it last wrote when the stream falls silent, not from when that was noticed", async () => {
     let wrote = 0;
+
     const { channel, recordings } = await connected({
       streams: (_source, out) => {
         if (wrote) return out.destroy();
@@ -592,13 +670,17 @@ describe.skipIf(!hasTools)("recordings", () => {
         wrote = Date.now();
       },
     });
+
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
+
     const [paused] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "paused",
       25_000,
     );
+
     const gap = paused?.gaps?.[0];
     expect(gap?.why).toBe("stream");
     // The silence watchdog notices after 15 seconds; the gap begins where the bytes stopped.
@@ -609,12 +691,14 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("cancels a start under way as the computer sleeps, keeping nothing", async () => {
     const { promise: requested, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
     const { channel, recordings, provider } = await connected({
       streams: (source, out, signal) => {
         arrived();
         void gate.then(() => liveStreams(source, out, signal));
       },
     });
+
     onTestFinished(() => open());
     const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
     await requested;
@@ -627,14 +711,18 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("lists a paused recording's Stop as not saved while it can't be written", async () => {
     let asked = 0;
+
     const { dataDir, channel, recordings } = await connected({
       streams: (_source, out) => {
         asked++;
+
         if (asked === 1) out.end(fixture("h264-aac.mpegts"));
         else out.destroy();
       },
     });
+
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => first?.status.kind === "paused");
     const manifest = join(dataDir, "recordings", "recordings.json");
@@ -652,14 +740,18 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("ends a paused recording the viewer stopped or quit as of then after a relaunch, its end unwritten", async () => {
     for (const how of ["stopped", "quit"] as const) {
       let asked = 0;
+
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
         streams: (_source, out) => {
           asked++;
+
           if (asked === 1) out.end(fixture("h264-aac.mpegts"));
           else out.destroy();
         },
       });
+
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       const manifest = join(dataDir, "recordings", "recordings.json");
       // Its pause is written down; only its end can't be.
@@ -672,6 +764,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       // Some time passes paused, which its gap keeps until it was ended.
       const waited = Date.now();
       await new Promise((resolve) => setTimeout(resolve, 300));
+
       if (how === "stopped")
         await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
           error: { kind: "unexpected" },
@@ -703,6 +796,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("reads one whose time was over when it was stopped as ended by the quit, not stopped", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     const manifest = join(dataDir, "recordings", "recordings.json");
     await rename(manifest, `${manifest}.saved`);
@@ -726,6 +820,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("pauses as the computer sleeps and records the rest after it wakes", async () => {
     const { dataDir, channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     const asked = provider.streamRequests();
@@ -739,10 +834,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     const before = paused!.bytes;
 
     await recordings.check();
+
     const [going] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording" && first.bytes > before,
     );
+
     expect(going?.gaps).toEqual([
       { from: expect.any(Number), to: expect.any(Number), why: "away" },
     ]);
@@ -756,6 +853,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("goes on after the system shut the app down, missing the time it was away", async () => {
     const { dataDir, subscriptionId, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     await recordings.leave("away");
@@ -765,10 +863,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     onTestFinished(again.quit);
     await again.library.refresh(subscriptionId);
     await again.recordings.check();
+
     const [going] = await until(
       again.recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(going).toMatchObject({ id: answer.recording.id });
     expect(going?.gaps).toEqual([
       { from: expect.any(Number), to: expect.any(Number), why: "away" },
@@ -779,14 +879,17 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("shows an automatic end it couldn't write down, and writes it once storage works again", async () => {
     const { dataDir, channel, subscriptionId, provider, recordings } = await connected();
     const started = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+
     if (started.kind !== "started") throw new Error("Not started");
     const manifest = join(dataDir, "recordings", "recordings.json");
     await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
+
     const [ended] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "complete" && first.unsaved === true,
     );
+
     expect(ended).toMatchObject({ status: { kind: "complete" }, unsaved: true });
     await expect(recordings.stop(started.recording.id)).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "Recordings could not be saved." },
@@ -815,6 +918,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("ends with the app as cut short by the quit, and is there after the next start", async () => {
     const { dataDir, channel, recordings, quit, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 100_000);
     await quit();
@@ -836,12 +940,14 @@ describe.skipIf(!hasTools)("recordings", () => {
     for (const how of ["stopped", "quit"] as const) {
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected();
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
       // Storage refuses the end, so recordings.json still says it records.
       const manifest = join(dataDir, "recordings", "recordings.json");
       await rename(manifest, `${manifest}.saved`);
       await mkdir(manifest);
+
       if (how === "stopped")
         await expect(recordings.stop(answer.recording.id)).rejects.toMatchObject({
           error: { kind: "unexpected", detail: "Recordings could not be saved." },
@@ -869,6 +975,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const chosen = join(await tempDir(), "Mr. Streamer");
     await recordings.setFolder(chosen);
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     // Storage refuses the end, so only the mark in its folder says it was stopped.
@@ -908,9 +1015,11 @@ describe.skipIf(!hasTools)("recordings", () => {
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected(
         how === "ended" ? { streams: (_source, out) => out.end(fixture("h264-aac.mpegts")) } : {},
       );
+
       // The update's install as the app makes it, around an installer that only counts.
       let installs = 0;
       const confirmed: boolean[] = [];
+
       const installer = installingOnceStopsKept(
         {
           download: async () => {},
@@ -919,6 +1028,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         recordings.keepStops,
         (confirm) => confirmed.push(confirm),
       );
+
       const updates = await promised(
         runtimeFor(
           Updates.layer({
@@ -930,21 +1040,26 @@ describe.skipIf(!hasTools)("recordings", () => {
         ),
         Updates,
       );
+
       await updates.check();
       await updates.download();
       const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       // Storage refuses both the end in recordings.json and the mark in the recording's folder.
       const manifest = join(dataDir, "recordings", "recordings.json");
       const mark = join(dataDir, "recordings", answer.recording.id, ".mrstreamer-stopped");
+
       if (how === "capturing") await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
       await rename(manifest, `${manifest}.saved`);
       await mkdir(manifest);
       await symlink(join(dataDir, "gone", "mark"), mark);
+
       if (how === "ended")
         await until(
           async () => {
             await recordings.check();
+
             return recordings.list();
           },
           ([first]) => first?.status.kind === "partial",
@@ -994,6 +1109,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("holds new recordings back for an update's restart only once nothing records", async () => {
     const { channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     expect(await recordings.holdStarts(true)).toBe(false);
     await recordings.stop(answer.recording.id);
@@ -1006,6 +1122,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     // The restart didn't go ahead: recordings start again.
     await recordings.holdStarts(false);
     const again = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (again.kind !== "started") throw new Error("Not started");
     await recordings.stop(again.recording.id);
   });
@@ -1014,6 +1131,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { dataDir, channel, subscriptionId, recordings } = await connected({
       streams: (_source, out) => out.end(Buffer.alloc(64 * 1024, 0x20)),
     });
+
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
       error: { kind: "stream", failure: { kind: "unsupported" } },
     });
@@ -1025,9 +1143,11 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("takes a failed start's record out of recordings.json once storage works, unasked", async () => {
     // The stream answers once recordings.json can't be written, with no MPEG-TS program.
     const asked = Promise.withResolvers<Writable>();
+
     const { dataDir, channel, recordings } = await connected({
       streams: (_source, out) => asked.resolve(out),
     });
+
     const starting = recordings.start(channel(TRACKS), Date.now() + 60_000, {});
     starting.catch(() => {});
     const out = await asked.promise;
@@ -1041,11 +1161,13 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     // Storage works again: the check writes recordings.json by itself, without the record.
     await rm(manifest, { recursive: true });
+
     const kept = await until(
       () => readFile(manifest, "utf8").catch(() => null),
       (text) => text !== null,
       15_000,
     );
+
     expect(JSON.parse(kept ?? "null")).toMatchObject({ recordings: [] });
     // Its folder, marked as recordings.json couldn't take its record out, goes after that write.
     expect(
@@ -1071,14 +1193,19 @@ describe.skipIf(!hasTools)("recordings", () => {
       `never records a failed start after a Quit and relaunch, though recordings.json kept its record (${where})`,
       async () => {
         const asked = Promise.withResolvers<Writable>();
+
         const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
           streams: (_source, out) => asked.resolve(out),
         });
+
         const chosen = join(await tempDir(), "Mr. Streamer");
+
         if (where !== "data") await recordings.setFolder(chosen);
+
         const stop =
           Date.now() +
           (where === "chosen late" || where === "chosen expired" || away ? 5000 : 60_000);
+
         const starting = recordings.start(channel(TRACKS), stop, {});
         starting.catch(() => {});
         const out = await asked.promise;
@@ -1100,9 +1227,11 @@ describe.skipIf(!hasTools)("recordings", () => {
 
         const before = provider.streamRequests();
         let again: Awaited<ReturnType<typeof app>>;
+
         try {
           if (away) {
             await rename(chosen, `${chosen}.away`);
+
             // A drive's mount point keeps an empty folder in its place.
             if (where === "chosen replaced") await mkdir(chosen);
             await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
@@ -1111,18 +1240,23 @@ describe.skipIf(!hasTools)("recordings", () => {
             await expect(stat(join(place, folder!, ".mrstreamer-failed"))).rejects.toMatchObject({
               code: "EACCES",
             });
+
             if (where === "chosen expired")
               await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
           }
+
           again = await app(dataDir);
           onTestFinished(again.quit);
           await again.library.refresh(subscriptionId);
+
           if (where !== "data") {
             await again.recordings.check();
+
             if (where === "chosen late") {
               await new Promise((resolve) => setTimeout(resolve, stop - Date.now() + 100));
               await again.recordings.check();
             }
+
             // An unread marker cannot say a failed start became an ended recording.
             expect(await again.recordings.list()).toMatchObject([{ status: { kind: "paused" } }]);
             expect(provider.streamRequests()).toBe(before);
@@ -1133,10 +1267,12 @@ describe.skipIf(!hasTools)("recordings", () => {
             await rename(`${chosen}.away`, chosen);
           } else if (permissions) await chmod(chosen, 0o700);
         }
+
         await again.recordings.check();
         await new Promise((resolve) => setTimeout(resolve, 500));
         expect(provider.streamRequests()).toBe(before);
         expect(await again.recordings.list()).toEqual([]);
+
         // recordings.json is written without its record, and its folder goes.
         const left = async () => [
           ...(await leftBehind(dataDir)).filter((name) => name !== "storage.json"),
@@ -1144,6 +1280,7 @@ describe.skipIf(!hasTools)("recordings", () => {
             (name) => name !== ".mrstreamer-storage",
           ),
         ];
+
         expect(await until(left, (names) => names.length === 0)).toEqual([]);
       },
       20_000,
@@ -1154,6 +1291,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { channel, recordings } = await connected({
       streams: (_source, out) => out.destroy(),
     });
+
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
       error: { kind: "stream", failure: { kind: "network", detail: "" } },
     });
@@ -1164,6 +1302,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       // writeHead buffers the headers until a first write, which never comes here.
       streams: () => undefined,
     });
+
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject({
       error: {
         kind: "stream",
@@ -1181,6 +1320,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const junk = "TEST | H.264 + AAC";
     // A name with what file systems refuse, longer in bytes than one takes whole.
     const long = `News/Sport: "live"? <a|b>*\t${"長い番組名".repeat(24)}`;
+
     const { dataDir, channel, provider, recordings } = await connected({
       channelOf: (each) => (each.name === TRACKS ? { ...each, name: long } : each),
       // It sends what isn't MPEG-TS, and keeps its connection open.
@@ -1189,9 +1329,11 @@ describe.skipIf(!hasTools)("recordings", () => {
           ? out.write(Buffer.alloc(64 * 1024, 0x20))
           : liveStreams(source, out, signal),
     });
+
     const answer = await recordings.start(channel(long), Date.now() + 1000, {
       variants: [channel(junk).id, channel(long).id],
     });
+
     expect(answer.kind).toBe("started");
     // The first stream's request ended: only the recording's holds the one connection.
     expect(provider.activeStreams()).toBe(1);
@@ -1211,11 +1353,13 @@ describe.skipIf(!hasTools)("recordings", () => {
     onTestFinished(() => host.close());
     const dataDir = await tempDir();
     const { recordings, subscriptions, library } = await app(dataDir);
+
     const { id: subscriptionId } = await subscriptions.add({
       server: host.link,
       username: "",
       password: "",
     });
+
     await library.refresh(subscriptionId);
     const channel = (name: string) => ({ subscriptionId, id: `${name}.test` });
 
@@ -1241,6 +1385,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("records from a channel's next stream when its playlist no longer names the one Auto tries first", async () => {
     const host = await startFakeHls();
     onTestFinished(() => host.close());
+
     // One channel's HD and SD feeds, both the fixture's playable stream.
     const playlist = (...feeds: string[]) => ({
       body: [
@@ -1252,16 +1397,20 @@ describe.skipIf(!hasTools)("recordings", () => {
         "",
       ].join("\n"),
     });
+
     host.overrides.set("/list.m3u", playlist("HD", "SD"));
     const dataDir = await tempDir();
     const first = await app(dataDir);
+
     const { id: subscriptionId } = await first.subscriptions.add({
       server: host.link,
       username: "",
       password: "",
     });
+
     await first.library.refresh(subscriptionId);
     const [listed] = await first.library.channels({});
+
     if (!listed) throw new Error("No channel");
     const tried = streamsToPlay(listed, {}, undefined).map(({ id }) => id);
     expect(tried).toHaveLength(2);
@@ -1281,14 +1430,19 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("takes no connection a download holds, and a download waits for the one it holds", async () => {
     const { provider, channel, subscriptionId, recordings, downloads, onDemand } =
       await connected();
+
     await onDemand.refresh(subscriptionId);
+
     const film = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Two sound tracks and subtitles"),
     )!;
+
     provider.stallMovieFile(film.id, 200_000, 60_000);
     const queued = await downloads.add({ kind: "movie", subscriptionId, id: String(film.id) });
+
     const statusOf = async () =>
       (await downloads.list()).items.find((each) => each.id === queued.id)?.status.kind;
+
     await until(statusOf, (status) => status === "transferring");
 
     const busy = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
@@ -1296,6 +1450,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
     await downloads.pause(queued.id);
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (started.kind !== "started") throw new Error("Not started");
     await downloads.resume(queued.id);
     expect(await until(statusOf, (status) => status === "waiting")).toBe("waiting");
@@ -1308,23 +1463,30 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("takes the connection Watch gave up for it back from a download that started meanwhile", async () => {
     const { provider, channel, subscriptionId, recordings, downloads, onDemand, playback } =
       await connected();
+
     await onDemand.refresh(subscriptionId);
+
     const film = provider.titles.movies.find((each) =>
       each.name.startsWith("TEST | Two sound tracks and subtitles"),
     )!;
+
     provider.stallMovieFile(film.id, 200_000, 60_000);
     const watching = await playback.open(channel(TRACKS), ["h264", "aac"]);
     const queued = await downloads.add({ kind: "movie", subscriptionId, id: String(film.id) });
+
     const statusOf = async () =>
       (await downloads.list()).items.find((each) => each.id === queued.id)?.status.kind;
+
     expect(await statusOf()).toBe("waiting");
 
     // Record's Stop playing closes the player before it asks to record: the download wakes first.
     await playback.close(watching.sessionId);
     expect(await until(statusOf, (status) => status === "transferring")).toBe("transferring");
+
     const started = await recordings.start(channel(TRACKS), Date.now() + 60_000, {
       stopPlaying: true,
     });
+
     expect(started.kind).toBe("started");
     expect(await until(statusOf, (status) => status === "waiting")).toBe("waiting");
     expect(await recordings.connections(subscriptionId)).toEqual({ limit: 1, uses: ["recording"] });
@@ -1332,11 +1494,13 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("refuses a stop time already past or more than 12 hours ahead, asking the provider nothing", async () => {
     const { provider, channel, recordings } = await connected();
+
     for (const stop of [Date.now() - 1000, Date.now() + 12 * 60 * 60 * 1000 + 60_000]) {
       await expect(recordings.start(channel(TRACKS), stop, {})).rejects.toMatchObject({
         error: { kind: "invalid-input" },
       });
     }
+
     expect(provider.streamRequests()).toBe(0);
   });
 
@@ -1344,12 +1508,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     // The first request answers nothing, so the start waits for its program table; later ones
     // send the stream and stay open.
     let asked = 0;
+
     const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
       streams: (_source, out) => {
         asked++;
+
         if (asked > 1) out.write(fixture("h264-aac.mpegts"));
       },
     });
+
     const stop = Date.now() + 60_000;
     recordings.start(channel(TRACKS), stop, {}).catch(() => {});
     await until(
@@ -1365,10 +1532,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     onTestFinished(again.quit);
     await again.library.refresh(subscriptionId);
     await again.recordings.check();
+
     const [going] = await until(
       again.recordings.list,
       ([first]) => first?.status.kind === "recording" && first.bytes > 0,
     );
+
     // Owed from the start it was asked for: what it missed is a gap, not a new recording.
     expect(going).toMatchObject({
       stop,
@@ -1379,6 +1548,7 @@ describe.skipIf(!hasTools)("recordings", () => {
 
   it("reads one it never saw end as cut by the quit once its time is over, else as paused since its file was written", async () => {
     const dataDir = await tempDir();
+
     const record = (id: string, file: string) => ({
       id,
       file,
@@ -1391,11 +1561,13 @@ describe.skipIf(!hasTools)("recordings", () => {
       bytes: 0,
       status: { kind: "recording" },
     });
+
     const crashed = "00000000-0000-4000-8000-000000000001";
     const gone = "00000000-0000-4000-8000-000000000002";
     const going = "00000000-0000-4000-8000-000000000003";
     // A folder a crash left before its record was written, and one of the viewer's own.
     const stray = "00000000-0000-4000-8000-000000000004";
+
     for (const id of [crashed, going, stray])
       await mkdir(join(dataDir, "recordings", id), { recursive: true });
     await mkdir(join(dataDir, "recordings", "mine"));
@@ -1432,6 +1604,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("keeps where an ended recording played, written once storage works, and lists one whose file went as missing before it plays", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
@@ -1475,6 +1648,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     async (when) => {
       const { dataDir, channel, recordings, quit } = await connected();
       const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       const { id } = answer.recording;
       await until(recordings.list, ([first]) => first?.status.kind === "complete");
@@ -1486,8 +1660,10 @@ describe.skipIf(!hasTools)("recordings", () => {
           Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
         ),
       );
+
       const kept = await promised(again, Recordings);
       await again.runPromise(TestClock.adjust(0));
+
       // A suspended app cannot run the ordinary retry before shutdown's final save.
       if (when === "shutdown") await kept.suspend();
       const manifest = join(dataDir, "recordings", "recordings.json");
@@ -1498,9 +1674,11 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
       // Let the wake settle while storage refuses writes, keeping its timer still.
       await again.runPromise(TestClock.adjust(0));
+
       if (when === "shutdown") await kept.leave("away");
       rmSync(manifest, { recursive: true });
       renameSync(`${manifest}.saved`, manifest);
+
       if (when === "check") {
         await kept.check();
         expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
@@ -1509,6 +1687,7 @@ describe.skipIf(!hasTools)("recordings", () => {
           ]),
         });
       }
+
       await again.dispose();
 
       const last = await app(dataDir);
@@ -1520,13 +1699,17 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
     const { channel, recordings, savedSubtitles } = await connected({ maxConnections: 2 });
     const ids: string[] = [];
+
     for (const name of [TRACKS, GUIDED]) {
       const answer = await recordings.start(channel(name), Date.now() + 1000, {});
+
       if (answer.kind !== "started") throw new Error("Not started");
       ids.push(answer.recording.id);
     }
+
     await until(recordings.list, (list) => list.every((each) => each.status.kind === "complete"));
     const files = ids.map((id) => subtitlesOfCopy(id, { kind: "movie", id }));
+
     for (const file of files) await savedSubtitles.timing(file, DEFAULT_SUBTITLE_TIMING);
     await recordings.remove(ids[0]!);
     expect(await savedSubtitles.read(files[0]!)).toBeNull();
@@ -1536,6 +1719,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   it("pauses at the space recordings may take and goes on once there is room, keeping every file", async () => {
     const { dataDir, channel, recordings, provider } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
     const { used } = await recordings.setLimits({ keepFree: 0, space: 1 });
@@ -1547,10 +1731,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(beforeResume.length).toBe(paused?.bytes);
 
     await recordings.setLimits({ keepFree: 0, space: null });
+
     const [going] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording" && first.bytes > paused!.bytes,
     );
+
     expect(going?.gaps).toEqual([
       { from: expect.any(Number), to: expect.any(Number), why: "space" },
     ]);
@@ -1593,6 +1779,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const folder = join(await tempDir(), "Mr. Streamer");
     expect((await recordings.setFolder(folder)).folder).toBe(folder);
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => first?.status.kind === "complete");
@@ -1643,16 +1830,20 @@ describe.skipIf(!hasTools)("recordings", () => {
     it(`records nothing into an empty folder at the chosen folder's place, and goes on there once it is back (${when}${stale ? ", stale failed marker" : ""})`, async () => {
       // Starting, the first request answers nothing, so the start waits for its program table.
       let asked = 0;
+
       const { dataDir, subscriptionId, channel, recordings, quit, provider } = await connected({
         streams: (_source, out) => {
           asked++;
+
           if (when === "capturing" || asked > 1) out.write(fixture("h264-aac.mpegts"));
         },
       });
+
       const chosen = join(await tempDir(), "Mr. Streamer");
       await recordings.setFolder(chosen);
       recordings.start(channel(TRACKS), Date.now() + 60_000, {}).catch(() => {});
       let data = dataDir;
+
       if (when === "capturing") {
         await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
         await recordings.leave("away");
@@ -1666,16 +1857,20 @@ describe.skipIf(!hasTools)("recordings", () => {
         data = await tempDir();
         await cp(dataDir, data, { recursive: true });
       }
+
       await quit();
       const [id] = readdirSync(chosen).filter((name) => !name.startsWith("."));
       expect(id === undefined).toBe(when === "starting");
+
       const before = id
         ? readdirSync(join(chosen, id))
             .filter((name) => name.endsWith(".ts"))
             .reduce((sum, name) => sum + statSync(join(chosen, id, name)).size, 0)
         : 0;
+
       await rename(chosen, `${chosen}.away`);
       await mkdir(chosen);
+
       if (stale) {
         await writeFile(join(chosen, ".mrstreamer-storage"), "another-storage-folder");
         await mkdir(join(chosen, id!));
@@ -1685,12 +1880,14 @@ describe.skipIf(!hasTools)("recordings", () => {
       const requests = provider.streamRequests();
       const again = await app(data);
       onTestFinished(again.quit);
+
       try {
         await again.library.refresh(subscriptionId);
         await again.recordings.check();
         await new Promise((resolve) => setTimeout(resolve, 500));
         const [paused] = await again.recordings.list();
         expect(paused?.status).toMatchObject({ kind: "paused" });
+
         if (!stale)
           await expect(
             again.recordings.start(channel(TRACKS), Date.now() + 60_000, {}),
@@ -1713,6 +1910,7 @@ describe.skipIf(!hasTools)("recordings", () => {
         expect(readdirSync(chosen).sort()).toEqual(
           stale ? [".mrstreamer-storage", id!].sort() : [".mrstreamer-storage"],
         );
+
         if (stale) expect(existsSync(join(chosen, id!, ".mrstreamer-failed"))).toBe(true);
       } finally {
         await rm(chosen, { recursive: true });
@@ -1723,10 +1921,12 @@ describe.skipIf(!hasTools)("recordings", () => {
       // to its file.
       await again.recordings.setFolder(chosen);
       await again.recordings.check();
+
       const [going] = await until(
         again.recordings.list,
         ([first]) => first?.status.kind === "recording" && first.bytes > before,
       );
+
       expect(going?.status.kind).toBe("recording");
       expect(going?.bytes).toBeGreaterThan(before);
       expect(readdirSync(chosen).filter((name) => !name.startsWith("."))).toEqual([going!.id]);
@@ -1741,6 +1941,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const chosen = join(await tempDir(), "Mr. Streamer");
     await recordings.setFolder(chosen);
     const answer = await recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (answer.kind !== "started") throw new Error("Not started");
     const { id } = answer.recording;
     await until(recordings.list, ([first]) => (first?.bytes ?? 0) > 0);
@@ -1759,6 +1960,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     await away.library.refresh(subscriptionId);
     await away.recordings.setFolder(join(crashed, "recordings"));
     const other = await away.recordings.start(channel(TRACKS), Date.now() + 60_000, {});
+
     if (other.kind !== "started") throw new Error("Not started");
     await away.recordings.stop(other.recording.id);
     await away.recordings.leave("away");
@@ -1770,10 +1972,12 @@ describe.skipIf(!hasTools)("recordings", () => {
     onTestFinished(again.quit);
     await again.library.refresh(subscriptionId);
     await again.recordings.check();
+
     const going = await until(
       async () => (await again.recordings.list()).find((each) => each.id === id),
       (found) => found?.status.kind === "recording",
     );
+
     expect(going?.gaps).toEqual([
       { from: Math.min(written, answer.recording.stop), to: expect.any(Number), why: "away" },
     ]);
@@ -1788,13 +1992,16 @@ describe.skipIf(!hasTools)("recordings", () => {
     let held: Promise<void> | null = null;
     const asked = Promise.withResolvers<void>();
     const answer = Promise.withResolvers<void>();
+
     const host = createServer(async (_request, response) => {
       if (held) {
         asked.resolve();
         await held;
       }
+
       response.writeHead(200, { "Content-Type": "audio/x-mpegurl" }).end(playlist);
     });
+
     await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve));
     onTestFinished(() => {
       answer.resolve();
@@ -1802,14 +2009,17 @@ describe.skipIf(!hasTools)("recordings", () => {
       host.close();
     });
     const address = host.address();
+
     if (!address || typeof address === "string") throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
+
     const { id: subscriptionId } = await before.subscriptions.add({
       server: `http://127.0.0.1:${address.port}/playlist.m3u`,
       username: "",
       password: "",
     });
+
     await before.library.refresh(subscriptionId);
     const channel = (await before.library.channels({})).find((each) => each.title === TRACKS)!;
     const chosen = join(await tempDir(), "Mr. Streamer");
@@ -1846,9 +2056,11 @@ describe.skipIf(!hasTools)("recordings", () => {
     await writeFile(path, unreadable);
     const { recordings, quit: quitAgain } = await app(dataDir);
     onTestFinished(quitAgain);
+
     const unread = {
       error: { kind: "unexpected", detail: "Recording settings could not be read." },
     };
+
     await expect(recordings.storage()).rejects.toMatchObject(unread);
     await expect(recordings.setLimits({ keepFree: 0, space: null })).rejects.toMatchObject(unread);
     await expect(recordings.start(channel(TRACKS), Date.now() + 60_000, {})).rejects.toMatchObject(
@@ -1862,6 +2074,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     const { dataDir, channel, provider } = await connected();
     const path = join(dataDir, "recordings", "recordings.json");
     await mkdir(join(dataDir, "recordings"), { recursive: true });
+
     const slot: RecordingPlan = {
       kind: "slot",
       channel: channel(TRACKS),
@@ -1871,7 +2084,9 @@ describe.skipIf(!hasTools)("recordings", () => {
       title: "Night",
       padding: { before: 0, after: 0 },
     };
+
     const unread = { error: { kind: "unexpected", detail: "Recordings could not be read." } };
+
     for (const unreadable of ["{ not json", JSON.stringify({ version: 2, recordings: [] })]) {
       await writeFile(path, unreadable);
       const { recordings } = await app(dataDir);
@@ -1883,6 +2098,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       await expect(recordings.schedule(slot)).rejects.toMatchObject(unread);
       expect(await readFile(path, "utf8")).toBe(unreadable);
     }
+
     expect(existsSync(join(dataDir, "recordings", "schedules.json"))).toBe(false);
     expect(provider.streamRequests()).toBe(0);
   });
@@ -1892,6 +2108,7 @@ const GUIDED = "TEST | H.264 + AAC";
 const TRACKS_FIXTURE = "h264-subtitles.mpegts";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
+
 /** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
 const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
@@ -1906,12 +2123,16 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
     const started = await connected(options);
     await started.guide.refresh(started.subscriptionId);
+
     const listing = async () => {
       const own = started.channel(GUIDED);
       const listed = (await started.guide.listings([own]))[`${own.subscriptionId}:${own.id}`];
+
       if (!listed?.now || !listed.next) throw new Error("No guide");
+
       return { now: listed.now, next: listed.next };
     };
+
     const programmePlan = (
       programme: { start: number; stop: number; title: string },
       padding = { before: 0, after: 0 },
@@ -1923,11 +2144,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: programme.title,
       padding,
     });
+
     /** The clock moves to `time`, and the app checks, as when the computer wakes. */
     const clockTo = async (time: number) => {
       vi.setSystemTime(time);
       await started.recordings.check();
     };
+
     return { ...started, listing, programmePlan, clockTo };
   }
 
@@ -1939,14 +2162,17 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
     const provider = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
     const dataDir = await tempDir();
+
     const clock = Layer.effectDiscard(TestClock.setTime(TEN_PAST)).pipe(
       Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
     );
+
     const runtime = runtimeFor(
       mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }).pipe(
         Layer.provideMerge(clock),
       ),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     const library = await runtime.runPromise(Library);
     const guide = await promised(runtime, Guide);
@@ -1968,6 +2194,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // Let the initial guide/catalogue notifications settle before the one failed lookup.
     await runtime.runPromise(TestClock.adjust(MINUTE));
     const release = await runtime.runPromise(Deferred.make<void>());
+
     const lookup = vi
       .spyOn(library, "lookup")
       .mockImplementationOnce(() =>
@@ -1976,6 +2203,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
           Effect.die(new Error("One scheduled lookup failed")),
         ),
       );
+
     onTestFinished(() => lookup.mockRestore());
     vi.setSystemTime(at.getTime());
     await runtime.runPromise(TestClock.adjust(MINUTE));
@@ -1986,10 +2214,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await runtime.runPromise(TestClock.adjust(0));
     vi.setSystemTime(at.getTime() + MINUTE);
     await runtime.runPromise(TestClock.adjust(MINUTE));
+
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(recording?.status.kind).toBe("recording");
     expect(provider.streamRequests()).toBe(1);
     await recordings.stop(recording!.id);
@@ -2007,10 +2237,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(provider.streamRequests()).toBe(0);
 
     await clockTo(next.start - MINUTE);
+
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(recording).toMatchObject({
       title: next.title,
       stop: next.stop,
@@ -2036,10 +2268,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { next } = await listing();
     await recordings.schedule(programmePlan(next));
     await clockTo(next.start);
+
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     const manifest = join(dataDir, "recordings", "recordings.json");
     await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
@@ -2071,6 +2305,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       clockTo,
       quit,
     } = await scheduling();
+
     const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
     const player = await fetch(watching.url);
     await player.body?.getReader().read();
@@ -2081,10 +2316,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const savedFrom = Date.now();
     const saved = await recordings.schedule(programmePlan(now));
     const savedBy = Date.now();
+
     const [waiting] = await until(
       recordings.schedules,
       ([first]) => first?.status.kind === "waiting",
     );
+
     expect(waiting?.status).toEqual({ kind: "waiting", holders: [{ kind: "watch" }] });
     expect(await recordings.list()).toEqual([]);
     expect(provider.streamRequests()).toBe(before);
@@ -2092,10 +2329,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // Nothing stops for it: it records once Watch lets its connection go.
     await playback.close(watching.sessionId);
     await clockTo(now.start + 15 * MINUTE);
+
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     // Late from when it was saved, not the programme's start, which still names its time.
     expect(recording?.scheduled).toEqual({
       schedule: saved.id,
@@ -2115,6 +2354,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await again.library.refresh(subscriptionId);
     await again.guide.refresh(subscriptionId);
     await again.recordings.check();
+
     const kept = [
       expect.objectContaining({
         id: recording?.id,
@@ -2122,6 +2362,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         status: { kind: "partial", cut: "quit" },
       }),
     ];
+
     expect(await again.recordings.list()).toEqual(kept);
     expect(await again.recordings.schedules()).toEqual([]);
     expect(provider.streamRequests()).toBe(requests);
@@ -2153,8 +2394,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
   it("owes a time a change moved it onto, already under way, from when the change was saved", async () => {
     const { dataDir, subscriptionId, channel, recordings, playback, quit } = await scheduling();
+
     const slot = (start: number): RecordingPlan => {
       const at = new Date(start);
+
       return {
         kind: "slot",
         channel: channel(GUIDED),
@@ -2165,6 +2408,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         padding: { before: 0, after: 0 },
       };
     };
+
     // Watch holds the one connection, so nothing captures before the app closes.
     const watching = await playback.open(channel(GUIDED), ["h264", "aac"]);
     const player = await fetch(watching.url);
@@ -2187,10 +2431,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     onTestFinished(again.quit);
     await again.library.refresh(subscriptionId);
     await again.recordings.check();
+
     const [recording] = await until(
       again.recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(recording?.scheduled).toEqual({
       schedule: saved.id,
       from: TEN_PAST + 20 * MINUTE,
@@ -2206,6 +2452,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { dataDir, subscriptionId, channel, recordings, quit } = await scheduling();
     // Twenty past seven, UTC, every day in this computer's time zone, for ten minutes.
     const at = new Date(TEN_PAST + 10 * MINUTE);
+
     const plan: RecordingPlan = {
       kind: "slot",
       channel: channel(GUIDED),
@@ -2215,6 +2462,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: "Evening",
       padding: { before: 0, after: 0 },
     };
+
     const saved = await recordings.schedule(plan);
     expect(saved.next).toEqual({ start: at.getTime(), stop: at.getTime() + 10 * MINUTE });
     await quit();
@@ -2230,6 +2478,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       bytes: 0,
       status: { kind: "missed", why: "away" },
     });
+
     const tomorrow = new Date(
       at.getFullYear(),
       at.getMonth(),
@@ -2237,6 +2486,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       at.getHours(),
       at.getMinutes(),
     );
+
     expect((await again.recordings.schedules())[0]).toMatchObject({
       next: { start: tomorrow.getTime() },
       status: { kind: "planned" },
@@ -2249,10 +2499,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // The computer wakes three minutes into tomorrow's time: it records the rest.
     vi.setSystemTime(tomorrow.getTime() + 3 * MINUTE);
     await again.recordings.check();
+
     const [late] = await until(
       again.recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(late?.scheduled).toEqual({ schedule: saved.id, from: tomorrow.getTime(), late: "away" });
     expect(late?.stop).toBe(tomorrow.getTime() + 10 * MINUTE);
   });
@@ -2262,9 +2514,11 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { next } = await listing();
     const renamed = await recordings.schedule(programmePlan({ ...next, title: "Another show" }));
     expect(renamed.status).toEqual({ kind: "changed", title: next.title });
+
     const moved = await recordings.schedule(
       programmePlan({ ...next, start: next.start + 5 * MINUTE }),
     );
+
     expect(moved.status).toEqual({ kind: "gone" });
 
     await clockTo(next.start + 6 * MINUTE);
@@ -2285,6 +2539,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { next } = await listing();
     const first = await recordings.schedule(programmePlan(next));
     const at = new Date(next.start);
+
     const overlapping: RecordingPlan = {
       kind: "slot",
       channel: channel(TRACKS),
@@ -2294,6 +2549,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: "Tracks",
       padding: { before: 0, after: 0 },
     };
+
     expect((await recordings.plan(overlapping)).status).toEqual({
       kind: "conflict",
       holders: [{ kind: "schedule", title: next.title, until: next.stop }],
@@ -2306,9 +2562,11 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await clockTo(next.start);
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     expect(recording?.scheduled?.schedule).toBe(first.id);
+
     const waiting = await until(recordings.schedules, (list) =>
       list.some((each) => each.id === second.id && each.status.kind === "waiting"),
     );
+
     expect(waiting.find((each) => each.id === second.id)?.status).toEqual({
       kind: "waiting",
       holders: [{ kind: "recording", title: next.title, until: next.stop }],
@@ -2332,6 +2590,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { channel, recordings, listing } = await scheduling();
     const { now } = await listing();
     const at = new Date(now.start);
+
     const plan: RecordingPlan = {
       kind: "slot",
       channel: channel(GUIDED),
@@ -2341,6 +2600,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: now.title,
       padding: { before: 0, after: 0 },
     };
+
     await recordings.schedule(plan);
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     await recordings.stop(recording!.id);
@@ -2356,12 +2616,14 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   it("records a time once when a change moves its start and end later while it starts", async () => {
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
     const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
       streams: (source, out, signal) => {
         arrived();
         void gate.then(() => liveStreams(source, out, signal));
       },
     });
+
     onTestFinished(() => open());
     const { next } = await listing();
     const saved = await recordings.schedule(programmePlan(next, { before: 2, after: 0 }));
@@ -2388,6 +2650,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     let first = true;
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
     const { recordings, listing, programmePlan, clockTo } = await scheduling({
       streams: (source, out, signal) => {
         if (!first) return liveStreams(source, out, signal);
@@ -2396,6 +2659,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
         void gate.then(() => out.destroy());
       },
     });
+
     onTestFinished(() => open());
     const { next } = await listing();
     const saved = await recordings.schedule(programmePlan(next));
@@ -2427,12 +2691,14 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // The stream answers once the test lets it, so the start stays under way until then.
     const { promise: asked, resolve: arrived } = Promise.withResolvers<void>();
     const { promise: gate, resolve: open } = Promise.withResolvers<void>();
+
     const { provider, recordings, listing, programmePlan, clockTo } = await scheduling({
       streams: (source, out, signal) => {
         arrived();
         void gate.then(() => liveStreams(source, out, signal));
       },
     });
+
     onTestFinished(() => open());
     const { next } = await listing();
     const saved = await recordings.schedule(programmePlan(next));
@@ -2441,10 +2707,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // The change waits for the start's answer, and the schedules go on meanwhile.
     const changing = recordings.schedule(programmePlan(next, { before: 2, after: 0 }), saved.id);
     await new Promise((resolve) => setTimeout(resolve, 50));
+
     const listed = await Promise.race([
       recordings.schedules().then(() => "listed"),
       new Promise((resolve) => setTimeout(resolve, 2000, "held")),
     ]);
+
     expect(listed).toBe("listed");
     open();
     await changing;
@@ -2463,6 +2731,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { provider, channel, recordings, listing } = await scheduling();
     const { now } = await listing();
     const at = new Date(now.start);
+
     const slot = (before: number): RecordingPlan => ({
       kind: "slot",
       channel: channel(GUIDED),
@@ -2472,12 +2741,15 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: now.title,
       padding: { before, after: 0 },
     });
+
     const saved = await recordings.schedule(slot(0));
     const [recording] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
     await recordings.stop(recording!.id);
+
     /** No second recording of today's time starts, waiting a moment for one that would. */
     const recordedOnce = async (count: number) =>
       (await until(recordings.list, (list) => list.length > count, 2000)).length === count;
+
     for (const before of [5, 2]) await recordings.schedule(slot(before), saved.id);
     await recordings.check();
     expect(await recordedOnce(1)).toBe(true);
@@ -2500,11 +2772,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { provider, recordings, listing, programmePlan, clockTo } = await scheduling();
     const { now, next } = await listing();
     const later = await recordings.schedule(programmePlan(next));
+
     // Changed by its id: the same schedule, with padding.
     const changed = await recordings.schedule(
       programmePlan(next, { before: 2, after: 3 }),
       later.id,
     );
+
     expect(changed).toMatchObject({
       id: later.id,
       next: { start: next.start - 2 * MINUTE, stop: next.stop + 3 * MINUTE },
@@ -2514,10 +2788,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     // On air as it is saved: it records the rest, not late, as it had no earlier time to record.
     const current = await recordings.schedule(programmePlan(now));
+
     const [recording] = await until(
       recordings.list,
       ([first]) => first?.status.kind === "recording",
     );
+
     expect(recording?.scheduled).toEqual({
       schedule: current.id,
       from: now.start,
@@ -2542,6 +2818,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     // Changed to every day at the same time, ten minutes longer: today's recording goes on to
     // its own end, today's longer time doesn't start again, and tomorrow's comes.
     const at = new Date(now.start);
+
     const tomorrow = new Date(
       at.getFullYear(),
       at.getMonth(),
@@ -2549,6 +2826,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       at.getHours(),
       at.getMinutes(),
     );
+
     const changed = await recordings.schedule(
       {
         kind: "slot",
@@ -2561,6 +2839,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       },
       saved.id,
     );
+
     expect(changed.status).toEqual({ kind: "recording", recording: first?.id });
     // Its row says when today's recording stops, not the changed time's end.
     expect(changed.next).toEqual({ start: now.start, stop: first?.stop });
@@ -2572,9 +2851,11 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     expect(await recordings.list()).toHaveLength(1);
 
     await clockTo(tomorrow.getTime());
+
     const list = await until(recordings.list, (each) =>
       each.some((recording) => recording.scheduled?.from === tomorrow.getTime()),
     );
+
     expect(list).toHaveLength(2);
     expect(list.find((each) => each.scheduled?.from === tomorrow.getTime())).toMatchObject({
       status: { kind: "recording" },
@@ -2586,12 +2867,15 @@ describe.skipIf(!hasTools)("recording schedules", () => {
   it("follows the guide's revised end until it records, then keeps the end it started with", async () => {
     const { provider, subscriptionId, guide, recordings, listing, programmePlan, clockTo } =
       await scheduling();
+
     const { next } = await listing();
     const saved = await recordings.schedule(programmePlan(next));
+
     /** The guide, with the next programme ending `minutes` later (earlier, below 0). */
     const ending = async (minutes: number) => {
       const at = (time: number) =>
         `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
+
       provider.serveGuide(
         fakeGuide(provider.catalogue, TEN_PAST).replace(
           `start="${at(next.start)}" stop="${at(next.stop)}"`,
@@ -2601,6 +2885,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       await guide.refresh(subscriptionId);
       await recordings.check();
     };
+
     // Sooner: a later end would overlap the programme after it.
     await ending(-10);
     expect((await recordings.schedules())[0]?.next?.stop).toBe(next.stop - 10 * MINUTE);
@@ -2656,18 +2941,22 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     });
     await first.quit();
     vi.setSystemTime(at.getTime() + MINUTE);
+
     const locked = await app(first.dataDir, {
       seal: testSecrets.seal,
       open: () => {
         throw new Error("The keychain opens nothing.");
       },
     });
+
     await locked.library.channels({});
     await locked.recordings.check();
+
     const [retrying] = await until(
       locked.recordings.schedules,
       ([each]) => each?.status.kind === "retrying",
     );
+
     expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
     vi.setSystemTime(at.getTime() + 6 * MINUTE);
     await locked.recordings.check();
@@ -2687,10 +2976,12 @@ describe.skipIf(!hasTools)("recording schedules", () => {
       title: "Offline",
       padding: { before: 0, after: 0 },
     });
+
     const [retrying] = await until(
       recordings.schedules,
       ([each]) => each?.status.kind === "retrying",
     );
+
     expect(retrying?.status).toEqual({ kind: "retrying", why: "stream" });
     const asked = provider.streamRequests();
     // Not before a minute has passed.
@@ -2709,6 +3000,7 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const { next } = await listing();
     const path = join(dataDir, "recordings", "schedules.json");
     await mkdir(join(dataDir, "recordings"), { recursive: true });
+
     for (const unreadable of [
       JSON.stringify({ version: 2, schedules: [] }),
       // A plan outside what the window may send.
@@ -2748,6 +3040,7 @@ describe("recording slot times", () => {
   function inZone(zone: string, body: () => void) {
     const was = process.env.TZ;
     process.env.TZ = zone;
+
     try {
       body();
     } finally {
@@ -2755,6 +3048,7 @@ describe("recording slot times", () => {
       else process.env.TZ = was;
     }
   }
+
   const slot = (at: number, minutes: number): RecordingPlan => ({
     kind: "slot",
     channel: { subscriptionId: "s", id: "1" },
@@ -2770,8 +3064,10 @@ describe("recording slot times", () => {
       // 02:30 for an hour: the clocks go forward at 02:00 on 29 March 2026 and back at 03:00 on
       // 25 October.
       const night = slot(150, 60);
+
       const day = (from: string) =>
         occurrences(night, Date.parse(from), Date.parse(from) + 20 * 60 * MINUTE)[0];
+
       // CET, before the change: 02:28 local is 01:28 UTC.
       expect(day("2026-03-28T00:00:00Z")).toEqual({
         start: Date.parse("2026-03-28T01:28:00Z"),

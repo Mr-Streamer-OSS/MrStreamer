@@ -114,6 +114,7 @@ export function Select<T extends string>({
       value={value}
       onChange={(event) => {
         const picked = options.find((option) => option.value === event.target.value);
+
         if (picked) onChange(picked.value);
       }}
       className={wide ? "w-64" : "w-56"}

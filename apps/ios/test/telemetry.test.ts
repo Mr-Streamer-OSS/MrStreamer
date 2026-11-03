@@ -12,11 +12,14 @@ import { analyticsTransport, type CaptureTransport } from "../src/telemetry/tran
 
 const files = new Map<string, string>();
 let storageFails = false;
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/files.ts", () => ({
   readJson: (name: string) => {
     if (storageFails) throw new Error("Unreadable");
     const text = files.get(name);
+
     return text === undefined ? null : (JSON.parse(text) as unknown);
   },
   writeJson: (name: string, value: unknown) => {
@@ -28,11 +31,13 @@ vi.mock("../src/files.ts", () => ({
 const fakePlayer = nativePlayer();
 
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
+
 vi.mock("expo-constants", () => ({
   default: { expoConfig: { version: "0.1.0" }, platform: { ios: { buildNumber: "2" } } },
 }));
 
 const native = { state: "active", listeners: [] as Array<(state: string) => void> };
+
 vi.mock("react-native", () => ({
   AppState: {
     get currentState() {
@@ -44,8 +49,10 @@ vi.mock("react-native", () => ({
   },
   Platform: { Version: "26.1" },
 }));
+
 const appState = (state: "active" | "inactive" | "background") => {
   native.state = state;
+
   for (const listener of native.listeners) listener(state);
 };
 
@@ -80,17 +87,22 @@ beforeEach(async () => {
     request.on("end", () => {
       if (request.url !== "/i/v0/e/" || request.method !== "POST") {
         response.writeHead(404).end();
+
         return;
       }
+
       raw.push(body);
       captured.push(JSON.parse(body) as Record<string, unknown>);
+
       if (respond === "hang") {
         hung.push(response);
         response.on("close", () => {
           if (!response.writableEnded) aborted++;
         });
+
         return;
       }
+
       response.writeHead(200, { "Content-Type": "application/json" }).end("{}");
     });
   });
@@ -107,6 +119,7 @@ afterEach(async () => {
   appState("background");
   native.listeners.length = 0;
   vi.useRealTimers();
+
   for (const response of hung) response.end();
   server.closeAllConnections();
   await new Promise((done) => server.close(done));
@@ -122,6 +135,7 @@ async function launch() {
   // The launch's own class, which its error handling recognizes.
   const { AppFailure } = await import("@mrstreamer/contracts/errors");
   telemetry.startTelemetry();
+
   return { ...telemetry, ...playback, AppFailure };
 }
 
@@ -130,17 +144,21 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 300 && !check(); i++) await new Promise((done) => setTimeout(done, 10));
   expect(check()).toBe(true);
 }
+
 /** Lets anything already queued reach the server, so an absence means something. */
 const quiet = () => new Promise((done) => setTimeout(done, 150));
 
 const names = () => captured.map((body) => body["event"]);
+
 const ofName = (name: string) =>
   captured.flatMap((body) =>
     body["event"] === name ? [body["properties"] as Record<string, unknown>] : [],
   );
+
 const stored = () => JSON.parse(files.get("analytics.json") ?? "null") as AnalyticsRecord | null;
 
 let position = 0;
+
 /** The player plays on for `seconds`, its position moving each second as AVPlayer reports. */
 function plays(seconds: number) {
   for (let i = 0; i < seconds; i++) {
@@ -149,6 +167,7 @@ function plays(seconds: number) {
     fakePlayer.state(true);
   }
 }
+
 /** Time passes with no position reported. */
 const waits = (seconds: number) => vi.advanceTimersByTime(seconds * 1000);
 const playing = (isPlaying: boolean) => fakePlayer.state(isPlaying);
@@ -162,10 +181,12 @@ const channel = (id = "c1") => ({
   next: false,
   versions: false,
 });
+
 const opens = async () => ({
   url: `http://panel.example/live/${encodeURIComponent(USERNAME)}/${PASSWORD}/1.m3u8`,
   container: "m3u8",
 });
+
 const login = [USERNAME, PASSWORD];
 
 describe("before the viewer chooses", () => {
@@ -213,6 +234,7 @@ describe("before the viewer chooses", () => {
     );
     const app = await launch();
     expect(app.statisticsChoice()).toBe(choice);
+
     if (choice === "on") await until(() => captured.length === 2);
     await quiet();
     expect(captured).toHaveLength(choice === "on" ? 2 : 0);
@@ -220,6 +242,7 @@ describe("before the viewer chooses", () => {
 
   it("discards the default-on beta backlog and unfinished play before opt-in", async () => {
     const id = "00000000-0000-4000-8000-000000000001";
+
     const unfinished: CaptureEvent = {
       uuid: "00000000-0000-4000-8000-000000000002",
       distinct_id: id,
@@ -235,6 +258,7 @@ describe("before the viewer chooses", () => {
         watch_duration_seconds: 10,
       },
     };
+
     files.set(
       "analytics.json",
       JSON.stringify({
@@ -381,6 +405,7 @@ describe("playback", () => {
         originalLanguage: null,
         open: async () => {
           if (refuse) throw new app.AppFailure({ kind: "invalid-login" });
+
           return { url: `http://panel.example/movie/${PASSWORD}/1.mp4`, container: "mp4" };
         },
       },
@@ -438,6 +463,7 @@ describe("playback", () => {
                   detail: "",
                 });
               }
+
               return opens();
             },
           },
@@ -569,6 +595,7 @@ describe("what the app reports of its use", () => {
     const app = await launch();
     app.setStatistics(true);
     await until(() => captured.length === 2);
+
     for (const path of [
       "/",
       "/",
@@ -581,6 +608,7 @@ describe("what the app reports of its use", () => {
       "/search",
     ])
       app.onTelemetryScreen(path);
+
     for (const text of ["c", SEARCH, "", "x", "xy"]) app.onSearchText(text);
     // Settings pushed on Live, from the top bar there, is Settings.
     app.onTelemetryScreen("/live/settings");
@@ -605,8 +633,10 @@ describe("what the app reports of its use", () => {
     const app = await launch();
     app.setStatistics(true);
     await until(() => captured.length === 2);
+
     for (const tab of ["", "/live", "/films", "/series"]) {
       app.onTelemetryScreen(tab || "/");
+
       for (const screen of ["settings", "licences", "licence", "licences", "settings"]) {
         app.onTelemetryScreen(`${tab}/${screen}`);
       }
@@ -656,6 +686,7 @@ describe("what the app reports of its use", () => {
         expect(text).not.toContain(secret);
       }
     }
+
     const common = [
       "app_version",
       "app_build",
@@ -664,6 +695,7 @@ describe("what the app reports of its use", () => {
       "$process_person_profile",
       "$geoip_disable",
     ];
+
     const own: Record<string, string[]> = {
       installation_observed: [],
       app_active_day: ["activity_date"],
@@ -673,6 +705,7 @@ describe("what the app reports of its use", () => {
       stream_error: ["stream_type", "error_type"],
       stream_stopped: ["stream_type", "watch_duration_seconds"],
     };
+
     for (const body of captured) {
       expect(Object.keys(body).sort()).toEqual(
         ["api_key", "distinct_id", "event", "properties", "timestamp", "uuid"].sort(),
@@ -697,6 +730,7 @@ describe("which capture a build uses", () => {
     expect(analyticsTransport({ ...release, host: "https://us.i.posthog.com" })?.kind).toBe(
       "production",
     );
+
     for (const changed of [
       { development: true },
       { releaseBuild: undefined },
@@ -718,6 +752,7 @@ describe("which capture a build uses", () => {
     expect(
       analyticsTransport({ ...development, localEndpoint: "http://127.0.0.1:8790/i/v0/e/" })?.kind,
     ).toBe("local");
+
     for (const localEndpoint of [
       "https://127.0.0.1:8790/i/v0/e/",
       "http://localhost:8790/i/v0/e/",
@@ -739,13 +774,16 @@ describe("the outbox", () => {
     let record: unknown = null;
     let mono = 0;
     let id = 0;
+
     const transport: CaptureTransport = {
       kind: "local",
       send: (event) => {
         sent.push(event);
+
         return answer();
       },
     };
+
     const ports: AnalyticsPorts = {
       store: {
         load: () => record,
@@ -759,8 +797,10 @@ describe("the outbox", () => {
       uuid: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
       retryMs: 1,
     };
+
     const analytics = new Analytics(ports);
     analytics.setForeground(true);
+
     return {
       analytics,
       sent,
@@ -768,6 +808,7 @@ describe("the outbox", () => {
       advance: (ms: number) => (mono += ms),
     };
   }
+
   const realWait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
   it("tries each event three times, then gives it up", async () => {
@@ -807,6 +848,7 @@ describe("the outbox", () => {
 
     // The next launch can read the record but not write it.
     const sent: CaptureEvent[] = [];
+
     const analytics = new Analytics({
       store: {
         load: () => structuredClone(saved),
@@ -818,6 +860,7 @@ describe("the outbox", () => {
         kind: "local",
         send: async (event) => {
           sent.push(event);
+
           return "accepted";
         },
       },
@@ -826,6 +869,7 @@ describe("the outbox", () => {
       uuid: () => "00000000-0000-4000-8000-000000000099",
       retryMs: 1,
     });
+
     analytics.setForeground(true);
     await realWait(50);
     expect(sent).toEqual([]);
@@ -837,10 +881,12 @@ describe("the outbox", () => {
   it("keeps at most 64 events, the first observation among them", () => {
     const { analytics, record, advance } = owner(() => new Promise(() => undefined));
     analytics.configure(true);
+
     for (let minute = 0; minute < 2; minute++) {
       for (let i = 0; i < 60; i++) analytics.noteFeature("home");
       advance(60_000);
     }
+
     const pending = record()?.pending ?? [];
     expect(pending).toHaveLength(64);
     expect(pending[0]?.event.event).toBe("installation_observed");
@@ -853,6 +899,7 @@ it("keeps one telemetry run across Live reconnect, excludes backoff and reports 
   app.setStatistics(true);
   let lookups = 0;
   const outcome = vi.fn();
+
   try {
     await app.play(
       channel(),
@@ -864,6 +911,7 @@ it("keeps one telemetry run across Live reconnect, excludes backoff and reports 
             variantId: "stream",
             open: async () => {
               lookups++;
+
               return opens();
             },
           },

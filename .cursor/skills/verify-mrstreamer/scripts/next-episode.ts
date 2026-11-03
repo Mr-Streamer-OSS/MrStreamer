@@ -10,8 +10,10 @@ import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const AUTOPLAY = `document.querySelector('[role=checkbox][aria-label="Next episode"]')`;
 const LANGUAGE = `document.querySelector('main section select:has(option[value="en-US"])')`;
+
 const expect = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
 };
@@ -21,15 +23,19 @@ export async function nextEpisodeScenario(
   files: () => { requests: number; mostAtOnce: number; streams: number; active: number },
 ): Promise<void> {
   let locale: Locale = "en-US";
+
   const delay = () =>
     `document.querySelector(${JSON.stringify(`input[aria-label="${translate(locale, "Next episode delay")}"]`)})`;
+
   const preferences = () =>
     d.evaluate<Preferences>(`(async () => {
       const reply = await window.mrStreamer.invoke('preferences.get');
       if (!reply.ok) throw new Error('Preferences read failed');
       return reply.value.preferences;
     })()`);
+
   const endText = () => d.evaluate<string>("document.body.innerText");
+
   const media = () =>
     d.evaluate(`(() => {
       const video = document.querySelector('video');
@@ -37,7 +43,9 @@ export async function nextEpisodeScenario(
         decodedFrames: video.getVideoPlaybackQuality().totalVideoFrames,
         decodedAudioBytes: video.webkitAudioDecodedByteCount };
     })()`);
+
   const remaining = async () => /Plays in (\d+)/.exec(await endText())?.[1] ?? null;
+
   const openSettings = async () => {
     d.action("Open Settings with the application shortcut");
     const modifiers = process.platform === "darwin" ? 4 : 2;
@@ -56,6 +64,7 @@ export async function nextEpisodeScenario(
     await d.click("Open Playback settings", named("nav button", translate(locale, "Playback")));
     await d.wait(() => d.exists(delay()));
   };
+
   const setDelay = async (seconds: number) => {
     await d.wait(() => d.evaluate<boolean>(`!!${delay()} && !${delay()}.disabled`));
     await d.click(`Edit the delay to ${seconds}`, delay());
@@ -89,8 +98,10 @@ export async function nextEpisodeScenario(
       })()`),
     );
   };
+
   const closeSettings = async () => {
     await d.key("Escape", 27);
+
     if (await d.exists(delay()))
       await d.click(
         "Close Settings with Back after cancelling delay editing",
@@ -98,15 +109,18 @@ export async function nextEpisodeScenario(
       );
     await d.wait(async () => !(await d.exists(delay())));
   };
+
   const pickLocale = async (next: Locale) => {
     await d.click("Open General settings", named("nav button", translate(locale, "General")));
     d.action(`Pick ${next} through Interface language`);
     await d.evaluate(`${LANGUAGE}.focus()`);
+
     // Native select type-ahead commits a single choice without intermediate language writes.
     for (const char of LANGUAGE_NAMES[next].slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+
     await d.wait(() =>
       d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(next)}`),
     );
@@ -117,6 +131,7 @@ export async function nextEpisodeScenario(
     );
     await d.wait(() => d.exists(delay()));
   };
+
   const playEpisode = async (episode: string) => {
     // Leaving playback returns to its still-open details, whose modal hides top navigation.
     if (!(await d.exists("document.querySelector('[role=dialog]')"))) {
@@ -127,6 +142,7 @@ export async function nextEpisodeScenario(
         `[...document.querySelectorAll('button[title]')].find(e => e.title.includes('Formats'))`,
       );
     }
+
     // Automatic prefers English, whose fixture has only one season. Choose the complete
     // Dutch version through the same menu a viewer uses, keeping the cross-season path real.
     await d.click(
@@ -156,19 +172,23 @@ export async function nextEpisodeScenario(
       files: files(),
     };
   };
+
   const seekEnd = async () => {
     const focused = () =>
       d.evaluate<boolean>(
         `document.activeElement?.matches('input[type=range][aria-label=Position]') ?? false`,
       );
+
     // Base UI's native range has an implicit slider role. Pointer release deliberately blurs
     // it, so reach it with Tab before using its End key, as a keyboard viewer does.
     for (let tabs = 0; tabs < 24 && !(await focused()); tabs++) await d.key("Tab", 9);
     expect(await focused(), "Keyboard could not reach the Position scrubber");
     await d.key("End", 35);
   };
+
   const waitEnded = (episode: string) =>
     d.wait(async () => (await endText()).includes(`Finished ${episode}`));
+
   const waitNext = async (episode: string) => {
     await d.wait(() =>
       d.evaluate<boolean>(`(() => {
@@ -273,6 +293,7 @@ export async function nextEpisodeScenario(
   await d.capture("maximum-60-countdown");
   await openSettings();
   const languages: Record<string, unknown> = {};
+
   for (const next of LOCALES) {
     await pickLocale(next);
     await setDelay(0);
@@ -283,12 +304,15 @@ export async function nextEpisodeScenario(
     await setDelay(60);
     await d.capture(`maximum-settings-${locale}`);
     await closeSettings();
+
     const labels = await d.evaluate<string[]>(
       `[...document.querySelectorAll('[data-view=title] span')].map(e => e.textContent.trim())`,
     );
+
     const countdown = Array.from({ length: 60 }, (_, index) =>
       translate(locale, "Plays in {seconds}", { seconds: index + 1 }),
     ).find((label) => labels.includes(label));
+
     expect(countdown !== undefined, `Missing localized countdown in ${locale}`);
     await d.capture(`countdown-${locale}`);
     languages[locale] = {
@@ -298,6 +322,7 @@ export async function nextEpisodeScenario(
     };
     await openSettings();
   }
+
   await pickLocale("en-US");
   d.observed["languages"] = languages;
   await d.click("Turn autoplay off for final release", AUTOPLAY);
@@ -329,6 +354,7 @@ export async function nextEpisodeScenario(
   await d.capture("handoff-countdown-held");
   await closeSettings();
   d.action("Open global Search over the ended episode");
+
   for (const type of ["rawKeyDown", "keyUp"])
     await d.send("Input.dispatchKeyEvent", {
       type,
@@ -364,6 +390,7 @@ export async function nextEpisodeScenario(
       subtitles: document.querySelector('[data-subtitles]') };
   })()`);
   await d.key("Escape", 27);
+
   if (await d.exists("document.querySelector('[role=dialog]')")) await d.key("Escape", 27);
   await d.click("Return to Home's live preview", named("header button", "Home"));
   await d.wait(() =>
@@ -405,12 +432,14 @@ export async function nextEpisodeScenario(
   })()`);
   await d.key("f", 70);
   await d.wait(() => d.evaluate<boolean>("!!document.fullscreenElement"));
+
   // macOS reports DOM fullscreen before its native window transition has finished.
   if (process.platform === "darwin")
     await d.wait(() => d.evaluate<boolean>("window.__handoffFullScreen.value"));
   await d.capture("handoff-movie-fullscreen");
   await d.key("Escape", 27);
   await d.wait(() => d.evaluate<boolean>("!document.fullscreenElement"));
+
   if (process.platform === "darwin")
     await d.wait(() => d.evaluate<boolean>("!window.__handoffFullScreen.value"));
   d.observed["handoff-fullscreen-events"] = await d.evaluate("window.__handoffFullScreen.events");
@@ -419,11 +448,14 @@ export async function nextEpisodeScenario(
     delete window.__handoffStopFullScreen;
     delete window.__handoffFullScreen;
   })()`);
+
   const sameNodes =
     await d.evaluate<boolean>(`window.__handoffNodes.video === document.querySelector('video') &&
     window.__handoffNodes.subtitles === document.querySelector('[data-subtitles]')`);
+
   expect(sameNodes, "The handoff or window movement replaced a media node");
   await d.key("Escape", 27);
+
   if (await d.exists("document.querySelector('[role=dialog]')")) await d.key("Escape", 27);
   await d.click("Return to preview after closing the movie", named("header button", "Home"));
   await d.wait(() =>

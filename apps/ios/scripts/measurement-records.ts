@@ -9,6 +9,7 @@ type Context = Readonly<{
   watch: boolean;
   aside: boolean;
 }>;
+
 type Input =
   | { kind: "native"; event: PlaybackObservation; context: Context }
   | {
@@ -69,15 +70,19 @@ export function measurementRecords(
   let ended: "event-limit" | "elapsed-limit" | "byte-limit" | "capture-failed" | null = null;
   let recordBytes = 0;
   const identity = new Map<number, number>();
+
   const scoped = (id: number | null) => {
     if (id === null) return null;
     let value = identity.get(id);
+
     if (value === undefined) {
       value = identity.size + 1;
       identity.set(id, value);
     }
+
     return value;
   };
+
   const scope = (context: Context) => ({
     phase: context.phase,
     watch: context.watch,
@@ -86,10 +91,12 @@ export function measurementRecords(
     external: context.external,
     generation: scoped(context.generation),
   });
+
   const detail = (input: Input) => {
     switch (input.kind) {
       case "native": {
         const { event } = input;
+
         return {
           kind: event.kind,
           nativeVersion: event.version,
@@ -100,27 +107,34 @@ export function measurementRecords(
           ...observed(event),
         };
       }
+
       case "intent":
         return { kind: input.kind, action: input.action, context: scope(input.context) };
       default:
         return { kind: input.kind, active: input.active };
     }
   };
+
   return (input: Input) => {
     if (ended !== null) return;
+
     try {
       const elapsed = now() - started;
+
       if (elapsed >= maxElapsedMs) ended = "elapsed-limit";
       else {
         const entry = { jsReceiptElapsedMs: elapsed, ...detail(input) };
         const bytes = JSON.stringify(entry).length; // Projected fields are ASCII enums, numbers and booleans.
+
         if (recordBytes + bytes > 60_000) ended = "byte-limit";
         else {
           records.push(entry);
           recordBytes += bytes;
         }
+
         if (records.length === maxEvents) ended = "event-limit";
       }
+
       // The terminal record is in the envelope, not evicted by the event limit. Later callbacks
       // do no capture work. Their count is unknown, rather than a fabricated zero loss total.
       const json = JSON.stringify({
@@ -140,6 +154,7 @@ export function measurementRecords(
         maxElapsedMs,
         lifetime: "ends on first callback at/after limit; no idle timer",
       });
+
       write(json);
     } catch {
       ended = "capture-failed";

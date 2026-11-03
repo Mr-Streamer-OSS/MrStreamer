@@ -8,24 +8,30 @@ const TICK_MS = 30_000;
 let now = Date.now();
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
+
 /** Reads the clock now: each tick, and an action that found the last tick's time stale. */
 export function refreshNow(): void {
   now = Date.now();
+
   for (const changed of listeners) changed();
 }
+
 const subscribe = (changed: () => void) => {
   listeners.add(changed);
   // Returning to a retained page uses the wall clock immediately, before the next tick.
   refreshNow();
   timer ??= setInterval(refreshNow, TICK_MS);
+
   return () => {
     listeners.delete(changed);
+
     if (listeners.size === 0 && timer !== null) {
       clearInterval(timer);
       timer = null;
     }
   };
 };
+
 const ignore = () => () => {};
 
 const snapshot = () => now;
@@ -33,5 +39,6 @@ const snapshot = () => now;
 /** The current time in epoch milliseconds, updated every 30 seconds. */
 export function useNow(): number {
   const visible = usePresentationVisible();
+
   return useSyncExternalStore(visible ? subscribe : ignore, snapshot);
 }

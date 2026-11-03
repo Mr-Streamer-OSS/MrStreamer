@@ -37,13 +37,17 @@ import {
 const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const hash = async (path: string) => digest(await readFile(path));
+
 const json = (path: string, value: unknown) =>
   writeFile(path, JSON.stringify(value, null, 2) + "\n");
+
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim();
 
 type Outcome = "passed" | "failed" | "unresolved";
+
 type Variant = "av1" | "startup-rejection" | "later-rejection" | "hevc-12bit" | "h264-10bit";
+
 interface Pins {
   executable: string;
   asar: string;
@@ -51,6 +55,7 @@ interface Pins {
   ffmpeg: string;
   ffprobe: string;
 }
+
 interface Target {
   platform: "win32" | "darwin" | "linux";
   executable: string;
@@ -59,17 +64,23 @@ interface Target {
   source: string;
   pins: Pins;
 }
+
 function object(value: unknown): Record<string, unknown> {
   assert(value && typeof value === "object" && !Array.isArray(value), "Expected JSON object");
+
   return value as Record<string, unknown>;
 }
+
 function keys(value: Record<string, unknown>, expected: string[]) {
   assert.deepEqual(Object.keys(value).sort(), expected.toSorted(), "Unexpected target fields");
 }
+
 function string(value: unknown): string {
   assert(typeof value === "string", "Expected string");
+
   return value;
 }
+
 /** Explicit data only. Unknown fields, including launch commands, are refused before spawning. */
 export function readTarget(input: unknown): Target {
   const data = object(input);
@@ -86,11 +97,14 @@ export function readTarget(input: unknown): Target {
   assert.match(source, /^[a-f0-9]{40}$/, "Expected a full product source SHA");
   const pins = object(data.pins);
   keys(pins, ["executable", "asar", "main", "ffmpeg", "ffprobe"]);
+
   const pin = (key: keyof Pins) => {
     const value = string(pins[key]);
     assert.match(value, /^[a-f0-9]{64}$/, `Invalid ${key} pin`);
+
     return value;
   };
+
   return {
     platform,
     executable,
@@ -106,18 +120,23 @@ export function readTarget(input: unknown): Target {
     },
   };
 }
+
 const samePath = (left: string, right: string) =>
   process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+
 async function canonical(path: string) {
   const actual = await realpath(path);
   assert(samePath(resolve(path), actual), `Path is not canonical: ${path} -> ${actual}`);
+
   return actual;
 }
+
 /** Hash the actual installed entry, including main extracted from the pinned ASAR manifest. */
 async function installedPins(executable: string, resources: string): Promise<Pins> {
   await canonical(executable);
   await canonical(resources);
   const asar = await hash(join(resources, "app.asar"));
+
   return {
     executable: await hash(executable),
     asar,
@@ -130,9 +149,11 @@ async function installedPins(executable: string, resources: string): Promise<Pin
     ),
   };
 }
+
 async function verifyPins(target: Target) {
   const actual = await installedPins(target.executable, target.resources);
   assert.deepEqual(actual, target.pins, "Installed product pins differ from target");
+
   return { at: Date.now(), pins: actual };
 }
 
@@ -148,11 +169,13 @@ const av1 = {
     sha256: "49148b103318044f3ea78a51e5188346fc4f1448b00a18487a1e84b58e6192b5",
   },
 };
+
 function av1Bytes(which: keyof typeof av1) {
   const pin = av1[which];
   const bytes = fixture(pin.file);
   assert.equal(bytes.length, pin.bytes, `${pin.file} size changed`);
   assert.equal(digest(bytes), pin.sha256, `${pin.file} bytes changed`);
+
   return bytes;
 }
 
@@ -166,8 +189,10 @@ async function listen(server: Server) {
   });
   const address = server.address();
   assert(address && typeof address !== "string");
+
   return `http://127.0.0.1:${address.port}`;
 }
+
 async function closeServer(server: Server) {
   if (!server.listening) return;
   server.closeAllConnections();
@@ -175,12 +200,15 @@ async function closeServer(server: Server) {
     server.close((error) => (error ? reject(error) : resolve())),
   );
 }
+
 async function freePort() {
   const server = createServer();
   const origin = await listen(server);
   await closeServer(server);
+
   return Number(new URL(origin).port);
 }
+
 async function refused(origin: string) {
   return new Promise<{ origin: string; refused: true }>((resolve, reject) => {
     const socket = createConnection({ host: "127.0.0.1", port: Number(new URL(origin).port) });
@@ -194,6 +222,7 @@ async function refused(origin: string) {
     });
     socket.once("error", (error: NodeJS.ErrnoException) => {
       socket.destroy();
+
       if (error.code === "ECONNREFUSED") resolve({ origin, refused: true });
       else reject(error);
     });
@@ -206,6 +235,7 @@ interface MainIdentity {
   resources: string;
   argv: string[];
 }
+
 interface AppIdentity extends MainIdentity {
   version: string;
   appPath: string;
@@ -236,6 +266,7 @@ function launch(
         !["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE"].includes(key.toUpperCase()),
     ),
   );
+
   const args = [
     `--remote-debugging-port=${port}`,
     `--inspect-brk=127.0.0.1:${inspect}`,
@@ -247,7 +278,9 @@ function launch(
     ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ...(process.platform === "darwin" ? ["--use-mock-keychain"] : []),
   ];
+
   const startedAt = Date.now();
+
   const app = spawn(target.executable, args, {
     cwd: repository,
     detached: process.platform !== "win32",
@@ -267,8 +300,10 @@ function launch(
       MR_STREAMER_ANALYTICS_LOCAL_ENDPOINT: endpoint,
     },
   });
+
   const log: string[] = [];
   app.on("error", (error) => log.push(String(error)));
+
   for (const stream of [app.stdout, app.stderr])
     stream.on("data", (bytes: Buffer) => log.push(bytes.toString()));
   spawned();
@@ -278,6 +313,7 @@ function launch(
   record["ownershipSamples"] = ownershipSamples;
   let tree: ReturnType<typeof ownedTree> | undefined;
   let ownerError: unknown;
+
   try {
     if (runner) tree = ownedTree(runner, app);
     else
@@ -298,6 +334,7 @@ function launch(
   let boundaryInstalled = false;
   let stopped = false;
   Object.assign(record, { pid: app.pid, args, profile, scratch, startedAt });
+
   return {
     async ready() {
       if (ownerError) throw ownerError;
@@ -306,9 +343,11 @@ function launch(
       main = await connect(inspect, "node", { app });
       assert.equal(await inspectorOwner(inspect, [app.pid]), app.pid);
       const paused = await pauseMain(main);
+
       const identity = await paused.evaluate<MainIdentity>(
         "({pid:process.pid,executable:process.execPath,resources:process.resourcesPath,argv:process.argv})",
       );
+
       assert.equal(identity.pid, app.pid);
       assert(samePath(await canonical(identity.executable), target.executable));
       assert(samePath(await canonical(identity.resources), target.resources));
@@ -362,12 +401,14 @@ function launch(
         ),
         `Unexpected renderer: ${renderer}`,
       );
+
       const identityAfter = await main.evaluate<AppIdentity>(`(()=>{
         const {app}=process.getBuiltinModule('module').createRequire(process.execPath)('electron');
         const fs=process.getBuiltinModule('fs'),p=process.getBuiltinModule('path'),c=process.getBuiltinModule('crypto');
         return {pid:process.pid,executable:process.execPath,resources:process.resourcesPath,argv:process.argv,
           version:app.getVersion(),appPath:app.getAppPath(),packaged:app.isPackaged,
           mainSha256:c.createHash('sha256').update(fs.readFileSync(p.join(app.getAppPath(),'out/main/index.js'))).digest('hex')};})()`);
+
       assert.equal(identityAfter.pid, app.pid);
       assert.equal(identityAfter.packaged, true);
       assert.equal(identityAfter.version, target.version);
@@ -390,6 +431,7 @@ function launch(
       });
       await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
       await page.send("Network.enable");
+
       return d;
     },
     async verifyWorker() {
@@ -400,6 +442,7 @@ function launch(
     },
     subtitleRequests() {
       assert(main && boundaryInstalled, "No verified SubDL boundary");
+
       return subtitleRequests(main);
     },
     async failure() {
@@ -408,6 +451,7 @@ function launch(
         record["videoAtFailure"] = await media(d);
         const facts = await browserFacts(d.page);
         record["probeAtFailure"] = facts;
+
         return facts;
       }
     },
@@ -415,14 +459,17 @@ function launch(
       if (stopped) return;
       stopped = true;
       const errors: unknown[] = [];
+
       const attempt = async <T>(work: () => Promise<T>) => {
         try {
           return await work();
         } catch (error) {
           errors.push(error);
+
           return undefined;
         }
       };
+
       // close wakes waitFor; joining first can wait for a Connect that never happened.
       const workerCleanup = await attempt(async () => workers?.close());
       await attempt(async () => {
@@ -435,17 +482,22 @@ function launch(
           cleanup: workerCleanup,
         }),
       );
+
       if (workers && (!workerStartup?.ok || workerCleanup?.errors.length))
         errors.push(new Error("Worker startup/cleanup failed"));
+
       if (main && boundaryInstalled)
         record["subtitleRequests"] = await attempt(() => subtitleRequests(main!));
       main?.close();
       record["groupBeforeClose"] = await attempt(async () => group?.sample());
       const alreadyExited = app.exitCode !== null || app.signalCode !== null;
+
       const requestClose = async () => {
         assert(page, "No verified page available for Browser.close");
+
         return page.send("Browser.close");
       };
+
       const closed = await attempt(async () => {
         if (tree) {
           const ended = await tree.stop(requestClose);
@@ -459,8 +511,10 @@ function launch(
               app.signalCode === null,
             JSON.stringify(exit),
           );
+
           return exit;
         }
+
         const exit = await closeNative(app, requestClose);
         record["exit"] = exit;
         assert(
@@ -471,14 +525,17 @@ function launch(
             exit.requestError === null,
           JSON.stringify(exit),
         );
+
         return exit;
       });
+
       record["exit"] = closed ?? record["exit"];
       page?.close();
       // A failed main close stays failed and gets only an immediate survivor audit.
       const drainStartedAt = Date.now();
       const drainStarted = performance.now();
       await attempt(async () => (closed ? group?.drain() : group?.sample()));
+
       if (group)
         record["groupDrain"] = {
           startedAt: drainStartedAt,
@@ -487,11 +544,13 @@ function launch(
         };
       const survivors = group ? ownershipSamples.at(-1)?.group : undefined;
       record["groupAfterClose"] = survivors;
+
       if (!closed && survivors?.length)
         errors.push(new Error("Owned process group survivors; profile retained"));
       record["exitPins"] = await attempt(() => verifyPins(target));
       await attempt(() => writeFile(join(evidence, "electron.log"), log.join("")));
       record["cleanupErrors"] = errors.map((error) => String(error));
+
       if (errors.length) throw new AggregateError(errors, "Installed session cleanup failed");
     },
   };
@@ -499,19 +558,24 @@ function launch(
 
 const labelled = (label: string) =>
   `document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})`;
+
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b=>b.textContent.trim()===${JSON.stringify(text)})`;
+
 const poster = (name: string) =>
   `[...document.querySelectorAll('button[title]')].find(b=>b.title.includes(${JSON.stringify(name)}))`;
+
 async function openMovie(d: Driver, name: string) {
   await d.click("Movies", button("header button", "Movies"));
   await d.click("All movies", button("nav button", "All movies"));
   await d.click(`Movie ${name}`, poster(name));
 }
+
 async function leave(d: Driver) {
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.video()).title, 10_000, "leaving title");
 }
+
 interface MediaObservation {
   time: number;
   width: number;
@@ -529,6 +593,7 @@ interface MediaObservation {
   window: number;
   generation: number;
 }
+
 export function media(d: { page: Pick<Page, "evaluate"> }) {
   return d.page
     .evaluate<MediaObservation>(`(()=>{const v=document.querySelector('video'),p=window.__installedMediaProbe,position=document.querySelector('[data-view=title] input[type=range][aria-label=Position]')?.getAttribute('aria-valuenow');return {
@@ -539,11 +604,13 @@ export function media(d: { page: Pick<Page, "evaluate"> }) {
     readyState:v?.readyState??0,seeking:v?.seeking??false,stateShown:!!document.querySelector('[data-view=title] h2'),
     position:position===null||position===undefined?null:Number(position),sequence:p?.sequence??0,window:p?.window??0,generation:p?.generation??0};})()`);
 }
+
 async function moving(d: Driver) {
   const until = Date.now() + 45_000;
   await d.wait(
     async () => {
       const v = await media(d);
+
       return (
         v.title &&
         !v.paused &&
@@ -561,6 +628,7 @@ async function moving(d: Driver) {
   await d.wait(
     async () => {
       const v = await media(d);
+
       return (
         !v.paused &&
         v.sameNode &&
@@ -586,6 +654,7 @@ async function download(d: Driver, name: string) {
   );
   await d.key("Escape", 27);
 }
+
 async function remove(d: Driver, record: Record<string, unknown>, save: () => Promise<void>) {
   await d.click("Settings", labelled("Settings"));
   await d.click("Subscriptions", button("nav button", "Subscriptions"));
@@ -597,7 +666,9 @@ async function remove(d: Driver, record: Record<string, unknown>, save: () => Pr
 }
 
 type Seen = Awaited<ReturnType<typeof probe>>;
+
 type WindowStart = Awaited<ReturnType<Seen["beginWindow"]>>;
+
 async function anchor(d: Driver) {
   await d.wait(
     () => d.page.evaluate<boolean>("!!document.querySelector('[data-view=title] video')"),
@@ -606,6 +677,7 @@ async function anchor(d: Driver) {
   );
   await d.page.evaluate("window.__installedMediaProbe.node=document.querySelector('video')");
 }
+
 async function windowFacts(d: Driver, seen: Seen, window: WindowStart) {
   return {
     ...(await seen.windowFacts(window)),
@@ -615,6 +687,7 @@ async function windowFacts(d: Driver, seen: Seen, window: WindowStart) {
     ),
   };
 }
+
 function requireVideoConversion(facts: Awaited<ReturnType<typeof windowFacts>>) {
   assert(
     facts.deliveries.some((item) => item.status === 200 && item.video === "convert"),
@@ -622,6 +695,7 @@ function requireVideoConversion(facts: Awaited<ReturnType<typeof windowFacts>>) 
   );
   assert(facts.decoded.sameNode, `${facts.name}: media element changed`);
 }
+
 class Unresolved extends Error {}
 
 /** A track reload must deliver and decode anew before DOM clocks or old width can be evidence. */
@@ -641,6 +715,7 @@ async function settledAfter(
       const buffer = facts.buffers.find((item) => item.generation === v.generation);
       const delivery = facts.deliveries.find((item) => item.requestId === buffer?.requestId);
       record["latest"] = { decoded: v, buffer, delivery };
+
       if (
         !delivery ||
         delivery.requestSequence <= before.sequence ||
@@ -662,11 +737,15 @@ async function settledAfter(
         v.paused !== before.paused
       )
         return false;
+
       if (before.paused) return Math.abs(v.time - before.time) < 0.2;
+
       if (!decoded || decoded.generation !== v.generation) {
         decoded = v;
+
         return false;
       }
+
       return v.time > decoded.time + 0.25 && v.frames > decoded.frames && v.audio > decoded.audio;
     },
     timeout,
@@ -696,6 +775,7 @@ async function pauseSeekResume(
   await d.wait(
     async () => {
       const v = await media(d);
+
       return (
         v.paused &&
         Math.abs(v.time - (held.time + 10)) < 2 &&
@@ -713,13 +793,16 @@ async function pauseSeekResume(
   record["pausedSeek"] = sought;
   await d.capture("paused-seek");
   await whilePaused?.();
+
   if (otherSound) {
     await d.click("Sound", labelled("Sound"));
     record["soundChoices"] = await d.page.evaluate<string[]>(
       "[...document.querySelectorAll('[role=dialog] button[aria-pressed], [role=dialog] [role=menuitemradio]')].map(e=>e.textContent.trim())",
     );
+
     const other =
       "[...document.querySelectorAll('[role=dialog] button[aria-pressed=false], [role=dialog] [role=menuitemradio][aria-checked=false]')][0]";
+
     const picked = await d.page.evaluate<string>(`(${other}).textContent.trim()`);
     const soundBefore = await media(d);
     const transition: Record<string, unknown> = {};
@@ -739,9 +822,11 @@ async function pauseSeekResume(
     );
     record["pausedOtherSound"] = await media(d);
     await d.click("Read selected sound", labelled("Sound"));
+
     const selected = await d.page.evaluate<string>(
       "document.querySelector('[role=dialog] button[aria-pressed=true], [role=dialog] [role=menuitemradio][aria-checked=true]')?.textContent.trim()??''",
     );
+
     record["selectedOtherSound"] = { picked, selected };
     assert.equal(selected, picked);
     await d.capture("paused-other-sound");
@@ -752,12 +837,14 @@ async function pauseSeekResume(
       "selected sound menu closed",
     );
   }
+
   const resumeFrom = await media(d);
   assert(resumeFrom.sameNode);
   await d.key(" ", 32);
   await d.wait(
     async () => {
       const v = await media(d);
+
       return (
         !v.paused &&
         v.time > resumeFrom.time + 0.25 &&
@@ -779,6 +866,7 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
   let priorGeneration = 0;
   let recoverySequence = 0;
   let recoveryRequestId: number | null = null;
+
   for (const phase of ["audio", "video"] as const) {
     await d.wait(
       () =>
@@ -791,18 +879,22 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
     const before = await browserFacts(d.page);
     priorGeneration = before.generation;
     const window = before.window;
+
     const step: Record<string, unknown> = {
       phase,
       before,
       window,
       generation: priorGeneration,
     };
+
     steps.push(step);
+
     const injection = await d.page.evaluate<{ sequence: number }>(
       `(()=>{const p=window.__installedMediaProbe,b=p.buffers.at(-1);
         const injection={...p.stamp(),requestId:b.requestId,deliverySequence:b.deliverySequence,generation:p.generation};
         p.injections.push(injection);p.buffer.appendBuffer(new Uint8Array([0,0,0,4,109,111,111,102]));return injection;})()`,
     );
+
     step["injection"] = injection;
     await d.wait(
       async () =>
@@ -818,6 +910,7 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
       30_000,
       "new actual browser code3 parser error",
     );
+
     const error = (await browserFacts(d.page)).errors
       .slice(before.errors.length)
       .find(
@@ -827,6 +920,7 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
           error.window === window &&
           error.sequence > injection.sequence,
       )!;
+
     step["error"] = error;
     await d.wait(
       async () =>
@@ -839,15 +933,18 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
       30_000,
       "response following actual parser error",
     );
+
     const next = (await browserFacts(d.page)).deliveries.find(
       (delivery) =>
         delivery.window === window &&
         delivery.responseWindow === window &&
         delivery.requestSequence > error.sequence,
     )!;
+
     step["followingDelivery"] = next;
     assert.equal(next.status, 200);
     assert.equal(next.video, phase === "audio" ? "copy" : "convert");
+
     if (phase === "audio") assert.equal(next.audio, "convert");
     assert.equal(
       new URL(next.url).searchParams.get(phase === "audio" ? "sound" : "picture"),
@@ -858,10 +955,13 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
     await d.wait(
       async () => {
         const v = await media(d);
+
         const buffer = (await browserFacts(d.page)).buffers.find(
           (item) => item.generation === v.generation,
         );
+
         step["recoveryBuffer"] = buffer;
+
         return (
           !!buffer &&
           buffer.sequence > next.sequence &&
@@ -897,6 +997,7 @@ async function embeddedFrench(
   const before = await media(d);
   transition["before"] = before;
   await save();
+
   try {
     await d.click(
       "Choose embedded French",
@@ -910,21 +1011,26 @@ async function embeddedFrench(
     transition["browser"] = await browserFacts(d.page);
     await save();
   }
+
   // Stop below the two-second cue at 60, then play into it within the existing cue wait.
   for (let attempt = 0; (await media(d)).time < 48 && attempt < 7; attempt++) {
     const before = await media(d);
+
     const observation: Record<string, unknown> = {
       before,
       key: { name: "ArrowRight", code: 39, nodeRequestedAt: Date.now() },
     };
+
     attempts.push(observation);
     await save();
+
     try {
       await d.key("ArrowRight", 39);
       await d.wait(
         async () => {
           const v = await media(d);
           observation["latest"] = v;
+
           return (
             !v.paused &&
             v.width > 0 &&
@@ -946,6 +1052,7 @@ async function embeddedFrench(
       await save();
     }
   }
+
   await d.wait(
     async () => (await media(d)).caption === "Soixante",
     15_000,
@@ -954,6 +1061,7 @@ async function embeddedFrench(
   const shown = await media(d);
   assert(shown.sameNode);
   await d.capture("offline-long-embedded-french");
+
   return shown;
 }
 
@@ -992,6 +1100,7 @@ async function runCase(
   let session: ReturnType<typeof launch> | undefined;
   let laterCopyDecoded = false;
   let stopped = false;
+
   const stopFixtures = async () => {
     if (!stopped) {
       const outcomes = await Promise.allSettled([
@@ -999,41 +1108,52 @@ async function runCase(
         tmdb?.close(),
         subtitles?.stop(),
       ]);
+
       const failures = outcomes.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : [],
       );
+
       if (failures.length) throw new AggregateError(failures, "Fixture cleanup failed");
       stopped = true;
     }
+
     return Promise.all(
       [provider?.url, tmdb?.url, subtitles?.origin].flatMap((origin) =>
         origin ? [refused(origin)] : [],
       ),
     );
   };
+
   try {
     // Every local boundary is listening before the very first installed spawn.
     provider = await startFakeProvider({ channels: 20, titles: 10 });
     tmdb = await startFakeTmdb();
     subtitles = await startSubtitleFixture();
+
     const short = provider.titles.movies.find((movie) =>
       movie.name.startsWith("TEST | Two sound tracks"),
     );
+
     const long = provider.titles.movies.find((movie) =>
       movie.name.startsWith("TEST | Long subtitles"),
     );
+
     assert(short && long);
+
     const original =
       variant === "av1"
         ? av1Bytes("short")
         : fixture(variant === "hevc-12bit" ? "title-hevc-12bit.mkv" : "title-h264-10bit.mkv");
+
     const clip = Buffer.from(original);
     proof.facts["fixture"] = { originalSha256: digest(original), bytes: clip.length };
+
     if (variant === "av1") {
       const longBytes = av1Bytes("long");
       provider.replaceMovieFile(long.id, longBytes);
       proof.facts["av1Fixtures"] = av1;
     }
+
     if (variant === "startup-rejection") {
       const offset = clip.indexOf(Buffer.from([1, 110, 0, 10, 255, 225]));
       assert(offset >= 0, "Expected original valid High10 AVC configuration");
@@ -1046,12 +1166,14 @@ async function runCase(
         mutated: 255,
       };
     }
+
     provider.replaceMovieFile(short.id, clip);
     proof.facts["servedFixtureSha256"] = digest(clip);
     proof.session["beforeSpawnPins"] = await verifyPins(target);
     await save();
     const port = await freePort();
     let inspect = await freePort();
+
     while (inspect === port) inspect = await freePort();
     session = launch(
       target,
@@ -1072,10 +1194,12 @@ async function runCase(
     const seen = await probe(d.page);
     proof.facts["media"] = seen;
     await d.wait(() => d.exists('document.querySelector("form input")'), 30_000, "Connect");
+
     for (const [index, value] of [provider.url, "demo", "demo"].entries()) {
       await d.click(`Connect field ${index}`, `document.querySelectorAll('form input')[${index}]`);
       await d.type("Type fake login", value);
     }
+
     await d.click("Connect", "document.querySelector('form button[type=submit]')");
     await d.wait(() => d.exists('document.querySelector("header")'), 60_000, "Home");
     await session.verifyWorker();
@@ -1086,6 +1210,7 @@ async function runCase(
     await save();
     const windows: Awaited<ReturnType<typeof windowFacts>>[] = [];
     proof.facts["windows"] = windows;
+
     if (variant === "av1") {
       await d.click("Settings", labelled("Settings"));
       await d.click("Subtitles settings", button("nav button", "Subtitles"));
@@ -1105,6 +1230,7 @@ async function runCase(
       await d.key("Escape", 27);
       await download(d, "Long subtitles");
     }
+
     await download(d, "Two sound tracks");
     await openMovie(d, "Two sound tracks");
     const online = await seen.beginWindow("provider-short");
@@ -1114,8 +1240,10 @@ async function runCase(
     proof.facts["onlineDecoded"] = await media(d);
     const initial = await windowFacts(d, seen, online);
     proof.facts["initialDelivery"] = initial;
+
     if (variant === "later-rejection") {
       const active = initial.deliveries.at(-1);
+
       if (
         active?.video === "convert" ||
         initial.deliveries.some((delivery) => delivery.video === "convert")
@@ -1123,6 +1251,7 @@ async function runCase(
         throw new Unresolved(
           "Later rejection unavailable: video converted before copied decoded start",
         );
+
       if (
         active?.audio === "convert" ||
         initial.errors.length ||
@@ -1137,6 +1266,7 @@ async function runCase(
       assert.equal(active?.audio, "copy");
       laterCopyDecoded = true;
     }
+
     const controls: Record<string, unknown> = {};
     proof.facts["providerControls"] = controls;
     await pauseSeekResume(
@@ -1147,10 +1277,13 @@ async function runCase(
     );
     const onlineFacts = await windowFacts(d, seen, online);
     windows.push(onlineFacts);
+
     if (variant === "av1") requireVideoConversion(onlineFacts);
+
     if (variant === "hevc-12bit" || variant === "h264-10bit") {
       const first = onlineFacts.deliveries[0];
       assert(first && (first.video === "copy" || first.video === "convert"));
+
       const rejection = [
         ...onlineFacts.checks.filter((check) => !check.supported),
         ...onlineFacts.errors.filter((error) => error.code === 3),
@@ -1164,7 +1297,9 @@ async function runCase(
               delivery.requestId === item.requestId,
           ),
         );
+
       const converted = onlineFacts.deliveries.find((delivery) => delivery.video === "convert");
+
       if (first.video === "copy" && converted)
         assert(
           rejection !== undefined && converted.requestSequence > rejection.sequence,
@@ -1180,6 +1315,7 @@ async function runCase(
         decodedWithControls: onlineFacts.decoded,
       };
     }
+
     await save();
     await leave(d);
     await d.key("Escape", 27);
@@ -1188,12 +1324,14 @@ async function runCase(
     assert.equal(copies.length, variant === "av1" ? 2 : 1);
     assert(copies.every((copy) => copy.status.kind === "complete"));
     await remove(d, proof.facts, save);
+
     const cutoff = {
       at: Date.now(),
       rendererRequestsFrom: d.requests.length,
       providerServedReads: provider.fileRequests(),
       subtitleAttempts: (await session.subtitleRequests()).length,
     };
+
     proof.facts["offlineCutoff"] = cutoff;
     proof.facts["fixturePortsRefused"] = await stopFixtures();
     proof.facts["fixturesStoppedAt"] = Date.now();
@@ -1209,9 +1347,11 @@ async function runCase(
       standalone.every((copy) => copy.status.kind === "complete" && copy.subscription === null),
     );
     await d.capture("copies-without-subscription");
+
     const shortCopy = standalone.find(
       (copy) => copy.title.kind === "movie" && copy.title.id === String(short.id),
     );
+
     assert(shortCopy);
     const offline = await seen.beginWindow("offline-short");
     await d.click(
@@ -1223,13 +1363,17 @@ async function runCase(
     const offlineFacts = await windowFacts(d, seen, offline);
     windows.push(offlineFacts);
     await d.capture("offline-short-decoded");
+
     if (variant === "av1") requireVideoConversion(offlineFacts);
+
     if (variant === "startup-rejection") {
       const copy = offlineFacts.deliveries[0];
+
       if (!copy || copy.video !== "copy")
         throw new Unresolved(
           "Startup copied rejection unavailable: no initial video-copy delivery",
         );
+
       const rejected = offlineFacts.checks.find(
         (check) =>
           !check.supported &&
@@ -1237,16 +1381,19 @@ async function runCase(
           check.sequence > copy.sequence &&
           check.requestId === copy.requestId,
       );
+
       if (!rejected)
         throw new Unresolved(
           "Startup copied rejection unavailable: browser accepted invalid AVC or no actual refusal observed",
         );
+
       const converted = offlineFacts.deliveries.find(
         (delivery) =>
           delivery.requestSequence > rejected.sequence &&
           delivery.video === "convert" &&
           new URL(delivery.url).searchParams.get("picture") === "convert",
       );
+
       assert(converted, "No actual picture=convert/video-convert delivery after avc1.ff refusal");
       proof.facts["startupSequence"] = {
         copy,
@@ -1256,12 +1403,15 @@ async function runCase(
         decoded: offlineFacts.decoded,
       };
     }
+
     await save();
     await leave(d);
+
     if (variant === "av1") {
       const longCopy = standalone.find(
         (copy) => copy.title.kind === "movie" && copy.title.id === String(long.id),
       );
+
       assert(longCopy);
       const window = await seen.beginWindow("offline-long-first-open");
       await d.click(
@@ -1280,16 +1430,21 @@ async function runCase(
       requireVideoConversion(longFacts);
       const left = (await media(d)).time;
       await leave(d);
+
       const progress = async () =>
         (await d.read("downloads.list")).items.find((copy) => copy.id === longCopy.id)?.progress;
+
       const row = `document.querySelector('[data-download="${longCopy.id}"]')`;
       await d.wait(
         async () => {
           const kept = await progress();
+
           if (!kept || Math.abs(kept.position - left) >= 2) return false;
+
           const shown = await d.page.evaluate<string | null>(
             `(${row})?.querySelector('span > span[style*="width"]')?.style.width??null`,
           );
+
           return shown === `${Math.round((100 * kept.position) / kept.duration)}%`;
         },
         15_000,
@@ -1297,9 +1452,11 @@ async function runCase(
       );
       const kept = await progress();
       assert(kept);
+
       const percentage = await d.page.evaluate<string | null>(
         `(${row})?.querySelector('span > span[style*="width"]')?.style.width??null`,
       );
+
       assert(percentage && Number.isFinite(parseFloat(percentage)), "No row progress percentage");
       assert(
         Math.abs(parseFloat(percentage) - (100 * kept.position) / kept.duration) < 2,
@@ -1321,6 +1478,7 @@ async function runCase(
       await d.capture("offline-long-saved-resume");
       await leave(d);
     }
+
     proof.facts["providerServedReadsAfterCutoff"] =
       provider.fileRequests() - cutoff.providerServedReads;
     assert.equal(proof.facts["providerServedReadsAfterCutoff"], 0);
@@ -1339,16 +1497,20 @@ async function runCase(
   } catch (error) {
     proof.outcome = error instanceof Unresolved ? "unresolved" : "failed";
     proof.error = error instanceof Error ? (error.stack ?? error.message) : String(error);
+
     const facts = await session?.failure().catch((error) => {
       proof.facts["failureCaptureError"] = String(error);
     });
+
     const initiallyConverted =
       variant === "later-rejection"
         ? !laterCopyDecoded && !!facts?.deliveries.some((delivery) => delivery.video === "convert")
         : facts?.deliveries[0]?.video === "convert";
+
     const acceptedInvalidAvc = facts?.checks.some(
       (check) => check.supported && /avc1\.ff/i.test(check.type),
     );
+
     // Capability facts explain the failure; only an explicit branch decision is Unresolved.
     proof.facts["capabilityAtFailure"] = { initiallyConverted, acceptedInvalidAvc };
   } finally {
@@ -1361,6 +1523,7 @@ async function runCase(
         proof.outcome = "failed";
       }
     }
+
     if (subtitles)
       proof.facts["subtitleFixture"] = {
         requests: subtitles.requests,
@@ -1386,8 +1549,10 @@ export async function installedMedia(args: string[]) {
       sha: { type: "string" },
     },
   });
+
   assert(values.out && isAbsolute(values.out), usage);
   const out = join(await realpath(dirname(values.out)), basename(values.out));
+
   if (process.platform === "win32") {
     const temp = await realpath(process.env["RUNNER_TEMP"] ?? "");
     const under = relative(temp, out);
@@ -1396,11 +1561,13 @@ export async function installedMedia(args: string[]) {
       "--out must be under RUNNER_TEMP",
     );
   }
+
   await mkdir(out); // An existing output is never overwritten, even for a failed preflight.
   const evidence = join(out, "evidence");
   await mkdir(evidence);
   const profiles = join(out, "profiles");
   await mkdir(profiles);
+
   const proof: {
     outcome: Outcome | "running";
     startedAt: number;
@@ -1421,9 +1588,11 @@ export async function installedMedia(args: string[]) {
       "Hosted derived target and native-installs MUST be compared with independently accepted product/setup/tool pins before acceptance; mismatch rejects acceptance.",
     ],
   };
+
   const save = () => json(join(evidence, "proof-incremental.json"), proof);
   let pair: Awaited<ReturnType<typeof installedTelemetryPair>> | undefined;
   let target: Target | undefined;
+
   const wire: {
     at: number;
     method: string | undefined;
@@ -1431,12 +1600,15 @@ export async function installedMedia(args: string[]) {
     headers: IncomingHttpHeaders;
     body: string;
   }[] = [];
+
   const captureErrors: string[] = [];
   const captureTasks = new Set<Promise<void>>();
+
   const capture = createServer((request, response) => {
     const task = (async () => {
       try {
         const chunks: Buffer[] = [];
+
         for await (const bytes of request) chunks.push(Buffer.from(bytes));
         wire.push({
           at: Date.now(),
@@ -1452,9 +1624,11 @@ export async function installedMedia(args: string[]) {
         response.writeHead(500).end();
       }
     })();
+
     captureTasks.add(task);
     void task.finally(() => captureTasks.delete(task));
   });
+
   const feed = createServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
     response.end(
@@ -1466,6 +1640,7 @@ export async function installedMedia(args: string[]) {
       }),
     );
   });
+
   try {
     assert(
       process.platform === "win32"
@@ -1477,11 +1652,14 @@ export async function installedMedia(args: string[]) {
     assert(!values.sha || /^[a-f0-9]{40}$/.test(values.sha), "Expected a full product source SHA");
     let runner: Runner | undefined;
     let setup: { sha256: string; file: string; bytes: number } | undefined;
+
     if (values.packages) {
       runner = disposableRunner();
+
       const receipt = readReceipt(
         JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8")),
       );
+
       const candidate = receipt.packages[1];
       assert(
         !values.sha || candidate.source === values.sha,
@@ -1507,7 +1685,9 @@ export async function installedMedia(args: string[]) {
     } else {
       target = readTarget(JSON.parse(await readFile(values.target!, "utf8")));
     }
+
     proof.details["target"] = target;
+
     // Write before preflight and before first spawn, so even a pin refusal retains its target.
     const helpers = [
       "app.ts",
@@ -1525,6 +1705,7 @@ export async function installedMedia(args: string[]) {
       "../fake-provider.ts",
       "../fake-tmdb.ts",
     ];
+
     const verifier = {
       revision: git("rev-parse", "HEAD"),
       tree: git("rev-parse", "HEAD^{tree}"),
@@ -1541,6 +1722,7 @@ export async function installedMedia(args: string[]) {
         })),
       ),
     };
+
     await json(join(evidence, "target.json"), { ...target, setup, verifier });
     proof.details["preflightPins"] = await verifyPins(target);
     av1Bytes("short");
@@ -1549,12 +1731,14 @@ export async function installedMedia(args: string[]) {
     const update = await listen(feed);
     proof.details["localBoundaries"] = { endpoint, update };
     await save();
+
     const variants: Variant[] = [
       "av1",
       "startup-rejection",
       "later-rejection",
       ...(process.platform === "darwin" ? (["hevc-12bit", "h264-10bit"] as const) : []),
     ];
+
     for (const variant of variants) {
       const scenario: CaseProof = {
         variant,
@@ -1565,6 +1749,7 @@ export async function installedMedia(args: string[]) {
         session: {},
         cleanupErrors: [],
       };
+
       proof.cases.push(scenario);
       await save();
       console.log(`MEDIA_BEGIN ${variant}`);
@@ -1573,11 +1758,13 @@ export async function installedMedia(args: string[]) {
       });
       console.log(`MEDIA_${scenario.outcome.toUpperCase()} ${variant}`);
       await save();
+
       if (scenario.outcome !== "passed") {
         proof.outcome = scenario.outcome === "unresolved" ? "unresolved" : "failed";
         break;
       }
     }
+
     if (
       proof.cases.length === variants.length &&
       proof.cases.every((scenario) => scenario.outcome === "passed")
@@ -1589,6 +1776,7 @@ export async function installedMedia(args: string[]) {
       error instanceof Error ? (error.stack ?? error.message) : String(error);
   } finally {
     const cleanupErrors: string[] = [];
+
     for (const server of [capture, feed]) {
       try {
         await closeServer(server);
@@ -1596,8 +1784,10 @@ export async function installedMedia(args: string[]) {
         cleanupErrors.push(String(error));
       }
     }
+
     await Promise.all(captureTasks);
     cleanupErrors.push(...captureErrors);
+
     if (target) {
       try {
         proof.details["finalPins"] = await verifyPins(target);
@@ -1605,9 +1795,12 @@ export async function installedMedia(args: string[]) {
         cleanupErrors.push(String(error));
       }
     }
+
     proof.details["captureErrors"] = captureErrors;
+
     if (cleanupErrors.length) proof.outcome = "failed";
     proof.details["cleanupErrors"] = cleanupErrors;
+
     // Profiles/install remain on any failure. Uninstall is success-only after every socket/child check.
     if (proof.outcome === "passed") {
       try {
@@ -1615,6 +1808,7 @@ export async function installedMedia(args: string[]) {
           pair.accepted();
           await pair.close();
         }
+
         for (const scenario of proof.cases) {
           await rm(scenario.profile, { recursive: true });
           scenario.profileRemoved = true;
@@ -1624,14 +1818,17 @@ export async function installedMedia(args: string[]) {
         cleanupErrors.push(String(error));
       }
     }
+
     proof.details["endedAt"] = Date.now();
     await json(join(evidence, "loopback-capture.json"), wire);
     await save();
     await json(join(evidence, "proof.json"), proof);
     console.log(`MEDIA_FINAL ${proof.outcome}: ${evidence}`);
   }
+
   return proof.outcome === "passed" ? 0 : 1;
 }
+
 if (import.meta.main) {
   installedMedia(process.argv.slice(2)).then(
     (code) => {

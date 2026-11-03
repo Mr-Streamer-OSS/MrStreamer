@@ -22,6 +22,7 @@ const movie = (id: string, name: string, addedAt = 1): ProviderTitle => ({
   container: "mkv",
   tmdbId: null,
 });
+
 const source = (movies: readonly ProviderTitle[], subscriptionId = "one") => ({
   subscriptionId,
   catalogue: {
@@ -31,6 +32,7 @@ const source = (movies: readonly ProviderTitle[], subscriptionId = "one") => ({
     seriesCategories: [],
   } satisfies OnDemandCatalogue,
 });
+
 const ids = (titles: readonly Title[]) =>
   titles.map((title) => `${title.subscriptionId}/${title.id}`);
 
@@ -72,6 +74,7 @@ describe.each([
         ...movie(String(index), `Story ${index} HD (EN)`),
         tmdbId: String(100000 + index),
       }));
+
       const index = indexCatalogue(
         [
           source(rows),
@@ -85,26 +88,32 @@ describe.each([
         ],
         "en",
       );
+
       const files: FilterFiles = new Map();
+
       const page = searchPage(index, "movie", "story", undefined, limit, {
         filters: { quality: "4k", language: "fr" },
         files,
       });
+
       expect(page.total).toBe(7);
       expect(page.unfiltered).toBe(650);
       expect(ids(page.titles)).toEqual(
         [0, 100, 200, 300, 400, 500, 600].slice(0, limit).map((id) => `two/${id}`),
       );
+
       for (const title of page.titles) {
         expect(title.versions.map((version) => `${version.subscriptionId}/${version.id}`)).toEqual([
           `one/${title.id}`,
           `two/${title.id}`,
         ]);
       }
+
       const broad = searchPage(index, "movie", "story", undefined, limit, {
         filters: { quality: "hd", language: "fr" },
         files,
       });
+
       expect(broad.total).toBe(643);
       expect(broad.unfiltered).toBe(650);
       expect(ids(broad.titles)).toEqual(
@@ -138,6 +147,7 @@ describe.each([
       ],
       "en",
     );
+
     const page = searchPage(index, "movie", "heat", undefined, limit);
     expect(page.total).toBe(7);
     expect(ids(page.titles)).toEqual(
@@ -177,11 +187,13 @@ describe.each([
       ],
       "nl",
     );
+
     const page = searchPage(index, "movie", "heat", (title) => ({
       title: title.id === "provider" ? "Warmte" : title.title,
       original: title.id === "original" ? "Heat" : null,
       names: title.id === "alias" ? ["Other translation", "Heat"] : [],
     }));
+
     expect(ids(page.titles)).toEqual([
       "one/displayed",
       "one/original",
@@ -199,11 +211,13 @@ describe.each([
       ],
       "nl",
     );
+
     const aliases = () => ({
       title: "Amélie",
       original: "Le Fabuleux Destin d'Amélie Poulain",
       names: ["Die fabelhafte Welt der Amelie", "Other translation"],
     });
+
     for (const query of [
       "amélie",
       "le fabuleux destin damelie poulain",
@@ -232,9 +246,11 @@ describe.each([
       ],
       "en",
     );
+
     for (const query of ["heat 1995", "1995 heat", "HEAT (1995)"]) {
       expect(ids(searchPage(index, "movie", query).titles)).toEqual(["one/heat"]);
     }
+
     expect(searchPage(index, "movie", "heat 2001").total).toBe(0);
     expect(ids(searchPage(index, "movie", "2012").titles)).toEqual(["one/2012"]);
     expect(ids(searchPage(index, "movie", "2012 2009").titles)).toEqual(["one/2012"]);
@@ -257,6 +273,7 @@ describe.each([
       [source([movie("target", name), movie("noise", "Unrelated")])],
       "en",
     );
+
     expect(ids(searchPage(index, "movie", query).titles)).toEqual(["one/target"]);
   });
 
@@ -265,6 +282,7 @@ describe.each([
       [source([movie("joined", "Spider-Man", 50), movie("literal", "Spiderman")])],
       "en",
     );
+
     expect(ids(searchPage(index, "movie", "spiderman").titles)).toEqual([
       "one/literal",
       "one/joined",
@@ -286,6 +304,7 @@ describe.each([
       ],
       "en",
     );
+
     for (const query of ["heat 1995", "heat １９９５"]) {
       expect(ids(searchPage(index, "movie", query).titles)).toEqual([
         "one/correct",
@@ -300,6 +319,7 @@ describe.each([
       [source([movie("space", "Spider Man"), movie("accent", "Amélie"), movie("alias", "Other")])],
       "en",
     );
+
     expect(searchPage(index, "movie", "spiderman", () => "spider man").total).toBe(0);
     expect(searchPage(index, "movie", "amlie").total).toBe(0);
   });
@@ -319,6 +339,7 @@ describe.each([
       ],
       "nl",
     );
+
     const page = searchPage(index, "movie", "blow fr");
     expect(page.total).toBe(1);
     expect(ids(page.titles)).toEqual(["one/1"]);
@@ -341,6 +362,7 @@ describe.each([
       ],
       "en",
     );
+
     for (const query of ["story", "  STORY  ", "story story"]) {
       expect(ids(searchPage(index, "movie", query).titles)).toEqual([
         "one/exact",
@@ -359,6 +381,7 @@ describe.each([
       ],
       "en",
     );
+
     expect(ids(searchPage(index, "movie", "story", undefined, 6).titles)).toEqual(
       Array.from({ length: 6 }, (_, n) => `one/${n}`),
     );

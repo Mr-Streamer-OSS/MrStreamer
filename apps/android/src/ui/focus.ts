@@ -6,6 +6,7 @@ import { useState } from "react";
  */
 export function useKeyboardFocus() {
   const [focused, setFocused] = useState(false);
+
   return {
     focused,
     handlers: { onFocus: () => setFocused(true), onBlur: () => setFocused(false) },

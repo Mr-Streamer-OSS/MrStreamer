@@ -9,15 +9,18 @@ const PROVIDER = "http://provider.example:8080/live/user/secret/1.m3u8";
 /** Rewrites `text`, numbering each relayed URI and keeping what each stands for. */
 function rewrite(text: string, sound: string | null = null) {
   const routes: Array<{ url: string; kind: RouteKind }> = [];
+
   const result = rewritePlaylist(
     text,
     PROVIDER,
     (url, kind) => {
       routes.push({ url, kind });
+
       return `${routes.length}.${kind === "playlist" ? "m3u8" : "ts"}`;
     },
     sound,
   );
+
   return { result, routes };
 }
 
@@ -37,7 +40,9 @@ describe("rewritePlaylist", () => {
         '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="part.m4s"',
       ].join("\n"),
     );
+
     expect(result.kind).toBe("playlist");
+
     if (result.kind !== "playlist") return;
     expect(result.text).not.toMatch(/provider|cdn|secret|token=|part\.m4s/);
     expect(result.text).toContain('#EXT-X-MAP:URI="1.ts"');
@@ -53,6 +58,7 @@ describe("rewritePlaylist", () => {
   it("refuses a stream with a key, wherever it appears", () => {
     const keyed = (key: string) =>
       rewrite(["#EXTM3U", "#EXTINF:6,", "a.ts", key, "#EXTINF:6,", "b.ts"].join("\n")).result;
+
     expect(keyed('#EXT-X-KEY:METHOD=AES-128,URI="https://keys.example/k"')).toEqual({
       kind: "refused",
       refusal: "protected",
@@ -74,6 +80,7 @@ describe("rewritePlaylist", () => {
       ].join("\n"),
       "nl",
     );
+
     if (result.kind !== "playlist") throw new Error(result.kind);
     // Of the two Dutch tracks, the default one, as the phone would pick.
     expect(result.text).toContain("Nederlands 3");
@@ -91,6 +98,7 @@ describe("rewritePlaylist", () => {
           "v.m3u8",
         ].join("\n"),
       ).result;
+
     expect(only("hvc1.1.6.L120.90,mp4a.40.2")).toEqual({ kind: "refused", refusal: "codec" });
     expect(only("avc1.640028,ac-3")).toEqual({ kind: "refused", refusal: "codec" });
     expect(only("avc1.640033,mp4a.40.2")).toEqual({ kind: "refused", refusal: "codec" });
@@ -108,9 +116,11 @@ describe("rewritePlaylist", () => {
     // A channel with an AAC sound beside an AC-3 one still goes, naming only what the TV plays.
     const mixed = only("avc1.640028,mp4a.40.2,ac-3");
     expect(mixed.kind === "playlist" && mixed.text).toContain('CODECS="avc1.640028,mp4a.40.2"');
+
     // A Matroska file's renditions don't say which is the AC-3 one: it is refused.
     const file =
       '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028,mp4a.40.2,ac-3"\nv.m3u8\n';
+
     expect(rewritePlaylist(file, PROVIDER, () => "1.m3u8", null, true)).toEqual({
       kind: "refused",
       refusal: "codec",

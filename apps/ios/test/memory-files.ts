@@ -3,6 +3,7 @@
 export function memoryFiles(memory: { files: Map<string, string>; full: Set<string> }) {
   const pathOf = (parent: string | { readonly path: string }, name: string) =>
     `${typeof parent === "string" ? parent : parent.path}/${name}`;
+
   class Directory {
     readonly path: string;
     constructor(parent: string | Directory, name: string) {
@@ -14,6 +15,7 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
     create() {}
     list() {
       const within = `${this.path}/`;
+
       return [...memory.files.keys()].flatMap((path) =>
         path.startsWith(within) && !path.slice(within.length).includes("/")
           ? [new File(this, path.slice(within.length))]
@@ -21,6 +23,7 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
       );
     }
   }
+
   class File {
     path: string;
     constructor(parent: string | Directory, name: string) {
@@ -43,7 +46,9 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
     }
     textSync() {
       const text = memory.files.get(this.path);
+
       if (text === undefined) throw new Error("No such file");
+
       return text;
     }
     async text() {
@@ -53,6 +58,7 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
       if ([...memory.full].some((name) => this.path.endsWith(`/${name}.next`))) {
         throw new Error("The disk is full");
       }
+
       memory.files.set(this.path, text);
     }
     async write(text: string) {
@@ -70,5 +76,6 @@ export function memoryFiles(memory: { files: Map<string, string>; full: Set<stri
       memory.files.delete(this.path);
     }
   }
+
   return { File, Directory, Paths: { document: "/documents", cache: "/cache" } };
 }

@@ -29,6 +29,7 @@ interface Native {
 }
 
 let found: Native | null | undefined;
+
 /**
  * The native module, found where Expo installs every module before the app's JavaScript runs;
  * null in a build without it, and in the tests, which run in Node without Expo.
@@ -36,6 +37,7 @@ let found: Native | null | undefined;
 function native(): Native | null {
   const host: { expo?: { modules?: { KeyCommands?: Native } } } = globalThis;
   found ??= host.expo?.modules?.KeyCommands ?? null;
+
   return found;
 }
 
@@ -44,13 +46,16 @@ const sets = new Map<
   symbol,
   { readonly shortcuts: readonly Shortcut<string>[]; run(id: string): void }
 >();
+
 let listening: { remove(): void } | null = null;
 
 /** Gives the native side every mounted caller's shortcuts, as one set. */
 function install() {
   const module = native();
+
   if (!module) return;
   module.set([...sets.values()].flatMap((each) => each.shortcuts));
+
   if (sets.size === 0) {
     listening?.remove();
     listening = null;
@@ -81,10 +86,12 @@ export function useShortcuts<Id extends string>(
       shortcuts,
       run: (id) => {
         const shortcut = shortcuts.find((each) => each.id === id);
+
         if (shortcut) latest.current(shortcut.id);
       },
     });
     install();
+
     return () => {
       sets.delete(mine);
       install();

@@ -32,11 +32,14 @@ import { databaseLayer } from "../src/main/platform/database.ts";
 import { viewingStoreLayer } from "../src/main/platform/viewing-store.ts";
 
 const CHANNELS = 13_000;
+
 /** About this many favourites at a time. */
 const FAVOURITES = 50;
 const SAMPLES = 1_000;
+
 /** How many favourites the list put in another order holds: far more than anyone stars. */
 const ORDERED = 1_000;
+
 /** How often one favourite is sent to the end, for a median. */
 const MOVES = 200;
 
@@ -47,11 +50,15 @@ const { values } = parseArgs({
     json: { type: "string" },
   },
 });
+
 const events = positiveCount(values.events, "events", 1000000);
 const SUBSCRIPTIONS = positiveCount(values.subscriptions, "subscriptions", 4);
+
 const output =
   values.json ?? join(process.cwd(), ".local/measurements", `viewing-${Date.now()}.json`);
+
 prepareMeasurementOutput(output);
+
 const subscriptions = Array.from({ length: SUBSCRIPTIONS }, (_, index) => `measure-${index}`);
 const runtimes: { dispose(): Promise<void> }[] = [];
 const dataDir = await mkdtemp(join(tmpdir(), "mr-streamer-viewing-"));
@@ -91,20 +98,25 @@ async function start() {
       ),
     ),
   );
+
   runtimes.push(runtime);
+
   const viewing = await runtime.runPromise(
     Effect.gen(function* () {
       return yield* ViewingRecord;
     }),
   );
+
   return { runtime, viewing };
 }
 
 /** Median and 99th percentile of `samples`, in milliseconds. */
 function spread(samples: number[]): string {
   const sorted = samples.toSorted((a, b) => a - b);
+
   const at = (share: number) =>
     sorted[Math.min(sorted.length - 1, Math.floor(share * sorted.length))]!;
+
   return `median ${median(samples).toFixed(2)} ms, p99 ${at(0.99).toFixed(2)} ms`;
 }
 
@@ -112,11 +124,15 @@ try {
   // Mostly watches across the catalogue, with favourites changed now and then among a few.
   let { runtime, viewing } = await start();
   let seed = 9;
+
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+
     return seed / 2 ** 32;
   };
+
   const pick = (count: number) => String(Math.floor(random() * count));
+
   for (let index = 0; index < events; index++) {
     const command =
       index % 20 === 0
@@ -126,11 +142,13 @@ try {
             random() < 0.5,
           )
         : viewing.recordWatch(`fill-${index}`, own(pick(CHANNELS), index));
+
     await runtime.runPromise(command);
   }
 
   const watch: number[] = [];
   const favourite: number[] = [];
+
   for (let index = 0; index < SAMPLES; index++) {
     const channelId = String(index);
     let started = performance.now();
@@ -142,6 +160,7 @@ try {
     );
     favourite.push(performance.now() - started);
   }
+
   const state = await runtime.runPromise(viewing.state);
   await runtime.dispose();
 
@@ -162,6 +181,7 @@ try {
 
   const size =
     (await stat(database)).size + (await stat(`${database}-wal`).catch(() => ({ size: 0 }))).size;
+
   console.log(`events: ${state.sequence.toLocaleString("en")}`);
   console.log(`watch: ${spread(watch)}`);
   console.log(`favourite: ${spread(favourite)}`);
@@ -173,29 +193,37 @@ try {
   // A long list of favourites in another order: the least an order writes, the most, and all of
   // it turned around.
   ({ runtime, viewing } = await start());
+
   for (let index = 0; index < ORDERED; index++) {
     await runtime.runPromise(
       viewing.setFavourite(`order-star-${index}`, own(`ordered-${index}`), true),
     );
   }
+
   let ordered = await runtime.runPromise(viewing.state);
+
   const reorder = async (commandId: string, order: readonly OwnedId[]) => {
     const from = ordered;
     const began = performance.now();
     ordered = await runtime.runPromise(
       viewing.reorderFavourites(commandId, { original: from.favourites, order }),
     );
+
     return { ms: performance.now() - began, events: ordered.sequence - from.sequence };
   };
+
   const toEnd: { ms: number; events: number }[] = [];
+
   for (let index = 0; index < MOVES; index++) {
     const [first, ...others] = ordered.favourites;
     toEnd.push(await reorder(`order-end-${index}`, first ? [...others, first] : others));
   }
+
   const toFront = await reorder("order-front", [
     ...ordered.favourites.slice(-1),
     ...ordered.favourites.slice(0, -1),
   ]);
+
   const reversed = await reorder("order-reversed", ordered.favourites.toReversed());
   await runtime.dispose();
   db = new DatabaseSync(database);
@@ -207,8 +235,10 @@ try {
   const reordered = await runtime.runPromise(viewing.state);
   await runtime.dispose();
   const count = ordered.favourites.length.toLocaleString("en");
+
   const written = (order: { ms: number; events: number }) =>
     `${order.ms.toFixed(1)} ms, ${order.events.toLocaleString("en")} events`;
+
   const most = Math.max(...toEnd.map((order) => order.events));
   console.log(
     `order of ${count} favourites, one to the end: ${spread(toEnd.map((order) => order.ms))}, ${most} events at most`,
@@ -264,6 +294,7 @@ try {
   console.log(`Raw measurement: ${output}`);
 } finally {
   let runtimesDisposed = false;
+
   try {
     await Promise.all(runtimes.map((runtime) => runtime.dispose()));
     runtimesDisposed = true;

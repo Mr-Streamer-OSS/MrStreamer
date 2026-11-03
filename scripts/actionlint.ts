@@ -91,7 +91,9 @@ function host(): Host {
   const name = `${process.platform}-${process.arch}`;
   const known = Object.keys(ACTIONLINT.files);
   const found = known.find((each): each is Host => each === name);
+
   if (!found) throw new Error(`actionlint runs here on ${known.join(", ")}, not ${name}.`);
+
   return found;
 }
 
@@ -101,21 +103,26 @@ function host(): Host {
  */
 async function install(tool: Tool, on: Host): Promise<string> {
   const folder = join(CACHE, `${tool.name}-${tool.version}-${on}`);
+
   if (existsSync(join(folder, tool.program(on)))) return folder;
   const { file, sha256 } = tool.files[on];
   const response = await fetch(tool.url(file));
+
   if (!response.ok) throw new Error(`${tool.url(file)} answered HTTP ${response.status}.`);
   const archive = Buffer.from(await response.arrayBuffer());
   const actual = createHash("sha256").update(archive).digest("hex");
+
   if (actual !== sha256) {
     throw new Error(`${file} has SHA-256 ${actual}, not the pinned ${sha256}.`);
   }
+
   rmSync(folder, { recursive: true, force: true });
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, file), archive);
   // tar reads all three archive kinds: bsdtar on macOS and Windows unpacks ZIP files too.
   execFileSync("tar", ["-xf", file], { cwd: folder, stdio: "inherit" });
   rmSync(join(folder, file));
+
   return folder;
 }
 
@@ -123,18 +130,21 @@ async function main(): Promise<number> {
   const on = host();
   const actionlint = join(await install(ACTIONLINT, on), ACTIONLINT.program(on));
   const shellcheck = join(await install(SHELLCHECK, on), SHELLCHECK.program(on));
+
   // No step runs Python, and a pyflakes on one machine's PATH alone would make them disagree.
   const { status } = spawnSync(
     actionlint,
     ["-shellcheck", shellcheck, "-pyflakes=", ...process.argv.slice(2)],
     { stdio: "inherit" },
   );
+
   return status ?? 1;
 }
 
 if (import.meta.main) {
   process.exitCode = await main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
+
     return 1;
   });
 }

@@ -18,6 +18,7 @@ import { streams, type Rendition } from "./hls-stand-in.ts";
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return { default: standIn(real.default) };
 });
 
@@ -40,6 +41,7 @@ const SOUND: readonly Rendition[] = [
   { name: "English", lang: "en", default: true },
   { name: "Español", lang: "es" },
 ];
+
 /** English is the stream's default, as broadcasters mark the subtitles of their own language. */
 const SUBTITLES: readonly Rendition[] = [
   { name: "English", lang: "en", default: true },
@@ -60,6 +62,7 @@ async function open(id: string) {
   });
   await wait();
   await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
+
   return streams.latest();
 }
 
@@ -73,6 +76,7 @@ async function playing(id: string) {
   stream.subtitleLines([{ start: -2, end: -1, text: "Proof" }], "Deutsch");
   await wait();
   player.element.currentTime = 7;
+
   return stream;
 }
 
@@ -90,6 +94,7 @@ async function reopened(id: string) {
   });
   await wait();
   await vi.waitFor(() => expect(streams.count()).toBeGreaterThan(opened));
+
   return streams.latest();
 }
 
@@ -98,27 +103,36 @@ const listed = () => ({
   sound: player.state().tracks?.audio.map((track) => track.label),
   subtitles: player.state().tracks?.subtitles.map((track) => track.label),
 });
+
 const sound = (label: string) => player.state().tracks?.audio.find((each) => each.label === label);
+
 const subtitles = (label: string) => {
   const track = player.state().tracks?.subtitles.find((each) => each.label === label);
+
   if (!track) throw new Error(`The stream lists no ${label} subtitles.`);
+
   return track;
 };
+
 /** The sound Sound marks as playing, by label. */
 const soundPlaying = () => {
   const { audioId, tracks } = player.state();
+
   return tracks?.audio.find((track) => track.id === (audioId ?? tracks.playing))?.label;
 };
+
 /** Puts the picture at `position` seconds: happy-dom times no cues, so the test says where it is. */
 function skipTo(position: number): void {
   player.element.currentTime = position;
   player.element.dispatchEvent(new Event("seeked"));
 }
+
 /** What the viewer reads over the picture where it is, top to bottom. */
 const onScreen = () =>
   [...subtitleLayer.querySelectorAll<HTMLElement>("[data-subtitle-text] > div")]
     .flatMap((row) => (row.style.visibility !== "hidden" ? [row.textContent] : []))
     .reverse();
+
 /** Whether CC says the chosen subtitles are loading. */
 const loading = () => player.state().subtitleLoading;
 const saved = () => ipc.argsOf("preferences.update");

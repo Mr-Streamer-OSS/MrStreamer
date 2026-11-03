@@ -3,6 +3,7 @@ import { useId } from "react";
 /** The top hat mark. Inherits its size from `className` and its colour from `currentColor`. */
 export function Logo({ className }: { className?: string }) {
   const mask = useId();
+
   return (
     <svg viewBox="0 0 100 100" className={className} aria-hidden="true">
       <defs>

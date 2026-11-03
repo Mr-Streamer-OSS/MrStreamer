@@ -26,6 +26,7 @@ describe("the version menu choices", () => {
       "en",
       ["blue", "green"],
     );
+
     expect(groups.map((group) => group.versions[0]?.id)).toEqual([
       "uhd-blue",
       "uhd-green",
@@ -55,6 +56,7 @@ describe("the version menu choices", () => {
       version("first", ["UHD"], "blue", 1),
       version("green", ["4K"], "green"),
     ];
+
     const groups = versionOptions(choices, "en", ["blue", "green"]);
     expect(groups).toHaveLength(2);
     expect(groups[0]?.versions.map((file) => file.id)).toEqual(["first", "later"]);
@@ -70,11 +72,13 @@ describe("the version menu choices", () => {
 
   it("collapses only the same exact owned id, never matching labels or ids at different providers", () => {
     const file = version("same", ["HD"]);
+
     const groups = versionOptions(
       [file, file, version("different", ["HD"]), version("same", ["HD"], "green")],
       null,
       ["blue", "green"],
     );
+
     expect(groups.flatMap((group) => group.versions.map(ownedKey))).toEqual([
       "blue:same",
       "blue:different",
@@ -87,6 +91,7 @@ describe("the version menu choices", () => {
       ...version("read", ["4K"]),
       observed: { files: 1, audio: ["en"], subtitles: [] },
     };
+
     const unread = version("unread", ["4K"]);
     const group = versionOptions([read, unread], null, ["blue"])[0];
     expect(group?.versions[0]?.observed).toEqual({ files: 1, audio: ["en"], subtitles: [] });
@@ -103,6 +108,7 @@ describe("the version menu choices", () => {
       "en",
       ["blue"],
     );
+
     expect(groups.map(({ label, asListed }) => ({ label, asListed }))).toEqual([
       { label: "Several subtitle languages", asListed: false },
       { label: "Original sound", asListed: false },

@@ -7,6 +7,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       const at = Date.UTC(2026, 2, 29, 0, 30);
+
       return plain({
         amsterdam: wallClock(at, "Europe/Amsterdam"),
         newYork: wallClock(at, "America/New_York"),

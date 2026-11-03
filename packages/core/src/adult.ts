@@ -31,6 +31,7 @@ const ADULT = new RegExp(
   `(?<![\\p{L}\\p{N}+])(${ADULT_WORDS.map((word) => word.replaceAll("+", "\\+")).join("|")})(?![\\p{L}\\p{N}+])`,
   "iu",
 );
+
 /** Names that hold one of the words without meaning it. */
 const NOT_ADULT = /adult\s+swim/giu;
 
@@ -49,5 +50,6 @@ export function adultIn(
   const adult = new Set(
     categories.flatMap((category) => (isAdultCategory(category.name) ? [category.id] : [])),
   );
+
   return (item) => item.adult === true || item.categoryIds.some((id) => adult.has(id));
 }

@@ -19,27 +19,34 @@ export function guideNames(sources: readonly Named[]): ReadonlyMap<string, strin
   const ids = sources.map(({ id }) => id.replaceAll("-", "").toLowerCase());
   // How much of its id each one shows: none until it is alike another.
   const shown = sources.map(() => 0);
+
   const nameAt = (at: number) =>
     shown[at] ? `${bases[at]} ${ids[at]?.slice(0, shown[at])}` : (bases[at] ?? "");
+
   for (let grew = true; grew;) {
     grew = false;
     const alike = Map.groupBy(sources.keys(), (at) => nameAt(at).toLocaleLowerCase());
+
     for (const group of alike.values()) {
       if (group.length < 2) continue;
+
       for (const at of group) {
         const now = shown[at] ?? 0;
         const next = Math.min(now === 0 ? TAG : now + 1, ids[at]?.length ?? 0);
+
         if (next === now) continue;
         shown[at] = next;
         grew = true;
       }
     }
   }
+
   return new Map(sources.map(({ id }, at) => [id, nameAt(at)]));
 }
 
 /** `source`'s name among `listed`, as one of them where it isn't listed yet. */
 export function guideName(source: Named, listed: readonly Named[]): string {
   const among = listed.some(({ id }) => id === source.id) ? listed : [...listed, source];
+
   return guideNames(among).get(source.id) ?? hostOf(source.origin);
 }

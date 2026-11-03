@@ -24,14 +24,18 @@ export function promotionProblem(
   ancestry: Ancestry,
 ): string | null {
   const fresh = `A stable release needs a fresh tested nightly: test one published after ${stable.tag}.`;
+
   if (compareVersions(nightly.version, stable.version) <= 0) {
     return `${nightly.tag} sorts below ${stable.tag}, the newest stable release, so the upgrade check can't install it over that release. ${fresh}`;
   }
+
   if (ancestry === "identical") {
     return `${nightly.tag} was built from the same commit as ${stable.tag}, so it holds nothing new. ${fresh}`;
   }
+
   if (ancestry !== "ahead") {
     return `${nightly.tag} doesn't contain ${stable.tag}'s commit (${ancestry}), so it can hold older code than ${formatVersion(stable.version)}. ${fresh}`;
   }
+
   return null;
 }

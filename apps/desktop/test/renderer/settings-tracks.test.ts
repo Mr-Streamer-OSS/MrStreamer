@@ -11,9 +11,11 @@ import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import { PlaybackSection } from "../../src/renderer/src/features/settings/GeneralSection.tsx";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -36,6 +38,7 @@ describe("Settings > Playback", () => {
       detach();
       mounted.unmount();
     };
+
     await act(() => vi.advanceTimersByTimeAsync(20));
 
     const audio = container.querySelector<HTMLSelectElement>('select[aria-label="Audio in"]');
@@ -51,8 +54,10 @@ describe("Settings > Playback", () => {
     await mounted.render(createElement(PlaybackSection));
     unmount = mounted.unmount;
     await act(() => vi.advanceTimersByTimeAsync(20));
+
     const field = () =>
       container.querySelector<HTMLInputElement>('[aria-label="Next episode delay"]')!;
+
     const enter = async (value: string) => {
       await act(async () => {
         field().focus();
@@ -65,6 +70,7 @@ describe("Settings > Playback", () => {
       await act(async () => field().blur());
       await act(() => vi.advanceTimersByTimeAsync(20));
     };
+
     const saving = ipc.hold("preferences.update");
     await enter("37");
     expect(ipc.argsOf("preferences.update")).toEqual([{ nextEpisodeDelaySeconds: 37 }]);

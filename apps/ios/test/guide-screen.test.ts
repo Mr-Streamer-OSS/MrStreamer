@@ -47,6 +47,7 @@ const state = vi.hoisted(() => ({
       ) => Promise<Result<Query>>)
     | null,
 }));
+
 vi.mock("../src/guide.ts", async (original) => {
   const actual = await original<typeof import("../src/guide.ts")>();
   const { guideFixture } = await import("./native-guide.ts");
@@ -63,22 +64,28 @@ vi.mock("../src/guide.ts", async (original) => {
     after,
   ) => {
     state.queries.push({ ids, mode, from, until, after });
+
     return state.answer
       ? state.answer(mode, ids, from, until, after, _lease)
       : { kind: "ok", value: { guideId: null, rows: [], more: false } };
   };
+
   state.owner = actual.createGuide(
     () => state.fixture!.native,
     () => Date.now(),
     (await import("../src/sources.ts")).currentSource,
   );
+
   return { ...actual, guide: state.owner };
 });
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-router", async () => {
   const { createContext, useContext } = await import("react");
   state.focusContext = createContext(true);
   const navigation = { dispatch: (action: unknown) => state.did.push(action) };
+
   return {
     useIsFocused: () => useContext(state.focusContext!) && state.focused,
     useLocalSearchParams: () => state.params,
@@ -91,6 +98,7 @@ vi.mock("expo-router", async () => {
     },
   };
 });
+
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: [] }),
   onRoster: () => () => {},
@@ -104,12 +112,15 @@ vi.mock("../src/account.ts", () => ({
   retryChannels: () => {},
   reloadAllChannels: () => {},
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (tab: string, name: string) => (tab === "live" ? `/live/${name}` : `/${name}`),
   tabStack: (_state: unknown, tab: string) => (tab === "live" ? state.stack : undefined),
 }));
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Docked: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     useDockInset: () => 0,
@@ -120,14 +131,18 @@ vi.mock("../src/loading.tsx", async () => {
     Shape: () => null,
   };
 });
+
 vi.mock("../src/favourites.ts", () => ({
   useFavouriteKeys: () => new Set(),
   starChannel: () => {},
   useFavourites: () => null,
 }));
+
 vi.mock("../src/favourites-screen.tsx", () => ({ FavouritesEntry: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({
@@ -141,6 +156,7 @@ vi.mock("../src/glass.tsx", async () => {
     }) => createElement("button", { onClick: onPress, "data-testid": testID }, label),
   };
 });
+
 vi.mock("../src/playback.ts", () => ({
   channelStatus: () => null,
   usePlayback: () => ({ phase: { kind: "idle" }, watch: false }),
@@ -149,14 +165,19 @@ vi.mock("../src/playback.ts", () => ({
   setMuted: () => {},
   openWatch: () => state.did.push("watch"),
 }));
+
 vi.mock("../src/storage.ts", () => ({ useSavedState: () => ({}), writeState: () => {} }));
+
 vi.mock("../src/resume.ts", () => ({
   useContinueWatching: () => [],
   openDetails: () => {},
   resume: () => {},
 }));
+
 vi.mock("../src/viewing.ts", () => ({ removeFromContinue: () => {} }));
+
 vi.mock("../src/watchlist.ts", () => ({ useWatchlist: () => [], watchlistRows: () => [] }));
+
 vi.mock("../src/titles.ts", () => ({
   useCollections: () => null,
   useTitleLists: () => ({ kind: "failed" }),
@@ -165,11 +186,15 @@ vi.mock("../src/titles.ts", () => ({
   titlesWorkedOut: () => false,
   named: () => "",
 }));
+
 vi.mock("expo-video", () => ({ VideoView: () => null }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("react-native", async () => {
   const { createElement, useEffect, isValidElement } = await import("react");
   const { reactNative } = await import("./react-native.ts");
+
   type Props = {
     children?: React.ReactNode;
     testID?: string;
@@ -178,6 +203,7 @@ vi.mock("react-native", async () => {
     accessibilityValue?: { now?: number };
     ref?: React.Ref<HTMLDivElement>;
   };
+
   const box = ({ children, testID, accessibilityRole, accessibilityValue, ref }: Props) =>
     createElement(
       "div",
@@ -189,8 +215,10 @@ vi.mock("react-native", async () => {
       },
       children,
     );
+
   const node = (value: unknown) =>
     !value ? null : isValidElement(value) ? value : createElement(value as React.ComponentType);
+
   return {
     ...reactNative,
     AccessibilityInfo: {
@@ -228,6 +256,7 @@ vi.mock("react-native", async () => {
             .map((item) => ({ item, isViewable: true })),
         });
       }, [data, onViewableItemsChanged, state.first]);
+
       return createElement(
         "div",
         { "data-testid": testID },
@@ -242,6 +271,7 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 const { LiveHome, LiveTab } = await import("../src/live-screen.tsx");
 const { splitAt } = await import("../src/ui.tsx");
 const { default: Home } = await import("../src/app/(tabs)/(home)/index.tsx");
@@ -250,26 +280,33 @@ const { programmeRange } = await import("../src/guide-ui.tsx");
 let root: ReturnType<typeof createRoot>;
 let container: ReturnType<typeof document.createElement>;
 const at = new Date(2026, 9, 24, 12).getTime();
+
 const current: Programme = {
   title: "Actual ocean programme",
   start: at - 30 * 60_000,
   stop: at + 30 * 60_000,
   description: "A real fixture description",
 };
+
 const next: Programme = {
   title: "Actual next programme",
   start: current.stop,
   stop: current.stop + 3600_000,
   description: null,
 };
+
 const owner = () => {
   if (!state.owner) throw new Error("Owner missing");
+
   return state.owner;
 };
+
 const fixture = () => {
   if (!state.fixture) throw new Error("Fixture missing");
+
   return state.fixture;
 };
+
 function part(id = "a", count = 3, catchupDays: number | null = null) {
   return finish(
     partSteps({
@@ -290,6 +327,7 @@ function part(id = "a", count = 3, catchupDays: number | null = null) {
     }),
   );
 }
+
 async function install(id = "a", count = 3, age = 0, catchupDays: number | null = null) {
   const p = part(id, count, catchupDays);
   fixture().control.activations.set(id, {
@@ -300,16 +338,19 @@ async function install(id = "a", count = 3, age = 0, catchupDays: number | null 
   owner().setPart(p);
   state.catalogue = { kind: "ready", failing: [], library: combine([{ label: id, part: p }]) };
 }
+
 async function draw(node: React.ReactNode) {
   await React.act(async () => {
     root.render(node);
   });
 }
+
 async function settle() {
   await React.act(async () => {
     for (let i = 0; i < 30; i++) await Promise.resolve();
   });
 }
+
 async function click(
   label: string,
   within: Pick<typeof container, "querySelectorAll"> = container,
@@ -317,19 +358,23 @@ async function click(
   const button = [...within.querySelectorAll("button")].find(
     (button) => button.textContent === label || button.getAttribute("data-testid") === label,
   );
+
   if (!button) throw new Error(`Missing button ${label}: ${container.textContent}`);
   await React.act(async () => button.click());
   await settle();
 }
+
 function answer(rows: readonly Programme[], more = false): Result<Query> {
   return { kind: "ok", value: { guideId: "trusted-1", rows, more } };
 }
+
 const tick = async () => {
   await React.act(async () => {
     vi.advanceTimersByTime(60_000);
   });
   await settle();
 };
+
 function holdQueries(reply: NonNullable<typeof state.answer>) {
   const releases: (() => void)[] = [];
   let holding = true;
@@ -341,6 +386,7 @@ function holdQueries(reply: NonNullable<typeof state.answer>) {
           }),
         )
       : reply(...args);
+
   return {
     release: async () => {
       await React.act(async () => {
@@ -351,11 +397,13 @@ function holdQueries(reply: NonNullable<typeof state.answer>) {
     },
   };
 }
+
 beforeEach(async () => {
   vi.useFakeTimers({
     toFake: ["Date", "setInterval", "clearInterval", "setTimeout", "clearTimeout"],
   });
   vi.setSystemTime(at);
+
   for (const id of ["a", "b", "c"]) dropSource(id);
   state.focused = true;
   state.window = { width: 390, height: 844, fontScale: 1 };
@@ -366,6 +414,7 @@ beforeEach(async () => {
   state.params = {};
   state.did = [];
   state.queries = [];
+
   for (const id of ["a", "b", "c"]) await fixture().native.forget(id);
   fixture().control.activations.clear();
   state.answer = async (_mode, ids) =>
@@ -376,6 +425,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
 });
+
 afterEach(async () => {
   await React.act(async () => root.unmount());
   container.remove();
@@ -474,6 +524,7 @@ describe("selected A public guide UI with the real guide owner", () => {
     state.answer = async () => {
       throw new Error("private error must not escape");
     };
+
     await draw(React.createElement(ScheduleScreen, { origin: "home" }));
     await settle();
     expect(container.textContent).toContain("Guide unavailable");
@@ -533,6 +584,7 @@ describe("selected A public guide UI with the real guide owner", () => {
     expect(container.textContent).toContain("Today");
     const oldZone = process.env.TZ;
     process.env.TZ = "Europe/Amsterdam";
+
     try {
       vi.setSystemTime(new Date(2026, 9, 25, 12));
       await React.act(async () => owner().foreground());
@@ -555,6 +607,7 @@ describe("selected A public guide UI with the real guide owner", () => {
   it("navigates real local day boundaries when midnight is skipped", async () => {
     const previous = process.env.TZ;
     process.env.TZ = "America/Santiago";
+
     try {
       vi.setSystemTime(new Date(2026, 8, 6, 12));
       state.params = { channel: "a:1" };
@@ -655,10 +708,12 @@ describe("selected A public guide UI with the real guide owner", () => {
   });
   it("shows unavailable guide recovery through existing settings without inventing a retry queue", async () => {
     const restore = fixture().native.restore;
+
     try {
       fixture().native.restore = async () => {
         throw new Error("private native description");
       };
+
       await install("c");
       await draw(React.createElement(LiveHome));
       await settle();
@@ -680,10 +735,13 @@ describe("selected A public guide UI with the real guide owner", () => {
     async (name, Screen) => {
       await draw(React.createElement(Screen));
       await settle();
+
       if (name === "Live") await click("All");
+
       const gate = holdQueries(async () =>
         answer([{ ...current, title: "Updated broadcast" }, next]),
       );
+
       await tick();
       expect(container.textContent).toContain(current.title);
       expect(container.textContent).not.toContain("Loading programme");
@@ -692,6 +750,7 @@ describe("selected A public guide UI with the real guide owner", () => {
       state.answer = async () => {
         throw new Error("private read failure");
       };
+
       await tick();
       expect(container.textContent).toContain("Updated broadcast");
       expect(container.textContent).not.toContain("private read failure");
@@ -700,6 +759,7 @@ describe("selected A public guide UI with the real guide owner", () => {
 
   it("retains the represented schedule span across a held tick, mounted Programme and Back, then replaces both pages atomically", async () => {
     state.params = { channel: "a:1" };
+
     const pages = async (
       _mode: string,
       _ids: readonly string[],
@@ -707,8 +767,10 @@ describe("selected A public guide UI with the real guide owner", () => {
       _until: number,
       after: number,
     ) => (after < 0 ? answer([current], true) : answer([next]));
+
     state.answer = pages;
     let inspection = false;
+
     const stack = () =>
       React.createElement(
         React.Fragment,
@@ -726,6 +788,7 @@ describe("selected A public guide UI with the real guide owner", () => {
             )
           : null,
       );
+
     await draw(stack());
     await settle();
     await click("Next day");
@@ -792,6 +855,7 @@ describe("selected A public guide UI with the real guide owner", () => {
     state.answer = async () => {
       throw new Error("private refresh error");
     };
+
     await tick();
     expect(schedule.textContent).toContain("New second page");
     expect(schedule.textContent).toContain("Couldn't update schedule");
@@ -802,6 +866,7 @@ describe("selected A public guide UI with the real guide owner", () => {
       { server: "https://fixture.test", username: "fixture", password: "canary" },
       { userAgent: "fixture" },
     );
+
     await React.act(async () => {
       setSource("a", { revision: 1, provider, login: [] });
       await owner().attach("a");
@@ -811,11 +876,13 @@ describe("selected A public guide UI with the real guide owner", () => {
     await draw(React.createElement(Home));
     await settle();
     expect(container.textContent).toContain(current.title);
+
     const gate = holdQueries(async (_mode, _ids, _from, _until, _after, lease) =>
       answer([
         { ...current, title: lease === oldLease ? "Retired source title" : "New source title" },
       ]),
     );
+
     await tick();
     await React.act(async () => {
       setSource("a", { revision: 2, provider, login: [] });
@@ -835,6 +902,7 @@ describe("selected A public guide UI with the real guide owner", () => {
     async (populated) => {
       const a = part("a"),
         b = part("b");
+
       state.answer = async () => answer(populated ? [current, next] : []);
       fixture().control.activations.set("b", {
         lease: "lease-b",
@@ -855,20 +923,25 @@ describe("selected A public guide UI with the real guide owner", () => {
       await settle();
       await click("All");
       state.did = [];
+
       for (const [id, label] of [
         ["a", "line.alpha-tv.example"],
         ["b", "line.beta-tv.example"],
       ] as const) {
         const row = container.querySelector(`[data-testid="channel-${id}:1"]`)!;
+
         if (populated) expect(row.textContent).toContain(current.title);
         expect(row.textContent).toContain(label);
         expect(row.getAttribute("aria-label")).toContain(label);
         expect(row.getAttribute("aria-label")!.split(label)).toHaveLength(2);
+
         if (populated) expect(row.getAttribute("aria-label")).toContain(current.title);
         await click(`channel-${id}:1`);
         expect(state.did).toContainEqual({ play: `${id}:1`, watch: true });
       }
+
       await click("Guide");
+
       for (const [id, label] of [
         ["a", "line.alpha-tv.example"],
         ["b", "line.beta-tv.example"],
@@ -876,6 +949,7 @@ describe("selected A public guide UI with the real guide owner", () => {
         expect(
           container.querySelector(`[data-testid="schedule-${id}:1"]`)?.getAttribute("aria-label"),
         ).toContain(label);
+
         if (populated)
           expect(
             container
@@ -888,20 +962,24 @@ describe("selected A public guide UI with the real guide owner", () => {
           params: { channel: `${id}:1` },
         });
       }
+
       await draw(React.createElement(Home));
       await settle();
       state.did = [];
+
       for (const [id, label] of [
         ["a", "line.alpha-tv.example"],
         ["b", "line.beta-tv.example"],
       ] as const) {
         const tile = container.querySelector(`[data-testid="home-channel-${id}:1"]`)!;
+
         if (populated) expect(tile.textContent).toContain(current.title);
         expect(tile.textContent).toContain(label);
         expect([...tile.querySelectorAll("div")].some((line) => line.textContent === label)).toBe(
           true,
         );
         expect(tile.getAttribute("aria-label")).toContain(label);
+
         if (populated) expect(tile.getAttribute("aria-label")).toContain(current.title);
         expect(
           container
@@ -944,6 +1022,7 @@ describe("selected A public guide UI with the real guide owner", () => {
 
   it("does not append a held Show more reply over a refresh and keeps known rows after failed pagination", async () => {
     state.params = { channel: "a:1" };
+
     const pages = async (
       _mode: string,
       _ids: readonly string[],
@@ -951,6 +1030,7 @@ describe("selected A public guide UI with the real guide owner", () => {
       _until: number,
       after: number,
     ) => (after < 0 ? answer([current], true) : answer([next]));
+
     state.answer = pages;
     await draw(React.createElement(ScheduleScreen, { origin: "live" }));
     await settle();
@@ -969,6 +1049,7 @@ describe("selected A public guide UI with the real guide owner", () => {
     state.answer = async () => {
       throw new Error("private pagination error");
     };
+
     await click("Show more");
     expect(container.textContent).toContain(current.title);
     expect(container.textContent).toContain("Couldn't update schedule");
@@ -988,8 +1069,10 @@ describe("a programme's catch-up", () => {
     state.params = (state.did.at(-1) as { params: typeof state.params }).params;
     await draw(React.createElement(ProgrammeScreen, { origin: "live" }));
     await settle();
+
     return [...container.querySelectorAll("button")].map((button) => button.textContent);
   }
+
   const ended: Programme = { ...current, start: at - 3 * 3600_000, stop: at - 2 * 3600_000 };
 
   it("plays an ended programme the channel keeps from its start, before Watch live", async () => {
@@ -1027,6 +1110,7 @@ describe("a programme's catch-up", () => {
   ])("watches live only, saying why: $says", async ({ days, programme, says }) => {
     expect(await actions(programme, days)).toEqual(["Watch live"]);
     expect(container.textContent).not.toContain("↺");
+
     if (says) expect(container.textContent).toContain(says);
     else expect(container.textContent).not.toContain("catch-up");
   });
@@ -1037,12 +1121,14 @@ describe("Live on iPad and Duo windows", () => {
   const pushes = () => state.did.filter((did) => typeof did === "object" && did && "type" in did);
   afterEach(async () => {
     const { closeDetail } = await import("../src/live-screen.tsx");
+
     while (closeDetail());
   });
 
   it("splits by window width alone: from 700 points, or 1000 at accessibility text sizes", () => {
     // iPhone, Duo outer, Duo inner portrait and an iPad half-width window stay compact.
     for (const width of [402, 466, 669, 684]) expect(splitAt(width, 1)).toBe(false);
+
     // Duo inner landscape and iPad portrait and landscape split.
     for (const width of [700, 951, 1032, 1376]) expect(splitAt(width, 1)).toBe(true);
     expect(splitAt(951, 1.786)).toBe(false);
@@ -1063,11 +1149,13 @@ describe("Live on iPad and Duo windows", () => {
     expect(state.focus).toEqual(["focus Channel 1"]);
     expect(detail()?.textContent).toContain("Today");
     await click("Next day", detail()!);
+
     const tomorrow = new Date(at + 86400_000).toLocaleDateString(undefined, {
       weekday: "short",
       month: "short",
       day: "numeric",
     });
+
     expect(detail()?.textContent).toContain(tomorrow);
     // Its Schedule pressed again keeps the day shown.
     await click("schedule-a:1");
@@ -1225,6 +1313,7 @@ describe("Live on iPad and Duo windows", () => {
   it("moves VoiceOver to a column programme's channel once the channel is there", async () => {
     const ready = state.catalogue;
     state.catalogue = { kind: "loading" };
+
     const column = () =>
       React.createElement(Programme, {
         channel: "a:1",
@@ -1232,6 +1321,7 @@ describe("Live on iPad and Duo windows", () => {
         origin: "live",
         onBack: () => {},
       });
+
     await draw(column());
     await settle();
     expect(state.focus).toEqual([]);
@@ -1268,28 +1358,34 @@ describe("Live on iPad and Duo windows", () => {
 describe("Live's Guide grid", () => {
   it("keeps a visible row when a different row's render is suspended", async () => {
     const { useGuideGrid, localDay } = await import("../src/guide-ui.tsx");
+
     if (state.catalogue.kind !== "ready") throw new Error("Catalogue missing");
     const catalogue = state.catalogue.library;
     const waiting = new Promise<void>(() => {});
     let suspended = false;
+
     function Grid({ keys, suspend }: { keys: string[]; suspend: boolean }) {
       const { rows } = useGuideGrid(keys, localDay(at), catalogue);
+
       if (suspend) {
         suspended = true;
         throw waiting;
       }
+
       return React.createElement(
         "div",
         null,
         [...rows.values()].flatMap((row) => row.programmes.map((programme) => programme.title)),
       );
     }
+
     const screen = (keys: string[], suspend = false) =>
       React.createElement(
         React.Suspense,
         { fallback: "Loading" },
         React.createElement(Grid, { keys, suspend }),
       );
+
     const gate = holdQueries(async () => answer([current]));
     await draw(screen(["a:1"]));
     await React.act(async () => {
@@ -1302,16 +1398,21 @@ describe("Live's Guide grid", () => {
 
   const cell = (key: string, programme: Programme) =>
     container.querySelector(`[data-testid="grid-${key}-${programme.start}"]`);
+
   const detail = () => container.querySelector('[data-testid="live-detail"]');
+
   /** Live on its Guide, around now. */
   async function guide(screen: React.ComponentType = LiveTab) {
     await draw(React.createElement(screen));
     await settle();
     await click("Guide");
+
     if (container.textContent?.includes("Now")) await click("Now");
   }
+
   afterEach(async () => {
     const { closeDetail } = await import("../src/live-screen.tsx");
+
     while (closeDetail());
   });
 
@@ -1329,9 +1430,11 @@ describe("Live's Guide grid", () => {
     expect(container.querySelector('[data-testid="live-guide"]')?.textContent).toContain(
       "No programme information",
     );
+
     const read = new Set(
       state.queries.filter((query) => query.mode === "day").flatMap((query) => query.ids),
     );
+
     expect(read.size).toBeLessThanOrEqual(24);
     expect(read.has("trusted-30")).toBe(false);
   });
@@ -1346,6 +1449,7 @@ describe("Live's Guide grid", () => {
     "titles each quarter-hour programme's cell at %s, in an hour's window or 45 minutes",
     async (_size, width, fontScale, hour) => {
       state.window = { width, height: 844, fontScale };
+
       const short = ["Field Notes", "Weather Watch", "Tide Tables", "Kids Club"].map(
         (title, i) => ({
           title,
@@ -1354,8 +1458,10 @@ describe("Live's Guide grid", () => {
           description: null,
         }),
       );
+
       state.answer = async () => answer(short);
       await guide();
+
       // Around noon the window starts at 11:45, so Kids Club, 12:30 to 12:45, is in an hour only.
       for (const programme of short.slice(0, 3))
         expect(cell("a:1", programme)?.textContent).toContain(programme.title);
@@ -1370,6 +1476,7 @@ describe("Live's Guide grid", () => {
       stop: start + 10 * 60_000,
       description: null,
     });
+
     const words = brief("👩‍🚀 launch Night", at);
     const emoji = brief("⚽️ 🏆", at + 10 * 60_000);
     state.answer = async () => answer([words, emoji]);
@@ -1423,8 +1530,10 @@ describe("Live's Guide grid", () => {
     // Every page says there is more, so the grid stops after its own pages, before noon.
     state.answer = async (_mode, _ids, _from, _until, after) => {
       const start = Math.max(after, current.start - 6 * 3600_000) + 60_000;
+
       return answer([{ ...current, start, stop: start + 60_000 }], true);
     };
+
     await guide();
     expect(container.textContent).toContain("More in Schedule");
     state.answer = async () => answer([current]);
@@ -1457,6 +1566,7 @@ describe("Live's Guide grid", () => {
     state.answer = async (mode, ids, ...rest) =>
       mode === "detail" ? answer([current]) : base(mode, ids, ...rest);
     await guide();
+
     // Another screen reads a day of more programmes than the owner keeps tokens for.
     const many = Array.from({ length: 8200 }, (_, i) => ({
       title: `Filler ${i}`,
@@ -1464,13 +1574,16 @@ describe("Live's Guide grid", () => {
       stop: current.start + i + 1,
       description: null,
     }));
+
     // That read only: a native page holds at most 128, so a grid row never holds this many.
     const withMany = state.answer;
     state.answer = async (mode, ids, ...rest) => {
       if (ids[0] !== "trusted-3") return withMany(mode, ids, ...rest);
       state.answer = withMany;
+
       return answer(many);
     };
+
     await React.act(async () => {
       await owner().schedule("a:3", {
         from: new Date(2026, 9, 24).getTime(),
@@ -1498,12 +1611,15 @@ describe("Live's Guide grid", () => {
     await guide();
     state.queries = [];
     await click("Next day");
+
     const reads = state.queries
       .filter((query) => query.mode === "day")
       .map((query) => query.ids.join());
+
     // Channel 2 names no guide id, so no guide is asked for it.
     expect(reads).toHaveLength(19);
     expect(new Set(reads).size).toBe(19);
+
     for (let i = 1; i <= 20; i++)
       if (i !== 2) expect(container.querySelector(`[data-testid^="grid-a:${i}-"]`)).not.toBeNull();
   });
@@ -1534,6 +1650,7 @@ describe("Live's Guide grid", () => {
   it("keeps one provider's rows reading while another provider changes", async () => {
     const a = part("a"),
       b = part("b");
+
     fixture().control.activations.set("b", {
       lease: "lease-b",
       generation: { id: "db-b", fetchedAt: Date.now(), until: Date.now() + 86400_000 },
@@ -1554,12 +1671,15 @@ describe("Live's Guide grid", () => {
     let readsOfB = 0;
     state.answer = (mode, ids, from, until, after, lease) => {
       if (lease !== "lease-b") return base(mode, ids, from, until, after, lease);
+
       if (mode === "day" && ids[0] === "trusted-1" && from === new Date(2026, 9, 24).getTime())
         readsOfB++;
+
       return new Promise((resolve) =>
         held.push(() => void base(mode, ids, from, until, after, lease).then(resolve)),
       );
     };
+
     await guide();
     expect(readsOfB).toBe(1);
     // Provider a signs in again while b's rows are still being read.
@@ -1574,10 +1694,12 @@ describe("Live's Guide grid", () => {
       });
     });
     await settle();
+
     while (held.length) {
       await React.act(async () => held.splice(0).forEach((release) => release()));
       await settle();
     }
+
     expect(cell("b:1", current)).not.toBeNull();
     expect(readsOfB).toBe(1);
   });
@@ -1630,12 +1752,14 @@ describe("Live's Guide grid", () => {
 
   it("moves a 45-minute window by half an hour at large text", async () => {
     state.window = { width: 390, height: 844, fontScale: 1.786 };
+
     const quarter = (minutes: number) => ({
       title: `At ${minutes}`,
       start: at + minutes * 60_000,
       stop: at + (minutes + 15) * 60_000,
       description: null,
     });
+
     const [noon, one] = [quarter(0), quarter(60)];
     state.answer = async () => answer([noon, one]);
     await guide();
@@ -1674,6 +1798,7 @@ describe("Live's Guide grid", () => {
   it("keeps a programme open beside it while many rows scroll by and a minute passes", async () => {
     state.window = { width: 1032, height: 1376, fontScale: 1 };
     await install("a", 80);
+
     // A realistic day, 48 programmes a row, so the rows read mint thousands of detail tokens.
     const day = [
       current,
@@ -1684,17 +1809,20 @@ describe("Live's Guide grid", () => {
         description: null,
       })),
     ];
+
     state.answer = async (mode) => (mode === "detail" ? answer([current]) : answer(day));
     state.visible = 16;
     await guide();
     state.did = [];
     await click(`grid-a:1-${current.start}`);
     expect(detail()?.textContent).toContain(current.description);
+
     for (const first of [16, 32, 48, 64]) {
       state.first = first;
       await draw(React.createElement(LiveTab));
       await settle();
     }
+
     expect(state.queries.some((query) => query.ids.includes("trusted-75"))).toBe(true);
     await tick();
     expect(detail()?.textContent).toContain(current.description);

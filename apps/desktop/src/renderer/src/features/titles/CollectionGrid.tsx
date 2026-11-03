@@ -60,7 +60,9 @@ export function usePages(listKey: string): {
     key: listKey,
     pages: FIRST_PAGE,
   }));
+
   const pages = asked.key === listKey ? asked.pages : FIRST_PAGE;
+
   const load = useCallback(
     (first: number, last: number) => {
       // Nothing in view yet, before the grid has measured its rows.
@@ -69,6 +71,7 @@ export function usePages(listKey: string): {
       const wanted = Array.from({ length: Math.floor(last / PAGE) - from + 1 }, (_, i) => from + i);
       setAsked((current) => {
         const had = current.key === listKey ? current.pages : FIRST_PAGE;
+
         return wanted.every((page) => had.has(page)) && current.key === listKey
           ? current
           : { key: listKey, pages: new Set([...had, ...wanted]) };
@@ -76,6 +79,7 @@ export function usePages(listKey: string): {
     },
     [listKey],
   );
+
   return { pages: [...pages], load };
 }
 
@@ -92,14 +96,17 @@ export function useCollection(
 ) {
   const visible = usePresentationVisible();
   const { pages, load } = usePages(`${kind}:${id}:${sort ?? ""}:${JSON.stringify(filters ?? {})}`);
+
   const loaded = useQueries({
     queries: pages.map((page) => ({
       ...queries.collection(kind, id, sort, page * PAGE, PAGE, filters),
       enabled: visible,
     })),
   });
+
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
+
   return {
     name: first?.name ?? null,
     total: first ? first.total : null,
@@ -130,6 +137,7 @@ export function CollectionGrid({
   hideCount?: boolean;
 } & Partial<TitleFilterControls>) {
   const listed = useCollection(kind, id, sort, filters);
+
   // Each poster is the version the grid lists, as the 4K tab's are their 4K versions.
   const open = (title: Title) =>
     openDetails({
@@ -137,6 +145,7 @@ export function CollectionGrid({
       ...ownedId(title),
       asked: id === "4k" || (!!filters && Object.keys(filters).length > 0),
     });
+
   return (
     <>
       {filters && onFilters && (
@@ -208,6 +217,7 @@ export function TitleGrid({
   onFocusTaken?: () => void;
 }) {
   const open = (title: Title) => openDetails({ kind: title.kind, ...ownedId(title), asked });
+
   return (
     <Grid
       total={titles.length}
@@ -254,23 +264,29 @@ function locate<T>(
   keyOf: (item: T) => string,
 ): number | null {
   const kept = Math.min(chosen.index, Math.max(total - 1, 0));
+
   if (chosen.key === null) return kept;
   const there = chosen.index < total ? itemAt(chosen.index) : undefined;
+
   if (there && keyOf(there) === chosen.key) return kept;
   // Nearest first: an insertion or a removal moves it only a little.
   const span = Math.max(chosen.index, total - 1 - chosen.index);
+
   for (let distance = 1; distance <= span; distance++) {
     for (const at of [chosen.index - distance, chosen.index + distance]) {
       const item = at >= 0 && at < total ? itemAt(at) : undefined;
+
       if (item && keyOf(item) === chosen.key) return at;
     }
   }
+
   return null;
 }
 
 /** The selected tile's control the focus belongs on: `part` 0 is the one that opens it. */
 function controlOf(scroller: HTMLElement, index: number, part: number): HTMLElement | null {
   const controls = scroller.querySelectorAll<HTMLElement>(`[data-index="${index}"] button`);
+
   return controls[Math.min(part, controls.length - 1)] ?? null;
 }
 
@@ -313,9 +329,11 @@ export function Grid<T>({
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const element = box.current;
+
     if (!element) return;
     const observer = new ResizeObserver(() => setWidth(element.clientWidth));
     observer.observe(element);
+
     return () => observer.disconnect();
   }, []);
   const gap = GAP_REM * rem;
@@ -337,6 +355,7 @@ export function Grid<T>({
   const selected = found ?? Math.min(chosen.index, Math.max(total - 1, 0));
   const selectedItem = itemAt(selected);
   const selectedKey = pending || !selectedItem ? chosen.key : keyOf(selectedItem);
+
   // Kept where it was found, so the next render needn't look for it again.
   if (selected !== chosen.index || selectedKey !== chosen.key)
     setChosen({ key: selectedKey, index: selected });
@@ -345,17 +364,20 @@ export function Grid<T>({
   // The rows in view and their overscan, without the selected row drawn beside them.
   const drawn = useRef<readonly number[]>([]);
   const visibleRows = useRef(1);
+
   const rangeExtractor = useCallback(
     (range: Range) => {
       const shown = defaultRangeExtractor(range);
       drawn.current = shown;
       visibleRows.current = Math.max(1, range.endIndex - range.startIndex + 1);
+
       return selectedRow >= range.count || shown.includes(selectedRow)
         ? shown
         : [...shown, selectedRow].sort((a, b) => a - b);
     },
     [selectedRow],
   );
+
   const virtual = useVirtualizer({
     count: rows,
     getScrollElement: () => box.current,
@@ -363,6 +385,7 @@ export function Grid<T>({
     overscan: 2,
     rangeExtractor,
   });
+
   useEffect(() => virtual.measure(), [rowHeight, virtual]);
   const items = virtual.getVirtualItems();
   const firstRow = drawn.current[0] ?? 0;
@@ -391,20 +414,26 @@ export function Grid<T>({
       follow.current = false;
       part.current = null;
     };
+
     document.addEventListener("focusin", elsewhere);
+
     return () => document.removeEventListener("focusin", elsewhere);
   }, []);
+
   const select = (index: number) => {
     const item = itemAt(index);
     setChosen({ key: item ? keyOf(item) : null, index });
   };
+
   const open = (index: number, focus: boolean) => {
     const item = itemAt(index);
+
     if (!item) return;
     reopen.current = { focus: focus || !!box.current?.contains(document.activeElement) };
     setChosen({ key: keyOf(item), index });
     onOpen(item);
   };
+
   const state = useRef({
     selected,
     pending,
@@ -414,6 +443,7 @@ export function Grid<T>({
     select,
     open,
   });
+
   state.current = {
     selected,
     pending,
@@ -425,12 +455,16 @@ export function Grid<T>({
   };
   useEffect(() => {
     if (!active) return;
+
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
+
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
+
       if (ui.searchOpen || ui.settings || ui.updateDialog || ui.details || ui.playingTitle) return;
       const target = event.target instanceof Element ? event.target : null;
+
       // A dialog's or a menu's keys are its own, wherever it is drawn.
       if (target?.closest('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]'))
         return;
@@ -438,18 +472,22 @@ export function Grid<T>({
       // Enter on a focused button, such as a tab or a tile's cross, is the button's. On the poster
       // that opens the selected tile it is the grid's, so the title opens once.
       const opener = !!box.current && controlOf(box.current, current.selected, 0) === target;
+
       if (event.key === "Enter" && target instanceof HTMLButtonElement && !opener) return;
+
       const move = (delta: number) => {
         const next = Math.min(
           Math.max(current.selected + delta, 0),
           Math.max(current.total - 1, 0),
         );
+
         current.select(next);
         // Another key before the next render goes on from here.
         current.selected = next;
         follow.current = true;
         virtual.scrollToIndex(Math.floor(next / current.columns), { align: "auto" });
       };
+
       switch (event.key) {
         case "ArrowRight":
           move(1);
@@ -481,9 +519,12 @@ export function Grid<T>({
         default:
           return;
       }
+
       event.preventDefault();
     }
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, [active, virtual]);
 
@@ -492,22 +533,28 @@ export function Grid<T>({
   // and waits while the selected title's pages are still being read.
   useLayoutEffect(() => {
     const scroller = box.current;
+
     if (!scroller || !active || pending) return;
     const focused = document.activeElement;
     const within = !!focused && scroller.contains(focused);
     const idle = !focused || focused === document.body;
     const lost = idle && part.current !== null;
     const handed = takeFocus && (within || idle);
+
     if (!follow.current && !handed && !within && !lost) return;
+
     const target = controlOf(
       scroller,
       selected,
       follow.current || handed ? 0 : (part.current ?? 0),
     );
+
     // Its page is still on its way.
     if (!target) return;
     follow.current = false;
+
     if (handed) onFocusTaken?.();
+
     if (target !== focused) target.focus({ preventScroll: true });
   });
 
@@ -520,13 +567,16 @@ export function Grid<T>({
   useLayoutEffect(() => {
     const back = active && !wasActive.current ? reopen.current : null;
     wasActive.current = active;
+
     if (!back) return;
     reopen.current = null;
     const opener = chosen;
+
     if (back.focus) virtual.scrollToIndex(selectedRow, { align: "auto" });
     queueMicrotask(() => {
       const scroller = box.current;
       const focused = document.activeElement;
+
       if (!scroller || (!back.focus && !(focused && scroller.contains(focused)))) return;
       // A new object, so the grid draws again and its focus effect runs.
       setChosen({ ...opener });
@@ -546,6 +596,7 @@ export function Grid<T>({
       ref={box}
       onFocus={(event: FocusEvent) => {
         const tile = event.target.closest<HTMLElement>("[data-index]");
+
         if (!tile) return;
         const controls = [...tile.querySelectorAll("button")];
         part.current = Math.max(
@@ -555,6 +606,7 @@ export function Grid<T>({
         // The focus went to another tile by itself, as a screen reader moves it: so does the
         // selection.
         const index = Number(tile.dataset["index"]);
+
         if (Number.isInteger(index) && index !== state.current.selected)
           state.current.select(index);
       }}
@@ -569,6 +621,7 @@ export function Grid<T>({
         {items.map((row) => {
           // Keys stay unique in a row even while two pages read at different times overlap.
           const seen = new Set<string>();
+
           return (
             <div
               key={row.key}
@@ -581,8 +634,10 @@ export function Grid<T>({
             >
               {Array.from({ length: columns }, (_, column) => {
                 const index = row.index * columns + column;
+
                 if (index >= total) return null;
                 const item = itemAt(index);
+
                 if (!item)
                   return (
                     <div key={`loading:${index}`}>
@@ -592,6 +647,7 @@ export function Grid<T>({
                 const key = keyOf(item);
                 const unique = seen.has(key) ? `${key}@${index}` : key;
                 seen.add(key);
+
                 return (
                   <div
                     key={unique}
@@ -621,6 +677,7 @@ export function Grid<T>({
 function GridPoster({ title, caption, grid }: { title: Title; caption: string; grid: GridTile }) {
   // Whose it is, where another subscription's title reads the same and isn't this one.
   const source = useSourceOf()(title);
+
   return (
     <button
       tabIndex={grid.tabIndex}

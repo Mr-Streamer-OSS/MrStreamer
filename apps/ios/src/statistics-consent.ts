@@ -6,12 +6,15 @@ import { setStatistics, statisticsChoice } from "./telemetry/index.ts";
 export function requestStatisticsChoice(onDone?: () => void): void {
   if (statisticsChoice() !== null) {
     onDone?.();
+
     return;
   }
+
   const choose = (enabled: boolean) => {
     setStatistics(enabled);
     onDone?.();
   };
+
   Alert.alert(
     t("Share usage statistics?"),
     t(

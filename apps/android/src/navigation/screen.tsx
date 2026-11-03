@@ -17,6 +17,7 @@ export interface Detail {
 
 /** From 840dp wide (Material's expanded window class) a detail pane shows beside its list. */
 const DETAIL_BESIDE = 840;
+
 /** The pane's width beside its list, as Paper A's tablet Guide has it. */
 const DETAIL_WIDTH = 360;
 
@@ -61,15 +62,19 @@ export function Screen({
     // Screens under a pushed one, and on other destinations, stay mounted: only the one showing
     // takes Back. Its listener is newer than the stacks' own, so it runs first.
     if (!open || !focused) return;
+
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       close.current?.();
+
       return true;
     });
+
     return () => back.remove();
   }, [open, focused]);
   const beside = width >= DETAIL_BESIDE;
   const folded = open && !beside;
   const onBack = detail ? detail.onClose : pushed ? () => router.back() : undefined;
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <TopAppBar

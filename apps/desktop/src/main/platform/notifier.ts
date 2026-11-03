@@ -10,15 +10,18 @@ import type { Notifier } from "../services/reminders.ts";
 /** Notifications that bring the window forward with `focus` when clicked. Once the app is ready. */
 export function electronNotifier(focus: () => void): Notifier {
   const held = new Map<string, Notification>();
+
   return {
     supported: Notification.isSupported(),
     show(notice, events) {
       held.get(notice.id)?.close();
+
       const notification = new Notification({
         id: notice.id,
         title: notice.title,
         body: notice.body,
       });
+
       held.set(notice.id, notification);
       notification.on("show", () => events.shown());
       notification.on("click", () => {

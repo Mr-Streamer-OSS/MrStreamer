@@ -32,6 +32,7 @@ import { defined } from "@mrstreamer/core/defined";
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
+
 const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
 
@@ -39,8 +40,10 @@ const LOCAL: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
 const MOVIE = "TEST | Long subtitles";
 const SHOWN = { name: "A movie" };
 const ANCHOR = { x: 900, y: 40, width: 36, height: 36 };
+
 /** Where the system's list opens, known at once, as from a window that stands still. */
 const at = (anchor: ScreenRect) => () => Promise.resolve(anchor);
+
 /**
  * A place the list has to wait for, as from a window still on its way, until the test gives it
  * with `arrive`. `calledOff` says whether the service gave the wait up meanwhile.
@@ -48,9 +51,11 @@ const at = (anchor: ScreenRect) => () => Promise.resolve(anchor);
 function onItsWay() {
   const found = Promise.withResolvers<ScreenRect | null>();
   let wait: AbortSignal | null = null;
+
   return {
     place: (signal: AbortSignal) => {
       wait = signal;
+
       return found.promise;
     },
     arrive: found.resolve,
@@ -77,6 +82,7 @@ async function casting(
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 50 });
   const tv = await startFakeCastReceiver();
   const helper = await startFakeAirplayHelper();
+
   const runtime = runtimeFor(
     mainLayer({
       ...testConfig(await tempDir()),
@@ -109,6 +115,7 @@ async function casting(
       },
     }),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
   await subscriptions.add(demoLogin(provider));
   const [source] = await subscriptions.sources();
@@ -123,6 +130,7 @@ async function casting(
   const movie = provider.titles.movies.find((each) => each.name.startsWith(MOVIE))!;
   const title: TitleRef = { kind: "movie", ...own(String(movie.id)) };
   const file = (await source!.provider.titleFile("movie", title.id, movie.container)).url;
+
   /** The second episode of the series the provider lists first, an MP4, and where its file is. */
   const episode: EpisodeRef = {
     kind: "episode",
@@ -131,17 +139,22 @@ async function casting(
     season: 1,
     episode: 2,
   };
+
   const episodeFile = (await source!.provider.titleFile("episode", episode.id, "mp4")).url;
+
   /** A channel that streams without end. */
   const channel = own(
     String(provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId),
   );
+
   /** Connects to the TV, as picking it in the app's list does. */
   const connect = async () => {
     await output.scan(true);
     await eventually(async () => expect((await output.status()).receivers).toHaveLength(1));
+
     return output.connect(tv.receiver.id);
   };
+
   /**
    * Opens the movie, or the episode, for the receiver and plays it from `position` seconds, as
    * the play the viewer began at `since`: now, unless it began on this computer before.
@@ -154,17 +167,21 @@ async function casting(
     const opened = await (what === "movie"
       ? output.openTitle(title, file, since)
       : output.openTitle(episode, episodeFile, since));
+
     const media = await output.playTitle(opened.sessionId, {
       position,
       audio: null,
       subtitle: null,
       shown: SHOWN,
     });
+
     return { opened, media };
   };
+
   /** The LOAD the TV was sent last. */
   const loaded = () =>
     tv.requests("LOAD").at(-1) as { media: { contentId: string } } & Record<string, unknown>;
+
   /**
    * Asks for a stream as a receiver does, its playlists and its first segment: the one the TV was
    * sent last, or the one at `address`.
@@ -173,18 +190,23 @@ async function casting(
     const main = await (await fetch(address)).text();
     const stream = main.split("\n").find((line) => line && !line.startsWith("#"))!;
     const video = new URL(stream, address).href;
+
     const first = (await (await fetch(video)).text())
       .split("\n")
       .find((line) => /^[^#]/.test(line))!;
+
     return fetch(new URL(first, video).href);
   };
+
   const state = async () => (await output.status()).output;
+
   /**
    * How far the record says the movie got, in seconds, for the subscription connected first or
    * for `subscriptionId`, which lists a movie under the same id; null when it has nothing.
    */
   const saved = async (subscriptionId = title.subscriptionId) =>
     (await viewing.progress({ movies: [{ subscriptionId, id: title.id }] }))[0]?.position ?? null;
+
   return {
     saved,
     own,
@@ -221,6 +243,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
   it("reports a failed prepared title before observation, leaving adapter load failure to its observer", async () => {
     const early: string[] = [];
     const physical: string[] = [];
+
     const { output, playback, coordination, tv, connect, title, file } = await casting({
       observePlayback: () => ({
         state() {},
@@ -229,6 +252,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
         end() {},
       }),
     });
+
     await connect();
     const prepared = await output.openTitle(title, file, Date.now());
     await playback.close(prepared.sessionId);
@@ -307,6 +331,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
   it("hands a title to the receiver at its position and follows the receiver's clock", async () => {
     const { provider, tv, playback, connect, play, loaded, fetches, state, changes, title, file } =
       await casting();
+
     const local = await playback.openTitle(title, file, LOCAL);
     await connect();
 
@@ -352,6 +377,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
       subtitle: null,
       shown: SHOWN,
     });
+
     expect(second.generation).toBeGreaterThan(first.media.generation);
     const paused = tv.requests("PAUSE").length;
     await output.command(first.media.generation, { command: "pause" });
@@ -598,6 +624,7 @@ describe.skipIf(!hasTools)("playback on a receiver", () => {
       variants: [String(offline.streamId)],
       shown: { name: "A channel" },
     });
+
     expect(media).toMatchObject({ state: "loading", duration: null, item: { kind: "channel" } });
     expect(loaded()).toMatchObject({ media: { streamType: "LIVE" } });
     expect(loaded().media.contentId).toMatch(/\/r\/[\w-]+\/live\.m3u8$/);
@@ -637,6 +664,7 @@ describe.skipIf(!hasTools)("playback through the system's list of receivers", ()
     expect(response.status).toBe(200);
     // Keep reading as the viewer does, so collection of an abandoned response cannot stop it.
     const reading = response.body?.pipeTo(new WritableStream()).catch(() => {});
+
     try {
       await eventually(() => expect(provider.activeStreams()).toBe(1));
 
@@ -1092,6 +1120,7 @@ it.skipIf(!hasTools)(
       stops: number;
       ends: number;
     }[] = [];
+
     const { output, tv, connect, play } = await casting({
       observePlayback: (kind, control) => {
         const item = {
@@ -1102,7 +1131,9 @@ it.skipIf(!hasTools)(
           stops: 0,
           ends: 0,
         };
+
         observations.push(item);
+
         return {
           state: (state) => {
             item.states.push(state);
@@ -1119,6 +1150,7 @@ it.skipIf(!hasTools)(
         };
       },
     });
+
     await connect();
     const { opened } = await play(10);
     expect(observations).toHaveLength(1);
@@ -1163,6 +1195,7 @@ it.skipIf(!hasTools)(
   async () => {
     const store = { record: null as AnalyticsRecord | null };
     const events: CaptureEvent[] = [];
+
     const analytics = new Analytics({
       dataDir: await tempDir(),
       origin: Promise.resolve("fresh"),
@@ -1182,10 +1215,12 @@ it.skipIf(!hasTools)(
         kind: "local",
         async send(event) {
           events.push(event);
+
           return "accepted";
         },
       },
     });
+
     const facts = () =>
       events.flatMap((event) =>
         event.event === "stream_started"
@@ -1196,9 +1231,11 @@ it.skipIf(!hasTools)(
               ? [`error ${event.properties.error_type}`]
               : [],
       );
+
     const { output, tv, connect, title, file, provider, own, loaded, dispose } = await casting({
       observePlayback: (kind, control) => analytics.remotePlayback(kind, control),
     });
+
     try {
       analytics.setForeground(true);
       await eventually(() =>
@@ -1209,16 +1246,19 @@ it.skipIf(!hasTools)(
         ]),
       );
       await connect();
+
       /** A title for the receiver under a run of its own, as when no window is left to ask. */
       const playRun = async (position: number) => {
         const control = analytics.beginPlayback("vod")!;
         const opened = await output.openTitle(title, file, Date.now(), { measurement: control });
+
         const media = await output.playTitle(opened.sessionId, {
           position,
           audio: null,
           subtitle: null,
           shown: SHOWN,
         });
+
         return { control, opened, media };
       };
 
@@ -1235,12 +1275,14 @@ it.skipIf(!hasTools)(
       tv.status({ playerState: "PLAYING", currentTime: 11 });
       await eventually(() => expect(store.record?.summaries?.unfinished).toBeTruthy());
       await eventually(() => expect(facts()).toHaveLength(1));
+
       const reload = await output.playTitle(second.opened.sessionId, {
         position: 20,
         audio: second.opened.audio[0]!.id,
         subtitle: null,
         shown: SHOWN,
       });
+
       tv.status({ playerState: "PLAYING", currentTime: 21 });
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(facts()).toHaveLength(1);
@@ -1271,9 +1313,11 @@ it.skipIf(!hasTools)(
 
       // A channel whose stream breaks is an incident to retry, not the end of its run.
       await connect();
+
       const broken = provider.catalogue.channels.find(
         (each) => each.name === "TEST | H.264 + AAC",
       )!;
+
       const live = analytics.beginPlayback("live")!;
       await output.playChannel(own(String(broken.streamId)), {
         variants: [String(broken.streamId)],

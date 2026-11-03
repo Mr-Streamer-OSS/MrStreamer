@@ -1,25 +1,30 @@
 import type { Page } from "./app.ts";
 
 type ObserverPage = Pick<Page, "evaluate" | "on" | "send">;
+
 interface Observation {
   at: number;
   sequence: number;
   window: number;
 }
+
 interface MediaObservation extends Observation {
   requestId: number | null;
   deliverySequence: number | null;
 }
+
 interface TypeCheck extends MediaObservation {
   type: string;
   supported: boolean;
 }
+
 interface BrowserError extends MediaObservation {
   code: number | null;
   message: string;
   time: number;
   generation: number;
 }
+
 interface Delivery extends Observation {
   requestId: number;
   requestSequence: number;
@@ -32,9 +37,11 @@ interface Delivery extends Observation {
   video: string | null;
   audio: string | null;
 }
+
 interface WindowStart extends Observation {
   name: string;
 }
+
 interface BrowserFacts {
   sequence: number;
   window: number;
@@ -47,6 +54,7 @@ interface BrowserFacts {
   currentDelivery: Delivery | null;
   injections: (MediaObservation & { generation: number })[];
 }
+
 export function browserFacts(page: ObserverPage) {
   return page.evaluate<BrowserFacts>(
     `(()=>{const p=window.__installedMediaProbe;return p?{
@@ -60,6 +68,7 @@ export function browserFacts(page: ObserverPage) {
 export async function probe(page: ObserverPage) {
   const events: { nodeReceivedAt: number; kind: string; data: unknown }[] = [];
   const network: { nodeReceivedAt: number; data: unknown }[] = [];
+
   for (const method of [
     "Media.playerPropertiesChanged",
     "Media.playerEventsAdded",
@@ -107,6 +116,7 @@ export async function probe(page: ObserverPage) {
         requestId:b?.requestId??null,deliverySequence:b?.deliverySequence??null,code:e.target.error?.code??null,
         message:e.target.error?.message??'',time:e.target.currentTime,generation:p.generation});}},true);
   })()`);
+
   return {
     events,
     network,
@@ -116,6 +126,7 @@ export async function probe(page: ObserverPage) {
     },
     async windowFacts(window: WindowStart) {
       const facts = await browserFacts(page);
+
       return {
         ...window,
         deliveries: facts.deliveries.filter(

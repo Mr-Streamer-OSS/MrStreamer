@@ -10,9 +10,11 @@ export function focusSettingControl(button: HTMLButtonElement): void {
   const previous = button.parentElement?.previousElementSibling;
   const control = previous?.matches(selector) ? previous : previous?.querySelector(selector);
   const settings = button.closest('[data-view="settings"]');
+
   const fallback =
     settings?.querySelector('nav button[aria-current="page"]') ??
     settings?.querySelector('nav input[type="search"]');
+
   if (control instanceof HTMLElement) control.focus();
   else if (fallback instanceof HTMLElement) fallback.focus();
 }
@@ -35,7 +37,9 @@ export function SaveFeedback({
         {t("Saving…")}
       </p>
     );
+
   if (!error) return null;
+
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 py-2 text-sm">
       <span className="select-text">{describeError(appError(error))}</span>

@@ -15,27 +15,34 @@ import { native } from "./native-files.ts";
 // React DOM resolves from the desktop app's install, which the iOS app's types don't see.
 const REACT_DOM = "react-dom/client";
 const window = new Window();
+
 Object.assign(globalThis, { window, document: window.document });
+
 const { document } = window;
 
 /** Each picture's Image error handler, by the file it shows: a file that won't draw calls it. */
 const drawn = vi.hoisted(() => new Map<string, () => void>());
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 // Channel rows draw their star with an SF Symbol.
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/loading.tsx", () => ({
   Placeholders: () => null,
   Shape: () => null,
   useDockInset: () => 0,
 }));
+
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
+
   return {
     ...(await import("./react-native.ts")).reactNative,
     FlatList: () => null,
     Image: ({ source, onError }: { source: { uri: string }; onError: () => void }) => {
       drawn.set(source.uri, onError);
+
       return createElement("img", { "data-uri": source.uri });
     },
   };
@@ -57,6 +64,7 @@ let origin = "";
 const asked = (path: string) => hits.get(path) ?? 0;
 const totalAsked = () => [...hits.values()].reduce((sum, each) => sum + each, 0);
 const at = (path: string, query = "") => `${origin}${path}${query}`;
+
 /** Holds a path's answers until each is released; `ended` counts the answers sent whole. */
 function hold(path: string) {
   const held: (() => void)[] & { ended: number } = Object.assign([], { ended: 0 });
@@ -66,6 +74,7 @@ function hold(path: string) {
       response.writeHead(200, { "Content-Type": "image/png" }).end("late");
     }),
   );
+
   return held;
 }
 
@@ -74,6 +83,7 @@ beforeAll(async () => {
     const path = new URL(request.url ?? "/", "http://pictures.test").pathname;
     hits.set(path, asked(path) + 1);
     const route = routes.get(path);
+
     if (route) return route(response);
     const body = Buffer.from(`picture ${path} ${served++}`);
     response.writeHead(200, { "Content-Type": "image/png", "Content-Length": body.length });
@@ -81,30 +91,36 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (typeof address !== "object" || address === null) throw new Error("No address");
   origin = `http://127.0.0.1:${address.port}`;
 });
+
 afterAll(() => {
   server.closeAllConnections();
   server.close();
 });
 
 type App = Awaited<ReturnType<typeof launch>>;
+
 let app: App;
 
 /** The app as a launch starts it: fresh modules, React with them, over the same files. */
 async function launch() {
   vi.resetModules();
   const React = await import("react");
+
   const { createRoot } = (await import(REACT_DOM)) as {
     createRoot(container: object): { render(node: unknown): void; unmount(): void };
   };
+
   const { ChannelLogo } = await import("../src/ui.tsx");
   const { Artwork } = await import("../src/titles-ui.tsx");
   const sources = await import("../src/sources.ts");
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+
   const shown = () =>
     [...container.querySelectorAll("[data-picture]")].map(
       (each) =>
@@ -112,6 +128,7 @@ async function launch() {
         each.querySelector("span")?.textContent ??
         "",
     );
+
   return {
     /** Shows a channel logo for each address, in order; anything shown before goes. */
     logos(urls: readonly (string | null)[]) {
@@ -166,6 +183,7 @@ async function relaunch(): Promise<App> {
   vi.clearAllTimers();
   vi.setSystemTime(now);
   app = await launch();
+
   return app;
 }
 
@@ -174,18 +192,22 @@ const settled = async (check: () => void) => vi.waitFor(check, { timeout: 5_000,
 /** Every file under Caches/artwork and Caches/artwork-session, with its path and text. */
 function stored(): { path: string; text: string }[] {
   const files: { path: string; text: string }[] = [];
+
   for (const folder of [kept, sessionFolder]) {
     try {
       for (const name of readdirSync(folder)) {
         const path = join(folder, name);
+
         if (statSync(path).isFile()) files.push({ path, text: readFileSync(path, "utf8") });
       }
     } catch {
       // No folder.
     }
   }
+
   return files;
 }
+
 const pictureFiles = (folder: string) => {
   try {
     return readdirSync(folder).filter((name) => !name.startsWith("index.json"));
@@ -193,7 +215,9 @@ const pictureFiles = (folder: string) => {
     return [];
   }
 };
+
 const isFile = (shown: string | undefined) => shown?.startsWith("file://") ?? false;
+
 const exists = (uri: string | undefined) => {
   try {
     return statSync((uri ?? "").replace(/^file:\/\//, "")).isFile();
@@ -215,6 +239,7 @@ beforeEach(async () => {
   native.undeletable = null;
   app = await launch();
 });
+
 afterEach(() => {
   app.close();
   vi.clearAllTimers();
@@ -377,6 +402,7 @@ describe("what isn't a whole picture", () => {
     );
     routes.set("/logo/unannounced.png", (response) => {
       response.writeHead(200, { "Content-Type": "image/png" });
+
       for (let sent = 0; sent < 6; sent++) response.write(Buffer.alloc(MIB));
       response.end();
     });
@@ -411,6 +437,7 @@ describe("pictures no one shows any more", () => {
     await act(async () => app.logos([]));
     environment.IS_REACT_ACT_ENVIRONMENT = false;
     await settled(() => expect(app.shown()).toEqual([]));
+
     for (const each of held) each[0]?.();
     await settled(() => expect(pictureFiles(kept)).toHaveLength(4));
     app.logos(busy);
@@ -424,17 +451,21 @@ describe("pictures no one shows any more", () => {
     native.sizeOf = (path) =>
       path.startsWith(kept) && !path.includes("index") ? 5_000_000 : undefined;
     const urls = Array.from({ length: 34 }, (_, n) => at(`/logo/many${n}.png`));
+
     /** Shows one logo in place of the last, once it shows its own file. */
     const showOne = async (url: string | undefined) => {
       const before = app.shown()[0];
       app.logos([url ?? null]);
       await settled(() => expect(isFile(app.shown()[0]) && app.shown()[0] !== before).toBe(true));
     };
+
     for (const url of urls.slice(0, 33)) {
       await showOne(url);
+
       // The first again, after the second: the second is now the least recently shown.
       if (url === urls[1]) await showOne(urls[0]);
     }
+
     await showOne(urls[33]);
     app.logos([urls[0] ?? null, urls[1] ?? null]);
     await settled(() => expect(app.shown().filter(isFile)).toHaveLength(2));
@@ -469,6 +500,7 @@ describe("pictures whose address carries a login", () => {
     await settled(() => expect(current.shown().filter(isFile)).toHaveLength(2));
     expect(asked("/logo/private.png")).toBe(2);
     await vi.advanceTimersByTimeAsync(5_500);
+
     for (const { path, text } of stored()) {
       for (const canary of [USER, PASS]) {
         expect(path).not.toContain(canary);
@@ -480,6 +512,7 @@ describe("pictures whose address carries a login", () => {
   it("keep a playlist link's short uncertain value out of the index, however an address spells it", async () => {
     // Punctuation keeps this short canary out of random artwork filenames.
     app.signIn("a", 1, ["", ""], ["k7!"]);
+
     const carrying = [
       at("/logo/signed.png", "?sig=k7!"),
       at("/k7!/logo.png"),
@@ -487,12 +520,14 @@ describe("pictures whose address carries a login", () => {
       at("/logo/joined.png", "?s=guest%7Ck7%21"),
       at("/logo/mixed.png", "?s=%6B7!"),
     ];
+
     app.logos([...carrying, at("/logo/public.png")]);
     await settled(() => expect(app.shown().filter(isFile)).toHaveLength(6));
     await vi.advanceTimersByTimeAsync(5_500);
     const index = readFileSync(join(kept, "index.json"), "utf8");
     expect(index).toContain("/logo/public.png");
     expect(index).not.toMatch(/k7!|k7%21|%6B7(?:!|%21)/);
+
     for (const { path } of stored()) expect(path).not.toContain("k7!");
   });
 
@@ -546,9 +581,11 @@ describe("pictures whose address carries a login", () => {
     const old = at("/logo/token.png", `?token=${encodeURIComponent(PASS)}`);
     current.logos([old, at("/logo/after.png")]);
     await settled(() => expect(current.shown().filter(isFile)).toHaveLength(2));
+
     for (const uri of current.shown())
       expect(uri.startsWith(`file://${sessionFolder}/`)).toBe(true);
     await vi.advanceTimersByTimeAsync(5_500);
+
     for (const { path, text } of stored()) {
       expect(path).not.toContain(PASS);
       expect(text).not.toContain(PASS);
@@ -603,12 +640,15 @@ describe("pictures whose address carries a login", () => {
     app.signIn("b", 1, [USER, PASS]);
     native.gate = null;
     go?.();
+
     // Right after the write that was under way ends, before any later write could repair it.
     for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setImmediate(resolve));
+
     for (const { text } of stored()) expect(text).not.toContain(PASS);
     await settled(() =>
       expect(readFileSync(join(kept, "index.json"), "utf8")).toContain('"entries":[]'),
     );
+
     for (const { path, text } of stored()) {
       expect(path).not.toContain(PASS);
       expect(text).not.toContain(PASS);
@@ -631,6 +671,7 @@ describe("the disk budget", () => {
   /** Every picture the cache keeps reports 5 MiB: 32 fill it. */
   const fiveMib = (path: string) =>
     path.startsWith(kept) && !basename(path).startsWith("index") ? 5 * MIB : undefined;
+
   const indexed = () =>
     (
       JSON.parse(readFileSync(join(kept, "index.json"), "utf8")) as {

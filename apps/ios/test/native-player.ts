@@ -13,6 +13,7 @@ import { vi } from "vitest";
 type Body<T> = T extends PlaybackObservation
   ? Omit<T, "version" | "sequence" | "attemptId" | "itemId">
   : never;
+
 type Observation = Body<PlaybackObservation>;
 
 /** Native port stand-in, not an AVFoundation model. Tests control delivery and acknowledgements. */
@@ -23,6 +24,7 @@ export function nativePlayer(
   let sequence = 0;
   let identity: ObservedItemIdentity = { attemptId: 0, itemId: 0 };
   const emit = (event: string, payload: unknown) => listeners.get(event)?.(payload as never);
+
   const port = {
     mrStreamerPlaybackContract: 1,
     muted: true,
@@ -67,6 +69,7 @@ export function nativePlayer(
         identity = { attemptId, itemId: identity.itemId + 1 };
         await source(input);
         port.observation({ kind: "attached" });
+
         return { kind: "attached", ...identity };
       },
     ),
@@ -100,6 +103,7 @@ export function nativePlayer(
     ),
     addListener: (event: string, listener: (payload: never) => void) => {
       listeners.set(event, listener);
+
       return { remove: () => listeners.delete(event) };
     },
     // Any retained legacy admission path is a public behavior failure.
@@ -110,5 +114,6 @@ export function nativePlayer(
     pause: vi.fn(),
     seekBy: vi.fn(),
   };
+
   return port;
 }

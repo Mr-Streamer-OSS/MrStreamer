@@ -20,10 +20,12 @@ async function alongside<A>(work: () => Promise<A>): Promise<{ result: A; tasks:
   let now = Date.now();
   const clock = vi.spyOn(Date, "now").mockImplementation(() => ++now);
   let tasks = 0;
+
   let timer = setTimeout(function task() {
     tasks += 1;
     timer = setTimeout(task, 0);
   }, 0);
+
   try {
     return { result: await work(), tasks };
   } finally {
@@ -40,8 +42,10 @@ function panelRows(count: number, offset: number) {
   const tags = ["EN", "NL", "4K", "MULTI"];
   const movies: unknown[] = [];
   const series: unknown[] = [];
+
   for (let at = 0; at < count; at++) {
     const film = Math.floor((at + offset) / 3);
+
     const row = {
       name: `${tags[at % tags.length]} - Film ${film}${at % 7 === 0 ? ` (${1990 + (film % 30)})` : ""}`,
       category_id: at % 50 === 0 ? "adult" : "films",
@@ -50,12 +54,16 @@ function panelRows(count: number, offset: number) {
       tmdb: at % 5 === 0 ? "" : String(1000 + film),
       is_adult: at % 211 === 0 ? 1 : 0,
     };
+
     movies.push({ ...row, stream_id: at % 97 === 0 ? 1 : at + 1, container_extension: "mkv" });
+
     if (at % 4 === 0) series.push({ ...row, series_id: at + 1, last_modified: row.added });
   }
+
   // No id, an id of the wrong type, and no row at all.
   movies.push({ name: "No id" }, { stream_id: { id: 1 }, name: "Odd id" }, null);
   series.push({ name: "No id" }, "a series");
+
   return { movies, series };
 }
 
@@ -73,7 +81,9 @@ function panel(rows: { readonly movies: unknown; readonly series: unknown }, tas
       ...defined({ inTasks: tasks ? inTasks : undefined }),
       fetch: async (input) => {
         const action = new URL(String(input)).searchParams.get("action") ?? "";
+
         if (action.endsWith("categories")) return Response.json(categories);
+
         return Response.json(action === "get_series" ? rows.series : rows.movies);
       },
     },
@@ -110,11 +120,14 @@ describe("movie and series lists read and indexed in tasks", () => {
         catalogue: await panel(panelRows(2000, 1500), false).onDemandCatalogue(),
       },
     ];
+
     for (const language of ["nl", "en"]) {
       const { result, tasks } = await alongside(() =>
         inTasks(indexSteps(sources, language), () => true),
       );
+
       expect(tasks).toBeGreaterThan(2);
+
       if (!result) throw new Error("Stopped");
       expect(shown(result)).toEqual(shown(indexCatalogue(sources, language)));
     }
@@ -124,20 +137,25 @@ describe("movie and series lists read and indexed in tasks", () => {
     // Every row of both panels under one TMDB id: one title, its versions in the viewer's order.
     const sameFilm = (count: number, offset: number) => {
       const rows = panelRows(count, offset);
+
       const film = (row: unknown) => ({
         ...(row as object),
         tmdb: "42",
         is_adult: 0,
         category_id: "films",
       });
+
       return { movies: rows.movies.slice(0, count).map(film), series: rows.series.map(film) };
     };
+
     const sources: CatalogueSource[] = [
       { subscriptionId: "a", catalogue: await panel(sameFilm(4000, 0), false).onDemandCatalogue() },
       { subscriptionId: "b", catalogue: await panel(sameFilm(3000, 9), false).onDemandCatalogue() },
     ];
+
     const { result, tasks } = await alongside(() => inTasks(indexSteps(sources, "nl"), () => true));
     expect(tasks).toBeGreaterThan(2);
+
     if (!result) throw new Error("Stopped");
     const most = Math.max(...kindOf(result, "movie").titles.map((title) => title.versions.length));
     expect(most).toBeGreaterThan(3000);
@@ -161,6 +179,7 @@ describe("movie and series lists read and indexed in tasks", () => {
       { server: "http://panel.test", username: "fixture", password: "secret" },
       { userAgent: "fixture", inTasks, fetch: async () => new Response(null, { status: 401 }) },
     );
+
     await expect(refusing.onDemandCatalogue()).rejects.toMatchObject({
       error: { kind: "invalid-login" },
     });
@@ -172,6 +191,7 @@ describe("movie and series lists read and indexed in tasks", () => {
       { server: "http://panel.test", username: "fixture", password: "secret" },
       { userAgent: "fixture", inTasks, fetch: async () => new Response("<html>") },
     );
+
     await expect(garbled.onDemandCatalogue()).rejects.toMatchObject({
       error: { kind: "unreachable" },
     });
@@ -181,10 +201,12 @@ describe("movie and series lists read and indexed in tasks", () => {
     const catalogue = await panel(panelRows(20_000, 0), false).onDemandCatalogue();
     // Wanted for the first task only: the load is left after one task of work.
     let asked = 0;
+
     const left = await inTasks(
       indexSteps([{ subscriptionId: "a", catalogue }], "en"),
       () => ++asked < 2,
     );
+
     expect(left).toBeNull();
     // Indexing the same lists again gives what lists never indexed before give.
     const again = indexCatalogue([{ subscriptionId: "a", catalogue }], "en");

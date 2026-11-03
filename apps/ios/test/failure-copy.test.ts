@@ -14,6 +14,7 @@ describe("failureOf", () => {
       },
       "http://typed.example:80",
     );
+
     expect(failure).toEqual({
       headline: "Couldn't reach tv.example.net",
       advice: "Check the address and that your iPhone is online.",
@@ -31,6 +32,7 @@ describe("failureOf", () => {
       { kind: "account-inactive", state: "expired", expiresAt: "2026-10-02T00:00:00Z" },
       "http://tv.example.net",
     );
+
     expect(failure.headline).toMatch(/^This subscription expired on .*2026/);
     expect(failure.advice).toBe("Renew it with tv.example.net, then try again.");
   });

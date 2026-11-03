@@ -800,6 +800,7 @@ const SAVED_TRANSLATED = new Map<string, (typeof KEPT)[number] | "">([
 /** `detail` in the interface language when it is one of downloads.ts's own; else as it came. */
 function said(detail: string): string {
   const kept = KEPT.find((each) => each === detail);
+
   return kept ? t(kept) : detail;
 }
 
@@ -809,10 +810,13 @@ function said(detail: string): string {
  */
 export function inLanguage(error: AppError): AppError {
   if (error.kind === "unexpected") return { ...error, detail: said(error.detail) };
+
   if (error.kind === "stream" && "detail" in error.failure) {
     const { detail } = error.failure;
     const saved = error.failure.kind === "network" ? SAVED_TRANSLATED.get(detail) : undefined;
+
     return { ...error, failure: { ...error.failure, detail: said(saved ?? detail) } };
   }
+
   return error;
 }

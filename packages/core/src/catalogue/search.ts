@@ -21,7 +21,9 @@ export function indexLiveSearch(channels: readonly LiveChannel[]): LiveSearchInd
   const groups = channels.some((channel) => channel.searchGroup !== undefined)
     ? searchResultGroups(channels)
     : groupLiveSearch(channels);
+
   let byCopy: LiveSearchIndex["byCopy"] | undefined;
+
   return {
     groups,
     get byCopy() {
@@ -39,10 +41,13 @@ export function matchingSearchGroups(
   matches: readonly LiveChannel[],
 ): readonly LiveSearchGroup[] {
   const groups = new Set<LiveSearchGroup>();
+
   for (const copy of matches) {
     const group = index.byCopy.get(ownedKey(copy));
+
     if (group) groups.add(group);
   }
+
   return [...groups];
 }
 
@@ -60,51 +65,65 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
   const topicGroups = new Map<string, Set<LiveChannel[]>>();
   const commonTopics = new Map<LiveChannel[], Set<string>>();
   const guidedCandidates = new Map<string, LiveChannel[]>();
+
   const regionKeys = (channel: LiveChannel): string[] => {
     const identity = channel.searchIdentity;
+
     return identity?.region
       ? [...new Set(identity.topics)].map((topic) =>
           JSON.stringify([identity.title, identity.language, identity.region, topic]),
         )
       : [];
   };
+
   for (const channel of channels) {
     if (seen.has(ownedKey(channel))) continue;
     seen.add(ownedKey(channel));
     order.set(channel, order.size);
     const identity = channel.searchIdentity;
+
     if (!identity || !identity.title) {
       alone.push([channel]);
       continue;
     }
+
     if (identity.guideId) {
       const key = JSON.stringify([identity.title, identity.language, identity.guideId]);
       const copies = guidedCandidates.get(key);
+
       if (copies) copies.push(channel);
       else guidedCandidates.set(key, [channel]);
       continue;
     }
+
     const regional = regionKeys(channel);
+
     if (regional.length > 0) {
       const key = JSON.stringify(regional.sort());
       const copies = ordinary.get(key);
+
       if (copies) copies.push(channel);
       else ordinary.set(key, [channel]);
     } else alone.push([channel]);
   }
+
   for (const [guideKey, candidates] of guidedCandidates) {
     const regions = new Set(candidates.flatMap((copy) => copy.searchIdentity?.region ?? []));
+
     for (const copy of candidates) {
       // A shared validated guide can supply missing region, but cannot erase known conflicts.
       const key =
         regions.size <= 1
           ? guideKey
           : JSON.stringify([guideKey, copy.searchIdentity?.region ?? ownedKey(copy)]);
+
       const copies = guides.get(key);
+
       if (copies) copies.push(copy);
       else guides.set(key, [copy]);
     }
   }
+
   const register = (keys: Iterable<string>, copies: LiveChannel[]) => {
     for (const key of keys) {
       const groups = topicGroups.get(key) ?? new Set<LiveChannel[]>();
@@ -112,32 +131,42 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
       topicGroups.set(key, groups);
     }
   };
+
   for (const copies of guides.values()) {
     register(copies.flatMap(regionKeys), copies);
   }
+
   for (const copies of ordinary.values()) {
     const keys = new Set(regionKeys(copies[0]!));
     const candidates = new Set<LiveChannel[]>();
     let ambiguous = false;
+
     for (const key of keys) {
       const groups = topicGroups.get(key);
+
       // Several trusted guide identities cannot be bridged by an unlabelled copy. Stop at the
       // first ambiguity, so even a widely reused topic never causes pairwise comparisons.
       if (groups && groups.size > 1) {
         ambiguous = true;
         break;
       }
+
       const group = groups?.values().next().value;
+
       if (group) candidates.add(group);
+
       if (candidates.size > 1) {
         ambiguous = true;
         break;
       }
     }
+
     const destination = !ambiguous ? candidates.values().next().value : undefined;
+
     if (destination) {
       destination.push(...copies);
       const common = commonTopics.get(destination);
+
       if (common)
         for (const key of common)
           if (!keys.has(key)) {
@@ -146,16 +175,19 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
           }
     } else {
       alone.push(copies);
+
       if (!ambiguous) {
         commonTopics.set(copies, keys);
         register(keys, copies);
       }
     }
   }
+
   return [...guides.values(), ...alone]
     .map((copies): LiveSearchGroup => {
       copies.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
       let streams: number | undefined;
+
       return {
         key: ownedKey(copies[0]!),
         copies,
@@ -178,15 +210,19 @@ export function groupLiveSearch(channels: readonly LiveChannel[]): readonly Live
 export function searchResultGroups(channels: readonly LiveChannel[]): readonly LiveSearchGroup[] {
   const groups = new Map<string, LiveChannel[]>();
   const seen = new Set<string>();
+
   for (const channel of channels) {
     const id = ownedKey(channel);
+
     if (seen.has(id)) continue;
     seen.add(id);
     const key = channel.searchGroup?.key ?? id;
     const copies = groups.get(key);
+
     if (copies) copies.push(channel);
     else groups.set(key, [channel]);
   }
+
   return [...groups].map(([key, copies]) => ({
     key,
     copies: copies.toSorted(
@@ -209,10 +245,13 @@ export function automaticSearchCopy(
   subscriptions: readonly { readonly id: string }[],
 ): LiveChannel {
   const positions = new Map(subscriptions.map(({ id }, index) => [id, index]));
+
   return group.copies.reduce((chosen, copy) => {
     const starred = favourites.has(ownedKey(copy));
     const chosenStarred = favourites.has(ownedKey(chosen));
+
     if (starred !== chosenStarred) return starred ? copy : chosen;
+
     return (positions.get(copy.subscriptionId) ?? Infinity) <
       (positions.get(chosen.subscriptionId) ?? Infinity)
       ? copy

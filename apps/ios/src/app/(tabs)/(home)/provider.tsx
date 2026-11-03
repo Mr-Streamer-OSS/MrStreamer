@@ -16,12 +16,16 @@ export default function Provider() {
   const navigation = useNavigation();
   const locale = useLocale();
   const roster = useRoster();
+
   const member =
     id && roster.kind === "ready" ? roster.members.find((each) => each.entry.id === id) : null;
+
   useLayoutEffect(() => {
     navigation.setOptions({ title: member ? member.label : t("Add provider") });
   }, [navigation, member, locale]);
+
   if (id && !member) return <Message text={t("This provider was removed.")} />;
+
   return (
     <ScrollView
       style={styles.screen}

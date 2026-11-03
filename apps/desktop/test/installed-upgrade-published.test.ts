@@ -21,9 +21,12 @@ const EXPECTED: Resolved = {
   candidateTag: "v0.0.12-nightly.20261013.330",
   candidateSha: "b".repeat(40),
 };
+
 const bytes = (text: string) => new TextEncoder().encode(text);
+
 const digest = (data: Uint8Array, algorithm = "sha256", encoding: "hex" | "base64" = "hex") =>
   createHash(algorithm).update(data).digest(encoding);
+
 const listed = (tag_name: string, changes: { draft?: boolean; prerelease?: boolean } = {}) => ({
   tag_name,
   draft: false,
@@ -35,23 +38,28 @@ const listed = (tag_name: string, changes: { draft?: boolean; prerelease?: boole
 /** Published release API contracts, with real recomputed synthetic package hashes. */
 function published() {
   const assets = new Map<number, Uint8Array>();
+
   const release = (tag: string, first: number, prerelease: boolean) => {
     const version = tag.slice(1);
     const name = `Mr-Streamer-${version}-win-x64-setup.exe`;
     const setup = bytes(`Published installer ${version}`);
     const sha512 = digest(setup, "sha512", "base64");
+
     const latest = {
       version,
       path: name,
       sha512,
       files: [{ url: name, sha512, size: setup.length }],
     };
+
     const entries = [
       { id: first, name, data: setup },
       { id: first + 1, name: "SHA256SUMS.txt", data: bytes(`${digest(setup)}  ${name}\n`) },
       { id: first + 2, name: "latest.yml", data: bytes(JSON.stringify(latest)) },
     ];
+
     for (const entry of entries) assets.set(entry.id, entry.data);
+
     return {
       name,
       latest,
@@ -70,8 +78,10 @@ function published() {
       },
     };
   };
+
   const stable = release(EXPECTED.stableTag, 1, false);
   const candidate = release(EXPECTED.candidateTag, 4, true);
+
   // GitHub lists releases newest-created first; the newest stable is found by version.
   const releases = [
     listed(EXPECTED.candidateTag),
@@ -80,8 +90,10 @@ function published() {
     listed("v0.0.11-nightly.20261001.300"),
     listed("v0.0.10"),
   ];
+
   const diff = { status: "ahead", ahead_by: 8, behind_by: 0 };
   const onMain = { status: "ahead", ahead_by: 1, behind_by: 0 };
+
   const json: Record<string, unknown> = {
     "": { default_branch: "main" },
     [`/releases/tags/${EXPECTED.stableTag}`]: stable.value,
@@ -92,29 +104,39 @@ function published() {
     [`/compare/${EXPECTED.candidateSha}...main?per_page=1`]: onMain,
     [`/compare/${EXPECTED.stableSha}...${EXPECTED.candidateSha}?per_page=1`]: diff,
   };
+
   const api: GitHub = {
     repository: "owner/player",
     json: vi.fn(async (path: string) => {
       const page = /^\/releases\?per_page=100&page=(\d+)$/.exec(path)?.[1];
+
       if (page) return structuredClone(releases.slice((+page - 1) * 100, +page * 100));
+
       if (!(path in json)) throw new Error(`Unexpected API request ${path}`);
+
       return structuredClone(json[path]);
     }),
     bytes: async (path) => {
       const id = Number(path.split("/").at(-1));
       const data = assets.get(id);
+
       if (!data) throw new Error(`Unexpected asset request ${path}`);
+
       return data;
     },
   };
+
   const replace = (id: number, data: Uint8Array) => {
     assets.set(id, data);
+
     const entry = [...stable.value.assets, ...candidate.value.assets].find(
       (each) => each.id === id,
     )!;
+
     entry.size = data.length;
     entry.digest = `sha256:${digest(data)}`;
   };
+
   return {
     api,
     json,
@@ -140,12 +162,14 @@ describe("the newest published stable release", () => {
       ["candidate", "0.0.12-nightly.20261013.330", EXPECTED.candidateSha],
     ]);
     expect(receipt.candidateAheadBy).toBe(8);
+
     for (const pkg of receipt.packages) {
       const data = files.get(pkg.file)!;
       expect(pkg.sha256).toBe(digest(data));
       expect(pkg.bytes).toBe(data.length);
       expect(pkg.provenance.metadata.sha512).toBe(digest(data, "sha512", "base64"));
     }
+
     expect(JSON.stringify(receipt)).not.toMatch(/token|Authorization|workflowCommit/);
     expect(world.api.json).not.toHaveBeenCalledWith(expect.stringContaining("/actions/"));
   });
@@ -265,12 +289,14 @@ describe("the candidate and both published packages", () => {
 
   it("rejects non-descendants and sources absent from main", async () => {
     const world = published();
+
     for (const status of ["diverged", "behind"]) {
       world.diff.status = status;
       await expect(world.resolve()).rejects.toThrow(
         `${EXPECTED.candidateTag} doesn't contain ${EXPECTED.stableTag}'s commit (${status})`,
       );
     }
+
     world.diff.status = "ahead";
     world.diff.ahead_by = 0;
     await expect(world.resolve()).rejects.toThrow(/strictly descend/);
@@ -291,10 +317,15 @@ describe("the candidate and both published packages", () => {
     async (field) => {
       const world = published();
       const latest = world.candidate.latest;
+
       if (field === "version") latest.version = "0.0.12";
+
       if (field === "size") latest.files[0]!.size++;
+
       if (field === "sha512") latest.files[0]!.sha512 = "incorrect";
+
       if (field === "filename") latest.path = "other.exe";
+
       if (field === "extra file") latest.files.push({ ...latest.files[0]! });
       world.replace(world.candidate.metadataId, bytes(JSON.stringify(latest)));
       await expect(world.resolve()).rejects.toThrow(/latest.yml does not describe/);

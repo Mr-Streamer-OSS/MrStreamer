@@ -36,14 +36,18 @@ import { connect, delay, key, launch, login, press, says, waitFor, type Page } f
 import { segmentsOf } from "./tv-player.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) throw new Error("Usage: node test/e2e/airplay-tv.ts <Electron> [-- args]");
+
 if (process.platform !== "darwin") throw new Error("AirPlay and a windowless app are macOS's.");
+
 if (lanAddresses().length === 0) {
   throw new Error("This computer has no address on a local network for a TV to reach.");
 }
 
 const work = mkdtempSync(join(tmpdir(), "mr-streamer-airplay-"));
 const results: boolean[] = [];
+
 function check(ok: boolean, what: string, detail = ""): void {
   results.push(ok);
   console.log(`${ok ? "PASS" : "FAIL"} ${what}${detail ? `: ${detail}` : ""}`);
@@ -60,15 +64,20 @@ function within<T>(what: string, ms: number, pending: Promise<T>): Promise<T> {
 // The app, started from a folder that holds the stand-in where it looks for its AirPlay helper.
 const helper = await startFakeAirplayHelper();
 const desktop = fileURLToPath(new URL("../..", import.meta.url));
+
 const built = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8")) as {
   readonly productName: string;
   readonly version: string;
   readonly main: string;
 };
+
 const folder = join(work, "app");
 const standIn = join(folder, "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
+
 mkdirSync(join(standIn, ".."), { recursive: true });
+
 symlinkSync(join(desktop, "out"), join(folder, "out"));
+
 writeFileSync(
   join(folder, "package.json"),
   JSON.stringify({
@@ -79,6 +88,7 @@ writeFileSync(
     main: built.main,
   }),
 );
+
 writeFileSync(
   standIn,
   `#!/bin/sh\nexec ${[helper.helper, ...helper.args].map((part) => `'${part}'`).join(" ")}\n`,
@@ -87,18 +97,22 @@ writeFileSync(
 
 const provider = await startFakeProvider();
 const port = 20000 + Math.floor(Math.random() * 20000);
+
 const app = launch(executable, [`--inspect=${port + 1}`, "--use-mock-keychain", folder, ...rest], {
   port,
   profile: join(work, "profile"),
 });
+
 const main = await connect(port + 1, "node");
 
 /** The app's windows in its main process, for the inspector. */
 const WINDOWS = `process.getBuiltinModule("node:module")
   .createRequire(process.cwd() + "/")("electron").BrowserWindow.getAllWindows()`;
+
 /** Whether each of the app's windows shows, as the app itself says. */
 const windows = () => main.evaluate<boolean[]>(`${WINDOWS}.map((each) => each.isVisible())`);
 const fullScreen = () => main.evaluate<boolean>(`${WINDOWS}[0].isFullScreen()`);
+
 /**
  * Closes the window as its close button does. The focus the script lends the page for its keys
  * goes first: Chromium counts it as a capture, and never treats a captured page as hidden.
@@ -107,10 +121,12 @@ async function closeWindow(page: Page): Promise<void> {
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: false });
   await main.evaluate(`${WINDOWS}[0]?.close()`);
 }
+
 const shows =
   (...visible: boolean[]) =>
   async () =>
     JSON.stringify(await windows()) === JSON.stringify(visible);
+
 /** What a click on the app's Dock icon sends it: the reopen event. */
 function clickDock(): void {
   execFileSync("osascript", [
@@ -124,6 +140,7 @@ function clickDock(): void {
     ).sendEventWithOptionsTimeoutError(1, 5, null);`,
   ]);
 }
+
 const pages = async () =>
   ((await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as { type: string }[]).filter(
     (target) => target.type === "page",
@@ -135,8 +152,10 @@ const output = async (page: Page) =>
       value?: { output: { kind: string; media?: { state: string } | null } };
     }>(`window.mrStreamer.invoke("output.status")`)
   ).value?.output;
+
 const clock = (page: Page) =>
   page.evaluate<number>(`document.querySelector("video")?.currentTime ?? 0`);
+
 /** What the page tells the system's media controls. */
 const session = (page: Page) =>
   page.evaluate<{ state: string; title: string; album: string }>(
@@ -144,8 +163,10 @@ const session = (page: Page) =>
         title: navigator.mediaSession.metadata?.title ?? "",
         album: navigator.mediaSession.metadata?.album ?? "" })`,
   );
+
 const onTv = (page: Page, words: string) =>
   says(page, `${words} over AirPlay`, "[data-view=title]");
+
 /** Clicks the title's own Pause or Play button, which needs no focus. */
 const click = (page: Page, label: "Pause" | "Play") =>
   page.evaluate(`[...document.querySelectorAll("[data-view=title] button")]
@@ -160,8 +181,10 @@ async function playEpisode(page: Page): Promise<void> {
   const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Formats"))`;
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 60_000);
   await page.evaluate(`${poster}.click()`);
+
   const row = `[...document.querySelectorAll('[role="dialog"] button')].find((b) =>
     b.firstElementChild?.tagName === "SPAN" && b.firstElementChild.textContent.trim() === "1")`;
+
   await waitFor(() => page.evaluate<boolean>(`!!${row}`), 20_000);
   await page.evaluate(`${row}.click()`);
 }
@@ -171,21 +194,28 @@ async function playEpisode(page: Page): Promise<void> {
  * as a TV's player does, and says it plays. `position` and `duration` are the stream's.
  */
 const served = { pieces: 0, refused: 0 };
+
 async function get(url: string): Promise<Buffer | null> {
   const response = await fetch(url, { signal: AbortSignal.timeout(25_000) }).catch(() => null);
+
   if (!response?.ok) served.refused++;
+
   return response?.ok ? Buffer.from(await response.arrayBuffer()) : null;
 }
+
 async function tvPlays(): Promise<{ url: string; position: number; duration: number }> {
   const load = await within("the app sends the TV a stream", 40_000, helper.took("load"));
   const segments = await segmentsOf(load.url, get);
   const at = segments.find((each) => each.start + each.length > load.position) ?? segments[0];
+
   if (at && (await get(at.url))) served.pieces++;
   const last = segments.at(-1);
   const duration = last ? last.start + last.length : 0;
   helper.status("playing", load.position, duration);
+
   return { url: load.url, position: load.position, duration };
 }
+
 /** Opens the system's list from the player, as O does, and has the viewer pick the TV there. */
 async function chooseTv(page: Page): Promise<void> {
   await key(page, "o", 79);
@@ -194,8 +224,10 @@ async function chooseTv(page: Page): Promise<void> {
 }
 
 let broke = false;
+
 /** The app's window, as far as the script got, for what it showed when a step failed. */
 let opened: Page | null = null;
+
 try {
   let page = await connect(port);
   opened = page;
@@ -255,6 +287,7 @@ try {
   await waitFor(onTv(page, "Playing"), 10_000);
   const pieces = served.pieces;
   const [next] = (await segmentsOf(first.url, get)).slice(1);
+
   if (next && (await get(next.url))) served.pieces++;
   check(
     served.pieces > pieces && provider.activeStreams() <= 1,
@@ -328,15 +361,19 @@ try {
   page.close();
   main.close();
   const asked = Date.now();
+
   const exited = new Promise<number>((resolve) =>
     app.once("exit", () => resolve(Date.now() - asked)),
   );
+
   app.kill("SIGTERM");
   const took = await Promise.race([exited, delay(10_000).then(() => null)]);
+
   const gone = await fetch(last.url).then(
     (response) => !response.ok,
     () => true,
   );
+
   // Nothing of the app may outlive it with the provider's connection, as an ffmpeg left running
   // would. The provider counts a stream for 300 ms after its connection closed, and the app may
   // hold that connection until it quits, so the count at the exit says only how long ago it
@@ -358,12 +395,14 @@ try {
   );
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
+
   // A wait that ran out doesn't say what happened instead. The window and the helper do.
   const view = await opened
     ?.evaluate<string>(
       `(document.querySelector("[data-view]") ?? document.body).innerText.replaceAll("\\n", " | ").slice(0, 400)`,
     )
     .catch(() => null);
+
   const status = opened ? await output(opened).catch(() => null) : null;
   console.error(`     The window showed: ${view ?? "nothing"}`);
   console.error(
@@ -380,4 +419,5 @@ try {
   await delay(1000);
   rmSync(work, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(broke || results.includes(false) ? 1 : 0);

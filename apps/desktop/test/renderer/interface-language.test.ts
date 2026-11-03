@@ -18,6 +18,7 @@ const english: InterfaceLanguage = {
   locale: "en-US",
   formats: "en-US",
 };
+
 const german: InterfaceLanguage = {
   choice: "de-DE",
   system: "en-US",
@@ -26,9 +27,11 @@ const german: InterfaceLanguage = {
 };
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   setLanguage(english);
@@ -46,14 +49,18 @@ async function render() {
   ipc.always("language.get", english);
   const mounted = queryView(new QueryClient());
   const { container } = mounted;
+
   function Root() {
     useLocale();
+
     return createElement(GeneralSection);
   }
+
   await mounted.render(createElement(Root));
   await settle();
   unmount = mounted.unmount;
   const select = () => container.querySelector<HTMLSelectElement>("section select");
+
   return { container, select };
 }
 
@@ -85,6 +92,7 @@ describe("Interface language", () => {
     const saving = ipc.hold("language.set");
     await act(async () => {
       const field = select();
+
       if (!field) throw new Error("No Interface language");
       field.value = "de-DE";
       field.dispatchEvent(new Event("change", { bubbles: true }));

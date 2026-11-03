@@ -39,8 +39,10 @@ const ORDERS = [
   { order: "newest", label: "Newest" },
   { order: "name", label: "A–Z" },
 ] as const satisfies readonly { readonly order: WatchlistOrder; readonly label: string }[];
+
 const labelOf = (order: WatchlistOrder) => {
   const label = ORDERS.find((each) => each.order === order)?.label;
+
   return label ? t(label) : "";
 };
 
@@ -67,11 +69,13 @@ export function WatchlistScreen() {
   const members = roster.kind === "ready" ? roster.members : null;
   // Read as the lists or the subscriptions change, which draw this again.
   const complete = titlesWorkedOut();
+
   const rows = useMemo(
     () => watchlistRows(list, { index, complete, members: members ?? [], named }, order),
     // A new metadata version renames titles.
     [list, index, complete, members, order, metadata],
   );
+
   const choose = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -80,11 +84,13 @@ export function WatchlistScreen() {
       },
       (at) => {
         const chosen = ORDERS[at]?.order;
+
         if (!chosen) return;
         kept = chosen;
         setOrder(chosen);
       },
     );
+
   return (
     <FlatList
       style={styles.screen}
@@ -129,15 +135,20 @@ function Separator() {
 const Row = memo(function Row({ row }: { row: WatchlistRow }) {
   useLocale();
   const { fontScale } = useWindowDimensions();
+
   const facts = [t(row.kind === "movie" ? "kind.movie" : "kind.series"), row.year]
     .filter(Boolean)
     .join(" · ");
+
   const note = row.unlisted ? t(UNLISTED[row.unlisted]) : null;
   const { title } = row;
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate" && title) openDetails(title);
+
     if (nativeEvent.actionName === "remove") remove(row);
   };
+
   return (
     <View style={[styles.row, fontScale > 1.2 && styles.top]}>
       <Pressable
@@ -195,7 +206,9 @@ function showActions(row: WatchlistRow) {
     (at) => {
       // Answered later: the row as it stands then, which may have lost its provider meanwhile.
       const now = choices[at] === "details" ? rowNow(row.key)?.title : null;
+
       if (now) openDetails(now);
+
       if (choices[at] === "remove") remove(row);
     },
   );
@@ -204,6 +217,7 @@ function showActions(row: WatchlistRow) {
 /** Row `key` as the watchlist, the lists and the providers stand now. */
 function rowNow(key: string): WatchlistRow | undefined {
   const lists = titleLists();
+
   return watchlistRows(
     currentWatchlist(),
     {

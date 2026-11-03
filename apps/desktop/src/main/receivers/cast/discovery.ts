@@ -47,19 +47,24 @@ const EXPIRY = 30_000;
 
 const SERVICE = ["_googlecast", "_tcp", "local"];
 const TYPE = { a: 1, ptr: 12, txt: 16, srv: 33 } as const;
+
 /** The class of every record here, and the bit on a question that asks for a unicast answer. */
 const INTERNET = 1;
 const UNICAST = 0x8000;
 
 /** The largest message mDNS allows. */
 const MAX_PACKET = 9000;
+
 /** Questions, and records, a packet may hold. One receiver answers with about six. */
 const MAX_RECORDS = 100;
+
 /** Bytes a name may take, as DNS limits it, and how many pointers it may follow. */
 const MAX_NAME = 255;
 const MAX_HOPS = 8;
+
 /** Services and hosts remembered, the oldest going first. */
 const KEPT = 64;
+
 /** Questions a query adds for records a receiver left out of its answer. */
 const FOLLOW_UPS = 8;
 
@@ -103,21 +108,30 @@ function readName(packet: Buffer, start: number): { labels: string[]; next: numb
   let floor = start;
   let next = -1;
   let size = 1;
+
   for (let hops = 0; ;) {
     const length = packet[offset];
+
     if (length === undefined) return null;
+
     if (length === 0) return { labels, next: next < 0 ? offset + 1 : next };
+
     if (length >= 0xc0) {
       const low = packet[offset + 1];
+
       if (low === undefined) return null;
       const target = ((length & 0x3f) << 8) | low;
+
       if (target >= floor || ++hops > MAX_HOPS) return null;
+
       if (next < 0) next = offset + 2;
       offset = floor = target;
       continue;
     }
+
     // 64 to 191 are label kinds DNS never came to use.
     size += length + 1;
+
     if (length > 63 || size > MAX_NAME || offset + 1 + length > packet.length) return null;
     labels.push(packet.toString("latin1", offset + 1, offset + 1 + length));
     offset += 1 + length;
@@ -127,15 +141,19 @@ function readName(packet: Buffer, start: number): { labels: string[]; next: numb
 /** A TXT record's `key=value` strings, the first of each key, with keys in lower case. */
 function readText(data: Buffer): Map<string, string> | null {
   const entries = new Map<string, string>();
+
   for (let offset = 0; offset < data.length;) {
     const end = offset + 1 + data[offset]!;
+
     if (end > data.length) return null;
     const entry = data.subarray(offset + 1, end);
     const equals = entry.indexOf(0x3d);
     const name = entry.toString("latin1", 0, Math.max(0, equals)).toLowerCase();
+
     if (name && !entries.has(name)) entries.set(name, entry.subarray(equals + 1).toString("utf8"));
     offset = end;
   }
+
   return entries;
 }
 
@@ -145,29 +163,38 @@ function readText(data: Buffer): Map<string, string> | null {
  */
 function readAnswer(packet: Buffer): DnsRecord[] | null {
   if (packet.length < 12 || packet.length > MAX_PACKET) return null;
+
   // The flags' top bit tells an answer from a question.
   if ((packet.readUInt16BE(2) & 0x8000) === 0) return null;
   const questions = packet.readUInt16BE(4);
   const count = packet.readUInt16BE(6) + packet.readUInt16BE(8) + packet.readUInt16BE(10);
+
   if (questions > MAX_RECORDS || count > MAX_RECORDS) return null;
 
   let offset = 12;
+
   for (let index = 0; index < questions; index++) {
     const name = readName(packet, offset);
+
     if (!name) return null;
     offset = name.next + 4;
   }
+
   const records: DnsRecord[] = [];
+
   for (let index = 0; index < count; index++) {
     const name = readName(packet, offset);
+
     if (!name || name.next + 10 > packet.length) return null;
     const type = packet.readUInt16BE(name.next);
     // The top bit of the class says to replace what was known, which the browse does anyway.
     const internet = (packet.readUInt16BE(name.next + 2) & 0x7fff) === INTERNET;
     const start = name.next + 10;
     const end = start + packet.readUInt16BE(name.next + 8);
+
     if (end > packet.length) return null;
     offset = end;
+
     if (!internet) continue;
 
     if (type === TYPE.a) {
@@ -179,12 +206,14 @@ function readAnswer(packet: Buffer): DnsRecord[] | null {
       });
     } else if (type === TYPE.txt) {
       const entries = readText(packet.subarray(start, end));
+
       if (!entries) return null;
       records.push({ type: "txt", name: name.labels, entries });
     } else if (type === TYPE.ptr || type === TYPE.srv) {
       // A service's record holds its priority, weight and port ahead of the host's name.
       const at = type === TYPE.srv ? start + 6 : start;
       const target = at <= end ? readName(packet, at) : null;
+
       if (!target || target.next !== end) return null;
       records.push(
         type === TYPE.ptr
@@ -198,6 +227,7 @@ function readAnswer(packet: Buffer): DnsRecord[] | null {
       );
     }
   }
+
   return records;
 }
 
@@ -206,6 +236,7 @@ function question(name: Name, type: number): Buffer {
   const tail = Buffer.alloc(5);
   tail.writeUInt16BE(type, 1);
   tail.writeUInt16BE(INTERNET | UNICAST, 3);
+
   return Buffer.concat([
     ...name.map((label) => Buffer.from([label.length, ...Buffer.from(label, "latin1")])),
     tail,
@@ -219,6 +250,7 @@ function question(name: Name, type: number): Buffer {
 function showsVideo(capabilities: string | undefined): boolean {
   if (!capabilities || !/^\d{1,9}$/.test(capabilities)) return true;
   const bits = Number(capabilities);
+
   return (bits & VIDEO_OUT) !== 0 && (bits & SPEAKER_GROUP) === 0;
 }
 
@@ -226,6 +258,7 @@ function showsVideo(capabilities: string | undefined): boolean {
 function keep<V>(map: Map<string, V>, name: string, value: V): void {
   map.delete(name);
   map.set(name, value);
+
   for (const oldest of map.keys()) {
     if (map.size <= KEPT) break;
     map.delete(oldest);
@@ -252,10 +285,13 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
   /** The receivers that answered in full, one for each id, without speakers and groups. */
   const list = (): CastEndpoint[] => {
     const found = new Map<string, CastEndpoint>();
+
     for (const service of services.values()) {
       const id = service.txt?.get("id");
       const host = service.srv && hosts.get(key(service.srv.host));
+
       if (!id || !host || !service.srv || found.has(id)) continue;
+
       if (!showsVideo(service.txt?.get("ca"))) continue;
       found.set(id, {
         receiver: { id, kind: "cast", name: service.txt?.get("fn") || null },
@@ -263,12 +299,14 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
         port: service.srv.port,
       });
     }
+
     return [...found.values()];
   };
 
   const tell = (always = false) => {
     const endpoints = list();
     const now = JSON.stringify(endpoints);
+
     if (now === told && !always) return;
     told = now;
     listener(endpoints.map((endpoint) => endpoint.receiver));
@@ -281,7 +319,9 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
     const known = services.get(key(name));
     const service = known ?? { name, srv: null, txt: null, seen: 0 };
     service.seen = performance.now();
+
     if (!known) keep(services, key(name), service);
+
     return service;
   };
 
@@ -292,6 +332,7 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
         // sender's own must at least be a local network's. A device with several addresses
         // answers from the one on this network, so that one is preferred.
         const name = key(record.name);
+
         if (record.address === from) keep(hosts, name, record.address);
         else if (!hosts.has(name) && isPrivateAddress(record.address)) {
           keep(hosts, name, record.address);
@@ -300,6 +341,7 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
         if (key(record.name) === SERVICE_KEY) heard(record.target);
       } else {
         const service = heard(record.name);
+
         if (service && record.type === "srv") {
           service.srv = { host: record.target, port: record.port };
         } else if (service && record.type === "txt") {
@@ -315,21 +357,27 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
    */
   const query = (): Buffer => {
     const questions = [question(SERVICE, TYPE.ptr)];
+
     for (const service of services.values()) {
       if (questions.length > FOLLOW_UPS) break;
+
       if (!service.srv) questions.push(question(service.name, TYPE.srv));
       else if (!hosts.has(key(service.srv.host))) {
         questions.push(question(service.srv.host, TYPE.a));
       }
+
       if (!service.txt) questions.push(question(service.name, TYPE.txt));
     }
+
     const header = Buffer.alloc(12);
     header.writeUInt16BE(questions.length, 4);
+
     return Buffer.concat([header, ...questions]);
   };
 
   const shut = (address: string, socket: Socket) => {
     if (sockets.get(address) === socket) sockets.delete(address);
+
     try {
       socket.close();
     } catch {
@@ -344,6 +392,7 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
     socket.on("error", () => shut(address, socket));
     socket.on("message", (packet, from) => {
       const records = readAnswer(packet);
+
       if (!records) return;
       take(records, from.address);
       tell();
@@ -365,18 +414,24 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
    */
   const ask = (first = false) => {
     const addresses = new Set(options.addresses?.() ?? lanAddresses());
+
     for (const [address, socket] of sockets) {
       if (!addresses.has(address)) shut(address, socket);
     }
+
     const packet = query();
+
     for (const address of addresses) {
       const socket = sockets.get(address);
+
       if (socket) socket.send(packet, group.port, group.address, () => {});
       else open(address);
     }
+
     for (const [name, service] of services) {
       if (performance.now() - service.seen > expiry) services.delete(name);
     }
+
     tell(first);
     timer = setTimeout(() => ask(), backoff[Math.min(round++, backoff.length - 1)]);
   };
@@ -388,12 +443,16 @@ export function castDiscovery(options: DiscoveryOptions = {}): CastDiscovery {
     scan(on) {
       if (on === scanning) return;
       scanning = on;
+
       if (on) {
         round = 0;
         ask(true);
+
         return;
       }
+
       clearTimeout(timer);
+
       for (const [address, socket] of sockets) shut(address, socket);
     },
     locate: (id) => list().find((endpoint) => endpoint.receiver.id === id) ?? null,

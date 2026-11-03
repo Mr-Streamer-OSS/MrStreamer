@@ -5,11 +5,14 @@ import { chosenVariant } from "@mrstreamer/core/catalogue/variants";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 const { native } = await import("./native-files.ts");
 const path = join(native.root, "documents", "media-preferences.json");
 const bytes = () => readFileSync(path, "utf8");
+
 const restart = async () => {
   vi.resetModules();
+
   return import("../src/media-preferences.ts");
 };
 
@@ -19,6 +22,7 @@ beforeEach(() => {
   native.sync = null;
   native.undeletable = null;
 });
+
 afterEach(() => {
   native.sync = null;
   native.undeletable = null;
@@ -109,9 +113,13 @@ describe("accepted media preferences", () => {
       );
       const app = await restart();
       const prefs = app.getMediaPreferences();
+
       if (field !== "titleLanguage") expect(prefs.titleLanguage).toBe("it");
+
       if (field !== "audio") expect(prefs.audio).toEqual({ kind: "original" });
+
       if (field !== "subtitles") expect(prefs.subtitles).toEqual({ kind: "off" });
+
       if (field !== "liveQuality") expect(prefs.liveQuality).toBe("uhd");
       expect(app.updateMediaPreferences("titleLanguage", "nl")).toBe(true);
     },
@@ -120,6 +128,7 @@ describe("accepted media preferences", () => {
   it("reads known future-version values without overwriting that file", async () => {
     const original =
       '{ "version": 88, "titleLanguage": "pl", "audio": { "kind": "original" }, "future": 9 }';
+
     writeFileSync(path, original);
     const app = await restart();
     expect(app.getMediaPreferences().titleLanguage).toBe("pl");
@@ -133,11 +142,13 @@ describe("accepted media preferences", () => {
   it("writes before notification, orders rapid choices and skips an accepted duplicate", async () => {
     const app = await restart();
     const heard: string[] = [];
+
     const stop = app.onMediaPreferences(() => {
       const cold = JSON.parse(bytes()) as { titleLanguage: string };
       expect(cold.titleLanguage).toBe(app.getMediaPreferences().titleLanguage);
       heard.push(cold.titleLanguage);
     });
+
     app.updateMediaPreferences("titleLanguage", "nl");
     app.updateMediaPreferences("titleLanguage", "fr");
     app.updateMediaPreferences("titleLanguage", "nl");
@@ -156,6 +167,7 @@ describe("accepted media preferences", () => {
     async (operation) => {
       const state =
         '{"subscription":null,"recent":[],"region":null,"titleVersions":{"a":{"movie:12":"7"}}}';
+
       writeFileSync(join(native.root, "documents", "state.json"), state);
       const app = await restart();
       app.updateMediaPreferences("titleLanguage", "nl");
@@ -167,6 +179,7 @@ describe("accepted media preferences", () => {
         if (step === (operation === "writeSync" ? "write" : "move"))
           throw new Error("raw private disk detail");
       };
+
       expect(app.updateMediaPreferences("titleLanguage", "de")).toBe(false);
       expect(app.getMediaPreferences()).toBe(accepted);
       expect(heard).not.toHaveBeenCalled();
@@ -183,6 +196,7 @@ it("a refused first move cannot reappear as accepted after restart", async () =>
   native.sync = (step) => {
     if (step === "move") throw new Error("refused");
   };
+
   expect(app.updateMediaPreferences("titleLanguage", "fr")).toBe(false);
   native.sync = null;
   expect((await restart()).getMediaPreferences().titleLanguage).toBeNull();
@@ -194,6 +208,7 @@ it.each([false, true])(
     // A legacy interrupted save has no accepted-backup file yet. A new-owner backup would
     // intentionally take precedence over a pending proposal after losing the primary.
     const accepted = JSON.stringify({ version: 1, titleLanguage: "nl" });
+
     if (corrupt) writeFileSync(path, "{broken");
     writeFileSync(`${path}.next`, accepted);
     const recovered = await restart();
@@ -201,6 +216,7 @@ it.each([false, true])(
     native.sync = (step) => {
       if (step === "move") throw new Error("refused");
     };
+
     expect(recovered.updateMediaPreferences("titleLanguage", "fr")).toBe(false);
     native.sync = null;
     expect((await restart()).getMediaPreferences().titleLanguage).toBe("nl");
@@ -213,6 +229,7 @@ it("keeps the first accepted defaults when proposal move and pending cleanup are
   native.sync = (step) => {
     if (step === "move" && ++moves === 2) throw new Error("proposal refused");
   };
+
   native.undeletable = (file) => file.endsWith(".next");
   expect(app.updateMediaPreferences("titleLanguage", "fr")).toBe(false);
   expect(app.getMediaPreferences().titleLanguage).toBeNull();
@@ -254,6 +271,7 @@ describe("R77 accepted-value recovery", () => {
         if (step === "move-after-delete" && file === `${path}.next`)
           throw new Error("move refused after destination deletion");
       };
+
       native.undeletable = (file) => cleanupRefused && file === `${path}.next`;
       expect(app.updateMediaPreferences("titleLanguage", "fr")).toBe(false);
       expect(app.getMediaPreferences()).toBe(before);
@@ -279,6 +297,7 @@ describe("R77 accepted-value recovery", () => {
       native.sync = (step) => {
         if (step === fault) throw new Error("checkpoint refused");
       };
+
       expect(app.updateMediaPreferences("titleLanguage", "it")).toBe(false);
       expect(app.getMediaPreferences()).toBe(before);
       expect(bytes()).toBe(text);
@@ -295,6 +314,7 @@ describe("R77 accepted-value recovery", () => {
       if (step === "move-after-delete" && file === `${path}.next`)
         throw new Error("first proposal refused");
     };
+
     native.undeletable = (file) => file === `${path}.next`;
     expect(app.updateMediaPreferences("titleLanguage", "fr")).toBe(false);
     native.sync = null;
@@ -303,6 +323,7 @@ describe("R77 accepted-value recovery", () => {
     native.sync = (step, file) => {
       if (step === "move" && file === `${path}.next`) throw new Error("second proposal refused");
     };
+
     expect(cold.updateMediaPreferences("titleLanguage", "it")).toBe(false);
     native.sync = null;
     const again = await restart();
@@ -328,6 +349,7 @@ describe("R77 accepted-value recovery", () => {
       native.sync = (step, file) => {
         if (step === "text" && file === destination) throw new Error("protected file unreadable");
       };
+
       const app = await restart();
       app.getMediaPreferences();
       const heard = vi.fn();
@@ -348,14 +370,17 @@ describe("per-channel quality picks", () => {
     tags: [],
     quality,
   });
+
   // A channel is named by its lowest stream id; a pick may sit under any of its streams' ids.
   const news = {
     subscriptionId: "s1",
     id: "10",
     variants: [stream("10", "fhd"), stream("11", "hd"), stream("12", null)],
   };
+
   const sport = { subscriptionId: "s1", id: "20", variants: [stream("20", "uhd")] };
   const elsewhere = { subscriptionId: "s2", id: "10", variants: [stream("10", "sd")] };
+
   const picked = (app: typeof import("../src/media-preferences.ts"), channel: typeof news) =>
     chosenVariant(channel, app.channelPicks(channel.subscriptionId))?.id ?? "Automatic";
 
@@ -463,6 +488,7 @@ describe("per-channel quality picks", () => {
         channelVariants: { s1: { "10": "11" } },
         future: { nested: ["keep", 7] },
       };
+
       writeFileSync(path, JSON.stringify(prior));
       const app = await restart();
       const before = app.getMediaPreferences();
@@ -472,6 +498,7 @@ describe("per-channel quality picks", () => {
         if (step === "move-after-delete" && file === `${path}.next`)
           throw new Error("move refused after destination deletion");
       };
+
       native.undeletable = (file) => cleanupRefused && file === `${path}.next`;
       expect(app.updateChannelPick(news, "12")).toBe(false);
       expect(picked(app, news)).toBe("11");
@@ -493,6 +520,7 @@ describe("per-channel quality picks", () => {
     native.sync = (step, file) => {
       if (step === "move" && file === `${path}.next`) throw new Error("refused");
     };
+
     expect(app.forgetChannelPicks("s1")).toBe(false);
     expect(picked(app, news)).toBe("12");
     native.sync = null;

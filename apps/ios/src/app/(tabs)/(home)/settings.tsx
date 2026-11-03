@@ -84,13 +84,17 @@ export default function Settings() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: t("Settings") });
   }, [navigation, language.locale]);
+
   if (roster.kind !== "ready") return null;
+
   const systemLanguage = t("System default ({language})", {
     language: mediaLanguageName(deviceLanguage),
   });
+
   const systemInterface = t("System default ({language})", {
     language: LANGUAGE_NAMES[language.system],
   });
+
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       <Section name={t("General")} />
@@ -302,11 +306,14 @@ export default function Settings() {
 
 const mediaLanguageName = (code: string) =>
   TITLE_LANGUAGES.find((language) => language.code === code)?.name ?? languageName(code) ?? code;
+
 const deviceLanguage = new Intl.Locale(Intl.DateTimeFormat().resolvedOptions().locale).language;
+
 const audioNames = {
   "follow-title": "Follow title language",
   original: "Original language",
 } as const;
+
 const subtitleNames = { "forced-only": "Only when forced", off: "Off" } as const;
 const qualityNames: Record<Quality, string> = { uhd: "4K", fhd: "Full HD", hd: "HD", sd: "SD" };
 const sizeNames = { small: "Small", medium: "Medium", large: "Large" } as const;
@@ -320,6 +327,7 @@ function pickLanguage(system: string) {
     { label: system, value: "system" },
     ...LOCALES.map((locale) => ({ label: LANGUAGE_NAMES[locale], value: locale })),
   ];
+
   ActionSheetIOS.showActionSheetWithOptions(
     {
       title: t("Interface language"),
@@ -328,6 +336,7 @@ function pickLanguage(system: string) {
     },
     (index) => {
       const choice = choices[index];
+
       if (choice && !chooseLanguage(choice.value)) {
         Alert.alert(
           t("Couldn't save the language"),
@@ -355,6 +364,7 @@ function chooseMedia<K extends keyof ReturnType<typeof getMediaPreferences>>(
     },
     (index) => {
       const choice = choices[index];
+
       if (choice && !updateMediaPreferences(field, choice.value)) {
         Alert.alert(
           t("Couldn't save media preference"),
@@ -414,13 +424,16 @@ function manageSubtitleKey() {
 function Provider({ member, tab }: { member: Member; tab: Tab }) {
   const { entry, label } = member;
   const unmapped = useUnmapped(member);
+
   const line = [
     standing(member),
     unmapped ? t("{count} groups need mapping", { count: unmapped }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
+
   const edit = () => router.push({ pathname: tabHref(tab, "provider"), params: { id: entry.id } });
+
   const reloads =
     entry.kind === "m3u"
       ? [
@@ -440,6 +453,7 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
           { label: t("Reload channels"), run: () => reloadChannels(entry.id) },
           { label: t("Reload movies and series"), run: () => reloadTitles(entry.id) },
         ];
+
   const open = () => {
     const actions =
       entry.kind === "demo"
@@ -464,6 +478,7 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
             { label: t("Edit"), run: edit },
             { label: t("Remove"), run: () => confirmRemove(member) },
           ];
+
     ActionSheetIOS.showActionSheetWithOptions(
       {
         title: label,
@@ -474,6 +489,7 @@ function Provider({ member, tab }: { member: Member; tab: Tab }) {
       (index) => actions[index]?.run(),
     );
   };
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -507,30 +523,37 @@ function standing({ entry, account, needsSecret, live, titles }: Member): string
   if (needsSecret) {
     return t(entry.kind === "m3u" ? "Enter the playlist link again" : "Enter the password again");
   }
+
   if (live.kind === "failed") return failureOf(live.error, entry.server).headline;
+
   if (titles.kind === "failed") {
     return t("Movies and series: {failure}", {
       failure: failureOf(titles.error, entry.server).headline,
     });
   }
+
   if (entry.kind === "demo") return t("Sample content");
+
   const loading =
     live.kind === "loading"
       ? t("Loading channels")
       : titles.kind === "loading"
         ? t("Loading")
         : null;
+
   // A playlist's provider says nothing of its account, only whether it answered.
   const state =
     entry.kind === "m3u" && !(account && "kind" in account)
       ? t("M3U playlist")
       : accountLine(account, entry.server);
+
   return [state, loading].filter(Boolean).join(" · ");
 }
 
 /** Both demo actions are ephemeral and name the data removed before the viewer confirms. */
 function confirmDemo(action: "reset" | "exit") {
   const label = t(action === "reset" ? "Reset demo data" : "Exit demo");
+
   const report = (result: DemoErase | DemoStart) => {
     if (result.kind === "incomplete")
       Alert.alert(
@@ -540,6 +563,7 @@ function confirmDemo(action: "reset" | "exit") {
     else if (result.kind === "refused")
       Alert.alert(t("Demo isn't available"), t("The operation couldn't continue."));
   };
+
   Alert.alert(
     t(action === "reset" ? "Reset demo data?" : "Exit demo?"),
     t("Demo downloads, favourites, watchlist, history and progress will be removed."),
@@ -584,6 +608,7 @@ function confirmRemove({ entry, label }: Member) {
         );
       }
     });
+
   Alert.alert(
     t("Remove {name}?", { name: label }),
     t(
@@ -600,7 +625,9 @@ function confirmRemove({ entry, label }: Member) {
 /** Where statistics go in this build, when that isn't PostHog. */
 function transportNote({ enabled, transport }: AnalyticsSettings): string | null {
   if (transport === "unavailable") return t("They can't be saved on this iPhone right now.");
+
   if (!enabled || transport === "production") return null;
+
   return transport === "local"
     ? t("This development build sends them to a test endpoint on this computer only.")
     : t("This build sends nothing.");
@@ -615,6 +642,7 @@ const tmdbKeyNames = { yours: "Saved", app: "This build's" } as const;
  */
 function Tmdb({ tmdb }: { tmdb: MetadataStanding }) {
   const count = "known" in tmdb ? t("{known} of {wanted}", tmdb) : "";
+
   return (
     <>
       <Opens
@@ -731,6 +759,7 @@ function manageTmdbKey() {
 /** What development builds also show, in English only. Release builds leave it out. */
 function Development() {
   const timings = useTitleTimings();
+
   return (
     <>
       <Section name="Development" />
@@ -756,14 +785,17 @@ const stateNames = {
 /** The account as one plain line: "Active until 12 Mar 2027, 1 of 2 streams". */
 function accountLine(account: AccountStatus | AppError | null, server: string): string {
   if (!account) return t("Checking");
+
   if ("kind" in account) return failureOf(account, server).headline;
   const state = t(stateNames[account.state]);
+
   const until = account.expiresAt
     ? t("{state} until {date}", {
         state,
         date: formatDate(Date.parse(account.expiresAt), "date"),
       })
     : state;
+
   return account.maxConnections !== null
     ? t("{account}, {active} of {max} streams", {
         account: until,

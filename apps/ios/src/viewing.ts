@@ -81,14 +81,17 @@ export interface ViewingCatalogue {
   readonly series: (version: OwnedId) => Promise<Title | undefined>;
   readonly details: (title: Title) => Promise<TitleDetails>;
 }
+
 let catalogue: ViewingCatalogue = {
   series: async () => undefined,
   details: () => Promise.reject(new AppFailure({ kind: "no-subscription" })),
 };
 
 const viewing = store<Viewing | null>(null);
+
 /** The record as it stands; null before it was first read or without a subscription. */
 export const useViewing = () => useStore(viewing);
+
 /** The record as the screens have it, for handlers outside React. */
 export const currentViewing = () => viewing.get();
 
@@ -107,21 +110,26 @@ const kept = readMembership(
     ? read.favouriteMembership
     : undefined,
 );
+
 /** Whether favourites may go by the memory: none read, or one this build reads. */
 const remembers = kept.kind !== "kept";
+
 /**
  * The memory this build can't read, written back as it is, until a provider's history is erased:
  * that write leaves it out, as it can't tell what of it was that provider's.
  */
 let carried: unknown = kept.kind === "kept" ? kept.value : undefined;
+
 /** Set while a provider's history is erased, for that write alone. */
 let erasing = false;
 
 /** The record as the file holds it: what was read, then each snapshot written. */
 let base: ViewingSnapshot | null = snapshot();
+
 /** Whether the last written record has this account, before an erase drops carried memory. */
 export const viewingHolds = (subscriptionId: string): boolean =>
   base !== null && Object.hasOwn(base.accounts, subscriptionId);
+
 /**
  * Which stream ids were seen together: what the file holds, and any grouping the catalogue
  * showed since that the file refused, until a write takes it. Never what a refused change of the
@@ -149,6 +157,7 @@ function save(next: ViewingSnapshot) {
   writeJson(FILE, fileOf(next, after));
   base = next;
   membership = after;
+
   if (erasing) carried = undefined;
 }
 
@@ -159,8 +168,10 @@ function save(next: ViewingSnapshot) {
 function observe() {
   if (!remembers || !base) return;
   const after = reconcile(membership, favouritesIn(base), channels);
+
   if (sameMembership(after, membership)) return;
   membership = after;
+
   try {
     writeJson(FILE, fileOf(base, after));
   } catch {
@@ -192,6 +203,7 @@ const layer = ViewingRecord.layer.pipe(
         lookup: (subscriptionId) =>
           Effect.sync(() => {
             const shown = channels;
+
             return (id: string) => shown.get(ownedKey({ subscriptionId, id }));
           }),
         ...defined({ favourite: remembers ? favourite : undefined }),
@@ -206,8 +218,10 @@ const layer = ViewingRecord.layer.pipe(
           Effect.tryPromise({
             try: async () => {
               const title = await catalogue.series(series);
+
               if (!title) throw new AppFailure({ kind: "title-not-found", titleId: series.id });
               const found = await catalogue.details({ ...title, ...series });
+
               return found.kind === "series" ? seriesEpisodeSeasons(found) : [];
             },
             catch: failedWith,
@@ -217,11 +231,14 @@ const layer = ViewingRecord.layer.pipe(
     ),
   ),
 );
+
 const runtime = ManagedRuntime.make(layer);
+
 // Built now, in one go, so a favourite's change, which runs in one go, never finds it half built.
 runtime.runSyncExit(Effect.void);
 
 type Call<A> = (record: ViewingRecord["Service"]) => Effect.Effect<A, Failed>;
+
 const withRecord = <A>(call: Call<A>) =>
   Effect.gen(function* () {
     return yield* call(yield* ViewingRecord);
@@ -248,8 +265,10 @@ let generation = 0;
 /** Reads the record again for the screens. */
 async function refresh() {
   const asked = generation;
+
   if (owners.length === 0) return viewing.set(null);
   const read = await run((record) => record.state);
+
   if (asked === generation) viewing.set(read);
 }
 
@@ -264,6 +283,7 @@ function change<A>(call: (record: ViewingRecord["Service"]) => Effect.Effect<A, 
   return trackChange(
     run(call).then(async (result) => {
       await refresh();
+
       return result;
     }),
   );
@@ -275,6 +295,7 @@ function trackChange<A>(changing: Promise<A>): Promise<A> {
     () => changes.delete(changing),
     () => changes.delete(changing),
   );
+
   return changing;
 }
 
@@ -314,11 +335,13 @@ export function serveViewing(lists: ViewingCatalogue) {
  */
 export async function eraseViewing(subscriptionId: string): Promise<void> {
   erasing = true;
+
   try {
     outcome(runtime.runSyncExit(withRecord((record) => record.erase(subscriptionId))));
   } finally {
     erasing = false;
   }
+
   await refresh();
 }
 
@@ -339,6 +362,7 @@ async function changeNow(call: Call<unknown>): Promise<void> {
  */
 export function setFavourite(channel: OwnedId, favourite: boolean): Promise<void> {
   const { subscriptionId, id } = channel;
+
   return changeNow((record) => record.setFavourite(commandId(), { subscriptionId, id }, favourite));
 }
 
@@ -365,7 +389,9 @@ export function removeFromContinue(title: Title) {
     subscriptionId: owner,
     id,
   }));
+
   const filter: TitleFilter = title.kind === "movie" ? { movies: versions } : { series: versions };
+
   return change((record) => record.removeFromContinue(commandId(), filter)).then(() => undefined);
 }
 

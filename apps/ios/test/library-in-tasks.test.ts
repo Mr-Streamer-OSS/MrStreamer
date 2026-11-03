@@ -9,6 +9,7 @@ import { buildLibrary, combineSteps, inTasks, partSteps, type LiveSource } from 
 /** A panel's list: channels by country and quality, some for adults, some in no category. */
 function catalogue(count: number, offset: number): LiveCatalogue {
   const countries = ["NL", "BE", "UK", "DE"];
+
   const categories = [
     ...countries.flatMap((code) => [
       { id: `${code}-news`, name: `${code} | News` },
@@ -16,11 +17,13 @@ function catalogue(count: number, offset: number): LiveCatalogue {
     ]),
     { id: "adult", name: "XXX Adults" },
   ];
+
   const channels = Array.from({ length: count }, (_, at) => {
     // Each channel in three qualities, one after another.
     const n = Math.floor((at + offset) / 3);
     const code = countries[n % countries.length] ?? "NL";
     const quality = ["FHD", "HD", "SD"][at % 3];
+
     return {
       id: String(at + 1),
       name: `${code} | Channel ${n} ${quality}`,
@@ -33,10 +36,12 @@ function catalogue(count: number, offset: number): LiveCatalogue {
       catchupDays: null,
     };
   });
+
   return { categories, channels };
 }
 
 const home: LiveSource = { subscriptionId: "a", label: "Home", catalogue: catalogue(3000, 0) };
+
 // The second lists some of the first's channels under the same names.
 const cabin: LiveSource = { subscriptionId: "b", label: "Cabin", catalogue: catalogue(1500, 1200) };
 const sources = [home, cabin];
@@ -46,10 +51,12 @@ async function alongside<A>(work: () => Promise<A>): Promise<{ result: A; tasks:
   let now = Date.now();
   const clock = vi.spyOn(Date, "now").mockImplementation(() => ++now);
   let tasks = 0;
+
   let timer = setTimeout(function task() {
     tasks += 1;
     timer = setTimeout(task, 0);
   }, 0);
+
   try {
     return { result: await work(), tasks };
   } finally {
@@ -61,11 +68,14 @@ async function alongside<A>(work: () => Promise<A>): Promise<{ result: A; tasks:
 /** Every part worked out in tasks, then joined in tasks, as the account owner does. */
 async function libraryInTasks(of: readonly LiveSource[]) {
   const parts = [];
+
   for (const source of of) {
     const part = await inTasks(partSteps(source), () => true);
+
     if (!part) throw new Error("Stopped");
     parts.push({ label: source.label, part });
   }
+
   return inTasks(combineSteps(parts), () => true);
 }
 
@@ -111,6 +121,7 @@ describe("a library worked out in tasks", () => {
         catalogue: listedOften("NL | Event Offline HD", "placeholder.tv", 600),
       },
     ];
+
     const { result, tasks } = await alongside(() => libraryInTasks(often));
     expect(tasks).toBeGreaterThan(2);
     expect(result).toEqual(buildLibrary(often));

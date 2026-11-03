@@ -21,6 +21,7 @@ vi.mock("node:child_process", { spy: true });
 
 function fixture() {
   const version = "0.0.22-nightly.20261029.447";
+
   const files = new Map(
     [
       `Mr-Streamer-${version}-win-x64-setup.exe`,
@@ -28,7 +29,9 @@ function fixture() {
       "latest.yml",
     ].map((name) => [name, strToU8(name)]),
   );
+
   const archive = zipSync(Object.fromEntries(files));
+
   const identity: PackageIdentity = {
     repository: "owner/player",
     sourceCommit: "a".repeat(40),
@@ -40,8 +43,10 @@ function fixture() {
     run: { id: 900, attempt: 1, headCommit: "c".repeat(40) },
     artifact: { id: 30, name: `release-win-x64-${version}`, sha256: sha256(archive) },
   };
+
   const receipt = producePackageReceipt(identity, files);
   const receiptZip = zipSync({ "package-receipt.json": strToU8(JSON.stringify(receipt)) });
+
   const artifact = {
     id: 30,
     name: identity.artifact.name,
@@ -50,6 +55,7 @@ function fixture() {
     expires_at: "2099-01-01T00:00:00Z",
     workflow_run: { id: 900, head_sha: identity.run.headCommit },
   };
+
   const artifacts = [
     artifact,
     {
@@ -59,7 +65,9 @@ function fixture() {
       digest: `sha256:${sha256(receiptZip)}`,
     },
   ];
+
   const input = { repository: identity.repository, request: { ...identity }, artifacts };
+
   const run = {
     id: 900,
     run_attempt: 1,
@@ -70,18 +78,22 @@ function fixture() {
     path: ".github/workflows/release.yml",
     head_repository: { full_name: identity.repository },
   };
+
   const github = {
     repository: identity.repository,
     json: async (path: string) => {
       if (path.startsWith("/actions/runs/900/attempts/")) return run;
+
       return artifacts.find((each) => path === `/actions/artifacts/${each.id}`);
     },
     bytes: async (path: string) => {
       if (path === "/actions/artifacts/30/zip") return archive;
+
       if (path === "/actions/artifacts/31/zip") return receiptZip;
       throw new Error(path);
     },
   };
+
   return { input, github, run };
 }
 
@@ -92,18 +104,22 @@ async function resolvedFixture() {
   const hash = sha256(setup);
   const sha512 = createHash("sha512").update(setup).digest("base64");
   const name = "Mr-Streamer-0.0.21-win-x64-setup.exe";
+
   const metadata = {
     version: "0.0.21",
     path: name,
     sha512,
     files: [{ url: name, sha512, size: setup.length }],
   };
+
   const sums = strToU8(`${hash}  ${name}`);
+
   const assets = [
     { id: 1, name, bytes: setup },
     { id: 2, name: "SHA256SUMS.txt", bytes: sums },
     { id: 3, name: "latest.yml", bytes: strToU8(JSON.stringify(metadata)) },
   ];
+
   const release = {
     tag_name: "v0.0.21",
     draft: false,
@@ -111,26 +127,35 @@ async function resolvedFixture() {
     published_at: "2026-10-29T00:00:00Z",
     assets: assets.map(({ id, name, bytes }) => ({ id, name, size: bytes.length })),
   };
+
   const api = {
     repository: input.repository,
     json: async (path: string) => {
       if (path === "") return { default_branch: "main" };
+
       if (path === "/releases?per_page=100&page=1") return [release];
+
       if (path === "/commits/v0.0.21") return { sha: "d".repeat(40) };
+
       if (path.startsWith("/compare/")) return { status: "ahead", ahead_by: 1, behind_by: 0 };
+
       if (path === "/releases/tags/v0.0.21") return release;
       throw new Error(`Unexpected published lookup: ${path}`);
     },
     bytes: async (path: string) => {
       const asset = assets.find((each) => path === `/releases/assets/${each.id}`);
+
       if (!asset) throw new Error(path);
+
       return asset.bytes;
     },
   };
+
   const { receipt } = await resolvePackages(api, {
     tag: `v${input.request.appVersion}`,
     private: verified,
   });
+
   return { input, github, verified, setup, receipt, api };
 }
 
@@ -145,8 +170,11 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     "refuses a successful run with the wrong %s",
     async (field) => {
       const { input, github, run } = fixture();
+
       if (field === "workflow") run.path = ".github/workflows/other.yml";
+
       if (field === "fork") run.head_repository.full_name = "fork/player";
+
       if (field === "run number") run.run_number++;
       await expect(verifyPrivateCandidate(github, input, true)).rejects.toThrow(
         "Private run identity",
@@ -176,6 +204,7 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     // A capability refusal must leave the owned machine untouched, after all package gates.
     const temp = await mkdtemp(join(tmpdir(), "audit-preflight-"));
     const root = join(temp, "journey");
+
     const runner = vi.spyOn(windows, "fleetRunner").mockReturnValue({
       id: "audit-preflight",
       temp,
@@ -183,24 +212,31 @@ describe("explicit unpublished Windows upgrade inputs", () => {
       executable: join(temp, "app.exe"),
       tools: [],
     });
+
     const execute = childProcess.execFileSync;
     const auditError = Object.assign(new Error("auditpol 0x00000522"), { status: 1314 });
+
     const command = vi
       .spyOn(childProcess, "execFileSync")
       .mockImplementation((file, args, options) => {
         if (file === "git") return args?.[0] === "rev-parse" ? "e".repeat(40) : "";
+
         if (file === "powershell.exe") throw auditError;
+
         return execute(file, args, options);
       });
+
     try {
       await writeFile(join(temp, "owner.json"), "{}");
       await writeFile(join(temp, "receipt.json"), JSON.stringify(receipt));
       await writeFile(join(temp, "private-input.json"), JSON.stringify(input));
+
       for (const id of [30, 31])
         await writeFile(
           join(temp, `artifact-${id}.zip`),
           await github.bytes(`/actions/artifacts/${id}/zip`),
         );
+
       for (const pkg of receipt.packages)
         await writeFile(
           join(temp, pkg.file),
@@ -235,8 +271,10 @@ describe("explicit unpublished Windows upgrade inputs", () => {
   });
   it("refuses a changed runtime fixture even with the correct verification commit pin", async () => {
     const checkout = await mkdtemp(join(tmpdir(), "verification-source-"));
+
     const git = (...args: string[]) =>
       execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", stdio: "pipe" }).trim();
+
     try {
       git("init", "--quiet");
       const folder = join(checkout, "apps", "desktop", "test");
@@ -270,8 +308,10 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     async (failure) => {
       const { input, github } = fixture();
       const temp = await mkdtemp(join(tmpdir(), "private-upgrade-"));
+
       const root =
         failure === "nested root" ? join(temp, "redirect", "journey") : join(temp, "journey");
+
       const runner = vi.spyOn(windows, "fleetRunner").mockReturnValue({
         id: "test",
         temp,
@@ -279,17 +319,21 @@ describe("explicit unpublished Windows upgrade inputs", () => {
         executable: join(temp, "app.exe"),
         tools: [],
       });
+
       try {
         await writeFile(join(temp, "owner.json"), "{}");
         await writeFile(join(temp, "private-input.json"), JSON.stringify(input));
+
         for (const id of [30, 31])
           await writeFile(
             join(temp, `artifact-${id}.zip`),
             await github.bytes(`/actions/artifacts/${id}/zip`),
           );
         const candidateTag = `v${input.request.appVersion}`;
+
         const pkg = (stage: "stable" | "candidate") => {
           const version = stage === "stable" ? "0.0.21" : input.request.appVersion;
+
           return {
             stage,
             version,
@@ -311,6 +355,7 @@ describe("explicit unpublished Windows upgrade inputs", () => {
             },
           };
         };
+
         await writeFile(
           join(temp, "receipt.json"),
           JSON.stringify({
@@ -360,16 +405,22 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     async (field) => {
       const { input, github } = fixture();
       const bad = structuredClone(input);
+
       if (field === "platform") Object.assign(bad.request, { platform: "mac-arm64" });
+
       if (field === "distribution") Object.assign(bad.request, { distribution: "store" });
+
       if (field === "attempt") bad.request.run.attempt++;
+
       if (field === "hash") bad.artifacts[0]!.digest = `sha256:${"0".repeat(64)}`;
+
       const message = {
         platform: /win-x64/,
         distribution: /direct/,
         attempt: /Private run identity/,
         hash: /artifact metadata differs/,
       }[field];
+
       await expect(verifyPrivateCandidate(github, bad, true)).rejects.toThrow(message);
     },
   );
@@ -394,6 +445,7 @@ describe("explicit unpublished Windows upgrade inputs", () => {
     vi.stubEnv("USERNAME", "agent");
     vi.stubEnv("LOCALAPPDATA", "C:\\Users\\agent\\AppData\\Local");
     vi.stubEnv("APPDATA", "C:\\Users\\agent\\AppData\\Roaming");
+
     try {
       expect(() =>
         fleetRunner({

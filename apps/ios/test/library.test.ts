@@ -44,10 +44,12 @@ describe.each([
       categories: [],
       channels: [channel("1", "Café-Film", []), channel("2", "Film", [])],
     };
+
     const library = buildLibrary([
       { subscriptionId: "a", label: "North", catalogue },
       { subscriptionId: "b", label: "South", catalogue },
     ]);
+
     for (const query of ["cafe film", "cafefilm", "CAFÉ"])
       expect(search(library, query).map((each) => each.key)).toEqual(["a:1", "b:1"]);
     expect(search(library, "film missing")).toEqual([]);
@@ -61,6 +63,7 @@ describe("the channels Live shows", () => {
       categories: [],
       channels: [channel("1", "Alpha", ["10"]), channel("2", "Bravo", [])],
     });
+
     expect(shown(library.regions)).toEqual([["All channels", ["Alpha", "Bravo"]]]);
   });
 
@@ -74,6 +77,7 @@ describe("the channels Live shows", () => {
         channel("4", "Delta", ["10", "99"]),
       ],
     });
+
     expect(shown(library.regions)).toEqual([
       ["News", ["Alpha", "Delta"]],
       ["Other channels", ["Bravo", "Charlie"]],
@@ -86,6 +90,7 @@ describe("the channels Live shows", () => {
       categories: [],
       channels: [channel("1", "Late", [], true)],
     });
+
     expect(library.regions).toEqual([]);
   });
 });
@@ -111,6 +116,7 @@ describe("finding countries and categories", () => {
       },
     },
   ]);
+
   const found = (query: string) =>
     searchPlaces(library, query).map((place) =>
       place.kind === "country"
@@ -162,6 +168,7 @@ describe("finding countries and categories", () => {
         },
       },
     ]);
+
     const places = searchPlaces(merged, "other channels");
     const keys = (channels: readonly { readonly key: string }[]) => channels.map(({ key }) => key);
     expect(

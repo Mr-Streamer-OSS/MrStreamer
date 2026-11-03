@@ -36,18 +36,22 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer() }));
 
 vi.mock("expo-secure-store", () => ({
   ...keychain(() => memory.keychain),
   setItemAsync: async (key: string, value: string) => {
     memory.keychain.set(key, value);
+
     if (memory.holdSecrets && key.startsWith("s.")) {
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
   },
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const LISTS = new Set([
@@ -58,22 +62,29 @@ const LISTS = new Set([
   "get_series_categories",
   "get_series",
 ]);
+
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = memory.aliases.reduce(
     (each, [alias, password]) =>
       each.replaceAll(encodeURIComponent(alias), encodeURIComponent(password)),
     input,
   );
+
   const action = new URL(url).searchParams.get("action") ?? "login";
   memory.requests.push(action);
+
   if (LISTS.has(action) && memory.holdLists) {
     await new Promise<void>((go) => memory.heldLists.push(go));
   }
+
   const response = await passThrough(url, init);
   const rewrite = memory.channels;
+
   if (action !== "get_live_streams" || !rewrite || !response.ok) return response;
   const rows = (await response.json()) as Record<string, unknown>[];
+
   return Response.json(rewrite(rows));
 });
 
@@ -85,8 +96,10 @@ interface FakeProvider {
   failTitles(status: number | null): void;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -101,20 +114,25 @@ const ONE = { username: "one", password: "one+Pw@1" };
 const TWO = { username: "two", password: "two+Pw@2" };
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ ...ONE, channels: 30, titles: 20 }),
     startFakeProvider({ ...TWO, channels: 30, titles: 20, second: true }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
+
 /** Panels a test starts for a login of its own, closed after it. */
 const started: FakeProvider[] = [];
+
 async function panelFor(login: typeof ONE, size = { channels: 10, titles: 10 }) {
   const panel = await startFakeProvider({ ...login, ...size });
   started.push(panel);
+
   return panel;
 }
 
@@ -136,23 +154,28 @@ function slowClock() {
 function ticker() {
   const counted = { ticks: 0 };
   let on = true;
+
   const tick = () => {
     if (!on) return;
     counted.ticks++;
     setTimeout(tick, 0);
   };
+
   setTimeout(tick, 0);
   cleanups.push(() => (on = false));
+
   return counted;
 }
 
 const folder = join(native.root, "cache", "catalogues");
 const pathOf = (name: string) => join(folder, name);
+
 /** The files in the folder of saved lists. */
 const saved = () => (existsSync(folder) ? readdirSync(folder).toSorted() : []);
 const savedOf = (id: string) => saved().filter((name) => name.startsWith(`${id}.`));
 const contents = (name: string) => JSON.parse(readFileSync(pathOf(name), "utf8"));
 const settle = (ms = 100) => new Promise((done) => setTimeout(done, ms));
+
 /** List requests since `from`, an index into `memory.requests`. */
 const listsAskedSince = (from: number) =>
   memory.requests.slice(from).filter((action) => LISTS.has(action));
@@ -171,21 +194,27 @@ async function launch() {
   const account = await import("../src/account.ts");
   const titles = await import("../src/titles.ts");
   await account.restore();
+
   return { ...titles, ...account };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 const member = (app: App, id: string) => {
   const found = app.members().find((each) => each.entry.id === id);
+
   if (!found) throw new Error(`No subscription ${id}`);
+
   return found;
 };
 
 /** Adds `panel`'s account, then waits until both its lists are saved. */
 async function added(app: App, panel: FakeProvider, login: typeof ONE) {
   const id = await app.add({ server: panel.url, ...login });
+
   if (!id) throw new Error("The add was cancelled");
   await until(() => savedOf(id).length === 2, "both lists saved");
+
   return id;
 }
 
@@ -202,18 +231,23 @@ beforeEach(() => {
   memory.holdLists = false;
   memory.requests.length = 0;
   memory.channels = null;
+
   for (const panel of [one, two]) {
     panel.failCatalogue(null);
     panel.failTitles(null);
   }
 });
+
 beforeEach(async () => {
   const { Directory, Paths } = await import("./native-files.ts");
+
   for (const each of [Paths.document, Paths.cache])
     new Directory(each).create({ idempotent: true });
 });
+
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) cleanup();
+
   for (const go of memory.heldLists.splice(0)) go();
   vi.useRealTimers();
   await Promise.all(started.splice(0).map((panel) => panel.close()));
@@ -269,6 +303,7 @@ describe("a launch with lists saved", () => {
     one.failCatalogue(503);
     one.failTitles(503);
     memory.holdLists = false;
+
     for (const go of memory.heldLists.splice(0)) go();
     await until(() => member(app, id).titles.kind === "failed", "the failures");
     await until(() => member(app, id).live.kind === "failed", "the channels' failure");
@@ -311,6 +346,7 @@ describe("a launch with lists saved", () => {
     const whole = readFileSync(pathOf(titles), "utf8");
     const envelope = JSON.parse(whole);
     const now = Date.now();
+
     const broken: Record<string, () => void> = {
       unreadable: () => writeFileSync(pathOf(titles), "{not json"),
       partial: () => writeFileSync(pathOf(titles), whole.slice(0, whole.length / 2)),
@@ -358,6 +394,7 @@ describe("a launch with lists saved", () => {
         ),
       "too large": () => truncateSync(pathOf(titles), 64 * 1024 * 1024 + 1),
     };
+
     for (const [what, breakIt] of Object.entries(broken)) {
       breakIt();
       const from = memory.requests.length;
@@ -369,6 +406,7 @@ describe("a launch with lists saved", () => {
       // Saved again from the provider's answer.
       await until(() => {
         const now = existsSync(pathOf(titles)) ? readFileSync(pathOf(titles), "utf8") : "";
+
         return now.startsWith("{") && JSON.parse(now).fetchedAt !== envelope.fetchedAt;
       }, `the lists saved again, ${what}`);
       writeFileSync(pathOf(titles), whole);
@@ -377,9 +415,11 @@ describe("a launch with lists saved", () => {
 
   it("loads one kind from the provider when a saved number overflows to infinity, keeping the other's", async () => {
     const id = await added(await launch(), one, ONE);
+
     const original = new Map(
       ["live", "titles"].map((kind) => [kind, readFileSync(pathOf(`${id}.${kind}.json`), "utf8")]),
     );
+
     /** `kind`'s file with `field` of its first `list` row set to `number`, as JSON text spells it. */
     const write = (kind: string, list: string, field: string, number: string) => {
       const envelope = JSON.parse(original.get(kind) ?? "");
@@ -389,15 +429,18 @@ describe("a launch with lists saved", () => {
         JSON.stringify(envelope).replace('"__number__"', number),
       );
     };
+
     const restore = () => {
       for (const [kind, text] of original) writeFileSync(pathOf(`${id}.${kind}.json`), text);
     };
+
     const overflows = [
       ["titles", "movies", "rating", "1e400"],
       ["titles", "movies", "addedAt", "-1e400"],
       ["live", "channels", "number", "1e400"],
       ["live", "channels", "catchupDays", "-1e400"],
     ] as const;
+
     for (const [kind, list, field, number] of overflows) {
       const what = `${list} ${field} ${number}`;
       restore();
@@ -421,6 +464,7 @@ describe("a launch with lists saved", () => {
         `the list saved again, ${what}`,
       );
     }
+
     // Finite numbers and none stay saved lists.
     for (const [kind, list, field, number] of [
       ["titles", "movies", "rating", "9.5"],
@@ -447,9 +491,11 @@ describe("a launch with lists saved", () => {
     // Stopped as iOS moves a write into place: the copy deleted, the new file still beside it.
     renameSync(pathOf(`${id}.live.json`), pathOf(`${id}.live.json.next`));
     writeFileSync(pathOf(`${id}.titles.json.next`), "{half");
+
     for (const name of ["xtream-gone.live.json", "xtream-gone.titles.json.next", "notes.txt"]) {
       writeFileSync(pathOf(name), "{}");
     }
+
     const from = memory.requests.length;
     const app = await launch();
     await until(() => member(app, id).titles.kind === "ready", "the saved lists");
@@ -463,6 +509,7 @@ describe("a launch with lists saved", () => {
     const app = await launch();
     const a = await added(app, one, ONE);
     const b = await added(app, two, TWO);
+
     const sizes: [string, number, number][] = [
       [`${a}.live.json`, 60, 1],
       [`${a}.titles.json`, 60, 2],
@@ -470,11 +517,13 @@ describe("a launch with lists saved", () => {
       [`${b}.live.json`, 60, 4],
       [`${b}.live.json.next`, 30, 5],
     ];
+
     for (const [name, mib, age] of sizes) {
       writeFileSync(pathOf(name), "");
       truncateSync(pathOf(name), mib * 1024 * 1024);
       utimesSync(pathOf(name), age * 1000, age * 1000);
     }
+
     // Reads wait, so the files stay as the launch left them.
     native.gate = (operation) => (operation === "text" ? new Promise(() => undefined) : undefined);
     await launch();
@@ -517,9 +566,11 @@ describe("a launch with lists saved", () => {
       () => [a, b].every((id) => member(again, id).titles.kind === "loading"),
       "the movie lists asked for",
     );
+
     for (const id of [a, b]) {
       expect(member(again, id).titles).toMatchObject({ kind: "loading", last: null });
     }
+
     expect(member(again, c).titles).toMatchObject({ kind: "ready", from: "cache" });
   });
 });
@@ -527,6 +578,7 @@ describe("a launch with lists saved", () => {
 describe("saving lists", () => {
   it("writes artwork that may carry the login as none, leaving this session's lists as they came", async () => {
     const [user, password] = [ONE.username, ONE.password];
+
     const unsafe = [
       `https://img.example/${user}/logo.png`,
       `https://img.example/logo.png?password=${encodeURIComponent(password)}`,
@@ -534,6 +586,7 @@ describe("saving lists", () => {
       `https://${user}:x@img.example/logo.png`,
       `https://img.example/${"a".repeat(2048)}.png`,
     ];
+
     memory.channels = (rows) =>
       rows.map((row, at) => (at < unsafe.length ? { ...row, stream_icon: unsafe[at] } : row));
     const app = await launch();
@@ -556,6 +609,7 @@ describe("saving lists", () => {
       rows.map((row, at) => (at === 3 ? { ...row, name: `News ${ONE.password}` } : row));
     const app = await launch();
     const id = await app.add({ server: one.url, ...ONE });
+
     if (!id) throw new Error("The add was cancelled");
     await until(() => savedOf(id).includes(`${id}.titles.json`), "the movie lists saved");
     await settle(200);
@@ -566,11 +620,13 @@ describe("saving lists", () => {
   it("writes as none artwork whose decoded query holds the password, as form encoding spells it", async () => {
     const login = { username: "three", password: "canary space 3" };
     const { password } = login;
+
     const unsafe = [
       `https://img.example/logo.png?${new URLSearchParams({ token: `prefix${password}suffix` })}`,
       `https://proxy.example/image?${new URLSearchParams({ url: `http://panel.example/live/three/${password}/7.png` })}`,
       `https://img.example/logo.png?${new URLSearchParams({ [`k${password}`]: "1" })}`,
     ];
+
     // The username within a longer part is no login.
     const safe = "https://img.example/threefold/logo.png?ref=three-ish";
     const art = [...unsafe, safe];
@@ -587,6 +643,7 @@ describe("saving lists", () => {
     ]);
     expect(listed.slice(0, art.length).map((each) => each.logoUrl)).toEqual(art);
     const text = readFileSync(pathOf(`${id}.live.json`), "utf8");
+
     for (const spelling of [
       password,
       password.replaceAll(" ", "+"),
@@ -599,18 +656,24 @@ describe("saving lists", () => {
   it("writes as none artwork whose address within an address holds the password encoded again", async () => {
     const login = { username: "five", password: "canary space" };
     const { password } = login;
+
     /** An image proxy's address for `inner`, encoded as its query value. */
     const proxied = (inner: string) => {
       const outer = new URL("https://proxy.example/image");
       outer.searchParams.set("url", inner);
+
       return outer.href;
     };
+
     const asked = (base: string, name: string, value: string) => {
       const address = new URL(base);
       address.searchParams.set(name, value);
+
       return address.href;
     };
+
     const encodedPath = `https://panel.example/art/five/${encodeURIComponent(password)}/7.png`;
+
     const unsafe = [
       proxied(encodedPath),
       `https://img.example/${encodeURIComponent(encodeURIComponent(password))}/logo.png`,
@@ -619,10 +682,12 @@ describe("saving lists", () => {
       // Encoding that doesn't decode can't be shown free of the login.
       "https://img.example/logo.png?x=%E0%A4%A",
     ];
+
     const safe = [
       proxied("https://img.example/art/7.png?size=w500"),
       proxied(asked("https://panel.example/logo.png", "ref", "fivefold")),
     ];
+
     const art = [...unsafe, ...safe];
     memory.channels = (rows) =>
       rows.map((row, at) => (at < art.length ? { ...row, stream_icon: art[at] } : row));
@@ -637,6 +702,7 @@ describe("saving lists", () => {
     ]);
     expect(listed.slice(0, art.length).map((each) => each.logoUrl)).toEqual(art);
     const text = readFileSync(pathOf(`${id}.live.json`), "utf8");
+
     for (const spelling of [
       password,
       password.replaceAll(" ", "+"),
@@ -668,6 +734,7 @@ describe("saving lists", () => {
       operation === "write" ? Promise.reject(new Error("The disk is full")) : undefined;
     const app = await launch();
     const id = await app.add({ server: one.url, ...ONE });
+
     if (!id) throw new Error("The add was cancelled");
     await until(() => member(app, id).titles.kind === "ready", "the lists");
     await settle(200);
@@ -682,10 +749,12 @@ describe("a login replaced or removed", () => {
       const app = await launch();
       const id = await added(app, one, ONE);
       memory.holdSecrets = true;
+
       const changing =
         how === "added again"
           ? app.add({ server: one.url, ...ONE })
           : app.update(id, { password: ONE.password });
+
       await until(() => memory.heldSecrets.length === 1, "the password's write");
       expect(savedOf(id)).toEqual([]);
       // The app stops before the Keychain answers: the next launch has nothing saved to show.
@@ -705,10 +774,12 @@ describe("a login replaced or removed", () => {
       const NEW = "oneNewPw7";
       memory.aliases = [[NEW, ONE.password]];
       const id = await added(await launch(), one, ONE);
+
       const change = (app: App) =>
         how === "added again"
           ? app.add({ server: one.url, username: ONE.username, password: NEW })
           : app.update(id, { password: NEW });
+
       native.undeletable = (path) => path.endsWith(`${id}.live.json`);
       const app = await launch();
       await until(() => member(app, id).titles.kind === "ready", "the saved lists");
@@ -817,26 +888,36 @@ describe("a login replaced or removed", () => {
 describe("a large provider's lists", () => {
   const BIG = { username: "big", password: "big-Pw7" };
   const SIZE = { channels: 600, titles: 3000 };
+
   /** The ticks when the titles first show as `from`, kept as the roster changes. */
   const shownWhen = (app: App, from: "provider" | "cache", counted: { ticks: number }) => {
     const seen = { at: -1 };
+
     const off = app.onRoster(() => {
       const titles = app.members()[0]?.titles;
+
       if (seen.at < 0 && titles?.kind === "ready" && titles.from === from) seen.at = counted.ticks;
     });
+
     cleanups.push(off);
+
     return seen;
   };
+
   /** By file name, the ticks when each pending file is first written. */
   const writtenWhen = (counted: { ticks: number }) => {
     const seen = new Map<string, number>();
     native.gate = (operation, path) => {
       const name = path.slice(path.lastIndexOf("/") + 1);
+
       if (operation === "write" && !seen.has(name)) seen.set(name, counted.ticks);
+
       return undefined;
     };
+
     return seen;
   };
+
   /** The ticks when `id`'s titles file is first read, or -1. */
   const readWhen = (id: string, counted: { ticks: number }) => {
     const seen = { at: -1 };
@@ -844,8 +925,10 @@ describe("a large provider's lists", () => {
       if (operation === "text" && path.endsWith(`/${id}.titles.json`) && seen.at < 0) {
         seen.at = counted.ticks;
       }
+
       return undefined;
     };
+
     return seen;
   };
 
@@ -924,6 +1007,7 @@ describe("a large provider's lists", () => {
     const shown = shownWhen(app, "provider", counted);
     const written = writtenWhen(counted);
     const id = await app.add({ server: panel.url, ...BIG });
+
     if (!id) throw new Error("The add was cancelled");
     await until(() => shown.at >= 0 && counted.ticks >= shown.at + 5, "the copy under way");
     expect(written.has(`${id}.titles.json.next`)).toBe(false);

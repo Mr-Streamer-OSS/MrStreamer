@@ -18,17 +18,23 @@ import {
 
 /** Which titles each streaming service carries changes often; fetched again after a week. */
 const SERVICES_KEEP_MS = 7 * 24 * 60 * 60_000;
+
 /** Requests in flight at once, and at most this many a second: TMDB allows about 50. */
 const PARALLEL = 8;
 const PER_SECOND = 40;
+
 /** How often the store is written while fetching. */
 const SAVE_EVERY_MS = 30_000;
+
 /** Streaming services followed per region and kind, most prominent first. */
 const SERVICES = 12;
+
 /** Pages read per service and kind, 20 titles each: its most popular 5,000. */
 const SERVICE_PAGES = 250;
+
 /** Requests in a row TMDB didn't answer before a run stops: offline, or TMDB down. */
 const GIVE_UP_AFTER = 3 * PARALLEL;
+
 /**
  * How far apart the UI is told of metadata. Every notice of new content has each open list read
  * again from the whole library, a second of the worker's time for a large one, so these start
@@ -56,10 +62,13 @@ const Entry = lazy(() =>
     "original?": "string | null",
   }),
 );
+
 type Entry = Infer<typeof Entry>;
+
 const ServiceList = lazy(() =>
   type({ id: "number", name: "string", priority: "number", ids: "string[]" }),
 );
+
 const MetadataFile = lazy(() =>
   type({
     version: "1",
@@ -72,6 +81,7 @@ const MetadataFile = lazy(() =>
     }).or("null"),
   }),
 );
+
 export type MetadataFile = Infer<typeof MetadataFile>;
 
 /** A title the catalogue lists, as the store needs it. */
@@ -121,20 +131,24 @@ export interface MetadataDeps {
 export function metadataStore(deps: MetadataDeps) {
   const now = deps.now ?? Date.now;
   let file: MetadataFile = { version: 1, entries: {}, services: null };
+
   // A file that can't be read is like none: everything is fetched again.
   const loading = deps.read().then(
     (read) => {
       const found = read === null ? null : MetadataFile()(read);
+
       if (!found || found instanceof type.errors) return;
       file = found;
       // A title searched before this was given no names: they are worked out again.
       searchNames.clear();
+
       // Lists built before this show the provider's names and no genres, and nothing later
       // would say so when the cache needs no fetching: that is content, told once.
       if (shows(found)) {
         untold = true;
         notify(true);
       }
+
       // What is past TMDB's limit goes, key or no key.
       if (Object.values(file.entries).some((entry) => !fresh(entry.at, TMDB_EXPIRE_MS))) {
         dirty = true;
@@ -143,6 +157,7 @@ export function metadataStore(deps: MetadataDeps) {
     },
     () => {},
   );
+
   let wanted: readonly Wanted[] = [];
   /** The viewer's language, which names are asked for in. */
   let language = "en";
@@ -173,19 +188,25 @@ export function metadataStore(deps: MetadataDeps) {
 
   const keyOf = (kind: TmdbKind, id: string) => `${kind}:${id}`;
   const fresh = (at: number, keep: number) => now() - at < keep;
+
   const servicesShown = (kept: MetadataFile["services"] | undefined) =>
     kept?.region === deps.region && fresh(kept.at, TMDB_EXPIRE_MS);
+
   /** Whether lists show anything of `kept`: a title TMDB knows or the region's services. */
   const shows = (kept: MetadataFile) =>
     servicesShown(kept.services) ||
     Object.values(kept.entries).some((entry) => !entry.missing && fresh(entry.at, TMDB_EXPIRE_MS));
+
   const current = (kind: TmdbKind, id: string) => {
     const entry = file.entries[keyOf(kind, id)];
+
     return entry && fresh(entry.at, TMDB_EXPIRE_MS) ? entry : undefined;
   };
+
   /** Whether TMDB answered for the title, its name in the viewer's language included. */
   const answered = (kind: TmdbKind, id: string) => {
     const entry = current(kind, id);
+
     return entry !== undefined && (entry.missing === true || entry.names?.[language] !== undefined);
   };
 
@@ -200,9 +221,11 @@ export function metadataStore(deps: MetadataDeps) {
    */
   function changed(change: "content" | "status" | "same", force = false): void {
     dirty = true;
+
     if (change === "content") untold = true;
     const at = now();
     const content = untold && (force || at - lastContent > contentGap);
+
     if (content || force || (change !== "same" && at - lastNotice > PROGRESS_EVERY_MS)) {
       notify(content);
     }
@@ -210,11 +233,13 @@ export function metadataStore(deps: MetadataDeps) {
 
   function notify(content: boolean): void {
     lastNotice = now();
+
     if (content) {
       lastContent = lastNotice;
       contentGap = Math.min(contentGap * 2, CONTENT_LAST_MS);
       untold = false;
     }
+
     deps.onChange({ content });
   }
 
@@ -222,17 +247,21 @@ export function metadataStore(deps: MetadataDeps) {
   function save(): Promise<void> {
     saving = saving.then(async () => {
       await loading;
+
       if (!dirty) return;
       dirty = false;
       lastSave = now();
+
       for (const [key, entry] of Object.entries(file.entries)) {
         if (!fresh(entry.at, TMDB_EXPIRE_MS)) delete file.entries[key];
       }
+
       if (file.services && !fresh(file.services.at, TMDB_EXPIRE_MS)) file.services = null;
       await deps.write(file).catch(() => {
         dirty = true;
       });
     });
+
     return saving;
   }
 
@@ -246,17 +275,22 @@ export function metadataStore(deps: MetadataDeps) {
     task: (item: T) => Promise<void>,
   ): Promise<void> {
     let next = 0;
+
     const lane = async () => {
       while (next < items.length && !refused && !unreachable() && !signal.aborted) {
         const item = items[next++] as T;
         const wait = Math.max(0, slot - now(), pausedUntil - now());
         slot = Math.max(slot, now()) + 1000 / PER_SECOND;
+
         if (wait > 0 && !(await delay(wait, signal))) return;
+
         if (signal.aborted || refused) return;
         await task(item);
+
         if (now() - lastSave > SAVE_EVERY_MS) await save();
       }
     };
+
     await Promise.all(Array.from({ length: PARALLEL }, lane));
   }
 
@@ -271,30 +305,42 @@ export function metadataStore(deps: MetadataDeps) {
     for (let tries = 0; tries < 3 && !signal.aborted && !refused; tries++) {
       try {
         const answer = await call();
+
         if (signal.aborted) return null;
         unanswered = 0;
+
         return answer;
       } catch (cause) {
         // A cancelled request may still settle as an HTTP failure or a late answer.
         if (signal.aborted) return null;
+
         if (!(cause instanceof TmdbError)) return null;
         const failure = cause.failure;
+
         if (failure.kind === "missing") {
           unanswered = 0;
+
           return "missing";
         }
+
         if (failure.kind === "refused") {
           refused = true;
           changed("status", true);
+
           return null;
         }
+
         const wait = failure.kind === "busy" ? failure.retryAfter * 1000 : 1000 * 2 ** tries;
+
         // Every request waits when TMDB asks to, not only this one.
         if (failure.kind === "busy") pausedUntil = Math.max(pausedUntil, now() + wait);
+
         if (tries < 2 && !(await delay(wait, signal))) return null;
       }
     }
+
     if (!signal.aborted && !refused) unanswered++;
+
     return null;
   }
 
@@ -310,15 +356,20 @@ export function metadataStore(deps: MetadataDeps) {
       entry.language !== "en" &&
       entry.names?.[asked] === null &&
       entry.names.en === undefined;
+
     const due = list
       .filter((title) => {
         const entry = file.entries[keyOf(title.kind, title.tmdbId)];
+
         if (!entry || !fresh(entry.at, TMDB_REFRESH_MS)) return true;
+
         return !entry.missing && (entry.names?.[asked] === undefined || needsEnglish(entry));
       })
       .toSorted((a, b) => b.addedAt - a.addedAt);
+
     await paced(due, signal, async (title) => {
       const key = keyOf(title.kind, title.tmdbId);
+
       /** What the entry's arrival changes: only its time, only the status, or what lists show. */
       const arrived = (entry: Entry): "content" | "status" | "same" => {
         const kept = file.entries[key];
@@ -327,23 +378,31 @@ export function metadataStore(deps: MetadataDeps) {
         const counted = answered(title.kind, title.tmdbId);
         file.entries[key] = entry;
         searchNames.delete(key);
+
         // A wrong "same" would leave lists stale, so anything but equal is content, and an entry
         // that had expired is always content: lists built before and after it differ.
         if (shown && sameValue({ ...shown, at: 0 }, { ...entry, at: 0 })) {
           return counted ? "same" : "status";
         }
+
         return entry.missing && (!kept || kept.missing) ? "status" : "content";
       };
+
       let entry = file.entries[key];
+
       if (!entry || !fresh(entry.at, TMDB_REFRESH_MS) || entry.names?.[asked] === undefined) {
         const found = await ask(signal, () =>
           client.details(title.kind, title.tmdbId, asked, signal),
         );
+
         if (found === null || signal.aborted) return;
+
         if (found === "missing") {
           changed(arrived({ at: now(), missing: true }));
+
           return;
         }
+
         const { name, original, ...metadata } = found;
         // Keep a completed translation even when replacement cancels its optional fallback.
         entry = {
@@ -355,11 +414,13 @@ export function metadataStore(deps: MetadataDeps) {
         };
         changed(arrived(entry));
       }
+
       // Resume an interrupted English lookup without refetching the completed primary answer.
       if (needsEnglish(entry)) {
         const english = await ask(signal, () =>
           client.details(title.kind, title.tmdbId, "en", signal),
         );
+
         if (english !== null && !signal.aborted) {
           changed(
             arrived({
@@ -376,29 +437,40 @@ export function metadataStore(deps: MetadataDeps) {
     if (file.services?.region === deps.region && fresh(file.services.at, SERVICES_KEEP_MS)) {
       return;
     }
+
     const lists: Record<TmdbKind, (StreamingService & { ids: string[] })[]> = { movie: [], tv: [] };
+
     for (const kind of ["movie", "tv"] as const) {
       const services = await ask(signal, () => client.services(kind, deps.region, signal));
+
       if (!services || services === "missing" || signal.aborted) return;
+
       for (const service of services.slice(0, SERVICES)) {
         const ids: string[] = [];
+
         for (let page = 1, pages = 1; page <= Math.min(pages, SERVICE_PAGES); page++) {
           if (signal.aborted || refused || unreachable()) return;
+
           const found = await ask(signal, () =>
             client.onService(kind, service.id, deps.region, page, signal),
           );
+
           // An exhausted transient failure abandons this crawl: partial membership must not
           // replace a complete snapshot or receive another week of freshness. A missing page
           // is terminal for this service only, as before.
           if (!found || signal.aborted) return;
+
           if (found === "missing") break;
           ids.push(...found.ids);
           pages = found.pages;
+
           if (!(await delay(1000 / PER_SECOND, signal))) return;
         }
+
         lists[kind].push({ ...service, ids });
       }
     }
+
     // Even the final request can settle after a new wanted list or language takes over.
     if (signal.aborted || refused) return;
     file.services = { region: deps.region, at: now(), ...lists };
@@ -412,6 +484,7 @@ export function metadataStore(deps: MetadataDeps) {
     signal: AbortSignal,
   ): Promise<void> {
     await loading;
+
     if (signal.aborted) return;
     unanswered = 0;
     // A new list or language is told of quickly again, however long the last run went on.
@@ -419,8 +492,10 @@ export function metadataStore(deps: MetadataDeps) {
     // A changed list or language takes over at once, ahead of
     // the services, a crawl of minutes.
     await fetchTitles(client, list, asked, signal);
+
     // The services take minutes to crawl; the titles' names needn't wait for them.
     if (untold) changed("status", true);
+
     if (!refused && !signal.aborted && !unreachable()) await fetchServices(client, signal);
     changed("status", true);
     await save();
@@ -439,6 +514,7 @@ export function metadataStore(deps: MetadataDeps) {
             ? file.services.at
             : undefined
           : file.entries[keyOf(kind, tmdbId)]?.at;
+
       return at === undefined ? Infinity : at + TMDB_EXPIRE_MS;
     },
 
@@ -451,20 +527,25 @@ export function metadataStore(deps: MetadataDeps) {
      */
     want(titles: readonly Wanted[], viewerLanguage: string = language): void {
       if (closed) return;
+
       if (running && language === viewerLanguage && sameWanted(wanted, titles)) {
         wanted = titles;
+
         return;
       }
+
       if (wanted !== titles || language !== viewerLanguage) controller?.abort();
       language = viewerLanguage;
       wanted = titles;
       const client = deps.client;
+
       // Nothing listed, as once the account goes, starts nothing; a run in progress stops.
       if (!client || refused || running || titles.length === 0) return;
       running = (async () => {
         // Again for a list or a language that came while fetching.
         let doneList: readonly Wanted[] | null = null;
         let doneLanguage: string | null = null;
+
         while (
           !closed &&
           wanted.length > 0 &&
@@ -487,7 +568,9 @@ export function metadataStore(deps: MetadataDeps) {
     /** What TMDB knows about a title, from the store; null before it arrived or once too old. */
     get(kind: TmdbKind, tmdbId: string): TitleMetadata | null {
       const entry = current(kind, tmdbId);
+
       if (!entry || entry.missing) return null;
+
       return {
         genres: entry.genres ?? [],
         language: entry.language ?? null,
@@ -510,23 +593,29 @@ export function metadataStore(deps: MetadataDeps) {
       viewerLanguage: string,
     ): { readonly name: string; readonly original: string | null } | null {
       const entry = current(kind, tmdbId);
+
       if (!entry || entry.missing) return null;
       const original = entry.original ?? null;
       const madeIn = entry.language ?? null;
+
       const name =
         entry.names?.[viewerLanguage] ??
         (madeIn === viewerLanguage ? original : null) ??
         entry.names?.["en"] ??
         (madeIn === "en" ? original : null) ??
         original;
+
       if (!name) return null;
+
       return { name, original: original && original !== name ? original : null };
     },
 
     /** Raw, independent translations and original name for relevance and punctuation recall. */
     searchAliases(kind: TmdbKind, tmdbId: string): readonly string[] {
       const entry = current(kind, tmdbId);
+
       if (!entry || entry.missing) return [];
+
       return [...Object.values(entry.names ?? {}), entry.original].filter(
         (name): name is string => typeof name === "string" && name !== "",
       );
@@ -537,25 +626,30 @@ export function metadataStore(deps: MetadataDeps) {
       const key = keyOf(kind, tmdbId);
       // Check time before the memo: a warm alias must expire just like get/name, key or no key.
       const entry = current(kind, tmdbId);
+
       if (!entry || entry.missing) return "";
       let found = searchNames.get(key);
+
       if (found === undefined) {
         const names = Object.values(entry.names ?? {}).filter((name) => name !== null);
         found = normalize([...names, entry.original ?? ""].join(" "));
         searchNames.set(key, found);
       }
+
       return found;
     },
 
     /** The streaming services of the region, each with what it streams. */
     services(kind: TmdbKind): readonly ServiceTitles[] {
       if (!file.services || !servicesShown(file.services)) return [];
+
       return file.services[kind].map(({ ids, ...service }) => ({ ...service, ids: new Set(ids) }));
     },
 
     status(): MetadataStatus {
       // Titles TMDB answered for, including ids it doesn't know.
       const known = wanted.filter((title) => answered(title.kind, title.tmdbId)).length;
+
       return { known, wanted: wanted.length, refused, fetching: running !== null };
     },
 
@@ -575,6 +669,7 @@ export function metadataStore(deps: MetadataDeps) {
         await running;
         await save();
       })();
+
       return closing;
     },
   };
@@ -586,6 +681,7 @@ function sameWanted(a: readonly Wanted[], b: readonly Wanted[]): boolean {
     a.length === b.length &&
     a.every((title, index) => {
       const other = b[index];
+
       return (
         other !== undefined &&
         title.kind === other.kind &&
@@ -599,13 +695,16 @@ function sameWanted(a: readonly Wanted[], b: readonly Wanted[]): boolean {
 /** A run's pacing and retry waits end immediately on cancellation, releasing their timers. */
 function delay(ms: number, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
+
   if (ms <= 0) return Promise.resolve(true);
+
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
       signal.removeEventListener("abort", done);
       resolve(!signal.aborted);
     };
+
     const timer = setTimeout(done, ms);
     signal.addEventListener("abort", done, { once: true });
   });
@@ -614,10 +713,13 @@ function delay(ms: number, signal: AbortSignal): Promise<boolean> {
 /** Whether two JSON values are equal, whatever order their keys are in. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
+
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const aKeys = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
   const bKeys = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
+
   return (
     aKeys.length === bKeys.length &&
     aKeys.every((key) =>

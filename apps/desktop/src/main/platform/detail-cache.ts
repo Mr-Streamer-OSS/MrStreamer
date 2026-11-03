@@ -13,12 +13,16 @@ import * as Layer from "effect/Layer";
 import { attempt, Database, transaction } from "./database.ts";
 
 export const DETAIL_CACHE_TABLE = "title_detail_cache";
+
 /** Live payload only. SQLite free pages and WAL are measured separately. */
 const PAYLOAD_BYTES = 64 * 1024 * 1024;
+
 /** A single enormous series remains usable without being persisted. */
 const RECORD_BYTES = 8 * 1024 * 1024;
+
 /** Bounds bookkeeping even when most records are tiny missing answers. */
 const RECORDS = 2048;
+
 /** A write never scans or prunes an unbounded number of old entries. */
 const PRUNE_BATCH = 64;
 
@@ -65,6 +69,7 @@ export type DetailRecord =
 const Person = lazy(() =>
   type({ "+": "delete", name: "string", character: "string | null", profile: "string | null" }),
 );
+
 const About = lazy(() =>
   type({
     "+": "delete",
@@ -79,6 +84,7 @@ const About = lazy(() =>
     directors: "string[]",
   }),
 );
+
 const Episode = lazy(() =>
   type({
     "+": "delete",
@@ -93,6 +99,7 @@ const Episode = lazy(() =>
     directors: "string[]",
   }),
 );
+
 const Provider = lazy(() =>
   type({
     "+": "delete",
@@ -128,6 +135,7 @@ const Provider = lazy(() =>
     container: "string | null",
   }),
 );
+
 // Each namespace initializes only the schema needed for the requested record.
 const Records = {
   provider: lazy(() =>
@@ -181,7 +189,9 @@ export const detailCacheLayer = Layer.effect(
   DetailCache,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return emptyCache;
+
     return yield* attempt(() => make(opened.db)).pipe(
       Effect.catch(() => Effect.succeed(emptyCache)),
     );
@@ -192,30 +202,39 @@ function make(db: DatabaseSync): DetailCache["Service"] {
   prepareDetailCache(db);
   const read = db.prepare(`select payload from ${DETAIL_CACHE_TABLE} where key = ?`);
   const touch = db.prepare(`update ${DETAIL_CACHE_TABLE} set used_at = ? where key = ?`);
+
   const write = db.prepare(`insert into ${DETAIL_CACHE_TABLE}
     (key, account, owner, used_at, bytes, payload) values (?, ?, ?, ?, ?, ?)
     on conflict(key) do update set used_at = excluded.used_at,
       bytes = excluded.bytes, payload = excluded.payload`);
+
   const remove = db.prepare(`delete from ${DETAIL_CACHE_TABLE} where key = ?`);
   const forget = db.prepare(`delete from ${DETAIL_CACHE_TABLE} where owner = ?`);
+
   const bytes = db.prepare(
     `select coalesce(sum(bytes), 0) as bytes, count(*) as count from ${DETAIL_CACHE_TABLE}`,
   );
+
   const size = db.prepare(`select bytes from ${DETAIL_CACHE_TABLE} where key = ?`);
+
   const oldest = db.prepare(
     `select key, bytes from ${DETAIL_CACHE_TABLE} where key != ? order by used_at limit ?`,
   );
+
   return {
     read: (key) =>
       attempt(() => {
         const id = keyOf(key);
         const row = read.get(id);
+
         const discard = () => {
           try {
             remove.run(id);
           } catch {}
+
           return null;
         };
+
         if (
           !row ||
           typeof row.payload !== "string" ||
@@ -223,17 +242,22 @@ function make(db: DatabaseSync): DetailCache["Service"] {
         )
           return row ? discard() : null;
         let payload: unknown;
+
         try {
           payload = JSON.parse(row.payload);
         } catch {
           return discard();
         }
+
         const record = Records[key.kind]()(payload);
+
         if (record instanceof type.errors || record.kind !== key.kind) return discard();
+
         // A read-only disk must still be able to supply its last good cached details.
         try {
           touch.run(Date.now(), id);
         } catch {}
+
         return record;
       }).pipe(Effect.orElseSucceed(() => null)),
     remember: (key, record) =>
@@ -241,9 +265,11 @@ function make(db: DatabaseSync): DetailCache["Service"] {
         if (record.kind !== key.kind) return;
         // Validate and remove undeclared fields at every depth. Only parsed display data reaches disk.
         const parsed = Records[key.kind]()({ schema: 1, ...record });
+
         if (parsed instanceof type.errors) return;
         const payload = JSON.stringify(parsed);
         const needed = Buffer.byteLength(payload);
+
         if (needed > RECORD_BYTES) return;
         const id = keyOf(key);
         transaction(db, () => {
@@ -252,16 +278,20 @@ function make(db: DatabaseSync): DetailCache["Service"] {
           let total = Number(usage?.bytes ?? 0) - Number(existing?.bytes ?? 0) + needed;
           let count = Number(usage?.count ?? 0) + (existing ? 0 : 1);
           const evict: string[] = [];
+
           if (total > PAYLOAD_BYTES || count > RECORDS) {
             for (const row of oldest.all(id, PRUNE_BATCH)) {
               evict.push(String(row.key));
               total -= Number(row.bytes);
               count--;
+
               if (total <= PAYLOAD_BYTES && count <= RECORDS) break;
             }
           }
+
           // Every bounded pass frees space, even when this write still cannot fit.
           for (const old of evict) remove.run(old);
+
           if (total > PAYLOAD_BYTES || count > RECORDS) return;
           write.run(
             id,

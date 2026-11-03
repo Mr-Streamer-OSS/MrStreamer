@@ -10,30 +10,41 @@ import { nativePlayer } from "./native-player.ts";
 // stand-ins.
 const port = nativePlayer();
 const keychain = new Map<string, string>();
+
 const sheets: Array<{
   title: string;
   message?: string;
   options: readonly string[];
   pick: (index: number) => void;
 }> = [];
+
 const alerts: string[][] = [];
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 let locked = false;
+
 vi.mock("expo-secure-store", () =>
   keychainStore(() => {
     if (locked) throw new Error("The Keychain is locked");
+
     return keychain;
   }),
 );
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => port,
   VideoView: () => null,
   VideoAirPlayButton: () => null,
   isPictureInPictureSupported: () => false,
 }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   // Text keeps its font size, so a test can see the size cues are drawn at.
@@ -47,6 +58,7 @@ vi.mock("react-native", async () => ({
             : found,
         undefined,
       );
+
     return React.createElement("span", { "data-size": size }, children);
   },
   ActionSheetIOS: {
@@ -63,28 +75,36 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined }, usePathname: () => "/films" }));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => ({ tab: "films" }),
   openOnTabs: () => undefined,
 }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, onPress }: { testID?: string; onPress: () => void }) =>
       createElement("button", { "data-testid": testID, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
 const { native } = await import("./native-files.ts");
@@ -95,9 +115,11 @@ const { WatchLayer } = await import("../src/watch.tsx");
 const preferences = await import("../src/media-preferences.ts");
 
 const SRT = "1\n00:00:01,000 --> 00:00:04,000\nHello <i>there</i>\n";
+
 const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
+
 let unmount = () => {};
 let container = document.createElement("div");
 
@@ -109,6 +131,7 @@ beforeEach(async () => {
   port.tracks = null;
   vi.stubGlobal("fetch", async (input: URL | string) => {
     const url = new URL(input);
+
     return url.hostname === "api.subdl.com"
       ? Response.json({
           status: true,
@@ -122,6 +145,7 @@ beforeEach(async () => {
   unmount = () => React.act(() => root.unmount());
   React.act(() => root.render(React.createElement(WatchLayer)));
 });
+
 afterEach(async () => {
   locked = false;
   native.sync = null;
@@ -138,6 +162,7 @@ async function watchMovie() {
     title: "Movie",
     year: 2001,
   });
+
   await React.act(async () => {
     await playback.play(
       {
@@ -160,8 +185,10 @@ async function watchMovie() {
     port.state(true);
     await tick();
   });
+
   return title;
 }
+
 async function openSubtitles() {
   await React.act(async () => {
     container
@@ -169,8 +196,10 @@ async function openSubtitles() {
       .dispatchEvent(new Event("click", { bubbles: true }));
     await tick();
   });
+
   return sheets.at(-1)!;
 }
+
 async function pick(sheet: (typeof sheets)[number], label: string) {
   const exact = sheet.options.indexOf(label);
   const index = exact >= 0 ? exact : sheet.options.findIndex((row) => row.includes(label));
@@ -234,6 +263,7 @@ describe("Watch's online subtitles", () => {
     const answer = fetch;
     vi.stubGlobal("fetch", async (input: URL | string) => {
       await held;
+
       return answer(input);
     });
     await pick(await openSubtitles(), "Find online");
@@ -272,9 +302,11 @@ describe("Watch's online subtitles", () => {
       port.state(true);
       await tick();
     });
+
     const cue = [...container.querySelectorAll("span")].find((each) =>
       each.textContent?.includes("Hello there"),
     );
+
     expect(cue?.getAttribute("data-size")).toBe("26");
     preferences.updateMediaPreferences("subtitleSize", "medium");
   });
@@ -323,20 +355,24 @@ describe("Watch's online subtitles", () => {
   it("says why a search, a download or keeping it failed, each in its own words", async () => {
     await saveSubtitleKey("key");
     await watchMovie();
+
     const found = () =>
       Response.json({
         status: true,
         results: [{ tmdb_id: 550, type: "movie" }],
         subtitles: [{ language: "EN", release_name: "Movie.2001", url: "/s/1.srt" }],
       });
+
     const serve = (file: () => Response) =>
       vi.stubGlobal("fetch", async (input: URL | string) =>
         new URL(input).hostname === "api.subdl.com" ? found() : file(),
       );
+
     for (const status of [429, 500]) {
       vi.stubGlobal("fetch", async () => new Response("", { status }));
       await pick(await openSubtitles(), "Find online");
     }
+
     // Text that isn't UTF-8 subtitles, then a disk that won't keep a good file.
     serve(() => new Response(new Uint8Array([0xff, 0xfe, 0xfd])));
     await pick(await openSubtitles(), "Find online");
@@ -345,6 +381,7 @@ describe("Watch's online subtitles", () => {
     native.sync = (operation, path) => {
       if (operation === "write" && path.includes("online-subtitles")) throw new Error("Disk full");
     };
+
     await pick(await openSubtitles(), "Find online");
     await pick(sheets.at(-1)!, "Movie.2001");
     native.sync = null;

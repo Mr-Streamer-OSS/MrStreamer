@@ -11,6 +11,7 @@ import type { StreamFailure } from "@mrstreamer/contracts/playback";
  * the picture's.
  */
 const KEPT = 10_000;
+
 /** Playlists a multivariant playlist names, kept for the whole session, at most this many. */
 const PINNED = 500;
 
@@ -24,16 +25,21 @@ const PINNED = 500;
 export function hlsAddresses(kept = KEPT) {
   const ids = new Map<string, string>();
   const addresses = new Map<string, { address: string; outcome: Outcome }>();
+
   type Outcome = { attempt: number; failure: StreamFailure | null };
+
   const root: Outcome = { attempt: 0, failure: null };
   // Discovery can evict thousands of old addresses in one playlist. Keep unresolved requests
   // independently, so that discovery cannot erase the cause of a fatal event still being handled.
   const requests = new Map<string, Outcome>();
+
   const retain = (id: string, outcome: Outcome) => {
     requests.delete(id);
     requests.set(id, outcome);
+
     if (requests.size > KEPT + PINNED) requests.delete(requests.keys().next().value!);
   };
+
   const pinned = new Set<string>();
   let next = 0;
 
@@ -42,16 +48,21 @@ export function hlsAddresses(kept = KEPT) {
     idOf(address: string, pin = false): string {
       const known = ids.get(address);
       const id = known ?? (next++).toString(36);
+
       if (pin && pinned.size < PINNED) pinned.add(id);
+
       if (known !== undefined) return known;
       ids.set(address, id);
       addresses.set(id, { address, outcome: { attempt: 0, failure: null } });
+
       for (const [oldest, oldId] of ids) {
         if (ids.size - pinned.size <= kept) break;
+
         if (pinned.has(oldId)) continue;
         ids.delete(oldest);
         addresses.delete(oldId);
       }
+
       return id;
     },
     /** The address `id` stands for, or undefined once it went. */
@@ -64,18 +75,24 @@ export function hlsAddresses(kept = KEPT) {
     begin(id: string | null) {
       const outcome = id === null ? root : (addresses.get(id)?.outcome ?? requests.get(id));
       const attempt = outcome ? ++outcome.attempt : null;
+
       // A pending retry has no HTTP cause yet. Its eventual timeout must not select the previous
       // attempt's status, including when hls.js aborts it before the proxy's own deadline.
       if (outcome) {
         outcome.failure = null;
+
         if (id !== null) retain(id, outcome);
       }
+
       return (failure: StreamFailure | null): void => {
         if (!outcome || outcome.attempt !== attempt) return;
+
         if (id !== null && addresses.get(id)?.outcome !== outcome && requests.get(id) !== outcome)
           return;
         outcome.failure = failure;
+
         if (id === null) return;
+
         if (failure) retain(id, outcome);
         else requests.delete(id);
       };
@@ -98,6 +115,7 @@ export const PLAYLIST_START = 64;
 /** Whether a response's first bytes start a playlist: "#EXTM3U", after any byte order mark. */
 export function startsPlaylist(bytes: Uint8Array): boolean {
   const text = new TextDecoder().decode(bytes.subarray(0, PLAYLIST_START)).trimStart();
+
   return text.startsWith("#EXTM3U");
 }
 
@@ -114,10 +132,12 @@ export function rewritePlaylist(
 ): string {
   const replace = (address: string) => {
     const absolute = URL.parse(address.trim(), base);
+
     return absolute && (absolute.protocol === "http:" || absolute.protocol === "https:")
       ? proxied(absolute.href)
       : address;
   };
+
   return playlist
     .split(/\r\n|\r|\n/)
     .map((line) => {
@@ -127,6 +147,7 @@ export function rewritePlaylist(
           (_match, address: string) => `URI="${replace(address)}"`,
         );
       }
+
       return line.trim() ? replace(line) : line;
     })
     .join("\n");

@@ -70,7 +70,9 @@ export function SubtitleSettingRows({
   subtitle: SubtitleTrack | null;
 }) {
   const { timing, look, text } = subtitleSettingsFor(subtitles, subtitle);
+
   if (!timing && !look) return null;
+
   return (
     <>
       <div role="separator" className="my-1 border-t border-white/12" />
@@ -90,6 +92,7 @@ export function SubtitleSettingRows({
 /** A file's or channel's text a tenth of a second earlier or later, and back on time. */
 export function TrackTiming() {
   const delay = useSubtitleSettings((state) => state.delay);
+
   return (
     <div className="flex items-center gap-1">
       <Step
@@ -115,12 +118,14 @@ export function TrackTiming() {
 /** Size, background and position, saved for every title and channel. */
 export function LookRows({ text }: { text: boolean }) {
   const look = useSubtitleSettings((state) => state.look);
+
   const pick = (patch: Partial<SubtitleLook>) => {
     void updateSubtitleLook(patch, {
       onError: (error) =>
         flashNote(`${t("Subtitle look")}: ${describeError(appError(error))}`, true),
     }).catch(() => {});
   };
+
   return (
     <>
       <Segments
@@ -212,12 +217,15 @@ function Segments<V extends string>({
     const radios = [...event.currentTarget.children];
     const at = radios.findIndex((radio) => radio === event.target);
     const sibling = radios[at + (event.key === "ArrowLeft" ? -1 : 1)];
+
     if (sibling instanceof HTMLElement) {
       sibling.click();
       sibling.focus();
     }
+
     event.preventDefault();
   };
+
   return (
     <div className="flex items-center gap-3 py-1">
       <span className="flex-1">{label}</span>
@@ -251,5 +259,6 @@ function Segments<V extends string>({
 /** "0.0 s", "+0.3 s" for later, "−0.2 s" for earlier. */
 export function delayLabel(delay: number): string {
   const sign = delay > 0 ? "+" : delay < 0 ? "−" : "";
+
   return t("{seconds} s", { seconds: `${sign}${formatDecimal(Math.abs(delay), 1)}` });
 }

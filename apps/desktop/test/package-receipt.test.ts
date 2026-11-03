@@ -20,6 +20,7 @@ import {
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const NOW = Date.parse("2026-10-11T00:00:00Z");
 const VERSION = "0.0.11-nightly.20261011.300";
+
 const builds: Pick<PackageIdentity, "platform" | "distribution" | "packageVersion">[] = [
   { platform: "mac-arm64", distribution: "direct", packageVersion: VERSION },
   { platform: "linux-x64", distribution: "direct", packageVersion: VERSION },
@@ -29,6 +30,7 @@ const builds: Pick<PackageIdentity, "platform" | "distribution" | "packageVersio
 
 function fixture(build = builds[2]!) {
   const base = `Mr-Streamer-${VERSION}-${build.platform}`;
+
   const names =
     build.distribution === "store"
       ? [`${base}.msix`, `${base}.msix.json`, `${base}.wack.xml`]
@@ -41,7 +43,9 @@ function fixture(build = builds[2]!) {
               "latest-linux.yml",
             ]
           : [`${base}-setup.exe`, `${base}-setup.exe.blockmap`, "latest.yml"];
+
   const files = new Map(names.map((name) => [name, strToU8(`Synthetic ${name}`)]));
+
   if (build.platform === "linux-x64") {
     const name = names[0]!;
     const installer = files.get(name)!;
@@ -62,7 +66,9 @@ function fixture(build = builds[2]!) {
       ),
     );
   }
+
   const archive = zipSync(Object.fromEntries(files));
+
   const identity: PackageIdentity = {
     ...build,
     repository: "owner/player",
@@ -77,7 +83,9 @@ function fixture(build = builds[2]!) {
       sha256: sha256(archive),
     },
   };
+
   const initialReceipt = producePackageReceipt(identity, files);
+
   const artifact = {
     id: 30,
     name: identity.artifact.name,
@@ -86,28 +94,35 @@ function fixture(build = builds[2]!) {
     expires_at: "2026-10-24T00:00:00Z",
     workflow_run: { id: 900, head_sha: identity.run.headCommit },
   };
+
   const receiptArtifact = {
     ...artifact,
     id: 31,
     name: `package-receipt-${build.platform}-${build.distribution}-${VERSION}-attempt-2`,
   };
+
   const archives = new Map([[30, archive]]);
   const artifacts = [artifact, receiptArtifact];
+
   const github = {
     repository: identity.repository,
     json: async () => ({ total_count: artifacts.length, artifacts }),
     bytes: async (path: string) => {
       if (path === "/actions/artifacts/31/zip") return archives.get(31)!;
+
       if (path === "/actions/artifacts/30/zip") return archives.get(30)!;
       throw new Error(`Unexpected download ${path}`);
     },
   };
+
   const updateReceipt = (value: unknown) => {
     const bytes = zipSync({ "package-receipt.json": strToU8(JSON.stringify(value)) });
     archives.set(31, bytes);
     receiptArtifact.digest = `sha256:${sha256(bytes)}`;
   };
+
   updateReceipt(initialReceipt);
+
   return {
     identity,
     files,
@@ -145,11 +160,13 @@ describe("successful package receipts", () => {
       [`${base}.dmg`, `${base}.zip`, `${base}.zip.blockmap`, "latest-mac.yml"].sort(),
     );
     expect((await world.resolve()).files).toEqual(world.files);
+
     for (const name of world.files.keys()) {
       const incomplete = new Map(world.files);
       incomplete.delete(name);
       expect(() => producePackageReceipt(world.identity, incomplete)).toThrow(/expected exactly/);
     }
+
     const receipt = world.receipt();
     const files = new Map(world.files);
     files.delete(`${base}.dmg`);
@@ -165,16 +182,20 @@ describe("successful package receipts", () => {
     const world = fixture(builds[3]!);
     const nightly = world.receipt();
     const appVersion = "0.0.11";
+
     const files = new Map(
       [...world.files].map(([name, bytes]) => [name.replace(VERSION, appVersion), bytes]),
     );
+
     const archive = zipSync(Object.fromEntries(files));
+
     const identity = {
       ...world.identity,
       appVersion,
       packageVersion: "1.0.11.0",
       artifact: { ...world.identity.artifact, name: `msix-${appVersion}`, sha256: sha256(archive) },
     };
+
     const stable = producePackageReceipt(identity, files);
     world.archives.set(30, archive);
     world.artifact.name = identity.artifact.name;
@@ -315,10 +336,12 @@ describe("successful package receipts", () => {
     async (build) => {
       for (const file of fixture(build).receipt().files) {
         const world = fixture(build);
+
         const bytes = zipSync({
           ...Object.fromEntries(world.files),
           [file.name]: strToU8("x".repeat(file.bytes)),
         });
+
         world.archives.set(30, bytes);
         world.artifact.digest = `sha256:${sha256(bytes)}`;
         const receipt = world.receipt();
@@ -342,10 +365,13 @@ describe("successful package receipts", () => {
 
   it("rejects ZIP entries that repeat a file name before extracting them", async () => {
     const world = fixture();
+
     const archive = Buffer.from(
       zipSync({ "same.exe": strToU8("first"), "dupe.exe": strToU8("second") }),
     );
+
     const original = Buffer.from("dupe.exe");
+
     for (
       let offset = archive.indexOf(original);
       offset !== -1;
@@ -353,6 +379,7 @@ describe("successful package receipts", () => {
     ) {
       archive.set(Buffer.from("same.exe"), offset);
     }
+
     world.archives.set(30, archive);
     world.artifact.digest = `sha256:${sha256(archive)}`;
     const receipt = world.receipt();
@@ -373,11 +400,13 @@ describe("successful package receipts", () => {
   it("reads all artifact pages before reporting absence", async () => {
     const world = fixture();
     const paths: string[] = [];
+
     const artifacts = await packageArtifacts(
       {
         ...world.github,
         json: async (path) => {
           paths.push(path);
+
           return {
             total_count: 2,
             artifacts: [paths.length === 1 ? world.artifact : world.receiptArtifact],
@@ -386,6 +415,7 @@ describe("successful package receipts", () => {
       },
       900,
     );
+
     expect(artifacts).toEqual(world.artifacts);
     expect(paths).toEqual([
       "/actions/runs/900/artifacts?per_page=100&page=1",
@@ -404,6 +434,7 @@ describe("successful package receipts", () => {
     async (build) => {
       const world = fixture(build);
       const { dir, env, run } = await checkout(world);
+
       try {
         // Unfinished files are not uploaded, so they must not appear in a success receipt.
         const installer = [...world.files.keys()][0]!;
@@ -417,12 +448,15 @@ describe("successful package receipts", () => {
           sourceCommit: env.PACKAGE_SOURCE,
         });
         world.updateReceipt(receipt);
+
         const resolved = await world.resolve({
           ...world.identity,
           sourceCommit: env.PACKAGE_SOURCE,
         });
+
         expect(resolved.files).toEqual(world.files);
         expect(resolved.receipt.platform).toBe(build.platform);
+
         if (build.platform === "linux-x64") {
           const image = `Mr-Streamer-${VERSION}-linux-x86_64.AppImage`;
           const deb = `Mr-Streamer-${VERSION}-linux-amd64.deb`;
@@ -456,8 +490,10 @@ describe("successful package receipts", () => {
     async (_, overrides, change, message) => {
       const world = fixture();
       const { dir, run } = await checkout(world);
+
       try {
         if (change === "missing") await rm(join(dir, "dist", [...world.files.keys()][0]!));
+
         if (change === "extra") await writeFile(join(dir, "dist", "other.exe"), "extra installer");
         const failed = await run(overrides);
         expect(failed.status).toBe(1);
@@ -477,11 +513,15 @@ describe("successful package receipts", () => {
  */
 async function checkout(world: ReturnType<typeof fixture>) {
   const dir = await mkdtemp(join(tmpdir(), "package-receipt-cli-"));
+
   const git = (...args: string[]) => {
     const result = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+
     if (result.status !== 0) throw new Error(result.stderr);
+
     return result.stdout.trim();
   };
+
   git("init", "-q");
   await writeFile(join(dir, "package.json"), JSON.stringify({ version: VERSION }));
   git("add", "package.json");
@@ -495,7 +535,9 @@ async function checkout(world: ReturnType<typeof fixture>) {
     "Synthetic source",
   );
   await mkdir(join(dir, "dist"));
+
   for (const [name, bytes] of world.files) await writeFile(join(dir, "dist", name), bytes);
+
   const env = {
     PATH: process.env["PATH"],
     GITHUB_REPOSITORY: world.identity.repository,
@@ -512,16 +554,20 @@ async function checkout(world: ReturnType<typeof fixture>) {
     PACKAGE_ARTIFACT_NAME: world.identity.artifact.name,
     PACKAGE_ARTIFACT_SHA256: world.identity.artifact.sha256,
   };
+
   const run = async (overrides: Partial<Record<keyof typeof env, string>> = {}) => {
     const child = spawn(process.execPath, [resolve("apps/desktop/scripts/package-receipt.ts")], {
       cwd: dir,
       env: { ...env, ...overrides },
       stdio: ["ignore", "ignore", "pipe"],
     });
+
     let stderr = "";
     child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
     const [status] = (await once(child, "close")) as [number | null];
+
     return { status, stderr };
   };
+
   return { dir, env, run };
 }

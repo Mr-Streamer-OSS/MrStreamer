@@ -15,6 +15,7 @@ describe("committed fixed usage observations", () => {
     const provider = await fakeProvider({ channels: 6 });
     const actions: AnalyticsAction[] = [];
     const settings: AnalyticsSetting[] = [];
+
     const runtime = runtimeFor(
       mainLayer({
         ...testConfig(await tempDir()),
@@ -28,6 +29,7 @@ describe("committed fixed usage observations", () => {
         },
       }),
     );
+
     const sources = await promised(runtime, Subscriptions);
     const library = await promised(runtime, Library);
     const viewing = await promised(runtime, ViewingRecord);
@@ -93,6 +95,7 @@ describe("committed fixed usage observations", () => {
   it("counts only current-target dismissal changes and effective update channel changes", async () => {
     const dismissed: AnalyticsAction[] = [];
     const channels: string[] = [];
+
     const runtime = runtimeFor(
       mainLayer({
         ...testConfig(await tempDir()),
@@ -119,6 +122,7 @@ describe("committed fixed usage observations", () => {
         },
       }),
     );
+
     const updates = await promised(runtime, Updates);
     await updates.check();
     await updates.dismiss("0.0.0");

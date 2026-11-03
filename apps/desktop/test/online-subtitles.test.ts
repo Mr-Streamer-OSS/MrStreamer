@@ -12,6 +12,7 @@ import { SubtitleAccounts } from "../src/main/services/subtitle-accounts.ts";
 import { promised, runtimeFor, tempDir, testSecrets } from "./support.ts";
 
 const preferences = { enabled: true, languages: ["nl"], service: "both" as const };
+
 const credentials = {
   subdl: { apiKey: "fixture-key" },
   opensubtitles: {
@@ -20,6 +21,7 @@ const credentials = {
     password: "fixture-password",
   },
 };
+
 const file = {
   account: "owner",
   kind: "movie" as const,
@@ -27,6 +29,7 @@ const file = {
   sourceStamp: "source",
   listingKey: "listed-4k",
 };
+
 const srt = "1\n00:00:04,000 --> 00:00:06,000\nGood evening.\n";
 
 async function setup(savedDir?: string) {
@@ -37,16 +40,20 @@ async function setup(savedDir?: string) {
   const calls: string[] = [];
   let hold: ReturnType<typeof Promise.withResolvers<void>> | null = null;
   let entered: ReturnType<typeof Promise.withResolvers<void>> | null = null;
+
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
     calls.push(url);
     const waiting = hold;
+
     if (waiting) {
       hold = null;
       entered?.resolve();
       await waiting.promise;
     }
+
     init?.signal?.throwIfAborted();
+
     if (url.startsWith("https://api.subdl.com"))
       return Response.json({
         status: true,
@@ -56,11 +63,14 @@ async function setup(savedDir?: string) {
           { language: "Dutch", release_name: "Television cut", url: "https://dl.subdl.com/tv.srt" },
         ],
       });
+
     if (url.startsWith("https://api.opensubtitles.com"))
       return new Response("Rejected fixture", { status: 401 });
+
     if (url.startsWith("https://dl.subdl.com/")) return new Response(srt);
     throw new Error("Unexpected fixture request");
   };
+
   const playing = (id: string) =>
     Effect.sync(() =>
       active && id === sessionId
@@ -72,6 +82,7 @@ async function setup(savedDir?: string) {
           }
         : null,
     );
+
   const layer = OnlineSubtitles.layer({ userAgent: "fixture", fetch: fetcher }).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -89,7 +100,9 @@ async function setup(savedDir?: string) {
       ),
     ),
   );
+
   const runtime = runtimeFor(layer);
+
   return {
     runtime,
     service: await promised(runtime, OnlineSubtitles),
@@ -108,6 +121,7 @@ async function setup(savedDir?: string) {
     hold() {
       hold = Promise.withResolvers<void>();
       entered = Promise.withResolvers<void>();
+
       return { entered: entered.promise, release: hold.resolve };
     },
   };
@@ -179,6 +193,7 @@ describe("online subtitles of the playing exact file", () => {
       const pending = state.service.search("playing-4k");
       const rejected = expect(pending).rejects.toBeDefined();
       await held.entered;
+
       if (action === "stop") state.stop();
       else if (action === "disable")
         await state.service.configure({ ...preferences, enabled: false });
@@ -238,6 +253,7 @@ describe("online subtitles of the playing exact file", () => {
       const late = await state.service.choose("playing-4k", found.results[1]!.id);
       await state.service.cancel("playing-4k");
       const downloads = state.calls.length;
+
       if (choice === "Off or a file track") {
         await state.service.hide("playing-4k");
         state.next();
@@ -259,6 +275,7 @@ describe("online subtitles of the playing exact file", () => {
           late.saved.subtitle,
         );
       }
+
       expect(state.calls).toHaveLength(downloads);
       await state.runtime.dispose();
     },

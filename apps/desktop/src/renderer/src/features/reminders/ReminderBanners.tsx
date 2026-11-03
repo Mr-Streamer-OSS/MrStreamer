@@ -25,7 +25,9 @@ export function ReminderBanners() {
   const now = useNow();
   const mini = useMiniPlayer((state) => state.on);
   const shown = (reminders ?? []).filter((each) => each.banner && now < each.stop);
+
   if (mini || shown.length === 0) return null;
+
   return (
     <div
       className="pointer-events-none fixed right-6 z-[45] flex w-[22rem] max-w-[calc(100vw-3rem)] flex-col gap-2"
@@ -43,6 +45,7 @@ function Banner({ reminder, now }: { reminder: Reminder; now: number }) {
   const channel = useQuery(queries.channel(reminder.channel));
   const dismiss = () => void call("reminders.dismiss", { id: reminder.id }).catch(() => {});
   const minutes = Math.floor((now - reminder.start) / 60_000);
+
   return (
     <section
       aria-label={reminder.title}

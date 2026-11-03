@@ -30,12 +30,15 @@ const english: SubtitleTrack = {
   forced: false,
   default: false,
 };
+
 const dutch: SubtitleTrack = { ...english, id: 4, language: "nl", label: "Nederlands" };
 const teletext: SubtitleTrack = { ...english, format: "teletext", page: 888 };
 const transport = pesReader();
+
 const packets = transport.push(
   readFileSync(join(import.meta.dirname, "../fixtures/h264-subtitles.mpegts")),
 );
+
 const page = packets.find((packet) => packet.pid === 0x300)!.payload;
 const packetLine = `${JSON.stringify({ at: 0, data: Buffer.from(page).toString("base64") })}\n`;
 
@@ -50,6 +53,7 @@ const line = (start: number, text: string, end = start + 60) =>
 function serveRuns(ready = true, codec: string | null = null) {
   let send: (text: string) => void = () => {};
   let end = () => {};
+
   /** The pictures asked for, by their query. */
   const pictures: string[] = [];
   const requests: { readonly subtitles: boolean; readonly signal: AbortSignal | null }[] = [];
@@ -58,22 +62,27 @@ function serveRuns(ready = true, codec: string | null = null) {
       subtitles: new URL(url).searchParams.get("only") === "subtitles",
       signal: init?.signal ?? null,
     });
+
     if (new URL(url).searchParams.get("only") === "subtitles") {
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
             send = (text) => controller.enqueue(new TextEncoder().encode(text));
             end = () => controller.close();
+
             if (ready) send('{"ready":true}\n');
           },
         }),
         { headers: codec ? { "x-codec": codec } : {} },
       );
     }
+
     // The picture never comes, which these tests don't need.
     pictures.push(new URL(url).search);
+
     return new Response(new ReadableStream());
   });
+
   return { send: (text: string) => send(text), end: () => end(), pictures, requests };
 }
 
@@ -133,15 +142,18 @@ async function watching(): Promise<() => string | null> {
   view = mounted.container;
   await mounted.render(createElement(TitleWatch));
   unmount = mounted.unmount;
+
   return () => view.querySelector('[role="status"]')?.textContent ?? null;
 }
 
 /** Opens CC, and reads the chosen track's row: its name and the word beside it. */
 async function chosenInPanel(): Promise<string | null> {
   const panel = () => view.querySelector('aside[aria-label="Subtitle choices"]');
+
   if (!panel()) {
     await act(async () => view.querySelector<HTMLElement>('[aria-label="Subtitles"]')!.click());
   }
+
   return panel()?.querySelector('[aria-pressed="true"]')?.textContent ?? null;
 }
 
@@ -153,6 +165,7 @@ afterEach(() => {
   act(() => titlePlayer.close());
   unmount();
   unmount = () => {};
+
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -294,6 +307,7 @@ describe("subtitles on a playing movie", () => {
       expect(runs.requests.filter((request) => !request.subtitles).at(-1)?.signal?.aborted).toBe(
         false,
       );
+
       if (codec === null) {
         runs.send(line(0, "The tide waits for no one."));
         await act(async () => vi.advanceTimersByTimeAsync(50));
@@ -324,12 +338,14 @@ describe("subtitles on a playing movie", () => {
     const note = await watching();
     await act(async () => titlePlayer.setSubtitle(english));
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
+
     if (state === "ready") {
       runs.send('{"ready":true}\n' + line(0, "We sail at first light."));
       await act(async () => vi.advanceTimersByTimeAsync(50));
     } else {
       await act(async () => titlePlayer.setSubtitle(null));
     }
+
     await act(async () => vi.advanceTimersByTimeAsync(25_100));
     expect(note()).toBeNull();
     expect(shown()).toEqual(state === "ready" ? ["We sail at first light."] : []);
@@ -453,11 +469,13 @@ describe("subtitles on a playing movie", () => {
     const close = view.querySelector<HTMLButtonElement>('[aria-label="Close message"]')!;
     close.focus();
     const asked = ipc.argsOf("playback.openTitle").length;
+
     for (const name of ["Enter", " "]) {
       const event = new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true });
       await act(async () => close.dispatchEvent(event));
       expect(event.defaultPrevented).toBe(false);
     }
+
     await act(async () => close.click());
     expect(note()).toBeNull();
     expect(ipc.argsOf("playback.openTitle")).toHaveLength(asked);

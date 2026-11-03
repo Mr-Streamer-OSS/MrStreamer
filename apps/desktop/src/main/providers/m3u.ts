@@ -28,10 +28,13 @@ export interface PlaylistAccount {
 
 /** Reading the playlist's first line, to check it is one or for the guide it names. */
 const CHECK_TIMEOUT_MS = 15_000;
+
 /** The whole playlist: a few megabytes for iptv-org's 11,000 channels. */
 const PLAYLIST_TIMEOUT_MS = 90_000;
+
 /** The whole guide download, before it is indexed. */
 const GUIDE_TIMEOUT_MS = 15 * 60_000;
+
 /** Mapping is bounded; existing unmapped Live playlists keep their original load limits. */
 const MAPPING_BYTES = 64 * 1024 * 1024;
 
@@ -50,14 +53,19 @@ function playlistRead(
   let pending = entries;
   let inspected = entries ? undefined : snapshot;
   let failure = limit;
+
   return {
     snapshot,
     inspect() {
       if (failure) throw failure;
+
       if (inspected) return inspected;
+
       if (!pending) return snapshot;
+
       try {
         inspected = inspectPlaylist(pending);
+
         return inspected;
       } catch (cause) {
         if (cause instanceof AppFailure) failure = cause;
@@ -77,6 +85,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
   const fetchImpl = providerFetch(options.fetch ?? fetch, loginIn(account.link));
   let last: PlaylistRead | null = null;
   let titleAddresses = new Set<string>();
+
   /** The read in progress, shared by every call that needs one. */
   let reading: { readonly inspecting: boolean; readonly promise: Promise<PlaylistRead> } | null =
     null;
@@ -89,6 +98,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
   ): Promise<{ body: ReadableStream<Uint8Array>; size: number | null }> {
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
+
     try {
       response = await fetchImpl(url, {
         headers: { "User-Agent": options.userAgent },
@@ -102,16 +112,19 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         detail: describeNetworkError(cause),
       });
     }
+
     if (!response.ok || !response.body) {
       void response.body?.cancel().catch(() => {});
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
+
     return { body: response.body, size: bodySize(response) };
   }
 
   /** A timeout or a connection lost while the playlist arrived, as the error the UI explains. */
   function lost(cause: unknown): AppFailure {
     if (cause instanceof AppFailure) return cause;
+
     return new AppFailure({
       kind: "unreachable",
       server: new URL(account.link).origin,
@@ -128,43 +141,55 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           if (cause instanceof AppFailure && cause.error.kind === "unexpected") return fresh();
           throw cause;
         });
+
       return reading.promise;
     }
+
     const promise = (async () => {
       try {
         const text = (await open(account.link, PLAYLIST_TIMEOUT_MS)).body.pipeThrough(
           new TextDecoderStream(),
         );
+
         const reader = m3uReader();
         const entries: PlaylistEntry[] = [];
         let bytes = 0;
+
         for await (const piece of text) {
           bytes += Buffer.byteLength(piece);
+
           if ((account.mapping || inspecting) && bytes > MAPPING_BYTES) {
             throw new AppFailure({
               kind: "unexpected",
               detail: t("Playlist exceeds the {size} MiB mapping limit.", { size: 64 }),
             });
           }
+
           for (const entry of reader.push(piece)) {
             entries.push(entry);
+
             if ((account.mapping || inspecting) && entries.length > 100_000)
               throw new AppFailure({
                 kind: "unexpected",
                 detail: t("Playlist exceeds the {count} entry mapping limit.", { count: 100_000 }),
               });
           }
+
           if (reader.playlist === false) {
             void text.cancel().catch(() => {});
             throw notAPlaylist(account.link);
           }
         }
+
         for (const entry of reader.end()) entries.push(entry);
+
         if (!reader.playlist) throw notAPlaylist(account.link);
+
         const snapshot =
           inspecting && !account.mapping
             ? inspectPlaylist(entries)
             : importPlaylist(entries, account.mapping);
+
         const limit =
           bytes > MAPPING_BYTES
             ? new AppFailure({
@@ -179,12 +204,14 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
                   }),
                 })
               : undefined;
+
         last = playlistRead(
           snapshot,
           account.mapping || inspecting || limit ? undefined : entries,
           limit,
         );
         titleAddresses = new Set([...snapshot.files.values()].map((file) => file.url));
+
         return last;
       } catch (cause) {
         throw lost(cause);
@@ -192,7 +219,9 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         reading = null;
       }
     })();
+
     reading = { inspecting, promise };
+
     return promise;
   }
 
@@ -206,8 +235,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     const text = (await open(account.link, CHECK_TIMEOUT_MS, signal)).body.pipeThrough(
       new TextDecoderStream(),
     );
+
     const reader = m3uReader();
     let characters = 0;
+
     try {
       for await (const piece of text) {
         // Only complete lines up to the first meaningful header are parsed, even when a fetch
@@ -215,32 +246,41 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
         for (const line of piece.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/g)) {
           const part = line[0];
           characters += part.length;
+
           if (characters > 65_536)
             throw new AppFailure({
               kind: "unexpected",
               detail: t("Playlist header exceeds {count} characters.", { count: 65_536 }),
             });
           reader.push(part);
+
           if (reader.playlist !== null) break;
         }
+
         if (reader.playlist !== null) break;
       }
     } catch (cause) {
       if (signal?.aborted) throw cause;
       throw lost(cause);
     }
+
     void text.cancel().catch(() => {});
+
     if (reader.playlist === null) reader.end();
+
     return { playlist: reader.playlist === true, guideUrl: reader.guideUrl };
   }
 
   /** A channel's stream, from the last read or, for one it doesn't have, a fresh one. */
   async function streamOf(channelId: string, signal?: AbortSignal): Promise<PlaylistStream> {
     const known = last?.snapshot.live.streams.get(channelId);
+
     if (known) return known;
     // Channels loaded from disk after a restart, or added since the last read.
     const stream = (await abortable(fresh(), signal)).snapshot.live.streams.get(channelId);
+
     if (!stream) throw new AppFailure({ kind: "channel-not-found", channelId });
+
     return stream;
   }
 
@@ -255,6 +295,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           ),
         });
       }
+
       return { state: "active", expiresAt: null, maxConnections: null, activeConnections: null };
     },
 
@@ -264,6 +305,7 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
           live: { categories, channels },
         },
       } = await abortable(fresh(), signal);
+
       return { categories, channels };
     },
 
@@ -272,8 +314,10 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
     async archiveStream(channelId, window, signal) {
       const stream = await streamOf(channelId, signal);
       const recording = stream.catchup && archiveAddress(stream.catchup, window, Date.now());
+
       if (!recording) throw new AppFailure({ kind: "catch-up", reason: "none" });
       const { url, start } = recording;
+
       return {
         url,
         start,
@@ -295,8 +339,11 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
      */
     async liveGuide(signal) {
       const { playlist, guideUrl } = await firstLine(signal);
+
       if (!playlist) throw notAPlaylist(account.link);
+
       if (!guideUrl) return { kind: "none" };
+
       // As it comes: the guide service unpacks one that is gzip, as guides named .xml.gz are.
       return { kind: "document", ...(await open(guideUrl, GUIDE_TIMEOUT_MS, signal)) };
     },
@@ -309,32 +356,40 @@ export function playlistProvider(account: PlaylistAccount, options: ProviderOpti
       const read = refresh
         ? await abortable(fresh(), signal)
         : (last ?? (await abortable(fresh(true), signal)));
+
       signal?.throwIfAborted();
+
       return refresh ? read.snapshot : read.inspect();
     },
 
     async movieDetails(id, signal) {
       const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
       const details = imported.details.get(id);
+
       if (!details || !imported.catalogue.movies.some((each) => each.id === id)) {
         throw new AppFailure({ kind: "title-not-found", titleId: id });
       }
+
       return details;
     },
 
     async seriesDetails(id, signal) {
       const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
       const details = imported.details.get(id);
+
       if (!details || !imported.catalogue.series.some((each) => each.id === id))
         throw new AppFailure({ kind: "title-not-found", titleId: id });
+
       return details;
     },
 
     async titleFile(kind, id, _container, signal) {
       const imported = (last ?? (await abortable(fresh(), signal))).snapshot;
       const file = imported.files.get(id);
+
       if (!file || kind !== file.kind)
         throw new AppFailure({ kind: "title-not-found", titleId: id });
+
       return file;
     },
   };
@@ -368,12 +423,15 @@ const LOGIN_NAMES: ReadonlySet<string> = new Set([
 function loginIn(...links: string[]): ProviderLogin {
   const secrets: string[] = [];
   const uncertain: string[] = [];
+
   for (const link of links) {
     const url = new URL(link);
     secrets.push(decoded(url.username), decoded(url.password));
+
     for (const [name, value] of url.searchParams)
       (LOGIN_NAMES.has(name.toLowerCase()) ? secrets : uncertain).push(value);
   }
+
   return { secrets, uncertain };
 }
 
@@ -397,6 +455,7 @@ function notAPlaylist(link: string): AppFailure {
 function abortable<A>(promise: Promise<A>, signal: AbortSignal | undefined): Promise<A> {
   if (!signal) return promise;
   signal.throwIfAborted();
+
   return new Promise((resolve, reject) => {
     const stop = () => reject(signal.reason);
     signal.addEventListener("abort", stop, { once: true });

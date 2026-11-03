@@ -79,15 +79,19 @@ import { defined } from "@mrstreamer/core/defined";
  * reach here: a firewall, or it is on another network.
  */
 const FETCH_MS = 10_000;
+
 /** Whose pictures a receiver is given to show: TMDB's, which anyone may fetch. */
 const ARTWORK_HOST = "image.tmdb.org";
+
 /** How often a title's progress is saved while a receiver plays it. */
 const CHECKPOINT_MS = 60_000;
+
 /**
  * Why a wait at the system's list ends when the list only opened again. Unlike going back to
  * this computer, that takes nothing back: a receiver picked in the list before still counts.
  */
 const REOPENED = "reopened";
+
 /**
  * Why it ends when the list was taken down from here, with the window it opened from or the
  * account it was asked under. That is as if the viewer closed it without picking.
@@ -268,10 +272,13 @@ function make(deps: OutputDeps) {
     /** Whether the system sees a receiver it lists itself; null without such an adapter. */
     let routes: boolean | null = adapters.some((each) => each.kind === "airplay") ? false : null;
     let output: OutputState = { kind: "local" };
+
     let connected: { readonly connection: Connection; readonly adapter: ReceiverAdapter } | null =
       null;
+
     /** A connect under way, which going back to this computer ends. */
     let connecting: AbortController | null = null;
+
     /**
      * The system's list, from when it is asked for until the wait at it ends: what gives it up,
      * and what its asker calls it. Going back to this computer, another receiver, another account
@@ -279,6 +286,7 @@ function make(deps: OutputDeps) {
      */
     let listing: { readonly wait: AbortController; readonly request: string | undefined } | null =
       null;
+
     let playing: Playing | null = null;
     let generation = 0;
     /** New receiver title requests retire an older load's pre-observer failure callback. */
@@ -295,13 +303,16 @@ function make(deps: OutputDeps) {
       receivers: [...found.values()].flat(),
       output,
     });
+
     const publish = () => void PubSub.publishUnsafe(updates, snapshot());
 
     const failed = (failure: OutputFailure) => new Failed({ error: { kind: "output", failure } });
+
     const failureOf = (cause: unknown): OutputFailure =>
       cause instanceof ReceiverFailed
         ? cause.failure
         : { kind: "unavailable", detail: cause instanceof Error ? cause.message : String(cause) };
+
     /** An adapter's call as an Effect that fails with why the receiver didn't take it. */
     const told = <A>(call: (signal: AbortSignal) => Promise<A>) =>
       Effect.tryPromise({ try: call, catch: (cause) => failed(failureOf(cause)) });
@@ -316,6 +327,7 @@ function make(deps: OutputDeps) {
     const positionOf = (now: Playing): number => {
       const { media } = now;
       const moved = media.state === "playing" ? (Date.now() - media.at) / 1000 : 0;
+
       return Math.min(media.position + Math.max(0, moved), now.title?.info.duration ?? Infinity);
     };
 
@@ -327,9 +339,11 @@ function make(deps: OutputDeps) {
     const checkpoint = (now: Playing | null) =>
       Effect.gen(function* () {
         const title = now?.title;
+
         // Nothing confirmed yet says nothing of how far it got.
         if (!now || !title || now.media.state === "loading") return;
         const position = positionOf(now);
+
         if (position <= 0) return;
         yield* viewing
           .recordProgress(
@@ -353,6 +367,7 @@ function make(deps: OutputDeps) {
         was?.measurement?.stop();
         was?.watch.abort();
         yield* checkpoint(was);
+
         if (was && close) yield* playback.close(was.sessionId);
       });
 
@@ -365,9 +380,11 @@ function make(deps: OutputDeps) {
           appDiagnostic({ kind: "output", failure }),
         );
         yield* drop(true);
+
         if (stop && was && connected) {
           yield* Effect.promise(() => connected!.connection.stop(was.generation).catch(() => {}));
         }
+
         if (output.kind === "receiver") output = { ...output, media: null, failure };
         publish();
       });
@@ -377,24 +394,32 @@ function make(deps: OutputDeps) {
       switch (event.type) {
         case "receivers":
           found.set(adapter.kind, event.receivers);
+
           return publish();
         case "routes":
           routes = event.available;
+
           return publish();
         case "volume":
           if (connected?.adapter !== adapter || output.kind !== "receiver") return;
+
           if (!connected.connection.volume) return;
           output = { ...output, volume: { level: event.level, muted: event.muted } };
+
           return publish();
         case "status":
           if (connected?.adapter === adapter) status(event.status);
+
           return;
         case "media-failed":
           if (connected?.adapter !== adapter || playing?.generation !== event.generation) return;
+
           return later(mediaFailed(event.failure, false));
         case "released": {
           const was = connected;
+
           if (was?.adapter !== adapter) return;
+
           // Let go of from the receiver's side: back to this computer, nothing failed.
           return later(
             one(
@@ -409,14 +434,17 @@ function make(deps: OutputDeps) {
             ),
           );
         }
+
         case "lost": {
           const was = connected;
+
           if (was?.adapter !== adapter || output.kind !== "receiver") return;
           const { receiver } = output;
           playing?.measurement?.failure(
             appFailure({ kind: "output", failure: event.failure }),
             appDiagnostic({ kind: "output", failure: event.failure }),
           );
+
           return later(
             one(
               Effect.gen(function* () {
@@ -435,7 +463,9 @@ function make(deps: OutputDeps) {
     /** What the receiver says of a load. Only the one that plays now counts. */
     function status(said: TransportStatus): void {
       const now = playing;
+
       if (!now || said.generation !== now.generation || output.kind !== "receiver") return;
+
       if (said.state === "stopped" || (said.state === "ended" && now.item.kind === "channel")) {
         // It holds the load no more. A channel has no end: its stream stopped, and the session
         // knows why. Stopped from the receiver's side otherwise, which is nobody's failure.
@@ -443,11 +473,14 @@ function make(deps: OutputDeps) {
           Effect.gen(function* () {
             const stream =
               now.item.kind === "channel" ? yield* playback.failure(now.sessionId) : null;
+
             if (playing !== now) return;
+
             // A stream that broke is an incident the viewer may retry; otherwise the play is over.
             if (stream) now.measurement?.failure(streamFailure(stream), streamDiagnostic(stream));
             else now.measurement?.end();
             yield* drop(true);
+
             if (output.kind !== "receiver") return;
             output = {
               ...output,
@@ -458,6 +491,7 @@ function make(deps: OutputDeps) {
           }),
         );
       }
+
       now.measurement?.state(
         said.state === "playing"
           ? "playing"
@@ -467,6 +501,7 @@ function make(deps: OutputDeps) {
               ? "stopped"
               : "waiting",
       );
+
       // A title played to its end: playing it again is a new play.
       if (said.state === "ended") now.measurement?.end();
       const before = now.media.state;
@@ -478,6 +513,7 @@ function make(deps: OutputDeps) {
       };
       output = { ...output, media: now.media };
       publish();
+
       // Paused, or played to its end: how far it got is saved then, as for the UI's player.
       if (said.state !== before && (said.state === "paused" || said.state === "ended")) {
         later(checkpoint(now));
@@ -495,7 +531,9 @@ function make(deps: OutputDeps) {
       Effect.suspend(() => {
         const candidates = connection.localAddress ? [connection.localAddress] : addresses();
         const address = candidates[addressTurn % Math.max(1, candidates.length)];
+
         if (!address) return Effect.fail(failed({ kind: "no-network" }));
+
         return Effect.succeed({
           address,
           decoders: connection.decoders,
@@ -503,15 +541,18 @@ function make(deps: OutputDeps) {
           // window closed. The receiver is told to stop what it can no longer get; nothing failed.
           closed: () => {
             const now = playing;
+
             if (!now) return;
             later(
               Effect.gen(function* () {
                 if (playing !== now) return;
                 yield* drop(false);
+
                 if (connected) {
                   const { connection } = connected;
                   yield* Effect.promise(() => connection.stop(now.generation).catch(() => {}));
                 }
+
                 if (output.kind === "receiver") output = { ...output, media: null, failure: null };
                 publish();
               }),
@@ -519,6 +560,7 @@ function make(deps: OutputDeps) {
           },
           failed: (failure: StreamFailure) => {
             const now = playing;
+
             if (!now) return;
             later(
               Effect.suspend(() =>
@@ -547,6 +589,7 @@ function make(deps: OutputDeps) {
         const mine = ++generation;
         const watch = new AbortController();
         const offset = title?.offset ?? 0;
+
         const now: Playing = {
           measurement: deps.observePlayback?.(
             item.kind === "channel" ? "live" : "vod",
@@ -570,7 +613,9 @@ function make(deps: OutputDeps) {
             subtitles: media.subtitles,
           },
         };
+
         playing = now;
+
         if (output.kind === "receiver") output = { ...output, media: now.media, failure: null };
         publish();
         const artwork = URL.parse(shown.artworkUrl ?? "");
@@ -598,12 +643,14 @@ function make(deps: OutputDeps) {
               : Effect.void,
           ),
         );
+
         // A receiver that never asks for the stream can't reach this computer.
         const timer = setTimeout(
           () =>
             later(
               Effect.gen(function* () {
                 if (playing !== now) return;
+
                 if ((yield* playback.receiverRequests(sessionId)) !== 0) return;
                 // The next try is served on this computer's next address, where it has several.
                 addressTurn++;
@@ -612,10 +659,12 @@ function make(deps: OutputDeps) {
             ),
           deps.fetchMs ?? FETCH_MS,
         );
+
         // Only playing moves a title on: a save while paused would make it look watched later.
         const saving = setInterval(() => {
           if (playing === now && now.media.state === "playing") later(checkpoint(now));
         }, deps.checkpointMs ?? CHECKPOINT_MS);
+
         watch.signal.addEventListener(
           "abort",
           () => {
@@ -624,6 +673,7 @@ function make(deps: OutputDeps) {
           },
           { once: true },
         );
+
         return now.media;
       });
 
@@ -658,6 +708,7 @@ function make(deps: OutputDeps) {
           connecting = mine;
           output = { kind: "connecting", protocol: adapter.kind, receiver: known };
           publish();
+
           const connection = yield* told((signal) =>
             adapter.connect(
               { kind: "receiver", id: known.id },
@@ -681,12 +732,16 @@ function make(deps: OutputDeps) {
               }),
             ),
           );
+
           if (!connection) {
             output = { kind: "local" };
             publish();
+
             return snapshot();
           }
+
           take(connection, adapter);
+
           return snapshot();
         }),
       );
@@ -708,9 +763,11 @@ function make(deps: OutputDeps) {
         listing = list;
         /** Until the call it is for ends, or this list is given up. */
         const until = (signal: AbortSignal) => AbortSignal.any([signal, mine.signal]);
+
         const waited = yield* Effect.result(
           Effect.gen(function* () {
             const anchor = yield* told((signal) => place(until(signal)));
+
             // Nowhere left to open at: no list opens.
             if (!anchor) return null;
             yield* one(
@@ -718,21 +775,26 @@ function make(deps: OutputDeps) {
                 // Given up before its turn came: no list opens.
                 if (mine.signal.aborted) return;
                 connecting = mine;
+
                 if (connected) return;
                 output = { kind: "connecting", protocol: adapter.kind, receiver: null };
                 publish();
               }),
             );
+
             return yield* told((signal) =>
               adapter.connect({ kind: "picker", anchor }, until(signal)),
             );
           }),
         );
+
         return yield* one(
           Effect.gen(function* () {
             // Whether this is still the connect under way: none began since.
             const current = connecting === mine;
+
             if (current) connecting = null;
+
             if (listing === list) listing = null;
             const picked = waited._tag === "Success" ? waited.success : null;
             // Given up from here meanwhile, which fails nothing. `left` when the viewer went
@@ -740,6 +802,7 @@ function make(deps: OutputDeps) {
             const given = mine.signal.aborted;
             const reason: unknown = mine.signal.reason;
             const left = given && reason !== REOPENED && reason !== CLOSED;
+
             if (picked && picked !== connected?.connection) {
               if (left) {
                 // Nobody takes what was picked after all.
@@ -751,6 +814,7 @@ function make(deps: OutputDeps) {
                   publish();
                   yield* release;
                 }
+
                 take(picked, adapter);
               }
             } else if (
@@ -764,7 +828,9 @@ function make(deps: OutputDeps) {
               output = { kind: "local" };
               publish();
             }
+
             if (waited._tag === "Failure" && !given) return yield* waited.failure;
+
             return snapshot();
           }),
         );
@@ -777,6 +843,7 @@ function make(deps: OutputDeps) {
       yield* drop(true);
       const was = connected;
       connected = null;
+
       if (was) yield* Effect.promise(() => was.connection.disconnect().catch(() => {}));
     });
 
@@ -788,6 +855,7 @@ function make(deps: OutputDeps) {
         Effect.sync(() => {
           if (scanning === on) return;
           scanning = on;
+
           for (const adapter of adapters) adapter.scan(on);
           publish();
         }),
@@ -797,16 +865,20 @@ function make(deps: OutputDeps) {
           const adapter = adapters.find((each) =>
             found.get(each.kind)?.some((listed) => listed.id === receiverId),
           );
+
           const known = [...found.values()].flat().find((each) => each.id === receiverId);
+
           if (!adapter || !known) return Effect.fail(failed({ kind: "unreachable" }));
           // The system's list gives way as this is asked, also one that still waits for its place.
           listing?.wait.abort();
+
           return connectTo(adapter, known);
         }),
 
       pick: (place: ListPlace, request?: string) =>
         Effect.suspend(() => {
           const adapter = adapters.find((each) => each.kind === "airplay");
+
           if (!adapter) {
             return Effect.fail(
               failed({
@@ -815,6 +887,7 @@ function make(deps: OutputDeps) {
               }),
             );
           }
+
           return pickWith(adapter, place, request);
         }),
 
@@ -838,6 +911,7 @@ function make(deps: OutputDeps) {
               output = { kind: "local" };
               publish();
             }
+
             yield* release;
           }),
         ),
@@ -861,12 +935,14 @@ function make(deps: OutputDeps) {
             // What it played closes without telling it to stop: the load takes its place.
             yield* drop(true);
             opened.clear();
+
             const stream = yield* playback.openReceiver(channel, yield* target(connection), {
               variants: options.variants,
               audio: options.audio ?? null,
               audioLanguage: options.audioLanguage ?? null,
               turn: options.turn,
             });
+
             return yield* load(
               connection,
               stream.sessionId,
@@ -894,18 +970,21 @@ function make(deps: OutputDeps) {
         asked: Asked & { readonly measurement?: string | undefined } = {},
       ) => {
         titleLoadRequest++;
+
         return one(
           Effect.gen(function* () {
             const connection = yield* receiver;
             yield* inTurn(asked.turn);
             yield* drop(true);
             opened.clear();
+
             const session = yield* playback.openReceiverTitle(
               title,
               upstreamUrl,
               yield* target(connection),
               asked,
             );
+
             const info: RemoteTitle = {
               sessionId: session.sessionId,
               title,
@@ -914,6 +993,7 @@ function make(deps: OutputDeps) {
               subtitles: session.subtitles,
               shows: ["text"],
             };
+
             opened.set(session.sessionId, {
               info,
               offset: session.offset,
@@ -921,6 +1001,7 @@ function make(deps: OutputDeps) {
               measurement: asked.measurement ?? null,
               turn: asked.turn,
             });
+
             return info;
           }),
         );
@@ -941,22 +1022,27 @@ function make(deps: OutputDeps) {
       ) => {
         const request = ++titleLoadRequest;
         const turn = opened.get(sessionId)?.turn;
+
         return one(
           Effect.gen(function* () {
             const prepared = yield* Effect.gen(function* () {
               const connection = yield* receiver;
               const title = opened.get(sessionId);
+
               const loaded = title
                 ? yield* playback.loadReceiverTitle(sessionId, {
                     audio: options.audio,
                     subtitle: options.subtitle,
                   })
                 : null;
+
               if (!title || !loaded) {
                 return yield* failed({ kind: "stream", failure: STOPPED });
               }
+
               // The same session with other tracks or from another position: only its load changes.
               yield* drop(false);
+
               return { connection, title, loaded };
             }).pipe(
               Effect.tapError((failure) =>
@@ -973,6 +1059,7 @@ function make(deps: OutputDeps) {
                 }),
               ),
             );
+
             return yield* load(
               prepared.connection,
               sessionId,
@@ -1002,7 +1089,9 @@ function make(deps: OutputDeps) {
           Effect.gen(function* () {
             const now = playing;
             const connection = connected?.connection;
+
             if (!now || !connection || now.generation !== mine) return;
+
             switch (command.command) {
               case "play":
                 return yield* told(() => connection.play(mine));
@@ -1012,22 +1101,26 @@ function make(deps: OutputDeps) {
                 now.measurement?.state("seeking");
                 // Where it was before the skip, as the UI's player saves it.
                 yield* checkpoint(now);
+
                 return yield* told(() =>
                   connection.seek(mine, Math.max(0, command.position - now.offset)),
                 );
               case "subtitles":
                 yield* told(() => connection.showSubtitles(mine, command.on));
+
                 if (playing === now && output.kind === "receiver") {
                   now.media = { ...now.media, subtitles: command.on };
                   output = { ...output, media: now.media };
                   publish();
                 }
+
                 return;
               case "stop":
                 now.measurement?.end();
                 yield* drop(true);
                 opened.clear();
                 yield* Effect.promise(() => connection.stop(mine).catch(() => {}));
+
                 if (output.kind === "receiver") output = { ...output, media: null, failure: null };
                 publish();
             }
@@ -1040,7 +1133,9 @@ function make(deps: OutputDeps) {
       }) =>
         Effect.suspend(() => {
           const connection = connected?.connection;
+
           if (!connection?.volume) return Effect.void;
+
           return told(() =>
             connection.setVolume({
               ...defined({ level: volume.level, muted: volume.muted }),
@@ -1063,17 +1158,21 @@ function make(deps: OutputDeps) {
             for (const [sessionId, title] of opened) {
               if (title.info.title.subscriptionId === subscriptionId) opened.delete(sessionId);
             }
+
             const was = playing;
             const { item } = was ?? {};
             const owner = item?.kind === "channel" ? item.channel : item?.title;
+
             if (!was || owner?.subscriptionId !== subscriptionId) return;
             was.measurement?.end();
             yield* drop(true);
+
             if (connected) {
               yield* Effect.promise(() =>
                 connected!.connection.stop(was.generation).catch(() => {}),
               );
             }
+
             if (output.kind === "receiver") output = { ...output, media: null, failure: null };
             publish();
           }),

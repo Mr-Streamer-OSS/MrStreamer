@@ -10,9 +10,11 @@ import { xtreamProvider } from "../src/xtream.ts";
 
 const USER = "synthetic-user";
 const SECRET = "synthetic-secret";
+
 /** A short password, and one with a space. */
 const PIN = "k9x";
 const SPACED = "open sesame";
+
 /**
  * The login, and the values of a playlist link that can be settings as well as a token: the
  * format words a panel's link carries beside the login, and a longer one.
@@ -21,16 +23,19 @@ const LOGIN: ProviderLogin = {
   secrets: [USER, SECRET, PIN, SPACED],
   uncertain: ["ts", "m3u8", "hlsarchive"],
 };
+
 const REFERER = `https://site.test/watch?token=${SECRET}`;
 
 let server: Server;
 let plain = "";
+
 /** Every request the http server got. */
 const reached: { path: string; headers: IncomingHttpHeaders }[] = [];
 
 beforeAll(async () => {
   server = createServer((request, response) => {
     reached.push({ path: request.url ?? "", headers: request.headers });
+
     // An http hop that leads on to the login, as a relay's load balancer could.
     if (request.url === "/hop")
       return response.writeHead(302, { location: `/media/${SECRET}` }).end();
@@ -39,10 +44,12 @@ beforeAll(async () => {
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   plain = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
+
 afterAll(async () => {
   server.closeAllConnections();
   await new Promise((closed) => server.close(closed));
 });
+
 beforeEach(() => {
   reached.length = 0;
 });
@@ -53,15 +60,19 @@ beforeEach(() => {
  */
 function world(redirects: Readonly<Record<string, string>> = {}) {
   const asked: { url: string; headers: Headers }[] = [];
+
   const fetchImpl: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
+
     if (url.protocol === "http:") return fetch(url, init);
     asked.push({ url: url.href, headers: new Headers(init?.headers) });
     const location = redirects[url.href];
+
     return location
       ? new Response(null, { status: 302, headers: { location } })
       : new Response("secure");
   };
+
   return { asked, fetchImpl, request: providerFetch(fetchImpl, LOGIN) };
 }
 
@@ -201,13 +212,16 @@ describe("an Xtream account's login, however short", () => {
   // Its username and password are the login for certain, as its addresses carry them.
   const ACCOUNT = { server: "https://panel.test", username: "viewer7", password: "q7x" };
   const STREAM = "https://panel.test/live/viewer7/q7x/1.ts";
+
   const account = (redirects: Readonly<Record<string, string>> = {}) => {
     const { asked, fetchImpl } = world(redirects);
+
     return {
       asked,
       request: xtreamProvider(ACCOUNT, { userAgent: "fixture", fetch: fetchImpl }).request,
     };
   };
+
   /** `text` with each character percent-encoded, then encoded `times` more times. */
   const encoded = (text: string, times: number) =>
     Array.from({ length: times }).reduce<string>(
@@ -240,9 +254,11 @@ describe("an Xtream account's login, however short", () => {
   it("refuses an http address an https playlist names with the password in it, past another hop", async () => {
     const playlist = "https://cdn.test/live/index.m3u8";
     const segment = "https://edge.test/live/segment.ts";
+
     const { request, asked } = account({
       [segment]: `${plain}/segment.ts?auth=x${ACCOUNT.password}y`,
     });
+
     await expect(
       request(`${plain}/segment.ts?auth=x${ACCOUNT.password}y`, {}, playlist),
     ).rejects.toThrow("unencrypted");
@@ -253,18 +269,22 @@ describe("an Xtream account's login, however short", () => {
 
   it("leaves a header holding the password at the account's origin, on a redirect and a playlist's child alike", async () => {
     const { request } = account({ [STREAM]: `${plain}/relay/live.ts?token=7f3a` });
+
     const headers = {
       Referer: `https://site.test/view?auth=x${ACCOUNT.password}y`,
       "X-Session": `x${ACCOUNT.password}y`,
       Range: "bytes=0-3",
     };
+
     await request(STREAM, { headers });
     await request(`${plain}/segment.ts`, { headers }, "https://panel.test/live/index.m3u8");
     expect(reached).toHaveLength(2);
+
     for (const each of reached) {
       expect(each.headers).toMatchObject({ referer: "https://site.test/", range: "bytes=0-3" });
       expect(each.headers).not.toHaveProperty("x-session");
     }
+
     expect(JSON.stringify(reached)).not.toContain(ACCOUNT.password);
   });
 
@@ -291,15 +311,18 @@ describe("an Xtream password as each part of an address spells it", () => {
             : new Response(null, { status: 302, headers: { location: `${plain}${target}` } }),
       },
     );
+
   /** Asks for the account's live stream. */
   const ask = async (provider: ReturnType<typeof redirecting>, init?: RequestInit) =>
     provider.request((await provider.liveStream("1")).url, init);
+
   /** `text` with each character percent-encoded, then encoded `times` more times. */
   const encoded = (text: string, times: number) =>
     Array.from({ length: times }).reduce<string>(
       (each) => encodeURIComponent(each),
       [...text].map((character) => `%${character.charCodeAt(0).toString(16)}`).join(""),
     );
+
   /** A query value as URLSearchParams reads it, as a server reading a form does. */
   const form = (value: string) => new URLSearchParams(`v=${value}`).get("v") ?? "";
   /** The form value "q+ %78" of `q%2B+%2578`, decoded again as code given it can: "q+ x". */

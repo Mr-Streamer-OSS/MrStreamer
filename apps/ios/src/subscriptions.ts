@@ -67,19 +67,24 @@ const Registry = lazy(() =>
 );
 
 export type Registry = Infer<typeof Registry>;
+
 export type SubscriptionEntry = Registry["subscriptions"][number];
+
 export type PlaylistEntry = Extract<SubscriptionEntry, { kind: "m3u" }>;
+
 type RetiredAccount = Registry["retired"][number];
 
 /** How the file keeps a playlist: with where it stood among all the saved or retired ones. */
 const SavedPlaylist = lazy(() =>
   Playlist().and({ name: "string | null", "mapping?": PlaylistMapping(), position: "number" }),
 );
+
 const RetiredPlaylist = lazy(() =>
   Playlist().and({ "mapping?": PlaylistMapping(), position: "number" }),
 );
 
 const FILE = "subscriptions.json";
+
 /** Removed accounts remembered for their history; older ones are forgotten. */
 export const RETIRED_LIMIT = 16;
 
@@ -106,7 +111,9 @@ const DemoValue = lazy(() => type({ version: "1", state: "'active' | 'erasing'" 
 /** A bad demo field never invalidates the unchanged personal envelope. */
 export function readRegistry(): RegistryFile | null {
   const read = readJson(FILE);
+
   if (!read || typeof read !== "object" || Array.isArray(read)) return null;
+
   const {
     version,
     subscriptions,
@@ -117,8 +124,10 @@ export function readRegistry(): RegistryFile | null {
     retiredPlaylists,
     ...extra
   } = read as Record<string, unknown>;
+
   const saved = readable(playlists, SavedPlaylist());
   const gone = readable(retiredPlaylists, RetiredPlaylist());
+
   const parsed = Registry()({
     version,
     subscriptions: withPlaylists(subscriptions, saved.read),
@@ -126,11 +135,13 @@ export function readRegistry(): RegistryFile | null {
     pendingSecrets,
     ...defined({ erasing }),
   });
+
   if (parsed instanceof type.errors) return null;
   const { demo, ...rest } = extra;
   // Kept for the next write, which puts them back beside this build's own.
   const opaque = { ...rest, ...fields({ playlists: saved.unread, retiredPlaylists: gone.unread }) };
   const marker = DemoValue()(demo);
+
   return {
     registry: parsed,
     opaque,
@@ -146,11 +157,14 @@ export function readRegistry(): RegistryFile | null {
 function readable<A>(list: unknown, schema: (value: unknown) => A | type.errors) {
   const read: A[] = [];
   const unread: unknown[] = [];
+
   for (const each of Array.isArray(list) ? list : []) {
     const parsed = schema(each);
+
     if (parsed instanceof type.errors) unread.push(each);
     else read.push(parsed);
   }
+
   return { read, unread };
 }
 
@@ -161,8 +175,10 @@ function withPlaylists(
 ): unknown {
   if (!Array.isArray(accounts)) return accounts;
   const all: unknown[] = [...accounts];
+
   for (const { position, ...entry } of playlists.toSorted((a, b) => a.position - b.position))
     all.splice(position, 0, entry);
+
   return all;
 }
 
@@ -225,6 +241,7 @@ export const playlistKey = (link: string): string => `m3u:${sha256Hex(link).slic
 /** The registry beta 2's state.json describes: its one subscription, under its own id. */
 export function migrated(state: SavedState): Registry {
   const { subscription } = state;
+
   return subscription
     ? {
         ...EMPTY_REGISTRY,
@@ -249,9 +266,11 @@ export function withoutSubscription(
           key: entry.key,
           ...defined({ mapping: entry.mapping }),
         };
+
   const others = registry.retired.filter(
     (each) => each.id !== entry.id && !sameAccount(each, entry),
   );
+
   return {
     ...registry,
     subscriptions: registry.subscriptions.filter((each) => each.id !== entry.id),
@@ -282,8 +301,11 @@ export function newSubscriptionId(
     ...[...registry.subscriptions, ...registry.retired].map((each) => each.id),
     ...registry.erasing,
   ]);
+
   const base = `${kind}-${now.toString(36)}`;
   let id = base;
+
   for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;
+
   return id;
 }

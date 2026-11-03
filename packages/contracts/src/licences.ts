@@ -34,4 +34,5 @@ export const NoticeManifest = lazy(() =>
       .array(),
   }),
 );
+
 export type NoticeManifest = Infer<typeof NoticeManifest>;

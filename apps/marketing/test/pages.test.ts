@@ -14,14 +14,17 @@ import {
 
 const home = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
 const released: Downloads = { version: "0.0.8", installers };
+
 const open = (html: string) => {
   // These contracts are the readable static HTML. Do not fetch styles or execute page scripts.
   document.documentElement.innerHTML = html
     .replace(/<link rel="stylesheet"[^>]*>/g, "")
     .replace(/<script type="module"[^>]*><\/script>/g, "");
 };
+
 const appData = (): Record<string, unknown> =>
   JSON.parse(document.querySelector('script[type="application/ld+json"]')?.textContent ?? "{}");
+
 const links = () =>
   Object.fromEntries(
     [...document.querySelectorAll<HTMLAnchorElement>("a[data-installer]")].map((link) => [
@@ -100,12 +103,15 @@ describe("public document pages without JavaScript", () => {
 
   it("names each cell's column in a wide table, for phones where its header is hidden", () => {
     open(renderPage("docs/live-tv/index.html", null, null));
+
     const keys = [...document.querySelectorAll("table")].find((table) =>
       table.querySelector("th")?.textContent?.includes("Key"),
     );
+
     const enter = [...(keys?.querySelectorAll("tr") ?? [])].find(
       (row) => row.cells[0]?.textContent === "Enter",
     );
+
     expect([...(enter?.cells ?? [])].map((cell) => cell.dataset["label"])).toEqual([
       "Key",
       "In the guide",
@@ -188,6 +194,7 @@ describe("Vercel page routes", () => {
         "caseSensitive" in route ? "" : "i",
       ).test(path),
     );
+
     return route ? ("status" in route ? route.status : route.dest) : "file";
   };
 
@@ -233,6 +240,7 @@ describe("one stable download contract across pages and metadata", () => {
       ),
     );
     const before = document.documentElement.innerHTML;
+
     const feed = (generated: string, version: string) => ({
       schema: 1,
       generated,
@@ -242,6 +250,7 @@ describe("one stable download contract across pages and metadata", () => {
         installers: [`Mr-Streamer-${version}-mac-arm64.dmg`],
       },
     });
+
     showFeedDownloads(document, feed("2026-10-07T17:59:00Z", "0.0.7"));
     expect(document.documentElement.innerHTML).toBe(before);
     showFeedDownloads(document, feed("2026-10-07T18:01:00Z", "0.0.7"));

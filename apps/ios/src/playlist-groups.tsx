@@ -87,6 +87,7 @@ type Reading =
  */
 export function useUnmapped(member: Member): number | null {
   const { entry, live, needsSecret } = member;
+
   const read =
     // Until a first pick every group is Live: none waits, and the playlist isn't inspected.
     entry.kind === "m3u" &&
@@ -96,6 +97,7 @@ export function useUnmapped(member: Member): number | null {
     live.from === "provider"
       ? live.fetchedAt
       : null;
+
   const [counted, setCounted] = useState<{ read: number; unmapped: number } | null>(null);
   useEffect(() => {
     if (read === null) return;
@@ -108,8 +110,10 @@ export function useUnmapped(member: Member): number | null {
       // The row says how the playlist stands without it.
       () => undefined,
     );
+
     return () => controller.abort();
   }, [entry.id, read]);
+
   return counted && counted.read === read ? counted.unmapped : null;
 }
 
@@ -121,8 +125,10 @@ export function useUnmapped(member: Member): number | null {
 export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView }) {
   useLocale();
   const roster = useRoster();
+
   const member =
     roster.kind === "ready" ? roster.members.find((each) => each.entry.id === id) : undefined;
+
   // A new report follows each read the channels land from.
   const read = member?.live.kind === "ready" ? member.live.fetchedAt : null;
   const [reading, setReading] = useState<Reading>({ kind: "loading" });
@@ -130,28 +136,35 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
   const [saving, setSaving] = useState<{ group: string; mode: PlaylistMode } | null>(null);
   const [refused, setRefused] = useState<{ group: string; failure: Failure } | null>(null);
   const leaving = useRef(new AbortController());
+
   const show = (signal: AbortSignal) => (report: PlaylistReport) => {
     if (!signal.aborted) setReading({ kind: "ready", report });
   };
+
   const failed = (signal: AbortSignal) => (cause: unknown) => {
     if (!signal.aborted) setReading({ kind: "failed", error: appError(cause) });
   };
+
   useEffect(() => {
     const controller = new AbortController();
     leaving.current = controller;
+
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     playlistReport(id, controller.signal).then(show(controller.signal), failed(controller.signal));
+
     return () => controller.abort();
   }, [id, read, asked]);
 
   if (roster.kind === "ready" && !member) {
     return <Message text={t("This provider was removed.")} />;
   }
+
   if (reading.kind === "loading") return <Message text={t("Reading playlist")} />;
+
   if (reading.kind === "failed") {
     return (
       <Notice
@@ -194,15 +207,19 @@ export function PlaylistScreen({ id, view }: { id: string; view: PlaylistView })
         if (!signal.aborted) setSaving(null);
       });
   };
+
   const detail = { report: reading.report, saving, refused, pick };
 
   if (view.kind === "groups") return <Groups id={id} {...detail} />;
+
   // False for Left out; undefined when the group is gone.
   const group =
     view.kind === "group" && reading.report.groups.find((each) => each.group === view.group);
+
   if (group === undefined) {
     return <Message text={t("This group is no longer in the playlist.")} />;
   }
+
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       {group ? (
@@ -224,6 +241,7 @@ function readFailure(error: AppError): Failure {
       : error.kind === "needs-secret"
         ? t("Enter the playlist link again in Settings.")
         : failureOf(error, "").headline;
+
   return { headline: t("Couldn't read the playlist"), advice };
 }
 
@@ -247,13 +265,16 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [leftOut, setLeftOut] = useState(false);
   const needle = query.trim().toLowerCase();
+
   const shown = needle
     ? report.groups.filter((group) => group.name.toLowerCase().includes(needle))
     : report.groups;
+
   const group =
     report.groups.find((each) => each.group === selected) ??
     report.groups.find((each) => each.mode === null) ??
     report.groups[0];
+
   // Not under Watch, whose Escape closes it, nor under a screen pushed over this one.
   const { watch } = usePlayback();
   const focused = useIsFocused();
@@ -264,6 +285,7 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
 
   const push = (params: { group: string } | { left: "1" }) =>
     router.push({ pathname: playlistHref(tab), params: { id, ...params } });
+
   const list = (
     <FlatList
       style={split ? { width, flexGrow: 0 } : styles.screen}
@@ -344,7 +366,9 @@ function Groups({ id, ...detail }: Detail & { id: string }) {
       ListEmptyComponent={<Text style={styles.none}>{t("No group matches.")}</Text>}
     />
   );
+
   if (!split) return list;
+
   return (
     <View style={styles.split}>
       {list}
@@ -377,8 +401,10 @@ function Count({ value, label, spoken }: { value: number; label: string; spoken:
 /** An entry's group as the report names it. */
 const groupName = (group: string) => group || t("Ungrouped");
 const entries = (count: number) => t("{count} entries", { count });
+
 const modeLabel = (mode: PlaylistMode | null) => {
   const label = MODES.find((each) => each.mode === mode)?.label;
+
   return label ? t(label) : t("Needs mapping");
 };
 
@@ -396,11 +422,13 @@ function GroupRow({
 }) {
   const { fontScale } = useWindowDimensions();
   const stacked = largeText(fontScale);
+
   const mode = (
     <Text style={group.mode === null ? styles.unmapped : styles.value}>
       {modeLabel(group.mode)}
     </Text>
   );
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -430,6 +458,7 @@ function GroupRow({
 /** One group: what it imports as, which a press saves, and a few entries with why any stay out. */
 function GroupDetail({ group, saving, refused, pick }: Detail & { group: PlaylistGroup }) {
   const here = saving?.group === group.group ? saving : null;
+
   return (
     <View style={styles.body}>
       <View style={styles.heading}>
@@ -444,6 +473,7 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
       {MODES.map(({ mode, label }) => {
         const current = here ? here.mode === mode : group.mode === mode;
         const waiting = saving !== null && here?.mode !== mode;
+
         return (
           <Pressable
             key={mode}
@@ -494,6 +524,7 @@ function GroupDetail({ group, saving, refused, pick }: Detail & { group: Playlis
 function sampleReason({ reason, groups }: PlaylistSample, here: string): string | null {
   if (!reason) return null;
   const others = groups.map(groupName).filter((name) => name !== here);
+
   return reason === "conflicting-groups" && others.length > 0
     ? t("{reason} · also in {groups}", { reason: t(OMISSIONS[reason]), groups: others.join(", ") })
     : t(OMISSIONS[reason]);
@@ -502,6 +533,7 @@ function sampleReason({ reason, groups }: PlaylistSample, here: string): string 
 /** Every entry left out of the lists, a page at a time. */
 function LeftOutEntries({ omissions }: { omissions: readonly PlaylistOmission[] }) {
   const [shown, setShown] = useState(PAGE);
+
   return (
     <>
       <View style={styles.heading}>

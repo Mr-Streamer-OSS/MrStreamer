@@ -31,7 +31,9 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Settings: { get: (key: string) => (key === "AppleLanguages" ? scenario.phone : undefined) },
@@ -47,10 +49,13 @@ vi.mock("react-native", async () => ({
     alert: (title: string, message?: string) => scenario.alerts.push({ title, message }),
   },
 }));
+
 vi.mock("react-native-safe-area-context", async () => ({
   SafeAreaView: (await import("./react-native.ts")).reactNative.View,
 }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
+
 vi.mock("expo-router", () => {
   const navigation = {
     setOptions: ({ title }: { title: string }) => {
@@ -58,6 +63,7 @@ vi.mock("expo-router", () => {
       scenario.titles.push(title);
     },
   };
+
   return {
     router: { push: () => undefined },
     useLocalSearchParams: () => ({}),
@@ -70,37 +76,48 @@ vi.mock("expo-router", () => {
           () => screenOptions({ route: { name: "index" } }).unstable_headerRightItems?.({}),
           [screenOptions],
         );
+
         scenario.stack = {
           title: scenario.stack?.title ?? "",
           buttons: (items ?? []).flatMap((item) => ("label" in item ? [item.label] : [])),
         };
+
         return children;
       },
       {
         Screen: ({ name, options }: { name: string; options: { title: string } }) => {
           if (name === "index" && scenario.stack) scenario.stack.title = options.title;
+
           return null;
         },
       },
     ),
   };
 });
+
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => ({ items: [], series: {}, bytes: 0, free: null, ended: 0 }),
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useMetadataStanding: () => scenario.tmdb,
   useTitleTimings: () => null,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   statisticsChoice: () => null,
   useStatistics: () => ({ enabled: false, transport: "production" }),
   setStatistics: async () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
@@ -120,17 +137,21 @@ const livingRoomFields: Partial<Member> = {
   live: { kind: "idle" },
   titles: { kind: "idle" },
 };
+
 const livingRoom = livingRoomFields as Member;
 
 type ScreenOptions = ReturnType<typeof useTabScreenOptions>;
 
 let unmount = () => {};
+
 afterEach(async () => {
   unmount();
   const { native } = await import("./native-files.ts");
+
   for (const name of ["language.json", "language.json.next"]) {
     rmSync(join(native.root, "documents", name), { force: true });
   }
+
   Object.assign(scenario, {
     phone: ["en-US"],
     sheet: null,
@@ -148,15 +169,18 @@ async function launch(route: "settings" | "connect") {
   vi.resetModules();
   // The root layout applies the saved language first, before any screen's module loads.
   await import("../src/language.ts");
+
   const screen =
     route === "settings"
       ? (await import("../src/app/(tabs)/(home)/settings.tsx")).default
       : (await import("../src/app/connect.tsx")).default;
+
   const container = document.createElement("div");
   const root = createRoot(container);
   React.act(() => root.render(React.createElement(screen)));
   unmount = () => React.act(() => root.unmount());
   const find = (testID: string) => container.querySelector(`[data-testid="${testID}"]`)!;
+
   return {
     text: () => container.textContent ?? "",
     language: () => find("settings-interface-language").getAttribute("aria-label"),
@@ -174,6 +198,7 @@ async function launch(route: "settings" | "connect") {
       const button = [...container.querySelectorAll("button")].find(
         (each) => each.textContent === label,
       )!;
+
       React.act(() => button.dispatchEvent(new Event("click", { bubbles: true })));
     },
   };
@@ -197,10 +222,12 @@ it("shows English when the iPhone speaks none of the app's languages", async () 
 it("falls back to English when the preferred language list is empty", async () => {
   scenario.phone = [];
   const resolved = new Intl.DateTimeFormat().resolvedOptions();
+
   const regional = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
     ...resolved,
     locale: "nl-NL",
   });
+
   try {
     const settings = await launch("settings");
     expect(settings.language()).toBe("Interface language, System default (English)");
@@ -265,6 +292,7 @@ it("updates the mounted Add provider title after a language change", async () =>
   const settings = await launch("settings");
   const { default: Provider } = await import("../src/app/(tabs)/(home)/provider.tsx");
   const root = createRoot(document.createElement("div"));
+
   try {
     React.act(() => root.render(React.createElement(Provider)));
     expect(scenario.titles).toContain("Add provider");
@@ -297,6 +325,7 @@ async function chooseRefused(
   native.sync = (operation) => {
     if (operation === step) throw new Error("disk full");
   };
+
   try {
     settings.choose(label);
   } finally {

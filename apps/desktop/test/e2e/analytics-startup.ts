@@ -11,8 +11,10 @@ export async function startupProbe(
   const removePauseListener = main.on("Debugger.paused", () => paused.resolve());
   await main.send("Debugger.enable");
   const started = await main.send("Runtime.runIfWaitingForDebugger");
+
   if (started.error) throw new Error("Could not start owned debugger.");
   let pauseTimer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     await Promise.race([
       paused.promise,
@@ -24,6 +26,7 @@ export async function startupProbe(
     if (pauseTimer) clearTimeout(pauseTimer);
     removePauseListener();
   }
+
   // Awaiting a promise while paused prevents Node's inspector from answering. Installation is
   // synchronous, and must complete before resuming the entrypoint.
   const reply = await main.send(
@@ -35,15 +38,21 @@ export async function startupProbe(
     },
     2000,
   );
+
   const result = reply.result as
     { result?: { value?: { pid?: unknown } }; exceptionDetails?: unknown } | undefined;
+
   const pid = result?.result?.value?.pid;
+
   if (reply.error || result?.exceptionDetails || typeof pid !== "number")
     throw new Error("Could not install owned startup probe.");
+
   if (pid !== expectedPid) throw new Error("Wrong main inspector process.");
   const resumed = await main.send("Debugger.resume");
+
   if (resumed.error) throw new Error("Could not resume owned startup.");
   await main.send("Debugger.disable");
+
   return {
     pid,
     read: () =>
@@ -70,15 +79,18 @@ function install(profile: string, delayMs: number) {
   const path = process.getBuiltinModule("path");
   const normalize = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
   const owned = normalize(native.realpathSync(profile));
+
   const matches = (value: unknown, directory: boolean) => {
     if (typeof value !== "string" || (!directory && path.basename(value) !== "analytics.json"))
       return false;
+
     try {
       return normalize(native.realpathSync(directory ? value : path.dirname(value))) === owned;
     } catch {
       return false;
     }
   };
+
   const operations: {
     operation: "read" | "directory" | "replace";
     startedMs: number;
@@ -86,8 +98,10 @@ function install(profile: string, delayMs: number) {
     code: string | null;
     format: 1 | 2 | null;
   }[] = [];
+
   const started = performance.now();
   const preferenceReads: { startedMs: number; enabled: boolean | null }[] = [];
+
   const preferenceUpdates: {
     startedMs: number;
     endedMs: number | null;
@@ -95,13 +109,16 @@ function install(profile: string, delayMs: number) {
     ok: boolean | null;
     error: string | null;
   }[] = [];
+
   const { ipcMain } = process.getBuiltinModule("module").createRequire(process.execPath)(
     "electron",
   ) as typeof import("electron");
+
   ipcMain.handle = new Proxy(ipcMain.handle, {
     apply(target, receiver, [channel, listener]: Parameters<typeof ipcMain.handle>) {
       if (channel !== "preferences.get" && channel !== "preferences.update")
         return target.call(receiver, channel, listener);
+
       return target.call(
         receiver,
         channel,
@@ -111,7 +128,9 @@ function install(profile: string, delayMs: number) {
               startedMs: performance.now() - started,
               enabled: null as boolean | null,
             };
+
             const patch: unknown = args[1];
+
             const update = {
               startedMs: sample.startedMs,
               endedMs: null as number | null,
@@ -125,12 +144,15 @@ function install(profile: string, delayMs: number) {
               ok: null as boolean | null,
               error: null as string | null,
             };
+
             if (channel === "preferences.get" && preferenceReads.length < 32)
               preferenceReads.push(sample);
+
             if (channel === "preferences.update" && preferenceUpdates.length < 32)
               preferenceUpdates.push(update);
             const reply: unknown = await handler.apply(context, args);
             update.endedMs = performance.now() - started;
+
             if (
               reply &&
               typeof reply === "object" &&
@@ -138,6 +160,7 @@ function install(profile: string, delayMs: number) {
               typeof reply.ok === "boolean"
             )
               update.ok = reply.ok;
+
             if (
               reply &&
               typeof reply === "object" &&
@@ -148,6 +171,7 @@ function install(profile: string, delayMs: number) {
               reply.error.detail === "Analytics preference could not be saved."
             )
               update.error = reply.error.detail;
+
             if (
               reply &&
               typeof reply === "object" &&
@@ -161,6 +185,7 @@ function install(profile: string, delayMs: number) {
               typeof reply.value.preferences.analyticsEnabled === "boolean"
             )
               sample.enabled = reply.value.preferences.analyticsEnabled;
+
             return reply;
           },
         }),
@@ -168,6 +193,7 @@ function install(profile: string, delayMs: number) {
     },
   });
   let delayed = false;
+
   const observe = async (
     operation: "read" | "directory" | "replace",
     run: () => Promise<unknown>,
@@ -179,13 +205,17 @@ function install(profile: string, delayMs: number) {
       code: null as string | null,
       format: null as 1 | 2 | null,
     };
+
     if (operations.length < 32) operations.push(sample);
+
     try {
       if (operation === "read" && delayMs && !delayed) {
         delayed = true;
         await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
       }
+
       const value = await run();
+
       if (
         operation === "read" &&
         (typeof value === "string" || Buffer.isBuffer(value)) &&
@@ -193,6 +223,7 @@ function install(profile: string, delayMs: number) {
       ) {
         try {
           const parsed: unknown = JSON.parse(value.toString());
+
           if (
             parsed &&
             typeof parsed === "object" &&
@@ -204,6 +235,7 @@ function install(profile: string, delayMs: number) {
           /* Invalid records stay unknown; never retain parse errors or values. */
         }
       }
+
       return value;
     } catch (error) {
       const code = error instanceof Error && "code" in error ? error.code : null;
@@ -217,6 +249,7 @@ function install(profile: string, delayMs: number) {
       sample.endedMs = performance.now() - started;
     }
   };
+
   const wrap = <T extends (...args: never[]) => Promise<unknown>>(
     method: T,
     operation: "read" | "directory" | "replace",
@@ -225,14 +258,17 @@ function install(profile: string, delayMs: number) {
     new Proxy(method, {
       apply(target, receiver, args: unknown[]) {
         const run = () => target.apply(receiver, args as Parameters<T>);
+
         return matches(args[argument], operation === "directory") ? observe(operation, run) : run();
       },
     });
+
   fs.readFile = wrap(fs.readFile, "read", 0);
   fs.readdir = wrap(fs.readdir, "directory", 0);
   fs.rename = wrap(fs.rename, "replace", 1);
   process.getBuiltinModule("module").syncBuiltinESMExports();
   const probe = { operations, preferenceReads, preferenceUpdates, pid: process.pid };
   Object.assign(globalThis, { __analyticsStartupIO: probe });
+
   return probe;
 }

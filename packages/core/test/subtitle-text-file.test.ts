@@ -58,6 +58,7 @@ describe("downloaded text subtitles", () => {
       "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210d0ac7e1cde1dec920320d0a",
       "hex",
     );
+
     expect(subtitleTextBytes(legacy, "ar")).toEqual([
       { start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" },
     ]);

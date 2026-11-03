@@ -33,6 +33,7 @@ const episodes = (count: number) => t("{count} episodes", { count });
 function summary(result: Result): string {
   const failed = result.failed[0];
   const before = episodes(result.cancelled);
+
   const said = [
     result.added > 0 ? t("{count} queued.", { count: result.added }) : null,
     result.retried > 0 ? t("{count} retried.", { count: result.retried }) : null,
@@ -56,6 +57,7 @@ function summary(result: Result): string {
       ? t("Stopped before {episodes}: a version was chosen meanwhile.", { episodes: before })
       : null,
   ].filter(Boolean);
+
   return said.length > 0 ? said.join(" ") : t("Nothing was added.");
 }
 
@@ -68,6 +70,7 @@ function message(plan: Plan): string {
           seasons: plan.seasons,
         })
       : `${episodes(plan.episodes.length)}.`;
+
   return [
     total,
     plan.held > 0 ? t("{count} already saved or queued.", { count: plan.held }) : null,
@@ -115,12 +118,14 @@ export function SeriesDownloadRow({
   // As they are when a sheet or an alert answers.
   const tabsNow = useRef(tabs);
   tabsNow.current = tabs;
+
   // The run started here, which this row follows and whose end it tells while it still shows.
   const [started, setStarted] = useState<{
     readonly id: number;
     readonly label: string;
     readonly asked: { stands(): boolean };
   } | null>(null);
+
   const mine = run && started && run.id === started.id ? run : null;
   useEffect(() => {
     if (!mine || !started || mine.phase !== "done") return;
@@ -146,6 +151,7 @@ export function SeriesDownloadRow({
   /** Starts `plan` as just confirmed, saying why when it can't. */
   function begin(plan: Plan, replace: boolean, name: string, asked: { stands(): boolean }) {
     const id = startDownload(plan, { replace, stands: asked.stands });
+
     if (id === null) {
       Alert.alert(
         t("Couldn't download {name}", { name }),
@@ -153,8 +159,10 @@ export function SeriesDownloadRow({
           ? t("Episodes of another download are still being added.")
           : t("The version or its provider changed. Try again."),
       );
+
       return;
     }
+
     setStarted({ id, label: name, asked });
   }
 
@@ -162,6 +170,7 @@ export function SeriesDownloadRow({
     // Asked now: the sheet answers only for the version and login shown as it opened.
     const asked = stands();
     let plan: Plan;
+
     try {
       plan = planDownload(details, version, scope);
     } catch (cause) {
@@ -169,10 +178,13 @@ export function SeriesDownloadRow({
         t("Couldn't download {name}", { name: label }),
         describeError(inLanguage(appError(cause))),
       );
+
       return;
     }
+
     const remaining = plan.add.length + plan.retry.length;
     const missing = plan.missing.length;
+
     if (remaining + missing === 0) {
       Alert.alert(
         t("All {count} episodes are saved or queued.", { count: plan.episodes.length }),
@@ -182,8 +194,10 @@ export function SeriesDownloadRow({
           { text: t("OK"), style: "cancel" },
         ],
       );
+
       return;
     }
+
     const choices = [
       ...(remaining > 0
         ? [{ label: t("Download {episodes}", { episodes: episodes(remaining) }), replace: false }]
@@ -203,6 +217,7 @@ export function SeriesDownloadRow({
           ]
         : []),
     ];
+
     let answered = false;
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -216,6 +231,7 @@ export function SeriesDownloadRow({
       },
       (index) => {
         const choice = choices[index];
+
         // One answer per sheet.
         if (!choice || answered) return;
         answered = true;
@@ -226,6 +242,7 @@ export function SeriesDownloadRow({
 
   const going = mine?.phase === "running" ? mine : null;
   const busy = run?.phase === "running";
+
   return (
     <View style={styles.row} testID={`bulk-${scope.kind}`}>
       <Text style={styles.count} numberOfLines={2}>

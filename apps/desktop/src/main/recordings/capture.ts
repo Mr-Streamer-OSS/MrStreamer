@@ -17,11 +17,13 @@ import { classify } from "../services/playback.ts";
 
 /** How long the provider may send nothing before a recording counts its stream as broken. */
 const SILENCE_MS = 15_000;
+
 /**
  * Waits before asking again after a refusal: a provider can take a moment to free the slot of a
  * stream that just closed, as Watch's does when the viewer stops it to record.
  */
 const REFUSED_RETRY_MS: readonly number[] = [500, 1500];
+
 /** How much of a stream may pass before its program table, while capture starts. */
 const START_LIMIT = { bytes: 4 * 1024 * 1024, ms: 15_000 };
 
@@ -43,6 +45,7 @@ export class CaptureFailure extends Error {
 
 /** Why capture couldn't write its file: the system's own words, which say why. */
 class DiskFailure extends Error {}
+
 const diskFailure = (cause: unknown) =>
   new DiskFailure(cause instanceof Error ? cause.message : String(cause));
 
@@ -98,6 +101,7 @@ export async function startCapture(
   ).catch((cause: unknown) => {
     throw diskFailure(cause);
   });
+
   // Where an append begins, and where a failed one cuts back to: unknown, nothing is written.
   const before = options.append
     ? await file.stat().then(
@@ -108,37 +112,46 @@ export async function startCapture(
         },
       )
     : 0;
+
   // The stop time also ends a start that takes that long.
   const deadline = AbortSignal.timeout(Math.max(0, options.until - Date.now()));
   let written = before;
   let wroteAt = Date.now();
+
   // Every byte, at its offset: a source that failed before leaves the file emptied, but not its
   // position.
   const write = async (chunk: Uint8Array) => {
     let offset = 0;
+
     while (offset < chunk.length) {
       const { bytesWritten } = await file
         .write(chunk, offset, chunk.length - offset, written)
         .catch((cause: unknown) => {
           throw diskFailure(cause);
         });
+
       if (bytesWritten === 0) throw new DiskFailure("Nothing could be written.");
       offset += bytesWritten;
       written += bytesWritten;
     }
+
     wroteAt = Date.now();
     options.changed();
   };
+
   /** Cuts the file back to `before`: one that can't be would keep what a failed source wrote. */
   const cutBack = () => file.truncate(before).then(() => null, diskFailure);
   let last: unknown = new CaptureFailure({ kind: "unavailable", status: 404 });
+
   for (const [index, source] of sources.entries()) {
     const stop = new AbortController();
     const signal = AbortSignal.any([options.signal, deadline, stop.signal]);
     let opened: Opened | null = null;
+
     try {
       opened = await openSource(source, options, signal);
       await startTable(opened.chunks, write, signal);
+
       return {
         bytes: () => written,
         lastWrite: () => wroteAt,
@@ -149,24 +162,32 @@ export async function startCapture(
       stop.abort();
       await opened?.close();
       last = cause;
+
       if (cause instanceof DiskFailure || options.signal.aborted || deadline.aborted) break;
       const cut = await cutBack();
+
       if (cut) {
         last = cut;
         break;
       }
+
       written = before;
     }
   }
+
   if (options.append) last = (await cutBack()) ?? last;
   await file.close().catch(() => {});
+
   if (!options.append) await rm(path, { force: true });
+
   if (last instanceof DiskFailure) throw last;
+
   if (deadline.aborted && !options.signal.aborted)
     throw new CaptureFailure({
       kind: "network",
       detail: t("The stop time passed while it started."),
     });
+
   if (options.signal.aborted) throw new CaptureFailure({ kind: "network", detail: t("Stopped.") });
   throw new CaptureFailure(last instanceof CaptureFailure ? last.failure : failureOf(last));
 }
@@ -188,10 +209,12 @@ async function openSource(
 ): Promise<Opened> {
   const ask = async (address: string, asked: AbortSignal) => {
     const headers = new Headers({ "User-Agent": options.userAgent, ...source.headers });
+
     for (let attempt = 0; ; attempt++) {
       const waiting = new AbortController();
       const timeout = setTimeout(() => waiting.abort(), SILENCE_MS);
       let answer: Response;
+
       try {
         answer = await options.request(
           address,
@@ -209,19 +232,24 @@ async function openSource(
         // Once headers arrive, the body's own watchdog owns silence on this response.
         clearTimeout(timeout);
       }
+
       if (answer.ok) return answer;
       await answer.body?.cancel().catch(() => {});
       const failure = classify(answer.status);
       const delay = REFUSED_RETRY_MS[attempt];
+
       if (failure.kind !== "refused" || delay === undefined) throw new CaptureFailure(failure);
       await sleep(delay, undefined, { signal: asked });
     }
   };
+
   if (source.format === "hls") {
     const input = await openHlsTsInput(source.url, ask, signal, false, null);
+
     const chunks = (async function* () {
       for await (const epoch of input.epochs) yield* epoch.chunks;
     })();
+
     return {
       chunks,
       close: async () => {
@@ -231,17 +259,22 @@ async function openSource(
       ends: true,
     };
   }
+
   const answer = await ask(source.url, signal);
   const reader = answer.body?.getReader();
+
   if (!reader)
     throw new CaptureFailure({ kind: "network", detail: t("The provider sent nothing.") });
+
   const chunks = (async function* () {
     for (;;) {
       const next = await within(reader.read(), SILENCE_MS, signal);
+
       if (next.done) return;
       yield next.value;
     }
   })();
+
   return {
     chunks,
     close: async () => {
@@ -260,14 +293,19 @@ async function startTable(
   const inspector = createInspector();
   const deadline = Date.now() + START_LIMIT.ms;
   let size = 0;
+
   for (;;) {
     const next = await within(chunks.next(), Math.max(1, deadline - Date.now()), signal);
+
     if (next.done) break;
     await write(next.value);
     size += next.value.length;
+
     if (inspector.push(next.value)) return;
+
     if (inspector.notTransportStream || size > START_LIMIT.bytes) break;
   }
+
   throw new CaptureFailure({
     kind: "unsupported",
     detail: "The provider's stream has no MPEG-TS program to record.",
@@ -289,40 +327,52 @@ async function run(
   let end: CaptureEnd = "stream";
   // Its timer waits out a computer's sleep: the clock says when the stop time passed meanwhile.
   let late = false;
+
   for (;;) {
     const next = await opened.chunks.next().catch(() => null);
+
     if (next?.done) end = opened.ends ? "ended" : "closed";
+
     if (!next || next.done) break;
+
     if (Date.now() >= options.until) {
       late = true;
       break;
     }
+
     if (!options.room()) {
       end = "space";
       break;
     }
+
     const wrote = await write(next.value).then(
       () => true,
       () => false,
     );
+
     if (!wrote) {
       end = "disk";
       break;
     }
   }
+
   stop.abort();
   await opened.close();
   const cut = end === "stream" || end === "ended" || end === "closed";
+
   if (cut && options.signal.aborted) end = "aborted";
   else if (cut && (deadline.aborted || late)) end = "until";
+
   const flushed = await file.sync().then(
     () => true,
     () => false,
   );
+
   const closed = await file.close().then(
     () => true,
     () => false,
   );
+
   return flushed && closed ? end : "disk";
 }
 
@@ -330,6 +380,7 @@ async function run(
 async function within<A>(promise: Promise<A>, ms: number, signal: AbortSignal): Promise<A> {
   let timer: NodeJS.Timeout | undefined;
   let abort = () => {};
+
   try {
     return await Promise.race([
       promise,
@@ -345,6 +396,7 @@ async function within<A>(promise: Promise<A>, ms: number, signal: AbortSignal): 
           ms,
         );
         abort = () => reject(new CaptureFailure({ kind: "network", detail: t("Stopped.") }));
+
         if (signal.aborted) abort();
         else signal.addEventListener("abort", abort, { once: true });
       }),
@@ -359,5 +411,6 @@ function failureOf(cause: unknown): StreamFailure {
   // Recorder-authored details stay on CaptureFailure; transport messages are not localized.
   if (cause instanceof HlsInputFailure)
     return cause.failure.kind === "network" ? { ...cause.failure, detail: "" } : cause.failure;
+
   return { kind: "network", detail: "" };
 }

@@ -14,6 +14,7 @@ import { bodySize, describeNetworkError } from "./xtream.ts";
  * before it is indexed.
  */
 const GUIDE_TIMEOUT_MS = 15 * 60_000;
+
 /** How many redirects a guide's address may take. A guide is one file, a hop or two away. */
 const MAX_REDIRECTS = 5;
 const REDIRECTS: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
@@ -30,14 +31,17 @@ function refused(failure: GuideFailure): AppFailure {
  */
 export function xmltvFetch(options: ProviderOptions) {
   const fetchImpl = options.fetch ?? fetch;
+
   return async (
     address: string,
     signal: AbortSignal,
   ): Promise<{ body: AsyncIterable<Uint8Array>; size: number | null }> => {
     const within = AbortSignal.any([signal, AbortSignal.timeout(GUIDE_TIMEOUT_MS)]);
     let target = new URL(address);
+
     for (let redirects = 0; ; redirects++) {
       let response: Response;
+
       try {
         response = await fetchImpl(target.href, {
           headers: {
@@ -55,7 +59,9 @@ export function xmltvFetch(options: ProviderOptions) {
           detail: describeNetworkError(cause),
         });
       }
+
       const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+
       if (location === null) {
         if (response.ok && response.body) {
           return {
@@ -63,18 +69,24 @@ export function xmltvFetch(options: ProviderOptions) {
             size: bodySize(response),
           };
         }
+
         void response.body?.cancel().catch(() => {});
         throw new AppFailure({ kind: "provider-error", status: response.status });
       }
+
       void response.body?.cancel().catch(() => {});
+
       if (redirects === MAX_REDIRECTS) throw refused({ kind: "redirect", reason: "too-many" });
       const next = URL.parse(location, target.href);
+
       if (!next || (next.protocol !== "https:" && next.protocol !== "http:")) {
         throw refused({ kind: "not-xmltv" });
       }
+
       if (target.protocol === "https:" && next.protocol === "http:") {
         throw refused({ kind: "redirect", reason: "unencrypted" });
       }
+
       target = next;
     }
   };

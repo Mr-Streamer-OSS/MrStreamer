@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { FEED, listedDownloads, verifiedDownloads } from "../src/downloads.ts";
 
 const RELEASES = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases";
+
 const NAMES = {
   dmg: "mac-arm64.dmg",
   exe: "win-x64-setup.exe",
   appImage: "linux-x86_64.AppImage",
   deb: "linux-amd64.deb",
 };
+
 const names = (version: string) =>
   Object.values(NAMES).map((ending) => `Mr-Streamer-${version}-${ending}`);
 
@@ -85,18 +87,24 @@ describe("the installers the build writes", () => {
    */
   function web(updates: unknown, present: readonly string[] = []) {
     const asked: string[] = [];
+
     const request: typeof fetch = async (input, init) => {
       const address = String(input);
       asked.push(`${init?.method ?? "GET"} ${address}`);
+
       if (address.split("?")[0] === FEED) {
         if (updates instanceof Error) throw updates;
+
         return typeof updates === "number"
           ? new Response(null, { status: updates })
           : Response.json(updates);
       }
+
       const found = present.some((name) => address.endsWith(`/${name}`));
+
       return new Response(null, { status: found ? 302 : 404 });
     };
+
     return { asked, request };
   }
 
@@ -133,6 +141,7 @@ describe("the installers the build writes", () => {
       feed("0.0.7"),
       names("0.0.8").filter((name) => !name.endsWith(".deb")),
     );
+
     const published = "2026-10-07T18:00:00Z";
     expect(await verifiedDownloads(request, { version: "0.0.8", published })).toEqual({
       version: "0.0.8",
@@ -146,6 +155,7 @@ describe("the installers the build writes", () => {
 
   it("leave out an installer that couldn't be asked for", async () => {
     const { request } = web(feed("0.0.8"), names("0.0.8"));
+
     const offline: typeof fetch = (input, init) =>
       String(input).endsWith(".dmg") ? Promise.reject(new Error("offline")) : request(input, init);
 

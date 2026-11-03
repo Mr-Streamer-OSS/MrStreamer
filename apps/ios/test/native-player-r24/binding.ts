@@ -8,6 +8,7 @@ import { SourceTextModule, SyntheticModule } from "node:vm";
 const require = createRequire(import.meta.url);
 let writes = 0;
 let recreations = 0;
+
 let hookDefinition:
   | {
       factory(): NativePlayer;
@@ -21,6 +22,7 @@ let hookDefinition:
       ): Promise<void> | undefined;
     }
   | undefined;
+
 class NativePlayer {
   managed = false;
   audio: unknown = null;
@@ -34,6 +36,7 @@ class NativePlayer {
   }
   async replaceObservedAsync(): Promise<{ kind: "attached" }> {
     this.managed = true;
+
     return { kind: "attached" };
   }
   _assertLegacyPlayback(): void {
@@ -44,6 +47,7 @@ class NativePlayer {
     }
   }
 }
+
 // Match Expo's non-configurable accessors on the native class prototype.
 for (const [key, field] of [
   ["audioTrack", "audio"],
@@ -59,20 +63,25 @@ for (const [key, field] of [
     },
   });
 }
+
 const sourceBinding = process.argv.includes("--source");
+
 const bindingCode = readFileSync(
   require.resolve(
     sourceBinding ? "expo-video/src/VideoPlayer.tsx" : "expo-video/build/VideoPlayer.js",
   ),
   "utf8",
 );
+
 const module = new SourceTextModule(
   sourceBinding ? stripTypeScriptTypes(bindingCode) : bindingCode,
 );
+
 const boundary = (exports: Record<string, unknown>) =>
   new SyntheticModule(Object.keys(exports), function () {
     for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
   });
+
 await module.link((specifier) => {
   switch (specifier) {
     case "./ExpoVideo":
@@ -83,6 +92,7 @@ await module.link((specifier) => {
       return boundary({
         useReleasingSharedObjectWithLifecycle: (definition: NonNullable<typeof hookDefinition>) => {
           hookDefinition = definition;
+
           return definition.factory();
         },
       });
@@ -99,40 +109,63 @@ await module.link((specifier) => {
       throw new Error("Unexpected production binding dependency");
   }
 });
+
 await module.evaluate();
+
 const legacy = new NativePlayer();
+
 Reflect.set(legacy, "audioTrack", { id: "0" });
+
 assert.equal(writes, 1);
+
 const managed = new NativePlayer();
+
 await managed.replaceObservedAsync();
+
 for (const key of ["audioTrack", "subtitleTrack"]) {
   assert.throws(() => Reflect.set(managed, key, null), {
     code: "ERR_OBSERVED_LEGACY_WRITE",
   });
 }
+
 assert.equal(writes, 1);
+
 assert.equal("audioTrack" in managed ? managed.audioTrack : undefined, null);
+
 Reflect.set(legacy, "subtitleTrack", { id: "1" });
+
 assert.equal(writes, 2);
+
 const exports = module.namespace;
 const useVideoPlayer = "useVideoPlayer" in exports ? exports.useVideoPlayer : undefined;
+
 assert.equal(typeof useVideoPlayer, "function");
+
 if (typeof useVideoPlayer !== "function") throw new Error("fixture-hook-missing");
+
 const createHookPlayer = useVideoPlayer;
 const hookPlayer: unknown = useVideoPlayer(null);
+
 assert.ok(hookPlayer instanceof NativePlayer);
+
 await hookPlayer.replaceObservedAsync();
+
 assert.ok(hookDefinition);
+
 const update = hookDefinition.update(hookPlayer, {
   previousDependencies: ["old"],
   dependencies: ["new"],
 });
+
 assert.ok(update);
+
 await assert.rejects(update, { code: "ERR_OBSERVED_LEGACY_WRITE" });
+
 assert.equal(recreations, 0);
 
 const results: Array<{ case: string; passed: boolean }> = [];
 const failures: unknown[] = [];
+
 async function control(name: string, test: () => void | Promise<void>) {
   try {
     await test();
@@ -142,20 +175,25 @@ async function control(name: string, test: () => void | Promise<void>) {
     failures.push(error);
   }
 }
+
 function hook() {
   const player: unknown = createHookPlayer(null);
   assert.ok(player instanceof NativePlayer);
   assert.ok(hookDefinition);
+
   return { player, definition: hookDefinition };
 }
+
 const sourceChange = {
   previousDependencies: ["old", "builder", 0],
   dependencies: ["new", "builder", 0],
 };
+
 const fallbackChange = {
   previousDependencies: ["old", "builder", 0],
   dependencies: ["old", "builder", 1],
 };
+
 const builderChange = {
   previousDependencies: ["old", "old-builder", 0],
   dependencies: ["old", "new-builder", 0],
@@ -218,5 +256,7 @@ await control("managed builder changes cannot recreate the player", async () => 
 });
 
 console.log(JSON.stringify({ binding: sourceBinding ? "source" : "build", results }));
+
 if (failures.length) throw new AggregateError(failures, "Production binding controls failed");
+
 console.log("Installed production binding controls passed; native scheduling is not exercised.");

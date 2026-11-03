@@ -9,6 +9,7 @@ import { isMac } from "../app/platform.ts";
 /** The typed error behind a failed call, or an `unexpected` error for anything else. */
 export function appError(cause: unknown): AppError {
   if (cause instanceof AppFailure) return cause.error;
+
   return { kind: "unexpected", detail: cause instanceof Error ? cause.message : String(cause) };
 }
 
@@ -25,6 +26,7 @@ export function describeError(error: AppError): string {
           date: formatDate(Date.parse(error.expiresAt), "date"),
         });
       }
+
       return error.state === "expired"
         ? t("The provider reports this subscription as expired.")
         : error.state === "banned"
@@ -86,8 +88,10 @@ export function describeError(error: AppError): string {
     case "incomplete-catalogue":
       if (error.list === "movies")
         return t("The provider sent no movies, so the previous list stays.");
+
       if (error.list === "series")
         return t("The provider sent no series, so the previous list stays.");
+
       return error.received === 0
         ? t("The provider sent an empty channel list, so the previous list stays.")
         : t("The provider sent {received} of {previous} channels, so the previous list stays.", {

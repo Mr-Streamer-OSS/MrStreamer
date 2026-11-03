@@ -27,15 +27,19 @@ const seen = { echo: [] as unknown[], holdsClosedByClient: 0 };
 
 const body = async (request: IncomingMessage) => {
   const chunks: Buffer[] = [];
+
   for await (const chunk of request) chunks.push(chunk as Buffer);
+
   return Buffer.concat(chunks).toString("utf8");
 };
 
 async function compare(report: Report) {
   const node = await runCases({ fixture: origin, fetches: { global: fetch } });
   const byName = new Map(node.map((result) => [result.name, result]));
+
   const verdicts = report.results.map((app) => {
     const reference = byName.get(app.name);
+
     const verdict =
       app.compare === "record"
         ? app.thrown
@@ -44,41 +48,54 @@ async function compare(report: Report) {
         : reference && !app.thrown && isDeepStrictEqual(app.value, reference.value)
           ? "same"
           : "differs";
+
     return { name: app.name, verdict, app, node: reference ?? null };
   });
+
   return verdicts;
 }
 
 const server = createServer(async (request, response) => {
   const path = new URL(request.url ?? "/", origin).pathname;
+
   switch (path) {
     case "/redirect":
       response.writeHead(302, { Location: "/ok" }).end();
+
       return;
     case "/ok":
       response.writeHead(200, { "Content-Type": "text/plain" }).end("ok");
+
       return;
     case "/echo": {
       const headers = {
         userAgent: request.headers["user-agent"],
         referer: request.headers.referer,
       };
+
       seen.echo.push(headers);
       response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(headers));
+
       return;
     }
+
     case "/chunks": {
       response.writeHead(200, { "Content-Type": "text/plain" });
+
       for (const part of ["one\n", "two\n", "three\n"]) {
         response.write(part);
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
+
       response.end();
+
       return;
     }
+
     case "/hold":
       // Never answered: the case aborts it, and the closed socket shows the abort reached here.
       request.socket.once("close", () => seen.holdsClosedByClient++);
+
       return;
     case "/report": {
       const report = JSON.parse(await body(request)) as Report;
@@ -95,10 +112,13 @@ const server = createServer(async (request, response) => {
           2,
         ),
       );
+
       for (const { name, verdict } of verdicts) console.log(`${verdict.padEnd(8)} ${name}`);
       console.log(`receipt ${file}`);
+
       return;
     }
+
     default:
       response.writeHead(404).end();
   }

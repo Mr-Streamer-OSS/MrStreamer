@@ -11,12 +11,14 @@ export const browseResult = (channels: readonly LiveChannel[]): LiveBrowseResult
   counts: { browseTopics: 0, countries: 0, languages: 0, subscriptions: 0 },
   facets: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
 });
+
 export const browseChannels = (category: OwnedId | null) =>
   queries.browse({
     scope: category ? { kind: "category", category } : { kind: "all" },
     filters: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
     visibility: "ordinary",
   });
+
 export const browseChannelsOf = (channels: readonly OwnedId[]) =>
   queries.browse({
     scope: { kind: "channels", channels: channels.map(ownedId) },

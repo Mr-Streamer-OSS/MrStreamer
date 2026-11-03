@@ -64,11 +64,14 @@ export function subtitleHistory(limit: number) {
   function after(time: number): number {
     let low = 0;
     let high = entries.length;
+
     while (low < high) {
       const middle = (low + high) >> 1;
+
       if (entries[middle]!.from <= time) low = middle + 1;
       else high = middle;
     }
+
     return low;
   }
 
@@ -84,14 +87,18 @@ export function subtitleHistory(limit: number) {
       const first = entries[0]!.from;
       const last = entries.at(-1)!.from;
       const early = time - first >= last - time;
+
       const still: Span = early
         ? { from: first + EDGE_S, to: Number.POSITIVE_INFINITY }
         : { from: Number.NEGATIVE_INFINITY, to: last - EDGE_S };
+
       read = read.flatMap((span) => within(span, still));
+
       if (open) {
         open.from = Math.max(open.from, still.from);
         open.to = Math.min(open.to, still.to);
       }
+
       const gone = early ? entries.splice(0, after(still.from)) : entries.splice(after(still.to));
       bytes -= gone.reduce((sum, entry) => sum + sizeOf(entry), 0);
     }
@@ -105,8 +112,10 @@ export function subtitleHistory(limit: number) {
     if (!open) return;
     const { from, to } = open;
     open = null;
+
     if (to >= from) read = joined([...read, { from, to }]);
     const beyond = entries.splice(after(to >= from ? to : from - EDGE_S));
+
     for (const entry of beyond) {
       if (isRead(entry.from)) entries.push(entry);
       else bytes -= sizeOf(entry);
@@ -139,6 +148,7 @@ export function subtitleHistory(limit: number) {
 
       const add = (entry: SubtitleEntry) => {
         if (!open || open !== mine || entry.from > upTo) return;
+
         // Before the point it is whole from, the reading may have missed others around it; in a
         // stretch read before, the entry is here already.
         if (entry.from < open.from || isRead(entry.from)) return;
@@ -154,6 +164,7 @@ export function subtitleHistory(limit: number) {
           open = mine = { from: time, to: Number.NEGATIVE_INFINITY };
           const held = waiting;
           waiting = null;
+
           for (const entry of held) add(entry);
         },
         add(entry) {
@@ -165,7 +176,9 @@ export function subtitleHistory(limit: number) {
         },
         end(toEnd) {
           waiting = null;
+
           if (!open || open !== mine) return;
+
           if (toEnd) open.to = upTo;
           settle();
           mine = null;
@@ -186,19 +199,24 @@ function holds(span: Span, time: number): boolean {
 /** The part of `span` inside `bounds`, if any. */
 function within(span: Span, bounds: Span): Span[] {
   const part = { from: Math.max(span.from, bounds.from), to: Math.min(span.to, bounds.to) };
+
   return part.to >= part.from ? [part] : [];
 }
 
 /** Spans in order, those that touch or overlap made one. */
 function joined(spans: readonly Span[]): Span[] {
   const out: Span[] = [];
+
   for (const span of spans.toSorted((a, b) => a.from - b.from)) {
     const last = out.at(-1);
+
     if (span.to < span.from) continue;
+
     if (last && span.from <= last.to) {
       out[out.length - 1] = { from: last.from, to: Math.max(last.to, span.to) };
     } else out.push({ from: span.from, to: span.to });
   }
+
   return out;
 }
 
@@ -228,8 +246,10 @@ export interface TrackIndex {
 
 /** How far before a listed time a reading for the packet listed there starts. */
 const INDEX_EDGE_S = 0.05;
+
 /** How far back the first reading for a fresh start goes, without an index; each next one doubles. */
 const FIRST_LOOK_BACK_S = 6;
+
 /** After this many readings, the next one starts from the start of the file. */
 const SCANS_BEFORE_START = 12;
 
@@ -241,19 +261,25 @@ const SCANS_BEFORE_START = 12;
  */
 export function replayFor(history: SubtitleHistory, need: Need): readonly SubtitleEntry[] | null {
   const span = history.spanAt(need.upTo);
+
   if (!span) return null;
   const fromStart = span.from === Number.NEGATIVE_INFINITY;
   const upTo = history.entriesIn(span, need.upTo);
+
   // A line of text may have begun at any time before: only the file from its start has them all.
   if (need.text) {
     return fromStart ? upTo.filter((entry) => "until" in entry && entry.until > need.at) : null;
   }
+
   const { fresh } = need;
   let start = fresh ? upTo.findLastIndex((entry) => entry.at <= need.at && fresh(entry)) : -1;
+
   // What starts afresh can come as several packets of one time, such as a DVB display's size
   // ahead of its page: the ones before it are part of it.
   while (start > 0 && upTo[start - 1]!.from === upTo[start]!.from) start--;
+
   if (start >= 0) return upTo.slice(start);
+
   return fromStart ? upTo : null;
 }
 
@@ -273,8 +299,10 @@ export function nextScan(
   const low = history.spanAt(need.upTo)?.from ?? need.upTo;
   const listed = index?.times.filter((time) => time < low) ?? [];
   let from = Number.NEGATIVE_INFINITY;
+
   if (need.fresh && tries < SCANS_BEFORE_START) {
     const nearest = listed.at(-1);
+
     if (nearest === undefined) {
       from = low - FIRST_LOOK_BACK_S * 2 ** tries;
     } else {
@@ -283,8 +311,11 @@ export function nextScan(
       from = (listed.at(-(2 ** Math.max(0, tries - 1))) ?? listed[0] ?? nearest) - INDEX_EDGE_S;
     }
   }
+
   // No further back than what is read before it, which the reading joins.
   const below = history.spanBelow(low);
+
   if (below && below.to >= from) from = below.to;
+
   return { from: Number.isFinite(from) ? from : null, to: low };
 }

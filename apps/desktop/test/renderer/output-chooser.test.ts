@@ -65,6 +65,7 @@ const movie: Title = {
 
 /** Where the output button is in the full window. happy-dom lays nothing out, so this says. */
 const BUTTON = { x: 1100, y: 720, width: 44, height: 44 };
+
 /** Where it is once the page fills the screen. */
 const FULL_BUTTON = { x: 1740, y: 1000, width: 44, height: 44 };
 
@@ -83,6 +84,7 @@ async function loaded() {
   const { titlePlayer } = await import("../../src/renderer/src/player/title-player.ts");
   available.resolve(true);
   await settle();
+
   return {
     ...ui,
     miniPlayer,
@@ -102,8 +104,10 @@ let unmount = () => {};
 
 /** The lists the page asked the system for so far: where each opens, and the name it goes by. */
 const lists = () => ipc.argsOf("output.pick");
+
 /** The places the system's list was asked to open at so far. */
 const asked = () => lists().map(({ anchor }) => ({ anchor }));
+
 /** The names of the lists the page took back so far. */
 const takenBack = () => ipc.argsOf("output.closePicker").map(({ request }) => request);
 
@@ -150,6 +154,7 @@ const ways = {
   O: () => key("o"),
   "its button": async () => {
     const more = container.querySelector<HTMLElement>('[aria-label="More"]');
+
     if (more) {
       await act(async () => {
         more.click();
@@ -157,6 +162,7 @@ const ways = {
       });
       await act(async () => {
         const output = document.querySelector<HTMLButtonElement>('[aria-label="Play on"]');
+
         if (!output) throw new Error("No Play on row in More");
         output.click();
         await settle();
@@ -165,6 +171,7 @@ const ways = {
         const airplay = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
           (button) => button.textContent === "AirPlay",
         );
+
         if (!airplay) throw new Error("No AirPlay choice in More > Play on");
         airplay.click();
         await settle();
@@ -181,6 +188,7 @@ const ways = {
 async function close(view: keyof typeof views): Promise<void> {
   await unmount();
   unmount = () => {};
+
   await act(async () => views[view].leave());
 }
 
@@ -200,6 +208,7 @@ async function shrunk(from?: "full screen"): Promise<void> {
     fullScreen.on = true;
     await windowFills(true);
   }
+
   ipc.hold("window.setMiniPlayer").resolve(null);
   await act(() => app.miniPlayer.enter());
   // The main process takes the window out of full screen before it shrinks it.
@@ -219,6 +228,7 @@ beforeEach(async () => {
   ) {
     const button = fullScreen.on ? FULL_BUTTON : BUTTON;
     const at = this.hasAttribute("data-output") ? button : { x: 0, y: 0, width: 0, height: 0 };
+
     return new DOMRect(at.x, at.y, at.width, at.height);
   });
   await act(async () => ipc.emit("output.changed", status({ kind: "local" })));
@@ -227,6 +237,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await unmount();
   unmount = () => {};
+
   await act(async () => {
     app.closeWatch();
     views["a title"].leave();
@@ -260,6 +271,7 @@ describe("the system's list of receivers", () => {
       await shrunk();
 
       const back = ipc.hold("window.setMiniPlayer");
+
       for (const each of keys) await key(each);
       // The window goes back once, whichever key asked first.
       expect(ipc.argsOf("window.setMiniPlayer")).toEqual([{ on: true }, { on: false }]);
@@ -283,6 +295,7 @@ describe("the system's list of receivers", () => {
 
       const back = ipc.hold("window.setMiniPlayer");
       const granted = fullScreen.hold("request");
+
       for (const each of keys) await key(each);
       await after(() => back.resolve(null));
       // The window is back at its size, and asked to fill the screen once.
@@ -333,10 +346,12 @@ describe("the system's list of receivers", () => {
     // O, then P before the main process has put the window back.
     const moves = [ipc.hold("window.setMiniPlayer")];
     await key("o");
+
     for (const each of keys) {
       moves.push(ipc.hold("window.setMiniPlayer"));
       await key(each);
     }
+
     // The window's moves end in turn, first the way back O waited for.
     for (const move of moves) {
       await after(() => move.resolve(null));
@@ -435,6 +450,7 @@ describe("the system's list of receivers", () => {
     // The receiver's connection broke, and no view with the button is on screen any more.
     await unmount();
     unmount = () => {};
+
     await act(async () =>
       ipc.emit(
         "output.changed",

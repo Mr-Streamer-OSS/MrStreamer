@@ -19,12 +19,15 @@ function observedLabel(version: TitleVersion, kind: Title["kind"]): string | nul
   if (!version.observed) return null;
   const name = (code: string | null) => languageName(code) ?? t("Unknown");
   const { audio, subtitles, files } = version.observed;
+
   const sound = audio.length
     ? t("{language} sound", { language: [...new Set(audio.map(name))].join(", ") })
     : t("No sound");
+
   const captions = subtitles.length
     ? t("{language} subtitles", { language: [...new Set(subtitles.map(name))].join(", ") })
     : t("No subtitles");
+
   return [kind === "series" && t("Read {count} files", { count: files }), sound, captions]
     .filter(Boolean)
     .join(" · ");
@@ -52,31 +55,41 @@ export function VersionMenu({
   const pick = usePickVersion();
   const names = useSubscriptionNames();
   const subscriptions = useSubscriptions();
+
   const groups = versionOptions(
     title.versions,
     title.originalLanguage,
     subscriptions.map(({ id }) => id),
   );
+
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+
   const automaticGroup = groups.find((group) =>
     group.versions.some((version) => automatic !== undefined && sameOwned(version, automatic)),
   );
+
   const automaticFile = title.versions.find(
     (version) => automatic !== undefined && sameOwned(version, automatic),
   );
+
   const describe = (group: VersionOptionGroup, version: TitleVersion) =>
     [group.quality, observedLabel(version, title.kind) ?? group.label, names(group.subscriptionId)]
       .filter(Boolean)
       .join(" · ");
+
   const expand = (key: string, open: boolean) =>
     setExpanded((held) => {
       const next = new Set(held);
+
       if (open) next.add(key);
       else next.delete(key);
+
       return next;
     });
+
   const item = (group: VersionOptionGroup, version: TitleVersion, ordinal?: number) => {
     const observed = observedLabel(version, title.kind);
+
     const metadata = [
       version.name,
       ordinal !== undefined ? t("Version {number}", { number: String(ordinal) }) : null,
@@ -85,6 +98,7 @@ export function VersionMenu({
     ]
       .filter(Boolean)
       .join(" · ");
+
     return (
       <Menu.RadioItem
         key={ownedKey(version)}
@@ -131,6 +145,7 @@ export function VersionMenu({
       </Menu.RadioItem>
     );
   };
+
   return (
     <Menu.Root>
       <Menu.Trigger
@@ -160,7 +175,9 @@ export function VersionMenu({
               onValueChange={(value: string) => {
                 const chosen =
                   title.versions.find((version) => ownedKey(version) === value) ?? null;
+
                 onPick(chosen);
+
                 if (remember) pick(title, chosen);
               }}
             >

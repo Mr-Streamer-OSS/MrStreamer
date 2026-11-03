@@ -21,8 +21,10 @@ export function browseFixtureLanguages(
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const PICKER = `(document.querySelector('[data-view=watch] [role=navigation][aria-label="Channel categories"]') ?? document.querySelector('[role=navigation][aria-label="Channel categories"]'))`;
 const row = (title: string) => `${PICKER}?.querySelector('button[title=${JSON.stringify(title)}]')`;
+
 const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
@@ -39,6 +41,7 @@ export async function liveCategoriesScenario(
   await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
   await d.click("Add second fixture subscription", named("button", "Add subscription"));
   await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('form input').length === 4"));
+
   for (const [index, text] of ["Backup", fixture.otherUrl, "demo", "demo"].entries()) {
     await d.click(
       `Fill second fixture field ${index + 1}`,
@@ -46,6 +49,7 @@ export async function liveCategoriesScenario(
     );
     await d.send("Input.insertText", { text });
   }
+
   await d.click("Connect second fixture", "document.querySelector('form button[type=submit]')");
   await d.wait(() =>
     d.evaluate<boolean>(
@@ -55,9 +59,11 @@ export async function liveCategoriesScenario(
   await d.key("Escape", 27);
   await d.click("Open Live TV", named("header button", "Live TV"));
   await d.wait(() => d.exists(PICKER));
+
   const root = await d.evaluate<{ titles: string[]; all: string }>(
     `(() => ({ titles: [...${PICKER}.querySelectorAll('[data-entry]')].map(e => e.title), all: ${PICKER}.querySelector('[title="All channels"]').textContent }))()`,
   );
+
   expect(
     root.titles.includes("Favourites") &&
       root.titles.includes("Recently watched") &&
@@ -162,9 +168,11 @@ export async function liveCategoriesScenario(
   await d.click("Open Provider lists", row("Provider lists"));
   await d.click("Open Belgium", row("Belgium"));
   await d.wait(() => d.exists(`${PICKER}.querySelector('button[aria-label="Back to countries"]')`));
+
   const country = await d.evaluate<string[]>(
     `[...${PICKER}.querySelectorAll('[data-entry]')].map(e => e.title)`,
   );
+
   expect(
     country.length > 1 && !country.includes("Belgium") && !country.includes("All channels"),
     "Country expanded inline",
@@ -214,10 +222,12 @@ export async function liveCategoriesScenario(
     ),
   );
   await d.key("ArrowDown", 40);
+
   if (await d.exists("document.querySelector('button[aria-label=\"Show copies\"]')")) {
     await d.key("ArrowRight", 39);
     await d.key("ArrowDown", 40);
   }
+
   await d.key("ArrowRight", 39);
   await d.wait(() =>
     d.evaluate<boolean>("!!document.querySelector('button[aria-label=\"Hide later programmes\"]')"),
@@ -239,12 +249,15 @@ export async function liveCategoriesScenario(
   await d.click("Return keyboard to channel search", channelSearch);
   await d.key("ArrowDown", 40);
   await d.key("Enter", 13);
+
   const picture = () =>
     d.evaluate<{ time: number; width: number; audio: number }>(
       "(() => { const v=document.querySelector('[data-view=watch] video'); return { time:v?.currentTime ?? 0, width:v?.videoWidth ?? 0, audio:v?.webkitAudioDecodedByteCount ?? 0 }; })()",
     );
+
   await d.wait(async () => {
     const v = await picture();
+
     return v.time > 1 && v.width > 0 && v.audio > 0;
   });
   const before = await picture();
@@ -304,6 +317,7 @@ export async function liveCategoriesScenario(
   await d.click("Reopen Belgium", row("Belgium"));
   let first = await d.evaluate<string>(`${PICKER}.querySelector('[data-entry]').title`);
   await d.click("Select a saved category", row(first));
+
   const refresh = async (kind: "reorder" | "remove") => {
     fixture.refresh(kind);
     await d.click(
@@ -311,14 +325,18 @@ export async function liveCategoriesScenario(
       "document.querySelector('header button[aria-pressed]')",
     );
     await d.click("Subscriptions for catalogue refresh", named("nav button", "Subscriptions"));
+
     for (let index = 0; index < 2; index++) {
       const item = `document.querySelectorAll('main section > ul > li')[${index}]`;
       const before = await d.evaluate<string>(`${item}.innerText`);
+
       if (!(await d.exists(`${item}.querySelector('button[aria-label="Refresh channels"]')`)))
         await d.click(`Open subscription ${index + 1}`, `${item}.querySelector('button')`);
+
       const stamp = await d.evaluate<number>(
         `(async () => { const result=await window.mrStreamer.invoke('library.status'); return result.ok ? result.value[${index}].fetchedAt : 0; })()`,
       );
+
       await d.click(
         `Refresh subscription ${index + 1}`,
         `${item}.querySelector('button[aria-label="Refresh channels"]')`,
@@ -330,8 +348,10 @@ export async function liveCategoriesScenario(
       );
       expect(before.length > 0, "Subscription row absent during refresh");
     }
+
     await d.key("Escape", 27);
   };
+
   await refresh("reorder");
   await d.wait(() =>
     d.evaluate<boolean>(
@@ -366,9 +386,11 @@ export async function liveCategoriesScenario(
   );
   d.observed["restartCategory"] = first;
   await d.capture("categories-restart");
+
   const retained = await d.evaluate<{ favourites: number; recent: number }>(
     `(async () => { const result=await window.mrStreamer.invoke('viewing.get'); if (!result.ok) throw new Error('Viewing read failed'); return { favourites: result.value.favourites.length, recent: result.value.recent.length }; })()`,
   );
+
   expect(
     retained.favourites === 1 && retained.recent === 1,
     "Favourites/history were lost on restart",
@@ -388,6 +410,7 @@ export async function liveCategoriesScenario(
     mobile: false,
   });
   await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
+
   for (const locale of [
     "en-US",
     "nl-NL",
@@ -402,10 +425,12 @@ export async function liveCategoriesScenario(
     const select = "document.querySelector('select:has(option[value=\"en-US\"])')";
     await d.wait(() => d.exists(select));
     await d.click("Focus interface language", select);
+
     for (const char of LANGUAGE_NAMES[locale].slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+
     await d.key("Enter", 13);
     await d.wait(() =>
       d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(locale)}`),
@@ -416,9 +441,11 @@ export async function liveCategoriesScenario(
         `document.querySelector('input[aria-label=${JSON.stringify(translate(locale, "Find a category"))}]')`,
       ),
     );
+
     const geometry = await d.evaluate<{ width: number; overflow: boolean; find: string }>(
       `(() => { const p=document.querySelector('[role=navigation][aria-label=${JSON.stringify(translate(locale, "Channel categories"))}]'); return { width: innerWidth, overflow: p.scrollWidth > p.clientWidth, find: p.querySelector('input').placeholder }; })()`,
     );
+
     expect(
       !geometry.overflow && geometry.find === translate(locale, "Find"),
       `Category layout overflow or wrong language ${locale}`,
@@ -426,16 +453,19 @@ export async function liveCategoriesScenario(
     d.observed[`narrow-${locale}`] = geometry;
     await d.capture(`categories-narrow-${locale}`);
   }
+
   await d.click(
     "Return to English for source-removal checks",
     "document.querySelector('header button[aria-pressed]')",
   );
   const language = "document.querySelector('select:has(option[value=\"en-US\"])')";
   await d.click("Interface language", language);
+
   for (const char of "En") {
     await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
     await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
   }
+
   await d.key("Enter", 13);
   await d.wait(() => d.evaluate<boolean>("document.documentElement.lang === 'en-US'"));
   await d.key("Escape", 27);
@@ -444,6 +474,7 @@ export async function liveCategoriesScenario(
     `${PICKER}.querySelector('button[aria-label="Back to topics"]')`,
   );
   await d.click("Remember News before removing added source", row("News"));
+
   const removeSource = async (index: number, remaining: number) => {
     await d.click(
       "Settings for source removal",
@@ -451,6 +482,7 @@ export async function liveCategoriesScenario(
     );
     await d.click("Subscriptions for source removal", named("nav button", "Subscriptions"));
     const item = `document.querySelectorAll('main section > ul > li')[${index}]`;
+
     if (!(await d.exists(`${item}.querySelector('[role=region]')`)))
       await d.click("Expand source to remove", `${item}.querySelector('button')`);
     await d.click(
@@ -468,6 +500,7 @@ export async function liveCategoriesScenario(
     );
     await d.key("Escape", 27);
   };
+
   await removeSource(1, 1);
   await d.quit();
   await d.launch();
@@ -484,6 +517,7 @@ export async function liveCategoriesScenario(
   await d.click("Replacement source subscriptions", named("nav button", "Subscriptions"));
   await d.click("Add subscription", named("button", "Add subscription"));
   await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('form input').length === 4"));
+
   for (const [index, text] of ["Backup", fixture.otherUrl, "demo", "demo"].entries()) {
     await d.click(
       `Replacement source field ${index}`,
@@ -491,6 +525,7 @@ export async function liveCategoriesScenario(
     );
     await d.send("Input.insertText", { text });
   }
+
   await d.click("Connect replacement source", "document.querySelector('form button[type=submit]')");
   await d.wait(() =>
     d.evaluate<boolean>("document.querySelectorAll('main section > ul > li').length === 2"),

@@ -62,9 +62,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -108,6 +110,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     ["library", "status"],
     [{ subscriptionId: "one", channelCount: count, fetchedAt: 1, failure: null, failedAt: null }],
   );
+
   const viewing: Viewing = {
     favourites,
     recent: [],
@@ -115,6 +118,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     marked: [],
     sequence: 1,
   };
+
   client.setQueryData(["viewing"], viewing);
   const view = queryView(client);
   const { container } = view;
@@ -125,15 +129,18 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
   /** A button by its label, or else by the words it begins with. */
   const button = (label: string) => {
     const buttons = [...container.querySelectorAll("button")];
+
     return (
       buttons.find((each) => each.getAttribute("aria-label") === label) ??
       buttons.find((each) => each.textContent?.trim().startsWith(label))
     );
   };
+
   const rowOf = (title: string) =>
     [...container.querySelectorAll("[data-index]")].find(
       (row) => row.querySelector("[data-name]")?.textContent === title,
     );
+
   return {
     client,
     favourites,
@@ -156,6 +163,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     click: (label: string, { shift = false } = {}) =>
       act(async () => {
         const target = button(label);
+
         if (!target) throw new Error(`No button "${label}".`);
         target.dispatchEvent(
           new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: shift }),
@@ -177,6 +185,7 @@ async function favouritesPage(count: number, list: ChannelList = { kind: "favour
     type: (text: string) =>
       act(async () => {
         const field = container.querySelector<HTMLInputElement>("main input");
+
         if (!field) throw new Error("The list has no search field.");
         const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
         setValue?.call(field, text);
@@ -246,6 +255,7 @@ describe("putting the favourites in another order", () => {
     // A row takes the keys when clicked, and neither it nor a key of the guide plays or stars.
     await page.clickRow("Channel 5");
     expect(page.focused()).toBe("Channel 5");
+
     for (const key of ["5", "s", "ArrowRight", "/"]) await page.press(key);
     expect(useUi.getState().watching).toBe(false);
     expect(ipc.methods().filter((method) => /^(playback|viewing|output)\./.test(method))).toEqual(
@@ -415,6 +425,7 @@ describe("putting the favourites in another order", () => {
     const record = ipc.hold("viewing.get");
     const listed = ipc.hold("library.browse", (query) => query.scope.kind === "channels");
     await page.click("Reload");
+
     const fresh: Viewing = {
       favourites: ["1", "adult", "2", "3", "gone"].map(own),
       recent: [],
@@ -422,6 +433,7 @@ describe("putting the favourites in another order", () => {
       marked: [],
       sequence: 100,
     };
+
     await act(async () => record.resolve(fresh));
     await act(async () => listed.resolve(browseResult(["1", "2", "3"].map(channel))));
     expect(
@@ -446,6 +458,7 @@ describe("putting the favourites in another order", () => {
   it("throws the draft away on Cancel, on Escape and when the list or its channels change", async () => {
     const page = await favouritesPage(4);
     const inOrder = titles(["1", "2", "3", "4"]);
+
     const reordering = async () => {
       await page.click("Reorder");
       await page.click("Move Channel 3 up", { shift: true });
@@ -488,11 +501,13 @@ describe("putting the favourites in another order", () => {
 
   it("keeps the draft through a read that finds the same channels, a new guide and a watch, and ends it once a channel changed", async () => {
     const page = await favouritesPage(4);
+
     const stop = [
       syncLibraryUpdates(page.client),
       syncGuideUpdates(page.client),
       syncViewing(page.client),
     ];
+
     const status = {
       subscriptionId: "one",
       channelCount: 4,
@@ -500,6 +515,7 @@ describe("putting the favourites in another order", () => {
       failure: null,
       failedAt: null,
     };
+
     await page.click("Reorder");
     await page.click("Move Channel 3 up", { shift: true });
     const arranged = titles(["3", "1", "2", "4"]);
@@ -547,6 +563,7 @@ describe("putting the favourites in another order", () => {
         { id: "20", name: "UK | CHANNEL 2 HD", tags: [], quality: "hd" },
       ],
     };
+
     listed = ipc.hold("library.browse", (query) => query.scope.kind === "channels");
     await act(async () => ipc.emit("library.updated", status));
     await act(async () =>
@@ -556,6 +573,7 @@ describe("putting the favourites in another order", () => {
     expect(page.button("Save")).toBeUndefined();
     expect(page.rows()).toEqual(["Channel 1", joined.title, "Channel 3", "Channel 4"]);
     expect(ipc.argsOf("viewing.reorderFavourites")).toEqual([]);
+
     for (const each of stop) each();
   });
 
@@ -564,22 +582,27 @@ describe("putting the favourites in another order", () => {
     const inOrder = titles(["1", "2", "3", "4"]);
     // The subscriptions saved: the one the favourites are of, alone or with another beside it.
     const saved = { one: [subscription("one")], two: [subscription("one"), subscription("two")] };
+
     const connect = async (roster: keyof typeof saved) => {
       await act(async () => page.client.setQueryData(["subscriptions"], saved[roster]));
       await settled();
     };
+
     const arranging = async () => {
       await connect("one");
       await page.click("Reorder");
       await page.click("Move Channel 4 up", { shift: true });
       expect(page.rows()).toEqual(titles(["4", "1", "2", "3"]));
     };
+
     /** No draft shows, in any of its states, and the list is the one saved. */
     const ended = () => {
       expect(page.inert()).toBe(false);
+
       for (const label of ["Save", "Retry", "Reload", "Cancel"]) {
         expect(page.button(label)).toBeUndefined();
       }
+
       expect(page.rows()).toEqual(inOrder);
       expect(page.client.getQueryData(["viewing"])).toEqual(page.viewing);
     };
@@ -648,6 +671,7 @@ describe("putting the favourites in another order", () => {
     answer = ipc.hold("viewing.reorderFavourites");
     let listed = ipc.hold("library.browse", (query) => query.scope.kind === "channels");
     await page.click("Retry");
+
     const current: Viewing = {
       favourites: ["5", "adult", "3", "4", "1", "2", "gone"].map(own),
       recent: [],
@@ -655,6 +679,7 @@ describe("putting the favourites in another order", () => {
       marked: [],
       sequence: 8,
     };
+
     await act(async () => answer.resolve(current));
     expect(ipc.argsOf("library.browse").filter((query) => query.scope.kind === "channels")).toEqual(
       [browseChannelsOf(current.favourites).queryKey[2]],
@@ -677,6 +702,7 @@ describe("putting the favourites in another order", () => {
     const reversed = ["4", "3", "2", "1"];
     const newer = next.saved(reversed, 9);
     const sent = () => ipc.argsOf("viewing.reorderFavourites").length;
+
     /** Moves a channel one place, in either order, and saves with the answer held. */
     const saving = async () => {
       const held = ipc.hold("viewing.reorderFavourites");
@@ -685,8 +711,10 @@ describe("putting the favourites in another order", () => {
       await next.click("Move Channel 2 up");
       await next.click("Save");
       expect(sent()).toBe(before + 1);
+
       return held;
     };
+
     let late = await saving();
     listed = ipc.hold("library.browse", (query) => query.scope.kind === "channels");
     await act(async () => next.client.setQueryData(["viewing"], newer));
@@ -703,6 +731,7 @@ describe("putting the favourites in another order", () => {
     const asked = ipc
       .argsOf("library.browse")
       .filter((query) => query.scope.kind === "channels").length;
+
     late = await saving();
     await act(async () => late.resolve(next.saved(["1", "2", "3", "4"], 5)));
     expect(next.button("Save")).toBeUndefined();

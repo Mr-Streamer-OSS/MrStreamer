@@ -26,6 +26,7 @@ export function newestStable(releases: readonly Release[]): Release | null {
     })),
     "",
   );
+
   return releases.find((release) => release.version === stable?.version) ?? null;
 }
 
@@ -35,7 +36,9 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
   const releases: Release[] = [];
   const token = process.env["GH_TOKEN"] ?? process.env["GITHUB_TOKEN"];
   const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+
   if (token) headers["Authorization"] = `Bearer ${token}`;
+
   try {
     // One deadline for the entire history, including pagination. An incomplete history is never
     // presented as all releases. The page limit also bounds a server that repeats full pages.
@@ -45,16 +48,25 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
         redirect: "error",
         headers,
       });
+
       if (!response.ok) return null;
       const rows: unknown = await response.json();
+
       if (!Array.isArray(rows)) return null;
+
       for (const row of rows) {
         if (typeof row !== "object" || row === null) return null;
+
         if (!("draft" in row) || !("prerelease" in row)) return null;
+
         if (row.draft === true || row.prerelease === true) continue;
+
         if (row.draft !== false || row.prerelease !== false) return null;
+
         if (!("tag_name" in row) || typeof row.tag_name !== "string") return null;
+
         if (!/^v\d+\.\d+\.\d+$/.test(row.tag_name)) continue;
+
         if (
           !("published_at" in row) ||
           typeof row.published_at !== "string" ||
@@ -66,6 +78,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
         )
           return null;
         const assets: string[] = [];
+
         for (const asset of row.assets) {
           if (
             typeof asset !== "object" ||
@@ -76,6 +89,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
             return null;
           assets.push(asset.name);
         }
+
         releases.push({
           version: row.tag_name.slice(1),
           published: row.published_at,
@@ -83,6 +97,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
           assets,
         });
       }
+
       if (rows.length < 100) {
         return releases.sort(
           (left, right) => Date.parse(right.published) - Date.parse(left.published),
@@ -92,5 +107,6 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
   } catch {
     // Offline, rate limited, malformed or past the deadline: the page links to GitHub instead.
   }
+
   return null;
 }

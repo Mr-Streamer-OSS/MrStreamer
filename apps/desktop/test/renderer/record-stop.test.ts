@@ -16,11 +16,14 @@ const zone = vi.hoisted(() => {
   process.env.TZ = "Europe/Amsterdam";
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(Date.parse("2026-10-25T01:15:00Z"));
+
   return was;
 });
+
 // The worker's next test files keep its own zone.
 afterAll(() => {
   vi.useRealTimers();
+
   if (zone === undefined) delete process.env.TZ;
   else process.env.TZ = zone;
 });
@@ -55,6 +58,7 @@ async function typedAt(typed: string) {
     setValue.call(input, typed);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
+
   return view;
 }
 
@@ -64,6 +68,7 @@ async function stopFor(typed: string): Promise<number | undefined> {
   await act(async () => button("Start recording")?.click());
   await vi.waitFor(() => expect(ipc.argsOf("recordings.start")).toHaveLength(1));
   view.unmount();
+
   return ipc.argsOf("recordings.start")[0]?.stop;
 }
 

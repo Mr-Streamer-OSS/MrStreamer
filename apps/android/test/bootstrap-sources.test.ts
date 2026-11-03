@@ -35,10 +35,13 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
   const guard = () => {
     if (phone.refuse) throw new Error("refused");
   };
+
   const credentials: Credentials = {
     read: async (id) => {
       guard();
+
       if (phone.unreadable) throw new Error("damaged");
+
       return phone.sealed.get(id) ?? null;
     },
     write: async (id, authority) => {
@@ -50,9 +53,11 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
     remove: async (id) => void (guard(), phone.sealed.delete(id)),
     retain: async (ids) => {
       guard();
+
       for (const id of phone.sealed.keys()) if (!ids.includes(id)) phone.sealed.delete(id);
     },
   };
+
   return sourcesOwner({
     credentials,
     // As storage.ts reads: no file, or one that isn't JSON, is none.
@@ -74,6 +79,7 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
 
 const listed = (owner: SourcesOwner): readonly ConnectedSource[] => {
   const state = owner.state.get();
+
   return state.kind === "ready" ? state.sources : [];
 };
 
@@ -84,6 +90,7 @@ async function settled(owner: SourcesOwner): Promise<readonly ConnectedSource[]>
       timeout: 10_000,
     })
     .toBe(true);
+
   return listed(owner);
 }
 
@@ -134,15 +141,19 @@ describe("Android sources", () => {
       channels: 20,
       adultChannels: true,
     });
+
     try {
       const owner = launch(newPhone());
       await owner.restore();
       await owner.connect({ ...xtream(), server: adults.url });
 
       const [source] = await settled(owner);
+
       const titles =
         source?.channels.kind === "ready" ? source.channels.rows.map((row) => row.title) : [];
+
       expect(titles.length).toBeGreaterThan(0);
+
       for (const adult of ["After Hours", "Late Show", "Night Club"])
         expect(titles).not.toContain(adult);
     } finally {
@@ -160,6 +171,7 @@ describe("Android sources", () => {
 
     const token = new URL(playlist.link).searchParams.values().next().value ?? "";
     const written = [...phone.files.values()].join("\n") + JSON.stringify(owner.state.get());
+
     for (const secret of [PASSWORD, "viewer", token]) expect(written).not.toContain(secret);
     expect([...phone.sealed.values()]).toEqual(
       expect.arrayContaining([
@@ -189,6 +201,7 @@ describe("Android sources", () => {
 
     const first = await owner.connect(typed);
     expect(first).toMatchObject({ kind: "failed", error: { kind: "unreachable" } });
+
     if (first.kind !== "failed" || !first.http) throw new Error("no http offered");
     expect(first.http.server).toBe(`http://${typed.server}`);
 
@@ -197,10 +210,12 @@ describe("Android sources", () => {
 
   it("shows a source's failed channel list with its reason, and lists it on Try again", async () => {
     let failing = true;
+
     const flaky: typeof fetch = (input, init) =>
       failing && String(input).includes("get_live_streams")
         ? Promise.reject(new TypeError("Network request failed"))
         : fetch(input, init);
+
     const owner = launch(newPhone(), flaky);
     await owner.restore();
     await owner.connect(xtream());
@@ -258,6 +273,7 @@ describe("Android sources", () => {
     const first = launch(phone);
     await first.restore();
     const connected = await first.connect(xtream());
+
     if (connected.kind !== "connected") throw new Error("not connected");
     await settled(first);
 
@@ -302,13 +318,17 @@ describe("Android sources", () => {
   it("saves nothing when Connect is cancelled while the provider answers", async () => {
     const phone = newPhone();
     const cancel = new AbortController();
+
     // Cancelled as the provider's answer to the login arrives.
     const cancelling: typeof fetch = async (input, init) => {
       const response = await fetch(input, init);
+
       if (String(input).includes("player_api.php") && !String(input).includes("action="))
         cancel.abort();
+
       return response;
     };
+
     const owner = launch(phone, cancelling);
     await owner.restore();
 
@@ -323,6 +343,7 @@ describe("Android sources", () => {
     await owner.restore();
     await owner.connect(m3u());
     const connected = await owner.connect(xtream());
+
     if (connected.kind !== "connected") throw new Error("not connected");
 
     // Removed while its channels still load.
@@ -343,6 +364,7 @@ describe("Android sources", () => {
     await owner.restore();
     const cancel = new AbortController();
     let release = () => {};
+
     const started = new Promise<void>((resolve) => {
       phone.hold = { started: resolve, until: new Promise((done) => (release = done)) };
     });
@@ -361,18 +383,23 @@ describe("Android sources", () => {
     const phone = newPhone();
     let showList = () => {};
     const listHeld = new Promise<void>((resolve) => (showList = resolve));
+
     const held: typeof fetch = async (input, init) => {
       if (String(input).includes("get_live_streams")) await listHeld;
+
       return fetch(input, init);
     };
+
     const owner = launch(phone, held);
     await owner.restore();
     await owner.connect(xtream());
 
     let release = () => {};
+
     const started = new Promise<void>((resolve) => {
       phone.hold = { started: resolve, until: new Promise((done) => (release = done)) };
     });
+
     const adding = owner.connect(m3u());
     await started;
     showList();
@@ -390,6 +417,7 @@ describe("Android sources", () => {
     const owner = launch(phone);
     await owner.restore();
     const connected = await owner.connect(xtream());
+
     if (connected.kind !== "connected") throw new Error("not connected");
     await settled(owner);
 

@@ -27,11 +27,13 @@ import { defined } from "@mrstreamer/core/defined";
 // CI points this at the bundled build, with ffprobe beside it; locally the ones on PATH do.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
+
 const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
 
 /** The first profile receivers get: what every one of them decodes. */
 const RECEIVER: readonly Codec[] = ["h264", "aac"];
+
 /** Where a title's first picture sits on the clock of a receiver's segments, in seconds. */
 const CLOCK_START = 10;
 
@@ -48,6 +50,7 @@ async function receiver(
   fetchImpl: typeof fetch = fetch,
 ) {
   const provider = await fakeProvider({ maxConnections: 1, slotReleaseMs: 0, ...options });
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE, ...deps }).pipe(
       Layer.provide(PlaybackCoordination.layer),
@@ -60,6 +63,7 @@ async function receiver(
       ),
     ),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
   await subscriptions.add(demoLogin(provider));
   const [source] = await subscriptions.sources();
@@ -68,12 +72,14 @@ async function receiver(
   const closed: string[] = [];
   /** What whoever opened a session was told went wrong with its stream. */
   const failed: StreamFailure[] = [];
+
   const target: ReceiverTarget = {
     address: "127.0.0.1",
     decoders: RECEIVER,
     closed: () => closed.push("closed"),
     failed: (failure) => failed.push(failure),
   };
+
   // Resolve the async provider addresses before any competing playback calls take their turns.
   const files = new Map(
     await Promise.all(
@@ -88,6 +94,7 @@ async function receiver(
       ),
     ),
   );
+
   /**
    * Opens a test movie by name for the receiver, the way the app opens it from the catalogue.
    * `file` puts another clip behind its address first: a fixture by name, or its bytes. `asked`
@@ -100,11 +107,15 @@ async function receiver(
     asked?: { turn: number },
   ) => {
     const movie = provider.titles.movies.find((each) => each.name.startsWith(name));
+
     if (!movie || !source) throw new Error(`No movie ${name}`);
+
     if (file !== undefined) provider.replaceMovieFile(movie.id, file);
     const ref: TitleRef = { kind: "movie", ...own(String(movie.id)) };
+
     return playback.openReceiverTitle(ref, files.get(movie.id)!, { ...target, decoders }, asked);
   };
+
   /** Opens a movie and loads it with these tracks: the video playlist a receiver ends up with. */
   const load = async (
     name: string,
@@ -112,20 +123,27 @@ async function receiver(
     tracks: { audio?: number | null; subtitle?: number | null } = {},
   ) => {
     const opened = await open(name, file);
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: tracks.audio ?? null,
       subtitle: tracks.subtitle ?? null,
     });
+
     if (!loaded) throw new Error("Not a receiver's title");
     const main = await playlist(loaded.url);
+
     return { opened, loaded, main, video: await playlist(main.stream ?? "") };
   };
+
   /** A test movie by the start of its name. */
   const movie = (name: string) => {
     const found = provider.titles.movies.find((each) => each.name.startsWith(name));
+
     if (!found) throw new Error(`No movie ${name}`);
+
     return found;
   };
+
   return { provider, playback, open, load, movie, target, closed, failed, source, own };
 }
 
@@ -146,14 +164,18 @@ async function playlist(url: string) {
   let at = 0;
   lines.forEach((line, index) => {
     const length = /^#EXTINF:([\d.]+)/.exec(line)?.[1];
+
     if (length === undefined) return;
     segments.push({ url: new URL(lines[index + 1] ?? "", url).href, length: Number(length), at });
     at += Number(length);
   });
+
   const named = (pattern: RegExp) => {
     const found = lines.map((line) => pattern.exec(line)?.[1]).find((each) => each !== undefined);
+
     return found === undefined ? null : new URL(found, url).href;
   };
+
   return {
     status: response.status,
     type: response.headers.get("content-type"),
@@ -178,6 +200,7 @@ async function segment(url: string, signal?: AbortSignal) {
  */
 async function segmentOf(response: Response) {
   const body = Buffer.from(await response.arrayBuffer());
+
   const probed = spawnSync(
     FFPROBE,
     [
@@ -186,15 +209,20 @@ async function segmentOf(response: Response) {
     ],
     { input: body, maxBuffer: 64 * 1024 * 1024 },
   );
+
   const json = JSON.parse(probed.stdout.toString() || "{}") as {
     streams?: { index: number; codec_type: string; codec_name: string }[];
     packets?: { stream_index: number; pts_time?: string; flags: string }[];
   };
+
   const video = json.streams?.find((stream) => stream.codec_type === "video");
+
   const pictures = (json.packets ?? [])
     .filter((packet) => packet.stream_index === video?.index && packet.pts_time !== undefined)
     .map((packet) => ({ at: Number(packet.pts_time), key: packet.flags.includes("K") }));
+
   const times = pictures.map((picture) => picture.at);
+
   return {
     status: response.status,
     bytes: body.length,
@@ -215,6 +243,7 @@ async function segmentOf(response: Response) {
 async function fetched(url: string): Promise<number> {
   const response = await fetch(url);
   await response.arrayBuffer();
+
   return response.status;
 }
 
@@ -222,18 +251,23 @@ async function fetched(url: string): Promise<number> {
 async function cues(url: string) {
   const response = await fetch(url);
   const text = await response.text();
+
   const seconds = (stamp: string) =>
     stamp.split(":").reduce((total, part) => total * 60 + Number(part), 0);
+
   const lines = [...text.matchAll(/^([\d:.]+) --> ([\d:.]+)\n([^\n]+)/gm)].map(
     (found) => [seconds(found[1]!), seconds(found[2]!), found[3]!] as const,
   );
+
   return { status: response.status, type: response.headers.get("content-type"), text, lines };
 }
 
 /** Where the receiver clips' picture has keyframes, in seconds into the title. */
 const KEYFRAMES = [0, 0.7, 5.1, 5.6, 13.3, 13.5, 21.9, 30, 30.4, 44.8, 52.2, 61];
+
 /** The Matroska receiver clip's clock starts here; its index names times on that clock. */
 const CLOCK = 7.5;
+
 /** A movie in a Matroska file and one in an MP4, which other clips take the place of. */
 const MATROSKA = "TEST | Long subtitles";
 const MP4 = "TEST | Two sound tracks and subtitles 1080p";
@@ -281,6 +315,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       // close pairs stay together, and none is cut on a grid the picture doesn't have.
       const starts = [0, 5.1, 13.3, 21.9, 30, 44.8, 52.2, 61];
       expect(video.segments.map((each) => Number(each.at.toFixed(1)))).toEqual(starts);
+
       for (const [index, listed] of video.segments.entries()) {
         const made = await segment(listed.url);
         expect(made.startsOnKeyframe, `segment ${index}`).toBe(true);
@@ -294,6 +329,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
           ).length,
         );
       }
+
       // One reader of the provider's file, however many segments were asked for.
       expect(provider.mostFilesAtOnce()).toBe(1);
     },
@@ -301,6 +337,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
   it("copies an end-index MP4's picture when the same title is opened again", async () => {
     const { provider, playback, load } = await receiver();
+
     for (const file of ["title-receiver.mp4", undefined]) {
       const { video } = await load(MP4, file);
       expect(video.segments.map((each) => Number(each.at.toFixed(1)))).toEqual([
@@ -313,6 +350,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       expect(first.keyframes).toBe(2);
       await playback.closeAll();
     }
+
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
 
@@ -330,6 +368,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       expect(made.startsOnKeyframe, `segment ${index}`).toBe(true);
       expect(made.from, `segment ${index}`).toBeCloseTo(at(index).at, 2);
     }
+
     const last = await segment(at(video.segments.length - 1).url);
     // The title's last picture: a tenth of a second before its end.
     expect(last.to).toBeCloseTo(video.length - 0.12, 1);
@@ -365,18 +404,23 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     // sent together, each on a connection of its own, reach it in any order. So each is sent as
     // soon as the proxy has counted the one before, and no answer is read until all four are in.
     const answers = [];
+
     for (const index of [1, 6, 4, 5]) {
       const before = (await asked()) ?? 0;
       answers.push(fetch(video.segments[index]!.url).then((answer) => [index, answer] as const));
       await vi.waitFor(async () => expect(await asked()).toBe(before + 1), { interval: 1 });
     }
+
     for (const [index, answer] of await Promise.all(answers)) {
       const made = await segmentOf(answer);
+
       // Where it went last, and the segment after, play. One it left may get nothing.
       if (index === 4 || index === 5) expect(made.status, `segment ${index}`).toBe(200);
       else expect([200, 503], `segment ${index}`).toContain(made.status);
+
       if (made.status === 200) expect(made.from).toBeCloseTo(video.segments[index]!.at, 2);
     }
+
     expect(provider.mostFilesAtOnce()).toBe(1);
     // Asked again, the one it left plays.
     expect((await segment(video.segments[1]!.url)).from).toBeCloseTo(video.segments[1]!.at, 2);
@@ -400,15 +444,18 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
   it("converts the picture when the index is too sparse to copy by, on the title's own clock", async () => {
     const { provider, load } = await receiver();
+
     const sparse = withIndexEntries(
       fixture("title-receiver.mkv"),
       [0, 21.9, 44.8].map((time) => CLOCK + time),
     );
+
     const { opened, video } = await load(MATROSKA, sparse);
 
     expect(video.length).toBeCloseTo(opened.duration, 1);
     // No index to cut by: every four seconds, with a keyframe made at each start.
     expect(video.segments.slice(0, 4).map((each) => each.at)).toEqual([0, 4, 8, 12]);
+
     for (const index of [9, 0, video.segments.length - 1]) {
       const listed = video.segments[index]!;
       const made = await segment(listed.url);
@@ -419,6 +466,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       expect(made.from, `segment ${index}`).toBeGreaterThanOrEqual(listed.at - 0.001);
       expect(made.from, `segment ${index}`).toBeLessThan(listed.at + 0.11);
     }
+
     expect(provider.mostFilesAtOnce()).toBe(1);
   });
 
@@ -430,6 +478,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
     const named = video.segments.findIndex((each) => Math.abs(each.at - 28.5) < 0.01);
     expect(named).toBeGreaterThan(0);
+
     // Played through from the start, and skipped to: both get a segment that starts where the
     // playlist the receiver already has says, not where the keyframe turned out to be.
     for (const index of [named - 1, named, named + 1]) {
@@ -440,6 +489,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       expect(Math.abs(made.from - listed.at), `segment ${index}`).toBeLessThan(0.11);
       expect(made.to, `segment ${index}`).toBeLessThan(listed.at + listed.length);
     }
+
     expect(video.length).toBeCloseTo(opened.duration, 1);
   });
 
@@ -476,10 +526,12 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       );
       const { playback, open } = await receiver({ ffmpeg: executable });
       const opened = await open(MATROSKA, "title-receiver.mkv");
+
       const loaded = await playback.loadReceiverTitle(opened.sessionId, {
         audio: null,
         subtitle: opened.subtitles.find((track) => track.language === "en")!.id,
       });
+
       const main = await playlist(loaded!.url);
       const video = await playlist(main.stream!);
       const subtitles = await playlist(main.subtitles!);
@@ -490,13 +542,16 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
         expect(converter.url).toMatch(/\/report\/[^/]+\/[^/]+\/subtitles$/);
         expect(() => process.kill(converter.pid, 0)).toThrow();
       });
+
       if (sent) {
         const response = await fetch(converter!.url, {
           method: "PUT",
           body: "WEBVTT\n\n00:00:10.500 --> 00:00:11.500\nLate report\n\n",
         });
+
         expect(response.status).toBe(204);
       }
+
       // The stand-in sends no video. Completion must still release the waiting receiver.
       expect(await waiting).toBe(503);
       expect((await cues(subtitles.segments[0]!.url)).lines).toEqual(
@@ -509,10 +564,12 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { playback, open } = await receiver();
     const opened = await open(MATROSKA, "title-receiver.mkv");
     const english = opened.subtitles.find((track) => track.language === "en");
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: english!.id,
     });
+
     expect(loaded?.subtitles).toBe(true);
     const main = await playlist(loaded!.url);
     expect(main.text).toMatch(/#EXT-X-MEDIA:TYPE=SUBTITLES.*NAME="English".*LANGUAGE="en"/);
@@ -543,21 +600,25 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { provider, playback, open } = await receiver();
     const opened = await open(movie, file);
     const english = opened.subtitles.find((track) => track.language === "en");
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: english!.id,
     });
+
     const main = await playlist(loaded!.url);
     const video = await playlist(main.stream!);
     const subtitles = await playlist(main.subtitles!);
 
     // Straight to the segment that starts at 30 s: "Across thirty" began at 29 s.
     const at = video.segments.findIndex((each) => Math.abs(each.at - 30) < 0.01);
+
     const [made, lines] = await Promise.all([
       segment(video.segments[at]!.url),
       // The next one too, as a receiver fills its buffer.
       segment(video.segments[at + 1]!.url).then(() => cues(subtitles.segments[at]!.url)),
     ]);
+
     expect(made.from).toBeCloseTo(30, 2);
     expect(lines.lines).toEqual([[29, 33, "Across thirty"]]);
     expect(provider.mostFilesAtOnce()).toBe(1);
@@ -567,16 +628,19 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { provider, playback, open, failed } = await receiver({}, { wholeFiles: true });
     const opened = await open(MATROSKA, "title-receiver.mkv");
     const english = opened.subtitles.find((track) => track.language === "en");
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: english!.id,
     });
+
     const main = await playlist(loaded!.url);
     const video = await playlist(main.stream!);
     const subtitles = await playlist(main.subtitles!);
     // Without byte ranges there is no index to cut the picture at its keyframes: the segments
     // are even, and one starts at 32 s.
     const at = video.segments.findIndex((each) => Math.abs(each.at - 32) < 0.01);
+
     /** Skips to the segment at 32 s, and the next as a receiver fills its buffer. */
     const skip = () =>
       Promise.all([
@@ -588,6 +652,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const [cold, without] = await skip();
     expect(cold.from).toBeCloseTo(32, 2);
     expect(without.lines).toEqual([]);
+
     // Played from the start to the end, which reads every line.
     for (const each of video.segments) expect((await segment(each.url)).status).toBe(200);
     const [made, lines] = await skip();
@@ -603,10 +668,12 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { provider, playback, open } = await receiver({ receiver: { cuesMs: 150 } });
     const opened = await open(MATROSKA, "title-receiver.mkv");
     const english = opened.subtitles.find((track) => track.language === "en");
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: english!.id,
     });
+
     const main = await playlist(loaded!.url);
     const video = await playlist(main.stream!);
     const subtitles = await playlist(main.subtitles!);
@@ -672,12 +739,15 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
     const again = await open(MATROSKA);
     const english = again.subtitles.find((track) => track.language === "en");
+
     const reloaded = await playback.loadReceiverTitle(again.sessionId, {
       audio: null,
       subtitle: english!.id,
     });
+
     const main = await playlist(reloaded!.url);
     const fresh = await playlist(main.stream!);
+
     for (const index of [0, 1]) await segment(fresh.segments[index]!.url);
     const lines = await cues((await playlist(main.subtitles!)).segments[0]!.url);
     expect(lines.lines).toEqual([[3, 6, "Three to SIX"]]);
@@ -689,6 +759,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { provider, playback, load, movie, failed } = await receiver({
       receiver: { segmentMs: 1500 },
     });
+
     const { opened, video } = await load(MATROSKA, "title-receiver.mkv");
     // The provider stops in the middle of the file, as a stalled connection does: inside the
     // segment that starts at 30 s, which a reading from there never gets to the end of.
@@ -715,6 +786,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { playback, open } = await receiver();
     const opened = await open("TEST | Picture subtitles");
     const picture = opened.subtitles.find((track) => track.format === "picture");
+
     const loaded = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: picture!.id,
@@ -732,6 +804,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
   it("holds the provider while the receiver has enough", async () => {
     const { provider, load } = await receiver({ receiver: { segments: { ahead: 1 } } });
     const { video } = await load(MATROSKA, "title-receiver.mkv");
+
     const exact = async (index: number) =>
       expect((await segment(video.segments[index]!.url)).from).toBeCloseTo(
         video.segments[index]!.at,
@@ -744,6 +817,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     // what the receiver asks for next comes of the same reading, with nothing new asked of the
     // provider.
     const asked = provider.fileRequests();
+
     for (const index of [2, 3, 4]) await exact(index);
     expect(provider.fileRequests()).toBe(asked);
     expect(provider.mostFilesAtOnce()).toBe(1);
@@ -753,6 +827,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     const { provider, load } = await receiver({
       receiver: { idleMs: 150, segments: { ahead: 1 } },
     });
+
     const { video } = await load(MATROSKA, "title-receiver.mkv");
 
     expect((await segment(video.segments[1]!.url)).status).toBe(200);
@@ -768,19 +843,23 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
   it("serves a receiver only its own load, and nothing of the proxy's own", async () => {
     const { playback, open, closed } = await receiver();
     const opened = await open(MATROSKA, "title-receiver.mkv");
+
     const first = await playback.loadReceiverTitle(opened.sessionId, {
       audio: null,
       subtitle: null,
     });
+
     const preflight = await fetch(first!.url, { method: "OPTIONS" });
     expect(preflight.status).toBe(204);
     expect(preflight.headers.get("Access-Control-Allow-Headers")).toBe("Range");
     const lan = new URL(first!.url);
     const token = lan.pathname.split("/")[2]!;
+
     const status = async (path: string, method = "GET") =>
       (await fetch(`${lan.origin}${path}`, { method })).status;
 
     expect(await status(`/r/${token}/master.m3u8`)).toBe(200);
+
     // What ffmpeg and ffprobe read and report stays on loopback's own port.
     for (const path of [
       `/source/${token}`,
@@ -797,6 +876,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
     ]) {
       expect(await status(path), path).toBe(410);
     }
+
     expect(await status(`/r/${token}/master.m3u8`, "POST")).toBe(410);
 
     // Other tracks are another load, under another token: the one before is gone.
@@ -804,6 +884,7 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
       audio: opened.audio[1]!.id,
       subtitle: null,
     });
+
     expect(second!.url).not.toBe(first!.url);
     expect(await status(`/r/${token}/master.m3u8`)).toBe(410);
     expect((await fetch(second!.url)).status).toBe(200);
@@ -816,9 +897,11 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
   it("is the one session: opening it closes what played here, and the other way round", async () => {
     const { provider, playback, load, source, own } = await receiver();
+
     const channel = String(
       provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
     );
+
     const local = await playback.open(own(channel), RECEIVER);
     const reading = new AbortController();
     void fetch(local.url, { signal: reading.signal }).catch(() => {});
@@ -842,9 +925,11 @@ describe.skipIf(!hasTools)("a movie for a receiver", { timeout: 20_000 }, () => 
 
   it("refuses a page's preview while a receiver has the session, one asked for before it opened too", async () => {
     const { provider, playback, load, closed, own } = await receiver();
+
     const channel = String(
       provider.catalogue.channels.find((each) => !each.offline && !each.fixture)!.streamId,
     );
+
     const refused = { error: { kind: "unexpected", detail: "A receiver has playback." } };
 
     // Asked for while the receiver's title is still being read: its turn comes after.
@@ -901,18 +986,22 @@ describe.skipIf(!hasTools)("a channel for a receiver", () => {
     expect(live.status).toBe(200);
     expect(live.ended).toBe(false);
     expect(live.segments.length).toBeGreaterThanOrEqual(2);
+
     for (const listed of live.segments) expect(listed.length).toBeGreaterThanOrEqual(1.9);
     const made = await segment(live.segments.at(-1)!.url);
     expect(made.status).toBe(200);
     // The recording has a picture and no sound.
     expect(made.codecs).toEqual(["h264"]);
     expect(made.startsOnKeyframe).toBe(true);
+
     // The stream goes on: a later playlist has moved, and holds no more than a few segments.
     const later = await vi.waitFor(async () => {
       const next = await playlist(opened.url);
       expect(next.segments.at(-1)!.url).not.toBe(live.segments[0]!.url);
+
       return next;
     });
+
     expect(later.segments.length).toBeLessThanOrEqual(6);
     expect(provider.streamRequests()).toBe(1);
     expect(provider.activeStreams()).toBe(1);
@@ -957,6 +1046,7 @@ describe("an HLS channel for a receiver", () => {
   it("has its playlists pointed at this computer, and the broadcaster's addresses kept from it", async () => {
     const clip = fixture("h264-aac.mpegts");
     const asked: { path: string; userAgent?: string }[] = [];
+
     const server = createServer((request, response) => {
       const { pathname } = new URL(request.url ?? "/", "http://host");
       asked.push({
@@ -964,12 +1054,15 @@ describe("an HLS channel for a receiver", () => {
         ...defined({ userAgent: request.headers["user-agent"] || undefined }),
       });
       const body = routes.get(pathname);
+
       if (body === undefined) response.writeHead(404).end();
       else response.writeHead(200).end(body);
     });
+
     servers.push(server);
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
     const routes = new Map<string, string | Buffer>([
       [
         "/list.m3u",
@@ -984,6 +1077,7 @@ describe("an HLS channel for a receiver", () => {
       ["/alpha/low/stream.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment-0.ts\n"],
       ["/alpha/low/segment-0.ts", clip],
     ]);
+
     const runtime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(
         Layer.provide(PlaybackCoordination.layer),
@@ -996,9 +1090,11 @@ describe("an HLS channel for a receiver", () => {
         ),
       ),
     );
+
     const { id: subscriptionId } = await (
       await promised(runtime, Subscriptions)
     ).add({ server: `${origin}/list.m3u`, username: "", password: "" });
+
     const playback = await promised(runtime, Playback);
 
     const opened = await playback.openReceiver(
@@ -1008,6 +1104,7 @@ describe("an HLS channel for a receiver", () => {
         decoders: RECEIVER,
       },
     );
+
     const lan = new URL(opened.url).origin;
     const main = await playlist(opened.url);
     expect(main.text).not.toContain(origin);
@@ -1038,6 +1135,7 @@ describe("an HLS channel for a receiver", () => {
     expect((await fetch(subtitles.segments[0]!.url)).status).toBe(200);
     expect(await playback.failure(opened.sessionId)).toEqual(videoFailure);
     const route = new URL(main.subtitles!);
+
     for (const path of [
       route.pathname.replace("/hsubs-", "/hsubs--"),
       route.pathname + "1234567890123",
@@ -1045,10 +1143,12 @@ describe("an HLS channel for a receiver", () => {
     ]) {
       expect((await fetch(new URL(path, lan))).status).toBe(410);
     }
+
     // Every request the receiver made went out with the header the channel asks for.
     for (const request of asked.filter((each) => each.path.startsWith("/alpha/"))) {
       expect(request.userAgent).toBe("Player/1.0");
     }
+
     await playback.close(opened.sessionId);
     await expect(fetch(opened.url)).rejects.toThrow();
   });
@@ -1056,17 +1156,21 @@ describe("an HLS channel for a receiver", () => {
   it("answers a request whose target is no address with 400, here and on the local network, and goes on", async () => {
     const server = createServer((request, response) => {
       const body = routes.get(new URL(request.url ?? "/", "http://host").pathname);
+
       if (body === undefined) response.writeHead(404).end();
       else response.writeHead(200).end(body);
     });
+
     servers.push(server);
     await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
     const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
     const routes = new Map<string, string | Buffer>([
       ["/list.m3u", `#EXTM3U\n#EXTINF:-1 tvg-id="Alpha.test",Alpha\n${origin}/alpha/index.m3u8\n`],
       ["/alpha/index.m3u8", "#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nsegment-0.ts\n"],
       ["/alpha/segment-0.ts", fixture("h264-aac.mpegts")],
     ]);
+
     const runtime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(
         Layer.provide(PlaybackCoordination.layer),
@@ -1079,13 +1183,16 @@ describe("an HLS channel for a receiver", () => {
         ),
       ),
     );
+
     const { id: subscriptionId } = await (
       await promised(runtime, Subscriptions)
     ).add({ server: `${origin}/list.m3u`, username: "", password: "" });
+
     const playback = await promised(runtime, Playback);
     const rejections: unknown[] = [];
     const note = (reason: unknown) => void rejections.push(reason);
     process.on("unhandledRejection", note);
+
     try {
       // Node's parser takes these targets; none of them is an address.
       const malformed = ["http://[", "//[", "http://%"];
@@ -1097,6 +1204,7 @@ describe("an HLS channel for a receiver", () => {
         { subscriptionId, id: "Alpha.test" },
         { address: "127.0.0.1", decoders: RECEIVER },
       );
+
       const lan = await Promise.all(malformed.map((target) => raw(new URL(opened.url), target)));
       const stream = await playlist(opened.url);
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1127,5 +1235,6 @@ async function raw(url: URL, target: string): Promise<string> {
   // A request nobody answers holds the connection: give up on it.
   socket.setTimeout(2_000, () => socket.destroy());
   await new Promise((closed) => socket.once("close", closed));
+
   return text.split("\r\n")[0] ?? "";
 }

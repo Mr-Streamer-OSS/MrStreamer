@@ -112,16 +112,19 @@ function subjectOf(name: ParsedName): string {
 export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatalogue> {
   const due = pacer();
   const named: { category: ProviderCategory; name: ParsedName }[] = [];
+
   for (const category of catalogue.categories) {
     if (due()) yield;
     named.push({ category, name: parse(category.name) });
   }
+
   const prefixed = named.filter(({ name }) => name.region !== null).length;
   const prefixStyle = prefixed >= Math.max(2, named.length * PREFIX_STYLE_SHARE);
   const regionUse = countBy(named.map(({ name }) => name.region));
 
   const show = ({ category, name }: (typeof named)[number]): ShownCategory => {
     const subject = subjectOf(name);
+
     const base = {
       id: category.id,
       name: category.name,
@@ -129,53 +132,71 @@ export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatal
       language: name.language,
       topic: subject ? `${name.region ?? ""}|${subject}` : null,
     };
+
     const whole = { ...base, group: null, title: recase(name.text) };
+
     if (!prefixStyle || name.region === null) return whole;
     const title = recase(name.rest || name.text) + (name.language ? ` (${name.language})` : "");
+
     if ((regionUse.get(name.region) ?? 0) >= 2) return { ...base, group: name.region, title };
+
     // A region with one category groups nothing. The category stands alone when its name says
     // the region, and keeps its whole name when the prefix is not a region anyone knows.
     if (namesRegion(name.rest, name.region)) return { ...base, group: null, title };
+
     return name.known ? { ...base, group: name.region, title } : whole;
   };
+
   const shown: ShownCategory[] = [];
+
   for (const each of named) {
     if (due()) yield;
     shown.push(show(each));
   }
+
   const categoryById = new Map(shown.map((category) => [category.id, category]));
   const categoryRegions = new Set(shown.map((category) => category.region));
 
   const kept: { channel: ProviderChannel; name: ParsedName }[] = [];
+
   for (const channel of catalogue.channels) {
     if (due()) yield;
+
     if (!isSeparator(channel.name)) kept.push({ channel, name: parse(channel.name) });
   }
+
   const recognised = (name: ParsedName) =>
     name.region !== null && (name.known || categoryRegions.has(name.region));
+
   const prefixedChannels = kept.filter(({ name }) => recognised(name)).length;
   const channelPrefixStyle = prefixedChannels >= kept.length * PREFIX_STYLE_SHARE;
 
   const streams: NormalizedStream[] = [];
+
   for (const { channel, name } of kept) {
     if (due()) yield;
     const own = channel.categoryIds.flatMap((id) => categoryById.get(id) ?? []);
+
     const strip =
       name.region !== null &&
       (name.flag ||
         own.some((category) => category.region === name.region) ||
         (channelPrefixStyle && recognised(name)));
+
     const repeatsCategory = (inner: string) => {
       const folded = fold(inner);
       const region = regionForCode(inner) ?? regionForName(inner);
+
       return own.some(
         (category) =>
           fold(category.title) === folded || (region !== null && region === category.region),
       );
     };
+
     const placed = own.find((category) => category.region !== null);
     const regions = new Set(own.flatMap((category) => category.region ?? []));
     const languages = new Set(own.flatMap((category) => category.language ?? []));
+
     const uncertain =
       channel.categoryIds.some((id) => !categoryById.has(id)) ||
       regions.size > 1 ||
@@ -184,6 +205,7 @@ export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatal
       own.some((category) => category.region !== null && !regionForName(category.region)) ||
       (name.region !== null && regions.size > 0 && !regions.has(name.region)) ||
       (name.language !== null && languages.size > 0 && !languages.has(name.language));
+
     streams.push({
       id: channel.id,
       name: channel.name,
@@ -211,6 +233,7 @@ export function* normalizeSteps(catalogue: LiveCatalogue): Steps<NormalizedCatal
 /** Decorative entries between channel groups: "##### UK SPORTS #####", "━━━ NL ━━━", "== NL ==". */
 function isSeparator(raw: string): boolean {
   const text = raw.trim();
+
   return (
     /^([^\p{L}\p{N}\s])\1{2,}/u.test(text) ||
     /([^\p{L}\p{N}\s!?.+)\]])\1{2,}$/u.test(text) ||
@@ -225,6 +248,7 @@ function parse(raw: string): ParsedName {
     .replace(/[⁰¹²³⁴-⁹\u2460-\u24ff]/g, "")
     .normalize("NFKC")
     .trim();
+
   const none: ParsedName = {
     text,
     rest: text,
@@ -235,12 +259,15 @@ function parse(raw: string): ParsedName {
   };
 
   const flag = leadingFlag(text);
+
   if (flag)
     return { ...none, rest: flag.rest.trim(), region: flag.region, known: true, flag: true };
 
   const coded = CODE_PREFIX.exec(text);
+
   if (coded?.[1]) {
     const region = regionForCode(coded[1]);
+
     return {
       ...none,
       rest: text.slice(coded[0].length).trim(),
@@ -252,7 +279,9 @@ function parse(raw: string): ParsedName {
 
   const spelled = NAME_PREFIX.exec(text);
   const region = spelled?.[1] ? regionForName(spelled[1]) : null;
+
   if (!spelled || !region) return none;
+
   return { ...none, rest: text.slice(spelled[0].length).trim(), region, known: true };
 }
 
@@ -260,6 +289,7 @@ function parse(raw: string): ParsedName {
 function namesRegion(name: string, region: string): boolean {
   if (regionForName(name) !== null) return true;
   const start = fold(name).slice(0, 3);
+
   return /^\p{L}{3}$/u.test(start) && fold(region).startsWith(start);
 }
 
@@ -270,13 +300,16 @@ function channelTitle(
   repeatsCategory: (inner: string) => boolean,
 ): { title: string; tags: string[] } {
   const tags: string[] = [];
+
   const title = name
     .replace(QUALITY, (tag: string) => {
       const normalized = tag
         .replace(/[\s.]/g, "")
         .toUpperCase()
         .replace(/(\d)P$/, "$1p");
+
       if (!tags.includes(normalized)) tags.push(normalized);
+
       return TAG;
     })
     // Joiners between removed tags, or a tag and an end ("FHD + HEVC"). One beside the name is
@@ -290,8 +323,10 @@ function channelTitle(
     // Separators and decoration at either end.
     .replace(/^[\s|:\-–.·•●★✦►]+|[\s|:\-–.·•●★✦►]+$/g, "")
     .replace(/\s{2,}/g, " ");
+
   // Never worse than the provider's own name: a title with no letters or digits left is not one.
   if (!/[\p{L}\p{N}]/u.test(title)) return { title: recase(fallback), tags: [] };
+
   return { title: recase(title), tags };
 }
 
@@ -303,31 +338,38 @@ function channelTitle(
  */
 export function recase(text: string): string {
   if (!/\p{Lu}/u.test(text) || /\p{Ll}/u.test(text)) return text;
+
   return text.replace(/\p{L}[\p{L}']*/gu, (word, offset: number) => {
     // "13TH" reads "13th".
     if (/^(ST|ND|RD|TH)$/.test(word) && /\d/.test(text.charAt(offset - 1))) {
       return word.toLowerCase();
     }
+
     const vowels = word.normalize("NFD").match(/[AEIOUY]/g)?.length ?? 0;
     // Alone in brackets a short word is a code: "(DE)" is Germany, not the article.
     const bracketed = text.charAt(offset - 1) === "(" && text.charAt(offset + word.length) === ")";
+
     const acronym =
       ACRONYMS.has(word) ||
       vowels === 0 ||
       (word.length <= 3 && vowels < 2 && (bracketed || !WORDS.has(word)));
+
     // Lowercasing the Turkish "İ" leaves a combining dot on the "i".
     const rest = word
       .slice(1)
       .toLowerCase()
       .replace(/i\u0307/g, "i");
+
     return acronym ? word : word.charAt(0) + rest;
   });
 }
 
 function countBy(values: readonly (string | null)[]): ReadonlyMap<string, number> {
   const counts = new Map<string, number>();
+
   for (const value of values) {
     if (value !== null) counts.set(value, (counts.get(value) ?? 0) + 1);
   }
+
   return counts;
 }

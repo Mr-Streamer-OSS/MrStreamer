@@ -74,6 +74,7 @@ function Details({ channel, categories }: NowPlayingProps) {
   const playing = usePlayer(
     (state) => state.phase.kind === "playing" && sameOwned(state.channel, channel),
   );
+
   const archive = usePlayer((state) => (sameOwned(state.channel, channel) ? state.archive : null));
   const listing = useQuery(queries.listings([channel])).data?.[ownedKey(channel)];
   const now = useNow();
@@ -83,6 +84,7 @@ function Details({ channel, categories }: NowPlayingProps) {
   const next = archive ? null : (listing?.next ?? null);
   // Whose channel it is, where another subscription has one of its name.
   const source = useSourceOf()(channel);
+
   const line = archive
     ? [channel.title, source, t("Aired {time}", { time: pastTime(archive.start, now) })]
     : current
@@ -93,7 +95,9 @@ function Details({ channel, categories }: NowPlayingProps) {
           timeLeft(current, now),
         ]
       : [channelLine(channel, categories), source];
+
   const fellBack = quality.fellBack;
+
   return (
     <div className="flex min-w-0 items-center gap-5 min-[720px]:flex-1">
       <ChannelLogo channel={channel} className="h-12 w-18" />
@@ -142,9 +146,11 @@ function Controls({
   const subtitleLoading = usePlayer((state) => state.subtitleLoading);
   const active = usePlayer((state) => state.phase.kind !== "idle" && state.phase.kind !== "failed");
   const previous = usePlayer((state) => state.previous);
+
   const playing = usePlayer(
     (state) => state.phase.kind === "playing" && sameOwned(state.channel, channel),
   );
+
   const height = useStreamInfo(playing)?.height ?? null;
   const quality = useChannelQuality(channel);
   const chooseQuality = useChooseQuality();
@@ -155,6 +161,7 @@ function Controls({
   useEffect(() => {
     if (menu === "subtitles" && !tracks?.subtitles.length) onMenu(null);
   }, [menu, tracks?.subtitles.length, onMenu]);
+
   return (
     <div className="ml-auto flex flex-none flex-wrap items-center justify-end gap-3 max-[720px]:gap-1.5">
       <Tooltip label={t("Channels")}>
@@ -261,12 +268,16 @@ function useStreamInfo(playing: boolean): StreamInfo | null {
   useEffect(() => {
     if (!playing) {
       setInfo(null);
+
       return;
     }
+
     const read = () => setInfo(player.info());
     read();
     const timer = setTimeout(read, 1500);
+
     return () => clearTimeout(timer);
   }, [playing]);
+
   return info;
 }

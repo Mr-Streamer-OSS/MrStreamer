@@ -24,17 +24,23 @@ const QUALITIES: Record<QualityHint, string> = {
   sd: "SD",
   unknown: "Unknown",
 };
+
 function hintName(code: string): string {
   if (code === "unknown") return t("Unknown");
+
   if (code === "multi") return "MULTI";
+
   return TITLE_LANGUAGES.find((language) => language.code === code)?.name ?? code;
 }
+
 function verifiedName(kind: "audio" | "subtitles", language: string): string {
   const name = language === "unknown" ? t("Unknown") : (formatLanguageName(language) ?? language);
+
   return kind === "audio"
     ? t("{language} sound", { language: name })
     : t("{language} subtitles", { language: name });
 }
+
 export interface TitleFilterControls {
   readonly filters: TitleFilters;
   readonly onFilters: (filters: TitleFilters) => void;
@@ -80,6 +86,7 @@ export function TitleChoiceMenu<V extends string>({
   showLabel?: boolean;
 }) {
   const selected = choices.find((choice) => choice.value === value);
+
   return (
     <div role="group" aria-label={label} onKeyDown={stopGridKeys}>
       <Menu.Root>
@@ -164,11 +171,15 @@ export function TitleFilterBar({
   const available = useQuery(queries.titleFilterOptions(kind));
   const options = available.data;
   const languages = new Set(options?.languages ?? []);
+
   if (filters.language) languages.add(filters.language);
+
   const ordered = [...TITLE_LANGUAGES.map((language) => language.code), "multi", "unknown"].filter(
     (code) => languages.has(code),
   );
+
   const verified = [...(options?.verified ?? [])];
+
   if (
     filters.verified &&
     !verified.some(
@@ -177,12 +188,15 @@ export function TitleFilterBar({
     )
   )
     verified.push(filters.verified);
+
   function change<K extends keyof TitleFilters>(key: K, value: TitleFilters[K]) {
     const next = { ...filters };
+
     if (value === undefined) delete next[key];
     else next[key] = value;
     onFilters(next);
   }
+
   return (
     <div className="mb-4 flex-none pr-8 text-[0.8125rem] text-white" onKeyDown={stopGridKeys}>
       {!hideCount && total !== null && unfiltered !== null && (

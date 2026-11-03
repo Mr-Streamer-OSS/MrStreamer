@@ -27,6 +27,7 @@ const home: LiveCatalogue = {
     channel("12", "Loose", []),
   ],
 };
+
 // The second panel numbers its channels as the first does.
 const cabin: LiveCatalogue = {
   categories: [
@@ -100,6 +101,7 @@ describe("channels in no category", () => {
         channel("3", "Charlie", []),
       ],
     };
+
     const joined = buildLibrary([
       { subscriptionId: "a", label: "Home", catalogue: own },
       {
@@ -108,6 +110,7 @@ describe("channels in no category", () => {
         catalogue: { categories: [], channels: [channel("9", "Delta", [])] },
       },
     ]);
+
     const names = joined.regions.map((region) => region.name);
     expect(names).toEqual(["News", "Other channels"]);
     expect(joined.regions[1]?.channels.map((each) => each.key)).toEqual(["a:2", "a:3", "b:9"]);

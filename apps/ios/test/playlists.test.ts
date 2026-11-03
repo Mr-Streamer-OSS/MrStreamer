@@ -22,9 +22,12 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer(() => {}) }));
+
 vi.mock("expo-file-system", () => {
   const files = memoryFiles(memory);
+
   class File extends files.File {
     override delete() {
       if (memory.undeletable && this.path.startsWith(memory.undeletable))
@@ -32,9 +35,12 @@ vi.mock("expo-file-system", () => {
       super.delete();
     }
   }
+
   return { ...files, File };
 });
+
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => {} }));
 
 /** The token every playlist link carries, which must reach no file. */
@@ -54,15 +60,21 @@ interface Host {
 async function startHost(): Promise<Host> {
   let lines: readonly string[] = [];
   let failing: number | null = null;
+
   const server: Server = createServer((request, response) => {
     const { pathname } = new URL(request.url ?? "/", "http://host");
+
     if (failing !== null) return response.writeHead(failing).end();
+
     if (pathname === "/page.html") return response.writeHead(200).end("<!doctype html><p>Hi</p>");
+
     if (!pathname.endsWith(".m3u")) return response.writeHead(404).end();
     response.writeHead(200).end(["#EXTM3U", ...lines, ""].join("\n"));
   });
+
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
   return {
     link: (path = "/list.m3u") => `${origin}${path}?token=${TOKEN}`,
     origin,
@@ -98,8 +110,10 @@ interface FakeProvider {
   readonly url: string;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -111,15 +125,18 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
 
 let host: Host;
 let panel: FakeProvider;
+
 beforeAll(async () => {
   [host, panel] = await Promise.all([
     startHost(),
     startFakeProvider({ username: "one", password: "one+Pw@1", channels: 4, titles: 2 }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([host.close(), panel.close()]);
 });
+
 beforeEach(() => {
   memory.files.clear();
   memory.keychain.clear();
@@ -143,25 +160,33 @@ async function launch() {
   const titles = await import("../src/titles.ts");
   const account = await import("../src/account.ts");
   await account.restore();
+
   return { ...titles, ...account };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 const PLAYLIST = { username: "", password: "" };
 const ids = (app: App) => app.members().map((member) => member.entry.id);
 const member = (app: App, id: string) => app.members().find((each) => each.entry.id === id);
+
 const channelNames = (app: App) => {
   const now = app.currentCatalogue();
+
   return now.kind === "ready"
     ? [...new Set(now.library.byKey.values())].map((each) => each.title)
     : [];
 };
+
 const titleNames = (app: App, kind: "movie" | "series") => {
   const lists = app.titleLists();
+
   return lists.kind === "ready" ? kindOf(lists.index, kind).titles.map((each) => each.name) : [];
 };
+
 const signedIn = (app: App) => app.members().every((each) => each.live.kind === "ready");
 const registry = () => JSON.parse(memory.files.get("/documents/subscriptions.json") ?? "null");
+
 const modes = (report: Awaited<ReturnType<App["playlistReport"]>>) =>
   Object.fromEntries(report.groups.map((group) => [group.name, group.mode]));
 
@@ -169,6 +194,7 @@ describe("a playlist subscription", () => {
   it("is added by its link, which only the Keychain keeps, and shows its channels after a relaunch", async () => {
     const app = await launch();
     const id = await app.add({ server: host.link(), ...PLAYLIST });
+
     if (!id) throw new Error("Not added");
     await until(() => channelNames(app).length === 6, "the playlist's channels");
     expect(member(app, id)).toMatchObject({ label: "127.0.0.1", account: { state: "active" } });
@@ -182,6 +208,7 @@ describe("a playlist subscription", () => {
       () => [...memory.files.keys()].some((path) => path.includes(`${id}.live`)),
       "the saved channels",
     );
+
     for (const [path, text] of memory.files) expect(text, path).not.toContain(TOKEN);
 
     const again = await launch();
@@ -265,6 +292,7 @@ describe("a playlist subscription", () => {
       () => [...memory.files.keys()].some((path) => path.includes(`${id}.live`)),
       "the saved channels",
     );
+
     for (const [path, text] of memory.files) {
       if (path.startsWith("/documents/subscriptions") || path.includes(".live"))
         for (const secret of [TOKEN, "second-0ne", "viewer-7"])
@@ -339,6 +367,7 @@ describe("a playlist subscription", () => {
     );
     await new Promise((settled) => setTimeout(settled, 200));
     expect(channelNames(app)).toEqual(["News One"]);
+
     for (const [path, text] of memory.files)
       for (const secret of [signature, "Ab%2F12", "Ab/12"])
         expect(text, path).not.toContain(secret);
@@ -389,6 +418,7 @@ describe("a playlist subscription", () => {
     );
     await new Promise((settled) => setTimeout(settled, 200));
     expect(channelNames(app)).toEqual(["News One"]);
+
     for (const [path, text] of memory.files) expect(text, path).not.toContain("short");
   });
 
@@ -404,21 +434,27 @@ describe("a playlist subscription", () => {
     await app.mapPlaylist(id, groupId(await app.playlistReport(id), "Films"), "movie");
     await until(() => titleNames(app, "movie").length === 2, "the films");
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No films");
+
     // Details are written in the order opened, one at a time: Harbour Lights' come last.
     for (const name of ["Night short-sig", "Harbour Lights"])
       await app.detailsOf(kindOf(lists.index, "movie").titles.find((each) => each.name === name)!);
+
     // The memory disk keeps a details record as the bytes written.
     const text = (value: unknown) =>
       value instanceof Uint8Array ? new TextDecoder().decode(value) : String(value);
+
     const details = () =>
       [...memory.files].flatMap(([path, value]) =>
         path.startsWith("/cache/details/") ? [text(value)] : [],
       );
+
     await until(() => details().some((each) => each.includes("Harbour")), "the saved details");
     await new Promise((settled) => setTimeout(settled, 200));
     expect(details()).toHaveLength(1);
     expect(memory.files.has(`/cache/catalogues/${id}.titles.json`)).toBe(false);
+
     for (const [path, value] of memory.files) expect(text(value), path).not.toContain("short");
   });
 
@@ -509,6 +545,7 @@ describe("a playlist subscription", () => {
     const before = host$.expo!.modules!.Guide;
     const { native, control } = guideFixture();
     host$.expo!.modules!.Guide = native;
+
     try {
       const id = (await (await launch()).add({ server: host.link(), ...PLAYLIST }))!;
       await until(
@@ -533,14 +570,17 @@ describe("a playlist subscription", () => {
         },
       });
       const shown = app.currentCatalogue();
+
       if (shown.kind !== "ready") throw new Error("No channels");
       const key = shown.library.channels.find((each) => each.title === "News One")!.key;
       const from = new Date(now).setHours(0, 0, 0, 0);
       const day = { from, until: new Date(from).setDate(new Date(from).getDate() + 1) };
       const [open] = (await guide.schedule(key, day)).programmes;
       const read = guide.withdrawn(key, day.from);
+
       const loaded = (app: App) => {
         const live = member(app, id)?.live;
+
         return live?.kind === "ready" ? live.fetchedAt : null;
       };
 
@@ -656,6 +696,7 @@ describe("mapping a playlist's groups", () => {
       () => [...memory.files.keys()].some((path) => path.includes(`${id}.titles`)),
       "the saved films",
     );
+
     for (const [path, text] of memory.files)
       for (const secret of [TOKEN, "second-0ne", "viewer-7"])
         expect(text, path).not.toContain(secret);
@@ -726,6 +767,7 @@ describe("a playlist's guide", () => {
   async function guideOf(link: string, guide: string, moved?: string) {
     const asked: string[] = [];
     const { playlistProvider } = await import("../src/playlist.ts");
+
     const provider = playlistProvider(
       { link },
       {
@@ -733,12 +775,14 @@ describe("a playlist's guide", () => {
         fetch: async (input) => {
           const url = String(input);
           asked.push(url);
+
           return moved && url === guide
             ? new Response(null, { status: 302, headers: { location: moved } })
             : new Response(`#EXTM3U x-tvg-url="${guide}"\n`);
         },
       },
     );
+
     return { provider, asked };
   }
 
@@ -761,12 +805,15 @@ describe("a playlist's guide", () => {
 
     // The native reader closes each redirect for the app to check before it asks the next.
     const request = await provider.liveGuideRequest!();
+
     if (request.kind !== "request") throw new Error("No guide");
     const { native } = guideFixture();
     native.prepare = async (_lease, _job, url) => {
       asked.push(url);
+
       return { kind: "ok", value: { kind: "redirect", location: moved } };
     };
+
     const { ingest } = await import("../src/guide-native.ts");
     const { playlistSecrets } = await import("../src/playlist.ts");
     await expect(
@@ -803,6 +850,8 @@ describe("a playlist's guide", () => {
 
 function groupId(report: Awaited<ReturnType<App["playlistReport"]>>, name: string): string {
   const found = report.groups.find((group) => group.name === name);
+
   if (!found) throw new Error(`No group ${name}`);
+
   return found.group;
 }

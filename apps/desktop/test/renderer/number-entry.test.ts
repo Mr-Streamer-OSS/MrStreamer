@@ -11,6 +11,7 @@ import { NumberEntry, numberEntry } from "../../src/renderer/src/features/watch/
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 
 let cleanup = () => {};
+
 afterEach(() => {
   cleanup();
   numberEntry.cancel();
@@ -29,6 +30,7 @@ it.each<ChannelList>([
 ])("tunes a global number from $kind and keeps the browsing descriptor", async (list) => {
   ipc.reset();
   useUi.setState({ list, settings: null, searchOpen: false, details: null, playingTitle: false });
+
   const first: LiveChannel = {
     subscriptionId: "another-source",
     id: "99",
@@ -41,6 +43,7 @@ it.each<ChannelList>([
     catchupDays: null,
     variants: [{ id: "99", name: "Elsewhere", tags: [], quality: null }],
   };
+
   const duplicate = { ...first, subscriptionId: SUBSCRIPTION };
   ipc.answer("library.browse", (query) => {
     expect(query).toEqual({
@@ -48,6 +51,7 @@ it.each<ChannelList>([
       filters: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
       visibility: "ordinary",
     });
+
     return browseResult([first, duplicate]);
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

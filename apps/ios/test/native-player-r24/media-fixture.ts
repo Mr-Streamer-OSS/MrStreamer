@@ -8,11 +8,13 @@ import { tone } from "../../scripts/native-fixtures/media.ts";
 
 export function prepareMedia(directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+
   const ffmpeg = (args: string[]) =>
     execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", ...args], {
       cwd: directory,
       stdio: "pipe",
     });
+
   const hls = ["-f", "hls", "-hls_time", "1", "-hls_list_size", "0"];
   ffmpeg([
     "-f",
@@ -33,6 +35,7 @@ export function prepareMedia(directory: string) {
     ...hls,
     "video.m3u8",
   ]);
+
   for (const [index, frequency] of [440, 880].entries()) {
     ffmpeg([
       "-f",
@@ -49,6 +52,7 @@ export function prepareMedia(directory: string) {
       `audio${index}.m3u8`,
     ]);
   }
+
   for (const [index, text] of [
     "Non-forced text",
     "Native forced text",
@@ -65,18 +69,22 @@ export function prepareMedia(directory: string) {
       { mode: 0o600 },
     );
   }
+
   const audio = [
     '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="English first",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,URI="audio0.m3u8"',
     '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="English default",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="audio1.m3u8"',
     '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="sound",NAME="No language",DEFAULT=NO,AUTOSELECT=NO,URI="audio0.m3u8"',
   ];
+
   const subtitles = [
     '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="text",NAME="Forced by label only",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="subtitle0.m3u8"',
     '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="text",NAME="Texte",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,FORCED=YES,URI="subtitle1.m3u8"',
     '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="text",NAME="No language",DEFAULT=NO,AUTOSELECT=NO,FORCED=NO,URI="subtitle2.m3u8"',
   ];
+
   const variant =
     '#EXT-X-STREAM-INF:BANDWIDTH=600000,CODECS="avc1.42c00c,mp4a.40.2",RESOLUTION=320x180,AUDIO="sound",SUBTITLES="text"';
+
   for (const [name, tracks] of [
     ["master.m3u8", audio],
     ["reordered.m3u8", [...audio].reverse()],
@@ -89,34 +97,45 @@ export function prepareMedia(directory: string) {
       { mode: 0o600 },
     );
   }
+
   return { fileCount: readdirSync(directory).length };
 }
 
 export function serveMedia(directory: string, port = 0) {
   const allowed = new Set(readdirSync(directory));
   const counts = { get: 0, head: 0, playlists: 0, segments: 0 };
+
   const server = createServer((request, response) => {
     const name = request.url?.split("?")[0]?.slice(1) ?? "";
+
     if (name === "counts") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(counts));
+
       return;
     }
+
     if (request.method === "HEAD") counts.head++;
+
     if (request.method !== "GET" || !allowed.has(name)) {
       response.writeHead(404);
       response.end();
+
       return;
     }
+
     counts.get++;
+
     if (name.endsWith(".m3u8")) counts.playlists++;
     else counts.segments++;
+
     const mime =
       extname(name) === ".m3u8"
         ? "application/vnd.apple.mpegurl"
         : extname(name) === ".vtt"
           ? "text/vtt"
           : "video/mp2t";
+
     const data = readFileSync(join(directory, name));
     response.writeHead(200, {
       "content-type": mime,
@@ -125,20 +144,26 @@ export function serveMedia(directory: string, port = 0) {
     });
     response.end(data);
   });
+
   server.listen(port, "127.0.0.1", () => {
     const address = server.address();
+
     if (address && typeof address !== "string") console.log(JSON.stringify({ port: address.port }));
   });
+
   return server;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [command, directory, port] = process.argv.slice(2);
+
   if (!directory || (command !== "prepare" && command !== "serve"))
     throw new Error("fixture-arguments");
+
   if (command === "prepare") console.log(JSON.stringify(prepareMedia(resolve(directory))));
   else {
     const server = serveMedia(resolve(directory), Number(port ?? 0));
+
     for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => server.close());
   }
 }

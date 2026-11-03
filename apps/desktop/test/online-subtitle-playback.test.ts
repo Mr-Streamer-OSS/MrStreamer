@@ -16,8 +16,10 @@ import {
   testConfig,
 } from "./support.ts";
 import { defined } from "@mrstreamer/core/defined";
+
 const hasTools =
   spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
+
 /** What the window decodes: the movie's FLAC sound plays as it is, with nothing to convert. */
 const DECODERS = ["h264", "aac", "flac"] as const;
 
@@ -27,10 +29,12 @@ function serveSubdl() {
   let requests = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
+
     if (url.hostname === "api.subdl.com") {
       requests++;
       const asked = url.searchParams;
       const episode = asked.has("season_number");
+
       return Response.json({
         status: true,
         results: [{ tmdb_id: Number(asked.get("tmdb_id")), type: asked.get("type") }],
@@ -47,12 +51,16 @@ function serveSubdl() {
         ],
       });
     }
+
     if (url.hostname === "dl.subdl.com") {
       requests++;
+
       return new Response("1\n00:00:01,000 --> 00:00:03,000\nWelcome.\n");
     }
+
     return request(input, init);
   });
+
   return { request, requests: () => requests };
 }
 
@@ -60,9 +68,11 @@ function serveSubdl() {
 async function started(listed = 1) {
   const provider = await fakeProvider({ titles: listed, maxConnections: 2, slotReleaseMs: 0 });
   const service = serveSubdl();
+
   const runtime = runtimeFor(
     mainLayer({ ...testConfig(await tempDir()), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
   const titles = await promised(runtime, OnDemand);
   const playback = await promised(runtime, Playback);
@@ -73,6 +83,7 @@ async function started(listed = 1) {
     { enabled: true, service: "subdl", languages: ["en"] },
     { subdl: { apiKey: "fixture-key" } },
   );
+
   return { provider, service, runtime, titles, playback, subtitles, subscriptionId: saved.id };
 }
 
@@ -85,6 +96,7 @@ function secondEpisode({
 }: Awaited<ReturnType<typeof started>>) {
   const series = provider.titles.series.find((each) => each.name === "TEST | Formats (NL)")!;
   const episode = series.seasons[0]![1]!;
+
   const ref = {
     kind: "episode" as const,
     subscriptionId,
@@ -93,6 +105,7 @@ function secondEpisode({
     season: 1,
     episode: 2,
   };
+
   /** The provider lists another file under the episode's id from now on. */
   const relist = () =>
     provider.serveTitles((all) => ({
@@ -110,10 +123,13 @@ function secondEpisode({
           : each,
       ),
     }));
+
   const open = async () => {
     const file = await titles.file(ref);
+
     return playback.openTitle(ref, file.url, DECODERS, file);
   };
+
   return { open, relist };
 }
 
@@ -121,16 +137,22 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
   it("restores the exact file without a service request, keeps Off for it, and says which session's file was replaced", async () => {
     const { provider, service, runtime, titles, playback, subtitles, subscriptionId } =
       await started();
+
     const { request } = service;
+
     try {
       const movie = provider.titles.movies.find((title) =>
         title.name.startsWith("TEST | Long subtitles"),
       )!;
+
       const ref = { kind: "movie" as const, subscriptionId, id: String(movie.id) };
+
       const open = async () => {
         const file = await titles.file(ref);
+
         return playback.openTitle(ref, file.url, DECODERS, file);
       };
+
       const first = await open();
       expect(await subtitles.saved(first.sessionId)).toBeNull();
       expect(service.requests()).toBe(0);
@@ -177,6 +199,7 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
     const all = await started();
     const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
     const { open, relist } = secondEpisode(all);
+
     try {
       const playing = await open();
       const found = await subtitles.search(playing.sessionId);
@@ -225,6 +248,7 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
     const all = await started();
     const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
     const { open } = secondEpisode(all);
+
     try {
       const playing = await open();
       const found = await subtitles.search(playing.sessionId);
@@ -265,6 +289,7 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
     const all = await started(210);
     const { provider, service, runtime, titles, playback, subtitles, subscriptionId } = all;
     const { open, relist } = secondEpisode(all);
+
     /** As many other details as are kept at once: the series' own are kept no longer. */
     const readOthers = () =>
       Promise.all(
@@ -272,6 +297,7 @@ describe.skipIf(!hasTools)("saved subtitles of the actual playback session", () 
           .slice(0, 200)
           .map((movie) => titles.details("movie", { subscriptionId, id: String(movie.id) })),
       );
+
     try {
       const playing = await open();
       const found = await subtitles.search(playing.sessionId);

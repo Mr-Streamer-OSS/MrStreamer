@@ -45,8 +45,10 @@ function handOn(had: Element | null) {
   if (!(had instanceof HTMLButtonElement) || !had.disabled || !had.isConnected) return;
   const by = Number(had.dataset["move"]);
   const now = document.activeElement;
+
   if (!by || (now !== had && now !== null && now !== document.body)) return;
   const other = had.closest("[data-download]")?.querySelector(`[data-move="${-by}"]`);
+
   if (other instanceof HTMLButtonElement && !other.disabled) other.focus();
 }
 
@@ -57,18 +59,23 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const shelf = useMemo(() => (list.data ? copyShelf(list.data) : []), [list.data]);
   // Main lists the ones waiting together, after the transfer.
   const line = queue.filter(waiting);
+
   const pausable = queue.some(
     (item) =>
       item.status.kind === "transferring" || (waiting(item) && item.status.kind !== "paused"),
   );
+
   const paused = queue.some((item) => item.status.kind === "paused");
+
   const all = useMutation({
     mutationFn: (pause: boolean) =>
       pause ? call("downloads.pauseAll") : call("downloads.resumeAll"),
   });
+
   // Where the keyboard is as this list is drawn, for `handOn` once it is.
   const had = document.activeElement;
   useLayoutEffect(() => handOn(had));
+
   const summary = list.data
     ? [
         list.data.bytes > 0
@@ -79,6 +86,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
         .filter(Boolean)
         .join(" · ")
     : "";
+
   return (
     <div className="flex h-full flex-col">
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
@@ -165,6 +173,7 @@ export function OfflineBar() {
   const downloads = (useDownloads().data?.items.length ?? 0) > 0 || view === "downloads";
   // Also while the list is read, or can't be, so Recordings' Retry stays in reach.
   const recordings = useAnyRecording() || view === "recordings";
+
   return (
     <BarFrame className="bg-black">
       <Brand />
@@ -208,11 +217,15 @@ function waiting(item: Download): boolean {
 function SeriesCopies({ series }: { series: ShelfSeries }) {
   const [open, setOpen] = useState(true);
   const [newest] = series.copies;
+
   if (!newest) return null;
+
   const seasons = new Set(
     series.copies.flatMap(({ title }) => (title.kind === "episode" ? [title.season] : [])),
   );
+
   const size = series.copies.reduce((sum, copy) => sum + (copy.size ?? 0), 0);
+
   const facts = [
     newest.subscription?.name ?? t("Subscription removed, copy kept"),
     t("{count} episodes", { count: series.copies.length }),
@@ -221,6 +234,7 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <div
       role="group"
@@ -276,6 +290,7 @@ function SeriesCopies({ series }: { series: ShelfSeries }) {
 function Gap({ season, episodes }: { season: number; episodes: readonly number[] }) {
   const [first = 0] = episodes;
   const last = episodes.at(-1) ?? first;
+
   return (
     <div className="ml-14 grid grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-4 border-b border-white/8 py-1.5 text-xs text-muted-foreground last:border-b-0">
       <span />
@@ -307,13 +322,16 @@ function Row({
   const [confirming, setConfirming] = useState(false);
   const remove = useMutation({ mutationFn: () => call("downloads.remove", { id: item.id }) });
   const retry = useMutation({ mutationFn: () => call("downloads.retry", { id: item.id }) });
+
   const hold = useMutation({
     mutationFn: (pause: boolean) =>
       pause ? call("downloads.pause", { id: item.id }) : call("downloads.resume", { id: item.id }),
   });
+
   const move = useMutation({
     mutationFn: (by: -1 | 1) => call("downloads.move", { id: item.id, by }),
   });
+
   // Pressed again while it is under way, a change does nothing; it isn't disabled meanwhile,
   // which would leave the keyboard on a button that can't be pressed.
   const holding = (pause: boolean) => () => {
@@ -321,26 +339,32 @@ function Row({
     move.reset();
     hold.mutate(pause);
   };
+
   const moving = (by: -1 | 1) => () => {
     if (move.isPending) return;
     hold.reset();
     move.mutate(by);
   };
+
   const { status, title } = item;
   const episode = episodeLine(item);
   const label = title.kind === "episode" ? episodeLabel(title.season, title.episode) : null;
   const numbered = inSeries && title.kind === "episode";
+
   const name =
     numbered && label
       ? (item.episodeName ?? label)
       : episode
         ? `${item.name} · ${episode}`
         : item.name;
+
   const copy = onComputer(item);
+
   const seen =
     status.kind === "complete" &&
     !!item.progress &&
     isFinished(item.progress.position, item.progress.duration);
+
   const facts = (
     numbered
       ? [item.duration ? runtime(item.duration) : null, seen ? t("Watched") : null]
@@ -354,17 +378,21 @@ function Row({
   )
     .filter(Boolean)
     .join(" · ");
+
   const done = transferred(item);
+
   const watched =
     status.kind === "complete" &&
     item.progress &&
     !isFinished(item.progress.position, item.progress.duration)
       ? item.progress
       : null;
+
   const line = statusLine(item);
   const failed = status.kind === "failed" || status.kind === "missing";
   const error = remove.error ?? retry.error;
   const unkept = hold.error ?? move.error;
+
   return (
     <div
       data-download={item.id}

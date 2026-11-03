@@ -35,9 +35,13 @@ const State = lazy(() =>
     "titleVersions?": "unknown",
   }),
 );
+
 const TitleVersions = lazy(() => type({ "[string]": { "[string]": "string" } }));
+
 type TitleVersions = Infer<typeof TitleVersions>;
+
 export type SavedState = Infer<typeof State>;
+
 export type SavedSubscription = NonNullable<SavedState["subscription"]>;
 
 const EMPTY: SavedState = { subscription: null, recent: [], region: null };
@@ -56,10 +60,12 @@ const cached = store<SavedState | null>(null);
 /** The saved state; an unreadable or unknown file counts as none. */
 export function readState(): SavedState {
   const known = cached.get();
+
   if (known) return known;
   const parsed = State()(readJson(FILE));
   const state = parsed instanceof type.errors ? EMPTY : parsed;
   cached.set(state);
+
   return state;
 }
 
@@ -72,6 +78,7 @@ export function writeState(change: (state: SavedState) => SavedState): SavedStat
   const next = change(readState());
   writeJson(FILE, next);
   cached.set(next);
+
   return next;
 }
 
@@ -92,6 +99,7 @@ export function rememberChannel(key: string): void {
  */
 export function migrateRecentChannels(): void {
   const { subscription, recent, recentChannels } = readState();
+
   if (recentChannels) return;
   writeState((state) => ({
     ...state,
@@ -102,6 +110,7 @@ export function migrateRecentChannels(): void {
 /** The picks as saved, or none when they don't check out. */
 function versionsOf(state: SavedState): TitleVersions {
   const parsed = TitleVersions()(state.titleVersions ?? {});
+
   return parsed instanceof type.errors ? {} : parsed;
 }
 
@@ -114,11 +123,14 @@ const pickKey = (title: Title) => (title.tmdbId ? `${title.kind}:${title.tmdbId}
  */
 export function pickedVersion(title: Title, state: SavedState): OwnedId | null {
   const key = pickKey(title);
+
   if (!key) return null;
   const picks = versionsOf(state);
+
   const found = title.versions.find(
     ({ subscriptionId, id }) => picks[subscriptionId]?.[key] === id,
   );
+
   return found ? ownedId(found) : null;
 }
 
@@ -129,20 +141,26 @@ export function pickedVersion(title: Title, state: SavedState): OwnedId | null {
  */
 export function pickVersion(title: Title, version: OwnedId | null): void {
   const key = pickKey(title);
+
   if (!key || (version && !title.versions.some((each) => sameOwned(each, version)))) return;
+
   try {
     writeState((state) => {
       const titleVersions: Record<string, Record<string, string>> = {};
+
       for (const [subscriptionId, picks] of Object.entries(versionsOf(state))) {
         const { [key]: _old, ...others } = picks;
+
         if (Object.keys(others).length > 0) titleVersions[subscriptionId] = others;
       }
+
       if (version) {
         titleVersions[version.subscriptionId] = {
           ...titleVersions[version.subscriptionId],
           [key]: version.id,
         };
       }
+
       return { ...state, titleVersions };
     });
   } catch {
@@ -156,7 +174,9 @@ export function pickVersion(title: Title, version: OwnedId | null): void {
  */
 export function withoutVersions(state: SavedState, id: string): SavedState {
   const picks = TitleVersions()(state.titleVersions ?? {});
+
   if (picks instanceof type.errors || !(id in picks)) return state;
   const { [id]: _gone, ...others } = picks;
+
   return { ...state, titleVersions: others };
 }

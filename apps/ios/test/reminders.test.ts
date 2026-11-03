@@ -40,11 +40,13 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-router", () => ({
   router: { push: (href: unknown) => scenario.pushed.push(href) },
   useIsFocused: () => true,
   useLocalSearchParams: () => scenario.params,
 }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Linking: { openURL: async () => undefined, openSettings: async () => void scenario.settings++ },
@@ -61,33 +63,43 @@ vi.mock("react-native", async () => ({
     currentState: "active",
     addEventListener: (_event: string, listener: (state: string) => void) => {
       scenario.appState.add(listener);
+
       return { remove: () => void scenario.appState.delete(listener) };
     },
   },
 }));
+
 vi.mock("../src/account.ts", () => ({
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => {
     scenario.rosterChanged.add(listener);
+
     return () => void scenario.rosterChanged.delete(listener);
   },
   currentCatalogue: () => scenario.catalogue,
   onCatalogue: (listener: () => void) => {
     scenario.catalogueChanged.add(listener);
+
     return () => void scenario.catalogueChanged.delete(listener);
   },
   useCatalogue: () => scenario.catalogue,
   playChannel: (channel: Channel, _place: string, options: object) =>
     scenario.played.push({ play: channel.key, ...options }),
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/artwork-cache.ts", () => ({ useArtwork: () => null }));
+
 vi.mock("../src/header.tsx", () => ({ tabHref: (_tab: string, name: string) => `/live/${name}` }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({ phase: { kind: "idle" }, watch: false }),
 }));
+
 vi.mock("../src/guide.ts", async (original) => {
   const actual = await original<typeof import("../src/guide.ts")>();
+
   // One owner across launches, as the guide's own files outlive the app's modules. Each launch's
   // modules hear its listings; the last launch's hear no more.
   const heard = (owner: ReturnType<typeof createGuide>) => ({
@@ -97,10 +109,12 @@ vi.mock("../src/guide.ts", async (original) => {
       subscribe: (listener: () => void) => {
         const stop = owner.listingRevision.subscribe(listener);
         scenario.revisionStops.push(stop);
+
         return stop;
       },
     },
   });
+
   if (scenario.owner) return { ...actual, guide: heard(scenario.owner) };
   const { guideFixture } = await import("./native-guide.ts");
   const fixture = guideFixture();
@@ -108,16 +122,19 @@ vi.mock("../src/guide.ts", async (original) => {
     await scenario.guideHolding;
     const listed = ids.includes("trusted-1") && scenario.programmes.some((p) => p.stop > at);
     const rows = mode === "detail" ? scenario.programmes.filter((p) => p.start === after) : [];
+
     return {
       kind: "ok",
       value: { guideId: listed ? "trusted-1" : null, rows, more: false },
     } satisfies Result<Query>;
   };
+
   fixture.control.activations.set("a", {
     lease: "lease-a",
     generation: { id: "db-a", fetchedAt: Date.now(), until: Date.now() + 7 * 86400_000 },
   });
   scenario.owner = actual.createGuide(() => fixture.native);
+
   return { ...actual, guide: heard(scenario.owner) };
 });
 
@@ -137,22 +154,28 @@ const ios = {
   opened: null as { channel: string; at: number } | null,
   listeners: new Set<() => void>(),
 };
+
 const module: RemindersNative = {
   permission: async () => ios.permission,
   async ask() {
     ios.asked++;
+
     if (ios.permission === "undetermined") ios.permission = ios.answer;
+
     return ios.permission;
   },
   async scheduled() {
     await ios.holding;
+
     return [...ios.scheduled.values()];
   },
   async schedule(notices) {
     if (ios.permission !== "granted") return notices.map((each) => each.id);
     const refused = notices.filter((each) => ios.refuses.has(each.title));
+
     for (const notice of notices)
       if (!refused.includes(notice)) ios.scheduled.set(notice.id, notice);
+
     return refused.map((each) => each.id);
   },
   async cancel(ids) {
@@ -164,16 +187,22 @@ const module: RemindersNative = {
   takeOpened() {
     const opened = ios.opened;
     ios.opened = null;
+
     return opened;
   },
   addListener(_event, listener) {
     ios.listeners.add(listener);
+
     return { remove: () => void ios.listeners.delete(listener) };
   },
 };
+
 const host: { expo?: { modules?: Record<string, unknown> } } = globalThis;
+
 host.expo ??= {};
+
 host.expo.modules ??= {};
+
 host.expo.modules["ProgrammeReminders"] = module;
 
 const member = (id: string): Member => ({
@@ -184,6 +213,7 @@ const member = (id: string): Member => ({
   live: { kind: "idle" },
   titles: { kind: "idle" },
 });
+
 /** Subscription `a`'s channels: `a:1` on guide id `trusted-1` and `a:2` without a guide. */
 function lists(channels = ["1", "2"], adult: readonly string[] = []) {
   return finish(
@@ -205,27 +235,34 @@ function lists(channels = ["1", "2"], adult: readonly string[] = []) {
     }),
   );
 }
+
 /** Live lists `channels` of `a`, and the guide reads them; everyone listening hears it. */
 function shows(channels?: string[], adult?: readonly string[]) {
   const part = lists(channels, adult);
   scenario.owner!.setPart(part);
   scenario.catalogue = { kind: "ready", failing: [], library: combine([{ label: "a", part }]) };
+
   for (const listener of scenario.catalogueChanged) listener();
 }
+
 const channel = (key = "a:1"): Channel => {
   const found = scenario.catalogue.kind === "ready" && scenario.catalogue.library.byKey.get(key);
+
   if (!found) throw new Error(`Live doesn't list ${key}`);
+
   return found;
 };
 
 const HOUR = 3600_000;
 const now = Date.now();
+
 const on: Programme = {
   title: "News",
   start: now - HOUR / 2,
   stop: now + HOUR / 2,
   description: null,
 };
+
 const later: Programme = {
   title: "Late film",
   start: now + 2 * HOUR,
@@ -241,6 +278,7 @@ const hourly = (count: number): Programme[] =>
     stop: now + (at + 2) * HOUR,
     description: null,
   }));
+
 const failWrites = () => {
   files.sync = (operation) => {
     if (operation === "write") throw new Error("disk full");
@@ -248,19 +286,23 @@ const failWrites = () => {
 };
 
 type Reminders = typeof import("../src/reminders.ts");
+
 let reminders: Reminders;
+
 /** The app as a launch starts it: the module read afresh over the same files and iOS. */
 async function launch() {
   scenario.rosterChanged.clear();
   scenario.catalogueChanged.clear();
   scenario.appState.clear();
   ios.listeners.clear();
+
   for (const stop of scenario.revisionStops.splice(0)) stop();
   vi.resetModules();
   reminders = await import("../src/reminders.ts");
   reminders.startReminders();
   await settled();
 }
+
 /** Every check asked for has run. */
 async function settled() {
   await reminders.checkReminders();
@@ -268,22 +310,30 @@ async function settled() {
 }
 
 let drawn: ReturnType<Reminders["useReminders"]> | null = null;
+
 function Probe() {
   drawn = reminders.useReminders();
+
   return null;
 }
+
 let root: Root | null = null;
+
 /** The reminders a screen shows now, as `title @ channel: status`. */
 function shown() {
   root ??= createRoot(document.createElement("div"));
   React.act(() => root!.render(React.createElement(Probe)));
+
   if (drawn?.kind !== "read") return drawn?.kind;
+
   return drawn.reminders.map(
     (each) =>
       `${each.title} @ ${each.channelName}: ${each.status.kind === "changed" ? `changed from ${each.status.was}` : each.status.kind}`,
   );
 }
+
 const file = () => join(files.root, "documents", "reminders.json");
+
 const notices = () =>
   [...ios.scheduled.values()].map((each) => `${each.title} at ${each.at - now}: ${each.body}`);
 
@@ -310,6 +360,7 @@ beforeEach(async () => {
   shows();
   await settled();
 });
+
 afterEach(() => {
   if (root) React.act(() => root!.unmount());
   root = null;
@@ -375,6 +426,7 @@ describe("programme reminders", () => {
     files.sync = (operation) => {
       if (operation === "write") throw new Error("disk full");
     };
+
     shows();
     await settled();
     expect(notices()).toEqual([]);
@@ -384,6 +436,7 @@ describe("programme reminders", () => {
     await reminders.setReminder(channel(), later);
     const [set] = remindersShown();
     let answer = () => {};
+
     ios.holding = new Promise((resolve) => (answer = resolve));
     const checking = reminders.checkReminders();
     await heard();
@@ -397,12 +450,14 @@ describe("programme reminders", () => {
   it("keeps none scheduled while iOS doesn't allow them, and schedules again once it does", async () => {
     await reminders.setReminder(channel(), later);
     ios.permission = "denied";
+
     for (const listener of scenario.appState) listener("active");
     await settled();
     expect(notices()).toEqual([]);
     expect(shown()).toEqual(["Late film @ Channel 1: upcoming"]);
 
     ios.permission = "granted";
+
     for (const listener of scenario.appState) listener("active");
     await settled();
     expect(notices()).toEqual([`Late film at ${2 * HOUR}: Starting now on Channel 1`]);
@@ -416,6 +471,7 @@ describe("programme reminders", () => {
     ios.delivered.add(set!.id);
     ios.permission = "denied";
     scenario.members = [];
+
     for (const listener of scenario.rosterChanged) listener();
     await settled();
     expect(shown()).toEqual([]);
@@ -429,7 +485,9 @@ describe("programme reminders", () => {
       stop: now + (at + 2) * HOUR,
       description: null,
     }));
+
     scenario.programmes = [on, ...programmes];
+
     for (const programme of programmes.slice(0, 64))
       expect(await reminders.setReminder(channel(), programme)).toBe("set");
     expect(await reminders.setReminder(channel(), programmes[64]!)).toBe("full");
@@ -451,7 +509,9 @@ describe("programme reminders", () => {
       stop: now + (at + 2) * HOUR,
       description: null,
     }));
+
     scenario.programmes = [on, ...programmes];
+
     for (const programme of programmes.slice(0, 64))
       await reminders.setReminder(channel(), programme);
     // One changes, so another can be set, then the guide has the first back.
@@ -477,6 +537,7 @@ describe("programme reminders", () => {
     module.schedule = async () => {
       throw new Error("native");
     };
+
     try {
       await expect(reminders.setReminder(channel(), later)).rejects.toMatchObject({
         error: { detail: "iOS didn't schedule the reminder." },
@@ -484,6 +545,7 @@ describe("programme reminders", () => {
     } finally {
       module.schedule = schedule;
     }
+
     expect(shown()).toEqual([]);
 
     // The prompt went without an answer, as when the app was sent away.
@@ -496,6 +558,7 @@ describe("programme reminders", () => {
   it("goes once its programme ends, and a relaunch doesn't bring it back", async () => {
     await reminders.setReminder(channel(), later);
     vi.useFakeTimers({ toFake: ["Date"] });
+
     try {
       vi.setSystemTime(later.stop);
       expect(shown()).toEqual([]);
@@ -503,6 +566,7 @@ describe("programme reminders", () => {
     } finally {
       vi.useRealTimers();
     }
+
     expect(readFileSync(file(), "utf8")).not.toContain("Late film");
     await launch();
     expect(shown()).toEqual([]);
@@ -527,6 +591,7 @@ describe("programme reminders", () => {
     files.sync = (operation) => {
       if (operation === "text") throw new Error("busy");
     };
+
     await launch();
     expect(shown()).toBe("unreadable");
     await expect(reminders.cancelReminder("any")).rejects.toMatchObject({
@@ -542,8 +607,10 @@ describe("programme reminders", () => {
     module.ask = async () => {
       vi.setSystemTime(later.start + 1);
       ios.permission = "granted";
+
       return "granted";
     };
+
     try {
       await expect(reminders.setReminder(channel(), later)).rejects.toMatchObject({
         error: { kind: "reminder", reason: "started" },
@@ -552,6 +619,7 @@ describe("programme reminders", () => {
       module.ask = ask;
       vi.useRealTimers();
     }
+
     expect(shown()).toEqual([]);
     expect(notices()).toEqual([]);
   });
@@ -564,6 +632,7 @@ describe("programme reminders", () => {
     ).toBeUndefined();
 
     let answer = () => {};
+
     scenario.guideHolding = new Promise((resolve) => (answer = resolve));
     const reading = scenario.owner!.programmeAt("a:1", later.start);
     await heard();
@@ -595,6 +664,7 @@ describe("programme reminders", () => {
   it("goes with its subscription", async () => {
     await reminders.setReminder(channel(), later);
     scenario.members = [];
+
     for (const listener of scenario.rosterChanged) listener();
     await settled();
     expect(shown()).toEqual([]);
@@ -604,6 +674,7 @@ describe("programme reminders", () => {
   it("opens a tapped notification's programme on Live, playing nothing", async () => {
     await reminders.setReminder(channel(), later);
     ios.opened = { channel: "a:1", at: later.start };
+
     for (const listener of ios.listeners) listener();
     expect(scenario.pushed).toEqual([
       { pathname: "/live/programme", params: { channel: "a:1", start: String(later.start) } },
@@ -630,6 +701,7 @@ async function draw(element: React.ReactElement) {
   const at = createRoot(container);
   await React.act(async () => at.render(element));
   await idle();
+
   return {
     text: () => container.textContent ?? "",
     has: (testID: string) => container.querySelector(`[data-testid="${testID}"]`) !== null,
@@ -638,6 +710,7 @@ async function draw(element: React.ReactElement) {
       const button = [...container.querySelectorAll("button")].find(
         (each) => each.getAttribute("data-testid") === testID,
       );
+
       if (!button) throw new Error(`No ${testID} on screen: ${container.textContent}`);
       await React.act(async () => button.click());
       await settled();
@@ -646,20 +719,25 @@ async function draw(element: React.ReactElement) {
     close: () => React.act(() => at.unmount()),
   };
 }
+
 /** Every promise the screen started has settled, and React drew what they changed. */
 async function idle() {
   await React.act(async () => {
     for (let i = 0; i < 30; i++) await Promise.resolve();
   });
 }
+
 /** Programme details for `programme` of channel `a:1`, as a notification or the list opens them. */
 async function details(programme: Programme) {
   scenario.params = { channel: "a:1", start: String(programme.start) };
   const { ProgrammeScreen } = await import("../src/guide-screen.tsx");
+
   return draw(React.createElement(ProgrammeScreen, { origin: "live" }));
 }
+
 async function list() {
   const { RemindersScreen } = await import("../src/reminders-screen.tsx");
+
   return draw(React.createElement(RemindersScreen));
 }
 
@@ -716,6 +794,7 @@ describe("programme details past the limit", () => {
   it("says iOS holds 64, and sets nothing more", async () => {
     const programmes = hourly(65);
     scenario.programmes = [on, ...programmes];
+
     for (const programme of programmes.slice(0, 64))
       await reminders.setReminder(channel(), programme);
     const screen = await details(programmes[64]!);
@@ -734,13 +813,16 @@ describe("the reminders list", () => {
       start: later.start + 24 * HOUR,
       stop: later.stop + 24 * HOUR,
     };
+
     scenario.programmes = [on, later, tomorrow];
     await reminders.setReminder(channel(), tomorrow);
     await reminders.setReminder(channel(), later);
     const screen = await list();
     const text = screen.text();
+
     const heading = (at: number) =>
       localDay(at).from === localDay(now, 1).from ? "Tomorrow" : dayLabel(localDay(at), now);
+
     expect(text.startsWith(heading(later.start))).toBe(true);
     expect(text.indexOf("Late film")).toBeLessThan(text.indexOf("Next film"));
     // The second day has a heading of its own, between them.
@@ -832,6 +914,7 @@ describe("the reminders list", () => {
   it("moves with the clock while it shows", async () => {
     await reminders.setReminder(channel(), later);
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+
     try {
       const screen = await list();
       expect(screen.text()).not.toContain("On now");
@@ -847,6 +930,7 @@ describe("the reminders list", () => {
   it("leads with a notice once iOS stops letting the app notify", async () => {
     await reminders.setReminder(channel(), later);
     ios.permission = "denied";
+
     for (const listener of scenario.appState) listener("active");
     await settled();
     const screen = await list();
@@ -863,5 +947,6 @@ async function heard() {
 
 function remindersShown() {
   shown();
+
   return drawn?.kind === "read" ? drawn.reminders : [];
 }

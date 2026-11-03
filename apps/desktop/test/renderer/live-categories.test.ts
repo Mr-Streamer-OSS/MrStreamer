@@ -14,6 +14,7 @@ import { setLanguage, t } from "@mrstreamer/core/i18n";
 import type { Locale } from "@mrstreamer/contracts/language";
 
 const OTHER = "870468e9-b944-4e10-bcfa-6330f80b45dc";
+
 const category = (
   id: string,
   group: string | null,
@@ -29,6 +30,7 @@ const category = (
   channelCount: count,
   members: [{ id, subscriptionId }],
 });
+
 const CATEGORIES = [
   category("be-sport", "Belgium", "Sport", 88),
   category("odd", null, "Ungrouped", 5),
@@ -36,11 +38,14 @@ const CATEGORIES = [
   category("uk-sport", "United Kingdom", "Sports", 412),
   category("backup", "Belgium", "Sport", 64, OTHER),
 ];
+
 let cleanup = () => {};
+
 afterEach(() => {
   cleanup();
   setLanguage({ locale: "en-US", formats: "en-US" });
 });
+
 async function picker(
   categories: readonly Category[] = CATEGORIES,
   selected: ChannelList = { kind: "all" },
@@ -73,8 +78,10 @@ async function picker(
   const onChannels = vi.fn();
   const mounted = queryView(client);
   const { container } = mounted;
+
   function View() {
     const state = useListPicker(selected);
+
     return createElement(ListPicker, {
       picker: state,
       selected,
@@ -83,18 +90,22 @@ async function picker(
       onChannels,
     });
   }
+
   await mounted.render(createElement(View));
   cleanup = mounted.unmount;
   const rows = () => [...container.querySelectorAll<HTMLButtonElement>("[data-entry]")];
   const field = () => container.querySelector<HTMLInputElement>("input")!;
+
   const click = async (title: string) =>
     act(async () => {
       const button = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
         (button) => button.title === title || button.getAttribute("aria-label") === title,
       );
+
       expect(button, title).toBeDefined();
       button!.click();
     });
+
   const type = async (text: string) =>
     act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
@@ -103,12 +114,14 @@ async function picker(
       );
       field().dispatchEvent(new Event("input", { bubbles: true }));
     });
+
   const key = async (key: string) =>
     act(async () => {
       document.activeElement!.dispatchEvent(
         new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
       );
     });
+
   return { container, client, rows, field, click, type, key, onPick, onChannels };
 }
 
@@ -192,6 +205,7 @@ describe("fixed topics and Provider lists", () => {
       kind: "category",
       category: { subscriptionId: SUBSCRIPTION, id: "be-news" },
     });
+
     await act(async () => p.client.setQueryData(queries.categories().queryKey, CATEGORIES));
     await vi.waitFor(() => expect(p.rows()[1]?.getAttribute("aria-current")).toBe("true"));
     await act(async () => p.client.setQueryData(queries.categories().queryKey, [CATEGORIES[3]!]));
@@ -202,9 +216,11 @@ describe("fixed topics and Provider lists", () => {
     "keeps a 63,000-channel catalogue compact and searchable in %s",
     async (locale) => {
       setLanguage({ locale, formats: locale });
+
       const large = Array.from({ length: 4500 }, (_, i) =>
         category(String(i), `Country ${Math.floor(i / 30)}`, `Category ${i}`, 14),
       );
+
       const p = await picker(large);
       expect(p.rows()).toHaveLength(13);
       await p.click(t("Provider lists"));

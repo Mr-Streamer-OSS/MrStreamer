@@ -8,6 +8,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       const recorded: string[] = [];
+
       const program = Effect.succeed(41).pipe(
         Effect.map((value) => value + 1),
         diagnosed("catalogue"),
@@ -16,7 +17,9 @@ export const cases: readonly ProofCase[] = [
             recorded.push(`${entry.op}:${"outcome" in entry ? entry.outcome : ""}`),
         }),
       );
+
       const failure = await Effect.runPromiseExit(Effect.fail("boom" as const));
+
       return { value: await Effect.runPromise(program), recorded, failed: failure._tag };
     },
   },

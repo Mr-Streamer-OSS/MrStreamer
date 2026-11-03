@@ -14,7 +14,9 @@ export const BROWSE_TOPICS = [
   "regional",
   "other",
 ] as const;
+
 export type BrowseTopic = (typeof BROWSE_TOPICS)[number];
+
 const owned = () => type({ subscriptionId: "string > 0", id: "string" });
 const topic = () => type.enumerated(...BROWSE_TOPICS);
 
@@ -31,6 +33,7 @@ export const LiveDiscovery = lazy(() =>
     { kind: "'custom'", id: "string > 0" },
   ),
 );
+
 export type LiveDiscovery = Infer<typeof LiveDiscovery>;
 
 export interface LiveFilters {
@@ -38,6 +41,7 @@ export interface LiveFilters {
   readonly languages: readonly string[];
   readonly subscriptions: readonly string[];
 }
+
 export const EMPTY_LIVE_FILTERS: LiveFilters = { countries: [], languages: [], subscriptions: [] };
 
 export const LiveBrowseQuery = lazy(() =>
@@ -59,6 +63,7 @@ export const LiveBrowseQuery = lazy(() =>
     visibility: "'viewer' | 'ordinary'",
   }),
 );
+
 export type LiveBrowseQuery = Infer<typeof LiveBrowseQuery>;
 
 export interface BrowseMetadata {
@@ -67,10 +72,12 @@ export interface BrowseMetadata {
   readonly country: string | null;
   readonly language: string | null;
 }
+
 export interface BrowseFacet {
   readonly value: string;
   readonly count: number;
 }
+
 /** Membership, totals and facets from one accepted catalogue and one visibility policy. */
 export interface LiveBrowseResult {
   readonly channels: readonly LiveChannel[];

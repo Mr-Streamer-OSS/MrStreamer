@@ -24,6 +24,7 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** What Chromium on Linux decodes: no HEVC, no AC-3, no MP2. */
 const LINUX: readonly Codec[] = ["h264", "aac", "mp3", "opus"];
+
 /** What Chromium on an Apple silicon Mac decodes. */
 const MAC: readonly Codec[] = ["h264", "hevc", "hevc-10bit", "aac", "mp3", "opus"];
 
@@ -43,6 +44,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     maxConnections: 1,
     slotReleaseMs: options.slotReleaseMs ?? 0,
   });
+
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: options.ffmpeg ? FFMPEG : null }).pipe(
       Layer.provide(PlaybackCoordination.layer),
@@ -55,10 +57,12 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
       ),
     ),
   );
+
   const subscriptions = await promised(runtime, Subscriptions);
   const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
   const service = await promised(runtime, Playback);
   const tracksChanged = await collect(runtime, service.tracksChanged);
+
   const playback = {
     ...service,
     open: (
@@ -68,6 +72,7 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
     ) => service.open({ subscriptionId, id: channelId }, decoders, options),
     dispose: () => runtime.dispose(),
   };
+
   return { provider, playback, service, subscriptionId, tracksChanged };
 }
 
@@ -80,7 +85,9 @@ function liveChannels(provider: FakeProvider): string[] {
 
 function channelNamed(provider: FakeProvider, name: string): string {
   const channel = provider.catalogue.channels.find((entry) => entry.name === name);
+
   if (!channel) throw new Error(`No channel ${name}`);
+
   return String(channel.streamId);
 }
 
@@ -94,9 +101,11 @@ async function firstBytes(
 ): Promise<{ status: number; bytes: number; stop: () => void }> {
   const controller = new AbortController();
   const response = await fetch(url, { signal: controller.signal });
+
   if (!response.ok || !response.body)
     return { status: response.status, bytes: 0, stop: () => controller.abort() };
   const { value } = await response.body.getReader().read();
+
   return { status: response.status, bytes: value?.length ?? 0, stop: () => controller.abort() };
 }
 
@@ -123,6 +132,7 @@ function streamIds(body: Buffer): { type: string; id: number; language?: string 
     ],
     { input: body, encoding: "utf8" },
   );
+
   return (
     JSON.parse(probe.stdout) as {
       streams: { codec_type: string; id: string; tags?: { language?: string } }[];
@@ -140,9 +150,11 @@ function playerReceivesBytes(body: Buffer): { video: string | null; audio: strin
     ["-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "json", "-i", "pipe:0"],
     { input: body, encoding: "utf8" },
   );
+
   const streams = (
     JSON.parse(probe.stdout) as { streams: { codec_type: string; codec_name: string }[] }
   ).streams;
+
   return {
     video: streams.find((stream) => stream.codec_type === "video")?.codec_name ?? null,
     audio: streams.find((stream) => stream.codec_type === "audio")?.codec_name ?? null,
@@ -316,10 +328,12 @@ describe("playback", () => {
 
   it("lists a channel's sound tracks and subtitle pages once its stream starts", async () => {
     const { provider, playback } = await connectedPlayback();
+
     const session = await playback.open(
       channelNamed(provider, "TEST | Subtitles and two sound tracks"),
       LINUX,
     );
+
     expect(await playback.tracks(session.sessionId)).toBeNull();
 
     await fetch(session.url).then((response) => response.arrayBuffer());
@@ -361,6 +375,7 @@ describe("playback", () => {
       channelNamed(provider, "TEST | Subtitles and two sound tracks"),
       LINUX,
     );
+
     await fetch(session.url).then((response) => response.arrayBuffer());
 
     await vi.waitFor(() => expect(tracksChanged).toEqual([session.sessionId]));
@@ -373,6 +388,7 @@ describe("playback", () => {
 
   it("copies captions out of the pictures into a stream the player reads, in display order", async () => {
     const { provider, playback } = await connectedPlayback();
+
     const session = await playback.open(
       channelNamed(provider, "TEST | Subtitles and two sound tracks"),
       LINUX,
@@ -382,11 +398,13 @@ describe("playback", () => {
 
     const reader = pesReader();
     const decoder = captionDecoder(1);
+
     const changes = [...reader.push(received), ...reader.end()].flatMap((packet) =>
       packet.pid === 0x1ff0 && packet.pts !== null
         ? (decoder.push(packet.payload, packet.pts / 90_000) ?? [])
         : [],
     );
+
     expect(
       changes.map((change) => [
         Math.round(change.at * 100) / 100,
@@ -410,6 +428,7 @@ describe("playback", () => {
       LINUX,
       choice,
     );
+
     const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
 
     // The player plays the first sound track the program table lists, which the tracks name.
@@ -448,6 +467,7 @@ describe("playback", () => {
   describe.skipIf(!hasFfmpeg)("with ffmpeg", { timeout: 30_000 }, () => {
     it("re-encodes a damaged picture when asked to repair a stream", async () => {
       const { provider, playback } = await connectedPlayback({ ffmpeg: true });
+
       const decodeErrors = (stream: Buffer) =>
         spawnSync(
           FFPROBE,
@@ -468,6 +488,7 @@ describe("playback", () => {
             encoding: "utf8",
           },
         ).stderr.trim();
+
       const channel = channelNamed(provider, "TEST | H.264 damaged");
 
       const direct = await playback.open(channel, LINUX);
@@ -487,7 +508,9 @@ describe("playback", () => {
         channelNamed(provider, "TEST | H.264 joined mid-stream"),
         LINUX,
       );
+
       const received = Buffer.from(await (await fetch(session.url)).arrayBuffer());
+
       const probe = spawnSync(
         FFPROBE,
         [
@@ -517,6 +540,7 @@ describe("playback", () => {
         ["h264", "mp3"],
         { audio: 0x102 },
       );
+
       const received = streamIds(Buffer.from(await (await fetch(session.url)).arrayBuffer()));
 
       expect(received.filter((stream) => stream.type === "audio")).toEqual([
@@ -560,6 +584,7 @@ describe("one stream across several subscriptions", () => {
       await fakeProvider({ maxConnections: 1, slotReleaseMs: 0 }),
       await fakeProvider({ maxConnections: 1, slotReleaseMs: 0, channels: 200 }),
     ];
+
     const runtime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: null }).pipe(
         Layer.provide(PlaybackCoordination.layer),
@@ -572,10 +597,12 @@ describe("one stream across several subscriptions", () => {
         ),
       ),
     );
+
     const subscriptions = await promised(runtime, Subscriptions);
     const [id = ""] = liveChannels(second);
     const a = { subscriptionId: (await subscriptions.add(demoLogin(first))).id, id };
     const b = { subscriptionId: (await subscriptions.add(demoLogin(second))).id, id };
+
     return { first, second, subscriptions, playback: await promised(runtime, Playback), a, b };
   }
 
@@ -622,6 +649,7 @@ describe("one stream across several subscriptions", () => {
     const host = await startFakePlaylist();
     const holdable = holdableFetch();
     const dataDir = await tempDir();
+
     const start = async () => {
       const runtime = runtimeFor(
         Playback.layer({ userAgent, ffmpeg: null }).pipe(
@@ -635,14 +663,17 @@ describe("one stream across several subscriptions", () => {
           ),
         ),
       );
+
       return {
         subscriptions: await promised(runtime, Subscriptions),
         playback: await promised(runtime, Playback),
       };
     };
+
     const { id: subscriptionId } = await (
       await start()
     ).subscriptions.add({ server: host.link, username: "", password: "" });
+
     // Started again, a playlist is read anew for the address of the channel asked for.
     const { playback } = await start();
     const channel = { subscriptionId, id: PLAYLIST_CHANNELS.plain.id };
@@ -680,12 +711,15 @@ describe("one stream across several subscriptions", () => {
     const { first, second, subscriptions, playback, a, b } = await two();
     const [source] = await subscriptions.sources();
     const movie = first.titles.movies[0];
+
     if (!source || !movie) throw new Error("The first subscription has a source and a movie");
+
     const title = {
       kind: "movie",
       subscriptionId: a.subscriptionId,
       id: String(movie.id),
     } as const;
+
     const address = (await source.provider.titleFile("movie", title.id, movie.container)).url;
     const session = await playback.open(b, LINUX);
     const playing = await firstBytes(session.url);
@@ -704,6 +738,7 @@ describe("one stream across several subscriptions", () => {
   it("plays nothing of a subscription whose secret the keychain lost, and says which", async () => {
     const dataDir = await tempDir();
     const provider = await fakeProvider();
+
     const start = async (open: (sealed: string) => string) => {
       const runtime = runtimeFor(
         Playback.layer({ userAgent, ffmpeg: null }).pipe(
@@ -717,11 +752,13 @@ describe("one stream across several subscriptions", () => {
           ),
         ),
       );
+
       return {
         subscriptions: await promised(runtime, Subscriptions),
         playback: await promised(runtime, Playback),
       };
     };
+
     const { id: subscriptionId } = await (
       await start(testSecrets.open)
     ).subscriptions.add(demoLogin(provider));

@@ -13,18 +13,21 @@ const pendingOf = (name: string) => new File(Paths.document, `${name}.next`);
 export function readJson(name: string): unknown {
   for (const file of [fileOf(name), pendingOf(name)]) {
     if (!file.exists) continue;
+
     try {
       return JSON.parse(file.textSync()) as unknown;
     } catch {
       // Unreadable or not JSON: try the other, then start again.
     }
   }
+
   return null;
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
 export function writeJson(name: string, value: unknown): void {
   const pending = pendingOf(name);
+
   if (!pending.exists) pending.create();
   pending.writeSync(JSON.stringify(value));
   pending.moveSync(fileOf(name), { overwrite: true });

@@ -164,6 +164,7 @@ export class Updates extends Context.Service<
 }
 
 const SETTINGS_FILE = "updates.json";
+
 /** updates.json: the channel, and the version whose notice was closed. */
 const SettingsFile = lazy(() =>
   type({ channel: "'stable' | 'nightly'", "dismissed?": "string | null" }),
@@ -172,6 +173,7 @@ const SettingsFile = lazy(() =>
 /** Whether a channel receives `version`: each receives only its own releases. */
 function receives(channel: Channel, version: string): boolean {
   const parsed = parseVersion(version);
+
   return parsed !== null && channelOf(parsed) === channel;
 }
 
@@ -183,6 +185,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     const settingsPath = join(deps.dataDir, SETTINGS_FILE);
     /** Writes updates.json one at a time, with what memory holds then, so the last change wins. */
     const writeOne = (yield* Semaphore.make(1)).withPermits(1);
+
     // A development build without a release version counts as the oldest stable.
     const installed: Version = parseVersion(deps.installed) ?? {
       major: 0,
@@ -204,9 +207,11 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     let reminderWasShown = false;
     let allowedReminder: string | null = null;
     let nextCheckAt: number | null = null;
+
     /** The check whose result still counts; a newer check or a channel change voids it. */
     let checking: { readonly channel: Channel; readonly fiber: Fiber.Fiber<CheckResult> } | null =
       null;
+
     /** The download in flight; there is one installer. */
     let downloading: Fiber.Fiber<void, unknown> | null = null;
     /** The download whose outcome still counts; a channel change can void it. */
@@ -217,17 +222,22 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       Effect.promise(async () => {
         const next = { ...stored, channel, dismissed };
         const currentTarget = target ? formatVersion(target.version) : null;
+
         const dismissedUpdate =
           next.dismissed !== savedDismissed && next.dismissed === currentTarget
             ? deps.usage?.action("update_dismissed")
             : undefined;
+
         await writeJsonFile(settingsPath, next);
+
         if (savedChannel !== next.channel) deps.onChannelChanged?.(next.channel);
         savedChannel = next.channel;
         savedDismissed = next.dismissed;
+
         if (target && formatVersion(target.version) === next.dismissed) dismissedUpdate?.();
       }),
     );
+
     if (!stored) yield* save;
 
     /** Whether the chosen channel still receives `version`, checked before downloading or installing it. */
@@ -239,6 +249,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
      */
     const reminder = () => {
       const previous = target?.previousStable;
+
       return !reminderWasShown &&
         checking === null &&
         channel === "stable" &&
@@ -264,6 +275,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       nextCheckAt,
       dismissed,
     });
+
     const status = Effect.sync(snapshot);
     const changed = Effect.suspend(() => PubSub.publish(updates, snapshot()));
 
@@ -272,6 +284,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       target = null;
       update = { kind: "idle" };
       yield* changed;
+
       return snapshot();
     });
 
@@ -279,6 +292,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
     const discover = (checkedChannel: Channel) =>
       Effect.suspend(() => {
         const finished = deps.observeCheck?.(checkedChannel);
+
         return Effect.tryPromise({
           try: (signal) => deps.discover(signal),
           catch: (cause) => cause,
@@ -328,26 +342,33 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       Effect.gen(function* () {
         if (staged()) return null;
         let running = checking?.channel === channel ? checking : null;
+
         if (!running) {
           running = { channel, fiber: yield* Effect.forkIn(discover(channel), scope) };
           checking = running;
         }
+
         if (manual) {
           update = { kind: "checking" };
           yield* changed;
         }
+
         const result = yield* Fiber.join(running.fiber);
+
         if (checking !== running) return null;
         checking = null;
         checked = {
           at: yield* Clock.currentTimeMillis,
           failure: result.ok ? null : result.failure,
         };
+
         // Including one that started while the check ran.
         if (staged()) {
           yield* changed;
+
           return result;
         }
+
         if (!result.ok) {
           // An update an earlier check found stays on offer; `checked` says this one failed.
           if (manual || update.kind === "checking") {
@@ -355,21 +376,27 @@ function make(deps: UpdatesDeps & DirectUpdates) {
               ? { kind: "available", version: formatVersion(target.version) }
               : { kind: "failed", step: "check", failure: result.failure };
           }
+
           yield* changed;
+
           return result;
         }
+
         const newest = newestOn(channel, result.offers);
+
         // A nightly build on Stable goes to the newest stable release, older or not. Nightly
         // never goes back, so a stable build on Nightly waits for a newer nightly.
         const offered =
           newest &&
           (compareVersions(newest.version, installed) > 0 ||
             (channel === "stable" && installed.nightly !== null));
+
         target = offered ? newest : null;
         update = target
           ? { kind: "available", version: formatVersion(target.version) }
           : { kind: "current" };
         yield* changed;
+
         return result;
       });
 
@@ -378,6 +405,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       Effect.gen(function* () {
         let wait = Duration.toMillis(schedule.first);
         let failures = 0;
+
         for (;;) {
           nextCheckAt = (yield* Clock.currentTimeMillis) + wait;
           yield* changed;
@@ -386,18 +414,21 @@ function make(deps: UpdatesDeps & DirectUpdates) {
           const result = yield* runCheck(false);
           const now = yield* Clock.currentTimeMillis;
           const failure = result && !result.ok ? result.failure : null;
+
           if (!failure) {
             failures = 0;
             // Up to a tenth later, so many installs don't all ask at once.
             wait = Duration.toMillis(schedule.every) * (1 + Math.random() / 10);
             continue;
           }
+
           const retry = RETRY_AFTER[Math.min(failures, RETRY_AFTER.length - 1)] ?? "4 hours";
           failures++;
           const allowed = failure.kind === "busy" && failure.until ? failure.until - now : 0;
           wait = Math.max(Duration.toMillis(retry), allowed + 60_000);
         }
       });
+
     if (deps.schedule) yield* Effect.forkIn(automatic(deps.schedule), scope);
 
     const download = (expectedVersion?: string) =>
@@ -408,14 +439,17 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         )
           return snapshot();
         const retry = update.kind === "failed" && update.step !== "check";
+
         if ((update.kind !== "available" && !retry) || !target || downloading) return snapshot();
         const release = target;
         const version = formatVersion(release.version);
+
         if (!wanted(version)) return yield* drop;
         const mine = {};
         attempt = mine;
         // Set before anything waits, so a second download finds this one.
         update = { kind: "downloading", version, percent: 0 };
+
         // In the service's scope, so quitting stops it too. Known before the UI hears of it, so
         // a cancel always finds it.
         const fiber = yield* Effect.forkIn(
@@ -438,12 +472,16 @@ function make(deps: UpdatesDeps & DirectUpdates) {
           }).pipe(diagnosed("download")),
           scope,
         );
+
         downloading = fiber;
         yield* changed;
         const exit = yield* Fiber.await(fiber);
+
         if (downloading === fiber) downloading = null;
+
         if (attempt !== mine) return snapshot();
         attempt = null;
+
         // A download that finishes after it was cancelled doesn't count either.
         if (Exit.isSuccess(exit)) update = { kind: "ready", version };
         else if (Cause.hasInterrupts(exit.cause)) update = { kind: "available", version };
@@ -455,7 +493,9 @@ function make(deps: UpdatesDeps & DirectUpdates) {
             detail: reason(Cause.squash(exit.cause)),
           };
         }
+
         yield* changed;
+
         return snapshot();
       });
 
@@ -468,15 +508,19 @@ function make(deps: UpdatesDeps & DirectUpdates) {
           channel = next;
           checking = null;
           const staged = update.kind === "downloading" || update.kind === "ready" ? update : null;
+
           if (!staged || !receives(next, staged.version)) {
             attempt = null;
             target = null;
             update = { kind: "idle" };
+
             if (downloading) yield* Fiber.interrupt(downloading);
           }
+
           yield* save;
           yield* changed;
           yield* runCheck(true);
+
           return snapshot();
         }),
 
@@ -488,14 +532,18 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       restart: Effect.gen(function* () {
         if (update.kind !== "ready") return;
         const version = update.version;
+
         if (!wanted(version)) {
           yield* drop;
+
           return;
         }
+
         const installing = yield* Effect.tryPromise({
           try: () => deps.installer.install(),
           catch: (cause) => cause,
         }).pipe(diagnosed("install"), Effect.result);
+
         if (installing._tag === "Failure") {
           update = { kind: "failed", step: "install", version, detail: reason(installing.failure) };
           yield* changed;
@@ -505,9 +553,11 @@ function make(deps: UpdatesDeps & DirectUpdates) {
       dismiss: (version: string) =>
         Effect.gen(function* () {
           dismissed = version;
+
           if (reminded === version) reminded = null;
           yield* save;
           yield* changed;
+
           return snapshot();
         }),
 
@@ -515,6 +565,7 @@ function make(deps: UpdatesDeps & DirectUpdates) {
         Effect.sync(() => {
           if (reminder()?.version !== version) return false;
           allowedReminder = version;
+
           return true;
         }),
       reminderShown: (version: string) =>
@@ -547,7 +598,9 @@ function managed(deps: UpdatesDeps & (StoreUpdates | PackageUpdates)) {
     nextCheckAt: null,
     dismissed: null,
   };
+
   const unchanged = Effect.succeed(status);
+
   return Effect.succeed({
     status: unchanged,
     check: unchanged,
@@ -574,6 +627,7 @@ type CheckResult =
 /** The offered release's notes and page, while there is an update to show them for. */
 function offerOf(target: Offer | null, update: UpdatePhase): UpdateOffer | null {
   if (!target || update.kind === "current" || update.kind === "idle") return null;
+
   return { version: formatVersion(target.version), notes: target.notes, page: target.page };
 }
 

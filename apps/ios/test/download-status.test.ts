@@ -8,24 +8,32 @@ const owner = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   asked: [] as string[],
 }));
+
 vi.mock("../src/downloads.ts", async () => {
   const { useSyncExternalStore } = await import("react");
+
   return {
     useDownloads: () =>
       useSyncExternalStore(
         (listener) => {
           owner.listeners.add(listener);
+
           return () => owner.listeners.delete(listener);
         },
         () => owner.list,
       ),
   };
 });
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({ router: { push: (path: string) => owner.asked.push(path) } }));
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF" } }));
+
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
+
   return {
     Text: ({ children }: { children: React.ReactNode }) => createElement("span", null, children),
     View: () => null,
@@ -45,6 +53,7 @@ vi.mock("react-native", async () => {
 
 const { DownloadStatusButton } = await import("../src/download-status.tsx");
 const { tabScreenOptions } = await import("../src/header.tsx");
+
 const item = (status: Download["status"], id = "a"): Download => ({
   id,
   status,
@@ -61,6 +70,7 @@ const item = (status: Download["status"], id = "a"): Download => ({
   progress: null,
   series: null,
 });
+
 const transferring = (received: number, size: number | null) =>
   item({
     kind: "transferring",
@@ -69,22 +79,27 @@ const transferring = (received: number, size: number | null) =>
     rate: null,
     restarted: false,
   });
+
 let container = document.createElement("div");
 let root = createRoot(container);
 const button = () => container.querySelector("button");
 const label = () => button()?.getAttribute("aria-label");
+
 function publish(items: readonly Download[]) {
   React.act(() => {
     owner.list = { ...owner.list, items };
+
     for (const listener of owner.listeners) listener();
   });
 }
+
 beforeEach(() => {
   container = document.createElement("div");
   root = createRoot(container);
   owner.list = { items: [], series: {}, bytes: 0, free: null, ended: 0 };
   owner.asked.length = 0;
 });
+
 afterEach(() => React.act(() => root.unmount()));
 
 describe("the shared Downloads action", () => {
@@ -159,11 +174,14 @@ describe("the shared Downloads action", () => {
   it("keeps each tab header's Downloads route while progress updates", () => {
     for (const tab of ["(home)", "live", "films", "series"] as const) {
       const options = tabScreenOptions(tab)({ route: { name: "index" } });
+
       const action = options
         .unstable_headerRightItems?.({ tintColor: "#FFFFFF", canGoBack: false })
         .find((each) => each.type === "custom");
+
       if (!action || action.type !== "custom") throw new Error("No Downloads entry");
       React.act(() => root.render(action.element));
+
       for (const reported of [
         transferring(499, 1000),
         item({ kind: "paused", received: 0, size: null }),
@@ -173,9 +191,11 @@ describe("the shared Downloads action", () => {
         publish([reported]);
         expect(container.textContent).toBe("");
       }
+
       expect(label()).toBe("Downloads, 1 queued");
       React.act(() => button()?.click());
     }
+
     expect(owner.asked).toEqual([
       "/downloads",
       "/live/downloads",

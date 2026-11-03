@@ -41,6 +41,7 @@ const parameter = (value: string | string[] | undefined) =>
 /** A chosen day as a route's `day` carries it: its first instant, or null for Today. */
 export const dayOf = (value: unknown) => {
   const day = typeof value === "string" ? Number(value) : NaN;
+
   return Number.isFinite(day) && day > 0 ? day : null;
 };
 
@@ -51,6 +52,7 @@ export const dayOf = (value: unknown) => {
  */
 export function ScheduleScreen({ origin }: { origin: GuideOrigin }) {
   const params = useLocalSearchParams<{ channel?: string; day?: string }>();
+
   return (
     <ChannelSchedule
       channel={parameter(params.channel)}
@@ -88,8 +90,11 @@ export function ChannelSchedule({
   useLocale();
   const catalogue = useCatalogue();
   const channel = catalogue.kind === "ready" ? catalogue.library.byKey.get(key) : undefined;
+
   if (catalogue.kind === "loading") return <Message text={t("Loading channels…")} />;
+
   if (!channel || catalogue.kind !== "ready") return <Message text={t("Channel unavailable")} />;
+
   return (
     <Schedule
       key={channel.key}
@@ -128,18 +133,22 @@ function Schedule({
   const clock = useGuideOwner();
   // null follows Today across midnight; a chosen calendar date stays on that date.
   const [chosen, choose] = useState<number | null>(initialDay);
+
   const setChosen = (day: number | null) => {
     choose(day);
     onDay(day);
   };
+
   const heading = useAnnounced(column && !over);
   const content = useContent(column);
   const day = localDay(chosen ?? clock.now);
   const schedule = useGuideSchedule(channel.key, day, library);
   const today = localDay(clock.now).from;
+
   const message = schedule.stale
     ? "Guide may be out of date"
     : guideMessage(schedule.snapshot.get(channel.subscriptionId));
+
   return (
     <FlatList
       style={styles.screen}
@@ -221,6 +230,7 @@ function Schedule({
 export function ProgrammeScreen({ origin }: { origin: GuideOrigin }) {
   const params = useLocalSearchParams<{ channel?: string; detail?: string; start?: string }>();
   const start = Number(parameter(params.start));
+
   return (
     <Programme
       channel={parameter(params.channel)}
@@ -259,22 +269,29 @@ export function Programme({
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const channel = library?.byKey.get(key);
   const heading = useAnnounced(onBack !== undefined && channel !== undefined);
+
   const load = useCallback(
     async (signal: AbortSignal) => {
       if (!channel || !library) return null;
+
       if (detail || start === undefined) return guide.programme(detail, { signal });
+
       return (await guide.programmeAt(channel.key, start, { signal })) ?? null;
     },
     [channel, library, detail, start],
   );
+
   const read = useGuideRead(load, channel ? [channel.subscriptionId] : []);
   const listing = useMemo(() => ({ now: read.value ?? null, next: null }), [read.value]);
   const progress = programmePresentation(listing, read.now).progress;
+
   const catchUp: CatchUp =
     read.value && channel ? catchUpOf(channel, read.value, read.now) : { kind: "later" };
+
   const kept = catchUp.kind === "past" || catchUp.kind === "on";
   const reminder = useReminder(channel?.key ?? key, read.value?.start);
   const belled = reminder?.status.kind === "upcoming";
+
   if (!channel || !library) {
     return (
       <Message
@@ -283,6 +300,7 @@ export function Programme({
       />
     );
   }
+
   return (
     <ScrollView
       style={styles.screen}
@@ -386,8 +404,10 @@ function RemindMe({
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<"refused" | "full" | "started" | "failed" | null>(null);
+
   const run = async (change: () => Promise<"set" | "denied" | "full" | void>) => {
     setBusy(true);
+
     try {
       const done = await change();
       setNote(done === "denied" ? "refused" : done === "full" ? "full" : null);
@@ -399,6 +419,7 @@ function RemindMe({
       setBusy(false);
     }
   };
+
   return (
     <>
       {reminder ? (
@@ -468,8 +489,10 @@ export function catchUpOf(
   now: number,
 ): CatchUp {
   if (programme.start >= now || programme.stop <= programme.start) return { kind: "later" };
+
   if (channel.variants.some((variant) => archiveHolds(variant.catchupDays, programme.start, now)))
     return { kind: programme.stop <= now ? "past" : "on" };
+
   return channel.catchupDays === null
     ? { kind: "none" }
     : { kind: "expired", days: channel.catchupDays };
@@ -481,6 +504,7 @@ export function catchUpOf(
  */
 function useContent(column: boolean) {
   const { gutter } = useListWidth();
+
   return column
     ? [styles.content, { paddingHorizontal: gutter, paddingTop: 8, maxWidth: 600 + 2 * gutter }]
     : styles.content;
@@ -491,8 +515,10 @@ function useAnnounced(announce: boolean) {
   const heading = useRef<HostInstance>(null);
   useEffect(() => {
     const shown = announce ? heading.current : null;
+
     if (shown) AccessibilityInfo.sendAccessibilityEvent(shown, "focus");
   }, [announce]);
+
   return heading;
 }
 
@@ -520,6 +546,7 @@ function GuideNotice({
     </View>
   ) : null;
 }
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   content: { paddingHorizontal: 16, paddingBottom: 32 },

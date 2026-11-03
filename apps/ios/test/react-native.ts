@@ -27,6 +27,7 @@ const part = (given: unknown): ReactNode =>
 const rowKey = <T>(item: T, index: number, keyExtractor?: (item: T, index: number) => string) => {
   if (keyExtractor) return keyExtractor(item, index);
   const row = item as { key?: unknown; id?: unknown } | null;
+
   return String(row?.key ?? row?.id ?? index);
 };
 

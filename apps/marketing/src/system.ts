@@ -35,11 +35,17 @@ export function systemOf({
   if (userAgentData?.mobile || /android|iphone|ipad|ipod|mobile|cros|xbox/i.test(userAgent)) {
     return undefined;
   }
+
   const platform = userAgentData?.platform.toLowerCase() ?? "";
+
   const is = (name: string, pattern: RegExp) =>
     (platform === "" || platform === name) && pattern.test(userAgent);
+
   if (is("windows", /windows nt/i)) return "windows";
+
   if (is("macos", /macintosh/i) && maxTouchPoints <= 1) return "mac";
+
   if (is("linux", /\b(x11|wayland);.*\blinux\b/i)) return "linux";
+
   return undefined;
 }

@@ -18,18 +18,23 @@ it("preserves the renderer's output-error projection while main and iOS keep the
     expect(playbackFailure(error)).toBe("unavailable");
     expect(appFailure(error)).toBe("network");
   }
+
   const error = {
     kind: "output",
     failure: { kind: "media", detail: "PRIVATE missing codec" },
   } as const;
+
   expect(playbackFailure(error)).toBe("unavailable");
   expect(appFailure(error)).toBe("unsupported");
 });
+
 it("requires unpaused progress after waiting and seek, and stops renewing when the engine ends", async () => {
   vi.useFakeTimers();
   const video = document.createElement("video");
+
   let paused = true,
     seeking = false;
+
   Object.defineProperties(video, {
     paused: { get: () => paused },
     seeking: { get: () => seeking },
@@ -101,6 +106,7 @@ it("counts different explicit channel selections, excluding previews, first sele
   ipc.reset();
   const { player } = await import("../../src/renderer/src/player/player.ts");
   player.stop();
+
   const channel = (id: string) => ({
     subscriptionId: SUBSCRIPTION,
     id,
@@ -113,6 +119,7 @@ it("counts different explicit channel selections, excluding previews, first sele
     catchupDays: null,
     variants: [{ id, name: id, tags: [], quality: null }],
   });
+
   player.preview(channel("private-channel-a"));
   player.watch(channel("private-channel-a"));
   player.watch(channel("private-channel-a"));
@@ -131,6 +138,7 @@ it("ends the live measurement on reset and treats the next selection as the firs
   ipc.reset();
   const token = "11111111-1111-4111-8111-111111111111";
   ipc.always("analytics.playbackBegin", token);
+
   const channel = (id: string) => ({
     subscriptionId: SUBSCRIPTION,
     id,
@@ -143,6 +151,7 @@ it("ends the live measurement on reset and treats the next selection as the firs
     catchupDays: null,
     variants: [{ id, name: id, tags: [], quality: null }],
   });
+
   player.watch(channel("first"));
   await vi.waitFor(() => expect(ipc.argsOf("analytics.playbackBegin")).toHaveLength(1));
   const control = ipc.argsOf("analytics.playbackBegin")[0]!.measurement.control;
@@ -169,6 +178,7 @@ it("reports a live mid-play network failure on its closed binding while recovery
   const binding = "22222222-2222-4222-8222-222222222222";
   ipc.always("analytics.playbackBegin", token);
   ipc.always("analytics.playbackBind", binding);
+
   const channel = {
     subscriptionId: SUBSCRIPTION,
     id: "live",
@@ -181,6 +191,7 @@ it("reports a live mid-play network failure on its closed binding while recovery
     catchupDays: null,
     variants: [{ id: "live", name: "Live", tags: [], quality: null }],
   };
+
   const open = ipc.hold("playback.open");
   player.setAudible(true);
   openWatch();
@@ -193,10 +204,12 @@ it("reports a live mid-play network failure on its closed binding while recovery
       format: "hls",
     }),
   );
+
   for (let second = 0; second < 40; second++) {
     player.element.currentTime += 1;
     await act(async () => vi.advanceTimersByTimeAsync(1000));
   }
+
   expect(player.state().phase.kind).toBe("playing");
   const failure = ipc.hold("playback.failure");
   const playing = ipc.hold("playback.playing");

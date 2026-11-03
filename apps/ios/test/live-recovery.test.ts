@@ -6,14 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nativePlayer } from "./native-player.ts";
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0,
   getItemAsync: async () => null,
   setItemAsync: async () => undefined,
   deleteItemAsync: async () => undefined,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const { native } = await import("./native-files.ts");
@@ -25,16 +29,21 @@ let preferences: typeof import("../src/media-preferences.ts");
 let demo: typeof import("../src/demo.ts");
 let channel: import("../src/library.ts").Channel;
 let revision = 0;
+
 const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((yes) => {
     resolve = yes;
   });
+
   return { promise, resolve };
 }
+
 const catalogue: LiveCatalogue = {
   categories: [{ id: "news", name: "NL | News" }],
   channels: ["FHD", "HD", "SD", "4K"].map((quality, i) => ({
@@ -47,28 +56,37 @@ const catalogue: LiveCatalogue = {
     catchupDays: null,
   })),
 };
+
 function signIn() {
   const liveStream = vi.fn(async (id: string, _signal?: AbortSignal) => ({
     url: `file:${id}.m3u8`,
     format: "hls" as const,
   }));
+
   const source = {
     revision: ++revision,
     login: [],
     provider: { ...demo.demoProvider(), liveStream },
   };
+
   sources.setSource("sub", source);
+
   return source;
 }
+
 async function watch() {
   account.playChannel(channel, "News", { watch: true });
   await tick();
   const { phase } = owner.playbackState.get();
+
   if (phase.kind === "idle") throw new Error("No selected channel");
+
   return phase.item;
 }
+
 const opened = (source: ReturnType<typeof signIn>) =>
   source.provider.liveStream.mock.calls.map(([id]) => id);
+
 function detached(stamp: { attemptId: number; itemId: number }): ObservedDetachResult {
   return {
     kind: "detached",
@@ -78,6 +96,7 @@ function detached(stamp: { attemptId: number; itemId: number }): ObservedDetachR
     providerDisconnect: "unobservable",
   };
 }
+
 const waiting = () =>
   port.observation({
     kind: "state",
@@ -104,9 +123,11 @@ beforeEach(async () => {
   account = await import("../src/account.ts");
   const { buildLibrary } = await import("../src/library.ts");
   const first = buildLibrary([{ subscriptionId: "sub", label: "Home", catalogue }]).channels[0];
+
   if (!first) throw new Error("No grouped channel");
   channel = first;
 });
+
 afterEach(async () => {
   native.sync = null;
   native.undeletable = null;
@@ -183,11 +204,14 @@ describe("Live attempt ownership", () => {
   it("caps the first unstable stretch at three candidates plus four reconnects at 1/2/4/8 seconds", async () => {
     const provider = signIn();
     const item = await watch();
+
     for (let i = 0; i < 2; i++) {
       port.failure({ kind: "missing", evidence: null });
       await tick();
     }
+
     port.state(true);
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       const count = opened(provider).length;
       port.failure({ kind: "network", evidence: null });
@@ -200,6 +224,7 @@ describe("Live attempt ownership", () => {
       expect(opened(provider)).toHaveLength(count + 1);
       port.state(true);
     }
+
     port.failure({ kind: "network", evidence: null });
     expect(owner.playbackState.get().phase).toEqual({
       kind: "failed",
@@ -216,9 +241,11 @@ describe("Live attempt ownership", () => {
       waiting();
       await vi.advanceTimersByTimeAsync(15_000);
     };
+
     const provider = signIn();
     const item = await watch();
     port.state(true);
+
     for (const [delay, playing] of [
       [1000, "11"],
       [2000, "12"],
@@ -231,6 +258,7 @@ describe("Live attempt ownership", () => {
       port.state(true);
       expect(owner.liveStream()).toEqual({ channel: item.id, explicit: false, playing });
     }
+
     await stall();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(opened(provider)).toEqual(["10", "11", "12", "12", "12"]);
@@ -245,34 +273,41 @@ describe("Live attempt ownership", () => {
     const chosen = signIn();
     await watch();
     port.state(true);
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       await stall();
       await vi.advanceTimersByTimeAsync(delay);
       await tick();
       port.state(true);
     }
+
     expect(opened(chosen)).toEqual(["11", "11", "11", "11", "11"]);
   });
 
   it("earns four more reconnects after thirty seconds of real playing on one attempt", async () => {
     const provider = signIn();
     await watch();
+
     for (let i = 0; i < 2; i++) {
       port.failure({ kind: "missing", evidence: null });
       await tick();
     }
+
     port.state(true);
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       port.failure();
       await vi.advanceTimersByTimeAsync(delay);
       await tick();
       port.state(true);
     }
+
     for (let i = 0; i < 3; i++) {
       await vi.advanceTimersByTimeAsync(10_000);
       port.currentTime += 10;
       port.state(true);
     }
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       const count = opened(provider).length;
       port.failure();
@@ -282,6 +317,7 @@ describe("Live attempt ownership", () => {
       await tick();
       port.state(true);
     }
+
     port.failure();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(opened(provider)).toEqual(["10", "11", ...Array<string>(9).fill("12")]);
@@ -292,12 +328,14 @@ describe("Live attempt ownership", () => {
     const provider = signIn();
     await watch();
     port.state(true);
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       port.failure();
       await vi.advanceTimersByTimeAsync(delay);
       await tick();
       port.state(true);
     }
+
     port.state(false);
     await vi.advanceTimersByTimeAsync(60_000);
     port.state(true);
@@ -345,19 +383,27 @@ describe("Live attempt ownership", () => {
       const provider = signIn();
       await watch();
       port.state(true);
+
       if (action === "pip") owner.pictureInPicture(true);
+
       if (action === "airplay") {
         port.emit("isExternalPlaybackActiveChange", { isExternalPlaybackActive: true });
         await owner.closeWatch();
       }
+
       const failed = vi.fn();
       owner.onPlaybackFailure(failed);
       port.failure({ kind: "network", evidence: null });
       expect(failed).not.toHaveBeenCalled();
+
       if (action === "pause") owner.togglePause();
+
       if (action === "close") await owner.closeWatch();
+
       if (action === "aside") owner.setAside();
+
       if (action === "pip") owner.pictureInPicture(false);
+
       if (action === "airplay")
         port.emit("isExternalPlaybackActiveChange", { isExternalPlaybackActive: false });
       expect(owner.playbackState.get().phase).toMatchObject({
@@ -471,6 +517,7 @@ describe("Live attempt ownership", () => {
     });
     provider.provider.liveStream.mockImplementation(async (id) => {
       order.push(`lookup:${id}`);
+
       return { url: `file:${id}.m3u8`, format: "hls" };
     });
     await watch();
@@ -564,13 +611,16 @@ describe("attended Live deadlines", () => {
     owner.onPlaybackFailure(failed);
     const attaching = deferred<void>();
     const replace = port.replaceObservedAsync.getMockImplementation();
+
     if (!replace) throw new Error("No native attach port");
     port.replaceObservedAsync.mockImplementationOnce(async (...args) => {
       await attaching.promise;
       const attached = await replace(...args);
       port.state(false); // The attached item's initial fact, before its admission reply.
+
       return attached;
     });
+
     try {
       const item = await watch();
       expect(port.replaceObservedAsync).toHaveBeenCalledOnce();
@@ -614,6 +664,7 @@ describe("attended Live deadlines", () => {
     const outcome = vi.fn();
     const failed = vi.fn();
     owner.onPlaybackFailure(failed);
+
     const item = {
       id: channel.key,
       subscriptionId: channel.subscriptionId,
@@ -623,6 +674,7 @@ describe("attended Live deadlines", () => {
       next: false,
       versions: false,
     };
+
     await owner.play(
       item,
       {
@@ -633,6 +685,7 @@ describe("attended Live deadlines", () => {
             variantId: "10",
             open: async (signal) => {
               const stream = await provider.provider.liveStream("10", signal);
+
               return { url: stream.url, container: "m3u8" };
             },
           },
@@ -834,12 +887,14 @@ describe("attended Live deadlines", () => {
     expect(outcome).not.toHaveBeenCalled();
     expect(failed).not.toHaveBeenCalled();
     port.state(true);
+
     for (const delay of [1000, 2000, 4000, 8000]) {
       port.failure();
       await vi.advanceTimersByTimeAsync(delay);
       await tick();
       port.state(true);
     }
+
     port.failure();
     port.failure();
     expect(outcome.mock.calls).toEqual([[true]]);

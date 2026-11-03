@@ -14,14 +14,17 @@ const home = writePackages(readFileSync(join(root, "index.html"), "utf8"));
 const css = readFileSync(join(root, "src/styles.css"), "utf8");
 
 const STORE = "https://apps.microsoft.com/detail/9N45GG76ZP4T?referrer=appbadge";
+
 const HOMEBREW = [
   "Homebrew · macOS, Apple silicon",
   "https://github.com/Mr-Streamer-OSS/homebrew-tap",
 ];
+
 const BREW_UPDATES = [
   "Homebrew updates and reinstalling",
   "/docs/updates#installed-through-homebrew",
 ];
+
 const AUR = ["AUR · Arch Linux, x86_64", "https://aur.archlinux.org/packages/mrstreamer-bin"];
 const AUR_UPDATES = ["Install and update on Arch Linux", "/docs/updates#installed-through-the-aur"];
 const FILES = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download";
@@ -37,9 +40,11 @@ function open(html: string, system?: System, downloads?: Downloads): void {
     /<link rel="stylesheet"[^>]*>/,
     `<style>${css}</style>`,
   );
+
   if (system) document.documentElement.dataset["os"] = system;
   else document.documentElement.removeAttribute("data-os");
 }
+
 const openDownload = (system?: System, downloads?: Downloads) =>
   open(renderPage("download/index.html", downloads ?? null, null), system, downloads);
 
@@ -113,6 +118,7 @@ describe("the download page", () => {
         link.getAttribute("href"),
       ]),
     }));
+
   /** The systems the rows list. */
   const rows = () => shown(".row").map((row) => said(row.querySelector("dt") ?? row));
 

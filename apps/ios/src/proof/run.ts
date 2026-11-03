@@ -18,16 +18,19 @@ const describe = (error: unknown) =>
  */
 export async function runCases(context: ProofContext): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
+
   for (const group of groups) {
     const started = Date.now();
     const name = `${group.name}: loads`;
     let loaded;
+
     try {
       loaded = await group.load();
     } catch (error) {
       results.push({ name, compare: "same", ms: Date.now() - started, thrown: describe(error) });
       continue;
     }
+
     // A development build reports a module that throws while it loads to the error overlay and
     // resolves its import without exports, instead of rejecting it.
     if (!Array.isArray(loaded.cases)) {
@@ -35,8 +38,10 @@ export async function runCases(context: ProofContext): Promise<CaseResult[]> {
       results.push({ name, compare: "same", ms: Date.now() - started, thrown });
       continue;
     }
+
     for (const proof of loaded.cases) {
       const begun = Date.now();
+
       try {
         const value = await proof.run(context);
         results.push({ name: proof.name, compare: proof.compare, ms: Date.now() - begun, value });
@@ -46,5 +51,6 @@ export async function runCases(context: ProofContext): Promise<CaseResult[]> {
       }
     }
   }
+
   return results;
 }

@@ -26,6 +26,7 @@ const DECODERS: readonly Codec[] = ["h264", "aac"];
 /** The app's services on `dataDir`, as a start of the app has them. */
 async function started(dataDir: string, now?: number) {
   const services = mainLayer(testConfig(dataDir));
+
   const runtime = runtimeFor(
     now === undefined
       ? services
@@ -37,6 +38,7 @@ async function started(dataDir: string, now?: number) {
           ),
         ),
   );
+
   return {
     runtime,
     /**
@@ -51,10 +53,13 @@ async function started(dataDir: string, now?: number) {
       const viewing = Context.get(services, ViewingRecord);
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
+
       const wait = Effect.promise(() => {
         arrived.resolve();
+
         return released.promise;
       });
+
       const slowed =
         held === "queued"
           ? Context.add(services, Subscriptions, {
@@ -65,12 +70,15 @@ async function started(dataDir: string, now?: number) {
               ...viewing,
               erase: (account) => Effect.andThen(viewing.erase(account), wait),
             });
+
       const roster = await promised(
         runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
         Roster,
       );
+
       const done = roster.remove(subscriptionId, true);
       await arrived.promise;
+
       return { done, release: () => released.resolve() };
     },
     roster: await promised(runtime, Roster),
@@ -94,6 +102,7 @@ async function watching(url: string) {
   const controller = new AbortController();
   const response = await fetch(url, { signal: controller.signal });
   await response.body?.getReader().read();
+
   return { status: response.status, stop: () => controller.abort() };
 }
 
@@ -103,13 +112,16 @@ async function watching(url: string) {
  */
 async function withOne() {
   const dataDir = await tempDir();
+
   const [first, second] = [
     await fakeProvider({ slotReleaseMs: 0 }),
     await fakeProvider({ slotReleaseMs: 0, channels: 200, second: true }),
   ];
+
   const app = await started(dataDir);
   const a = (await app.subscriptions.add(demoLogin(first))).id;
   await app.library.refresh(a);
+
   return { ...app, dataDir, first, second, a };
 }
 
@@ -120,6 +132,7 @@ async function withTwo() {
   await app.library.refresh(b);
   await app.onDemand.refresh(app.a);
   await app.onDemand.refresh(b);
+
   return { ...app, b };
 }
 
@@ -129,6 +142,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const app = await started(await tempDir());
     const channels = provider.hold("channels");
     const guide = provider.hold("guide");
+
     try {
       const saved = await app.roster.add(demoLogin(provider));
       await channels.arrived;
@@ -193,20 +207,24 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
       const a = (await app.subscriptions.add(demoLogin(first))).id;
       const b = (await app.subscriptions.add(demoLogin(second))).id;
       const before = new Map<string, number>();
+
       if (trigger === "startup") {
         for (const id of [a, b]) {
           await app.library.refresh(id);
           await app.guide.refresh(id);
           await app.onDemand.refresh(id);
         }
+
         for (const row of (await app.onDemand.status()).lists)
           before.set(row.subscriptionId, row.fetchedAt ?? 0);
         await app.runtime.dispose();
         app = await started(dataDir, Date.now() + 13 * 60 * 60 * 1000);
       }
+
       const guide = first.hold("guide");
       const titles = first.hold("titles");
       let refreshing: Promise<void> | undefined;
+
       try {
         if (trigger === "repair") {
           await app.roster.update(a, { secret: "demo" });
@@ -224,6 +242,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
               { subscriptionId: a, fetchedAt: expect.any(Number) },
               { subscriptionId: b, fetchedAt: expect.any(Number) },
             ]);
+
             for (const row of rows)
               expect(row.fetchedAt).toBeGreaterThan(before.get(row.subscriptionId) ?? 0);
           },
@@ -232,6 +251,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
         expect((await page).total).toBeGreaterThan(0);
         expect(first.titleListRequests()).toBe(trigger === "startup" ? 8 : 4);
         expect(second.titleListRequests()).toBe(trigger === "startup" ? 8 : 4);
+
         for (const provider of [first, second]) {
           expect(provider.fileRequests()).toBe(0);
           expect(provider.detailRequests()).toBe(0);
@@ -292,23 +312,28 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const guide = Context.get(services, Guide);
     const arrived = Promise.withResolvers<void>();
     const released = Promise.withResolvers<void>();
+
     const slowed = Context.add(services, Guide, {
       ...guide,
       forget: (subscription) =>
         Effect.andThen(
           Effect.promise(() => {
             arrived.resolve();
+
             return released.promise;
           }),
           guide.forget(subscription),
         ),
     });
+
     const roster = await promised(
       runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
       Roster,
     );
+
     const folder = join(dataDir, "subscriptions", b);
     const removing = roster.remove(b, false);
+
     try {
       await arrived.promise;
       // It admits no new work, while already admitted writes still have their folder.
@@ -318,6 +343,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
       released.resolve();
       await removing;
     }
+
     expect(await stat(folder).catch(() => null)).toBeNull();
   });
 
@@ -380,11 +406,13 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const app = await withTwo();
     const { roster, subscriptions, viewing, watchlist, dataDir, second, a, b } = app;
     const saved = () => watchlist.list({ sort: "saved", offset: 0, limit: 10 });
+
     const database = (sql: string) => {
       const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
       db.exec(sql);
       db.close();
     };
+
     await viewing.setFavourite(randomUUID(), { subscriptionId: b, id: "2014" }, true);
     const entry = await watchlist.save("movie", { subscriptionId: b, id: "91001" });
     // The database gives out at the watchlist, after the favourites went.
@@ -446,6 +474,7 @@ describe("the saved subscriptions", { timeout: 30_000 }, () => {
     const before = await library.status();
     const titles = (await onDemand.status()).lists;
     const guides = [first.guideRequests(), second.guideRequests()];
+
     for (const provider of [first, second]) {
       provider.failCatalogue(500);
       provider.failTitles(500);

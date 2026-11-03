@@ -6,8 +6,10 @@ import { Licences } from "../src/main/services/licences.ts";
 import { promised, runtimeFor, tempDir } from "./support.ts";
 
 const MIT = "MIT License\n\nCopyright (c) Someone\n\nPermission is hereby granted, free of charge.";
+
 const APACHE =
   "Apache License\nVersion 2.0, January 2004\n\nTERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION";
+
 const GPL =
   "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n\nTERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION";
 
@@ -22,6 +24,7 @@ function installed(name: string, json: object, files: Record<string, string> = {
 /** A fake app folder with `files`, and a licences.config.json that adds nothing unless told to. */
 async function app(files: Record<string, string>, config: object = {}): Promise<string> {
   const root = await tempDir();
+
   const all = {
     "licences.config.json": JSON.stringify({
       packages: {},
@@ -35,10 +38,12 @@ async function app(files: Record<string, string>, config: object = {}): Promise<
     }),
     ...files,
   };
+
   for (const [file, text] of Object.entries(all)) {
     await mkdir(dirname(join(root, file)), { recursive: true });
     await writeFile(join(root, file), text);
   }
+
   return root;
 }
 
@@ -52,6 +57,7 @@ async function problems(
     () => new Error("The notices were written."),
     (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
   );
+
   return failure.message;
 }
 
@@ -153,8 +159,10 @@ describe("collecting notices", () => {
       ),
       "licences/emitter-LICENSE": MIT,
     };
+
     const modules = (root: string) => [`${root}/node_modules/player/dist/player.js`];
     const unknown = await app(files);
+
     const described = await app(files, {
       embedded: {
         "player@1.0.0": [
@@ -172,11 +180,13 @@ describe("collecting notices", () => {
     expect(await problems(unknown, modules(unknown))).toMatch(
       /player@1\.0\.0 carries emitter in its prebuilt files/,
     );
+
     const { notices } = await collectNotices({
       root: described,
       modules: modules(described),
       variables: {},
     });
+
     expect(notices.map(({ id }) => id)).toEqual(["emitter@2.0.0", "player@1.0.0"]);
   });
 
@@ -243,6 +253,7 @@ describe("collecting notices", () => {
       ...installed("electron", { version: "2.0.0", license: "MIT" }, { LICENSE: MIT }),
       "licences/codec.txt": "Chromium's codec at {CODEC_COMMIT}, in Electron {electron}",
     };
+
     const reviewedFor = (version: string) =>
       app(files, {
         packages: { electron: "Every installer carries it." },
@@ -261,11 +272,13 @@ describe("collecting notices", () => {
     expect(await problems(await reviewedFor("1.0.0"), [])).toMatch(
       /electron 2\.0\.0 is installed, and the notices and source archives were reviewed for 1\.0\.0/,
     );
+
     const { notices } = await collectNotices({
       root: await reviewedFor("2.0.0"),
       modules: [],
       variables: {},
     });
+
     expect(notices).toContainEqual({
       id: "Codec@abc123",
       name: "Codec",
@@ -282,6 +295,7 @@ describe("collecting notices", () => {
       ...installed("blob", { license: "LicenseRef-proprietary" }, { LICENSE: "No rights." }),
       "licences/driver.txt": "A vendor's driver. All rights reserved.",
     };
+
     const driver = (licence: string, exceptions?: Record<string, string>) =>
       app(files, {
         components: [
@@ -295,6 +309,7 @@ describe("collecting notices", () => {
           },
         ],
       });
+
     const explained = { "LicenseRef-proprietary": "The vendor's own file, beside the app." };
 
     expect(await problems(await driver("LicenseRef-proprietary"), [])).toMatch(
@@ -320,10 +335,12 @@ describe("collecting notices", () => {
 
   it("needs every release file a notice links among the sources, and a notice for every source", async () => {
     const release = "https://github.com/Mr-Streamer-OSS/MrStreamer/releases/download";
+
     const files = {
       "licences/codec.txt": `Codec, with its source and its patches on this release:\n${release}/v{app}/codec-1.tar.xz\n${release}/v{app}/patches-1.zip`,
       "licences/old.txt": `Old, from an earlier release:\n${release}/v0.0.1/codec-1.tar.xz`,
     };
+
     const codec = {
       name: "Codec",
       version: "1",
@@ -331,17 +348,20 @@ describe("collecting notices", () => {
       source: `${release}/v{app}/codec-1.tar.xz`,
       files: ["licences/codec.txt"],
     };
+
     const old = {
       ...codec,
       name: "Old",
       source: "https://example.com",
       files: ["licences/old.txt"],
     };
+
     const download = (file: string) => ({
       file,
       url: `https://example.com/${file}`,
       sha256: "0".repeat(64),
     });
+
     const both = [download("codec-1.tar.xz"), download("patches-1.zip")];
     const build = (config: object) => app(files, { components: [codec], ...config });
     const version = { app: "1.2.3" };
@@ -367,6 +387,7 @@ describe("collecting notices", () => {
       modules: [],
       variables: version,
     });
+
     expect(notices.map(({ source }) => source)).toEqual([`${release}/v1.2.3/codec-1.tar.xz`]);
   });
 });
@@ -412,13 +433,16 @@ describe("reading notices", () => {
         },
       ],
     });
+
     const manifest = await collectNotices({
       root,
       modules: [`${root}/node_modules/player/index.js`],
       variables: {},
     });
+
     await writeFile(join(root, "third-party.json"), JSON.stringify(manifest));
     await writeFile(join(root, "LICENSES.chromium.html"), CREDITS);
+
     return promised(
       runtimeFor(
         Licences.layer({
@@ -480,6 +504,7 @@ describe("reading notices", () => {
 
   it("fails when the build wrote no notices", async () => {
     const root = await tempDir();
+
     const service = await promised(
       runtimeFor(
         Licences.layer({ manifest: join(root, "third-party.json"), credits: [], versions: {} }),

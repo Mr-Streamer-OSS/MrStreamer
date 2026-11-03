@@ -30,6 +30,7 @@ describe("Xtream live streams", () => {
 describe("Xtream catch-up recordings", () => {
   const panel: typeof fetch = async () =>
     Response.json({ user_info: { auth: 1 }, server_info: { timezone: "Europe/Amsterdam" } });
+
   // 14:05:30 UTC on 13 October 2026, for an hour: 16:05 in Amsterdam, from the minute before.
   const window = { start: Date.UTC(2026, 9, 13, 14, 5, 30), end: Date.UTC(2026, 9, 13, 15, 5) };
 
@@ -42,6 +43,7 @@ describe("Xtream catch-up recordings", () => {
       fetch: panel,
       ...defined({ live }),
     });
+
     expect(await provider.archiveStream("1001", window)).toEqual({
       url: `http://panel.test:8080/timeshift/fixture%20user/p%2Fw/60/2026-10-13:16-05/1001.${extension}`,
       format,
@@ -55,12 +57,14 @@ describe("Xtream catch-up recordings", () => {
 describe("Xtream catalogue answers", () => {
   const categories = [{ category_id: "1", category_name: "News" }];
   const row = { stream_id: 7, series_id: 7, name: "Seven", category_id: "1" };
+
   /** A provider whose lists answer `list`, and whose categories answer `categoryList`. */
   const answering = (list: unknown, categoryList: unknown = categories) =>
     xtreamProvider(account, {
       userAgent: "fixture",
       fetch: async (input) => {
         const action = new URL(String(input)).searchParams.get("action") ?? "";
+
         return Response.json(action.endsWith("categories") ? categoryList : list);
       },
     });

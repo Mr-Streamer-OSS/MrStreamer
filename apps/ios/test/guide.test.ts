@@ -9,6 +9,7 @@ import type { Source } from "../src/sources.ts";
 import { guideFixture } from "./native-guide.ts";
 
 const at = Date.now();
+
 const part = (subscriptionId = "a") =>
   finish(
     partSteps({
@@ -48,6 +49,7 @@ const part = (subscriptionId = "a") =>
       },
     }),
   );
+
 const source: Source = {
   revision: 1,
   login: ["fixture", "canary"],
@@ -56,27 +58,35 @@ const source: Source = {
     { userAgent: "fixture" },
   ),
 };
+
 const programme = { start: at - 60000, stop: at + 60000, title: "News", description: "Details" };
 const empty = { programmes: [], cursor: null };
+
 function setup() {
   const { native, control } = guideFixture();
   const sources = new Map<string, Source>();
+
   const owner = createGuide(
     () => native,
     () => at,
     (id) => sources.get(id),
   );
+
   control.activations.set("a", {
     lease: "offline",
     generation: { id: "db", fetchedAt: at, until: at + 86400_000 },
   });
+
   return { owner, native, control, sources };
 }
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
+
   const promise = new Promise<T>((r) => {
     resolve = r;
   });
+
   return { promise, resolve };
 }
 
@@ -131,10 +141,13 @@ describe("guide public owner", () => {
     let calls = 0;
     control.prepare = () => {
       calls++;
+
       return held.promise;
     };
+
     const first = owner.refresh("a"),
       second = owner.refresh("a");
+
     await Promise.resolve();
     expect(calls).toBe(1);
     held.resolve({ kind: "failed", error: "gzip" });
@@ -171,6 +184,7 @@ describe("guide public owner", () => {
   it("reads the local calendar day when midnight is skipped", async () => {
     const previous = process.env.TZ;
     process.env.TZ = "America/Santiago";
+
     try {
       const when = new Date(2026, 8, 6, 12).getTime();
       const from = new Date(2026, 8, 6);
@@ -182,11 +196,13 @@ describe("guide public owner", () => {
         lease: "midnight",
         generation: { id: "day", fetchedAt: when, until: until.getTime() },
       });
+
       const owner = createGuide(
         () => native,
         () => when,
         () => undefined,
       );
+
       await owner.restore(["a"]);
       owner.setPart(part());
       control.query = async () => ({
@@ -229,19 +245,23 @@ describe("guide public owner", () => {
   it("reports a whole-job deadline and backs off without an automatic retry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(at);
+
     try {
       const { native, control } = guideFixture();
       const held = deferred<Awaited<ReturnType<GuideNative["prepare"]>>>();
       let prepares = 0;
       control.prepare = () => {
         prepares++;
+
         return held.promise;
       };
+
       const owner = createGuide(
         () => native,
         Date.now,
         () => source,
       );
+
       await owner.attach("a");
       const refreshing = owner.refresh("a");
       await Promise.resolve();
@@ -261,12 +281,14 @@ describe("guide public owner", () => {
     const owner = createGuide(() => {
       throw new Error("missing");
     });
+
     await owner.restore(["a"]);
     expect(owner.status("a").error).toBe("unavailable");
     expect(await owner.forget("a")).toBe(false);
   });
   it("uses a minute foreground clock only while subscribed and never fast-retries a failure", async () => {
     vi.useFakeTimers();
+
     try {
       const { owner, control } = setup();
       await owner.restore(["a"]);
@@ -291,6 +313,7 @@ describe("external guides and mappings", () => {
   const external = { revision: 1, login: [], provider: {} };
   /** The ids each native read asked for. */
   const asked: (readonly string[])[] = [];
+
   /** Answers each lease's guide ids: what the native reader would find in its generation. */
   function guides(native: GuideNative, control: ReturnType<typeof guideFixture>["control"]) {
     const has = new Map<string, readonly string[]>();
@@ -299,13 +322,16 @@ describe("external guides and mappings", () => {
       asked.push(ids);
       const owner = [...control.activations].find(([, value]) => value.lease === lease)?.[0];
       const guideId = ids.find((id) => has.get(owner ?? "")?.includes(id)) ?? null;
+
       return {
         kind: "ok",
         value: { guideId, rows: guideId ? [{ ...programme, title: owner! }] : [], more: false },
       };
     };
+
     return has;
   }
+
   async function twoGuides() {
     const { owner, native, control, sources } = setup();
     control.activations.set("xmltv-1", {
@@ -317,8 +343,10 @@ describe("external guides and mappings", () => {
     owner.setPart(part());
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
+
     return { owner, has, control, native, sources };
   }
+
   const titleOf = async (owner: ReturnType<typeof createGuide>, key: string) =>
     (await owner.listings([key])).get(key)?.now?.title ?? null;
 
@@ -375,6 +403,7 @@ describe("external guides and mappings", () => {
       const day = { from: from.getTime(), until: new Date(from).setDate(from.getDate() + 1) };
       expect((await owner.schedule("a:1", day)).programmes).toHaveLength(1);
       const read = owner.withdrawn("a:1", day.from);
+
       if (change === "reload") owner.setPart(part());
       else await owner.forget("a");
       expect(owner.withdrawn("a:1", day.from)).not.toBe(read);
@@ -402,18 +431,22 @@ describe("external guides and mappings", () => {
   it("still tells a withdrawn channel day after a long session's withdrawals of others", async () => {
     const { owner, has } = await twoGuides();
     has.set("xmltv-1", ["trusted.tv"]);
+
     const dayBefore = (days: number) => {
       const from = new Date(at);
       from.setHours(0, 0, 0, 0);
       from.setDate(from.getDate() - days);
       const until = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+
       return { from: from.getTime(), until: until.getTime() };
     };
+
     const today = dayBefore(0);
     const read = owner.withdrawn("a:1", today.from);
     const { programmes } = await owner.schedule("a:1", today);
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
+
     // Days back over years, all withdrawn by the next configure, as a guide reload does.
     for (let days = 1; days <= 5000; days++) await owner.schedule("a:2", dayBefore(days));
     owner.configure(new Map([["xmltv-1", external]]), new Map());
@@ -461,8 +494,10 @@ describe("external guides and mappings", () => {
     const held = deferred<void>();
     native.query = async (...args) => {
       await held.promise;
+
       return query(...args);
     };
+
     const reading = owner.schedule("a:1", day);
     await owner.refresh("xmltv-1");
     held.resolve();
@@ -498,8 +533,10 @@ describe("external guides and mappings", () => {
     const asked: unknown[][] = [];
     native.prepare = async (...args) => {
       asked.push(args);
+
       return { kind: "failed", error: "xml" };
     };
+
     owner.configure(
       new Map([
         [
@@ -538,6 +575,7 @@ describe("native transport adapter", () => {
   it("keeps yesterday's full calendar day when today's midnight is skipped", async () => {
     const previous = process.env.TZ;
     process.env.TZ = "America/Santiago";
+
     try {
       const when = new Date(2026, 8, 6, 12).getTime();
       const { native } = guideFixture();
@@ -563,6 +601,7 @@ describe("native transport adapter", () => {
     const urls: string[] = [];
     native.prepare = async (_lease, _job, url) => {
       urls.push(url);
+
       return {
         kind: "ok",
         value: {
@@ -574,6 +613,7 @@ describe("native transport adapter", () => {
         },
       };
     };
+
     const result = await ingest(
       native,
       "l",
@@ -583,6 +623,7 @@ describe("native transport adapter", () => {
       at,
       () => true,
     );
+
     expect(result).toEqual({ kind: "failed", error: "redirect" });
     expect(urls).toHaveLength(2);
   });
@@ -593,6 +634,7 @@ describe("native transport adapter", () => {
       prepared.push({ url, uncertain });
       // A hop without the value is followed; a later one with it is not.
       const location = ["http://fixture.test/moved", "http://fixture.test/guide?sig=short-sig"];
+
       return {
         kind: "ok",
         value:
@@ -601,6 +643,7 @@ describe("native transport adapter", () => {
             : { kind: "candidate", id: "candidate" },
       };
     };
+
     const playlist: Source = {
       ...source,
       login: ["", "canary"],
@@ -615,11 +658,13 @@ describe("native transport adapter", () => {
         }),
       },
     };
+
     const owner = createGuide(
       () => native,
       Date.now,
       () => playlist,
     );
+
     await owner.attach("a");
     await owner.refresh("a");
     expect(prepared).toEqual([
@@ -675,17 +720,22 @@ describe("guide control and publication lifecycle", () => {
       kind: "ok",
       value: { guideId: "trusted.tv", rows: [programme], more: false },
     });
+
     const committed = deferred<void>(),
       ack = deferred<void>();
+
     const attach = native.attach;
     native.attach = async (...args) => {
       const result = await attach(...args);
       committed.resolve();
       await ack.promise;
+
       return result;
     };
+
     sources.set("a", source);
     const activating = owner.attach("a");
+
     try {
       await committed.promise;
       const result = await owner.listings(["a:1", "b:1"]);
@@ -695,6 +745,7 @@ describe("guide control and publication lifecycle", () => {
       ack.resolve();
       await activating;
     }
+
     expect((await owner.listings(["a:1"])).get("a:1")?.now).toEqual(programme);
   });
 
@@ -710,23 +761,31 @@ describe("guide control and publication lifecycle", () => {
       });
       await owner.restore(["a"]);
       owner.setPart(part());
+
       const gate = deferred<void>(),
         committed = deferred<void>();
+
       const attach = native.attach;
       native.attach = async (...args) => {
         if (phase === "before") await gate.promise;
         const result = await attach(...args);
         committed.resolve();
+
         if (phase === "after") await gate.promise;
+
         return result;
       };
+
       const prepares: string[] = [];
       native.prepare = async (lease) => {
         prepares.push(lease);
+
         return { kind: "failed", error: "network" };
       };
+
       sources.set("a", source);
       const activating = owner.attach("a");
+
       try {
         if (phase === "after") await committed.promise;
         owner.foreground();
@@ -756,8 +815,10 @@ describe("guide control and publication lifecycle", () => {
     const attach = native.attach;
     native.attach = async (...args) => {
       await gate.promise;
+
       return attach(...args);
     };
+
     control.query = async () => ({
       kind: "ok",
       value: { guideId: "trusted.tv", rows: [programme], more: false },
@@ -783,9 +844,11 @@ describe("guide control and publication lifecycle", () => {
       value: { guideId: "trusted.tv", rows: [programme], more: false },
     });
     control.prepare = async () => ({ kind: "failed", error: "network" });
+
     const request = vi
       .spyOn(source.provider, "liveGuideRequest")
       .mockResolvedValue({ kind: "request", url: "https://fixture.test/guide", headers: {} });
+
     try {
       await owner.refresh("a");
       expect(owner.status("a")).toMatchObject({
@@ -809,9 +872,11 @@ describe("guide control and publication lifecycle", () => {
     sources.set("a", source);
     await owner.attach("a");
     const attach = vi.spyOn(native, "attach").mockRejectedValueOnce(new Error("unavailable"));
+
     const request = vi
       .spyOn(source.provider, "liveGuideRequest")
       .mockResolvedValue({ kind: "none" });
+
     try {
       await owner.refresh("a");
       expect(owner.status("a").activity).toBe("idle");
@@ -838,11 +903,13 @@ describe("guide control and publication lifecycle", () => {
     let prepares = 0;
     control.prepare = async () =>
       ++prepares === 1 ? held.promise : { kind: "failed", error: "network" };
+
     const owner = createGuide(
       () => native,
       Date.now,
       () => source,
     );
+
     try {
       await owner.attach("a");
       await vi.advanceTimersByTimeAsync(0);
@@ -865,11 +932,13 @@ describe("guide control and publication lifecycle", () => {
       vi.setSystemTime(at);
       const { native, control } = guideFixture();
       const sources = new Map([["a", source]]);
+
       const owner = createGuide(
         () => native,
         Date.now,
         (key) => sources.get(key),
       );
+
       control.activations.set("a", {
         lease: "restored",
         generation: { id: "old", fetchedAt: at, until: at + 86400_000 },
@@ -878,15 +947,19 @@ describe("guide control and publication lifecycle", () => {
       await owner.attach("a");
       owner.setPart(part());
       control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "candidate" } });
+
       const committed = deferred<void>(),
         ack = deferred<void>();
+
       const publish = native.publish;
       native.publish = async (...args) => {
         const result = await publish(...args);
         committed.resolve();
         await ack.promise;
+
         return result;
       };
+
       native.query = async (_lease, generation) =>
         control.activations.get("a")?.generation?.id === generation
           ? {
@@ -898,17 +971,23 @@ describe("guide control and publication lifecycle", () => {
               },
             }
           : { kind: "changed" };
+
       try {
         const refreshing = owner.refresh("a");
         await committed.promise;
         const current = control.activations.get("a")?.generation?.id;
+
         if (change === "background") owner.background();
+
         if (change === "deadline") await vi.advanceTimersByTimeAsync(180000);
+
         if (change === "removal") await owner.forget("a");
+
         if (change === "replacement") sources.set("a", { ...source, revision: 2 });
         ack.resolve();
         await refreshing;
         const row = (await owner.listings(["a:1"])).get("a:1");
+
         if (change === "removal" || change === "replacement") expect(row?.now).toBeNull();
         else {
           expect(row?.now?.title).toBe(current);
@@ -943,40 +1022,54 @@ describe("guide results after final asynchronous cleanup", () => {
         until.setDate(until.getDate() + 1);
         const day = { from: from.getTime(), until: until.getTime() };
         const detail = (await owner.schedule("a:1", day)).programmes[0]!.detail;
+
         const held = deferred<void>(),
           reached = deferred<void>();
+
         const baseQuery = native.query,
           baseCancel = native.cancel;
+
         let readJob = "";
         native.query = async (...args) => {
           readJob = args[2];
+
           return baseQuery(...args);
         };
+
         native.cancel = async (job) => {
           if (job === readJob) {
             reached.resolve();
             await held.promise;
           }
+
           await baseCancel(job);
         };
+
         const controller = new AbortController();
         const options = { signal: controller.signal };
+
         const pending =
           method === "listings"
             ? owner.listings(["a:1"], options)
             : method === "schedule"
               ? owner.schedule("a:1", day, undefined, options)
               : owner.programme(detail, options);
+
         await reached.promise;
+
         if (change === "removal") await owner.forget("a");
+
         if (change === "part") owner.setPart(part());
+
         if (change === "generation") {
           control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "new" } });
           await owner.refresh("a");
         }
+
         if (change === "abort") controller.abort();
         held.resolve();
         const result = await pending;
+
         if (result instanceof Map) expect(result.get("a:1")?.now, change).toBeNull();
         else if (result && "programmes" in result) expect(result.programmes, change).toEqual([]);
         else expect(result, change).toBeNull();
@@ -991,30 +1084,43 @@ describe("guide results after final asynchronous cleanup", () => {
       await owner.restore(["a"]);
       sources.set("a", source);
       await owner.attach("a");
+
       const value = part(),
         first = value.channels[0]!;
+
       owner.setPart({ ...value, byId: new Map([...value.byId, ["third-alias", first]]) });
+
       const held = deferred<Awaited<ReturnType<GuideNative["query"]>>>(),
         reached = deferred<void>();
+
       let calls = 0;
       control.query = async () => {
         if (++calls === 3) {
           reached.resolve();
+
           return held.promise;
         }
+
         return { kind: "ok", value: { guideId: "trusted.tv", rows: [programme], more: false } };
       };
+
       const controller = new AbortController();
+
       const pending = owner.listings(["a:1", "a:2", "a:third-alias"], {
         signal: controller.signal,
       });
+
       await reached.promise;
+
       if (change === "removal") await owner.forget("a");
+
       if (change === "part") owner.setPart(part());
+
       if (change === "generation") {
         control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "new" } });
         await owner.refresh("a");
       }
+
       if (change === "abort") controller.abort();
       held.resolve({ kind: "ok", value: { guideId: "trusted.tv", rows: [], more: false } });
       const result = await pending;
@@ -1027,6 +1133,7 @@ describe("guide results after final asynchronous cleanup", () => {
   it("does not return a saved result after the query budget expires during drain", async () => {
     vi.useFakeTimers();
     const { owner, native, control } = setup();
+
     try {
       await owner.restore(["a"]);
       owner.setPart(part());
@@ -1034,12 +1141,15 @@ describe("guide results after final asynchronous cleanup", () => {
         kind: "ok",
         value: { guideId: "trusted.tv", rows: [programme], more: false },
       });
+
       const held = deferred<void>(),
         reached = deferred<void>();
+
       native.cancel = async () => {
         reached.resolve();
         await held.promise;
       };
+
       const pending = owner.listings(["a:1"]);
       await reached.promise;
       await vi.advanceTimersByTimeAsync(2001);
@@ -1053,6 +1163,7 @@ describe("guide results after final asynchronous cleanup", () => {
 
 describe("programme search", () => {
   const external = { revision: 1, login: [], provider: {} };
+
   const channel = (id: string, name: string, guideId: string) => ({
     id,
     name,
@@ -1062,6 +1173,7 @@ describe("programme search", () => {
     guideId,
     catchupDays: null,
   });
+
   /** News reads news.tv from its provider; Sport reads sport.tv, which only the external guide has. */
   const channels = () =>
     finish(
@@ -1078,12 +1190,14 @@ describe("programme search", () => {
         },
       }),
     );
+
   const show = (title: string, start: number, stop = start + 3600_000) => ({
     start,
     stop,
     title,
     description: `About ${title}`,
   });
+
   /**
    * Native search and reads over what each guide holds, by guide id: matches its words as the
    * native reader folds titles, and reads a channel's programmes by the first id it holds.
@@ -1094,16 +1208,20 @@ describe("programme search", () => {
       lease: "external",
       generation: { id: "db-x", fetchedAt: at, until: at + 86400_000 },
     });
+
     const held = new Map<string, Map<string, ReturnType<typeof show>[]>>([
       ["a", new Map()],
       ["xmltv-1", new Map()],
     ]);
+
     const ownerOf = (lease: string) =>
       [...control.activations].find(([, value]) => value.lease === lease)?.[0] ?? "";
+
     const searched: { owner: string; ids: readonly string[]; limit: number }[] = [];
     native.search = async (lease, _generation, _job, ids, words, now, limit) => {
       const guide = held.get(ownerOf(lease))!;
       searched.push({ owner: ownerOf(lease), ids, limit });
+
       const rows = ids
         .flatMap((guideId) => (guide.get(guideId) ?? []).map((row) => ({ ...row, guideId })))
         .filter(
@@ -1112,28 +1230,38 @@ describe("programme search", () => {
         .sort((a, b) => Number(a.start > now) - Number(b.start > now) || a.start - b.start)
         .slice(0, limit)
         .map(({ guideId, start, stop, title }) => ({ guideId, start, stop, title }));
+
       return { kind: "ok", value: { rows } };
     };
+
     native.current = async (lease, _generation, _job, now) => {
       const guide = held.get(ownerOf(lease));
+
       if (!guide) return { kind: "changed" };
       const ids = [...guide].filter(([, rows]) => rows.some((row) => row.stop > now));
+
       return { kind: "ok", value: { ids: ids.map(([id]) => id) } };
     };
+
     native.query = async (lease, _generation, _job, ids, now, mode, _from, _until, after) => {
       const guide = held.get(ownerOf(lease))!;
       const guideId = ids.find((id) => guide.get(id)?.some((row) => row.stop > now)) ?? null;
+
       const rows = (guideId ? guide.get(guideId)! : []).filter((row) =>
         mode === "detail" ? row.start === after : row.stop > now,
       );
+
       return { kind: "ok", value: { guideId, rows, more: false } };
     };
+
     await owner.restore(["a", "xmltv-1"]);
     owner.setPart(channels());
     owner.configure(new Map([["xmltv-1", external]]), new Map());
     await owner.attach("xmltv-1");
+
     return { owner, native, control, sources, held, searched };
   }
+
   const keys = ["a:1", "a:2"];
 
   it("finds programmes on now first, each on the channel that reads it, and opens their details", async () => {
@@ -1207,8 +1335,10 @@ describe("programme search", () => {
 
   it("finds at most 20, asking each guide for no more", async () => {
     const { owner, held, searched } = await searching();
+
     const many = (title: string, from: number) =>
       Array.from({ length: 20 }, (_, n) => show(`${title} ${n}`, from + n * 60_000));
+
     held.get("a")!.set("news.tv", many("Weather", at + 60_000));
     held.get("xmltv-1")!.set("sport.tv", many("Weather", at - 30_000));
     const found = (await owner.search("weather", keys)).found;
@@ -1245,13 +1375,17 @@ describe("programme search", () => {
   it("takes a search the background cancelled for no failure", async () => {
     const { owner, native, held } = await searching();
     held.get("a")!.set("news.tv", [show("News", at)]);
+
     const reached = deferred<void>(),
       release = deferred<void>();
+
     native.search = async () => {
       reached.resolve();
       await release.promise;
+
       return { kind: "cancelled" };
     };
+
     const pending = owner.search("news", keys);
     await reached.promise;
     owner.background();
@@ -1263,8 +1397,10 @@ describe("programme search", () => {
     const { owner, held } = await searching();
     held.get("a")!.set("news.tv", [show("News", at)]);
     held.get("xmltv-1")!.set("sport.tv", [show("Sport news", at)]);
+
     const keysOf = async (listed: string[]) =>
       (await owner.search("news", listed)).found.map(({ key }) => key);
+
     expect(await keysOf(["a:4", "a:2", "a:1"])).toEqual(["a:4", "a:2"]);
     expect(await keysOf(["a:2", "a:1", "a:4"])).toEqual(["a:2", "a:1"]);
   });
@@ -1278,31 +1414,43 @@ describe("programme search", () => {
       sources.set("a", source);
       await owner.attach("a");
       const answered = native.search;
+
       const release = deferred<void>(),
         reached = deferred<void>();
+
       // The external guide, searched last, answers under the old provider, but late.
       native.search = async (...args) => {
         const answer = await answered(...args);
+
         if (args[1] !== "db-x") return answer;
         reached.resolve();
         await release.promise;
+
         return answer;
       };
+
       const pending = owner.search("news", keys);
       await reached.promise;
+
       if (change === "removal") await owner.forget("a");
+
       if (change === "replacement") {
         sources.set("a", { ...source, revision: 2 });
         await owner.attach("a");
       }
+
       if (change === "part") owner.setPart(channels());
+
       if (change === "mappings") owner.configure(new Map([["xmltv-1", external]]), new Map());
+
       if (change === "generation") {
         control.prepare = async () => ({ kind: "ok", value: { kind: "candidate", id: "new" } });
         await owner.refresh("a");
       }
+
       release.resolve();
       expect((await pending).found).toEqual([]);
+
       if (change !== "removal")
         expect((await owner.search("news", keys)).found.map(({ key }) => key)).toEqual([
           "a:1",

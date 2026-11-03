@@ -31,15 +31,19 @@ describe("the measurement profile", () => {
       { server: provider.url, username: "fixture", password: "pass" },
       { userAgent: "fixture" },
     ).onDemandCatalogue();
+
     expect(catalogue.movies).toHaveLength(provider.titles.movies.length);
     expect(catalogue.series).toHaveLength(provider.titles.series.length);
+
     for (const language of ["en", "nl"]) {
       const index = indexCatalogue([{ subscriptionId: "fixture", catalogue }], language);
+
       // TMDB's metadata, when it has arrived, saying every title was made in another language.
       for (const madeIn of [null, "ja"]) {
         for (const now of [measured.now.from, measured.now.to]) {
           for (const kind of ["movie", "series"] as const) {
             const declared = kind === "movie" ? measured.movies : measured.series;
+
             const made = collections({
               kind,
               titles: kindOf(index, kind).titles,
@@ -60,6 +64,7 @@ describe("the measurement profile", () => {
               services: [],
               now: now * 1000,
             });
+
             const fresh = collectionRows(made, "new", null);
             expect(fresh.map((row) => [row.id, row.total])).toEqual([
               ["new-week", declared.week],
@@ -78,15 +83,18 @@ describe("the measurement profile", () => {
 describe("PNG logos", () => {
   it("lists each channel's logo as a PNG mark the panel serves", async () => {
     const provider = await startFakeProvider({ channels: 100, logoPng: pngLogo });
+
     try {
       const listed = new URL(
         "/player_api.php?username=demo&password=demo&action=get_live_streams",
         provider.url,
       );
+
       const channels = (await (await fetch(listed)).json()) as { stream_icon: string }[];
       const icons = channels.map((channel) => channel.stream_icon).filter(Boolean);
       expect(icons.length).toBeGreaterThan(10);
       const sizes = new Set<string>();
+
       for (const icon of icons) {
         expect(icon).toMatch(/\/logos\/\d+\.png$/);
         const answer = await fetch(icon);
@@ -97,6 +105,7 @@ describe("PNG logos", () => {
         expect(bytes.subarray(12, 16).toString("latin1")).toBe("IHDR");
         sizes.add(`${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`);
       }
+
       expect(sizes.size).toBeGreaterThan(3);
     } finally {
       await provider.close();

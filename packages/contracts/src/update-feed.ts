@@ -93,10 +93,14 @@ export function buildFeed(
   const listed = releases
     .flatMap((release): { version: Version; entry: FeedRelease }[] => {
       const version = parseVersion(release.tag);
+
       if (!version || release.draft || release.publishedAt === null) return [];
+
       if ((channelOf(version) === "nightly") !== release.prerelease) return [];
       const platforms = PLATFORM_FILES.filter((file) => release.assets.includes(file));
+
       if (platforms.length < PLATFORM_FILES.length) return [];
+
       const entry: FeedRelease = {
         version: formatVersion(version),
         published: release.publishedAt,
@@ -108,14 +112,18 @@ export function buildFeed(
           INSTALLER_ENDINGS.some((ending) => name.endsWith(ending)),
         ),
       };
+
       return [{ version, entry }];
     })
     .sort((a, b) => compareVersions(b.version, a.version));
+
   const stable = listed.filter(({ version }) => !version.nightly);
   const latest = stable[0];
+
   const previous = stable.find(
     ({ version }) => latest && compareVersions(version, latest.version) < 0,
   );
+
   return {
     schema: 1,
     generated,
@@ -141,6 +149,7 @@ export function mergeFeeds(
   options: { readonly allowRegress?: boolean } = {},
 ): UpdateFeed {
   if (!current || options.allowRegress) return next;
+
   return {
     ...next,
     stable: higher(current.stable, next.stable),
@@ -153,6 +162,7 @@ export function readFeed(json: unknown): UpdateFeed {
   if (!isRecord(json) || json["schema"] !== 1 || typeof json["generated"] !== "string") {
     throw new Error("This is not an update feed with schema 1.");
   }
+
   return {
     schema: 1,
     generated: json["generated"],
@@ -170,28 +180,38 @@ function higher(current: FeedRelease | null, next: FeedRelease | null): FeedRele
   if (!current || !next) return next ?? current;
   const was = parseVersion(current.version);
   const now = parseVersion(next.version);
+
   return was && now && compareVersions(now, was) < 0 ? current : next;
 }
 
 function readRelease(json: unknown, channel: Channel): FeedRelease | null {
   if (json === null) return null;
   const malformed = new Error(`The feed's ${channel} release is malformed.`);
+
   if (!isRecord(json)) throw malformed;
+
   const text = (key: keyof FeedRelease): string => {
     const value = json[key];
+
     if (typeof value !== "string") throw malformed;
+
     return value;
   };
+
   const platforms = json["platforms"];
   // The app never reads the installers, so a list it can't read is left out, not refused.
   const installers = json["installers"];
+
   if (!isNames(platforms)) throw malformed;
   const version = parseVersion(text("version"));
+
   if (!version || (channel === "stable" && version.nightly)) {
     throw new Error(`The feed's ${channel} release has version "${text("version")}".`);
   }
+
   const previous =
     typeof json["previousStable"] === "string" ? parseVersion(json["previousStable"]) : null;
+
   return {
     version: formatVersion(version),
     published: text("published"),

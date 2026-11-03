@@ -17,6 +17,7 @@ import { fakeProvider, promised, runtimeFor, tempDir, testConfig } from "./suppo
 /** The entries in the diagnostics log of `dataDir`, oldest first. */
 async function entries(dataDir: string): Promise<Diagnostic[]> {
   const text = await readFile(join(dataDir, "diagnostics.log"), "utf8").catch(() => "");
+
   return text
     .split("\n")
     .filter(Boolean)
@@ -35,14 +36,17 @@ describe("diagnostics", () => {
     const playback = await promised(runtime, Playback);
     const login = { server: provider.url, username: "demo", password: "wrong" };
     await expect(subscriptions.add(login)).rejects.toThrow();
+
     const { id: subscriptionId } = await subscriptions.add({
       ...login,
       password: "s3cret-pass",
     });
+
     const channel = (name: string) => ({
       subscriptionId,
       id: String(provider.catalogue.channels.find((entry) => entry.name === name)?.streamId),
     });
+
     await library.refresh(subscriptionId);
     await guide.refresh(subscriptionId);
     const direct = await playback.open(channel("TEST | H.264 + AAC"), ["h264", "aac"]);
@@ -61,6 +65,7 @@ describe("diagnostics", () => {
       { op: "stream", delivery: "none", outcome: "unsupported" },
     ]);
     const log = await readFile(join(dataDir, "diagnostics.log"), "utf8");
+
     for (const secret of [new URL(provider.url).host, "s3cret-pass", "demo", "H.264 + AAC"]) {
       expect(log).not.toContain(secret);
     }
@@ -83,6 +88,7 @@ describe("diagnostics", () => {
   it("closes while an update's install waits for the app to quit, with its line on disk", async () => {
     const dataDir = await tempDir();
     const installing = Promise.withResolvers<void>();
+
     const runtime = ManagedRuntime.make(
       mainLayer({
         ...testConfig(dataDir),
@@ -101,12 +107,14 @@ describe("diagnostics", () => {
             // As electron-updater leaves an install the system accepts: the app quits instead.
             install: () => {
               installing.resolve();
+
               return new Promise<void>(() => {});
             },
           },
         },
       }),
     );
+
     const updates = await promised(runtime, Updates);
     await updates.check();
     await updates.download();
@@ -130,11 +138,13 @@ describe("diagnostics", () => {
     await vi.waitFor(async () =>
       expect((await entries(dataDir)).at(-1)).toMatchObject({ ms: 11_999 }),
     );
+
     const sizes = await Promise.all(
       ["diagnostics.log", "diagnostics.1.log"].map(
         async (name) => (await stat(join(dataDir, name))).size,
       ),
     );
+
     expect(sizes.every((size) => size > 0 && size <= 512 * 1024)).toBe(true);
   });
 });

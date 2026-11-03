@@ -11,6 +11,7 @@ import { NAMESPACE, PLATFORM, SENDER, readPlatformMessage } from "./messages.ts"
 
 /** The protocol's limit on one frame's message. */
 const MAX_FRAME = 65_535;
+
 /**
  * The most a message sent in several frames may add up to, and the most frames it may take. The
  * app announces protocol version 1.0, which has no such messages, so none should arrive; one that
@@ -18,8 +19,10 @@ const MAX_FRAME = 65_535;
  */
 const MAX_MESSAGE = 4 * MAX_FRAME;
 const MAX_FRAGMENTS = 64;
+
 /** How deep groups, protobuf's old nested fields, may go in a field that is skipped. */
 const MAX_DEPTH = 16;
+
 /** Milliseconds a closed connection gets to send what was written before it is cut. */
 const LINGER = 1000;
 
@@ -46,19 +49,25 @@ interface Fragment {
 /** A protobuf varint: seven bits a byte, lowest first, the top bit set on all but the last. */
 function varint(value: number): number[] {
   const bytes = [];
+
   for (; value > 0x7f; value >>>= 7) bytes.push((value & 0x7f) | 0x80);
+
   return [...bytes, value];
 }
 
 /** The varint at `at` and where it ends, or null when it runs off the end or past ten bytes. */
 function readVarint(bytes: Buffer, at: number): { value: number; next: number } | null {
   let value = 0;
+
   for (let index = 0; index < 10; index++) {
     const byte = bytes[at + index];
+
     if (byte === undefined) return null;
     value += (byte & 0x7f) * 2 ** (7 * index);
+
     if (byte < 0x80) return { value, next: at + index + 1 };
   }
+
   return null;
 }
 
@@ -75,31 +84,42 @@ function readField(
 ): { next: number; number?: number; bytes?: Buffer } | null {
   // No field has number 0.
   if (tag < 8) return null;
+
   switch (tag % 8) {
     case 0: {
       const number = readVarint(bytes, at);
+
       return number && { next: number.next, number: number.value };
     }
+
     case 1:
       return at + 8 <= bytes.length ? { next: at + 8 } : null;
     case 2: {
       const length = readVarint(bytes, at);
+
       if (!length || length.value > bytes.length - length.next) return null;
       const end = length.next + length.value;
+
       return { next: end, bytes: bytes.subarray(length.next, end) };
     }
+
     case 3: {
       // A group: fields up to the end tag of its own number, which is its start tag plus one.
       if (depth >= MAX_DEPTH) return null;
+
       for (let offset = at; ;) {
         const inner = readVarint(bytes, offset);
+
         if (!inner) return null;
+
         if (inner.value % 8 === 4) return inner.value === tag + 1 ? { next: inner.next } : null;
         const field = readField(bytes, inner.next, inner.value, depth + 1);
+
         if (!field) return null;
         offset = field.next;
       }
     }
+
     case 5:
       return at + 4 <= bytes.length ? { next: at + 4 } : null;
     default:
@@ -111,8 +131,10 @@ function readField(
 function encodeFrame(message: CastMessage): Buffer {
   const text = (field: number, value: string) => {
     const bytes = Buffer.from(value, "utf8");
+
     return [Buffer.from([(field << 3) | 2, ...varint(bytes.length)]), bytes];
   };
+
   const body = Buffer.concat([
     // protocol_version: CASTV2_1_0.
     Buffer.from([1 << 3, 0]),
@@ -123,10 +145,12 @@ function encodeFrame(message: CastMessage): Buffer {
     Buffer.from([5 << 3, 0]),
     ...text(6, message.payload),
   ]);
+
   if (body.length > MAX_FRAME) throw new RangeError("Cast message over the frame limit");
   const frame = Buffer.alloc(4 + body.length);
   frame.writeUInt32BE(body.length);
   body.copy(frame, 4);
+
   return frame;
 }
 
@@ -144,12 +168,15 @@ function decodeFrame(body: Buffer): Fragment | null {
   let binary = false;
   let continued = false;
   let remaining = 0;
+
   for (let offset = 0; offset < body.length;) {
     const tag = readVarint(body, offset);
     const field = tag && readField(body, tag.next, tag.value);
+
     if (!field) return null;
     offset = field.next;
     const number = Math.floor(tag.value / 8);
+
     if (field.bytes) {
       if (number === 2) sourceId = field.bytes.toString("utf8");
       else if (number === 3) destinationId = field.bytes.toString("utf8");
@@ -162,7 +189,9 @@ function decodeFrame(body: Buffer): Fragment | null {
       else if (number === 9) remaining = field.number;
     }
   }
+
   if (!sourceId || !destinationId || !namespace) return null;
+
   return {
     sourceId,
     destinationId,
@@ -191,22 +220,30 @@ function messageReader(): (chunk: Buffer) => CastMessage[] | null {
     held.push(chunk);
     size += chunk.length;
     const messages: CastMessage[] = [];
+
     // Chunks are joined only once they hold a length or a whole frame, however small they come.
     if (size < wanted) return messages;
     let buffered = held.length === 1 ? chunk : Buffer.concat(held);
+
     for (;;) {
       wanted = 4;
+
       if (buffered.length < wanted) break;
       const length = buffered.readUInt32BE(0);
+
       if (length > MAX_FRAME) return null;
       wanted += length;
+
       if (buffered.length < wanted) break;
       const fragment = decodeFrame(buffered.subarray(4, 4 + length));
       buffered = buffered.subarray(4 + length);
+
       if (!fragment) return null;
+
       if (fragment.payload === null) continue;
 
       const { first } = (parts ??= { first: fragment, payloads: [], size: 0 });
+
       if (
         first.sourceId !== fragment.sourceId ||
         first.destinationId !== fragment.destinationId ||
@@ -214,10 +251,13 @@ function messageReader(): (chunk: Buffer) => CastMessage[] | null {
       ) {
         return null;
       }
+
       parts.payloads.push(fragment.payload);
       parts.size += fragment.payload.length;
       const expected = parts.size + (fragment.continued ? fragment.remaining : 0);
+
       if (expected > MAX_MESSAGE || parts.payloads.length > MAX_FRAGMENTS) return null;
+
       if (fragment.continued) continue;
       messages.push({
         sourceId: first.sourceId,
@@ -227,8 +267,10 @@ function messageReader(): (chunk: Buffer) => CastMessage[] | null {
       });
       parts = null;
     }
+
     held = buffered.length > 0 ? [buffered] : [];
     size = buffered.length;
+
     return messages;
   };
 }
@@ -293,15 +335,18 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
     clearInterval(heartbeat);
     options.signal.removeEventListener("abort", fail);
   };
+
   /** Cuts the connection: it didn't open, or what it carries is of no use any more. */
   const fail = () => {
     if (state === "closed") return;
     const opened = state === "open";
     settle();
     socket.destroy();
+
     if (opened) options.broken();
     else reject(new ReceiverFailed({ kind: "unreachable" }));
   };
+
   const send: Channel["send"] = (destinationId, namespace, payload) => {
     if (state !== "open") return;
     socket.write(
@@ -311,6 +356,7 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
 
   const opening = setTimeout(fail, options.deadline);
   options.signal.addEventListener("abort", fail);
+
   if (options.signal.aborted) fail();
 
   socket.on("error", fail);
@@ -325,6 +371,7 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
       // A timer that runs late, after this process stood still, can find the silence over while
       // what the receiver sent waits to be read: the silence must outlast one more ping.
       const silent = performance.now() - heard > options.silence;
+
       if (silent && quiet) return fail();
       quiet = silent;
       send(PLATFORM, NAMESPACE.heartbeat, { type: "PING" });
@@ -343,11 +390,14 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
   socket.on("data", (chunk: Buffer) => {
     if (state !== "open") return;
     const messages = read(chunk);
+
     if (!messages) return fail();
     heard = performance.now();
+
     for (const message of messages) {
       // A message may have closed the channel: the ones behind it are for nobody.
       if (state !== "open") return;
+
       try {
         if (message.namespace !== NAMESPACE.heartbeat) options.message(message);
         else if (readPlatformMessage(message.payload)?.type === "PING") {
@@ -359,5 +409,6 @@ export function openChannel(options: ChannelOptions): Promise<Channel> {
       }
     }
   });
+
   return promise;
 }

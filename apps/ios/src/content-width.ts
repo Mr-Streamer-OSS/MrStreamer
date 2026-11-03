@@ -14,5 +14,6 @@ export const tabSides = store({ left: 0, right: 0 });
 export function useContentWidth(): number {
   const { width } = useWindowDimensions();
   const { left, right } = useStore(tabSides);
+
   return width - left - right;
 }

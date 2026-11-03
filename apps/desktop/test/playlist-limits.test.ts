@@ -27,9 +27,11 @@ function provider(body: string, mapped = false) {
 describe("explicit playlist mapping limits", () => {
   it("keeps a concurrent unmapped Live load usable when a first inspection stops at its cap", async () => {
     const source = provider(playlist(100_001));
+
     const inspection = expect(source.playlistImport!()).rejects.toMatchObject({
       error: { kind: "unexpected", detail: expect.stringContaining("100,000") },
     });
+
     const catalogue = source.liveCatalogue();
     await inspection;
     expect((await catalogue).channels).toHaveLength(100_001);
@@ -43,10 +45,12 @@ describe("explicit playlist mapping limits", () => {
     async (mapped) => {
       let pieces = 0;
       let cancelled = false;
+
       const chunk = new TextEncoder().encode(
         "#EXTM3U\n" +
           '#EXTINF:-1 group-title="Films",Film\nhttps://example.test/1.mp4\n'.repeat(1000),
       );
+
       const body = new ReadableStream<Uint8Array>({
         pull(controller) {
           pieces++;
@@ -56,10 +60,12 @@ describe("explicit playlist mapping limits", () => {
           cancelled = true;
         },
       });
+
       const source = playlistProvider(
         { link, ...defined({ mapping: mapped ? { version: 1 as const, groups } : undefined }) },
         { userAgent: "test", fetch: async () => new Response(body) },
       );
+
       await expect(source.playlistImport!()).rejects.toMatchObject({
         error: { kind: "unexpected", detail: expect.stringContaining("100,000") },
       });
@@ -130,17 +136,21 @@ describe("explicit playlist mapping limits", () => {
     });
     const body = playlist(10_001, true);
     let reads = 0;
+
     const live = playlistProvider(
       { link },
       {
         userAgent: "test",
         fetch: async () => {
           reads++;
+
           return new Response(body);
         },
       },
     );
+
     expect((await live.liveCatalogue()).categories).toHaveLength(10_001);
+
     for (let attempt = 0; attempt < 2; attempt++)
       await expect(live.playlistImport!()).rejects.toMatchObject({
         error: { kind: "unexpected", detail: expect.stringContaining("10,000 groups") },

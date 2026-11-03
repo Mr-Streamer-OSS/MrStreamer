@@ -12,9 +12,11 @@ const fixture = vi.hoisted(() => ({
   groups: new Map<string, readonly Rendition[]>(),
   unsupported: new Set<Level>(),
 }));
+
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return {
     ...real,
     default: class extends standIn(real.default) {
@@ -49,12 +51,14 @@ vi.mock("hls.js", async (original) => {
 });
 
 let engine: Engine | undefined;
+
 afterEach(() => {
   engine?.destroy();
   fixture.starts = [];
   fixture.groups.clear();
   fixture.unsupported.clear();
 });
+
 function level(bitrate: number, group?: string, videoCodec = "avc1.42e01e") {
   return new Level({
     bitrate,
@@ -65,6 +69,7 @@ function level(bitrate: number, group?: string, videoCodec = "avc1.42e01e") {
     audioCodec: "mp4a.40.2",
   });
 }
+
 async function open() {
   engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
     audio: null,
@@ -72,8 +77,10 @@ async function open() {
   });
   await vi.dynamicImportSettled();
   fixture.parsed();
+
   return engine;
 }
+
 const settle = async () => {
   for (let i = 0; i < 15; i++) await Promise.resolve();
 };
@@ -123,6 +130,7 @@ it.each([false, true])(
     });
     const playing = await open();
     expect(fixture.starts).toEqual([]);
+
     if (stop) playing.destroy();
     check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
     await settle();
@@ -144,6 +152,7 @@ it("leaves startup to hls.js when a capability query rejects", async () => {
 
 it("uses default startup when capability service stays pending", async () => {
   vi.useFakeTimers();
+
   try {
     const low = level(128);
     const high = level(512);

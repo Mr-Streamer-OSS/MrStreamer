@@ -18,6 +18,7 @@ interface HermesRuntime {
 /** What the app threw outside the cases, such as a shared module failing while it loads. */
 const uncaught: string[] = [];
 const previousHandler = ErrorUtils.getGlobalHandler();
+
 ErrorUtils.setGlobalHandler((error: unknown, fatal?: boolean) => {
   uncaught.push(
     error instanceof Error ? `${error.name}: ${error.message}\n${error.stack}` : String(error),
@@ -27,18 +28,23 @@ ErrorUtils.setGlobalHandler((error: unknown, fatal?: boolean) => {
 
 async function prove() {
   const fixture = PROOF_URL ?? "http://127.0.0.1:9";
+
   const results = await runCases({
     fixture,
     // expo/fetch implements fetch with types of its own; the cases use only what both share.
     fetches: { global: fetch, expo: expoFetch as typeof fetch },
   });
+
   const started = Date.now();
+
   const keychain = await keychainProof(keychainSecrets).then(
     (value) => ({ value }),
     (error: unknown) => ({ thrown: String(error) }),
   );
+
   results.push({ name: "keychain", compare: "record", ms: Date.now() - started, ...keychain });
   const hermes = (globalThis as { HermesInternal?: HermesRuntime }).HermesInternal;
+
   const report = {
     runtime: {
       hermes: hermes?.getRuntimeProperties?.() ?? null,
@@ -48,6 +54,7 @@ async function prove() {
     uncaught,
     results,
   };
+
   if (PROOF_URL) {
     await fetch(`${PROOF_URL}/report`, {
       method: "POST",
@@ -55,6 +62,7 @@ async function prove() {
       body: JSON.stringify(report),
     });
   }
+
   return results;
 }
 
@@ -74,6 +82,7 @@ export function ProofScreen() {
         ]),
     );
   }, []);
+
   return (
     <ScrollView style={{ backgroundColor: "#000" }} contentContainerStyle={{ padding: 16 }}>
       {lines.map((line, index) => (

@@ -9,7 +9,9 @@ import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
+
 const expect = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
@@ -143,10 +145,12 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
     () => d.evaluate<boolean>("(document.querySelector('video')?.currentTime ?? 0) >= 1"),
     60_000,
   );
+
   const playing = await d.evaluate<{ time: number; width: number; audio: number }>(
     `(() => { const v = document.querySelector('video');
     return { time: v.currentTime, width: v.videoWidth, audio: v.webkitAudioDecodedByteCount }; })()`,
   );
+
   expect(playing.width > 0 && playing.audio > 0, "No picture or sound", playing);
   d.observed["playing"] = playing;
   await d.capture("recording-playing");

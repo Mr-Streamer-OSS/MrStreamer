@@ -8,6 +8,7 @@ import type { Title } from "@mrstreamer/contracts/ondemand";
 import { VersionMenu } from "../../src/renderer/src/features/titles/VersionMenu.tsx";
 
 const GREEN = "849e1969-a047-4f37-9171-b09ae2c87a13";
+
 const film: Title = {
   kind: "movie",
   key: "movie:603",
@@ -50,14 +51,18 @@ const film: Title = {
     { subscriptionId: GREEN, id: "unknown", tags: ["HD", "HQ"], name: "Harbour HQ" },
   ],
 };
+
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
 });
+
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
 const radios = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
 
@@ -88,6 +93,7 @@ async function mount(title = film) {
     container.querySelector<HTMLButtonElement>('[aria-label="Versions"]')?.click(),
   );
   await settle();
+
   return { picked, container };
 }
 
@@ -117,9 +123,11 @@ describe("the movie version menu", () => {
 
   it("shows one quality-first list with provider names and preserves unfamiliar hints", async () => {
     await mount();
+
     const choices = [...document.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')].map(
       (item) => item.textContent ?? "",
     );
+
     expect(choices[0]).toContain("Automatic");
     expect(choices[1]).toContain("4K");
     expect(choices[1]).toContain("Nederlands subtitles");

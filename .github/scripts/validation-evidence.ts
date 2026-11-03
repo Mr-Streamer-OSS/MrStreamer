@@ -11,6 +11,7 @@ export function validationIdentity() {
   const sourceRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
     encoding: "utf8",
   }).trim();
+
   const inputs = execFileSync(
     "git",
     [
@@ -30,6 +31,7 @@ export function validationIdentity() {
     ],
     { cwd: sourceRoot, encoding: "utf8" },
   );
+
   const tools = execFileSync(
     "git",
     [
@@ -53,6 +55,7 @@ export function validationIdentity() {
       encoding: "utf8",
     },
   );
+
   return createHash("sha256")
     .update(
       JSON.stringify({
@@ -95,6 +98,7 @@ export function acceptsEvidence(
 ): boolean {
   if (!value || typeof value !== "object") return false;
   const evidence = value as Partial<Evidence>;
+
   return (
     producer.repository === "Mr-Streamer-OSS/MrStreamer" &&
     producer.event === "push" &&
@@ -120,6 +124,7 @@ if (
   realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   const [command, file] = process.argv.slice(2);
+
   if (command === "identity") console.log(validationIdentity());
   else if (command === "record" && file) {
     const evidence: Evidence = {
@@ -139,6 +144,7 @@ if (
         website: process.env["WEBSITE_RESULT"] ?? "unknown",
       },
     };
+
     writeFileSync(file, JSON.stringify(evidence, null, 2) + "\n");
   } else if (command === "verify" && file) {
     const producer = JSON.parse(readFileSync(process.argv[4]!, "utf8")) as Producer;

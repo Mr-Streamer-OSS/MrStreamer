@@ -10,8 +10,10 @@ import type { AfterPackContext } from "electron-builder";
 export default function adHocSign(context: AfterPackContext): void {
   if (context.electronPlatformName !== "darwin") return;
   const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+
   const result = spawnSync("codesign", ["--force", "--deep", "--sign", "-", app], {
     stdio: "inherit",
   });
+
   if (result.status !== 0) throw new Error(`Ad hoc signing ${app} failed`);
 }

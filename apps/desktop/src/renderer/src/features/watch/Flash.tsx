@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils.ts";
 import { usePlayer } from "../../player/player.ts";
 import { CloseMessage, useClosed } from "./CloseMessage.tsx";
 import { flash, useFlash } from "./flash-state.ts";
+
 export { flash, flashNote } from "./flash-state.ts";
 
 const SHOWN_MS = 1500;
@@ -21,14 +22,17 @@ export function Flash() {
   useEffect(() => {
     if (!text) return;
     const timer = setTimeout(() => useFlash.setState({ text: null }), SHOWN_MS);
+
     return () => clearTimeout(timer);
   }, [text, at]);
   // A note from one view doesn't show up in the next.
   useEffect(() => () => useFlash.setState({ text: null }), []);
   const standing = note && !closed ? note : null;
   const shown = text ?? standing?.text;
+
   if (!shown) return null;
   const closable = !text && standing?.failed;
+
   return (
     <div
       className={cn(
@@ -49,7 +53,9 @@ export function LiveSubtitleHint() {
   useEffect(() => {
     const previous = seen.current;
     seen.current = available;
+
     if (available === previous) return;
+
     if (!available) {
       if (useFlash.getState().text === t("Subtitles available · C")) {
         useFlash.setState({ text: null });
@@ -58,5 +64,6 @@ export function LiveSubtitleHint() {
       flash(t("Subtitles available · C"));
     }
   }, [available]);
+
   return null;
 }

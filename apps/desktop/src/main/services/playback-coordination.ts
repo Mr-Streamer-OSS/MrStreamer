@@ -82,17 +82,21 @@ export class PlaybackCoordination extends Context.Service<
       const one = (yield* Semaphore.make(1)).withPermits(1);
       const changed = yield* PubSub.sliding<void>(1);
       const sessions = new Map<string, string | null>();
+
       const lent = new Map<
         string,
         { readonly controller: AbortController; readonly released: Promise<void> }
       >();
+
       /** Each admitted recording's subscription and what reads its account's current limit. */
       const recordings = new Map<
         Held,
         { readonly subscriptionId: string; readonly limit: Effect.Effect<number> }
       >();
+
       const recordingsOf = (subscriptionId: string) =>
         [...recordings.values()].filter((each) => each.subscriptionId === subscriptionId);
+
       const usesOf = (subscriptionId: string): ConnectionUse[] => [
         ...[...sessions.values()].flatMap((owner) =>
           owner === subscriptionId ? (["watch"] as const) : [],
@@ -100,25 +104,33 @@ export class PlaybackCoordination extends Context.Service<
         ...(lent.has(subscriptionId) ? (["download"] as const) : []),
         ...recordingsOf(subscriptionId).map(() => "recording" as const),
       ];
+
       /** Aborts the subscription's download, answering whether its lease ended in time. */
       const takeBack = (subscriptionId: string) =>
         Effect.promise(async () => {
           const lease = lent.get(subscriptionId);
+
           if (!lease) return true;
           lease.controller.abort();
           let timer: NodeJS.Timeout | undefined;
+
           const late = new Promise<boolean>(
             (resolve) => (timer = setTimeout(() => resolve(false), RECLAIM_MS)),
           );
+
           const given = await Promise.race([lease.released.then(() => true), late]);
           clearTimeout(timer);
+
           return given;
         });
+
       let turns = 0;
+
       const whileAsked = (turn: number | undefined) =>
         Effect.suspend(() =>
           turn === undefined || turn === turns ? Effect.void : Effect.fail(superseded()),
         );
+
       return {
         begin: Effect.sync(() => ++turns),
         passed: (turn: number) => Effect.sync(() => turn !== turns),
@@ -130,20 +142,25 @@ export class PlaybackCoordination extends Context.Service<
           Effect.gen(function* () {
             // What plays closes before it opens again, so only recordings count against it.
             const held = recordingsOf(subscriptionId);
+
             if (held[0] && held.length >= (yield* held[0].limit)) return yield* recorded();
+
             if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
           }),
         lend: (subscriptionId: string) =>
           one(
             Effect.sync((): Lent | null => {
               if (lent.has(subscriptionId) || recordingsOf(subscriptionId).length > 0) return null;
+
               for (const owner of sessions.values()) {
                 if (owner === subscriptionId) return null;
               }
+
               const controller = new AbortController();
               const { promise: released, resolve } = Promise.withResolvers<void>();
               const lease = { controller, released };
               lent.set(subscriptionId, lease);
+
               return {
                 signal: controller.signal,
                 release: () => {
@@ -165,19 +182,24 @@ export class PlaybackCoordination extends Context.Service<
             Effect.gen(function* () {
               const allowed = yield* limit;
               let uses = usesOf(subscriptionId);
+
               // Only when taking the download's connection back admits it.
               if (fromDownload && lent.has(subscriptionId) && uses.length === allowed) {
                 if (!(yield* takeBack(subscriptionId))) return yield* stillLent();
                 uses = usesOf(subscriptionId);
               }
+
               if (uses.length >= allowed) return { kind: "busy" as const, uses };
+
               const held: Held = {
                 release: () => {
                   if (recordings.delete(held)) PubSub.publishUnsafe(changed, undefined);
                 },
               };
+
               recordings.set(held, { subscriptionId, limit });
               PubSub.publishUnsafe(changed, undefined);
+
               return { kind: "held" as const, held };
             }),
           ),

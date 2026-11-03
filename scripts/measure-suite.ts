@@ -17,25 +17,34 @@ const { values } = parseArgs({
     conditions: { type: "string" },
   },
 });
+
 if (!values.output || !values.conditions)
   throw new Error(
     "Usage: node scripts/measure-suite.ts --output <new-directory> --conditions <cache/host description> [--runs 5]",
   );
+
 const runs = positiveCount(values.runs, "runs", 20);
 const output = resolve(values.output);
+
 const git = (...args: string[]) =>
   execFileSync("git", args, { encoding: "utf8", maxBuffer: Infinity }).trim();
+
 const fromRoot = relative(git("rev-parse", "--show-toplevel"), output);
 const insideCheckout = !isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith("../");
+
 if (insideCheckout && spawnSync("git", ["check-ignore", "--quiet", "--", output]).status !== 0)
   throw new Error(
     "Measurement output inside the checkout must be gitignored (use .local/measurements)",
   );
+
 // Refuse reuse: failures and previous campaigns must never be silently overwritten.
 mkdirSync(output, { recursive: false });
+
 const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
+
 const hashed = (paths: string[]) =>
   paths.map((path) => ({ path, sha256: sha256(readFileSync(path)) }));
+
 const identity = () => ({
   revision: git("rev-parse", "HEAD"),
   trackedDiffSha256: sha256(git("diff", "--binary", "--no-ext-diff", "HEAD")),
@@ -50,7 +59,9 @@ const identity = () => ({
   files: hashed(globSync(include, { dot: true, ignore: exclude, expandDirectories: false }).sort()),
   policy: hashed(["package.json", "pnpm-lock.yaml", "vitest.config.ts", "test/suites.ts"]),
 });
+
 const before = identity();
+
 writeFileSync(
   join(output, "environment.json"),
   JSON.stringify(
@@ -79,10 +90,13 @@ writeFileSync(
     2,
   ),
 );
+
 const samples: number[] = [];
+
 for (let index = 1; index <= runs; index++) {
   const policy = join(output, `run-${index}.policy.json`);
   const report = join(output, `run-${index}.vitest.json`);
+
   const args = [
     "test",
     "--reporter=default",
@@ -90,25 +104,32 @@ for (let index = 1; index <= runs; index++) {
     "--reporter=./scripts/suite-measurement-reporter.ts",
     `--outputFile.json=${report}`,
   ];
+
   const log = openSync(join(output, `run-${index}.log`), "wx");
   const startedAt = new Date().toISOString();
   const loadBefore = loadavg();
   const started = performance.now();
+
   const result = spawnSync("pnpm", args, {
     env: { ...process.env, MR_STREAMER_SUITE_POLICY: policy },
     stdio: ["ignore", log, log],
   });
+
   const wallMs = performance.now() - started;
+
   const validation = spawnSync(process.execPath, ["scripts/ci-test-results.ts", report], {
     encoding: "utf8",
   });
+
   let unchanged = false;
   let identityError: string | undefined;
+
   try {
     unchanged = JSON.stringify(before) === JSON.stringify(identity());
   } catch (error) {
     identityError = error instanceof Error ? error.message : String(error);
   }
+
   const complete = result.status === 0 && validation.status === 0 && unchanged;
   writeFileSync(
     join(output, `run-${index}.json`),
@@ -141,10 +162,13 @@ for (let index = 1; index <= runs; index++) {
   console.log(
     `Run ${index}: ${complete ? "complete" : "FAILED"}, ${wallMs.toFixed(0)} ms; ${output}`,
   );
+
   if (!complete) break;
   samples.push(wallMs);
 }
+
 const complete = samples.length === runs;
+
 writeFileSync(
   join(output, "summary.json"),
   JSON.stringify(
@@ -161,4 +185,5 @@ writeFileSync(
     2,
   ),
 );
+
 if (!complete) process.exitCode = 1;

@@ -12,18 +12,23 @@ const release = {
 
 async function discord(status = 200) {
   const requests: { path: string; body: unknown }[] = [];
+
   const server = createServer(async (request, response) => {
     let body = "";
+
     for await (const chunk of request) body += String(chunk);
     requests.push({ path: request.url!, body: JSON.parse(body) });
+
     if (status) response.writeHead(status).end("private response must not be logged");
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   onTestFinished(() => {
     server.closeAllConnections();
     server.close();
   });
+
   return { url, requests };
 }
 

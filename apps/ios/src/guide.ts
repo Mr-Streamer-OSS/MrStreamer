@@ -35,27 +35,33 @@ export interface GuideStatus {
   readonly stale: boolean;
   readonly error: GuideProblem | null;
 }
+
 export interface Day {
   readonly from: number;
   readonly until: number;
 }
+
 export interface ScheduleItem extends Omit<Programme, "description"> {
   readonly detail: string;
 }
+
 export interface DayPage {
   readonly programmes: readonly ScheduleItem[];
   readonly cursor: string | null;
 }
+
 /** A programme `search` found, on channel `key` (`Channel.key`). */
 export interface FoundProgramme {
   readonly key: string;
   readonly programme: ScheduleItem;
 }
+
 /** What `search` found, and whether a guide could not be searched. */
 export interface ProgrammeSearch {
   readonly found: readonly FoundProgramme[];
   readonly unsearched: boolean;
 }
+
 interface Entry {
   activation: Activation;
   /** Cached reads may stand while attach is pending, but its old lease cannot refresh. */
@@ -68,6 +74,7 @@ interface Entry {
   refreshAbort?: AbortController;
   readonly jobs: Set<string>;
 }
+
 interface Token {
   /** The subscription or external guide whose guide `entry` is. */
   readonly owner: string;
@@ -81,26 +88,33 @@ interface Token {
   /** The `configure` it was read under: new guides or mappings withdraw it. */
   readonly layout: number;
 }
+
 /** A token schedule() handed out, with the start of the day read that minted it. */
 interface Minted extends Token {
   readonly on: number;
 }
+
 const listingOf = (rows: readonly Programme[], at: number): Listing => ({
   now: rows.find((row) => row.start <= at && row.stop > at) ?? null,
   next: rows.find((row) => row.start > at) ?? null,
 });
+
 /** The start of the local day `at` is in, as a Schedule's day starts. */
 const dayOf = (at: number) => {
   const date = new Date(at);
+
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 };
+
 const FRESH = 6 * 3600_000;
+
 /**
  * Channel days whose withdrawals `withdrawn` tells apart: a week of the Guide grid's 24 rows
  * several times over. Past it, a screen's rows of the rest read again once.
  */
 const WITHDRAWALS = 2048;
 const MAX_AGE = 7 * 86400_000;
+
 const EMPTY: GuideStatus = {
   availability: "unknown",
   activity: "idle",
@@ -140,6 +154,7 @@ export function createGuide(
   const revision = store(0);
   const originOf = (key: string) => sourceOf(key) ?? externals.get(key);
   const id = () => `g${++sequence}`;
+
   const cancel = async (job: string) => {
     try {
       await port().cancel(job);
@@ -147,14 +162,18 @@ export function createGuide(
       /* A missing binding cannot have an active local job. */
     }
   };
+
   const stands = (key: string, entry: Entry) =>
     entries.get(key) === entry && originOf(key) === entry.source;
+
   const usable = (g: Generation | null) =>
     g !== null &&
     g.until > now() &&
     now() - g.fetchedAt <= MAX_AGE &&
     g.fetchedAt - now() <= 600_000;
+
   const status = (key: string) => state.get().get(key) ?? EMPTY;
+
   const update = (key: string, change: Partial<GuideStatus> = {}) => {
     const g = entries.get(key)?.generation ?? null;
     state.set(
@@ -166,8 +185,10 @@ export function createGuide(
       }),
     );
   };
+
   /** Each token by what it names, so reading the same programme or page again reuses it. */
   const minted = new Map<string, string>();
+
   const named = (value: Minted) =>
     JSON.stringify([
       value.generation.id,
@@ -177,11 +198,14 @@ export function createGuide(
       value.day?.from ?? null,
       value.on,
     ]);
+
   const drop = (key: string) => {
     const value = tokens.get(key);
+
     if (value && minted.get(named(value)) === key) minted.delete(named(value));
     tokens.delete(key);
   };
+
   /**
    * By channel and day read, the last withdrawal of its tokens, numbered across all of them, so a
    * screen reads again. The least recently withdrawn half goes past WITHDRAWALS; one gone answers
@@ -196,16 +220,19 @@ export function createGuide(
   const awake = store(true);
   let announced = false;
   const read = (key: string, on: number) => JSON.stringify([key, on]);
+
   const withdraw = (value: Minted) => {
     const at = read(value.key, value.on);
     withdrawals.delete(at);
     withdrawals.set(at, ++withdrawn);
+
     if (withdrawals.size > WITHDRAWALS)
       for (const [each, number] of withdrawals) {
         if (withdrawals.size <= WITHDRAWALS / 2) break;
         withdrawals.delete(each);
         floor = number;
       }
+
     if (announced) return;
     announced = true;
     queueMicrotask(() => {
@@ -213,14 +240,17 @@ export function createGuide(
       withdrawing.set((count) => count + 1);
     });
   };
+
   const invalidate = (entry: Entry) => {
     revision.set((value) => value + 1);
+
     for (const [key, value] of tokens)
       if (value.entry === entry) {
         withdraw(value);
         drop(key);
       }
   };
+
   // The least recently minted or read goes first, withdrawn, once 8192 different programmes and
   // pages are held: 32 Guide grid rows of 256 programmes, or about 170 of 48. The grid's 24 rows of
   // two native pages of 128 (GuideIndex.swift) mint fewer, so its rows never evict each other.
@@ -228,6 +258,7 @@ export function createGuide(
     const name = named(value);
     const known = minted.get(name);
     const held = known === undefined ? undefined : tokens.get(known);
+
     if (
       known !== undefined &&
       held?.entry === value.entry &&
@@ -236,65 +267,84 @@ export function createGuide(
     ) {
       tokens.delete(known);
       tokens.set(known, held);
+
       return known;
     }
+
     const oldest = tokens.entries().next().value;
+
     if (tokens.size >= 8192 && oldest) {
       withdraw(oldest[1]);
       drop(oldest[0]);
     }
+
     const key = id();
     tokens.set(key, value);
     minted.set(name, key);
+
     return key;
   };
+
   const validToken = (value: Token) =>
     value.layout === layout &&
     stands(value.owner, value.entry) &&
     parts.get(value.part.subscriptionId) === value.part &&
     value.entry.generation === value.generation &&
     usable(value.generation);
+
   /** Withdraws the reads of a subscription's channels, from external guides too. */
   const withdrawChannels = (subscriptionId: string) => {
     revision.set((value) => value + 1);
+
     for (const [key, value] of tokens)
       if (value.part.subscriptionId === subscriptionId) {
         withdraw(value);
         drop(key);
       }
   };
+
   /** Withdraws every read handed out, and refuses those under way. */
   const withdrawAll = () => {
     revision.set((value) => value + 1);
     layout++;
+
     for (const value of tokens.values()) withdraw(value);
     tokens.clear();
     minted.clear();
   };
+
   const cancelEntry = (entry: Entry) => {
     entry.refreshAbort?.abort();
     invalidate(entry);
+
     for (const job of entry.jobs) void cancel(job);
   };
+
   const connect = () => {
     if (lifecycle.length) return;
     const native = port();
+
     if (native.addListener)
       lifecycle = [
         native.addListener("foreground", () => service.foreground()),
         native.addListener("background", () => service.background()),
       ];
   };
+
   async function refresh(key: string, explicit = true): Promise<void> {
     if (!foreground) return;
     let entry = entries.get(key);
+
     // A failed activation has no usable lease. The public Retry action must acquire one.
     if (!entry && explicit && originOf(key)) {
       await service.attach(key);
       entry = entries.get(key);
     }
+
     if (!entry || entry.activating || !entry.source || !stands(key, entry) || !foreground) return;
+
     if (entry.refresh) return entry.refresh;
+
     if (!explicit && now() - entry.failedAt < 15 * 60_000) return;
     const source = entry.source;
     const lease = entry.activation.lease;
@@ -306,26 +356,35 @@ export function createGuide(
     entry.refresh = (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let expired = false;
+
       try {
         const native = port();
+
         if (!native.begin(entry.activation.lease, job)) throw new GuideFault("busy");
         timer = setTimeout(() => {
           expired = true;
           entry.failedAt = now();
+
           if (stands(key, entry) && foreground) update(key, { error: "time" });
           controller.abort();
           void cancel(job);
         }, 180_000);
         const wanted = () => !controller.signal.aborted && foreground && stands(key, entry);
         update(key, { activity: "loading", error: null });
+
         if (!source.provider.liveGuideRequest) throw new GuideFault("unavailable");
         const request = await source.provider.liveGuideRequest(controller.signal);
+
         if (!wanted()) return;
+
         if (request.kind === "none") {
           // Only an authoritative provider answer clears availability.
           native.revoke(key);
+
           if (!(await native.forget(key))) throw new GuideFault("disk");
+
           if (!stands(key, entry)) return;
+
           try {
             entry.activation = await native.attach(key, source.revision);
           } catch {
@@ -334,14 +393,18 @@ export function createGuide(
               entries.delete(key);
               update(key, { availability: "none", activity: "idle", error: "unavailable" });
             }
+
             return;
           }
+
           if (!stands(key, entry)) return;
           entry.generation = null;
           invalidate(entry);
           update(key, { availability: "none" });
+
           return;
         }
+
         const result = await ingest(
           native,
           entry.activation.lease,
@@ -351,17 +414,21 @@ export function createGuide(
           now(),
           wanted,
         );
+
         // An ok publish is already committed. Background/deadline cannot roll it back.
         // Source/entry replacement still rejects the receipt, including remove/re-add.
         if (!stands(key, entry) || entry.activation.lease !== lease) return;
+
         if (result.kind === "ok") {
           entry.generation = result.value;
+
           // An external guide can now answer channels another guide answered before.
           if (externals.has(key)) withdrawAll();
           else {
             invalidate(entry);
             withdrawChannels(key);
           }
+
           entry.failedAt = -Infinity;
           update(key, { availability: "available", error: null });
         } else if (wanted() && result.kind === "failed") throw new GuideFault(result.error);
@@ -378,8 +445,10 @@ export function createGuide(
         entry.jobs.delete(job);
         delete entry.refresh;
         delete entry.refreshAbort;
+
         if (stands(key, entry)) {
           update(key, { activity: "idle" });
+
           // A foreground event while cancellation drained gets one fresh attempt.
           if (
             foreground &&
@@ -392,43 +461,54 @@ export function createGuide(
         }
       }
     })();
+
     return entry.refresh;
   }
+
   /** The channel an owned key names, by its canonical key, with its subscription's Part. */
   const channelOf = (key: string) => {
     const colon = key.indexOf(":");
+
     if (colon < 1) return null;
     const part = parts.get(key.slice(0, colon));
     const channel = part?.byId.get(key.slice(colon + 1));
+
     return part && channel ? { part, channel } : null;
   };
+
   /**
    * What to read a channel by, in order, from each guide with a usable generation: its mapped id,
    * then its own ids, or only `trying`.
    */
   const candidates = (key: string, trying?: string): Token[] => {
     const found = channelOf(key);
+
     if (!found) return [];
     const { part, channel } = found;
     const own = part.guideIds.get(channel.id) ?? [];
     const mapped = mappings.get(channel.key);
+
     const guides = [part.subscriptionId, ...externals.keys()].flatMap((owner) => {
       const entry = entries.get(owner);
+
       return entry?.generation && stands(owner, entry) && usable(entry.generation)
         ? [{ owner, entry, generation: entry.generation }]
         : [];
     });
+
     const passes = trying
       ? [[trying]]
       : mapped
         ? [[mapped], own.filter((id) => id !== mapped)]
         : [own];
+
     return passes
       .filter((ids) => ids.length > 0)
       .flatMap((ids) =>
         guides.map((read) => ({ ...read, part, ids, key: channel.key, start: -1, layout })),
       );
   };
+
   /** The first candidate whose guide has the channel, with its answer. */
   async function first(
     key: string,
@@ -439,11 +519,15 @@ export function createGuide(
   ) {
     for (const captured of candidates(key, trying)) {
       const answer = await query(captured, mode, day, signal);
+
       if (signal?.aborted) return null;
+
       if (answer?.guideId) return { captured, answer };
     }
+
     return null;
   }
+
   function query(
     value: Token,
     mode: "listing" | "day" | "detail",
@@ -464,6 +548,7 @@ export function createGuide(
       ),
     );
   }
+
   /**
    * Runs `read` as a job of `value`'s guide within its 2 second budget: its answer, or null where
    * `value` no longer stands, `signal` aborted, the budget ran out or the native reader refused.
@@ -477,20 +562,27 @@ export function createGuide(
     const native = port();
     const job = id();
     value.entry.jobs.add(job);
+
     if (!native.begin(value.entry.activation.lease, job)) {
       value.entry.jobs.delete(job);
+
       return null;
     }
+
     const cancel = () => {
       void native.cancel(job);
     };
+
     signal?.addEventListener("abort", cancel, { once: true });
     let expired = false;
+
     const timeout = setTimeout(() => {
       expired = true;
       cancel();
     }, 2000);
+
     let result: Result<T>;
+
     try {
       result = await read(native, value.entry.activation.lease, job);
     } finally {
@@ -502,17 +594,21 @@ export function createGuide(
         value.entry.jobs.delete(job);
       }
     }
+
     // Cleanup is an asynchronous boundary too. Validate at the final public return.
     return !expired && !signal?.aborted && validToken(value) && result.kind === "ok"
       ? result.value
       : null;
   }
+
   const tick = () => {
     for (const key of entries.keys()) {
       update(key);
+
       if (status(key).stale) void refresh(key, false);
     }
   };
+
   const service = {
     status,
     /** Immutable owner snapshot for React; notifications also carry the foreground minute tick. */
@@ -532,9 +628,12 @@ export function createGuide(
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
+
       if (listeners === 1 && foreground) clock = setInterval(tick, 60_000);
+
       return () => {
         stop();
+
         if (--listeners === 0) {
           clearInterval(clock);
           clock = undefined;
@@ -547,15 +646,20 @@ export function createGuide(
      */
     async restore(ids: readonly string[], kept: readonly string[] = []) {
       const cycle = ++era;
+
       for (const entry of entries.values()) cancelEntry(entry);
       entries.clear();
       withdrawAll();
+
       try {
         connect();
         const restored = await port().restore(ids, kept);
+
         if (cycle !== era) return;
+
         for (const value of restored) {
           if (!ids.includes(value.subscriptionId)) continue;
+
           const entry: Entry = {
             activation: value.activation,
             source: undefined,
@@ -563,8 +667,10 @@ export function createGuide(
             failedAt: -Infinity,
             jobs: new Set(),
           };
+
           entries.set(value.subscriptionId, entry);
           const part = parts.get(value.subscriptionId);
+
           if (part) entry.part = part;
           update(value.subscriptionId, {
             availability: usable(entry.generation) ? "available" : "unknown",
@@ -579,10 +685,13 @@ export function createGuide(
     async attach(key: string) {
       const source = originOf(key);
       const cycle = era;
+
       if (!source) return;
       const before = entries.get(key);
+
       if (before?.source === source) return;
       let pending: Entry | undefined;
+
       if (before) {
         cancelEntry(before);
         pending = {
@@ -596,12 +705,16 @@ export function createGuide(
         };
         entries.set(key, pending);
       }
+
       const version = (versions.get(key) ?? 0) + 1;
       versions.set(key, version);
+
       try {
         connect();
         const activation = await port().attach(key, source.revision);
+
         if (originOf(key) !== source || versions.get(key) !== version || cycle !== era) return;
+
         const entry: Entry = pending ?? {
           activation,
           source,
@@ -609,11 +722,13 @@ export function createGuide(
           failedAt: -Infinity,
           jobs: new Set(),
         };
+
         invalidate(entry);
         entry.activation = activation;
         entry.generation = activation.generation;
         delete entry.activating;
         const part = parts.get(key);
+
         if (part) entry.part = part;
         entries.set(key, entry);
         update(key, {
@@ -621,12 +736,14 @@ export function createGuide(
           activity: "idle",
           error: null,
         });
+
         if (status(key).stale) void refresh(key, false);
       } catch {
         if (pending && entries.get(key) === pending) {
           cancelEntry(pending);
           entries.delete(key);
         }
+
         if (originOf(key) === source && versions.get(key) === version && cycle === era)
           update(key, { error: "unavailable" });
       }
@@ -635,6 +752,7 @@ export function createGuide(
       parts.set(part.subscriptionId, part);
       withdrawChannels(part.subscriptionId);
       const entry = entries.get(part.subscriptionId);
+
       if (entry) {
         invalidate(entry);
         entry.part = part;
@@ -657,6 +775,7 @@ export function createGuide(
     /** The guide ids channel `key`'s provider names it by, as its own guide is read. */
     guideIdsOf(key: string): readonly string[] {
       const found = channelOf(key);
+
       return found?.part.guideIds.get(found.channel.id) ?? [];
     },
     /**
@@ -669,7 +788,9 @@ export function createGuide(
       options?: { readonly signal?: AbortSignal },
     ): Promise<{ readonly guide: string; readonly listing: Listing } | null> {
       const read = await first(key, "listing", { from: 0, until: 0 }, options?.signal, guideId);
+
       if (!read || options?.signal?.aborted || !validToken(read.captured)) return null;
+
       return { guide: read.captured.owner, listing: listingOf(read.answer.rows, now()) };
     },
     /**
@@ -688,6 +809,7 @@ export function createGuide(
       const signal = options?.signal;
       const none = { found: [], unsearched: false };
       const words = [...new Set(searchWords(text))];
+
       // Past what the native reader takes, as no title of its 300 characters folds to more.
       if (
         words.length === 0 ||
@@ -695,71 +817,94 @@ export function createGuide(
         words.some((word) => new TextEncoder().encode(word).length > 32768)
       )
         return none;
+
       // What every answer stands on, which a change during the search leaves it none of.
       const footing = () => [
         layout,
         ...[...entries].flatMap(([key, entry]) => [key, entry, entry.generation, originOf(key)]),
         ...parts.values(),
       ];
+
       const before = footing();
       const at = now();
       let unsearched = false;
+
       /** Runs `read` on `value`'s guide; `unsearched` where that guide stands but didn't answer. */
       const asked = async <T>(
         value: Token,
         read: (native: GuideNative, lease: string, job: string) => Promise<Result<T>>,
       ) => {
         const answer = await ask(value, signal, read);
+
         if (!answer && !signal?.aborted && foreground && validToken(value)) unsearched = true;
+
         return answer;
       };
+
       // The guide ids each guide has programmes for now, which tell which guide answers a channel,
       // or null for one that didn't say.
       const current = new Map<string, ReadonlySet<string> | null>();
+
       const standing = [...entries].filter(
         ([owner, entry]) => stands(owner, entry) && usable(entry.generation),
       ).length;
+
       for (const key of keys) {
         if (current.size >= standing || signal?.aborted) break;
+
         for (const value of candidates(key))
           if (!current.has(value.owner)) {
             const answer = await asked(value, (native, lease, job) =>
               native.current(lease, value.generation.id, job, at),
             );
+
             current.set(value.owner, answer && new Set(answer.ids));
           }
       }
+
       // By guide, the first of `keys` that reads each of its guide ids.
       const guides = new Map<
         string,
         { readonly asking: Token; readonly by: Map<string, Token & { readonly key: string }> }
       >();
+
       const places = new Map<string, number>();
+
       for (const [place, key] of keys.entries())
         for (const value of candidates(key)) {
           const ids = current.get(value.owner);
+
           // Which guide answers it is unknown past one that didn't say.
           if (ids === null || signal?.aborted) break;
           const guideId = value.ids.find((id) => ids?.has(id));
+
           if (!guideId) continue;
+
           if (places.has(value.key)) break;
           places.set(value.key, place);
           const read = guides.get(value.owner) ?? { asking: value, by: new Map() };
           guides.set(value.owner, read);
+
           if (!read.by.has(guideId)) read.by.set(guideId, value);
           break;
         }
+
       const found: { captured: Token; match: Match }[] = [];
+
       for (const { asking, by } of guides.values()) {
         const answer = await asked(asking, (native, lease, job) =>
           native.search(lease, asking.generation.id, job, [...by.keys()], words, at, 20),
         );
+
         for (const match of answer?.rows ?? []) {
           const captured = by.get(match.guideId);
+
           if (captured) found.push({ captured, match });
         }
       }
+
       const after = footing();
+
       if (
         signal?.aborted ||
         after.length !== before.length ||
@@ -767,6 +912,7 @@ export function createGuide(
       )
         return none;
       const rank = ({ match }: (typeof found)[number]) => (match.start <= at ? 0 : 1);
+
       const programmes = found
         .filter(({ captured }) => validToken(captured))
         .sort(
@@ -785,6 +931,7 @@ export function createGuide(
             detail: token({ ...captured, ids: [guideId], start, on: dayOf(start) }),
           },
         }));
+
       return { found: programmes, unsearched };
     },
     async forget(key: string): Promise<boolean> {
@@ -794,9 +941,12 @@ export function createGuide(
       entries.delete(key);
       parts.delete(key);
       state.set(new Map([...state.get()].filter(([id]) => id !== key)));
+
       try {
         port().revoke(key);
+
         if (entry) cancelEntry(entry);
+
         return await port().forget(key);
       } catch {
         return false;
@@ -807,6 +957,7 @@ export function createGuide(
       foregroundCycle++;
       foreground = true;
       awake.set(true);
+
       if (listeners && !clock) clock = setInterval(tick, 60_000);
       tick();
     },
@@ -815,6 +966,7 @@ export function createGuide(
       awake.set(false);
       clearInterval(clock);
       clock = undefined;
+
       for (const entry of entries.values()) cancelEntry(entry);
     },
     async listings(
@@ -823,6 +975,7 @@ export function createGuide(
     ): Promise<ReadonlyMap<string, Listing>> {
       if (keys.length > 40) throw new GuideFault("reply");
       const answers = new Map<string, Awaited<ReturnType<typeof first>>>();
+
       // Retain each requested alias independently. Later batches must not hide earlier captures.
       for (let offset = 0; offset < keys.length; offset += 2)
         await Promise.all(
@@ -832,13 +985,16 @@ export function createGuide(
         );
       const result = new Map<string, Listing>();
       const at = now();
+
       for (const [key, value] of answers) {
         const rows =
           !options?.signal?.aborted && value && validToken(value.captured)
             ? value.answer.rows
             : undefined;
+
         result.set(key, listingOf(rows ?? [], at));
       }
+
       return result;
     },
     async schedule(
@@ -857,11 +1013,14 @@ export function createGuide(
       const date = new Date(day.from);
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       const tomorrow = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+
       if (start.getTime() !== day.from || tomorrow.getTime() !== day.until)
         throw new GuideFault("time");
       let read: Awaited<ReturnType<typeof first>> = null;
+
       if (cursor) {
         const captured = tokens.get(cursor);
+
         if (
           captured &&
           validToken(captured) &&
@@ -870,21 +1029,26 @@ export function createGuide(
           channelOf(key)?.channel.key === captured.key
         ) {
           const answer = await query(captured, "day", day, options?.signal);
+
           if (answer) read = { captured, answer };
         }
       } else read = await first(key, "day", day, options?.signal);
       const guideId = read?.answer.guideId;
+
       if (!read || !guideId || options?.signal?.aborted || !validToken(read.captured))
         return { programmes: [], cursor: null };
       const { captured, answer } = read;
       const ids = [guideId];
+
       const programmes = answer.rows.map(({ start, stop, title }) => ({
         start,
         stop,
         title,
         detail: token({ ...captured, ids, start, on: day.from }),
       }));
+
       const last = programmes.at(-1);
+
       return {
         programmes,
         cursor:
@@ -898,11 +1062,13 @@ export function createGuide(
       options?: { readonly signal?: AbortSignal },
     ): Promise<Programme | null> {
       const captured = tokens.get(detail);
+
       if (!captured || !validToken(captured)) return null;
       // Newest again, so a programme read as it shows outlasts the day pages minted after it.
       tokens.delete(detail);
       tokens.set(detail, captured);
       const answer = await query(captured, "detail", { from: 0, until: 0 }, options?.signal);
+
       return !options?.signal?.aborted && validToken(captured) ? (answer?.rows[0] ?? null) : null;
     },
     /**
@@ -923,13 +1089,17 @@ export function createGuide(
           { from: 0, until: 0 },
           options?.signal,
         );
+
         // `ask` answers null for a read aborted, or withdrawn meanwhile.
         if (!answer) return undefined;
+
         if (answer.guideId) return answer.rows[0] ?? null;
       }
+
       return undefined;
     },
   };
+
   return service;
 }
 

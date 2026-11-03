@@ -15,21 +15,29 @@ let provider: Provider;
 const keychain = new Map<string, string>();
 const sheets: Array<{ options: readonly string[]; pick: (index: number) => void }> = [];
 const alerts: string[][] = [];
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-secure-store", () => keychainStore(() => keychain));
+
 vi.mock("@mrstreamer/core/xtream", async () => ({
   ...(await vi.importActual<typeof import("@mrstreamer/core/xtream")>("@mrstreamer/core/xtream")),
   xtreamProvider: () => provider,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => port,
   VideoView: () => null,
   VideoAirPlayButton: () => null,
   isPictureInPictureSupported: () => false,
 }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -46,28 +54,36 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined }, usePathname: () => "/live" }));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => ({ tab: "live" }),
   openOnTabs: () => undefined,
 }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, onPress }: { testID?: string; onPress: () => void }) =>
       createElement("button", { "data-testid": testID, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
 
 const { native } = await import("./native-files.ts");
@@ -79,20 +95,25 @@ const { demoProvider } = await import("../src/demo.ts");
 const { WatchLayer } = await import("../src/watch.tsx");
 let channel: import("../src/library.ts").Channel;
 let liveStream = vi.fn(async (id: string) => ({ url: `file:${id}.m3u8`, format: "hls" as const }));
+
 const tick = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
+
 let unmount = () => {};
 let container = document.createElement("div");
+
 async function until(ready: () => boolean) {
   for (let i = 0; i < 100 && !ready(); i++) await new Promise((done) => setTimeout(done, 10));
   expect(ready()).toBe(true);
 }
+
 beforeAll(async () => {
   rmSync(join(native.root, "documents"), { recursive: true, force: true });
   mkdirSync(join(native.root, "documents"));
   await account.restore();
 });
+
 beforeEach(async () => {
   liveStream = vi.fn(async (id: string) => ({ url: `file:${id}.m3u8`, format: "hls" as const }));
   provider = {
@@ -111,18 +132,22 @@ beforeEach(async () => {
       })),
     }),
   };
+
   const id = await account.add({
     server: "http://quality.example",
     username: "fixture",
     password: "fixture-pass",
   });
+
   if (!id) throw new Error("No saved account");
   await until(() => {
     const now = account.currentCatalogue();
+
     return now.kind === "ready" && now.library.byKey.has(`${id}:10`);
   });
   const now = account.currentCatalogue();
   const found = now.kind === "ready" ? now.library.byKey.get(`${id}:10`) : undefined;
+
   if (!found) throw new Error("No channel");
   channel = found;
   preferences.updateMediaPreferences("liveQuality", "fhd");
@@ -136,6 +161,7 @@ beforeEach(async () => {
   unmount = () => React.act(() => root.unmount());
   React.act(() => root.render(React.createElement(WatchLayer)));
 });
+
 afterEach(async () => {
   native.sync = null;
   native.undeletable = null;
@@ -144,12 +170,14 @@ afterEach(async () => {
   await tick();
   await account.remove(channel.subscriptionId, { keepHistory: true });
 });
+
 async function watch() {
   await React.act(async () => {
     account.playChannel(channel, "News", { watch: true });
     await tick();
   });
 }
+
 function menu() {
   React.act(() =>
     container
@@ -157,9 +185,12 @@ function menu() {
       .dispatchEvent(new Event("click", { bubbles: true })),
   );
   const sheet = sheets.at(-1);
+
   if (!sheet) throw new Error("No Quality sheet");
+
   return sheet;
 }
+
 async function pick(sheet: ReturnType<typeof menu>, contains: string) {
   const index = sheet.options.findIndex((row) => row.includes(contains));
   expect(index).toBeGreaterThanOrEqual(0);
@@ -191,6 +222,7 @@ describe("Live quality through the real owners", () => {
   it("names Automatic in the interface language, where it still resets the pick", async () => {
     preferences.updateChannelPick(channel, "11");
     setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+
     try {
       await watch();
       const sheet = menu();
@@ -210,10 +242,12 @@ describe("Live quality through the real owners", () => {
       await watch();
       await React.act(async () => {
         if (phase === "playing" || phase === "paused") port.state(true);
+
         if (phase === "paused") {
           playback.togglePause();
           port.state(false);
         }
+
         if (phase === "failed") port.failure({ kind: "auth", evidence: null });
         await tick();
       });
@@ -256,6 +290,7 @@ describe("Live quality through the real owners", () => {
         if (operation === "move-after-delete" && path.endsWith("media-preferences.json.next"))
           throw new Error("Disk refused");
       };
+
       native.undeletable = (path) => cleanup && path.endsWith("media-preferences.json.next");
       await pick(menu(), "SD · NL | News SD");
       expect(preferences.channelPicks(channel.subscriptionId)).toEqual({ "10": "11" });
@@ -274,21 +309,29 @@ describe("Live quality through the real owners", () => {
       const sheet = menu();
       await React.act(async () => {
         if (changed === "close") await playback.closeWatch();
+
         if (changed === "new-item") account.playChannel(channel, "News", { watch: true });
+
         if (changed === "retry") playback.retry();
+
         if (changed === "new-menu") menu();
+
         if (changed === "request") playback.request();
+
         if (changed === "source") {
           const current = sources.sourceOf(channel.subscriptionId);
           sources.setSource(channel.subscriptionId, { ...current, revision: current.revision + 1 });
         }
+
         if (changed === "catalogue") {
           account.reloadChannels(channel.subscriptionId);
           await until(() => {
             const now = account.currentCatalogue();
+
             return now.kind === "ready" && now.library.byKey.get(channel.key) !== channel;
           });
         }
+
         await tick();
       });
       const before = liveStream.mock.calls.length;

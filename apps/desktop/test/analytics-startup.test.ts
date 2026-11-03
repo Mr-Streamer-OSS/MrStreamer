@@ -27,14 +27,17 @@ const properties: BuildProperties = {
   arch: "x64",
   distribution: "direct",
 };
+
 const id = "fd17819b-85f2-41e4-8322-444bfa91ece0";
 const timestamp = "2026-10-23T12:00:00.000Z";
+
 const envelope = {
   ...properties,
   profile_origin: "upgrading" as const,
   $process_person_profile: false as const,
   $geoip_disable: true as const,
 };
+
 const installation = {
   uuid: "e1ebd019-ab3e-4d80-b1bd-912eb2ac0800",
   distinct_id: id,
@@ -42,6 +45,7 @@ const installation = {
   event: "installation_observed",
   properties: envelope,
 } satisfies CaptureEvent;
+
 const usage: SummaryEvent = {
   uuid: "be219421-d07a-48f0-bd4e-fdb8bf58fa46",
   distinct_id: id,
@@ -54,6 +58,7 @@ const usage: SummaryEvent = {
     counts: { feature_home: 2 },
   },
 };
+
 const play: SummaryEvent = {
   uuid: "3634b8ec-c442-48da-861c-0e99941d35be",
   distinct_id: id,
@@ -68,6 +73,7 @@ const play: SummaryEvent = {
     end_reason: "interrupted",
   },
 };
+
 function retained(): AnalyticsRecord {
   return {
     format: 2,
@@ -81,12 +87,14 @@ function retained(): AnalyticsRecord {
 }
 
 const owners: Analytics[] = [];
+
 beforeEach(() => {
   vi.useFakeTimers({
     toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
   });
   vi.setSystemTime(new Date(timestamp));
 });
+
 afterEach(async () => {
   const closing = Promise.all(owners.splice(0).map((owner) => owner.close()));
   await vi.advanceTimersByTimeAsync(1500);
@@ -107,6 +115,7 @@ async function start(
   const load = Promise.withResolvers<AnalyticsRecord | null>();
   let record = options.record === undefined ? retained() : structuredClone(options.record);
   const writes: AnalyticsRecord[] = [];
+
   const store = options.store ?? {
     load: () => load.promise,
     async save(next: AnalyticsRecord) {
@@ -114,7 +123,9 @@ async function start(
       writes.push(record);
     },
   };
+
   const events: CaptureEvent[] = [];
+
   const owner = new Analytics({
     dataDir,
     origin: options.origin ?? Promise.resolve("fresh"),
@@ -125,11 +136,14 @@ async function start(
       kind: "local",
       async send(event) {
         events.push(structuredClone(event));
+
         return "accepted";
       },
     },
   });
+
   owners.push(owner);
+
   return { owner, events, writes, load, snapshot: () => structuredClone(record) };
 }
 
@@ -139,6 +153,7 @@ async function until(check: () => boolean | Promise<boolean>) {
     if (await check()) return;
     await pause(5);
   }
+
   throw new Error("Analytics startup side effect did not settle.");
 }
 
@@ -148,6 +163,7 @@ describe("optional analytics startup", () => {
     const started = await start({ ...options, consentChanged: () => refresh?.() });
     const { owner } = started;
     const published: PreferenceSnapshot[] = [];
+
     const publication = await Effect.runPromise(
       preferencePublication({
         read: Effect.promise(async () => ({
@@ -170,10 +186,13 @@ describe("optional analytics startup", () => {
         stale: () => {},
       }),
     );
+
     refresh = async () => {
       await Effect.runPromise(publication.get);
     };
+
     const recovered = owner.loaded.then(refresh);
+
     return { ...started, publication, published, recovered };
   }
 
@@ -186,6 +205,7 @@ describe("optional analytics startup", () => {
       expect((await boot).preferences.analyticsEnabled).toBe(false);
       expect(published).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(200);
+
       if (outcome === "success") load.resolve(null);
       else load.reject(new Error("private load failure"));
       await recovered;
@@ -212,6 +232,7 @@ describe("optional analytics startup", () => {
       const load = Promise.withResolvers<AnalyticsRecord | null>();
       let durable: AnalyticsRecord = structuredClone(before);
       const commits: boolean[] = [];
+
       const { owner, events, publication, published, recovered } = await compose({
         store: {
           load: () => load.promise,
@@ -222,14 +243,18 @@ describe("optional analytics startup", () => {
           },
         },
       });
+
       owner.setForeground(true);
       const boot = Effect.runPromise(publication.get);
       await vi.advanceTimersByTimeAsync(1500);
       expect((await boot).preferences.analyticsEnabled).toBe(false);
+
       const changes = requests.map((analyticsEnabled) =>
         Effect.runPromiseExit(publication.update({ analyticsEnabled })),
       );
+
       await vi.advanceTimersByTimeAsync(1500);
+
       for (const change of changes) expect((await change)._tag).toBe("Failure");
       expect(commits).toEqual([]);
       load.resolve(before);
@@ -252,6 +277,7 @@ describe("optional analytics startup", () => {
     async (initial) => {
       const before = { ...retained(), enabled: initial, pending: [] };
       let durable: AnalyticsRecord = structuredClone(before);
+
       const { owner, publication, published, recovered } = await compose({
         store: {
           load: async () => before,
@@ -261,6 +287,7 @@ describe("optional analytics startup", () => {
           },
         },
       });
+
       await recovered;
       expect(published.at(-1)?.preferences.analyticsEnabled).toBe(initial);
       const first = Effect.runPromiseExit(publication.update({ analyticsEnabled: initial }));
@@ -284,9 +311,11 @@ describe("optional analytics startup", () => {
       enabled: false,
       summaries: { version: 1, installationId: id, pending: [], usage, unfinished: null },
     };
+
     const load = Promise.withResolvers<AnalyticsRecord | null>();
     let durable: AnalyticsRecord = structuredClone(before);
     let saved = false;
+
     const { owner, events, publication, published, recovered } = await compose({
       store: {
         load: () => load.promise,
@@ -297,6 +326,7 @@ describe("optional analytics startup", () => {
         },
       },
     });
+
     const boot = Effect.runPromise(publication.get);
     await vi.advanceTimersByTimeAsync(1500);
     await boot;
@@ -317,8 +347,10 @@ describe("optional analytics startup", () => {
     async (failure) => {
       const consentChanged = vi.fn(() => {
         if (failure === "throw") throw new Error("publication failed");
+
         return Promise.reject(new Error("publication failed"));
       });
+
       const { owner, load, snapshot } = await start({ consentChanged });
       load.resolve(retained());
       await owner.loaded;
@@ -396,6 +428,7 @@ describe("optional analytics startup", () => {
       const settings = owner.settings();
       await vi.advanceTimersByTimeAsync(1500);
       expect(await settings).toMatchObject({ transport: "unavailable" });
+
       if (port === "store") {
         load.reject(new Error("PRIVATE-ID /private/path"));
         origin.resolve("fresh");
@@ -403,6 +436,7 @@ describe("optional analytics startup", () => {
         load.resolve(retained());
         origin.reject(new Error("PRIVATE-ID /private/path"));
       }
+
       await vi.advanceTimersByTimeAsync(200);
       owner.setForeground(true);
       await expect(owner.configure(true)).rejects.toThrow(
@@ -426,11 +460,14 @@ describe("optional analytics startup", () => {
         unfinished: { event: play, watchMs: 42_000 },
       },
     };
+
     const { owner, load, events, snapshot } = await start({ record: before });
     owner.setForeground(true);
+
     const disabled = expect(owner.configure(false)).rejects.toThrow(
       "Analytics preference could not be saved.",
     );
+
     await vi.advanceTimersByTimeAsync(1500);
     await disabled;
     expect(events).toEqual([]);
@@ -481,6 +518,7 @@ describe("optional analytics startup", () => {
 
   it("recovers open summaries once after a pending enable and preserves an existing summary's retry time", async () => {
     const delayed = { ...play, uuid: "9a93e0a9-c293-44fe-a41e-c491e9f99107" };
+
     const before: AnalyticsRecord = {
       ...retained(),
       summaries: {
@@ -493,6 +531,7 @@ describe("optional analytics startup", () => {
         ],
       },
     };
+
     const { owner, load, events, snapshot } = await start({ record: before });
     const settings = owner.settings();
     await vi.advanceTimersByTimeAsync(1500);
@@ -515,7 +554,9 @@ describe("optional analytics startup", () => {
       ...retained(),
       summaries: { version: 1, installationId: id, pending: [], usage, unfinished: null },
     };
+
     const gate = Promise.withResolvers<AnalyticsRecord>();
+
     const { owner, events } = await start({
       store: {
         load: () => gate.promise,
@@ -524,6 +565,7 @@ describe("optional analytics startup", () => {
         },
       },
     });
+
     await vi.advanceTimersByTimeAsync(1700);
     gate.resolve(structuredClone(before));
     await vi.advanceTimersByTimeAsync(0);
@@ -541,6 +583,7 @@ describe("optional analytics startup", () => {
       const closing = owner.close();
       await vi.advanceTimersByTimeAsync(500);
       await closing;
+
       if (outcome === "resolve") load.resolve(retained());
       else load.reject(new Error("PRIVATE-ID"));
       await vi.advanceTimersByTimeAsync(2000);
@@ -558,6 +601,7 @@ describe("optional analytics startup", () => {
     const release = Promise.withResolvers<void>();
     const consentChanged = vi.fn();
     let durable: AnalyticsRecord = structuredClone(before);
+
     const { owner, events } = await start({
       consentChanged,
       store: {
@@ -569,6 +613,7 @@ describe("optional analytics startup", () => {
         },
       },
     });
+
     await owner.loaded;
     const changing = owner.configure(true);
     await entered.promise;
@@ -584,6 +629,7 @@ describe("optional analytics startup", () => {
 
   it("does not notify composition for a rejected consent save", async () => {
     const consentChanged = vi.fn();
+
     const { owner } = await start({
       consentChanged,
       store: {
@@ -593,6 +639,7 @@ describe("optional analytics startup", () => {
         },
       },
     });
+
     await owner.loaded;
     await expect(owner.configure(false)).rejects.toThrow(
       "Analytics preference could not be saved.",
@@ -603,9 +650,11 @@ describe("optional analytics startup", () => {
 
   it("does not apply a queued preference after quitting with initialization still pending", async () => {
     const { owner, load, events, writes } = await start();
+
     const disabled = expect(owner.configure(false)).rejects.toThrow(
       "Analytics preference could not be saved.",
     );
+
     const closing = owner.close();
     await vi.advanceTimersByTimeAsync(500);
     await closing;
@@ -622,6 +671,7 @@ describe("optional analytics startup", () => {
     async (outcome) => {
       const dataDir = await tempDir();
       const path = join(dataDir, "analytics.json");
+
       const legacy = {
         ...retained(),
         format: 1,
@@ -631,6 +681,7 @@ describe("optional analytics startup", () => {
           { event: { ...installation, event: "app_summary_day" }, attempts: 0 },
         ],
       };
+
       await writeFile(path, JSON.stringify(legacy));
       const entered = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -638,16 +689,19 @@ describe("optional analytics startup", () => {
       vi.spyOn(jsonFile, "writeJsonFile").mockImplementationOnce(async (destination, value) => {
         entered.resolve();
         await release.promise;
+
         if (outcome === "failure") throw new Error("PRIVATE-ID rename EACCES");
         await original(destination, value);
       });
       const { owner, events } = await start({ store: analyticsStore(dataDir) });
+
       const disabled =
         outcome === "opt-out"
           ? expect(owner.configure(false)).rejects.toThrow(
               "Analytics preference could not be saved.",
             )
           : null;
+
       await entered.promise;
       const settings = owner.settings();
       await vi.advanceTimersByTimeAsync(1500);
@@ -655,6 +709,7 @@ describe("optional analytics startup", () => {
       expect(await settings).toEqual({ enabled: false, transport: "unavailable" });
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual(legacy);
       release.resolve();
+
       if (outcome === "success") {
         await until(
           async () =>
@@ -666,6 +721,7 @@ describe("optional analytics startup", () => {
       } else if (outcome === "opt-out") {
         await until(async () => {
           const settings = await owner.settings();
+
           return settings.enabled === false && settings.transport === "local";
         });
         expect(events).toEqual([]);
@@ -679,6 +735,7 @@ describe("optional analytics startup", () => {
         await until(async () => {
           try {
             await owner.configure(true);
+
             return false;
           } catch {
             return true;

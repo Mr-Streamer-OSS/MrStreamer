@@ -12,6 +12,7 @@ const CHANNELS = ["Meridian", "Newsroom", "Orbit", "Harbour", "Fernlight", "Atla
 /** Six playable synthetic channels, with both current programmes and a deliberate guide gap. */
 export function stageChannel(channel: FakeChannel): FakeChannel {
   const name = CHANNELS[channel.streamId - 1000];
+
   return name
     ? {
         ...channel,
@@ -32,10 +33,12 @@ export function stageChannel(channel: FakeChannel): FakeChannel {
 export const stageStreams: NonNullable<FakeProviderOptions["streams"]> = (channel, out, signal) => {
   if (!channel.fixture || !channel.name.startsWith("STAGE | "))
     return liveStreams(channel, out, signal);
+
   const clip = new URL(
     `../../../../apps/desktop/test/fixtures/${channel.fixture}`,
     import.meta.url,
   );
+
   const broadcast = spawn(
     process.env["MR_STREAMER_FFMPEG"] || "ffmpeg",
     [
@@ -51,6 +54,7 @@ export const stageStreams: NonNullable<FakeProviderOptions["streams"]> = (channe
     ],
     { stdio: ["ignore", "pipe", "ignore"] },
   );
+
   broadcast.once("error", () => out.destroy(new Error("Stage broadcast unavailable.")));
   broadcast.stdout.pipe(out);
   signal.addEventListener("abort", () => broadcast.kill("SIGTERM"), { once: true });
@@ -66,16 +70,21 @@ export function stageLogo(channel: FakeChannel): string {
     [24, 120],
     [120, 60],
   ] as const;
+
   const [width, height] = sizes[(channel.streamId - 1000) % sizes.length] ?? [80, 40];
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" rx="1" fill="white"/><path d="M0 0 L${width} ${height} M0 ${height} L${width} 0" stroke="#2861bd" stroke-width="${Math.min(width, height) / 5}"/></svg>`;
 }
 
 const text = (selector: string, name: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(name)})`;
+
 const check = (name: string) =>
   `${text('section[aria-label="Customize Home"] label', name)}.querySelector('input')`;
+
 const move = (name: string, direction: string) =>
   `document.querySelector('button[aria-label="Move ${name} ${direction}"]')`;
+
 const require = (condition: boolean, message: string) => {
   if (!condition) throw new Error(message);
 };
@@ -90,14 +99,17 @@ interface Fixture {
 /** Selected Stage acceptance uses pointer/key navigation and read-only state/geometry evidence. */
 export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<void> {
   const row = (id: string) => `document.querySelector('[data-home-row="${id}"]')`;
+
   const promoted = () =>
     d.evaluate<string | null>(
       "document.querySelector('[data-home-promoted]')?.getAttribute('data-home-row') ?? null",
     );
+
   const preferences = () =>
     d.evaluate<{ id: string; visible: boolean }[]>(
       "(async () => { const read = await window.mrStreamer.invoke('preferences.get'); return read.ok ? read.value.preferences.homeRows ?? [] : []; })()",
     );
+
   const customize = async () => {
     await d.click(
       "Open Settings",
@@ -107,19 +119,23 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     await d.wait(() =>
       d.exists("document.querySelector('section[aria-label=\"Customize Home\"]')"),
     );
+
     const controls = await d.evaluate<{ label: string; radius: number; height: number }[]>(
       "[...document.querySelectorAll('section[aria-label=\"Customize Home\"] [data-slot=button]')].map(b => ({ label:b.getAttribute('aria-label') ?? b.innerText, radius:parseFloat(getComputedStyle(b).borderRadius), height:b.getBoundingClientRect().height }))",
     );
+
     require(controls.length === 17 &&
       controls.every((c) => c.radius >= c.height / 2), "Customize controls are not rounded");
     d.observed["customizeControls"] = controls;
     await d.capture("home-customize-controls");
   };
+
   const done = () =>
     d.click(
       "Return from Home settings",
       "[...document.querySelectorAll('header button')].findLast(b => b.textContent.trim() === 'Back')",
     );
+
   const reset = async () => {
     await d.click("Reset Home rows", text("button", "Reset to defaults"));
     await d.wait(
@@ -128,6 +144,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
         (await preferences())[0]?.id === "continue",
     );
   };
+
   const search = async (name: string) => {
     await d.click(`Search ${name}`, "document.querySelector('button[aria-label=Search]')");
     await d.send("Input.insertText", { text: name });
@@ -137,17 +154,21 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       ),
     );
   };
+
   const home = async () => {
     await d.click("Return Home", text("header button", "Home"));
     await d.wait(() => d.exists("document.querySelector('[data-home-stage]')"));
   };
+
   const sizes = [
     [1280, 798],
     [1600, 1000],
     [900, 700],
   ] as const;
+
   const measure = async (state: string) => {
     const frames: object[] = [];
+
     for (const [width, height] of sizes) {
       d.action(`Measure ${state} at ${width} by ${height}`);
       await d.send("Emulation.setDeviceMetricsOverride", {
@@ -166,6 +187,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
         ),
       );
       await d.capture(`${state}-${width}`);
+
       const geometry = await d.evaluate<{
         width: number;
         height: number;
@@ -220,14 +242,17 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
           video: { time:v?.currentTime ?? 0, muted:v?.muted ?? true, width:v?.videoWidth ?? 0, paused:v?.paused ?? true },
         };
       })()`);
+
       require(geometry.overflow <= 1, `${state}/${width} overflowed`);
       require(Math.abs(geometry.preview.width / geometry.preview.height - 16 / 9) <
         0.01, `${state}/${width} preview aspect`);
       require(new Set(geometry.rows).size ===
         geometry.rows.length, `${state}/${width} duplicated promoted row`);
+
       for (const art of geometry.arts) {
         require(Math.abs(art.width / art.height - 16 / 9) <
           0.01, `${state}/${width} channel art aspect`);
+
         if (art.logo)
           require(art.logo.fit === "contain" &&
             art.logo.x >= 0 &&
@@ -235,16 +260,19 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
             art.logo.x + art.logo.width <= art.width + 1 &&
             art.logo.y + art.logo.height <= art.height + 1, `${state}/${width} logo escaped`);
       }
+
       for (const id of geometry.rows) {
         const arts = geometry.arts.filter((a) => a.row === id);
         require(arts.length === 0 ||
           Math.max(...arts.map((a) => a.height)) - Math.min(...arts.map((a) => a.height)) <
             1, `${state}/${width} inconsistent channel heights`);
+
         if (id !== geometry.promoted)
           require(arts.length === 0 ||
             Math.max(...arts.map((a) => a.labelY)) - Math.min(...arts.map((a) => a.labelY)) <
               1, `${state}/${width} inconsistent label baselines`);
       }
+
       require(geometry.controls.every(
         (b) => b.radius >= b.height / 2,
       ), `${state}/${width} square control`);
@@ -254,11 +282,14 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       require(geometry.headings.every(
         (h) => h.x >= 0 && h.right <= width + 1,
       ), `${state}/${width} clipped heading`);
+
       for (const art of geometry.titleArt) {
         require(Math.abs(art.width / art.height - (art.row === "continue" ? 16 / 9 : 2 / 3)) <
           0.01, `${state}/${width} title art aspect`);
       }
+
       frames.push(geometry);
+
       if (state === "two-saved" || state === "three-saved") {
         await d.evaluate(
           "document.querySelector('[data-home-row=watchlist]').scrollIntoView({ block: 'center' })",
@@ -266,6 +297,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
         await d.capture(`${state}-row-${width}`);
       }
     }
+
     d.observed[state] = frames;
   };
 
@@ -275,6 +307,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
   await measure(fixture.liveOnly ? "live-only" : "no-history");
   await d.wait(async () => !(await d.exists(text("header button", "Watchlist"))));
   await d.capture("empty-navigation");
+
   if (fixture.liveOnly) {
     require(!(await d.exists(text("header button", "Movies"))), "Live-only title navigation");
     require(fixture.counts().titleLists === 0 &&
@@ -292,6 +325,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     await done();
     await d.wait(async () => (await promoted()) === "category");
     d.observed["liveOnlyCounts"] = fixture.counts();
+
     return;
   }
 
@@ -310,7 +344,9 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     await d.key("Escape", 27);
     await home();
   };
+
   await save("Index at the end");
+
   for (const [index, name] of CHANNELS.entries()) {
     await search(`STAGE | ${name}`);
     await d.key("Enter", 13);
@@ -327,6 +363,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     await d.key("Escape", 27);
     await d.wait(() => d.exists("document.querySelector('[data-home-preview] video')"));
   }
+
   await d.wait(async () => (await promoted()) === "recent");
   await d.wait(() =>
     d.evaluate<boolean>(`${row("recent")}?.querySelectorAll('button[title]').length === 6`),
@@ -337,17 +374,21 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
   require(!(await d.exists(row("continue"))), "Sparse Continue was populated");
   await measure("sparse");
   const before = fixture.streams();
+
   const clock = await d.evaluate<number>(
     "document.querySelector('[data-home-preview] video').currentTime",
   );
+
   await d.wait(() =>
     d.evaluate<boolean>(
       `document.querySelector('[data-home-preview] video').muted && !document.querySelector('[data-home-preview] video').paused && document.querySelector('[data-home-preview] video').currentTime > ${clock + 0.4}`,
     ),
   );
+
   const muted = await d.evaluate<number>(
     "document.querySelector('[data-home-preview] video').currentTime",
   );
+
   await d.click("Watch shares the live preview", text("button", "Watch"));
   await d.wait(() =>
     d.evaluate<boolean>(
@@ -419,6 +460,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     );
     await d.key("Escape", 27);
   }
+
   await d.wait(async () => (await promoted()) === "favourites");
   await measure("full");
   const requestCounts = fixture.counts();
@@ -477,6 +519,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     reorderRequestCounts: requestCounts,
   };
   await customize();
+
   while ((await preferences())[0]?.id !== "favourites") {
     const before = (await preferences()).findIndex((r) => r.id === "favourites");
     await d.click("Move Favourites before title rows", move("Favourites", "up"));
@@ -484,15 +527,19 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       async () => (await preferences()).findIndex((r) => r.id === "favourites") < before,
     );
   }
+
   while ((await preferences())[1]?.id !== "recent") {
     const before = (await preferences()).findIndex((r) => r.id === "recent");
     await d.click("Keep another channel row before title rows", move("Recently watched", "up"));
     await d.wait(async () => (await preferences()).findIndex((r) => r.id === "recent") < before);
   }
+
   await done();
+
   const mixedOrder = await d.evaluate<string[]>(
     "[...document.querySelectorAll('[data-home-row]')].map(r=>r.dataset.homeRow)",
   );
+
   require(mixedOrder[0] === "favourites" &&
     mixedOrder[1] === "recent" &&
     mixedOrder[2] === "continue", "Continue displaced a saved channel-row position");
@@ -501,6 +548,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
   await customize();
   await reset();
   await done();
+
   if (fixture.otherUrl) {
     await d.click(
       "Open subscriptions for owner labels",
@@ -509,6 +557,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
     await d.click("Subscriptions", text("nav button", "Subscriptions"));
     await d.click("Add a second fixture owner", text("button", "Add subscription"));
     await d.wait(() => d.evaluate<boolean>("document.querySelectorAll('form input').length >= 4"));
+
     for (const [index, value] of ["Nova TV", fixture.otherUrl, "demo", "demo"].entries()) {
       await d.click(
         `Fill second-owner field ${index + 1}`,
@@ -516,6 +565,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       );
       await d.send("Input.insertText", { text: value });
     }
+
     await d.click("Connect second owner", "document.querySelector('form button[type=submit]')");
     await d.wait(() =>
       d.evaluate<boolean>(
@@ -534,6 +584,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       "document.querySelector('[data-home-promoted]').innerText",
     );
   }
+
   await d.click(
     "Settings for adult channel exclusion",
     "document.querySelector('button[aria-label=Settings]')",

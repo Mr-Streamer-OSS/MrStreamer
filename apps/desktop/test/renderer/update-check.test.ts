@@ -27,6 +27,7 @@ const recording: Recording = {
 };
 
 let unmount = () => {};
+
 afterEach(() => unmount());
 
 /** Settings' update rows for `update`, and the names of their buttons. */
@@ -38,8 +39,10 @@ async function buttonsFor(
 ): Promise<HTMLElement> {
   ipc.reset();
   useUi.setState(useUi.getInitialState(), true);
+
   if (surface !== "settings") useUi.setState({ updateDialog: "panel" });
   ipc.always("recordings.list", recordings);
+
   const status: UpdateStatus = {
     version: "0.0.3-nightly.20261001.46",
     distribution,
@@ -50,6 +53,7 @@ async function buttonsFor(
     nextCheckAt: null,
     dismissed: null,
   };
+
   const client = new QueryClient();
   client.setQueryData(["updates"], status);
   const stop = syncRecordings(client);
@@ -66,6 +70,7 @@ async function buttonsFor(
     stop();
     mounted.unmount();
   };
+
   return surface === "settings" ? mounted.container : document.body;
 }
 
@@ -162,10 +167,12 @@ it("shares a pending Stop between Settings and the update popover", async () => 
     [recording],
     "both",
   );
+
   const choices = () =>
     [...rows.querySelectorAll<HTMLButtonElement>("button")].filter(
       (button) => button.textContent === "Restart now",
     );
+
   await vi.waitFor(() => expect(choices()).toHaveLength(2));
   const stop = ipc.hold("recordings.stop");
   ipc.always("updates.restart", null);
@@ -187,6 +194,7 @@ it("keeps keyboard focus on the update actions when retrying a failed Stop", asy
     [recording],
     "notice",
   );
+
   await vi.waitFor(() => expect(named(rows, "Restart now")).toBeDefined());
   ipc.refuse("recordings.stop", { kind: "unexpected", detail: "Recordings could not be saved." });
   await act(async () => named(rows, "Restart now")!.click());

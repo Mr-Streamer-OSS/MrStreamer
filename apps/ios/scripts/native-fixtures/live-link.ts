@@ -14,6 +14,7 @@ const TICK_MS = 100;
 
 export function liveLink() {
   let kbps = 0;
+
   return {
     /** Sends this single-rendition segment at the pace sampled when its response begins. */
     send(response: ServerResponse, body: Buffer) {
@@ -23,22 +24,28 @@ export function liveLink() {
         "Cache-Control": "no-store",
       });
       const piece = Math.ceil((kbps * 1000 * TICK_MS) / 8 / 1000);
+
       if (piece === 0) return void response.end(body);
       void (async () => {
         for (let sent = 0; sent < body.length && !response.destroyed; sent += piece) {
           await new Promise((resolve) => setTimeout(resolve, TICK_MS));
           response.write(body.subarray(sent, sent + piece));
         }
+
         response.end();
       })();
     },
     control(method: string, url: URL): { status: number; body: unknown } | undefined {
       if (url.pathname !== "/live-link") return undefined;
+
       if (method === "GET") return { status: 200, body: { kbps } };
+
       if (method !== "POST") return undefined;
       const value = url.searchParams.get("kbps") ?? "";
+
       if (!/^\d+$/.test(value)) return { status: 400, body: null };
       kbps = Number(value);
+
       return { status: 200, body: { kbps } };
     },
   };

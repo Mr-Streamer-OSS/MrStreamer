@@ -5,5 +5,6 @@ export default function FilmsDetails() {
   // `id` is the version's `ownedKey`: the subscription that lists it, then its own id. `asked`
   // when that version itself was asked for (resume.ts `detailsHref`).
   const { id, asked } = useLocalSearchParams<{ id: string; asked?: string }>();
+
   return <DetailsScreen kind="movie" version={id} asked={asked === "1"} />;
 }

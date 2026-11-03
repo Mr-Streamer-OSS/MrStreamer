@@ -22,8 +22,10 @@ const episode = (season: number, number: number, id = `${season}-${number}`): Ep
   stillUrl: null,
   airDate: null,
 });
+
 const episodes = [episode(0, 1), episode(1, 1), episode(1, 2), episode(2, 1), episode(2, 2)];
 const episodeOrder = ["2-2", "0-1", "1-2", "1-1", "2-1"];
+
 const details: SeriesDetails = {
   kind: "series",
   title: {
@@ -62,6 +64,7 @@ const details: SeriesDetails = {
   })),
   episodeOrder,
 };
+
 const download = (episode: Episode, status: DownloadStatus): Download => ({
   id: `d-${episode.id}`,
   title: {
@@ -84,6 +87,7 @@ const download = (episode: Episode, status: DownloadStatus): Download => ({
   progress: null,
   series: null,
 });
+
 const list = (items: readonly Download[]): DownloadList => ({
   items,
   series: {},
@@ -91,15 +95,19 @@ const list = (items: readonly Download[]): DownloadList => ({
   free: null,
   ended: 0,
 });
+
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
   vi.useRealTimers();
 });
+
 /** Lets the menu's timers and answers run on the fake clock until `check` passes. */
 const until = (check: () => void) =>
   vi.waitFor(
@@ -123,6 +131,7 @@ async function mount(
   const stop = syncDownloads(client);
   const mounted = queryView(client);
   const { container } = mounted;
+
   const render = (value = picked, key = "series", marks: readonly EpisodeMark[] = []) =>
     mounted.render(
       createElement(SeriesDownload, {
@@ -133,27 +142,34 @@ async function mount(
         key,
       }),
     );
+
   await render();
   await until(() => expect(client.getQueryData(downloadsQuery().queryKey)).toBeDefined());
+
   const click = async (text: string) => {
     const target = [...document.querySelectorAll<HTMLElement>('button, [role="menuitem"]')].find(
       (element) => element.textContent === text,
     );
+
     expect(target).toBeDefined();
     await act(async () => target!.click());
   };
+
   const open = () =>
     act(async () =>
       container.querySelector<HTMLButtonElement>('[aria-label^="Download options:"]')!.click(),
     );
+
   const changed = async (items: readonly Download[]) => {
     ipc.always("downloads.list", list(items));
     await act(async () => ipc.emit("downloads.changed", list(items)));
   };
+
   cleanup = () => {
     mounted.unmount();
     stop();
   };
+
   return { container, client, render, click, open, changed };
 }
 
@@ -165,12 +181,14 @@ it("queues the selected version's file for every season including Specials in so
       { id: "other", duration: 1000, name: "Other (EN)", tags: ["EN"] },
     ],
   };
+
   const selected = {
     ...details,
     seasons: details.seasons.map((season) =>
       season.number === 0 ? { ...season, episodes: [first] } : season,
     ),
   };
+
   const progress: TitleProgress[] = [
     {
       title: {
@@ -188,6 +206,7 @@ it("queues the selected version's file for every season including Specials in so
       since: 1,
     },
   ];
+
   const page = await mount([], selected, progress);
   await page.open();
   expect(document.querySelector('[role="menu"]')?.textContent).toContain(
@@ -220,15 +239,18 @@ it("skips copies and every in-flight state, retries failed files and prevents du
               : { kind: "failed", failure: { kind: "disk-full", needed: null } },
     ),
   );
+
   const held = ipc.hold("downloads.retry");
   const page = await mount(files);
   await page.open();
   await page.click("Download 1 episode");
   await until(() => expect(ipc.argsOf("downloads.retry")).toEqual([{ id: "d-2-2" }]));
   await page.open();
+
   const add = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
     (element) => element.textContent === "Download 1 episode",
   )!;
+
   expect(add.getAttribute("aria-disabled")).toBe("true");
   await act(async () => add.click());
   await page.changed(
@@ -273,6 +295,7 @@ it("removes obsolete failure feedback after a language refresh and queues the cu
   await until(() =>
     expect(page.container.textContent).toContain("Queued 4 of 5. 1 couldn't be added: S2 E2."),
   );
+
   const changed = {
     ...details,
     episodeOrder: episodeOrder.map((id) => `${id}-new-language`),
@@ -293,6 +316,7 @@ it("removes obsolete failure feedback after a language refresh and queues the cu
       })),
     })),
   };
+
   await page.render(changed);
   expect(page.container.querySelector('[role="status"]')).toBeNull();
   expect(
@@ -324,6 +348,7 @@ it("removes the old resumed-file Retry when the episode is marked watched", asyn
       ),
     })),
   };
+
   const progress: TitleProgress[] = [
     {
       title: {
@@ -341,6 +366,7 @@ it("removes the old resumed-file Retry when the episode is marked watched", asyn
       since: 1,
     },
   ];
+
   const first = ipc.hold("downloads.add");
   const page = await mount([], selected, progress);
   await page.open();
@@ -348,9 +374,11 @@ it("removes the old resumed-file Retry when the episode is marked watched", asyn
   await act(async () => first.reject({ kind: "no-subscription" }));
   await until(() => expect(page.container.textContent).toContain("1 couldn't be added: S2 E2."));
   expect(ipc.argsOf("downloads.add")[0]?.title.id).toBe("resumed");
+
   const copies = episodes.flatMap((episode) =>
     episode.id !== "2-2" ? [download(episode, { kind: "queued" })] : [],
   );
+
   await page.changed(copies);
   await page.render(selected, "series", [
     { season: 2, episode: 2, watched: true, at: 2, revision: 2 },
@@ -385,6 +413,7 @@ it("cancels only unfinished files in this version, leaving completed and failed 
     download(episodes[1]!, { kind: "complete" }),
     download(episodes[2]!, { kind: "failed", failure: { kind: "folder", detail: "fixture" } }),
   ];
+
   const page = await mount(files);
   await page.open();
   await page.click("Cancel the rest");
@@ -408,6 +437,7 @@ it("replaces a missing copy through Delete then Add and keeps unrelated copies",
     download(episodes[0]!, { kind: "missing" }),
     ...episodes.slice(1).map((episode) => download(episode, { kind: "complete" })),
   ]);
+
   await page.open();
   await page.click("Download 1 episode");
   await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(1));
@@ -443,10 +473,12 @@ it("uses events received during an awaited addition for subsequent skip, retry a
 
 it("cancels against the latest full snapshot after every awaited removal", async () => {
   const first = ipc.hold("downloads.remove");
+
   const page = await mount([
     download(episodes[4]!, { kind: "queued" }),
     download(episodes[0]!, { kind: "queued" }),
   ]);
+
   await page.open();
   await page.click("Cancel the rest");
   await until(() => expect(ipc.argsOf("downloads.remove")).toEqual([{ id: "d-2-2" }]));
@@ -462,6 +494,7 @@ it("cancels against the latest full snapshot after every awaited removal", async
 
 it("keeps visible series counts and aggregate progress current for its own files", async () => {
   const files = episodes.slice(1, 4).map((episode) => download(episode, { kind: "complete" }));
+
   const running = (received: number) =>
     download(episodes[0]!, {
       kind: "transferring",
@@ -470,11 +503,14 @@ it("keeps visible series counts and aggregate progress current for its own files
       rate: null,
       restarted: false,
     });
+
   const page = await mount([...files, running(20)]);
+
   const progress = () =>
     page.container.querySelector<HTMLElement>(
       'button[aria-label="Download options: 3 of 5"] .w-8 > span',
     )?.style.width;
+
   await until(() => expect(progress()).toBe("64%"));
   await page.changed([...files, running(80)]);
   await until(() => expect(progress()).toBe("76%"));
@@ -494,6 +530,7 @@ it.each(["success", "failure"])(
     await page.open();
     await page.click("Download 5 episodes");
     await until(() => expect(ipc.argsOf("downloads.add")).toHaveLength(1));
+
     const changed = {
       ...details,
       episodeOrder: episodeOrder.map((id) => `${id}-new-language`),
@@ -505,6 +542,7 @@ it.each(["success", "failure"])(
         })),
       })),
     };
+
     await page.render(changed);
     await act(async () => {
       if (outcome === "success") first.resolve(download(episodes[4]!, { kind: "queued" }));

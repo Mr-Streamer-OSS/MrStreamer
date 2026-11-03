@@ -4,19 +4,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function useWake(idleMs: number): [awake: boolean, wake: () => void] {
   const [awake, setAwake] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const wake = useCallback(() => {
     setAwake(true);
+
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => setAwake(false), idleMs);
   }, [idleMs]);
+
   useEffect(() => {
     wake();
     window.addEventListener("keydown", wake);
+
     return () => {
       window.removeEventListener("keydown", wake);
+
       if (timer.current) clearTimeout(timer.current);
     };
   }, [wake]);
+
   return [awake, wake];
 }
 
@@ -26,11 +32,14 @@ export function useFullscreen(): [fullscreen: boolean, toggle: () => void] {
   useEffect(() => {
     const onChange = () => setFullscreen(document.fullscreenElement !== null);
     document.addEventListener("fullscreenchange", onChange);
+
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
   const toggle = useCallback(() => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
   }, []);
+
   return [fullscreen, toggle];
 }

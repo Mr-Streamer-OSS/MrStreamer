@@ -11,13 +11,16 @@ const TUNNEL =
 export function isPrivateAddress(address: string): boolean {
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address);
   const parts = (mapped?.[1] ?? address).split(".").map(Number);
+
   if (
     parts.length !== 4 ||
     parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
   ) {
     return address === "::1";
   }
+
   const [a = 0, b = 0] = parts;
+
   return (
     a === 10 ||
     a === 127 ||
@@ -37,8 +40,10 @@ export function lanAddresses(
   interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces(),
 ): string[] {
   const found: { readonly address: string; readonly rank: number }[] = [];
+
   for (const [name, addresses] of Object.entries(interfaces)) {
     if (TUNNEL.test(name)) continue;
+
     for (const each of addresses ?? []) {
       if (each.family !== "IPv4" || each.internal || !isPrivateAddress(each.address)) continue;
       const selfGiven = each.address.startsWith("169.254.");
@@ -46,5 +51,6 @@ export function lanAddresses(
       found.push({ address: each.address, rank: (selfGiven ? 2 : 0) + (physical ? 0 : 1) });
     }
   }
+
   return found.toSorted((a, b) => a.rank - b.rank).map((each) => each.address);
 }

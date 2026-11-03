@@ -21,8 +21,10 @@ declare module "vitest" {
 export default async function bundleCatalogueWorker(project: TestProject) {
   if (project.vitest.config.watch) {
     project.provide("catalogueWorker", null);
+
     return;
   }
+
   const outDir = await mkdtemp(join(tmpdir(), "catalogue-worker-"));
   await build({
     configFile: false,
@@ -38,5 +40,6 @@ export default async function bundleCatalogueWorker(project: TestProject) {
     ssr: { noExternal: true },
   });
   project.provide("catalogueWorker", join(outDir, "catalogue-worker.js"));
+
   return () => rm(outDir, { recursive: true, force: true });
 }

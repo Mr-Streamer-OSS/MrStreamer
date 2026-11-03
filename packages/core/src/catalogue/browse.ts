@@ -82,10 +82,13 @@ const CONTENT: Readonly<Partial<Record<BrowseTopic, readonly string[]>>> = {
     "وثائقية",
   ],
 };
+
 const words = BROWSE_TOPICS.flatMap((topic) => {
   const labels = CONTENT[topic];
+
   return labels ? [{ topic, labels: new Set(labels) }] : [];
 });
+
 // Place-only subjects are deliberately finite. A country prefix with no subject is not Regional.
 const PLACES = new Set([
   "vlaanderen",
@@ -115,11 +118,14 @@ export function categoryBrowseTopics(name: string): readonly BrowseTopic[] {
   const label = categorySubject(name);
   const tokens = label.split(/[^\p{L}\p{N}]+/u);
   const topics: BrowseTopic[] = [];
+
   for (const { topic, labels } of words) {
     if (tokens.some((word) => labels.has(word))) topics.push(topic);
   }
+
   if (topics.length) return topics;
   const country = regionForName(label);
+
   return label && (PLACES.has(label) || (country !== null && !isBroadRegion(country)))
     ? ["regional"]
     : ["other"];
@@ -134,13 +140,17 @@ export function browseMetadata(
   const assigned = new Set(channel.categoryIds.flatMap((id) => categories.get(id) ?? []));
   const content = [...assigned].filter((id) => id !== "regional" && id !== "other");
   const own = channel.variants.flatMap((variant) => streams.get(variant.id) ?? []);
+
   const certain =
     own.length === channel.variants.length && own.every((each) => !each.searchUncertain);
+
   const fact = (get: (stream: NormalizedStream) => string | null) => {
     if (!certain || own.length === 0) return null;
     const values = new Set(own.map(get));
+
     return values.size === 1 ? ([...values][0] ?? null) : null;
   };
+
   return {
     topics: channel.adult
       ? ["other"]

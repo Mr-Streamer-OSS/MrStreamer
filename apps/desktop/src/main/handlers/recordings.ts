@@ -47,6 +47,7 @@ export function recordingHandlers({
       Effect.gen(function* () {
         const channel = yield* library.channel(named);
         const variants = yield* streamsOf(settings, channel, variant);
+
         return yield* recordings.start(ownedId(channel), stop, {
           variants,
           stopPlaying: stopPlaying ?? false,
@@ -65,6 +66,7 @@ export function recordingHandlers({
     "recordings.chooseFolder": () =>
       Effect.gen(function* () {
         const { folder } = yield* recordings.storage;
+
         const chosen = yield* Effect.tryPromise({
           try: () => chooseFolder(folder),
           catch: () =>
@@ -72,6 +74,7 @@ export function recordingHandlers({
               error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
             }),
         });
+
         return chosen ? yield* recordings.setFolder(chosen) : yield* recordings.storage;
       }),
     "recordings.openFolder": () =>
@@ -84,6 +87,7 @@ export function recordingHandlers({
               error: { kind: "unexpected", detail: t("The folder couldn't be opened.") },
             }),
         });
+
         return null;
       }),
   };

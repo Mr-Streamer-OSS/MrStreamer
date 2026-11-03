@@ -7,9 +7,12 @@ import { useFeatureEntries } from "../../src/renderer/src/app/analytics.ts";
 import { openView, useUi } from "../../src/renderer/src/app/ui-store.ts";
 
 let unmount = () => {};
+
 afterEach(() => unmount());
+
 function Entries() {
   useFeatureEntries(true, false, false);
+
   return null;
 }
 
@@ -63,17 +66,22 @@ it("counts search episodes without terms, survives remount/refetch, and resets o
   ipc.always("analytics.action", null);
   useUi.setState({ settings: null, updateDialog: null, searchOpen: false });
   const { useSearchUsage } = await import("../../src/renderer/src/app/analytics.ts");
+
   function Search({ query, active }: { query: string; active: boolean }) {
     useSearchUsage("movies", query, active);
+
     return null;
   }
+
   const container = document.createElement("div");
   let root = createRoot(container);
   unmount = () => act(() => root.unmount());
+
   const render = (query: string, active = true) =>
     act(async () =>
       root.render(createElement(StrictMode, null, createElement(Search, { query, active }))),
     );
+
   await render("");
   await render("PRIVATE title");
   await render("PRIVATE title changed");

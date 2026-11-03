@@ -10,5 +10,6 @@ export class Failed extends Data.TaggedError("Failed")<{ readonly error: AppErro
 export function failedWith(cause: unknown): Failed {
   if (cause instanceof AppFailure) return new Failed({ error: cause.error });
   const detail = cause instanceof Error ? cause.message : String(cause);
+
   return new Failed({ error: { kind: "unexpected", detail } });
 }

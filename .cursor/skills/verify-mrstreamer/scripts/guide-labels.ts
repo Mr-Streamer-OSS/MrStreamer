@@ -31,16 +31,20 @@ export const labelledGuideId = (name: string): string | undefined =>
   Object.values(LABELLED).find((each) => each.name === name)?.guideId;
 
 const SLOT = 30 * 60 * 1000;
+
 const stamp = (at: number) =>
   `${new Date(at).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
 
 /** An XMLTV document of half-hour programmes from an hour back to a day ahead on `id`. */
 function xmltv(id: string): string {
   const first = Math.floor(Date.now() / SLOT) * SLOT - 2 * SLOT;
+
   const programmes = Array.from({ length: 50 }, (_, slot) => {
     const start = first + slot * SLOT;
+
     return `<programme start="${stamp(start)}" stop="${stamp(start + SLOT)}" channel="${id}"><title>${id} ${slot}</title></programme>`;
   });
+
   return `<?xml version="1.0" encoding="utf-8"?><tv><channel id="${id}"><display-name>${id}</display-name></channel>${programmes.join("")}</tv>`;
 }
 
@@ -60,15 +64,20 @@ const LANGUAGE = `document.querySelector('main section select:has(option[value="
 export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<void> {
   const hostName = new URL(host.origin).host;
   let locale: Locale = "en-US";
+
   /** `key` in the language shown. */
   const tr = <K extends MessageKey>(key: K, ...params: MessageArgs<K>) =>
     translate(locale, key, ...params);
+
   const byText = (selector: string, text: string) =>
     `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
   const labelled = (label: string) =>
     `document.querySelector(${JSON.stringify(`[aria-label="${label.replaceAll('"', '\\"')}"]`)})`;
+
   const addressField = () => labelled(tr("Address of an XMLTV guide"));
   const nameField = () => labelled(tr("Name of the guide"));
+
   /** Each row as drawn: its first line, its second, whether it is red, and its buttons' names. */
   const rows = () =>
     d.evaluate<{ name: string; state: string; failing: boolean; buttons: string[] }[]>(
@@ -79,15 +88,19 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
           buttons: [...row.querySelectorAll('button')].map(b => b.getAttribute('aria-label') ?? b.textContent.trim()) };
       })`,
     );
+
   const focused = () =>
     d.evaluate<string | null>("document.activeElement?.getAttribute('aria-label') ?? null");
+
   /** The rows' first lines once they read `names`, and every row and button name distinct. */
   const named = async (names: readonly string[], why: string) => {
     await d.wait(async () => (await rows()).map((each) => each.name).join("|") === names.join("|"));
     const all = (await rows()).flatMap((each) => [each.name, ...each.buttons]);
     expect(new Set(all).size === all.length, `${why}: two names read alike`, all);
+
     return rows();
   };
+
   const width = async (pixels: number) => {
     d.action(`Size the page ${pixels} px wide`);
     await d.send("Emulation.setDeviceMetricsOverride", {
@@ -110,6 +123,7 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
       })()`),
     );
   };
+
   const openGuides = async () => {
     if (!(await d.exists(byText("nav button", tr("Guides"))))) {
       await d.click(
@@ -117,9 +131,11 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
         `document.querySelector('header button[aria-label="${tr("Settings")}"]')`,
       );
     }
+
     await d.click("Open Guides", byText("nav button", tr("Guides")));
     await d.wait(() => d.exists(addressField()));
   };
+
   /**
    * Adds guide A or B through the form, named `name`, and waits for it as the `count`th row,
    * ready. The actions name the guide by its letter: its path stays out of the proof.
@@ -128,19 +144,23 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
     await d.click(`Focus the address field for ${guide}`, addressField());
     d.action(`Type ${guide}'s address, with the host's key`);
     await d.send("Input.insertText", { text: host.address(guide === "A" ? "/a.xml" : "/b.xml") });
+
     if (name !== null) {
       await d.click("Focus the name field", nameField());
       d.action(`Type the name ${name}`);
       await d.send("Input.insertText", { text: name });
     }
+
     await d.click(`Add ${guide}`, byText("main form button", tr("Add")));
     await d.wait(async () => {
       const shown = await rows();
+
       return shown.length === count && /Ready/.test(shown.at(-1)?.state ?? "");
     });
     const fields = await d.evaluate<string[]>(`[${addressField()}.value, ${nameField()}.value]`);
     expect(fields.join("") === "", "The add form kept what was typed", fields);
   };
+
   /**
    * Renames the row called `from` to `to` by typing, ending with `end`, captured as `shot`. It
    * returns once the field closes, which is before the name is saved: wait for the names it brings.
@@ -153,13 +173,16 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
   ) => {
     await d.click(`Rename ${from}`, labelled(tr("Rename {name}", { name: from })));
     await d.wait(async () => (await focused()) === tr("Name of the guide"));
+
     // The field starts with all of its name selected: typing replaces it.
     if (to === "") await d.key("Backspace", 8);
     else {
       d.action(`Type ${to}`);
       await d.send("Input.insertText", { text: to });
     }
+
     if (shot) await d.capture(shot);
+
     if (end === "Enter") await d.key("Enter", 13);
     else if (end === "Escape") await d.key("Escape", 27);
     else
@@ -172,12 +195,15 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
         !(await d.exists(`document.querySelector('[data-settings-section=guides] li input')`)),
     );
   };
+
   /** Neither path nor key in the page's text, attributes or accessibility tree. */
   const private_ = async (where: string) => {
     const page = await d.evaluate<string>(
       `document.body.innerText + [...document.querySelectorAll('*')].flatMap(e => [...e.attributes].map(a => a.value)).join(' ') + [...document.querySelectorAll('input')].map(i => i.value).join(' ')`,
     );
+
     const tree = JSON.stringify(await d.send("Accessibility.getFullAXTree"));
+
     for (const secret of [GUIDE_KEY, "/a.xml", "/b.xml"]) {
       expect(!page.includes(secret) && !tree.includes(secret), `${where} shows ${secret}`);
     }
@@ -190,10 +216,12 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
   await add("B", null, 2);
   const tag = new RegExp(`^${hostName.replaceAll(".", "\\.")} [0-9a-f]{4,}$`);
   await d.wait(async () => (await rows()).every((row) => tag.test(row.name)));
+
   const tagged = await named(
     (await rows()).map((each) => each.name),
     "Unnamed",
   );
+
   d.observed["unnamed"] = tagged;
   const tagA = tagged[0]?.name ?? "";
   await d.capture("labels-unnamed-1280");
@@ -206,15 +234,18 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
   await rename(hostName, "netherlands", "leave");
   await d.wait(async () => {
     const [a, b] = await rows();
+
     return (
       /^Netherlands [0-9a-f]{4,}$/.test(a?.name ?? "") &&
       /^netherlands [0-9a-f]{4,}$/.test(b?.name ?? "")
     );
   });
+
   const alike = await named(
     (await rows()).map((each) => each.name),
     "Two named alike",
   );
+
   expect(
     alike.every((row) => /^[Nn]etherlands [0-9a-f]{4,}$/.test(row.name)),
     "Two guides named alike aren't tagged",
@@ -244,8 +275,10 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
 
   // The subscription's Guide row and the mapping sheet say the same names.
   await d.click("Open Subscriptions", byText("nav button", "Subscriptions"));
+
   const guideRow = () =>
     d.evaluate<string>("[...document.querySelectorAll('main:not([hidden])')].at(-1).innerText");
+
   await d.wait(async () => /1 United Kingdom · 1 Netherlands/.test(await guideRow()));
   d.observed["guideRow"] = (await guideRow())
     .split("\n")
@@ -261,12 +294,15 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
   await d.evaluate(`${search}.select()`);
   d.action("Type src");
   await d.send("Input.insertText", { text: "src" });
+
   const options = () =>
     d.evaluate<string[]>(
       `[...(document.querySelectorAll('[role=dialog] [role=listbox]')[1]?.querySelectorAll('[role=option]') ?? [])].map(o => o.textContent)`,
     );
+
   await d.wait(async () => {
     const shown = (await options()).join("|");
+
     return shown.includes("United Kingdom · b.src") && shown.includes("Netherlands · a.src");
   });
   d.observed["mapOptions"] = await options();
@@ -307,18 +343,23 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
     await d.wait(() => d.exists(LANGUAGE));
     d.action(`Pick ${LANGUAGE_NAMES[next]} with the keyboard`);
     await d.evaluate(`${LANGUAGE}.focus()`);
+
     for (const char of LANGUAGE_NAMES[next].slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+
     await d.wait(async () => (await d.evaluate<string>("document.documentElement.lang")) === next);
     locale = next;
     await openGuides();
   };
+
   const languages: Record<string, unknown> = {};
+
   for (const each of ["en-US", "nl-NL", "de-DE", "fr-FR", "es-ES"] as const) {
     if (each !== locale) await pick(each);
     const shown = await named(["United Kingdom", "Netherlands"], each);
+
     const wanted = [
       tr("Retry {name}", { name: "United Kingdom" }),
       tr("Rename {name}", { name: "United Kingdom" }),
@@ -329,6 +370,7 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
       tr("Move {name} up", { name: "Netherlands" }),
       tr("Remove {name}", { name: "Netherlands" }),
     ];
+
     const buttons = shown.flatMap((row) => row.buttons);
     expect(
       wanted.every((label) => buttons.includes(label)),
@@ -343,6 +385,7 @@ export async function guideLabelsScenario(d: Driver, host: GuideHost): Promise<v
     await width(900);
     await d.capture(`labels-${each}-900`);
   }
+
   d.observed["languages"] = languages;
   await pick("en-US");
   await width(1280);

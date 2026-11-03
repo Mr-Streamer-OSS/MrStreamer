@@ -34,8 +34,10 @@ export interface SiteCapture {
 
 /** Requests one page may make, however long it stays open or however often it is clicked. */
 export const MAX_EVENTS = 64;
+
 /** How long one request may stay open before the page gives up on it. */
 export const DEADLINE_MS = 10_000;
+
 /** A vital this long or longer is a broken measurement and goes unsent, as posthog-js does. */
 const MAX_VITAL = 15 * 60_000;
 
@@ -43,11 +45,13 @@ const MAX_VITAL = 15 * 60_000;
 export const CHOICE = "mrstreamer.site-analytics";
 
 type Choice = "on" | "off";
+
 /** What the switch shows. "refused": GPC or Do Not Track. "unavailable": local storage failed. */
 type Status = Choice | "refused" | "unavailable";
 
 /** The home page's parts, by the ids index.html gives its sections. */
 const HOME_SECTIONS = ["tricks", "screens", "what-you-need", "faq", "downloads"] as const;
+
 type HomeSection = (typeof HOME_SECTIONS)[number];
 
 interface Download {
@@ -55,6 +59,7 @@ interface Download {
   readonly os_hint: "mac" | "windows" | "linux";
   readonly kind: "dmg" | "exe" | "appimage" | "deb" | "store";
 }
+
 /** By the `data-installer` names downloads.ts gives the release's files. */
 const INSTALLERS: Readonly<Record<string, Download>> = {
   dmg: { os_hint: "mac", kind: "dmg" },
@@ -62,6 +67,7 @@ const INSTALLERS: Readonly<Record<string, Download>> = {
   appImage: { os_hint: "linux", kind: "appimage" },
   deb: { os_hint: "linux", kind: "deb" },
 };
+
 const STORE: Download = { os_hint: "windows", kind: "store" };
 
 /** The Core Web Vitals sent, by web-vitals' names. */
@@ -130,6 +136,7 @@ type SiteEvent =
 
 const HOST = "mrstreamer.app";
 const SITE = `https://${HOST}`;
+
 /**
  * posthog-js's cookieless placeholder distinct id; `$cookieless_mode: true` is its flag
  * (packages/browser/src/constants.ts). Ingestion hashes only events with the flag, and only in a
@@ -137,8 +144,10 @@ const SITE = `https://${HOST}`;
  */
 const COOKIELESS_DISTINCT_ID = "$posthog_cookieless";
 const REPOSITORY = "https://github.com/Mr-Streamer-OSS/MrStreamer";
+
 /** A link to the guides: /docs or /docs/<slug>, with any fragment left unread. */
 const DOCS = /^\/docs(?:\/([a-z0-9-]+))?\/?(?:#.*)?$/;
+
 /** Build-written ids: lowercase words and hyphens, as pages.ts makes them. */
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
@@ -168,6 +177,7 @@ declare global {
 function routeOf(document: Document): string {
   const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute("href") ?? "";
   const route = canonical.startsWith(`${SITE}/`) ? canonical.slice(SITE.length) : "";
+
   return /^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/.test(route) ? route : "/404";
 }
 
@@ -178,6 +188,7 @@ function storedStatus(): Status {
     // A choice must be savable, or Turn off couldn't last beyond this page.
     localStorage.setItem(`${CHOICE}.probe`, "1");
     localStorage.removeItem(`${CHOICE}.probe`);
+
     return stored === "off" ? "off" : "on";
   } catch {
     return "unavailable";
@@ -211,6 +222,7 @@ function followScrollDepth(signal: AbortSignal): () => { scroll: number; content
   let viewBottom = 0;
   let height = 0;
   let frame = 0;
+
   const measure = (): void => {
     frame = 0;
     const { scrollHeight, clientHeight } = document.documentElement;
@@ -220,16 +232,20 @@ function followScrollDepth(signal: AbortSignal): () => { scroll: number; content
     viewBottom = Math.max(viewBottom, Math.ceil(top + clientHeight));
     height = Math.max(height, Math.ceil(scrollHeight));
   };
+
   const queue = (): void => {
     frame ||= requestAnimationFrame(measure);
   };
+
   const options = { passive: true, signal };
   addEventListener("scroll", queue, options);
   addEventListener("resize", queue, options);
   signal.addEventListener("abort", () => cancelAnimationFrame(frame), { once: true });
+
   return () => {
     cancelAnimationFrame(frame);
     measure();
+
     return { scroll: share(deepest, scrollable), content: share(viewBottom, height) };
   };
 }
@@ -241,6 +257,7 @@ function followScrollDepth(signal: AbortSignal): () => { scroll: number; content
  */
 export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   if (!capture) return () => {};
+
   const route = routeOf(document);
   const refused = navigator.globalPrivacyControl === true || navigator.doNotTrack === "1";
   let status: Status = refused ? "refused" : storedStatus();
@@ -249,11 +266,13 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   /** Web Analytics' address properties, built from the route alone. */
   const address = { $current_url: `${SITE}${route}`, $pathname: route, $host: HOST };
   let budget = MAX_EVENTS;
+
   /** Each open request's abort and deadline, cleared as it settles. */
   const open = new Set<{
     readonly controller: AbortController;
     readonly deadline: ReturnType<typeof setTimeout>;
   }>();
+
   const listeners = new AbortController();
   const on = { signal: listeners.signal };
   /** Scroll depth's listeners and frame, stopped as the page is left or analytics turn off. */
@@ -263,6 +282,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   const send = ({ event, properties }: SiteEvent): void => {
     if (!sending || budget === 0) return;
     budget--;
+
     const body = JSON.stringify({
       api_key: capture.token,
       event,
@@ -281,6 +301,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         ...(capture.apiHost && { $lib_custom_api_host: capture.apiHost }),
       },
     });
+
     // A string body is text/plain, so the browser sends it without a preflight. Events that come
     // as the page is hidden, closes or follows a link need keepalive to arrive. Chromium doesn't
     // cancel a keepalive request once sent, so every other event goes without it and the signal
@@ -291,11 +312,14 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
       event === "download_clicked" ||
       event === "github_link_clicked" ||
       event === "docs_link_clicked";
+
     const controller = new AbortController();
+
     const request = {
       controller,
       deadline: setTimeout(() => controller.abort(), DEADLINE_MS),
     };
+
     open.add(request);
     void fetch(capture.endpoint, {
       method: "POST",
@@ -315,14 +339,17 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
 
   const stopSending = (): void => {
     sending = false;
+
     for (const { controller, deadline } of open) {
       clearTimeout(deadline);
       controller.abort();
     }
+
     open.clear();
     observer?.disconnect();
     measuring.abort();
   };
+
   /** Analytics went off: nothing more is sent and the tab forgets where the visit entered. */
   const turnedOff = (): void => {
     stopSending();
@@ -335,6 +362,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
       button.type = "button";
       button.addEventListener("click", () => choose(status === "on" ? "off" : "on"), on);
       control.querySelector("[data-site-analytics-status]")?.after(" ", button);
+
       return {
         control,
         button,
@@ -346,6 +374,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   const render = (): void => {
     for (const { control, button, place } of controls) {
       const text = control.querySelector("[data-site-analytics-status]");
+
       if (text) text.textContent = TEXT[place][status];
       button.hidden = status !== "on" && status !== "off";
       button.textContent = status === "on" ? "Turn off" : "Turn on";
@@ -359,15 +388,18 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     } catch {
       status = "unavailable";
     }
+
     if (status !== "on") turnedOff();
     render();
   };
 
   const reread = (): void => {
     status = storedStatus();
+
     if (status !== "on") turnedOff();
     render();
   };
+
   // A choice made in another tab applies here at once. An off applies even when it arrives late,
   // after the choice is on again: this page stops and the tab forgets its entry. An on never
   // restarts this page.
@@ -375,6 +407,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     "storage",
     ({ key, newValue }) => {
       if (status === "refused" || (key !== null && key !== CHOICE)) return;
+
       if (key === CHOICE && newValue === "off") turnedOff();
       reread();
     },
@@ -389,12 +422,15 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     on,
   );
   render();
+
   // Announced from here on: a change the visitor makes, not the state the page opened in.
   for (const { control, place } of controls)
     if (place === "footer")
       control.querySelector("[data-site-analytics-status]")?.setAttribute("role", "status");
+
   if (!sending) {
     forgetEntry();
+
     return () => listeners.abort();
   }
 
@@ -416,9 +452,11 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   // off its reports go unsent.
   const vital = ({ name, value }: CLSMetric | INPMetric | LCPMetric): void => {
     const rounded = name === "CLS" ? Math.round(value * 1000) / 1000 : Math.round(value);
+
     if (Number.isFinite(rounded) && rounded >= 0 && rounded < MAX_VITAL)
       send({ event: "$web_vitals", properties: { [`$web_vitals_${name}_value`]: rounded } });
   };
+
   onLCP(vital);
   onCLS(vital);
   onINP(vital);
@@ -427,9 +465,11 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   let visibleMs = 0;
   let visibleSince = document.visibilityState === "visible" ? performance.now() : null;
   let left = false;
+
   const leave = (): void => {
     if (left) return;
     left = true;
+
     if (visibleSince !== null) visibleMs += performance.now() - visibleSince;
     const { scroll, content } = scrollDepth();
     measuring.abort();
@@ -444,6 +484,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
       },
     });
   };
+
   addEventListener("pagehide", leave, on);
   document.addEventListener(
     "visibilitychange",
@@ -458,24 +499,30 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
     "click",
     ({ target }) => {
       const link = target instanceof Element ? target.closest<HTMLAnchorElement>("a[href]") : null;
+
       if (!link) return;
       const href = link.getAttribute("href") ?? "";
       const docs = DOCS.exec(href);
       const installer = link.dataset["installer"];
+
       const download =
         installer && Object.hasOwn(INSTALLERS, installer)
           ? INSTALLERS[installer]
           : href.startsWith("https://apps.microsoft.com/")
             ? STORE
             : undefined;
+
       if (docs) {
         const doc_section = docs[1] ?? "index";
+
         if (!ID.test(doc_section)) return;
+
         const location = link.closest("header")
           ? "header"
           : link.closest("footer")
             ? "footer"
             : "page";
+
         send({ event: "docs_link_clicked", properties: { doc_section, route, location } });
       } else if (download) {
         const location = link.closest(".hero") ? "hero" : "page";
@@ -491,6 +538,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
             : href.includes("/issues")
               ? "footer_bug"
               : "footer_license";
+
         send({ event: "github_link_clicked", properties: { route, link_location } });
       }
     },
@@ -501,16 +549,20 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
   // guide sections and releases sit in collapsed sections and count once open and in view.
   const seen = new Map<Element, () => SiteEvent | undefined>();
   const opened = location.hash.slice(1);
+
   if (route === "/")
     for (const section of document.querySelectorAll("main section[id]")) {
       const id = HOME_SECTIONS.find((known) => known === section.id);
+
       if (id)
         seen.set(section, () => ({
           event: "feature_section_viewed",
           properties: { feature_name: id },
         }));
     }
+
   const guide = route.startsWith("/docs/") ? route.slice("/docs/".length) : "";
+
   if (ID.test(guide))
     for (const heading of document.querySelectorAll("article h2[id], article h3[id]"))
       if (ID.test(heading.id))
@@ -518,10 +570,12 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
           event: "guide_section_viewed",
           properties: { guide, section: heading.id },
         }));
+
   if (route === "/faq")
     for (const row of document.querySelectorAll(".faq-rows > details[id]")) {
       if (!ID.test(row.id)) continue;
       const faq_question = row.id;
+
       // The page opened on this question's address: counted now, as the reason it was read.
       if (opened === faq_question)
         send({ event: "faq_question_viewed", properties: { faq_question, via: "anchor" } });
@@ -531,31 +585,39 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
           properties: { faq_question, via: "scroll" },
         }));
     }
+
   if (route === "/releases")
     for (const heading of document.querySelectorAll(".section h2[id]")) {
       const version = heading.id.slice(1);
+
       if (/^v\d+\.\d+\.\d+$/.test(heading.id))
         seen.set(heading, () => ({ event: "changelog_viewed", properties: { version } }));
     }
+
   if (seen.size && typeof IntersectionObserver === "function") {
     // A part in a collapsed section counts once it is open and in view, not as its heading passes.
     const shown = (part: Element) => part.closest("details")?.open !== false;
+
     const watch = new IntersectionObserver((entries) => {
       for (const { isIntersecting, target } of entries) {
         if (!isIntersecting || !shown(target)) continue;
         watch.unobserve(target);
         const event = seen.get(target)?.();
         seen.delete(target);
+
         if (event) send(event);
       }
     });
+
     observer = watch;
+
     for (const element of seen.keys()) watch.observe(element);
     // Watching again reports where an opened section's parts are now.
     document.addEventListener(
       "toggle",
       ({ target }) => {
         if (!(target instanceof HTMLDetailsElement) || !target.open) return;
+
         for (const element of seen.keys())
           if (target.contains(element)) {
             watch.unobserve(element);

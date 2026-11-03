@@ -41,16 +41,20 @@ export const cases: readonly ProofCase[] = [
         try {
           const response = await fetchImpl(`${context.fixture}/chunks`);
           const reader = response.body?.getReader();
+
           if (!reader) return { streamed: false, text: await response.text() };
           const decoder = new TextDecoder();
           let reads = 0;
           let text = "";
+
           for (;;) {
             const { done, value } = await reader.read();
+
             if (done) break;
             reads++;
             text += decoder.decode(value, { stream: true });
           }
+
           return { streamed: true, multipleReads: reads > 1, text };
         } catch (error) {
           return { error: error instanceof Error ? `${error.name}: ${error.message}` : "failed" };
@@ -65,9 +69,11 @@ export const cases: readonly ProofCase[] = [
         const controller = new AbortController();
         const started = Date.now();
         setTimeout(() => controller.abort(), 300);
+
         const result = await outcome(() =>
           fetchImpl(`${context.fixture}/hold`, { signal: controller.signal }),
         );
+
         return { result, settledWithinTwoSeconds: Date.now() - started < 2_000 };
       }),
   },

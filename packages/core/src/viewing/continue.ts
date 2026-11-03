@@ -12,7 +12,9 @@ import { seriesIdentity } from "./marks.ts";
 export function minutesLeft(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
+
   if (hours === 0) return t("{minutes} min left", { minutes });
+
   return rest
     ? t("{hours} h {minutes} min left", { hours, minutes: rest })
     : t("{hours} h left", { hours });
@@ -23,7 +25,9 @@ export function runtime(seconds: number): string {
   const minutes = Math.max(1, Math.round(seconds / 60));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
+
   if (hours === 0) return t("{minutes} min", { minutes });
+
   return rest ? t("{hours} h {minutes} min", { hours, minutes: rest }) : t("{hours} h", { hours });
 }
 
@@ -32,6 +36,7 @@ export function timeLeftOf(
   progress: Pick<TitleProgress, "position" | "duration" | "finished"> | undefined,
 ): string | null {
   if (!progress || progress.finished) return null;
+
   return minutesLeft(Math.max(1, Math.round((progress.duration - progress.position) / 60)));
 }
 
@@ -41,12 +46,14 @@ export function clock(seconds: number): string {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const rest = String(total % 60).padStart(2, "0");
+
   return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
 }
 
 /** Where a title starts: where it stopped, a few seconds back, or the beginning. */
 export function resumePoint(progress: TitleProgress | undefined): number {
   if (!progress || progress.finished) return 0;
+
   return Math.max(0, progress.position - 5);
 }
 
@@ -68,8 +75,11 @@ export function automaticVersion(
   ) {
     return ownedId(opened);
   }
+
   const latest = progress.toSorted((a, b) => b.at - a.at)[0];
+
   if (latest?.title.kind === "episode") return seriesOf(latest.title);
+
   return ownedId(latest && !latest.finished && latest.position > 0 ? latest.title : title);
 }
 
@@ -112,31 +122,41 @@ export function continueEntries(
 ): ContinueEntry[] {
   const items = viewing.continueWatching;
   const marks = viewing.marked;
+
   /** The version each entry played: the movie, or the episode's series. */
   const played = ({ title }: TitleProgress): OwnedId =>
     title.kind === "movie" ? ownedId(title) : seriesOf(title);
+
   /** A series' latest mark in each subscription, by the series and that subscription. */
   const marked = new Map<string, { readonly title: Title; readonly mark: MarkedSeries }>();
+
   for (const mark of marks) {
     const title = titleOf("series", mark.series);
+
     if (!title || title.adult) continue;
+
     // Marks kept under what the lists no longer take the series for say nothing of it now.
     if (!seriesIdentity(mark.series, title).keys.includes(mark.kept)) continue;
     const key = `${title.key}|${mark.series.subscriptionId}`;
+
     if ((marked.get(key)?.mark.at ?? -Infinity) < mark.at) marked.set(key, { title, mark });
   }
+
   /** Marks a play of their series, in their subscription, began after. */
   const replaced = new Set<string>();
+
   const shown = items.flatMap((progress): (ContinueEntry & { readonly at: number })[] => {
     const ref = progress.title;
     const version = played(progress);
     const title = titleOf(ref.kind === "movie" ? "movie" : "series", version);
+
     if (!title || title.adult) return [];
     // One entry per film or series, whichever of its versions was played, of whichever
     // subscription: the one played last stands for the rest, and is the one that resumes.
     const { key } = title;
     const artworkUrl = title.backdropUrl ?? title.posterUrl;
     const { at } = progress;
+
     if (ref.kind === "movie") {
       return [
         {
@@ -151,14 +171,17 @@ export function continueEntries(
         },
       ];
     }
+
     const own = `${key}|${ref.subscriptionId}`;
     const exactFiles = title.versions.find((each) => sameOwned(each, version))?.episodeFiles;
     const obsolete = exactFiles !== undefined && !exactFiles.includes(ref.id);
     const mark = marked.get(own)?.mark;
+
     if (mark) {
       if (progress.since <= mark.at) return [];
       replaced.add(own);
     }
+
     return [
       {
         key,
@@ -175,8 +198,10 @@ export function continueEntries(
       },
     ];
   });
+
   for (const [own, { title, mark }] of marked) {
     const { next } = mark;
+
     if (!next || replaced.has(own)) continue;
     const left = next.resume && timeLeftOf({ ...next.resume, finished: false });
     shown.push({
@@ -190,10 +215,13 @@ export function continueEntries(
       at: mark.at,
     });
   }
+
   // Most recent first, so the version played or marked last stands for the rest.
   const entries = new Map<string, ContinueEntry>();
+
   for (const { at: _at, ...entry } of shown.toSorted((a, b) => b.at - a.at)) {
     if (!entries.has(entry.key)) entries.set(entry.key, entry);
   }
+
   return [...entries.values()].slice(0, limit);
 }

@@ -17,37 +17,46 @@ import { AAC_STEREO_ARGUMENTS, H264_IMAGE_ARGUMENTS } from "./conversion-setting
 
 /** How long a segment of a movie is, about: the first index entry this long after the last start. */
 export const SEGMENT_S = 4;
+
 /**
  * The longest a copied segment may be. An index that leaves longer gaps would have the proxy hold
  * more of the file in memory than it may, so such a file's picture is converted instead.
  */
 const SEGMENT_MOST_S = 20;
+
 /** A last segment shorter than this joins the one before it. */
 const LAST_LEAST_S = 1;
+
 /** Segments a playlist lists at most: a title of 44 hours at four seconds each. */
 const SEGMENTS_MOST = 40_000;
+
 /**
  * How far past its keyframe a run's seek aims, at most: ffmpeg starts at the index entry at or
  * before where it seeks, so the aim only has to stay before the entry after it.
  */
 const SEEK_PAST_S = 0.02;
+
 /**
  * What ffmpeg takes off a seek in a file whose pictures are stored out of order, unless its reader
  * seeks by presentation time, as the one for MP4 does: three twenty-thirds of a second.
  */
 const REORDER_SEEK_S = 3 / 23;
+
 /**
  * A picture counts as at a cut when it is this close before it: timestamps round to the file's
  * tick. Less than a frame apart at any frame rate, so no earlier keyframe is taken for it.
  */
 const COPY_CUT_S = 0.004;
+
 /**
  * The same for a converted picture, whose only keyframes are the ones made at the cuts: the first
  * frame at or after each, so up to a frame late.
  */
 const CONVERT_CUT_S = 0.5;
+
 /** Where a title's first picture sits on a receiver's MPEG-TS clock, in seconds. */
 const TS_START_S = 10;
+
 /** Split times one run is given at most, which keeps its command line within every system's limit. */
 const RUN_SEGMENTS = 1200;
 
@@ -86,20 +95,27 @@ export function copyPlan(
   let before = Number.NEGATIVE_INFINITY;
   /** The entry after the last start, once passed. */
   let after: number | null = null;
+
   for (const time of keyframes) {
     if (!Number.isFinite(time) || time < before) return null;
     before = time;
     const last = starts.at(-1)!;
+
     if (time <= last + COPY_CUT_S) continue;
     after ??= time;
+
     if (time < last + SEGMENT_S || time > end - LAST_LEAST_S) continue;
+
     if (time - last > SEGMENT_MOST_S || starts.length >= SEGMENTS_MOST) return null;
     next.push(after);
     after = null;
     starts.push(time);
   }
+
   next.push(after);
+
   if (end - starts.at(-1)! > SEGMENT_MOST_S) return null;
+
   return { video: "copy", starts, end, next };
 }
 
@@ -107,9 +123,11 @@ export function copyPlan(
 export function convertPlan(first: number, end: number): SegmentPlan | null {
   if (!(end > first) || (end - first) / SEGMENT_S > SEGMENTS_MOST) return null;
   const starts: number[] = [];
+
   for (let start = first; start < end - LAST_LEAST_S || starts.length === 0; start += SEGMENT_S) {
     starts.push(start);
   }
+
   return { video: "convert", starts, end, next: starts.map(() => null) };
 }
 
@@ -153,6 +171,7 @@ export function runCuts(
   // file, which is right only for the plan's last segment.
   const whole = from + ends.length === plan.starts.length - 1;
   const count = ends.length + (whole ? 1 : 0);
+
   if (plan.video === "convert") {
     return {
       seek: from === 0 ? null : start - origin,
@@ -162,8 +181,10 @@ export function runCuts(
       count,
     };
   }
+
   const next = plan.next[from] ?? null;
   const past = next === null ? SEEK_PAST_S : Math.min(SEEK_PAST_S, (next - start) / 2);
+
   return {
     seek: from === 0 ? null : start + past - origin + (reordered ? REORDER_SEEK_S : 0),
     times,
@@ -210,6 +231,7 @@ export function segmentSpan(
 ): { start: number; end: number | null; within: number } {
   const on = (time: number) => TS_START_S + time - plan.starts[0]!;
   const next = plan.starts[index + 1];
+
   return {
     start: on(plan.starts[index]!),
     end: next === undefined ? null : on(next),
@@ -227,22 +249,30 @@ export function pictureSpan(segment: Uint8Array): { first: number; last: number 
   let pid: number | null = null;
   let first: number | null = null;
   let last = Number.NEGATIVE_INFINITY;
+
   for (let at = 0; at + 188 <= segment.length; at += 188) {
     // Only the packets that start a picture carry its time.
     if (segment[at] !== 0x47 || (segment[at + 1]! & 0x40) === 0) continue;
     const packet = ((segment[at + 1]! & 0x1f) << 8) | segment[at + 2]!;
+
     if (pid !== null && packet !== pid) continue;
     const adaptation = (segment[at + 3]! >> 4) & 0x3;
+
     if ((adaptation & 0x1) === 0) continue;
     const payload = at + 4 + (adaptation === 3 ? 1 + segment[at + 4]! : 0);
+
     if (payload + 14 > at + 188) continue;
+
     const startCode =
       segment[payload] === 0 && segment[payload + 1] === 0 && segment[payload + 2] === 1;
+
     const stream = segment[payload + 3]!;
+
     // Video streams, and only a packet that carries a presentation time.
     if (!startCode || stream < 0xe0 || stream > 0xef || (segment[payload + 7]! & 0x80) === 0) {
       continue;
     }
+
     const shows =
       ((segment[payload + 9]! & 0x0e) * 2 ** 29 +
         segment[payload + 10]! * 2 ** 22 +
@@ -250,10 +280,12 @@ export function pictureSpan(segment: Uint8Array): { first: number; last: number 
         segment[payload + 12]! * 2 ** 7 +
         (segment[payload + 13]! >> 1)) /
       90_000;
+
     pid = packet;
     first ??= shows;
     last = Math.max(last, shows);
   }
+
   return first === null ? null : { first, last };
 }
 
@@ -268,6 +300,7 @@ export interface LiveSegments {
 
 /** How long a segment of a channel is, about: ffmpeg cuts at the first keyframe after it. */
 const LIVE_SEGMENT_S = 2;
+
 /** How many segments each of ffmpeg's lists names: more than one new one never comes at once. */
 const LIVE_LISTED = 4;
 
@@ -287,16 +320,22 @@ export function liveSegmentArguments(
     ...["-probesize", "1000000", "-analyzeduration", "1500000", "-fflags", "+genpts"],
     ...["-f", "mpegts", "-i", "pipe:0"],
   ];
+
   const { pids } = segments;
+
   if (segments.video !== "none")
     args.push("-map", pids.video === null ? "0:v:0" : `0:i:${pids.video}`);
+
   if (segments.audio !== "none")
     args.push("-map", pids.audio === null ? "0:a:0" : `0:i:${pids.audio}`);
+
   if (segments.subtitles?.length) {
     for (const pid of segments.subtitles) args.push("-map", `0:i:${pid}?`);
     args.push("-c:s", "copy");
   }
+
   if (segments.video === "copy") args.push("-c:v", "copy");
+
   if (segments.video === "h264") {
     args.push(
       ...["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "21"],
@@ -305,7 +344,9 @@ export function liveSegmentArguments(
       ...H264_IMAGE_ARGUMENTS,
     );
   }
+
   if (segments.audio === "copy") args.push("-c:a", "copy");
+
   if (segments.audio === "aac") args.push(...AAC_STEREO_ARGUMENTS);
   args.push(
     ...["-f", "segment", "-segment_format", "mpegts", "-individual_header_trailer", "0"],
@@ -315,6 +356,7 @@ export function liveSegmentArguments(
     ...["-segment_list_size", String(LIVE_LISTED)],
     url,
   );
+
   return args;
 }
 
@@ -332,6 +374,7 @@ export function masterPlaylist(
   subtitles: { readonly name: string; readonly language: string | null } | null,
 ): string {
   const lines = ["#EXTM3U", "#EXT-X-VERSION:3"];
+
   if (subtitles) {
     const language = subtitles.language ? `,LANGUAGE="${quoted(subtitles.language)}"` : "";
     lines.push(
@@ -339,10 +382,12 @@ export function masterPlaylist(
         `DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,URI="subs.m3u8"`,
     );
   }
+
   lines.push(
     `#EXT-X-STREAM-INF:BANDWIDTH=${Math.max(1, Math.round(bandwidth))}${subtitles ? ',SUBTITLES="subs"' : ""}`,
     "video.m3u8",
   );
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -354,6 +399,7 @@ function quoted(text: string): string {
 /** A title's whole playlist: every segment of `plan` with its length, named by `name`. */
 export function titlePlaylist(plan: SegmentPlan, name: (index: number) => string): string {
   const lengths = plan.starts.map((_start, index) => segmentLength(plan, index));
+
   const lines = [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
@@ -362,8 +408,10 @@ export function titlePlaylist(plan: SegmentPlan, name: (index: number) => string
     "#EXT-X-PLAYLIST-TYPE:VOD",
     "#EXT-X-INDEPENDENT-SEGMENTS",
   ];
+
   lengths.forEach((length, index) => lines.push(`#EXTINF:${length.toFixed(3)},`, name(index)));
   lines.push("#EXT-X-ENDLIST");
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -372,17 +420,20 @@ export function livePlaylist(
   segments: readonly { readonly index: number; readonly length: number; readonly fresh: boolean }[],
 ): string {
   const longest = Math.max(LIVE_SEGMENT_S, ...segments.map((each) => each.length));
+
   const lines = [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
     `#EXT-X-TARGETDURATION:${Math.ceil(longest)}`,
     `#EXT-X-MEDIA-SEQUENCE:${segments[0]?.index ?? 0}`,
   ];
+
   for (const segment of segments) {
     // The provider's stream started again there: its clock did too.
     if (segment.fresh) lines.push("#EXT-X-DISCONTINUITY");
     lines.push(`#EXTINF:${segment.length.toFixed(3)},`, `l${segment.index}.ts`);
   }
+
   return `${lines.join("\n")}\n`;
 }
 
@@ -400,17 +451,21 @@ export function subtitleSegment(
 ): string {
   const lines = ["WEBVTT", `X-TIMESTAMP-MAP=MPEGTS:${TS_START_S * 90_000},LOCAL:00:00:00.000`, ""];
   const seen = new Set<string>();
+
   for (const entry of entries) {
     if (!("text" in entry) || entry.until <= from || entry.at >= to) continue;
     const start = Math.max(0, entry.at - first);
     const end = entry.until - first;
+
     if (!(end > start)) continue;
     // What came before a position and what the run read can hold the same line.
     const key = `${start.toFixed(3)} ${end.toFixed(3)} ${entry.text}`;
+
     if (seen.has(key)) continue;
     seen.add(key);
     lines.push(`${cueTime(start)} --> ${cueTime(end)}`, entry.text.replace(/\n{2,}/g, "\n"), "");
   }
+
   return lines.join("\n");
 }
 
@@ -418,5 +473,6 @@ export function subtitleSegment(
 function cueTime(seconds: number): string {
   const ms = Math.round(seconds * 1000);
   const part = (value: number, width = 2) => String(value).padStart(width, "0");
+
   return `${part(Math.floor(ms / 3_600_000))}:${part(Math.floor(ms / 60_000) % 60)}:${part(Math.floor(ms / 1000) % 60)}.${part(ms % 1000, 3)}`;
 }

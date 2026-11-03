@@ -21,9 +21,11 @@ import { defined } from "@mrstreamer/core/defined";
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;
 const remotes: FakeTmdb[] = [];
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+
   for (const remote of remotes.splice(0)) await remote.close();
 });
 
@@ -31,7 +33,9 @@ async function app({ metadata = false } = {}) {
   const dir = await tempDir();
   const provider = await fakeProvider({ titles: 5 });
   const remote = metadata ? await startFakeTmdb() : null;
+
   if (remote) remotes.push(remote);
+
   const start = async (key: string | null = metadata ? "test-key" : null) => {
     const runtime = runtimeFor(
       mainLayer({
@@ -40,7 +44,9 @@ async function app({ metadata = false } = {}) {
         ...defined({ tmdbApi: remote ? remote.url : undefined }),
       }).pipe(Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" }))),
     );
+
     await runtime.runPromise(TestClock.setTime(NOW));
+
     return {
       runtime,
       service: await promised(runtime, OnDemand),
@@ -50,11 +56,13 @@ async function app({ metadata = false } = {}) {
       time: (time: number) => runtime.runPromise(TestClock.setTime(time)),
     };
   };
+
   const first = await start();
   const login = demoLogin(provider);
   const { id: subscriptionId } = await first.subscriptions.add(login);
   const own = (id: string) => ({ subscriptionId, id });
   const series = own("80000");
+
   const episode = {
     ...own("81000"),
     kind: "episode",
@@ -62,7 +70,9 @@ async function app({ metadata = false } = {}) {
     season: 1,
     episode: 1,
   } as const;
+
   const movie = own("90000");
+
   return {
     ...first,
     first,
@@ -83,6 +93,7 @@ async function app({ metadata = false } = {}) {
 function holdDetails() {
   return holdResponse((url) => {
     const action = url.searchParams.get("action");
+
     return action === "get_series_info" || action === "get_vod_info";
   });
 }
@@ -93,15 +104,19 @@ function holdResponse(matches: (url: URL) => boolean) {
   vi.stubGlobal("fetch", (async (input, init) => {
     const url = new URL(String(input));
     const gate = matches(url) ? pending : undefined;
+
     if (gate) pending = undefined;
     const response = await original(input, init);
+
     if (gate) {
       init?.signal?.addEventListener("abort", gate.aborted, { once: true });
       gate.arrived();
       await gate.release;
     }
+
     return response;
   }) satisfies typeof fetch);
+
   return () => {
     const arrived = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -113,6 +128,7 @@ function holdResponse(matches: (url: URL) => boolean) {
         aborted = true;
       },
     };
+
     return { arrived: arrived.promise, release: release.resolve, aborted: () => aborted };
   };
 }
@@ -148,10 +164,12 @@ function relistFirstEpisode(provider: Awaited<ReturnType<typeof app>>["provider"
 /** Rewrites the saved catalogue in `dir` as builds before its acceptance stamp left it. */
 async function dropCatalogueStamp(dir: string) {
   const path = join(dir, "ondemand.json.gz");
+
   const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
     string,
     unknown
   >;
+
   expect(snapshot["catalogueStamp"]).toEqual(expect.any(String));
   delete snapshot["catalogueStamp"];
   await writeFile(path, gzipSync(JSON.stringify(snapshot)));
@@ -161,6 +179,7 @@ function episodeIds(
   details: Awaited<ReturnType<Awaited<ReturnType<typeof app>>["service"]["details"]>>,
 ) {
   if (details.kind !== "series") throw new Error("Expected a series");
+
   return details.seasons.flatMap((season) => season.episodes.map((episode) => episode.id));
 }
 
@@ -175,6 +194,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     await expect
       .poll(async () => {
         const { metadata } = await a.service.status();
+
         return metadata && metadata.wanted > 0 && metadata.known === metadata.wanted;
       })
       .toBe(true);
@@ -184,11 +204,13 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
       .toMatch(/^TMDB/);
     const series = await a.service.details("series", a.series);
     const file = await a.service.file(a.episode);
+
     const counts = [
       a.provider.detailRequests(),
       a.remote!.aboutRequests(),
       a.remote!.seasonRequests().length,
     ];
+
     expect(counts[0]).toBe(2);
     await a.runtime.dispose();
     a.provider.failDetails(503);
@@ -333,6 +355,7 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     await expect(a.service.details("series", a.series)).rejects.toBeDefined();
     gate.release();
     const db = new DatabaseSync(join(a.dir, "mrstreamer.db"));
+
     try {
       expect(
         db
@@ -377,15 +400,19 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const source = await a.subscriptions.sourceOf(a.subscriptionId);
     await a.subscriptions.add(a.login);
     const gate = hold();
+
     const current = a.service.details("series", a.series).then(
       (details) => ({ details }),
       (error: unknown) => ({ error }),
     );
+
     await gate.arrived;
+
     const joined = a.service.file(a.episode).then(
       (file) => ({ file }),
       (error: unknown) => ({ error }),
     );
+
     // A captured refresh can arrive after its saved source has already been replaced.
     await expect(
       a.service.refresh(a.subscriptionId, { source, read: Effect.never }),
@@ -458,29 +485,36 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
       const holdAbout = holdResponse(
         (url) => url.searchParams.get("append_to_response") === "credits",
       );
+
       const holdSeason = holdResponse((url) => url.pathname.endsWith("/season/1"));
       const a = await app({ metadata: true });
       const network = vi.spyOn(globalThis, "fetch");
       await a.settings.update({ titleLanguage: "nl" });
       const before = cached ? await a.service.season(a.series, 1) : undefined;
+
       if (cached) {
         await expect
           .poll(async () => (await a.service.details("series", a.series)).plot)
           .toMatch(/^TMDB/);
         await a.time(NOW + 150 * DAY);
       }
+
       const about = holdAbout();
       const season = holdSeason();
+
       const pending = a.service.season(a.series, 1).then(
         (episodes) => ({ episodes }),
         (error: unknown) => ({ error }),
       );
+
       await Promise.all([about.arrived, season.arrived]);
       await a.settings.update({ tmdbKey: "replacement-key" });
       await a.service.reconfigure();
       const result = await pending;
       expect(result).toHaveProperty("episodes");
+
       if (!("episodes" in result)) throw new Error("Season failed during key rotation");
+
       if (before) expect(result.episodes).toEqual(before);
       else expect(result.episodes[0]?.plot).toBeNull();
       expect(about.aborted()).toBe(true);
@@ -489,17 +523,20 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
       season.release();
       const record = await a.cache.read({ kind: "season", id: "90000", number: 1, language: "nl" });
       expect(record?.at ?? null).toBe(cached ? NOW : null);
+
       const title = await a.cache.read({
         kind: "about",
         titleKind: "series",
         id: "90000",
         language: "nl",
       });
+
       expect(title?.at ?? null).toBe(cached ? NOW : null);
       expect((await a.service.season(a.series, 1))[0]?.plot).toMatch(/^TMDB/);
       expect(
         network.mock.calls.some(([input]) => {
           const url = new URL(String(input));
+
           return (
             url.pathname.endsWith("/season/1") &&
             url.searchParams.get("api_key") === "replacement-key"
@@ -513,10 +550,12 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app({ metadata: true });
     await a.settings.update({ titleLanguage: "nl" });
     a.remote!.failSeasons("hold");
+
     const pending = a.service.season(a.series, 1).then(
       () => null,
       (error: unknown) => error,
     );
+
     await expect.poll(() => a.remote!.seasonRequests().length).toBe(1);
     await a.subscriptions.add(a.login);
     await a.settings.update({ tmdbKey: "replacement-key" });
@@ -599,11 +638,13 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const a = await app();
     await a.service.refresh(a.subscriptionId);
     const db = new DatabaseSync(join(a.dir, "mrstreamer.db"));
+
     try {
       db.exec("drop table title_detail_cache");
     } finally {
       db.close();
     }
+
     expect(episodeIds(await a.service.details("series", a.series))).toContain("81000");
     expect((await a.service.file(a.episode)).listingKey).toEqual(expect.any(String));
     expect(a.provider.detailRequests()).toBe(1);
@@ -636,9 +677,11 @@ describe("persistent opened details through OnDemand", { timeout: 20_000 }, () =
     const [source] = await a.subscriptions.saved();
     await a.service.forget(source!);
     expect(await pending).toBe("rejected");
+
     const signals = network.mock.calls
       .filter(([input]) => String(input).startsWith(a.remote!.url))
       .map(([, init]) => init?.signal);
+
     expect(signals.length).toBe(2);
     expect(signals.every((signal) => signal?.aborted)).toBe(true);
     a.remote!.holdAbout(false);

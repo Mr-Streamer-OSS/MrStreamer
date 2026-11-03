@@ -23,6 +23,7 @@ export default defineConfig(({ command }) => {
     host: process.env["MR_STREAMER_ANALYTICS_HOST"],
     projectToken: process.env["MR_STREAMER_ANALYTICS_PROJECT_TOKEN"],
   });
+
   return {
     main: {
       plugins: [notices("main")],
@@ -62,7 +63,9 @@ function buildCommit(): string {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).split("\n");
+
     const ours = realpathSync(top) === realpathSync(join(root, "..", ".."));
+
     return ours && /^[0-9a-f]{40}$/.test(head) ? head : "";
   } catch {
     return "";

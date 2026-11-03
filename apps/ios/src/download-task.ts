@@ -34,6 +34,7 @@ const OutcomeV2 = lazy(() =>
     .or({ kind: "'network'", code: "number.integer", resumable: "boolean" })
     .or({ kind: "'refresh'", reason: "'source' | 'secret-missing' | 'resume-unusable'" }),
 );
+
 /** How an authorization's request ended. */
 export type OutcomeV2 = Infer<typeof OutcomeV2>;
 
@@ -52,6 +53,7 @@ const ReceiptV2 = lazy(() =>
     outcome: OutcomeV2(),
   }),
 );
+
 /** One authorization's ending, until it is acknowledged. */
 export type ReceiptV2 = Infer<typeof ReceiptV2>;
 
@@ -62,9 +64,11 @@ const LegacyOutcome = lazy(() =>
     .or({ kind: "'refused'", status: "number" })
     .or({ kind: "'network'", code: "number", resumable: "boolean" }),
 );
+
 const LegacyReceipt = lazy(() =>
   type({ receipt: "string", attempt: "string", id: "string", outcome: LegacyOutcome() }),
 );
+
 /** A build-14 attempt's ending, taken in with build 14's meanings. */
 export type LegacyReceipt = Infer<typeof LegacyReceipt>;
 
@@ -85,12 +89,14 @@ const AuthorizationView = lazy(() =>
     held: "boolean",
   }),
 );
+
 export type AuthorizationView = Infer<typeof AuthorizationView>;
 
 /** Receipts that read, and how many didn't: one bad entry hides no other. */
 function readable<T>(parse: (value: unknown) => T | type.errors, values: unknown): T[] {
   return (Array.isArray(values) ? values : []).flatMap((value) => {
     const parsed = parse(value);
+
     return parsed instanceof type.errors ? [] : [parsed];
   });
 }
@@ -133,6 +139,7 @@ const Observation = lazy(() =>
     expected: { queueEpoch: "string", expected: "string" },
   }),
 );
+
 /**
  * How a source's download authority stands: enabled under a generation, or not; `expected` is
  * what the next enable or revoke must name.
@@ -245,6 +252,7 @@ const REFUSALS: Readonly<Record<string, Refusal>> = {
 export function refusalOf(cause: unknown): Refusal | null {
   const code =
     typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : "";
+
   return REFUSALS[code] ?? null;
 }
 
@@ -255,6 +263,7 @@ const refused = (refusal: Refusal) =>
   });
 
 let found: Native | null = null;
+
 /**
  * The native module, found where Expo installs every module before the app's JavaScript runs, as
  * `requireNativeModule` finds it first; null in a build without it, which holds no download
@@ -264,12 +273,15 @@ let found: Native | null = null;
 function lookup(): Native | null {
   const host: { expo?: { modules?: { BackgroundDownloads?: Native } } } = globalThis;
   found ??= host.expo?.modules?.BackgroundDownloads ?? null;
+
   return found;
 }
 
 function native(): Native {
   const module = lookup();
+
   if (!module) throw refused("unavailable");
+
   return module;
 }
 
@@ -279,6 +291,7 @@ function native(): Native {
  */
 function bounded<A>(work: Promise<A>, ms = 6_000): Promise<A> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   return Promise.race([
     work,
     new Promise<never>((_, reject) => {
@@ -289,16 +302,20 @@ function bounded<A>(work: Promise<A>, ms = 6_000): Promise<A> {
 
 function parsed<T>(parse: (value: unknown) => T | type.errors, value: unknown): T {
   const result = parse(value);
+
   if (result instanceof type.errors) throw refused("corrupt");
+
   return result;
 }
 
 function fenceOf(value: unknown): Fence {
   const body = typeof value === "object" && value !== null ? value : {};
   const durable = "durable" in body ? body.durable : null;
+
   if (durable !== "ledger" && durable !== "secrets" && durable !== "already-terminal") {
     throw refused("corrupt");
   }
+
   return {
     durable,
     receipts: readable(ReceiptV2(), "receipts" in body ? body.receipts : []),
@@ -315,7 +332,9 @@ export const transfers = {
   /** Enables `sourceId` under a fresh generation, while it stands as `observed`. */
   enableSource: async (sourceId: string, observed: Observation): Promise<string> => {
     const { generation } = await bounded(native().enableSource({ sourceId, ...observed.expected }));
+
     if (typeof generation !== "string") throw refused("corrupt");
+
     return generation;
   },
   /** Revokes `sourceId` durably, while it stands as `observed`; never waits for a task. */
@@ -329,7 +348,9 @@ export const transfers = {
     readonly sourceGeneration: string;
   }): Promise<string> => {
     const { authorization } = await native().reserve({ ...request });
+
     if (typeof authorization !== "string") throw refused("corrupt");
+
     return authorization;
   },
   /** Arms a reserved authorization with the file's request, login included. */
@@ -347,6 +368,7 @@ export const transfers = {
     reason: "remove" | "abandon" = "remove",
   ): Promise<Fence> => {
     const answer = await bounded(native().cancelAuthorization(authorization, reason));
+
     return reason === "abandon" ? { durable: "ledger", receipts: [], legacy: [] } : fenceOf(answer);
   },
   /**
@@ -376,6 +398,7 @@ export const transfers = {
   /** The queue at one moment; the first foreground reconcile installs the barrier first. */
   reconcile: async (context: "first-foreground" | "background" | "ordinary"): Promise<Snapshot> => {
     const body = parsed(Envelope(), await native().reconcile(context));
+
     return {
       queueEpoch: body.queueEpoch,
       foregroundToken: body.foregroundToken,
@@ -399,11 +422,14 @@ export const transfers = {
       native().resetQueue({ ...scope, knownSourceIds: [...scope.knownSourceIds] }),
       20_000,
     );
+
     const answer = typeof body === "object" && body !== null ? body : {};
     const epoch = "queueEpoch" in answer ? answer.queueEpoch : null;
+
     if (!("kind" in answer) || answer.kind !== "reset" || typeof epoch !== "string") {
       throw refused("corrupt");
     }
+
     return {
       queueEpoch: epoch,
       receipts: readable(
@@ -424,12 +450,14 @@ export const transfers = {
   onProgress(listener: (progress: Progress) => void): Subscription {
     return native().addListener("progress", (body) => {
       const progress = ProgressEvent()(body);
+
       if (!(progress instanceof type.errors)) listener(progress);
     });
   },
   onReceipt(listener: (receipt: ReceiptV2) => void): Subscription {
     return native().addListener("receipt", (body) => {
       const receipt = ReceiptV2()(body);
+
       if (!(receipt instanceof type.errors)) listener(receipt);
     });
   },

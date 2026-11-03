@@ -25,6 +25,7 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const HOUR = 60 * 60 * 1000;
 const QUARTER = HOUR / 4;
+
 /** 20:10 in the fake guide's +02:00. */
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 
@@ -41,6 +42,7 @@ function started(dataDir: string) {
   const clock = Layer.effectDiscard(TestClock.setTime(NOW)).pipe(
     Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
   );
+
   return runtimeFor(mainLayer(testConfig(dataDir)).pipe(Layer.provideMerge(clock)));
 }
 
@@ -49,6 +51,7 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
   provider.serveGuide(fakeGuide(provider.catalogue, NOW));
   const dataDir = await tempDir();
   let subscriptionId: string | null = null;
+
   const create = async () => {
     const runtime = started(dataDir);
     const subscriptions = await runtime.runPromise(Subscriptions);
@@ -59,11 +62,13 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
     const library = await promised(runtime, Library);
     const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
     const own = (id: string) => ({ subscriptionId: owner, id });
+
     /** An answer per channel, by the provider's id alone. */
     const byId = <A>(answer: Record<string, A>) =>
       Object.fromEntries(
         Object.entries(answer).map(([key, value]) => [key.slice(owner.length + 1), value]),
       );
+
     return {
       own,
       /** The guide's own answer, by each channel's `ownedKey`. */
@@ -85,7 +90,9 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
         const [{ subscriptionId: of, ...status } = { subscriptionId: null }] = await run(
           guide.status,
         );
+
         expect(of).toBe(owner);
+
         return status;
       },
       /** Removes the subscription, with what was loaded from it. */
@@ -108,7 +115,9 @@ async function connectedGuide(options: FakeProviderOptions = {}) {
       },
     };
   };
+
   const guide = await create();
+
   return { provider, library: guide.library, create, guide, ...channelsOf(provider) };
 }
 
@@ -117,8 +126,10 @@ function channelsOf(provider: FakeProvider) {
   const regular = provider.catalogue.channels.filter(
     (channel) => channel.streamId >= 2000 && !channel.offline,
   );
+
   const guided = regular.find((channel) => channel.guideId)!;
   const unguided = regular.find((channel) => !channel.guideId)!;
+
   return {
     guided: String(guided.streamId),
     guideId: guided.guideId!,
@@ -153,6 +164,7 @@ describe("programme guide", () => {
       variants: [guided],
       archive: { start: aired!.start, end: aired!.stop },
     });
+
     await (await fetch(session.url)).arrayBuffer();
     expect(provider.archiveRequests()).toEqual([
       { streamId: guided, minutes: 30, start: "2026-10-02:18-00" },
@@ -270,6 +282,7 @@ describe("programme guide", () => {
       ].join("")}</tv>`,
     );
     await guide.refresh();
+
     const search = async (query: string, until: string) =>
       (await guide.searchChannels(query, [guided], at(until)))[guided];
 
@@ -295,13 +308,16 @@ describe("programme guide", () => {
   it("finds each channel that shows a guide id, where the search of everything names the first", async () => {
     // Two channels of one name in different countries, which stay two channels, send one guide id.
     let sharing: ReadonlySet<string> = new Set();
+
     const { provider, guide } = await connectedGuide({
       guideIdOf: (channel) =>
         sharing.has(String(channel.streamId)) ? "shared.test" : channel.guideId,
     });
+
     const byTitle = Map.groupBy(await guide.library.channels({}), (channel) => channel.title);
     const pair = [...byTitle.values()].find((channels) => channels.length > 1)?.slice(0, 2) ?? [];
     const [first, second] = pair.map((channel) => channel.id);
+
     if (!first || !second) throw new Error("The fake catalogue has no two channels of one name.");
     sharing = new Set(pair.flatMap((channel) => channel.variants.map((variant) => variant.id)));
     await guide.library.refresh();
@@ -388,10 +404,12 @@ describe("programme guide", () => {
   it("stops a download when the subscription goes, and keeps nothing from it", async () => {
     const { provider, guide, create, guided } = await connectedGuide();
     provider.serveGuide(fakeGuide(provider.catalogue, NOW), { pieceBytes: 64 });
+
     const download = guide.refresh().then(
       () => "finished",
       () => "stopped",
     );
+
     await vi.waitFor(() => expect(provider.guideRequests()).toBe(1));
 
     await guide.clear();
@@ -425,18 +443,24 @@ describe("programme guide", () => {
     // unrelated channel send the variants' id, and three unrelated channels send an id none of them
     // is: only the variants get programmes.
     let files = new Map<number, string>();
+
     const { provider, guide } = await connectedGuide({
       guideIdOf: (channel) => files.get(channel.streamId) ?? null,
     });
+
     const regular = provider.catalogue.channels.filter(
       (channel) => channel.streamId >= 2000 && !channel.offline,
     );
+
     const base = (channel: FakeChannel) =>
       channel.name.replace(/^[A-Z]{2}(: | \| )/, "").replace(/ (HD|FHD|4K|SD)$/, "");
+
     const variants = regular.filter((channel, _, all) =>
       all.some((other) => other !== channel && base(other) === base(channel)),
     );
+
     const [first] = variants;
+
     if (!first) throw new Error("The fake catalogue has no variants of one channel.");
     const same = variants.filter((channel) => base(channel) === base(first));
     const others = regular.filter((channel) => !base(channel).includes(base(first).split(" ")[0]!));
@@ -463,20 +487,25 @@ describe("programme guide", () => {
     // "kwaliteit1 BE" on the HD one, and its guide lists programmes under the first only.
     const fhd = String(QUALITY_STREAM_IDS);
     const hd = String(QUALITY_STREAM_IDS + 1);
+
     const { provider, guide, create } = await connectedGuide({
       guideIdOf: (channel) => (String(channel.streamId) === hd ? "kwaliteit1 BE" : channel.guideId),
     });
+
     provider.serveGuide(`<tv>${slot("kwaliteit1.be", "Journaal")}</tv>`);
     await guide.refresh();
+
     const shown = async ({ library, listings }: typeof guide) => {
       const channels = await library.channels({ query: "kwaliteit" });
       const now = await listings(channels.map((channel) => channel.id));
+
       return channels.map((channel) => [
         channel.id,
         channel.variants.map((variant) => variant.id).toSorted(),
         now[channel.id]?.now?.title,
       ]);
     };
+
     const one = (title: string) => [[fhd, [fhd, hd, String(QUALITY_STREAM_IDS + 2)], title]];
 
     expect(await shown(guide)).toEqual(one("Journaal"));
@@ -518,9 +547,11 @@ describe("the guides of several subscriptions", () => {
   async function two() {
     const [first, second] = [await fakeProvider(), await fakeProvider({ channels: 200 })];
     const dataDir = await tempDir();
+
     const create = async () => {
       const runtime = started(dataDir);
       const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+
       return {
         run,
         guide: await runtime.runPromise(Guide),
@@ -528,12 +559,15 @@ describe("the guides of several subscriptions", () => {
         subscriptions: await runtime.runPromise(Subscriptions),
       };
     };
+
     const services = await create();
     const { run, subscriptions } = services;
     const a = (await run(subscriptions.add(demoLogin(first)))).id;
     const b = (await run(subscriptions.add(demoLogin(second)))).id;
+
     return { ...services, create, first, second, a, b };
   }
+
   const channel = (subscriptionId: string) => ({ subscriptionId, id: "1000" });
 
   it("shows each subscription's channels its own guide, though both use the same guide ids", async () => {
@@ -550,8 +584,10 @@ describe("the guides of several subscriptions", () => {
 
     const shows = async (asked: typeof guide) => {
       const listings = await run(asked.listings([channel(b), channel(a)]));
+
       return [channel(a), channel(b)].map((each) => listings[ownedKey(each)]?.now?.title);
     };
+
     expect(await shows(guide)).toEqual(["Journaal", "Journal"]);
     expect(await run(guide.schedule(channel(b), NOW, NOW + 24 * HOUR))).toMatchObject([
       { title: "Journal" },
@@ -616,6 +652,7 @@ describe("the guides of several subscriptions", () => {
 
     const now = async (asked: typeof guide, of: string) =>
       (await run(asked.listings([channel(of)])))[ownedKey(channel(of))]?.now?.title;
+
     // The one that failed keeps the guide it had; the other never noticed.
     expect([await now(guide, a), await now(guide, b)]).toEqual(["Journaal", "Journal"]);
 

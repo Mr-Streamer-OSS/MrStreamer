@@ -34,8 +34,10 @@ const LONGEST = 8_000;
 const startup = store<Startup>({ kind: "opening" });
 
 export const useStartup = () => useStore(startup);
+
 /** Whether the app has opened yet, for owners outside React. */
 export const currentStartup = () => startup.get();
+
 /** Calls `listener` once the app opens. */
 export const onStartup = (listener: () => void) => startup.subscribe(listener);
 
@@ -53,8 +55,10 @@ function open() {
 
 function settle() {
   if (startup.get().kind === "open") return;
+
   if (currentRoster().kind !== "ready") return;
   const shows = restored && !readingSaved() && channelsWorkedOut() && titlesWorkedOut();
+
   if (expired || shows) open();
 }
 
@@ -69,6 +73,7 @@ export function startUp(): Promise<void> {
       expired = true;
       settle();
     }, LONGEST);
+
     stops.push(
       () => clearTimeout(timer),
       onRoster(settle),
@@ -76,10 +81,12 @@ export function startUp(): Promise<void> {
       onCatalogue(settle),
       onTitleLists(settle),
     );
+
     return restore().then(() => {
       restored = true;
       settle();
     });
   })();
+
   return started;
 }

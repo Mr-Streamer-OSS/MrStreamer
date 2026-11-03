@@ -61,11 +61,13 @@ function silence(): HTMLAudioElement {
   const samples = 80_000;
   const bytes = new Uint8Array(44 + samples).fill(128, 44);
   const view = new DataView(bytes.buffer);
+
   const text = (at: number, value: string) => {
     for (let index = 0; index < value.length; index++) {
       view.setUint8(at + index, value.charCodeAt(index));
     }
   };
+
   text(0, "RIFF");
   view.setUint32(4, 36 + samples, true);
   text(8, "WAVEfmt ");
@@ -81,6 +83,7 @@ function silence(): HTMLAudioElement {
   view.setUint32(40, samples, true);
   const audio = new Audio(URL.createObjectURL(new Blob([bytes], { type: "audio/wav" })));
   audio.loop = true;
+
   return audio;
 }
 
@@ -91,8 +94,10 @@ function silence(): HTMLAudioElement {
  */
 function carry(state: "playing" | "paused" | null): void {
   if (!session) return;
+
   if (letGo) clearTimeout(letGo);
   letGo = null;
+
   if (state === null) {
     letGo = setTimeout(() => {
       if (!silent) return;
@@ -102,9 +107,12 @@ function carry(state: "playing" | "paused" | null): void {
       silent.load();
       silent = null;
     });
+
     return;
   }
+
   silent ??= silence();
+
   if (state === "playing") void silent.play().catch(() => {});
   else silent.pause();
 }
@@ -147,6 +155,7 @@ function useView(): object {
     },
     [view],
   );
+
   return view;
 }
 
@@ -172,14 +181,17 @@ export function useTitleSession(): void {
     const [label, ...name] = now.detail?.split(" · ") ?? [];
     // A copy shows its own name and detail, as it was kept.
     const episode = now.kind === "provider" && now.title.kind === "episode";
+
     // On a receiver the element here plays nothing: whether it plays is the receiver's word.
     const paused = () =>
       titlePlayer.onReceiver()
         ? titlePlayer.state().phase.kind !== "playing"
         : player.element.paused;
+
     const pause = () => {
       if (!paused()) titlePlayer.togglePause();
     };
+
     present(
       view,
       {
@@ -210,8 +222,10 @@ export function useTitleSession(): void {
   useEffect(() => {
     if (!duration) return;
     const video = player.element;
+
     const update = () => {
       if (!session || owner !== view) return;
+
       if (!Number.isFinite(video.currentTime) || video.currentTime > duration) return;
       session.setPositionState({
         duration,
@@ -219,9 +233,12 @@ export function useTitleSession(): void {
         playbackRate: video.playbackRate || 1,
       });
     };
+
     update();
     const events = ["seeked", "ratechange", "play", "pause", "playing"] as const;
+
     for (const event of events) video.addEventListener(event, update);
+
     return () => {
       for (const event of events) video.removeEventListener(event, update);
     };
@@ -263,9 +280,11 @@ export function useLiveSession(channel: LiveChannel | null): void {
   // Only a receiver holds a channel that is on paused: the system shows what it said.
   const held = usePlayer((state) => receiverState(state.phase) === "paused");
   const playing = live && !held;
+
   const archived = usePlayer((state) =>
     channel && sameOwned(state.channel, channel) ? (state.archive?.title ?? null) : null,
   );
+
   const listings = useQuery(queries.listings(channel ? [channel] : []));
   const programme = archived ?? (channel && listings.data?.[ownedKey(channel)]?.now?.title) ?? null;
   const view = useView();
@@ -283,6 +302,7 @@ export function useLiveSession(channel: LiveChannel | null): void {
       {
         play: () => {
           const { phase: now } = player.state();
+
           if (now.kind === "idle" || now.kind === "failed") player.play(channel);
           // One a receiver holds paused plays on there. Any other is on its way already.
           else player.resume();

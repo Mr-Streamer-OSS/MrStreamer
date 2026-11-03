@@ -34,6 +34,7 @@ export function useDownloads() {
 }
 
 type FileIndex = Map<string, Map<RawTitleRef["kind"], Map<string, Download>>>;
+
 const filesBySnapshot = new WeakMap<DownloadList, FileIndex>();
 
 /** Exact files in this immutable full snapshot. Detached copies have no current subscription. */
@@ -43,19 +44,26 @@ export function downloadOf(
 ): Download | null {
   if (!list) return null;
   let index = filesBySnapshot.get(list);
+
   if (!index) {
     index = new Map();
+
     for (const file of list.items) {
       if (!file.subscription) continue;
       let subscription = index.get(file.subscription.id);
+
       if (!subscription) index.set(file.subscription.id, (subscription = new Map()));
       let kind = subscription.get(file.title.kind);
+
       if (!kind) subscription.set(file.title.kind, (kind = new Map()));
+
       // Keep the same first match as the list's previous find, even for duplicate records.
       if (!kind.has(file.title.id)) kind.set(file.title.id, file);
     }
+
     filesBySnapshot.set(list, index);
   }
+
   return index.get(title.subscriptionId)?.get(title.kind)?.get(title.id) ?? null;
 }
 
@@ -69,10 +77,12 @@ export function useDownloadOf(
   title: Pick<RawTitleRef, "kind" | "id">,
 ): Download | null {
   const { kind, id } = title;
+
   const select = useCallback(
     (list: DownloadList) => downloadOf(list, { subscriptionId, kind, id }),
     [subscriptionId, kind, id],
   );
+
   return useQuery({ ...downloadsQuery(), select }).data ?? null;
 }
 
@@ -104,6 +114,7 @@ export function describeFailure(failure: DownloadFailure): string {
 /** How a download stands, as its row says it under the title. */
 export function statusLine(download: Download): string {
   const { status } = download;
+
   switch (status.kind) {
     case "queued":
       return t("Queued");
@@ -113,6 +124,7 @@ export function statusLine(download: Download): string {
         : t("Waiting for playback");
     case "paused":
       if (status.received === 0) return t("Paused");
+
       return [
         t("Paused"),
         status.size
@@ -126,8 +138,10 @@ export function statusLine(download: Download): string {
       if (status.size === null || status.size === 0) {
         return status.received > 0 ? formatBytes(status.received) : t("Starting");
       }
+
       const left =
         status.rate && status.rate > 0 ? (status.size - status.received) / status.rate : null;
+
       return [
         formatPercent(Math.floor((status.received / status.size) * 100) / 100),
         t("{received} of {size}", {
@@ -140,6 +154,7 @@ export function statusLine(download: Download): string {
         .filter(Boolean)
         .join(" · ");
     }
+
     case "failed":
       return describeFailure(status.failure);
     case "complete":
@@ -152,6 +167,7 @@ export function statusLine(download: Download): string {
 /** How far a transfer is, or got before it was paused, from 0 to 1, when its size is known. */
 export function transferred(download: Download): number | null {
   const { status } = download;
+
   return (status.kind === "transferring" || status.kind === "paused") && status.size
     ? status.received / status.size
     : null;

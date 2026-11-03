@@ -29,6 +29,7 @@ vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
   vi.setSystemTime(new Date(2026, 9, 14, 10, 40, 20));
 });
+
 afterAll(() => vi.useRealTimers());
 
 const MINUTE = 60_000;
@@ -66,8 +67,10 @@ function programmesOf(id: string): Programme[] {
   if (id === "3") return [];
   const length = id === "1" ? HOUR / 2 : HOUR;
   const offset = id === "2" ? 15 * MINUTE : id === "4" ? 40 * MINUTE : 0;
+
   return Array.from({ length: (2 * 7 * 24 * HOUR) / length }, (_, slot) => {
     const start = BASE - 7 * 24 * HOUR + offset + slot * length;
+
     return {
       start,
       stop: start + length,
@@ -76,9 +79,12 @@ function programmesOf(id: string): Programme[] {
     };
   });
 }
+
 const guide = new Map<string, Programme[]>();
+
 function titleAt(id: string, at: number): string | undefined {
   if (!guide.has(id)) guide.set(id, programmesOf(id));
+
   return guide.get(id)!.find((programme) => programme.start <= at && at < programme.stop)?.title;
 }
 
@@ -89,12 +95,14 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
     return this.dataset["index"] === undefined ? 900 : 49;
   },
 });
+
 Object.defineProperty(HTMLElement.prototype, "clientWidth", {
   configurable: true,
   get: () => 1000,
 });
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   player.reset();
@@ -129,6 +137,7 @@ async function gridPage(
         const slots = all(owned.id)
           .filter((programme) => programme.stop > from && programme.start < to)
           .map(({ start, stop, title }) => ({ start, stop, title, guide: `${owned.id}.guide` }));
+
         return slots.length ? [[ownedKey(owned), slots]] : [];
       }),
     ),
@@ -205,12 +214,14 @@ async function gridPage(
   await mounted.render(createElement(GuidePage, { active: true }));
   unmount = mounted.unmount;
   const grid = () => container.querySelector<HTMLElement>('[role="grid"]');
+
   return {
     client,
     grid,
     /** The cell the grid names as its active one, by its accessible name. */
     active: () => {
       const id = grid()?.getAttribute("aria-activedescendant");
+
       return id ? (document.getElementById(id)?.getAttribute("aria-label") ?? null) : null;
     },
     /** A cell's accessible name, by what it shows. */
@@ -382,6 +393,7 @@ describe("the guide grid", () => {
   it("hands the keys to the lists from the start of the grid, and takes them back with Right", async () => {
     const page = await gridPage(THREE);
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+
     // The grid reaches a couple of hours back: fewer than ten half hours.
     for (let press = 0; press < 10; press++) await page.press("ArrowLeft");
     const first = page.details();
@@ -525,9 +537,11 @@ describe("the guide grid", () => {
     const now = programmes.find((p) => p.start <= Date.now() && Date.now() < p.stop)!;
     const next = programmes.find((p) => p.start === now.stop)!;
     const aired = programmes.find((p) => p.stop === now.start)!;
+
     const page = await gridPage([one], "grid", null, () =>
       ipc.always("guide.listings", { [ownedKey(one)]: { now, next } }),
     );
+
     const strip = () => document.querySelector("main > section")?.textContent ?? "";
     await ready(() => expect(page.cell(aired.title)).toBeDefined());
     await act(async () => page.cell(aired.title)!.click());
@@ -546,11 +560,13 @@ describe("the guide grid", () => {
   it("watches the channel live from a recording of it, by Watch live, Enter on now and the channel", async () => {
     const page = await gridPage([channel("1", "One", 3), channel("2", "Two")]);
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+
     const recording = async () => {
       await act(async () => useUi.setState({ watching: false }));
       // A click opens the programme's details, or closes them when they were open on it.
       const aired = page.cell(titleAt("1", Date.now() - HOUR)!)!;
       await act(async () => aired.click());
+
       if (!page.action("Play from start")) await act(async () => aired.click());
       await page.click("Play from start");
       expect(player.state().archive).not.toBeNull();
@@ -596,6 +612,7 @@ describe("the guide grid", () => {
     const page = await gridPage(THREE, "grid", null, () => (held = ipc.hold("guide.range")));
     await ready(() => expect(ipc.argsOf("guide.range").length).toBeGreaterThan(0));
     const first = ipc.argsOf("guide.range")[0]!;
+
     const answer = (title: string, from: number, to: number, asked: typeof first.channels) =>
       Object.fromEntries(
         asked.map((owned) => [
@@ -605,10 +622,12 @@ describe("the guide grid", () => {
             .map(({ start, stop }) => ({ start, stop, title, guide: title })),
         ]),
       );
+
     ipc.answer("guide.range", ({ channels: asked, from, to }) =>
       answer("New guide", from, to, asked),
     );
     const stop = syncGuideUpdates(page.client);
+
     try {
       await act(async () => ipc.emit("guide.updated", null));
       await act(async () =>
@@ -638,6 +657,7 @@ describe("the guide grid", () => {
   it("takes the keys back from the lists when the focus comes into the grid, and gives them up when it goes there", async () => {
     const page = await gridPage(THREE);
     await ready(() => expect(page.cell(titleAt("1", Date.now())!)).toBeDefined());
+
     // Left past the grid's start hands the keys to the lists: Down there moves no programme.
     for (let press = 0; press < 10; press++) await page.press("ArrowLeft");
     const first = page.details();
@@ -704,12 +724,14 @@ describe("the guide grid", () => {
   it("reads the guide only for the channels and hours in view, and the next ones as it scrolls", async () => {
     const many = Array.from({ length: 2000 }, (_, at) => channel(String(at + 1), `Channel ${at}`));
     const page = await gridPage(many);
+
     const reads = () =>
       ipc.argsOf("guide.range").map((args) => ({
         from: args.from,
         to: args.to,
         rows: args.channels.map((each) => Number(each.id) - 1),
       }));
+
     /** Waits until no read has been asked for a while: those for what is drawn are all in. */
     const settled = async () => {
       let count = -1;
@@ -724,6 +746,7 @@ describe("the guide grid", () => {
         { interval: 10, timeout: 5000 },
       );
     };
+
     const pageOf = (row: number) => Math.floor(row / 25);
     await settled();
 
@@ -749,6 +772,7 @@ describe("the guide grid", () => {
     await settled();
     const drawn = new Set(page.drawn().map(pageOf));
     expect(Math.min(...page.drawn().filter((row) => row > 0))).toBeGreaterThan(800);
+
     for (const read of reads().slice(asked)) expect(drawn).toContain(pageOf(read.rows[0]!));
 
     // A day ahead: only the hours around then.
@@ -757,6 +781,7 @@ describe("the guide grid", () => {
     await page.scroll({ left: 24 * hourPx });
     await ready(() => expect(reads().length).toBeGreaterThan(asked));
     await settled();
+
     for (const read of reads().slice(asked)) {
       expect(read.from).toBeGreaterThan(Date.now() + 12 * HOUR);
       expect(read.to).toBeLessThan(Date.now() + 36 * HOUR);
@@ -825,6 +850,7 @@ describe("reminders in the guide grid", () => {
     ipc.answer("reminders.list", () => list);
     ipc.answer("reminders.set", ({ channel, start }) => {
       const programme = guide.get(channel.id)!.find((each) => each.start === start)!;
+
       const reminder: Reminder = {
         id: `r${start}`,
         channel,
@@ -836,14 +862,18 @@ describe("reminders in the guide grid", () => {
         status: { kind: "upcoming" },
         banner: false,
       };
+
       list = { ...list, reminders: [...list.reminders, reminder] };
+
       return reminder;
     });
     ipc.answer("reminders.cancel", ({ id }) => {
       list = { ...list, reminders: list.reminders.filter((each) => each.id !== id) };
+
       return null;
     });
   }
+
   const pressed = (label: string) =>
     [...document.querySelectorAll<HTMLButtonElement>('[role="region"] button')]
       .find((button) => button.textContent?.trim() === label)
@@ -894,9 +924,11 @@ describe("reminders in the guide grid", () => {
     const held = ipc.hold("reminders.set");
     await page.click("Remind me");
     await page.press("ArrowRight");
+
     const button = [...document.querySelectorAll('[role="region"] button')].find(
       (each) => each.textContent?.trim() === "Remind me",
     );
+
     expect(button?.getAttribute("aria-busy")).toBeNull();
     await act(async () => held.reject({ kind: "unexpected", detail: "disk full" }));
     await ready(() => expect(page.details()).not.toContain("Couldn't save"));

@@ -52,6 +52,7 @@ import { PAGE, usePages } from "../titles/CollectionGrid.tsx";
 import { Select } from "./Rows.tsx";
 
 const ROW_REM = 2.5;
+
 /** A search waits this long for typing to pause, as the other lists' do. */
 const SEARCH_DELAY_MS = 120;
 
@@ -77,11 +78,13 @@ export function GuideMap({
   const query = useDebounced(text.trim(), SEARCH_DELAY_MS);
   const listKey = `${subscriptionId}:${filter}:${query}`;
   const { pages, load } = usePages(listKey);
+
   const loaded = useQueries({
     queries: pages.map((page) =>
       queries.mapChannels(subscriptionId, filter, query, page * PAGE, PAGE),
     ),
   });
+
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const first = byPage.get(0);
   const total = first?.total ?? 0;
@@ -99,6 +102,7 @@ export function GuideMap({
   const sources = useQuery(queries.guideSources()).data ?? [];
 
   const without = Math.max(0, guide.listed - guide.channels);
+
   return (
     <Sheet onClose={onClose} overSettings initialFocus={channelList}>
       <div className="flex h-full flex-col px-8 pt-7 pb-6">
@@ -164,6 +168,7 @@ export function GuideMap({
                 onEnter={() => optionField.current?.focus()}
                 row={(position) => {
                   const channel = channelAt(position);
+
                   return (
                     channel && (
                       <>
@@ -223,16 +228,20 @@ export function GuideMap({
 function nameOf(guideChannel: GuideChannelRef, sources: readonly GuideSourceStatus[]): string {
   const { id, source, origin } = guideChannel;
   const listed = source === null ? undefined : sources.find((each) => each.id === source);
+
   if (listed) return `${guideName(listed, sources)} · ${id}`;
+
   return origin ? `${hostOf(origin)} · ${id}` : id;
 }
 
 /** How a channel gets its programmes, in a few words beside its name. */
 function stateOf(channel: MapChannel, sources: readonly GuideSourceStatus[]): string {
   if (!channel.listed) return t("no longer listed");
+
   if (channel.mapped === null) {
     return channel.shown ? nameOf(channel.shown, sources) : t("no id match");
   }
+
   return channel.shown === null
     ? `${t("mapped")} · ${nameOf(channel.mapped, sources)} · ${t("not in this guide")}`
     : `${t("mapped")} · ${nameOf(channel.mapped, sources)}`;
@@ -268,18 +277,23 @@ function Picker({
   const query = useDebounced(text.trim(), SEARCH_DELAY_MS);
   const listKey = `${subscriptionId}:${query}`;
   const { pages, load } = usePages(listKey);
+
   const loaded = useQueries({
     queries: pages.map((page) => queries.mapOptions(subscriptionId, query, page * PAGE, PAGE)),
   });
+
   const byPage = new Map(pages.map((page, index) => [page, loaded[index]?.data]));
   const total = byPage.get(0)?.total ?? 0;
+
   /** Automatic is the first option; the guides' channels follow it. */
   const optionAt = (index: number): GuideChannel | undefined =>
     byPage.get(Math.floor((index - 1) / PAGE))?.channels[(index - 1) % PAGE];
+
   const visible = useCallback(
     (from: number, to: number) => load(Math.max(0, from - 1), to - 1),
     [load],
   );
+
   const [at, setAt] = useState({ list: listKey, index: 0 });
   const active = at.list === listKey ? at.index : 0;
   const list = useRef<HTMLDivElement>(null);
@@ -293,14 +307,18 @@ function Picker({
     onError: (cause) => {
       const error = appError(cause);
       const changed = error.kind === "guide" && error.failure.kind === "changed";
+
       if (changed || error.kind === "channel-not-found") onChanged();
     },
   });
+
   /** Maps the channel to the option at `index`, or back to automatic at the first. */
   const choose = (index: number) => {
     if (map.isPending) return;
     const ref = index === 0 ? null : optionAt(index)?.ref;
+
     if (ref === undefined || ref === (channel.mapped?.ref ?? null)) return;
+
     // Only a channel the provider still lists can be mapped anew.
     if (ref !== null && !channel.listed) return;
     map.mutate(ref);
@@ -349,7 +367,9 @@ function Picker({
               </>
             );
           }
+
           const option = optionAt(index);
+
           return (
             option && (
               <>
@@ -405,6 +425,7 @@ function Choice({
   if (current) {
     return <span className="flex-none px-3.5 text-[0.8125rem] opacity-60">{t("Current")}</span>;
   }
+
   return (
     <Button
       size="sm"
@@ -443,6 +464,7 @@ function ListSearch({
       onKeyDown={(event) => {
         // Enter that ends a composition, as for Japanese, is the text's.
         if (event.nativeEvent.isComposing) return;
+
         if (event.key !== "ArrowDown" && event.key !== "Enter") return;
         onDown();
         event.preventDefault();
@@ -484,12 +506,14 @@ function Options({
 }) {
   const rem = useRem();
   const id = useId();
+
   const virtualizer = useVirtualizer({
     count: total,
     getScrollElement: () => box.current,
     estimateSize: () => ROW_REM * rem,
     overscan: 8,
   });
+
   useEffect(() => virtualizer.measure(), [rem, virtualizer]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
@@ -498,6 +522,7 @@ function Options({
 
   function onKey(event: KeyboardEvent) {
     const page = Math.max(1, items.length - 2);
+
     const to =
       event.key === "ArrowDown"
         ? active + 1
@@ -512,6 +537,7 @@ function Options({
                 : event.key === "End"
                   ? total - 1
                   : null;
+
     if (event.key === "Enter") onEnter(active);
     else if (to === null) return;
     else if (to < 0 && onLeave) onLeave();
@@ -520,6 +546,7 @@ function Options({
       onActive(next);
       virtualizer.scrollToIndex(next, { align: "auto" });
     }
+
     event.preventDefault();
   }
 

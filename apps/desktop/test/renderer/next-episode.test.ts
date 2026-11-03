@@ -142,7 +142,9 @@ function press(label: string): Promise<void> {
   const button = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!button) throw new Error(`No ${label} button in "${text()}"`);
+
   return act(async () => button.click());
 }
 
@@ -216,9 +218,11 @@ describe("the end of an episode", () => {
         episode: 1,
       },
     });
+
     const playback = ipc
       .methods()
       .filter((method) => method === "playback.close" || method === "playback.openTitle");
+
     expect(playback).toEqual(["playback.openTitle", "playback.close", "playback.openTitle"]);
     expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "s1" }]);
   });
@@ -276,6 +280,7 @@ describe("the end of an episode", () => {
       act(async () => useUi.setState({ settings: "playback" })),
     );
     expect(titlePlayer.state().countdown).toBe(10);
+
     const channel = {
       subscriptionId: SUBSCRIPTION,
       id: "live",
@@ -288,12 +293,14 @@ describe("the end of an episode", () => {
       catchupDays: null,
       variants: [{ id: "live", name: "Live channel", tags: [], quality: null }],
     };
+
     ipc.always("playback.open", {
       sessionId: "live-session",
       channel: { subscriptionId: SUBSCRIPTION, id: "live" },
       url: "http://127.0.0.1/live",
       format: "hls",
     });
+
     try {
       await act(async () => player.zap(channel));
       expect(titlePlayer.state().now).toBeNull();
@@ -544,6 +551,7 @@ describe("the next episode, as the record answers", () => {
 
       if (failsFirst) await act(async () => afterMark.reject(unread));
       await act(async () => atCountdown.resolve(standing()));
+
       if (!failsFirst) await act(async () => afterMark.reject(unread));
 
       expect(text()).not.toContain("Plays in");
@@ -650,12 +658,14 @@ describe("the saved countdown policy", () => {
   it.each([0, 60])("opens once after exactly %i seconds", async (nextEpisodeDelaySeconds) => {
     ipc.always("preferences.get", ipc.snapshot({ ...defaultPreferences, nextEpisodeDelaySeconds }));
     await playToEnd(pilotHouse, "s1");
+
     if (nextEpisodeDelaySeconds > 0) {
       expect(text()).toContain(`Plays in ${nextEpisodeDelaySeconds}`);
       await wait(nextEpisodeDelaySeconds * 1000 - 1);
       expect(opened()).toEqual(["e13"]);
       await wait(1);
     }
+
     // Instant is already opening without advancing the clock.
     expect(opened()).toEqual(["e13", "e21"]);
     await wait(65_000);
@@ -778,9 +788,12 @@ describe("the saved countdown policy", () => {
       await playToEnd(pilotHouse, "s1");
       await act(async () => {
         if (action === "cancel") titlePlayer.cancelNext();
+
         if (action === "stop") titlePlayer.close();
+
         if (action === "new title")
           playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
+
         if (action === "removed source") resetForAccount();
       });
       await act(async () =>
@@ -802,7 +815,9 @@ describe("the saved countdown policy", () => {
       await act(async () => useUi.setState({ settings: null }));
       await act(async () => {
         if (action === "cancel") titlePlayer.cancelNext();
+
         if (action === "stop") titlePlayer.close();
+
         if (action === "new title")
           playTitle(movieNow({ ...series.title, kind: "movie", id: "m1" }, null), 0);
       });
@@ -842,7 +857,9 @@ describe("the saved countdown policy", () => {
       } else {
         ipc.hold("preferences.get").resolve(ipc.snapshot(defaultPreferences));
       }
+
       const policy = ipc.hold("preferences.get");
+
       if (atRelease) await act(async () => useUi.setState({ settings: null }));
       else await playToEnd(pilotHouse, "s1");
       await act(async () =>

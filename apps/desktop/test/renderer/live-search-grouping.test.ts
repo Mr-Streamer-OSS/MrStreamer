@@ -49,15 +49,19 @@ const CHANNELS = [
   channel("6", "Dave", "UK | DAVE HD (COMEDY)"),
   channel("7", "Één"),
 ];
+
 /** Names a channel or category by the provider's id, as the one subscription lists it. */
 const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
+
 /** Favourites, in the order they were starred. */
 const FAVOURITES = ["4", "2", "1"].map(own);
+
 /** What a search found per channel, as the main process answers: by each channel's own key. */
 const found = (matches: Record<string, ListingMatch>): Record<string, ListingMatch> =>
   Object.fromEntries(Object.entries(matches).map(([id, match]) => [ownedKey(own(id)), match]));
 
 const GREEN = "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11";
+
 const catalogue = liveChannels(
   normalizeCatalogue({
     categories: [
@@ -81,38 +85,47 @@ const catalogue = liveChannels(
     })),
   }).streams,
 ).channels;
+
 const blue: readonly LiveChannel[] = catalogue.map((channel) => ({
   ...channel,
   subscriptionId: SUBSCRIPTION,
 }));
+
 const green: readonly LiveChannel[] = catalogue.map((channel) => ({
   ...channel,
   subscriptionId: GREEN,
 }));
+
 const all = [...blue, ...green];
+
 const plain = (channels: readonly LiveChannel[]) =>
   channels.map(({ searchIdentity: _identity, searchGroup: _group, ...channel }) => channel);
+
 const responses = (channels: readonly LiveChannel[]) => {
   const stamps = new Map(
     indexLiveSearch(channels).groups.flatMap((group) =>
       group.copies.map((copy, order) => [ownedKey(copy), { key: group.key, order }] as const),
     ),
   );
+
   return channels.map(({ searchIdentity: _identity, ...channel }) => ({
     ...channel,
     searchGroup: stamps.get(ownedKey(channel))!,
   }));
 };
+
 const stamps = (channels: readonly LiveChannel[]) =>
   indexLiveSearch(channels)
     .groups.filter((group) => group.copies.length > 1)
     .map((group) => ({ key: group.key, copies: group.copies.map(ownedKey) }));
+
 const programme = (title: string): Programme => ({
   start: Date.now() - 1000,
   stop: Date.now() + 3600000,
   title,
   description: "From this copy's guide.",
 });
+
 const later: Programme = {
   ...programme("Evening news"),
   start: Date.now() + 3600000,
@@ -125,16 +138,20 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
     return this.dataset["index"] === undefined ? 900 : 60;
   },
 });
+
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   act(() => player.reset());
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
+
 const settled = (ms = 30) => act(() => vi.advanceTimersByTimeAsync(ms));
 
 // Match when the request arrives, since the selected list can change after registration.
@@ -146,6 +163,7 @@ const holdCurrentBrowse = () =>
       (query.scope.kind === "channels" &&
         ["favourites", "recent"].includes(useUi.getState().list.kind)),
   );
+
 const updateCatalogue = (subscriptionId: string, channelCount: number) =>
   act(async () =>
     ipc.emit("library.updated", {
@@ -166,6 +184,7 @@ async function page(
 ) {
   ipc.reset();
   const watch = vi.spyOn(player, "watch");
+
   if (!realPlayback) watch.mockImplementation(() => {});
   useUi.setState({
     view: "live",
@@ -184,10 +203,12 @@ async function page(
     { ...SAVED, name: "Blue" },
     { ...SAVED, id: GREEN, name: "Green" },
   ]);
+
   if (kind === "guide") {
     client.setQueryData(browseChannels(null).queryKey, browseResult(plain(listed)));
     client.setQueryData(browseChannelsOf(listed).queryKey, browseResult(plain(listed)));
   }
+
   ipc.always("library.searchGroups", stamps(all));
   client.setQueryData(
     queries.categories().queryKey,
@@ -247,23 +268,30 @@ async function page(
     stopViewing();
     mounted.unmount();
   };
+
   await settled();
   const scope = () => (kind === "guide" ? container : document.body);
+
   const field = () =>
     scope().querySelector<HTMLInputElement>(kind === "guide" ? "main input" : "input")!;
+
   const press = (key: string, target: EventTarget = document.activeElement ?? field()) =>
     act(async () => {
       target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
     });
+
   const rows = () =>
     kind === "guide"
       ? [...container.querySelectorAll<HTMLElement>('[data-index] [role="button"]')]
       : [...document.querySelectorAll<HTMLElement>("button[data-group-row]")];
+
   const button = (label: string, row?: HTMLElement) =>
     [...(row ?? scope()).querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.getAttribute("aria-label") === label,
     )!;
+
   const click = (target: HTMLElement) => act(async () => target.click());
+
   const type = async (text: string) => {
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
@@ -273,6 +301,7 @@ async function page(
       field().dispatchEvent(new Event("input", { bubbles: true }));
     });
   };
+
   const search = async (text: string, matches: Record<string, ListingMatch> = {}) => {
     const answer = ipc.hold("guide.searchList");
     await type(text);
@@ -280,6 +309,7 @@ async function page(
     answer.resolve(matches);
     await settled();
   };
+
   return {
     client,
     watch,
@@ -328,6 +358,7 @@ describe("real search components with two subscriptions", () => {
     expect(
       ipc.argsOf("analytics.action").filter((action) => action === "search_used"),
     ).toHaveLength(1);
+
     for (const method of ["library.channels", "guide.search", "ondemand.search"] as const)
       expect(ipc.argsOf(method)).toEqual([]);
   });
@@ -338,6 +369,7 @@ describe("real search components with two subscriptions", () => {
     p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
     p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
     const stopGuide = syncGuideUpdates(p.client);
+
     try {
       await p.type("Canvas");
       const refresh = ipc.hold("guide.search");
@@ -364,10 +396,13 @@ describe("real search components with two subscriptions", () => {
       const p = await page("palette");
       p.client.setQueryData(queries.search("Canvas").queryKey, responses([green[3]!]));
       p.client.setQueryData(queries.titleSearch("Canvas").queryKey, { movies: [], series: [] });
+
       if (condition !== "missing programmes")
         p.client.setQueryData(queries.programmes("Canvas").queryKey, []);
+
       // An unobserved guide answer still expires while the viewer searches elsewhere.
       if (condition === "expired programmes") vi.setSystemTime(Date.now() + 61_000);
+
       if (condition === "changed catalogue")
         await p.client.invalidateQueries({
           queryKey: queries.search("Canvas").queryKey,
@@ -383,6 +418,7 @@ describe("real search components with two subscriptions", () => {
       await p.press("Enter", p.field());
       await p.click(p.rows()[0]!);
       expect(p.watch).not.toHaveBeenCalled();
+
       for (const method of ["library.channels", "guide.search", "ondemand.search"] as const)
         expect(ipc.argsOf(method)).toEqual([]);
       await settled(150);
@@ -448,11 +484,13 @@ describe("real search components with two subscriptions", () => {
       await p.press("ArrowDown", p.field());
       await p.press("ArrowDown");
       await p.press("ArrowRight");
+
       const copy = p
         .rows()
         .find((row) =>
           row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
         )!;
+
       await act(async () => copy.focus());
       expect(document.activeElement).toBe(copy);
       const groups = ipc.hold("library.searchGroups");
@@ -460,11 +498,13 @@ describe("real search components with two subscriptions", () => {
       await updateCatalogue(GREEN, listed.length);
       channels.resolve(browseResult(plain(listed)));
       await settled();
+
       const singleton = p
         .rows()
         .find((row) =>
           row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
         )!;
+
       expect(singleton.className).toContain("ring-2");
       expect(document.activeElement).toBe(singleton);
       await p.press("Enter");
@@ -472,11 +512,13 @@ describe("real search components with two subscriptions", () => {
       await act(async () => useUi.setState({ watching: false, view: "live" }));
       groups.resolve(stamps(all));
       await settled();
+
       const regrouped = p
         .rows()
         .find((row) =>
           row.getAttribute("aria-label")?.startsWith("VRT Canvas, Green, Belgium, General"),
         )!;
+
       expect(regrouped.className).toContain("ring-2");
       expect(document.activeElement).toBe(regrouped);
       await p.press("Enter");
@@ -490,12 +532,14 @@ describe("real search components with two subscriptions", () => {
     await p.search("news", { [ownedKey(green[3]!)]: { now: true, later: null } });
     p.field().blur();
     await p.press("ArrowRight", window);
+
     const chosenRow = () =>
       p
         .rows()
         .find((row) =>
           row.getAttribute("aria-label")?.startsWith("VRT Canvas, Blue, Belgium, Vlaanderen"),
         )!;
+
     await act(async () => chosenRow().focus());
     expect(chosenRow().className).toContain("ring-2");
     const groups = ipc.hold("library.searchGroups");
@@ -550,11 +594,13 @@ describe("real search components with two subscriptions", () => {
     const p = await page("guide");
     const old = ipc.hold("library.searchGroups");
     await p.search("VRT");
+
     const current = all.map((channel) =>
       channel.subscriptionId === GREEN && channel.title === "VRT 1"
         ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
         : channel,
     );
+
     const listed = holdCurrentBrowse();
     const fresh = ipc.hold("library.searchGroups");
     await updateCatalogue(GREEN, current.length);
@@ -609,9 +655,11 @@ describe("real search components with two subscriptions", () => {
     await p.search("VRT 1");
     expect(p.rows()).toHaveLength(0);
     const programmes = ipc.hold("guide.searchList");
+
     const searchAll = [...p.scope().querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Search all channels",
     )!;
+
     await p.click(searchAll);
     await settled();
     expect(p.field().value).toBe("VRT 1");
@@ -645,7 +693,9 @@ describe("real search components with two subscriptions", () => {
       ...green[0]!,
       searchIdentity: { ...green[0]!.searchIdentity!, guideId: null },
     };
+
     const subset = [blue[0]!, unguided];
+
     const hidden: LiveChannel = {
       ...blue[0]!,
       id: "hidden",
@@ -654,6 +704,7 @@ describe("real search components with two subscriptions", () => {
         guideId: "other.be",
       },
     };
+
     const p = await page("guide", "", false, subset, { kind: "favourites" });
     ipc.always("library.searchGroups", stamps(subset));
     await p.search("VRT");
@@ -709,6 +760,7 @@ describe("real search components with two subscriptions", () => {
   it("keeps removed copies out and newly matching channels playable while grouping refreshes", async () => {
     const p = await page("guide");
     await p.search("VRT");
+
     const added: LiveChannel = {
       ...plain([blue[0]!])[0]!,
       id: "extra",
@@ -716,6 +768,7 @@ describe("real search components with two subscriptions", () => {
       name: "VRT Extra",
       variants: [{ id: "extra", name: "VRT Extra", quality: null, tags: [] }],
     };
+
     const current = [...blue, added];
     const listed = holdCurrentBrowse();
     const groups = ipc.hold("library.searchGroups");
@@ -725,6 +778,7 @@ describe("real search components with two subscriptions", () => {
     expect(p.rows()).toHaveLength(5);
     expect(p.scope().textContent).toContain("5 channels · 6 streams");
     expect(p.rows().some((row) => row.getAttribute("aria-label")?.includes("Green"))).toBe(false);
+
     for (const row of p.rows()) await p.click(row);
     expect(p.watch.mock.calls.map(([channel]) => ownedKey(channel))).toEqual(current.map(ownedKey));
     groups.resolve(stamps(current));
@@ -737,11 +791,13 @@ describe("real search components with two subscriptions", () => {
     const p = await page("guide");
     await p.search("VRT");
     await p.search("");
+
     const current = all.map((channel) =>
       channel.subscriptionId === GREEN && channel.title === "VRT 1"
         ? { ...channel, searchIdentity: { ...channel.searchIdentity!, guideId: "different.be" } }
         : channel,
     );
+
     const listed = holdCurrentBrowse();
     await updateCatalogue(GREEN, current.length);
     listed.resolve(browseResult(plain(current)));
@@ -820,10 +876,12 @@ describe("real search components with two subscriptions", () => {
   it("keeps Tab on unrelated controls when pointer use changes to keyboard use", async () => {
     const p = await page("guide");
     await p.search("VRT");
+
     const other = [...p.scope().querySelectorAll<HTMLButtonElement>("button")].find(
       (button) =>
         !button.closest("[data-index]") && button.getAttribute("aria-label") !== "Clear search",
     )!;
+
     await act(async () => {
       window.dispatchEvent(new MouseEvent("mousemove", { movementX: 3, movementY: 3 }));
       other.focus();
@@ -871,6 +929,7 @@ describe("real search components with two subscriptions", () => {
     const listed = responses(all).filter((channel) =>
       [ownedKey(green[1]!), ownedKey(blue[2]!)].includes(ownedKey(channel)),
     );
+
     const p = await page("guide", "VRT", false, listed);
     await p.search("news", {
       [ownedKey(green[1]!)]: { now: true, later: null },
@@ -932,6 +991,7 @@ describe("real search components with two subscriptions", () => {
     await expect
       .poll(async () => {
         await settled();
+
         return p.rows()[3]!.textContent;
       })
       .toContain("Green guide 1");
@@ -1113,8 +1173,10 @@ describe("real search components with two subscriptions", () => {
       );
     });
     await settled();
+
     const programmeRow = (title: string) =>
       programmeResults().find((row) => row.textContent?.includes(title))!;
+
     await p.click(programmeRow("Epsilon").querySelector("button")!);
     expect(programmeRow("Epsilon").textContent).toContain("About Epsilon");
     await p.click(
@@ -1156,6 +1218,7 @@ describe("real search components with two subscriptions", () => {
 
   it("SearchPalette retains programme matches beyond the twenty channel-name results", async () => {
     const p = await page("palette", "news");
+
     const names = Array.from({ length: 25 }, (_, index): LiveChannel => ({
       ...blue[0]!,
       id: `news-${index}`,
@@ -1170,12 +1233,14 @@ describe("real search components with two subscriptions", () => {
       },
       variants: [{ id: `news-${index}`, name: `News ${index}`, tags: [], quality: null }],
     }));
+
     await act(async () => p.client.setQueryData(queries.search("news").queryKey, responses(names)));
     await expect.poll(() => p.rows().length).toBe(20);
     const rows = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
     expect(rows).toHaveLength(21);
     expect(rows[20]!.textContent).toContain("Evening news");
     expect(p.scope().textContent).toContain("20 channels · 20 streams");
+
     for (let index = 0; index < 20; index++) await p.press("ArrowDown", p.field());
     expect(p.field().getAttribute("aria-activedescendant")).toBe(rows[20]!.id);
     await p.press("Enter", p.field());
@@ -1188,6 +1253,7 @@ describe("real search components with two subscriptions", () => {
     "%s names a channel's subscription on its search rows only while several are saved",
     async (kind) => {
       const listed = [blue[0]!, blue[1]!, blue[2]!];
+
       const named = async (saved: readonly SubscriptionSummary[]) => {
         const p = await page(kind, kind === "guide" ? "" : "VRT", false, responses(listed));
         ipc.always("library.searchGroups", stamps(listed));
@@ -1196,6 +1262,7 @@ describe("real search components with two subscriptions", () => {
           p.client.setQueryData(queries.search("VRT").queryKey, responses(listed));
         });
         await settled();
+
         if (kind === "guide") {
           await p.search("VRT");
           p.field().blur();
@@ -1208,12 +1275,16 @@ describe("real search components with two subscriptions", () => {
           "VRT 1",
           "VRT Canvas",
         ]);
+
         const names = rows.map((row) =>
           `${row.getAttribute("aria-label")} ${row.textContent}`.includes("Northline"),
         );
+
         unmount();
+
         return names;
       };
+
       const northline = { ...SAVED, name: "Northline" };
       expect(await named([northline])).toEqual([false, false, false, false]);
       // A subscription whose login can't be read is still saved.
@@ -1394,6 +1465,7 @@ it("drops out-of-order palette replies and cancels on close before reopening", a
 it("keeps a selected movie's owned version when channels arrive and opens that version on Enter", async () => {
   const p = await page("palette", "");
   const names = ipc.hold("library.channels");
+
   const title: Title = {
     kind: "movie",
     key: "movie:tmdb:fixture",
@@ -1414,6 +1486,7 @@ it("keeps a selected movie's owned version when channels arrive and opens that v
     genres: [],
     versions: [{ subscriptionId: GREEN, id: "movie-fixture", tags: ["FR"] }],
   };
+
   ipc.always("ondemand.search", { movies: [title], series: [] });
   ipc.always("guide.search", []);
   await p.type("fixture");
@@ -1436,8 +1509,10 @@ it("keeps a selected movie's owned version when channels arrive and opens that v
 async function live(channels: readonly LiveChannel[] = CHANNELS, list?: ChannelList) {
   const p = await page("guide", "", false, channels, list);
   ipc.always("library.searchGroups", []);
+
   return p;
 }
+
 /** Flushes React until `check` passes; the fake clock moves 10 ms between tries. */
 const ready = (check: () => void) =>
   vi.waitFor(
@@ -1447,6 +1522,7 @@ const ready = (check: () => void) =>
     },
     { interval: 10 },
   );
+
 /** Types a search and answers it with the programme matches, keyed by provider channel id. */
 async function searched(
   p: Awaited<ReturnType<typeof page>>,
@@ -1543,9 +1619,11 @@ describe("searching the list Live TV shows", () => {
     await ready(() => expect(p.names()).toEqual(["BBC One", "ITV1", "BBC News", "Euronews"]));
     expect(p.text()).toContain("4 channels · 4 streams");
     expect(p.row("ITV1")?.textContent).toContain("ITV News at Ten");
+
     // What matched is marked: in a name, inside a word, and in the later programme.
     const marked = (title: string) =>
       [...(p.row(title)?.querySelectorAll("mark") ?? [])].map((mark) => mark.textContent);
+
     expect(marked("BBC News")).toEqual(["News", "News"]);
     expect(marked("Euronews")).toEqual(["news"]);
     expect(marked("ITV1")).toEqual(["News"]);
@@ -1655,12 +1733,14 @@ describe("searching the list Live TV shows", () => {
   it("opens the rest of the day on the later programme found, with its description", async () => {
     const p = await live();
     const start = Date.now() + 2 * HOUR;
+
     const at = (from: number, title: string, description: string): Programme => ({
       start: from,
       stop: from + HOUR,
       title,
       description,
     });
+
     await searched(p, "ten", ["ITV1"], {
       "2": { now: false, later: { start, title: "News at Ten" } },
     });
@@ -1698,6 +1778,7 @@ it("finds joined channel spellings in Live without changing list order or progra
     channel("2", "Spider-Man"),
     channel("3", "Spider Man"),
   ]);
+
   await searched(p, "spiderman", ["Spider-Man"]);
   expect(p.row("Spider-Man")?.querySelector("mark")?.textContent).toBe("Spider-Man");
   await searched(p, "obrien", ["O’Brien"]);

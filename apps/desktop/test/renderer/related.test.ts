@@ -35,6 +35,7 @@ const movie = (id: string): Title => ({
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id, tags: [] }],
 });
+
 const details = (id: string): MovieDetails => ({
   kind: "movie",
   title: movie(id),
@@ -47,22 +48,28 @@ const details = (id: string): MovieDetails => ({
   duration: null,
   backdropUrl: null,
 });
+
 /** What the main process tells of the lists fetched at `fetchedAt`, and of TMDB's answers. */
 const lists = (fetchedAt: number, known = 0): OnDemandStatus => ({
   lists: [{ subscriptionId: SUBSCRIPTION, movies: 3, series: 0, fetchedAt, failure: null }],
   metadata: { known, wanted: 3, refused: false, fetching: known < 3 },
 });
+
 const picks = (...names: string[]): Related => ({
   basis: "Drama",
   titles: names.map((name) => ({ title: movie(name), reason: "Drama" })),
 });
+
 /** The picks the row offers to open. */
 const offered = (container: HTMLElement) =>
   [...container.querySelectorAll("button")].map((button) => button.textContent);
+
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -76,6 +83,7 @@ async function mount(opened = "opened", switching = false) {
   const stop = syncOnDemand(client);
   const mounted = queryView(client);
   const { container } = mounted;
+
   const render = (id: string, switching: boolean) =>
     mounted.render(
       createElement(RelatedTitles, {
@@ -84,11 +92,14 @@ async function mount(opened = "opened", switching = false) {
         here: (related) => ({ season: null, scroll: 0, related }),
       }),
     );
+
   cleanup = () => {
     stop();
     mounted.unmount();
   };
+
   await render(opened, switching);
+
   // Lets the list's timers and answers run on the fake clock until `check` passes.
   const until = async (check: () => void) =>
     vi.waitFor(
@@ -98,13 +109,16 @@ async function mount(opened = "opened", switching = false) {
       },
       { interval: 1 },
     );
+
   /** Closes the details the row is part of, as Close or Settings does. */
   const close = () => mounted.render();
+
   /** Sends `ondemand.updated`, and lets the views take it in while nothing else answers. */
   const updated = async (status: OnDemandUpdate) => {
     await act(async () => ipc.emit("ondemand.updated", status));
     await act(() => vi.advanceTimersByTimeAsync(50));
   };
+
   return { container, render, until, close, updated };
 }
 

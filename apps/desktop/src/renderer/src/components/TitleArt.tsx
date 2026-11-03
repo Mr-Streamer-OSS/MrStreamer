@@ -37,6 +37,7 @@ export function Artwork({
 }) {
   // The link that failed to load: a tile shown again for another title tries its own.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
   if (url && url !== failedUrl) {
     return (
       <img
@@ -50,7 +51,9 @@ export function Artwork({
       />
     );
   }
+
   const hue = hueOf(name);
+
   return (
     <span
       className={cn(
@@ -145,6 +148,7 @@ export function PosterTile({
   ref?: Ref<HTMLButtonElement> | undefined;
 }) {
   const source = useSourceOf()(title);
+
   return (
     <button
       ref={ref}

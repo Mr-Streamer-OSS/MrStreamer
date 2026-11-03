@@ -66,6 +66,7 @@ interface Draft {
 /** Live's row that opens every favourite, with how many open. */
 export function FavouritesEntry() {
   const favourites = useFavourites();
+
   return (
     <Entry
       name={t("Favourites")}
@@ -90,6 +91,7 @@ export function FavouritesScreen() {
     open.current = draft;
   }, [draft]);
   useEffect(() => () => void (open.current = null), []);
+
   if (!favourites) return <View style={styles.screen} />;
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const placeOf = (channel: Channel) => library?.placeOf.get(channel.key) ?? "";
@@ -102,10 +104,12 @@ export function FavouritesScreen() {
       order: favourites.shown,
       saving: false,
     });
+
   const move = (favourite: Favourite, by: number) => {
     if (!draft || draft.saving) return;
     const from = draft.order.indexOf(favourite);
     const to = Math.min(Math.max(from + by, 0), draft.order.length - 1);
+
     if (from < 0 || to === from) return;
     const order = draft.order.toSpliced(from, 1).toSpliced(to, 0, favourite);
     setDraft({ ...draft, order });
@@ -117,17 +121,23 @@ export function FavouritesScreen() {
       }),
     );
   };
+
   const save = (from: Draft) => {
     if (open.current !== from) {
       Alert.alert(t("The order wasn't saved"), t("Nothing was moved: the list was closed."));
+
       return;
     }
+
     if (from.order.every((each, at) => each === from.listed[at])) return setDraft(null);
+
     // As they stand now, not as this screen last drew them.
     if (!sameFavourites({ original: from.original, shown: from.listed }, currentFavourites())) {
       setDraft(null);
+
       return changedAlert();
     }
+
     const sent = { ...from, saving: true };
     setDraft(sent);
     open.current = sent;
@@ -140,15 +150,20 @@ export function FavouritesScreen() {
       },
       (cause: unknown) => {
         const error = appError(cause);
+
         // The list closed meanwhile: there is no draft left to send again.
         if (open.current !== sent) {
           Alert.alert(t("The order wasn't saved"), t("Nothing was moved."));
+
           return;
         }
+
         if (error.kind === "favourites-changed") {
           setDraft(null);
+
           return changedAlert();
         }
+
         const kept = { ...from, saving: false };
         setDraft(kept);
         open.current = kept;
@@ -161,6 +176,7 @@ export function FavouritesScreen() {
   };
 
   const empty = favourites.shown.length === 0 && favourites.hidden.length === 0;
+
   return (
     <FlatList
       style={styles.screen}
@@ -255,11 +271,15 @@ const FavouriteRow = memo(function FavouriteRow({
   useLocale();
   const { channel } = favourite;
   const row = useRef<ComponentRef<typeof Pressable>>(null);
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate") onPress(channel);
+
     if (nativeEvent.actionName === "unstar") starChannel(channel, false);
+
     if (nativeEvent.actionName === "lists") openListSheet(channel);
   };
+
   return (
     <View style={[styles.row, { height }]}>
       <Pressable
@@ -312,10 +332,13 @@ function ArrangedRow({
   const { channel } = favourite;
   const first = position === 0;
   const last = position === count - 1;
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "up") onMove(favourite, -1);
+
     if (nativeEvent.actionName === "down") onMove(favourite, 1);
   };
+
   return (
     <View style={[styles.row, { height }]}>
       <View
@@ -384,6 +407,7 @@ function Move({
 
 function Names({ channel, detail }: { channel: Channel; detail: string }) {
   const tags = channel.tags.join(" ");
+
   return (
     <>
       <ChannelLogo channel={channel} style={styles.mark} />

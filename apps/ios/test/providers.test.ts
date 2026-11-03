@@ -41,6 +41,7 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () =>
     nativePlayer((source) => {
@@ -49,32 +50,40 @@ vi.mock("expo-video", () => ({
 }));
 
 vi.mock("expo-file-system", () => memoryFiles(memory));
+
 vi.mock("expo-secure-store", () => ({
   ...keychain(() => memory.keychain),
   setItemAsync: async (key: string, value: string) => {
     if (memory.refused.has(key)) throw new Error("errSecInteractionNotAllowed");
     memory.keychain.set(key, value);
+
     if (memory.holdSecrets && key.startsWith("s.")) {
       await new Promise<void>((go) => memory.heldSecrets.push(go));
     }
   },
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   noteAction: (action: string) => memory.actions.push(action),
 }));
 
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = new URL(input);
   memory.caching.push(new Headers(init?.headers).get("Cache-Control"));
   const login = url.pathname.endsWith("/player_api.php") && !url.searchParams.has("action");
+
   if (login && memory.holdLogins) await new Promise<void>((go) => memory.held.push(go));
+
   if (url.searchParams.get("action") === "get_live_streams" && memory.holdChannels) {
     await new Promise<void>((go) => memory.heldChannels.push(go));
   }
+
   if (url.searchParams.get("action") === "get_vod_streams" && memory.holdMovies) {
     await new Promise<void>((go) => memory.heldMovies.push(go));
   }
+
   return passThrough(input, init);
 });
 
@@ -82,6 +91,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 interface FakeTitles {
   readonly movies: readonly { readonly id: number; readonly container: string }[];
 }
+
 interface FakeProvider {
   readonly url: string;
   readonly titles: FakeTitles;
@@ -91,8 +101,10 @@ interface FakeProvider {
   titleListRequests(): number;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -105,6 +117,7 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
 
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ username: "one", password: "one+Pw@1", channels: 40, titles: 20 }),
@@ -117,6 +130,7 @@ beforeAll(async () => {
     }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
@@ -142,28 +156,38 @@ async function launch() {
   const viewing = await import("../src/viewing.ts");
   const storage = await import("../src/storage.ts");
   await account.restore();
+
   // The account's names last: its `retry` is a subscription's, not the player's.
   return { ...titles, ...playback, ...viewing, ...storage, ...account };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 const ids = (app: App) => app.members().map((member) => member.entry.id);
 const member = (app: App, id: string) => app.members().find((each) => each.entry.id === id);
+
 /** Every channel Live lists, once. */
 const channels = (app: App) => {
   const now = app.currentCatalogue();
+
   return now.kind === "ready" ? [...new Set(now.library.byKey.values())] : [];
 };
+
 const channelsReady = (app: App, subscriptions: number) =>
   new Set(channels(app).map((channel) => channel.subscriptionId)).size === subscriptions;
+
 const titlesOf = (app: App) => {
   const lists = app.titleLists();
+
   return lists.kind === "ready" ? kindOf(lists.index, "movie").titles : [];
 };
+
 const registry = () => JSON.parse(memory.files.get(doc("subscriptions.json")) ?? "null");
+
 /** What Documents holds; Caches, where lists are saved, aside. */
 const documents = () =>
   new Map([...memory.files].filter(([path]) => path.startsWith("/documents/")));
+
 const savedLists = () =>
   [...memory.files.keys()].filter((path) => path.startsWith("/cache/catalogues/"));
 
@@ -174,11 +198,15 @@ async function forgetSavedLists(...ids: string[]) {
     () => names.every((name) => memory.files.has(`/cache/catalogues/${name}`)),
     "the saved lists",
   );
+
   for (const path of savedLists()) memory.files.delete(path);
 }
+
 const keychainIds = () => JSON.parse(memory.keychain.get("index") ?? "[]");
+
 const playingNow = (app: App) => {
   const { phase } = app.playbackState.get();
+
   return phase.kind === "idle" ? null : phase.item;
 };
 
@@ -187,8 +215,10 @@ function watchChannel(app: App, subscriptionId: string, id: string) {
   const channel = channels(app).find(
     (each) => each.subscriptionId === subscriptionId && each.id === id,
   );
+
   if (!channel) throw new Error(`No channel ${id} from ${subscriptionId}`);
   app.playChannel(channel, "", { watch: true });
+
   return channel;
 }
 
@@ -234,7 +264,9 @@ async function beta2(panel: FakeProvider, movie: TitleRef) {
 
 const firstMovie = (panel: FakeProvider, subscriptionId: string): TitleRef => {
   const [movie] = panel.titles.movies;
+
   if (!movie) throw new Error("The panel lists no movies");
+
   return { kind: "movie", subscriptionId, id: String(movie.id) };
 };
 
@@ -253,15 +285,19 @@ beforeEach(() => {
   memory.heldMovies.length = 0;
   memory.holdSecrets = false;
   memory.caching.length = 0;
+
   for (const panel of [one, two]) {
     panel.failCatalogue(null);
     panel.failTitles(null);
     panel.serveTitles((all) => all);
   }
 });
+
 afterEach(() => {
   for (const go of memory.held.splice(0)) go();
+
   for (const go of memory.heldChannels.splice(0)) go();
+
   for (const go of memory.heldMovies.splice(0)) go();
   // A write still held belongs to an app that stopped: it never answers.
   memory.heldSecrets.length = 0;
@@ -285,10 +321,12 @@ describe("the first launch since private beta 2", () => {
     });
     expect(keychainIds()).toEqual([LEGACY]);
     expect(memory.keychain.get(`s.${LEGACY}`)).toBe("one+Pw@1");
+
     // Beta 2's files stay as they were, for an older build; state.json gains the owned channels.
     for (const name of ["watchlist.json", "viewing.json"]) {
       expect(memory.files.get(doc(name))).toBe(before.get(doc(name)));
     }
+
     const state = JSON.parse(memory.files.get(doc("state.json")) ?? "{}");
     expect(state).toEqual({
       subscription: { id: LEGACY, server: one.url, username: "one" },
@@ -339,12 +377,14 @@ async function twoProviders() {
   const app = await launch();
   const a = await app.add({ server: one.url, ...ONE });
   const b = await app.add({ server: two.url, ...TWO, name: "Holiday house" });
+
   if (!a || !b) throw new Error("An add was cancelled");
   await until(() => channelsReady(app, 2), "both channel lists");
   await until(
     () => new Set(titlesOf(app).flatMap((t) => t.versions.map((v) => v.subscriptionId))).size === 2,
     "both title lists",
   );
+
   return { app, a, b };
 }
 
@@ -393,6 +433,7 @@ describe("adding a subscription", () => {
     const adding = app.add({ server: one.url, ...ONE }, cancel.signal);
     await until(() => memory.held.length === 1, "the login check");
     cancel.abort();
+
     for (const go of memory.held.splice(0)) go();
     await adding.catch(() => null);
     expect(registry().subscriptions).toEqual([]);
@@ -431,9 +472,11 @@ describe("adding a subscription", () => {
 
   it("saves nothing for an add left while its password is written, keeping the others", async () => {
     const { app, a, b } = await twoProviders();
+
     const movie = titlesOf(app)
       .flatMap((title) => title.versions)
       .find((v) => v.subscriptionId === b);
+
     if (!movie) throw new Error("No film of the second");
     await app.recordProgress({ kind: "movie", ...movie }, 200, 600, Date.now());
     await app.remove(b, { keepHistory: true });
@@ -442,6 +485,7 @@ describe("adding a subscription", () => {
     const adding = app.add({ server: two.url, ...TWO }, leaving.signal);
     await until(() => memory.heldSecrets.length === 1, "the password's write");
     leaving.abort();
+
     for (const go of memory.heldSecrets.splice(0)) go();
     expect(await adding).toBeNull();
     expect(ids(app)).toEqual([a]);
@@ -479,6 +523,7 @@ describe("editing a subscription", () => {
     const editing = app.update(b, { name: "Cabin", password: TWO.password }, leaving.signal);
     await until(() => memory.held.length === 1, "the login check");
     leaving.abort();
+
     for (const go of memory.held.splice(0)) go();
     await editing.catch(() => undefined);
     expect(member(app, b)?.label).toBe("Holiday house");
@@ -491,6 +536,7 @@ describe("editing a subscription", () => {
     const editing = app.update(b, { name: "Cabin", password: TWO.password }, leaving.signal);
     await until(() => memory.heldSecrets.length === 1, "the password's write");
     leaving.abort();
+
     for (const go of memory.heldSecrets.splice(0)) go();
     await editing;
     expect(member(app, b)?.label).toBe("Cabin");
@@ -518,8 +564,10 @@ describe("everything together", () => {
     // The same channel from two providers is two rows, each named for its subscription.
     expect(fromTwo.every((each) => each.ambiguous)).toBe(true);
     const [first] = fromOne;
+
     if (!first) throw new Error("No channel");
     const now = app.currentCatalogue();
+
     if (now.kind !== "ready") throw new Error("No library");
     expect(now.library.placeOf.get(`${b}:${first.id}`)).toMatch(/· Holiday house$/);
 
@@ -532,21 +580,26 @@ describe("everything together", () => {
 
   it("joins a film both list by TMDB id, its progress kept for each provider's file", async () => {
     const { app, a, b } = await twoProviders();
+
     const merged = titlesOf(app).find(
       (title) => new Set(title.versions.map((v) => v.subscriptionId)).size === 2,
     );
+
     if (!merged) throw new Error("No film both providers list");
     const ofOne = merged.versions.find((v) => v.subscriptionId === a);
     const ofTwo = merged.versions.find((v) => v.subscriptionId === b);
+
     if (!ofOne || !ofTwo) throw new Error("A version is missing");
     await app.recordProgress({ kind: "movie", ...ofTwo }, 300, 600, Date.now());
     await app.recordProgress({ kind: "movie", ...ofOne }, 60, 600, Date.now());
+
     const progress = await app.progressOf({
       movies: [
         { subscriptionId: a, id: ofOne.id },
         { subscriptionId: b, id: ofTwo.id },
       ],
     });
+
     expect(progress.map((each) => [each.title.subscriptionId, each.position]).toSorted()).toEqual(
       [
         [a, 60],
@@ -558,6 +611,7 @@ describe("everything together", () => {
   it("keeps one provider's lists and stream when the other's fail, and retries only that one", async () => {
     const { app, a, b } = await twoProviders();
     const [first] = channels(app).filter((each) => each.subscriptionId === a);
+
     if (!first) throw new Error("No channel");
     watchChannel(app, a, first.id);
     const asked = one.titleListRequests();
@@ -587,6 +641,7 @@ describe("everything together", () => {
       movies: all.movies.map((movie) => ({ ...movie, container: "mp4" })),
     }));
     const { app, a, b } = await twoProviders();
+
     const shared = titlesOf(app).find((title) =>
       title.versions.some(
         (v) =>
@@ -594,10 +649,13 @@ describe("everything together", () => {
           title.versions.some((w) => w.subscriptionId === b && w.id === v.id),
       ),
     );
+
     if (!shared) throw new Error("No film both list under one id");
     const id = shared.versions[0]!.id;
+
     const fileOf = (subscriptionId: string) =>
       app.titleFile({ kind: "movie", subscriptionId, id }, new AbortController().signal);
+
     expect((await fileOf(a)).url).toMatch(new RegExp(`/movie/one/.+/${id}\\.mkv$`));
     expect((await fileOf(b)).url).toMatch(new RegExp(`/movie/two/.+/${id}\\.mp4$`));
   });
@@ -606,6 +664,7 @@ describe("everything together", () => {
     one.failTitles(503);
     const app = await launch();
     const a = await app.add({ server: one.url, ...ONE });
+
     if (!a) throw new Error("The add was cancelled");
     await until(() => member(app, a)?.titles.kind === "failed", "the failure");
     expect(app.titleLists().kind).toBe("failed");
@@ -617,13 +676,18 @@ describe("everything together", () => {
   it("reads a season as a provider added again lists it, not as it was before", async () => {
     const { app, b } = await twoProviders();
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No lists");
+
     const series = kindOf(lists.index, "series").titles.find((title) =>
       title.versions.some((v) => v.subscriptionId === b),
     );
+
     const version = series?.versions.find((v) => v.subscriptionId === b);
+
     if (!series || !version) throw new Error("No series of the second");
     const title = { ...series, ...version };
+
     const seasonOf = (id: string): Season => ({
       number: 1,
       name: "Season 1",
@@ -643,6 +707,7 @@ describe("everything together", () => {
         },
       ],
     });
+
     expect((await app.episodesOf(title, seasonOf("old-file"))).map((each) => each.id)).toEqual([
       "old-file",
     ]);
@@ -656,9 +721,11 @@ describe("everything together", () => {
   it("names a renamed subscription where its channels show, at once", async () => {
     const { app, a, b } = await twoProviders();
     const [first] = channels(app).filter((each) => each.subscriptionId === a);
+
     if (!first) throw new Error("No channel");
     await app.update(b, { name: "Cabin" });
     const now = app.currentCatalogue();
+
     if (now.kind !== "ready") throw new Error("No library");
     expect(now.library.placeOf.get(`${b}:${first.id}`)).toMatch(/· Cabin$/);
   });
@@ -670,6 +737,7 @@ describe("everything together", () => {
     await until(() => {
       expect(channelsReady(app, 2)).toBe(true);
       const now = app.currentCatalogue();
+
       return now.kind === "ready" && before.kind === "ready" && now.library !== before.library;
     }, "the new list");
     await editing;
@@ -680,6 +748,7 @@ describe("everything together", () => {
   it("counts a change of channel, not the first one or the same one again", async () => {
     const { app, a, b } = await twoProviders();
     const [first, second] = channels(app).filter((each) => each.subscriptionId === a);
+
     if (!first || !second) throw new Error("Too few channels");
     memory.actions.length = 0;
     watchChannel(app, a, first.id);
@@ -694,18 +763,25 @@ describe("removing a subscription", () => {
   /** A film and an episode of the first provider, as a play or a download names them. */
   async function filesOf(app: App, a: string) {
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No lists");
+
     const film = kindOf(lists.index, "movie")
       .titles.flatMap((title) => title.versions)
       .find((version) => version.subscriptionId === a && version.container);
+
     const show = kindOf(lists.index, "series").titles.find((title) =>
       title.versions.some((version) => version.subscriptionId === a),
     );
+
     const version = show?.versions.find((each) => each.subscriptionId === a);
+
     if (!film || !show || !version) throw new Error("The first provider lists no film or series");
     const details = await app.detailsOf({ ...show, subscriptionId: a, id: version.id });
     const episode = details.kind === "series" ? details.seasons[0]?.episodes[0] : undefined;
+
     if (!episode) throw new Error("The series lists no episode");
+
     const refs: readonly TitleRef[] = [
       { kind: "movie", subscriptionId: a, id: film.id },
       {
@@ -717,8 +793,10 @@ describe("removing a subscription", () => {
         episode: episode.number,
       },
     ];
+
     return refs;
   }
+
   const urlsOf = (app: App, refs: readonly TitleRef[], signal = new AbortController().signal) =>
     Promise.all(refs.map((ref) => app.titleFile(ref, signal).then((file) => file.url)));
 
@@ -736,20 +814,29 @@ describe("removing a subscription", () => {
   /** A series of the first provider's that TMDB knows, which its marks are kept by, with its details. */
   async function markedSeries(app: App, a: string, episodes: number) {
     const lists = app.titleLists();
+
     if (lists.kind !== "ready") throw new Error("No lists");
+
     for (const show of kindOf(lists.index, "series").titles) {
       const version = show.versions.find((each) => each.subscriptionId === a);
+
       if (!show.tmdbId || !version) continue;
       const details = await app.detailsOf({ ...show, subscriptionId: a, id: version.id });
+
       if (details.kind !== "series") continue;
+
       const numbered = details.seasons
         .filter((season) => season.number > 0)
         .flatMap((season) => season.episodes);
+
       if (numbered.length < episodes) continue;
+
       return { details, numbered, series: { subscriptionId: a, id: version.id } };
     }
+
     throw new Error(`No series of the first provider's with ${episodes} episodes`);
   }
+
   const refOf = (episode: Episode) => ({
     kind: "episode" as const,
     subscriptionId: episode.subscriptionId,
@@ -763,6 +850,7 @@ describe("removing a subscription", () => {
     const { app, a, b } = await twoProviders();
     const { details, numbered, series } = await markedSeries(app, a, 2);
     const [first, watched] = numbered;
+
     if (!first || !watched) throw new Error("Too few episodes");
     const at = { id: first.id, season: first.season, episode: first.number };
     await app.markEpisode(refOf(watched), true);
@@ -782,6 +870,7 @@ describe("removing a subscription", () => {
     const { app, a, b } = await twoProviders();
     const { numbered, series } = await markedSeries(app, a, 1);
     const [episode] = numbered;
+
     if (!episode) throw new Error("No episode");
     await app.remove(b, { keepHistory: true });
     expect(app.titleLists().kind).toBe("loading");
@@ -817,6 +906,7 @@ describe("removing a subscription", () => {
     one.failTitles(503);
     const app = await launch();
     const a = await app.add({ server: one.url, ...ONE });
+
     if (!a) throw new Error("The add was cancelled");
     await until(() => member(app, a)?.titles.kind === "failed", "the failure");
     const asked = app.titleFile(firstMovie(one, a), new AbortController().signal);
@@ -827,6 +917,7 @@ describe("removing a subscription", () => {
   it("stops what plays from it, and only that", async () => {
     const { app, a, b } = await twoProviders();
     const [first] = channels(app).filter((each) => each.subscriptionId === a);
+
     if (!first) throw new Error("No channel");
     watchChannel(app, a, first.id);
     await app.remove(b, { keepHistory: true });
@@ -846,18 +937,22 @@ describe("removing a subscription", () => {
   it("never shows the channels of one removed while they are worked out", async () => {
     const app = await launch();
     const a = await app.add({ server: one.url, ...ONE });
+
     if (!a) throw new Error("The add was cancelled");
     await until(() => channelsReady(app, 1), "the first's channels");
     memory.holdChannels = true;
     const b = await app.add({ server: two.url, ...TWO });
+
     if (!b) throw new Error("The add was cancelled");
     let removing: Promise<void> | null = null;
+
     // Removed as its channels land, before a task has worked them out.
     const off = app.onRoster(() => {
       if (!removing && member(app, b)?.live.kind === "ready") {
         removing = app.remove(b, { keepHistory: true });
       }
     });
+
     await until(() => memory.heldChannels.length === 1, "the second's channel list");
     memory.heldChannels.shift()?.();
     await until(() => removing !== null, "the second's channels");
@@ -874,27 +969,34 @@ describe("removing a subscription", () => {
     for (const when of ["read", "indexed"] as const) {
       const app = await launch();
       const a = await app.add({ server: one.url, ...ONE });
+
       if (!a) throw new Error("The add was cancelled");
       await until(() => titlesOf(app).length > 0, "the first's lists");
       const before = app.titleLists();
       const shownFrom = new Set<string>();
+
       const offLists = app.onTitleLists(() => {
         for (const title of titlesOf(app)) {
           for (const version of title.versions) shownFrom.add(version.subscriptionId);
         }
       });
+
       memory.holdMovies = true;
       const b = await app.add({ server: two.url, ...TWO });
+
       if (!b) throw new Error("The add was cancelled");
       await until(() => memory.heldMovies.length === 1, "the second's movie list");
       let removing: Promise<void> | null = null;
+
       // Removed as its rows are read, or as its lists land, before a task has indexed them.
       const off = app.onRoster(() => {
         if (!removing && when === "indexed" && member(app, b)?.titles.kind === "ready") {
           removing = app.remove(b, { keepHistory: true });
         }
       });
+
       memory.heldMovies.shift()?.();
+
       if (when === "read") removing = app.remove(b, { keepHistory: true });
       await until(() => removing !== null, "the second's lists");
       off();
@@ -903,6 +1005,7 @@ describe("removing a subscription", () => {
       offLists();
       expect(ids(app)).toEqual([a]);
       expect(shownFrom.has(b)).toBe(false);
+
       if (when === "read") expect(app.titleLists()).toBe(before);
       expect(titlesOf(app).length).toBeGreaterThan(0);
       expect(
@@ -915,9 +1018,11 @@ describe("removing a subscription", () => {
 
   it("brings its history back when the account is added again", async () => {
     const { app, b } = await twoProviders();
+
     const movie = titlesOf(app)
       .flatMap((title) => title.versions)
       .find((v) => v.subscriptionId === b);
+
     if (!movie) throw new Error("No film of the second");
     await app.recordProgress({ kind: "movie", ...movie }, 200, 600, Date.now());
     await app.remove(b, { keepHistory: true });
@@ -931,15 +1036,20 @@ describe("removing a subscription", () => {
   it("keeps a removed provider's saves for its return, while Remove takes out what shows", async () => {
     const { app, a, b } = await twoProviders();
     const watchlist = await import("../src/watchlist.ts");
+
     const shared = titlesOf(app).find(
       (title) => title.tmdbId && new Set(title.versions.map((v) => v.subscriptionId)).size === 2,
     );
+
     const own = titlesOf(app).find((title) => title.versions.every((v) => v.subscriptionId === b));
+
     if (!shared || !own) throw new Error("The lists lack a shared or own film");
     watchlist.saveTitle(shared);
     watchlist.saveTitle(own);
+
     const owners = () =>
       watchlist.currentWatchlist().map((entry) => entry.map((each) => each.subscriptionId));
+
     expect(owners()).toEqual([[b], [a, b]]);
 
     // Removed with its history kept: its saves leave the watchlist, and stay on the phone.
@@ -957,24 +1067,34 @@ describe("removing a subscription", () => {
 
   it("keeps the version picked with its history, plays it once added again, and erases it with it", async () => {
     const { app, a, b } = await twoProviders();
+
     const both = (title: { versions: readonly { subscriptionId: string }[] }) =>
       new Set(title.versions.map((v) => v.subscriptionId)).size === 2;
+
     const shared = titlesOf(app).find((title) => title.tmdbId && both(title));
+
     const own = titlesOf(app).find(
       (title) => title.tmdbId && title.versions.every((v) => v.subscriptionId === a),
     );
+
     const picked = shared?.versions.find((v) => v.subscriptionId === b);
+
     if (!shared || !own || !picked) throw new Error("The lists lack a shared or own film");
+
     const now = (title: typeof shared) => {
       const found = titlesOf(app).find((each) => each.tmdbId === title.tmdbId);
+
       if (!found) throw new Error("The film isn't listed");
+
       return found;
     };
+
     const stateOf = () => JSON.parse(memory.files.get(doc("state.json")) ?? "{}");
     app.pickVersion(shared, { subscriptionId: b, id: picked.id });
     app.pickVersion(own, own.versions[0]!);
     // Another write of state.json keeps the picks, and they keep it.
     const [channel] = channels(app).filter((each) => each.subscriptionId === a);
+
     if (!channel) throw new Error("No channel");
     watchChannel(app, a, channel.id);
     expect(stateOf().recentChannels).toContain(channel.key);
@@ -988,6 +1108,7 @@ describe("removing a subscription", () => {
     // The removed provider's titles go at once; the film shows again once listed from the first.
     await until(() => {
       const found = titlesOf(app).find((each) => each.tmdbId === shared.tmdbId);
+
       return found !== undefined && !both(found);
     }, "the film from the first alone");
     expect(app.pickedVersion(now(shared), app.readState())).toBeNull();
@@ -1013,6 +1134,7 @@ describe("removing a subscription", () => {
     for (const password of [ONE.password, TWO.password]) {
       expect(memory.files.get(doc("state.json"))).not.toContain(password);
     }
+
     await again.remove(b, { keepHistory: false });
     expect(stateOf().titleVersions[b]).toBeUndefined();
     expect(stateOf().titleVersions[a]).toEqual({ [`movie:${own.tmdbId}`]: own.versions[0]!.id });
@@ -1022,10 +1144,13 @@ describe("removing a subscription", () => {
   it("erases its history when asked, leaving a film the other saved too on the watchlist", async () => {
     const { app, a, b } = await twoProviders();
     const watchlist = await import("../src/watchlist.ts");
+
     const shared = titlesOf(app).find(
       (title) => new Set(title.versions.map((v) => v.subscriptionId)).size === 2,
     );
+
     const own = titlesOf(app).find((title) => title.versions.every((v) => v.subscriptionId === b));
+
     if (!shared || !own) throw new Error("The lists lack a shared or own film");
     watchlist.saveTitle(shared);
     watchlist.saveTitle(own);
@@ -1047,15 +1172,19 @@ describe("removing a subscription", () => {
     const { app, a, b } = await twoProviders();
     const watchlist = await import("../src/watchlist.ts");
     const own = titlesOf(app).find((title) => title.versions.every((v) => v.subscriptionId === b));
+
     if (!own) throw new Error("No film of the second's own");
     watchlist.saveTitle(own);
     const version = own.versions[0]!;
     await app.recordProgress({ kind: "movie", ...version }, 200, 600, Date.now());
     const [channel] = channels(app).filter((each) => each.subscriptionId === b);
+
     if (!channel) throw new Error("No channel");
     watchChannel(app, b, channel.id);
+
     const recentOf = () =>
       (JSON.parse(memory.files.get(doc("state.json")) ?? "{}").recentChannels ?? []) as string[];
+
     expect(recentOf()).toContain(channel.key);
 
     memory.full.add("state.json");
@@ -1085,14 +1214,17 @@ describe("removing a subscription", () => {
     vi.setSystemTime(Number.parseInt(b.slice("xtream-".length), 36));
     const readded = await app.add({ server: two.url, ...TWO });
     vi.useRealTimers();
+
     if (!readded) throw new Error("The add was cancelled");
     expect(readded).not.toBe(b);
     await until(() =>
       titlesOf(app).some((t) => t.versions.some((v) => v.subscriptionId === readded)),
     );
+
     const version = titlesOf(app)
       .flatMap((title) => title.versions)
       .find((v) => v.subscriptionId === readded)!;
+
     await app.recordProgress({ kind: "movie", ...version }, 90, 600, Date.now());
     const again = await launch();
     const progress = await again.progressOf({ movies: [version] });
@@ -1145,10 +1277,12 @@ describe("removing a subscription", () => {
   it("serialises an add and a removal begun together", async () => {
     const { app, a, b } = await twoProviders();
     await app.remove(b, { keepHistory: true });
+
     const [readded] = await Promise.all([
       app.add({ server: two.url, ...TWO }),
       app.remove(a, { keepHistory: true }),
     ]);
+
     expect(readded).toBe(b);
     expect(ids(app)).toEqual([b]);
     expect(keychainIds()).toEqual([b]);
@@ -1179,6 +1313,7 @@ describe("a launch with saved subscriptions", () => {
     await until(() => memory.held.length === 2, "both login checks");
     const before = two.titleListRequests();
     await app.remove(b, { keepHistory: true });
+
     for (const go of memory.held.splice(0)) go();
     await settle();
     await new Promise((done) => setTimeout(done, 200));
@@ -1190,9 +1325,11 @@ describe("guide identity erasure through account lifecycle", () => {
   it("awaits guide deletion before writing a replacement password and blocks failed deletion", async () => {
     const fixture = guideFixture();
     vi.stubGlobal("expo", { modules: { Guide: fixture.native } });
+
     try {
       const app = await launch();
       const id = await app.add({ server: one.url, ...ONE });
+
       if (!id) throw new Error("cancelled");
       const before = new Map(memory.keychain);
       fixture.control.refused.add(id);
@@ -1220,9 +1357,11 @@ describe("guide identity erasure through account lifecycle", () => {
   it("keeps removal committed while awaiting guide forget, including keepHistory, then reuses only an erased identity", async () => {
     const fixture = guideFixture();
     vi.stubGlobal("expo", { modules: { Guide: fixture.native } });
+
     try {
       const app = await launch();
       const id = await app.add({ server: one.url, ...ONE });
+
       if (!id) throw new Error("cancelled");
       let release!: (value: boolean) => void;
       fixture.control.forget = () =>
@@ -1254,6 +1393,7 @@ describe("accepted channel picks on provider removal", () => {
     const prefs = await import("../src/media-preferences.ts");
     const own = channels(app).find((channel) => channel.subscriptionId === b);
     const other = channels(app).find((channel) => channel.subscriptionId === a);
+
     if (!own?.variants[0] || !other?.variants[0]) throw new Error("No provider channels");
     prefs.updateChannelPick(own, own.variants[0].id);
     prefs.updateChannelPick(other, other.variants[0].id);
@@ -1271,6 +1411,7 @@ describe("accepted channel picks on provider removal", () => {
     const { app, a, b } = await twoProviders();
     const prefs = await import("../src/media-preferences.ts");
     const own = channels(app).find((channel) => channel.subscriptionId === b);
+
     if (!own?.variants[0]) throw new Error("No channel");
     prefs.updateChannelPick(own, own.variants[0].id);
     memory.full.add("media-preferences.json");
@@ -1289,11 +1430,13 @@ describe("accepted channel picks on provider removal", () => {
     "keeps erase pending while future preferences are read-only: %s",
     async (future) => {
       const { b } = await twoProviders();
+
       const original = JSON.stringify(
         future === "version"
           ? { version: 88, channelVariants: { [b]: { "10": "11" } } }
           : { version: 1, channelVariants: ["future-shape"] },
       );
+
       memory.files.set(doc("media-preferences.json"), original);
       const app = await launch();
       await expect(app.remove(b, { keepHistory: false })).rejects.toThrow();

@@ -44,12 +44,14 @@ import {
 } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) throw new Error("Usage: node test/e2e/playlist-app.ts <app executable> [-- args]");
 
 // A named prefix lets a maintainer keep this run separate from other app checks.
 const profile = mkdtempSync(
   process.env["MR_STREAMER_E2E_PROFILE_PREFIX"] ?? join(tmpdir(), "mr-streamer-e2e-"),
 );
+
 const host = await startFakePlaylist();
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
 let port = randomPort();
@@ -59,6 +61,7 @@ const morePopup = `document.querySelector('[role="dialog"][aria-label="More"]')`
 const soundRow = `[...${morePopup}?.querySelectorAll("button") ?? []].find((b) => b.getAttribute("aria-label") === "Sound")`;
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, result: { ok: boolean; detail: string }): void {
   console.log(`${result.ok ? "PASS" : "FAIL"} ${name}: ${result.detail}`);
@@ -97,6 +100,7 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);
 
 /** Waits for this app to exit before restarting it or removing its throwaway profile. */
@@ -122,6 +126,7 @@ async function click(page: Page, expression: string): Promise<void> {
 async function guideRow(page: Page): Promise<{ ok: boolean; detail: string }> {
   await openSubscriptions(page);
   const refresh = `document.querySelector('[aria-label^="Refresh guide of "]')`;
+
   const read = () =>
     page.evaluate<{ row: string; under: string | null; busy: boolean }>(`(() => {
       const button = ${refresh};
@@ -134,15 +139,19 @@ async function guideRow(page: Page): Promise<{ ok: boolean; detail: string }> {
         busy: !!button?.disabled,
       };
     })()`);
+
   /** Presses Refresh and waits for the row to settle on `wanted`. */
   const refreshed = async (wanted: RegExp) => {
     await click(page, refresh);
     await waitFor(async () => {
       const now = await read();
+
       return !now.busy && wanted.test(now.row);
     }, 20_000).catch(() => {});
+
     return read();
   };
+
   await waitFor(async () => (await read()).row.includes("none in this playlist"), 20_000).catch(
     () => {},
   );
@@ -154,12 +163,14 @@ async function guideRow(page: Page): Promise<{ ok: boolean; detail: string }> {
   const dropped = await refreshed(/none in this playlist/);
   await key(page, "Escape", 27);
   const none = "Guide · none in this playlist · 3 without";
+
   const ok =
     first.row === none &&
     again.row === none &&
     found.row === "Guide · 1 own · 2 without" &&
     dropped.row === none &&
     [first, again, found, dropped].every((each) => each.under === null);
+
   return {
     ok,
     detail: `"${first.row}", after Refresh "${again.row}", once named "${found.row}", once dropped "${dropped.row}", ${[first, again, found, dropped].filter((each) => each.under).length} error lines`,
@@ -218,6 +229,7 @@ async function choices(page: Page, menu: "Sound" | "Subtitles"): Promise<string[
   const items = await openMenu(page, menu);
   await key(page, "Escape", 27);
   await delay(300);
+
   return items;
 }
 
@@ -236,6 +248,7 @@ async function hasSound(page: Page): Promise<boolean> {
   const offered = await page.evaluate<boolean>(`!!(${soundRow})`);
   await key(page, "Escape", 27);
   await delay(300);
+
   return offered;
 }
 
@@ -252,11 +265,13 @@ async function openMenu(page: Page, menu: "Sound" | "Subtitles"): Promise<string
   } else {
     await click(page, `document.querySelector('[data-view="watch"] [aria-label^="Subtitles"]')`);
   }
+
   const popup = menuPopup(menu);
   await waitFor(
     () => page.evaluate<boolean>(`!!${popup}?.querySelector("[aria-pressed]")`),
     10_000,
   );
+
   return page.evaluate<string[]>(
     `[...${popup}.querySelectorAll("[data-item][aria-pressed]")].map((item) =>
       (item.getAttribute("aria-pressed") === "true" ? "*" : "") + item.textContent.trim())`,
@@ -312,6 +327,7 @@ async function listsTracks(page: Page): Promise<{ ok: boolean; detail: string }>
   await holdAt(page, 5);
   const now = await playing(page);
   await resume(page);
+
   const ok =
     sound.join() === "*English,Español" &&
     subtitles.join() === "*Off,English,Deutsch,Français" &&
@@ -321,6 +337,7 @@ async function listsTracks(page: Page): Promise<{ ok: boolean; detail: string }>
     asked(/subtitles-.*\.vtt$/) > 0 &&
     asked(/subtitles-.*\.vtt$/) <= 3 &&
     asked(/sound-es/) === 0;
+
   return {
     ok,
     detail: `Sound [${sound}], CC [${subtitles}], CC ${now.cc}, ${now.lines.length} lines at 5 s, ${now.sound} bytes of sound decoded, ${asked(/subtitles-/)} subtitle requests`,
@@ -335,12 +352,14 @@ async function switchesSound(page: Page): Promise<{ ok: boolean; detail: string 
   await waitFor(async () => (await playing(page)).sound > before.sound, 15_000).catch(() => {});
   const after = await playing(page);
   const sound = await choices(page, "Sound");
+
   const ok =
     asked(/sound-es-\d+\.mpegts$/) > 0 &&
     asked(/master\.m3u8$/) === opened &&
     after.time > before.time &&
     after.sound > before.sound &&
     sound.join() === "English,*Español";
+
   return {
     ok,
     detail: `Sound [${sound}], ${asked(/sound-es-\d+\.mpegts$/)} Spanish segments loaded, the stream opened ${asked(/master\.m3u8$/) - opened} more times, clock ${before.time.toFixed(1)} to ${after.time.toFixed(1)} s, sound ${before.sound} to ${after.sound} bytes`,
@@ -353,8 +372,10 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
   await choose(page, "Subtitles", "English");
   await waitFor(async () => (await playing(page)).lines.length > 0, 15_000).catch(() => {});
   const english = await playing(page);
+
   const row = async () =>
     (await choices(page, "Subtitles")).find((choice) => choice.startsWith("*")) ?? "";
+
   const listed = await choices(page, "Subtitles");
   await choose(page, "Subtitles", "Deutsch");
   await waitFor(async () => (await playing(page)).lines.join().includes("Deutsche"), 15_000).catch(
@@ -368,12 +389,16 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
   await delay(500);
   // The lines read before come back, and nothing is left to load.
   const on = { row: await row(), ...(await playing(page)) };
+
   const between = await (async () => {
     // Between two lines nothing shows.
     await holdAt(page, 6);
+
     return playing(page);
   })();
+
   await resume(page);
+
   const ok =
     english.lines.join() === "English line 3" &&
     english.cc === "on" &&
@@ -386,6 +411,7 @@ async function showsSubtitles(page: Page): Promise<{ ok: boolean; detail: string
     on.row === "*Deutsch" &&
     on.lines.join() === "Deutsche Zeile 3" &&
     between.lines.length === 0;
+
   return {
     ok,
     detail: `at 5 s "${english.lines}", CC [${listed}] after reading the empty French rendition, then "${german.lines}"; C: ${off.cc} with ${off.lines.length} lines, C: ${on.cc} "${on.row}" with "${on.lines}"; at 6 s ${between.lines.length} lines`,
@@ -401,6 +427,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   const listed = before.cc === "absent" ? [] : await choices(page, "Subtitles");
   // "HELLO CAPTIONS" shows from 1 to 3 s.
   await holdAt(page, 2);
+
   if (listed.length > 0) await choose(page, "Subtitles", "Captions");
   await waitFor(async () => (await playing(page)).lines.length > 0, 10_000).catch(() => {});
   const shown = await playing(page);
@@ -419,6 +446,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
   await waitFor(async () => (await playing(page)).lines.length > 0, 10_000).catch(() => {});
   const again = await playing(page);
   const said = (lines: readonly string[]) => lines.join(" ").replace(/\s+/g, " ").trim();
+
   const ok =
     listed.join() === "*Off,Captions" &&
     !soundOffered &&
@@ -429,6 +457,7 @@ async function showsCaptions(page: Page): Promise<{ ok: boolean; detail: string 
     kept.join() === "Off,*Captions" &&
     // Said once: a line the stream before left behind would show beside the new one.
     said(again.lines) === "HELLO CAPTIONS";
+
   return {
     ok,
     detail: `CC [${listed}], at 2 s "${shown.lines.join(" | ")}", at 3.5 s ${after.lines.length} lines, Sound ${soundOffered ? "shown" : "hidden"}; after Stop and the same channel CC ${reopened.cc} [${kept}], at 2 s "${again.lines.join(" | ")}"`,
@@ -451,12 +480,14 @@ async function carriesOver(page: Page): Promise<{ ok: boolean; detail: string }>
   );
   const switched = await playing(page);
   await resume(page);
+
   const ok =
     sound.join() === "English,*Español" &&
     subtitles.join() === "Off,English,*Deutsch,Français" &&
     switched.lines.join() === "English line 5" &&
     now.lines.join() === "Deutsche Zeile 5" &&
     asked(/sound-en-\d+\.mpegts$/) === english;
+
   return {
     ok,
     detail: `Sound [${sound}], CC [${subtitles}], at 9 s "${now.lines}", then English "${switched.lines}", ${asked(/sound-en-\d+\.mpegts$/) - english} English segments loaded`,
@@ -468,6 +499,7 @@ async function plainStream(page: Page): Promise<{ ok: boolean; detail: string }>
   await delay(1500);
   const now = await playing(page);
   const soundOffered = await hasSound(page);
+
   return {
     ok: !soundOffered && now.cc === "absent" && now.lines.length === 0,
     detail: `Sound ${soundOffered ? "shown" : "hidden"}, CC ${now.cc}, ${now.lines.length} lines`,
@@ -501,14 +533,17 @@ async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }>
   const kept = await favourites(page);
   await openSubscriptions(page);
   const row = subscriptionRow(from);
+
   const line = () =>
     page.evaluate<string>(`(${row})?.querySelector("button")?.textContent.trim() ?? ""`);
+
   await waitFor(async () => (await line()).includes("needs its link again"), 30_000).catch(
     () => {},
   );
   const listed = await line();
   await click(page, buttonNamed("Enter link", `(${row})`));
   await waitFor(() => page.evaluate<boolean>("!!document.querySelector('form input')"), 10_000);
+
   const asking = await page.evaluate<{
     line: string;
     fields: string[];
@@ -523,6 +558,7 @@ async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }>
       page: document.body.innerText,
     };
   })()`);
+
   await fill(page, [host.link]);
   await waitFor(
     async () => (await line()) !== "" && !(await line()).includes("needs"),
@@ -530,6 +566,7 @@ async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }>
   ).catch(() => {});
   const repaired = await line();
   const after = await favourites(page);
+
   const ok =
     listed.startsWith(`${from} · M3U · needs its link again`) &&
     asking.line === `Your keychain no longer gives Mr. Streamer the saved link from ${from}.` &&
@@ -541,6 +578,7 @@ async function asksForLink(page: Page): Promise<{ ok: boolean; detail: string }>
     !repaired.includes("needs") &&
     kept.length === 1 &&
     after.length === 1;
+
   return {
     ok,
     detail: `"${listed}", ${asking.fields.length} empty field${asking.focused ? " with the cursor" : ""}, the host named ${asking.line.includes(from) ? "alone" : "wrongly"}, then "${repaired}", ${kept.length} favourite before and ${after.length} after the same link`,

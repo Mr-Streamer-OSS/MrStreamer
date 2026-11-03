@@ -66,6 +66,7 @@ import { defined } from "../../../../packages/core/src/defined.ts";
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const desktop = join(root, "apps/desktop");
+
 const scenarios = [
   "home",
   "home-stage",
@@ -105,6 +106,7 @@ const scenarios = [
   "custom-lists-sources",
   "custom-lists-round-trip",
 ] as const;
+
 type Scenario = (typeof scenarios)[number];
 
 /** A playable test channel with a guide channel of its own, for the guide scenarios. */
@@ -167,7 +169,9 @@ function scenarioProvider(scenario: Scenario): FakeProviderOptions {
       return {};
   }
 }
+
 const [command, selected] = process.argv.slice(2);
+
 if (command === "--help" || !command) {
   console.log(`Usage: pnpm verify:desktop doctor | ${scenarios.join(" | ")} | downloads-queue | downloads-series
        pnpm verify:desktop downloads <locale>, as fr-FR: Downloads in another interface language
@@ -183,6 +187,7 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
   console.log(JSON.stringify(await preflight(), null, 2));
 } else if (command === "downloads" && (selected === undefined || isLocale(selected))) {
   const build = await preflight();
+
   if (!build.display) throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads.");
   await runDownloads(build, selected);
 } else if (
@@ -190,6 +195,7 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
   (selected === undefined || (selected === "--previous" && process.argv[4]))
 ) {
   const build = await preflight();
+
   if (!build.display)
     throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads-queue.");
   await runDownloadsQueue(build, selected ? process.argv[4] : undefined);
@@ -198,6 +204,7 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
   (selected === undefined || (selected === "--previous" && process.argv[4]))
 ) {
   const build = await preflight();
+
   if (!build.display)
     throw new Error("No display. Use xvfb-run -a pnpm verify:desktop downloads-series.");
   await runDownloadsSeries(build, selected ? process.argv[4] : undefined);
@@ -220,14 +227,18 @@ async function preflight() {
   await access(join(desktop, "out/renderer/index.html"));
   await access(join(desktop, "test/fixtures/h264-aac.mpegts"));
   const ffmpeg = process.env["MR_STREAMER_FFMPEG"] || "ffmpeg";
+
   const ffprobe = process.env["MR_STREAMER_FFMPEG"]
     ? join(dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe")
     : "ffprobe";
+
   const version = (tool: string) =>
     execFileSync(tool, ["-version"], { encoding: "utf8" }).split("\n")[0];
+
   const pkg = JSON.parse(await readFile(join(desktop, "package.json"), "utf8")) as {
     version: string;
   };
+
   return {
     executable,
     appVersion: pkg.version,
@@ -242,11 +253,14 @@ async function preflight() {
 /** A bounded check that remains interruptible, unlike a retry that swallows cancellation. */
 async function until(check: () => Promise<boolean>, signal: AbortSignal, timeout = 30_000) {
   const deadline = Date.now() + timeout;
+
   while (Date.now() < deadline) {
     signal.throwIfAborted();
+
     if (await check()) return;
     await delay(150, undefined, { signal });
   }
+
   throw new Error(`Timed out waiting for ${check.toString()}`);
 }
 
@@ -257,6 +271,7 @@ async function until(check: () => Promise<boolean>, signal: AbortSignal, timeout
  */
 async function run(scenario: Scenario, prior?: string) {
   const build = await preflight();
+
   if (!build.display)
     throw new Error("No display. Use xvfb-run -a pnpm verify:desktop <scenario>.");
   const evidenceRoot = join(root, ".local/verification");
@@ -271,10 +286,12 @@ async function run(scenario: Scenario, prior?: string) {
   let catalogueLaunch = 0;
   let profile: string | undefined;
   let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
+
   let playlist:
     | Awaited<ReturnType<typeof startFakePlaylist>>
     | Awaited<ReturnType<typeof startFakeHls>>
     | undefined;
+
   let other: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
   let guideHosts: { north: GuideHost; south: GuideHost } | undefined;
   let movedHost: GuideHost | undefined;
@@ -286,6 +303,7 @@ async function run(scenario: Scenario, prior?: string) {
   let page: Page | undefined;
   let failed: unknown;
   const log: string[] = [];
+
   try {
     profile = await mkdtemp(join(tmpdir(), "mrstreamer-verify-"));
     const stage = scenario === "home-stage" || scenario === "home-stage-live-only";
@@ -297,18 +315,24 @@ async function run(scenario: Scenario, prior?: string) {
       live: true,
       ...scenarioProvider(scenario),
     });
+
     if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
+
     if (scenario === "guides") {
       guideHosts = { north: await startGuideHost(), south: await startGuideHost() };
       serveGuides(guideHosts.north, guideHosts.south);
     }
+
     if (scenario === "moved-guide") movedHost = await startGuideHost();
+
     if (scenario === "guide-labels") {
       labelHost = await startGuideHost();
       serveLabelled(labelHost);
     }
+
     if (scenario === "live-categories")
       other = await startFakeProvider({ channels: 300, titles: 10, live: true });
+
     // The same channels under the same names: every row says whose it is.
     if (scenario === "live-names")
       other = await startFakeProvider({
@@ -318,6 +342,7 @@ async function run(scenario: Scenario, prior?: string) {
         second: true,
         channelOf: longNamed,
       });
+
     if (
       scenario === "custom-lists" ||
       scenario === "custom-lists-sources" ||
@@ -331,19 +356,25 @@ async function run(scenario: Scenario, prior?: string) {
         channelOf: backupChannel,
         adultChannels: scenario === "custom-lists-sources",
       });
+
     if (scenario === "live-categories")
       provider.serveCategories((all) =>
         browseFixtureLanguages(all).map((category) =>
           category.id === "1" ? { ...category, name: LONG_CATEGORY } : category,
         ),
       );
+
     if (scenario === "live-categories") other!.serveCategories(browseFixtureLanguages);
+
     if (scenario.startsWith("hls-compatibility")) playlist = await startFakeHls({ realtime: true });
+
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
+
     if (scenario === "catch-up-hls") {
       playlist = await startFakePlaylist({ catchup: true });
       playlist.nameGuide(true);
     }
+
     if (scenario === "home-stage")
       other = await startFakeProvider({
         channels: 60,
@@ -354,6 +385,7 @@ async function run(scenario: Scenario, prior?: string) {
         logoSvg: stageLogo,
         streams: stageStreams,
       });
+
     if (scenario === "details-back")
       other = await startFakeProvider({
         titles: 30,
@@ -361,21 +393,26 @@ async function run(scenario: Scenario, prior?: string) {
         second: true,
         titlesOf: withSecondSeason,
       });
+
     if (scenario === "background-refresh") releaseGuide = provider.hold("guide").release;
+
     if (scenario === "slow-catalogue") {
       releaseTitles = provider.hold("titles").release;
       other = await startFakeProvider({ channels: 60, titles: 30, second: true });
     }
+
     tmdb = await startFakeTmdb();
     const ownedProfile = profile;
     const ownedTmdb = tmdb;
     let port = 0;
+
     /** The app the window belongs to: this checkout's build, or `prior`'s packaged one. */
     let running = {
       executable: build.executable,
       app: desktop as string | null,
       renderer: pathToFileURL(join(desktop, "out/renderer/")).href,
     };
+
     /**
      * Starts the app on this run's profile, with the system's language `system` as Linux reads
      * it from the environment (English unless a scenario says otherwise), and waits for its
@@ -398,6 +435,7 @@ async function run(scenario: Scenario, prior?: string) {
               renderer: pathToFileURL(join(desktop, "out/renderer/")).href,
             };
       port = await freePort();
+
       const args = [
         `--remote-debugging-port=${port}`,
         "--remote-debugging-address=127.0.0.1",
@@ -408,6 +446,7 @@ async function run(scenario: Scenario, prior?: string) {
         ...(process.platform === "linux" ? ["--no-sandbox"] : []),
         ...(running.app ? [running.app] : []),
       ];
+
       // Discard ambient test overrides; this run's external services are its own loopback fixtures.
       const env = Object.fromEntries(
         Object.entries(process.env).filter(
@@ -417,8 +456,10 @@ async function run(scenario: Scenario, prior?: string) {
             !/^(LANGUAGE|LANG|LC_ALL|LC_MESSAGES)$/.test(name),
         ),
       );
+
       if (process.platform === "linux")
         Object.assign(env, { LANGUAGE: system, LANG: `${system}.UTF-8` });
+
       const started = spawn(running.executable, args, {
         cwd: root,
         detached: process.platform !== "win32",
@@ -431,25 +472,30 @@ async function run(scenario: Scenario, prior?: string) {
           MR_STREAMER_TMDB_KEY: "test-key",
         },
       });
+
       app = started;
       let spawnError: Error | undefined;
       started.on("error", (error) => {
         spawnError = error;
       });
+
       for (const stream of [started.stdout, started.stderr])
         stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
       page = await connect(port);
+
       if (scenario === "slow-catalogue") {
         const launch = ++catalogueLaunch;
         observed["runtimeExceptions"] = runtimeExceptions;
         page.on("Runtime.exceptionThrown", (event) => runtimeExceptions.push({ launch, event }));
         await send("Runtime.enable");
       }
+
       if (scenario.startsWith("hls-compatibility")) {
         page.on("Runtime.consoleAPICalled", (entry) => log.push(JSON.stringify(entry) + "\n"));
         page.on("Runtime.exceptionThrown", (entry) => log.push(JSON.stringify(entry) + "\n"));
         await page.send("Runtime.enable");
       }
+
       if (spawnError) throw spawnError;
       // The CDP target can answer before the renderer's initial navigation finishes.
       await until(
@@ -462,27 +508,36 @@ async function run(scenario: Scenario, prior?: string) {
       await send("Network.enable");
       await send("Network.setBlockedURLs", { urls: ["*image.example*", "*image.tmdb.org*"] });
     };
+
     /** Quits the app as the viewer does, keeping the profile for the next `launch`. */
     const quit = async () => {
       if (app) await stop(app, page);
       page?.close();
       page = undefined;
     };
+
     const live = () => {
       if (!page) throw new Error("The app isn't running.");
+
       return page;
     };
+
     const send = async (method: string, params: Record<string, unknown> = {}) => {
       abort.signal.throwIfAborted();
       const reply = await live().send(method, params);
+
       if (reply.error) throw new Error(`${method}: ${JSON.stringify(reply.error)}`);
+
       return reply.result;
     };
+
     const doctor = async () => {
       if (app?.exitCode !== null || app?.signalCode !== null) throw new Error("Owned app exited.");
       const reply = await send("Browser.getBrowserCommandLine");
+
       if (!record(reply) || !Array.isArray(reply["arguments"]))
         throw new Error("No browser identity.");
+
       for (const expected of [
         `--user-data-dir=${profile}`,
         `--remote-debugging-port=${port}`,
@@ -491,10 +546,13 @@ async function run(scenario: Scenario, prior?: string) {
         if (!reply["arguments"].includes(expected))
           throw new Error("CDP belongs to a different app instance.");
       }
+
       if (!running.app && reply["arguments"][0] !== running.executable)
         throw new Error("CDP belongs to another app than the prior release's.");
       const url = await live().evaluate<string>("location.href");
+
       if (!url.startsWith(running.renderer)) throw new Error(`Wrong renderer: ${url}`);
+
       const doctor = {
         executable: running.executable,
         pid: app?.pid,
@@ -513,19 +571,25 @@ async function run(scenario: Scenario, prior?: string) {
         ],
         url,
       };
+
       // A prior release's app is identified by its executable, not by this checkout's build.
       observed[running.app ? "doctor" : "priorDoctor"] = running.app
         ? { ...doctor, ...build }
         : doctor;
     };
+
     await launch();
+
     const livePage = {
       evaluate: <T>(expression: string) => live().evaluate<T>(expression),
     };
+
     const wait = (check: () => Promise<boolean>, timeout?: number) =>
       until(check, abort.signal, timeout);
+
     const exists = (expression: string) => livePage.evaluate<boolean>(`!!(${expression})`);
     const action = (label: string) => actions.push({ action: label, at: new Date().toISOString() });
+
     const capture = async (name: string) => {
       // DOM readiness can precede Chromium's paint, especially immediately after a locale switch.
       await livePage.evaluate(
@@ -533,12 +597,14 @@ async function run(scenario: Scenario, prior?: string) {
       );
       await delay(200, undefined, { signal: abort.signal });
       const shot = await send("Page.captureScreenshot", { format: "png" });
+
       if (!record(shot) || typeof shot["data"] !== "string")
         throw new Error("No screenshot returned.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(shot["data"], "base64"));
       const tree = await send("Accessibility.getFullAXTree");
       await writeFile(join(evidence, `${name}.ax.json`), JSON.stringify(tree, null, 2));
     };
+
     const click = async (label: string, element: string) => {
       await wait(() => exists(element));
       await livePage.evaluate(`(${element})?.scrollIntoView({ block: "nearest" })`);
@@ -575,16 +641,20 @@ async function run(scenario: Scenario, prior?: string) {
       })()`),
       );
       action(label);
+
       const point = await livePage.evaluate<{ x: number; y: number }>(`(() => {
         const box = ${element}.getBoundingClientRect();
         return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
       })()`);
+
       for (const type of ["mousePressed", "mouseReleased"]) {
         await send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
       }
     };
+
     const button = (selector: string, text: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
     const key = async (name: string, code: number) => {
       action(`Press ${name}`);
       const native = name === "Enter" || name === " ";
@@ -600,16 +670,19 @@ async function run(scenario: Scenario, prior?: string) {
         windowsVirtualKeyCode: code,
       });
     };
+
     await wait(() =>
       livePage.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
     );
     await capture("before-connect");
+
     if (playlist) {
       await click("Use a Live-only M3U link", button("form button", "Use an M3U link"));
       await wait(() =>
         livePage.evaluate<boolean>("document.querySelectorAll('form input').length === 1"),
       );
     }
+
     for (const [index, value] of (playlist
       ? [playlist.link]
       : [provider.url, "demo", "demo"]
@@ -620,6 +693,7 @@ async function run(scenario: Scenario, prior?: string) {
       );
       await send("Input.insertText", { text: value });
     }
+
     await click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await wait(() =>
       livePage.evaluate<boolean>(
@@ -628,6 +702,7 @@ async function run(scenario: Scenario, prior?: string) {
     );
     await capture("connected");
     injectedFailure(scenario);
+
     if (scenario.startsWith("hls-compatibility")) {
       if (scenario === "hls-compatibility-catchup")
         await hlsCompatibilityCatchupScenario({
@@ -659,6 +734,7 @@ async function run(scenario: Scenario, prior?: string) {
           scenario.endsWith("baseline"),
         );
       observed["hlsRequests"] = playlist!.requests();
+
       if (playlist && "stats" in playlist) observed["hlsResources"] = playlist.stats();
     } else if (stage) {
       await homeStageScenario(
@@ -751,6 +827,7 @@ async function run(scenario: Scenario, prior?: string) {
       observed["titleListRequests"] = provider.titleListRequests();
       observed["fileRequests"] = provider.fileRequests();
       observed["detailRequests"] = provider.detailRequests();
+
       if (
         provider.titleListRequests() !== 4 ||
         provider.fileRequests() !== 0 ||
@@ -1082,6 +1159,7 @@ async function run(scenario: Scenario, prior?: string) {
         launch,
         quit,
       };
+
       if (scenario === "guide-grid")
         await guideGridScenario(driver, {
           streams: () => ({
@@ -1232,6 +1310,7 @@ async function run(scenario: Scenario, prior?: string) {
         ),
       );
       await key("Enter", 13);
+
       const video = () =>
         livePage.evaluate<{
           time: number;
@@ -1246,8 +1325,10 @@ async function run(scenario: Scenario, prior?: string) {
           audio: v?.webkitAudioDecodedByteCount ?? 0, muted: v?.muted ?? false,
           paused: v?.paused ?? true, watching: !!document.querySelector('[data-view=watch]') };
       })()`);
+
       await wait(async () => {
         const v = await video();
+
         return v.time >= 1 && v.width > 0 && v.audio > 0 && v.watching;
       });
       observed["playback"] = await video();
@@ -1256,6 +1337,7 @@ async function run(scenario: Scenario, prior?: string) {
       await key("Escape", 27);
       await wait(async () => {
         const v = await video();
+
         return !v.watching && v.muted && !v.paused;
       });
       observed["home"] = await video();
@@ -1263,10 +1345,12 @@ async function run(scenario: Scenario, prior?: string) {
       await click("Return through Watch", button("button", "Watch"));
       await wait(async () => {
         const v = await video();
+
         return v.watching && !v.muted && !v.paused;
       });
       await delay(1000, undefined, { signal: abort.signal });
       observed["additionalStreamRequests"] = provider.streamRequests() - requests;
+
       if (observed["additionalStreamRequests"] !== 0 || provider.activeStreams() !== 1)
         throw new Error("Home/Watch opened another stream.");
     } else {
@@ -1276,6 +1360,7 @@ async function run(scenario: Scenario, prior?: string) {
         observed["emptyNavigation"] = true;
         await capture("empty-navigation");
       }
+
       await click("Open Movies", button("header button", "Movies"));
       await click("Open All movies", button("nav button", "All movies"));
       const poster = `[...document.querySelectorAll('button[title]')].find(b => b.title.includes('Two sound tracks'))`;
@@ -1284,6 +1369,7 @@ async function run(scenario: Scenario, prior?: string) {
       await wait(() => exists(button('[role="dialog"] button', "Play")));
       await wait(async () => tmdb!.aboutRequests() >= 1);
       await capture("movie-details");
+
       if (scenario === "watchlist") {
         await click("Save movie", button('[role="dialog"] button', "Save"));
         await wait(() => exists(button('[role="dialog"] button', "Saved")));
@@ -1329,29 +1415,36 @@ async function run(scenario: Scenario, prior?: string) {
         );
         await wait(async () => tmdb!.aboutRequests() >= 2);
         observed["tmdbAboutRequests"] = tmdb.aboutRequests();
+
         if (tmdb.aboutRequests() < 2)
           throw new Error("Movie and series details never reached fixture TMDB.");
       }
     }
+
     observed["streamRequests"] = provider.streamRequests();
     observed["activeStreams"] = provider.activeStreams();
     const profileFiles = await readdir(profile);
     observed["profileFiles"] = profileFiles;
+
     if (!profileFiles.includes("mrstreamer.db")) throw new Error("No persisted app database.");
     await capture("result");
     await doctor();
+
     if (scenario === "slow-catalogue" && runtimeExceptions.length > 0)
       throw new Error("Slow catalogue raised renderer runtime exceptions; see runtimeExceptions.");
   } catch (error) {
     failed = error;
+
     if (scenario === "live-categories" && page)
       observed["failedFixtureUi"] = await page
         .evaluate("document.body.innerText")
         .catch(() => "unavailable");
+
     if (page) {
       const shot = await page
         .send("Page.captureScreenshot", { format: "png" })
         .catch(() => undefined);
+
       if (record(shot?.result) && typeof shot.result["data"] === "string")
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
@@ -1359,6 +1452,7 @@ async function run(scenario: Scenario, prior?: string) {
     releaseTitles?.();
     releaseGuide?.();
     const cleanupErrors: string[] = [];
+
     const clean = async (operation: () => Promise<unknown>) => {
       try {
         await operation();
@@ -1366,50 +1460,64 @@ async function run(scenario: Scenario, prior?: string) {
         cleanupErrors.push(String(error));
       }
     };
+
     if (app) {
       const ownedApp = app;
       await clean(() => stop(ownedApp, page));
     }
+
     page?.close();
+
     if (provider) {
       const ownedProvider = provider;
       await clean(() => ownedProvider.close());
+
       // The provider hears a stream's socket close a moment after the app's process ends.
       for (let i = 0; i < 20 && ownedProvider.activeStreams() !== 0; i++) await delay(100);
       observed["streamsAfterAppExit"] = ownedProvider.activeStreams();
+
       if (ownedProvider.activeStreams() !== 0)
         cleanupErrors.push("Provider still has active streams after app exit.");
     }
+
     if (playlist) {
       const ownedPlaylist = playlist;
       await clean(() => ownedPlaylist.close());
     }
+
     if (other) {
       const ownedOther = other;
       await clean(() => ownedOther.close());
     }
+
     if (guideHosts) {
       const owned = guideHosts;
       await clean(() => Promise.all([owned.north.close(), owned.south.close()]));
     }
+
     if (movedHost) {
       const owned = movedHost;
       await clean(() => owned.close());
     }
+
     if (labelHost) {
       const owned = labelHost;
       await clean(() => owned.close());
     }
+
     if (tmdb) {
       const ownedTmdb = tmdb;
       await clean(() => ownedTmdb.close());
     }
+
     if (profile && (!app || app.exitCode !== null || app.signalCode !== null)) {
       const ownedProfile = profile;
       await clean(() => rm(ownedProfile, { recursive: true, force: true, maxRetries: 5 }));
     }
+
     process.off("SIGINT", interrupt);
     process.off("SIGTERM", interrupt);
+
     if (cleanupErrors.length) failed ??= new Error(cleanupErrors.join("\n"));
     await writeFile(join(evidence, "electron.log"), log.join(""));
     await writeFile(
@@ -1454,5 +1562,6 @@ async function run(scenario: Scenario, prior?: string) {
     console.log(`${failed ? "FAIL" : "PASS"} ${scenario}: ${evidence}`);
     await access(join(evidence, "proof.json"));
   }
+
   if (failed) throw failed;
 }

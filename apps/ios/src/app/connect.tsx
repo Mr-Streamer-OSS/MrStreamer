@@ -21,6 +21,7 @@ export default function Connect() {
   const { fontScale } = useWindowDimensions();
   const downloads = useDownloads();
   const [form, setForm] = useState(false);
+
   return (
     <SafeAreaView style={styles.screen} edges={form ? [] : ["top", "bottom"]}>
       <ScrollView

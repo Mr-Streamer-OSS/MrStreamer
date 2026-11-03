@@ -51,18 +51,22 @@ import {
 } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) throw new Error("Usage: node test/e2e/packaged-app.ts <app executable> [-- args]");
+
 const updater = /[\\/]WindowsApps[\\/]/i.test(executable)
   ? "store"
   : executable.startsWith("/snap/")
     ? "snap"
     : "direct";
+
 const target =
   process.platform === "darwin"
     ? "mac-arm64"
     : process.platform === "win32"
       ? "win-x64"
       : "linux-x64";
+
 // AppImages unpack resources into a runtime mount. Package jobs retain their exact vendor input.
 const toolDirectory = executable.endsWith(".AppImage")
   ? join(import.meta.dirname, "../../vendor/ffmpeg", target)
@@ -71,6 +75,7 @@ const toolDirectory = executable.endsWith(".AppImage")
       process.platform === "darwin" ? "../Resources" : "resources",
       "ffmpeg",
     );
+
 const ffmpeg =
   process.env["MR_STREAMER_FFMPEG"] ??
   join(toolDirectory, process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
@@ -79,7 +84,9 @@ const CHANNELS = ["TEST | H.264 + AAC", "TEST | H.264 + MP2"];
 const port = 20000 + Math.floor(Math.random() * 20000);
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
 const evidenceRoot = join(import.meta.dirname, "../../../../.local/verification");
+
 mkdirSync(evidenceRoot, { recursive: true });
+
 const evidence = mkdtempSync(join(evidenceRoot, "packaged-app-"));
 const observed: Record<string, unknown> = {};
 const provider = await startFakeProvider({ channels: 60, live: true });
@@ -88,24 +95,29 @@ const app = launch(executable, rest, { port, profile });
 
 let failed = false;
 let openPage: Page | null = null;
+
 try {
   const page = await connect(port);
   openPage = page;
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
+
   const status = await page.evaluate<{ value?: { distribution: string } }>(
     `window.mrStreamer.invoke("updates.status")`,
   );
+
   const distribution = status.value?.distribution ?? "nothing";
   console.log(
     `${distribution === updater ? "PASS" : "FAIL"} Updates: ${distribution}, for a ${updater} build`,
   );
   failed ||= distribution !== updater;
+
   for (const channel of CHANNELS) {
     const result = await play(page, channel);
     console.log(`${result.ok ? "PASS" : "FAIL"} ${channel}: ${result.detail}`);
     failed ||= !result.ok;
   }
+
   const shared = await homeAndBack(page);
   console.log(`${shared.ok ? "PASS" : "FAIL"} Home and Watch share one stream: ${shared.detail}`);
   failed ||= !shared.ok;
@@ -132,6 +144,7 @@ try {
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
   observed["error"] = String(error);
+
   if (openPage) {
     try {
       observed["failedView"] = await openPage.evaluate<string>("document.body.innerText");
@@ -140,6 +153,7 @@ try {
       observed["captureError"] = String(captureError);
     }
   }
+
   failed = true;
 } finally {
   observed["hlsRequests"] = [...hls.requests()];
@@ -155,6 +169,7 @@ try {
   );
   console.log(`Packaged smoke evidence: ${evidence}`);
 }
+
 process.exit(failed ? 1 : 0);
 
 /** Picks a channel through search and waits for picture and sound. */
@@ -166,6 +181,7 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
   await key(page, "Enter", 13);
   const until = Date.now() + 25_000;
   let last = { time: 0, width: 0, audio: 0, title: "" };
+
   while (Date.now() < until) {
     await delay(250);
     last = await page.evaluate(`(() => {
@@ -177,6 +193,7 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
         title: document.querySelector("h2")?.textContent ?? "",
       };
     })()`);
+
     if (last.time >= 1 && last.width > 0 && last.audio > 0) {
       return {
         ok: true,
@@ -184,6 +201,7 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
       };
     }
   }
+
   return {
     ok: false,
     detail: `clock ${last.time.toFixed(2)} s, width ${last.width}, sound ${last.audio} bytes, "${last.title}"`,
@@ -193,6 +211,7 @@ async function play(page: Page, channel: string): Promise<{ ok: boolean; detail:
 /** Leaves Watch for Home, where the stream plays on muted, then watches it again from there. */
 async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }> {
   const requests = provider.streamRequests();
+
   const state = () =>
     page.evaluate<{ watching: boolean; muted: boolean; playing: boolean }>(`(() => {
       const video = document.querySelector("video");
@@ -202,6 +221,7 @@ async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }>
         playing: !!video && video.isConnected && !video.paused,
       };
     })()`);
+
   await key(page, "Escape", 27);
   await waitFor(async () => !(await state()).watching, 10_000);
   const home = await state();
@@ -213,6 +233,7 @@ async function homeAndBack(page: Page): Promise<{ ok: boolean; detail: string }>
   const watch = await state();
   const extra = provider.streamRequests() - requests;
   const ok = home.playing && home.muted && watch.playing && !watch.muted && extra === 0;
+
   return {
     ok,
     detail: `Home ${home.playing ? "playing" : "stopped"}${home.muted ? " muted" : " with sound"}, Watch ${watch.playing ? "playing" : "stopped"}${watch.muted ? " muted" : " with sound"}, ${extra} more stream requests, ${provider.activeStreams()} open`,
@@ -240,6 +261,7 @@ async function playMovie(
   const play = `[...document.querySelectorAll('[role="dialog"] button')].find((b) => /^(Play|Resume)$/.test(b.textContent.trim()))`;
   await waitFor(() => page.evaluate<boolean>(`!!${play}`), 20_000);
   await page.evaluate(`${play}.click()`);
+
   const state = () =>
     page.evaluate<{ time: number; width: number; audio: number; frames: number }>(`(() => {
       const video = document.querySelector("video");
@@ -250,40 +272,49 @@ async function playMovie(
         frames: video?.webkitDecodedFrameCount ?? 0,
       };
     })()`);
+
   let started = { time: 0, width: 0, audio: 0, frames: 0 };
   const until = Date.now() + 30_000;
+
   while (Date.now() < until && !(started.time >= 1 && started.width > 0 && started.audio > 0)) {
     await delay(250);
     started = await state();
   }
+
   if (started.time < 1 || started.audio === 0 || started.frames === 0) {
     return {
       ok: false,
       detail: `clock ${started.time.toFixed(2)} s, sound ${started.audio} bytes`,
     };
   }
+
   await key(page, "ArrowRight", 39);
   // A skip into what's buffered is instant. Further, a new run starts there, and the element's
   // clock reads 0 until its first picture arrives, about two seconds on a busy machine.
   let skipped = await state();
   const skipUntil = Date.now() + 10_000;
+
   while (Date.now() < skipUntil && skipped.time < started.time + 9) {
     await delay(250);
     skipped = await state();
   }
+
   if (captureName) {
     observed[captureName] = { started, skipped };
     await capture(page, captureName);
   }
+
   await key(page, "Escape", 27);
   await delay(1500);
   const open = provider.activeStreams();
+
   const ok =
     skipped.time >= started.time + 9 &&
     skipped.frames > 0 &&
     skipped.audio > 0 &&
     open === 0 &&
     (expectedWidth === undefined || started.width === expectedWidth);
+
   return {
     ok,
     detail: `played to ${started.time.toFixed(1)} s with ${started.audio} bytes of sound, skipped to ${skipped.time.toFixed(1)} s, ${open} connections open after leaving`,
@@ -293,6 +324,7 @@ async function playMovie(
 /** A previously unopened address makes main probe the actual replacement VP9/AAC bytes. */
 async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }> {
   const output = join(profile, "vp9-aac.mp4");
+
   const args = [
     "-v",
     "error",
@@ -322,10 +354,14 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     "-y",
     output,
   ];
+
   const tools = fixtureTools(ffmpeg, profile);
   const made = spawnSync(tools.ffmpeg, args, { encoding: "utf8" });
+
   if (made.error) throw made.error;
+
   if (made.status !== 0) throw new Error(`VP9 fixture creation failed: ${made.stderr}`);
+
   const probe = spawnSync(
     tools.ffprobe,
     [
@@ -340,12 +376,16 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     ],
     { encoding: "utf8" },
   );
+
   if (probe.error) throw probe.error;
+
   if (probe.status !== 0) throw new Error(`VP9 fixture probe failed: ${probe.stderr}`);
+
   const source = JSON.parse(probe.stdout) as {
     streams: { codec_type: string; codec_name: string; nb_read_frames: string }[];
     format: { duration: string };
   };
+
   if (
     !source.streams.some(
       (stream) => stream.codec_name === "vp9" && Number(stream.nb_read_frames) > 0,
@@ -358,6 +398,7 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     throw new Error("Expected a finite 24-second VP9/AAC fixture");
   const bytes = readFileSync(output);
   const movie = provider.titles.movies.find((each) => each.name.includes("Index at the end"));
+
   if (!movie) throw new Error("No unopened MP4 movie to replace");
   provider.replaceMovieFile(movie.id, bytes);
   observed["vp9Source"] = {
@@ -368,6 +409,7 @@ async function playVp9Movie(page: Page): Promise<{ ok: boolean; detail: string }
     tools,
     args,
   };
+
   return playMovie(page, "Index at the end", "vp9-movie", 96);
 }
 
@@ -407,6 +449,7 @@ async function convertedHls(page: Page): Promise<void> {
 async function capture(page: Page, name: string): Promise<void> {
   const shot = await page.send("Page.captureScreenshot", { format: "png" });
   const result = shot.result;
+
   if (
     !result ||
     typeof result !== "object" ||
@@ -440,6 +483,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   await waitFor(() => page.evaluate<boolean>(`!!${play}`), 20_000);
   await page.evaluate(`${play}.click()`);
   const time = () => page.evaluate<number>(`document.querySelector("video")?.currentTime ?? 0`);
+
   const drawn = () =>
     page.evaluate<number>(`(() => {
       const canvas = document.querySelector("canvas[aria-hidden]");
@@ -448,6 +492,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
       for (let index = 3; index < (data?.length ?? 0); index += 4) if (data[index] > 0) count++;
       return count;
     })()`);
+
   const choose = async (label: string) => {
     await page.evaluate(
       `document.querySelector("[data-view=title]").dispatchEvent(new MouseEvent("mousemove", { bubbles: true }))`,
@@ -455,6 +500,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
     const menu = `document.querySelector('[data-view="title"] button[aria-label="Subtitles"]')`;
     const panel = `document.querySelector('aside[aria-label="Subtitle choices"]')`;
     await waitFor(() => page.evaluate<boolean>(`!!${menu}`), 10_000);
+
     if (!(await page.evaluate<boolean>(`!!${panel}`))) await page.evaluate(`${menu}.click()`);
     const track = `[...document.querySelectorAll('aside[aria-label="Subtitle choices"] button[data-item]')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
     await waitFor(() => page.evaluate<boolean>(`!!${track}`), 10_000);
@@ -463,6 +509,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
     await page.evaluate(`${panel}.querySelector('[aria-label="Close subtitles"]').click()`);
     await waitFor(() => page.evaluate<boolean>(`!${panel}`), 10_000);
   };
+
   await waitFor(async () => (await time()) > 0.1, 30_000);
   await choose("English");
   await waitFor(async () => (await time()) >= 2.5, 30_000);
@@ -472,6 +519,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   await waitFor(async () => (await time()) >= 8.5, 30_000);
   await delay(300);
   const dutch = await drawn();
+
   // Choosing subtitles starts a run where the title is. Paused, at a position within what's
   // loaded, only that run puts anything on screen.
   const startAt = async (position: number, label: string) => {
@@ -482,6 +530,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
       video.addEventListener("timeupdate", () => resolve(video.src), { once: true });
       video.currentTime = ${position};
     })`);
+
     await choose(label);
     await waitFor(
       () =>
@@ -502,16 +551,20 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
       15_000,
     );
     await delay(300);
+
     return drawn();
   };
+
   await key(page, " ", 32);
   await waitFor(() => page.evaluate<boolean>(`document.querySelector("video").paused`), 10_000);
   const inside = await startAt(6.5, "English");
   const after = await startAt(7.5, "Nederlands · Forced");
+
   // Text shows as lines over the picture, where the pictures of the track before have gone.
   // What the viewer can read of it: text a style hides isn't part of that.
   const text = () =>
     page.evaluate<string>(`document.querySelector("[data-subtitle-text]")?.innerText ?? ""`);
+
   const pictures = await startAt(6.5, "Français");
   const french = await text();
   // A skip within what's loaded, still paused: the line ended at 7 s.
@@ -526,6 +579,7 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
   await delay(300);
   const skipped = await text();
   await key(page, "Escape", 27);
+
   return {
     ok:
       english > 0 &&
@@ -546,10 +600,13 @@ async function pictureSubtitles(page: Page): Promise<{ ok: boolean; detail: stri
 async function receivers(page: Page): Promise<{ ok: boolean; detail: string }> {
   const expected =
     process.platform === "darwin" ? ["airplay"] : process.platform === "win32" ? ["cast"] : [];
+
   const status = await page.evaluate<{ value?: { offers: string[] } }>(
     `window.mrStreamer.invoke("output.status")`,
   );
+
   const offers = status.value?.offers ?? [];
+
   return { ok: offers.join() === expected.join(), detail: offers.join(", ") || "none" };
 }
 
@@ -570,5 +627,6 @@ async function creditsNotices(page: Page): Promise<{ ok: boolean; detail: string
         : name + ": " + (text.ok ? "empty" : text.error.detail);
     }));
   })()`);
+
   return { ok: opened.every((each) => each.endsWith(" characters")), detail: opened.join("; ") };
 }

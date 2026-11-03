@@ -25,6 +25,7 @@ describe("stable GitHub release history", () => {
         ]),
       ),
     );
+
     expect(history?.map((release) => release.version)).toEqual(["0.0.8", "0.0.7"]);
     expect(newestStable(history ?? [])?.version).toBe("0.0.7");
     expect(newestStable(history?.slice(0, 1) ?? [])).toBeNull();
@@ -41,6 +42,7 @@ describe("stable GitHub release history", () => {
           ]),
         ),
     );
+
     expect(history?.[0]?.version).toBe("1.9.0");
     expect(newestStable(history ?? [])?.version).toBe("1.10.0");
     expect(newestStable([])).toBeNull();
@@ -52,6 +54,7 @@ describe("stable GitHub release history", () => {
         row("1.0.1-nightly.1", "2026-01-02T00:00:00Z", { prerelease: true }),
       ),
     ];
+
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json(first))
@@ -62,6 +65,7 @@ describe("stable GitHub release history", () => {
           row("1.0.3-nightly.1", "2026-01-05T00:00:00Z"),
         ]),
       );
+
     expect(await stableReleases(request)).toEqual([
       {
         version: "1.0.1",
@@ -89,6 +93,7 @@ describe("stable GitHub release history", () => {
         Response.json(Array.from({ length: 100 }, () => row("1.0.0", "2026-01-01T00:00:00Z"))),
       )
       .mockResolvedValueOnce(new Response(null, { status: 403 }));
+
     expect(await stableReleases(request)).toBeNull();
   });
 
@@ -110,6 +115,7 @@ describe("stable GitHub release history", () => {
 
   it("uses an available workflow token only in the GitHub API request, with redirects refused", async () => {
     vi.stubEnv("GH_TOKEN", "test-workflow-token");
+
     try {
       const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json([]));
       await stableReleases(request);

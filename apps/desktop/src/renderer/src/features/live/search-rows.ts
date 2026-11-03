@@ -11,6 +11,7 @@ export function searchQualities(copies: readonly LiveChannel[]): string {
       copy.variants.map((variant) => [variant.quality, shortQuality(variant)] as const),
     ),
   );
+
   return QUALITIES.flatMap((quality) => labelled.get(quality) ?? []).join(" · ");
 }
 
@@ -29,6 +30,7 @@ export function rowPlays(
   playingKey: string | null,
 ): boolean {
   const copies = row && !row.copy ? row.group.copies : [channel];
+
   return copies.some((copy) => ownedKey(copy) === playingKey);
 }
 
@@ -40,6 +42,7 @@ export function searchChannelRows(
 ): readonly SearchChannelRow[] {
   return groups.flatMap((group) => {
     const channel = group.copies.find((copy) => matches[ownedKey(copy)]) ?? group.copies[0]!;
+
     return [
       { key: group.key, group, copy: false, channel },
       ...(expanded.has(group.key) && group.copies.length > 1

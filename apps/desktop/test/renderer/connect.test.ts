@@ -10,9 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectScreen } from "../../src/renderer/src/features/connect/ConnectScreen.tsx";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -36,12 +38,14 @@ async function connectScreen(): Promise<HTMLElement> {
   await view.render(createElement(ConnectScreen));
   await settled(() => {});
   unmount = view.unmount;
+
   return view.container;
 }
 
 /** Types into the login form's fields, in order: server, username, password. */
 function type(screen: HTMLElement, values: readonly string[]): Promise<void> {
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+
   return settled(() =>
     screen.querySelectorAll("input").forEach((input, index) => {
       setValue?.call(input, values[index] ?? "");

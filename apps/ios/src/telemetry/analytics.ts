@@ -21,8 +21,10 @@ import type { CaptureTransport } from "./transport.ts";
 
 /** Captures per minute. A viewer stays far below it; a runaway producer loses the rest. */
 const RATE_LIMIT = 60;
+
 /** How long a confirmed playing state counts without the clock moving on. */
 const PLAYING_LEASE_MS = 5000;
+
 /** How often a counted run's stop is saved, for a launch after iOS ended the app. */
 const CHECKPOINT_MS = 60_000;
 
@@ -95,18 +97,22 @@ export class Analytics {
 
   constructor(ports: AnalyticsPorts) {
     this.ports = ports;
+
     try {
       this.record = loaded(ports.store.load());
     } catch {
       // Unreadable: nothing is captured until the viewer's next choice writes a new record.
       this.available = false;
     }
+
     this.settings = store(this.snapshot());
+
     // Old beta records collected by default without a choice. Erase that work before any
     // observation, recovery or delivery can run, including after a later opt-in.
     if (this.record?.choice === null) this.save(this.record);
     // A stop saved before iOS ended the app last time is that run's end.
     const unfinished = this.record?.unfinished;
+
     if (this.record && unfinished) {
       this.save({
         ...this.record,
@@ -128,18 +134,23 @@ export class Analytics {
    */
   configure(enabled: boolean): AnalyticsSettings {
     const choice = enabled ? "on" : "off";
+
     if (this.available && this.record && this.enabled() === enabled) {
       // Choosing what's already in effect only saves the choice.
       if (this.record.choice !== choice) this.save({ ...this.record, choice });
+
       return this.settings.get();
     }
+
     this.revision++;
     this.abort();
+
     if (this.run) {
       this.settle();
       this.run.started = true;
       this.run.reported = false;
     }
+
     const record = this.record ?? fresh();
     this.available = true;
     this.save({
@@ -151,6 +162,7 @@ export class Analytics {
     this.settings.set(this.snapshot());
     this.observe();
     this.pump();
+
     return this.settings.get();
   }
 
@@ -160,8 +172,10 @@ export class Analytics {
     this.settle();
     this.foreground = active;
     this.count();
+
     if (this.dayTimer) clearInterval(this.dayTimer);
     this.dayTimer = null;
+
     if (active) {
       this.observe();
       this.pump();
@@ -180,8 +194,10 @@ export class Analytics {
   /** The player's state changed. A different run ends the one before. */
   notePlayback(view: PlaybackView): void {
     this.settle();
+
     if (view.run !== this.run?.identity) {
       this.finishRun();
+
       if (view.run) {
         this.run = {
           identity: view.run,
@@ -195,8 +211,10 @@ export class Analytics {
         };
       }
     }
+
     this.view = view;
     this.count();
+
     // Only the player playing again ends an incident. The clock can't: it resets while a failed
     // stream is let go, before the player shows the failure.
     if (this.run && this.counting()) this.run.incident = false;
@@ -208,6 +226,7 @@ export class Analytics {
     this.settle();
     this.count();
     const run = this.run;
+
     if (run?.reported && this.ports.monotonic() - run.checkpoint >= CHECKPOINT_MS) {
       this.checkpoint();
     }
@@ -216,6 +235,7 @@ export class Analytics {
   /** The current run failed, before the player shows it. Once per incident, if it was seen. */
   notePlaybackFailure(failure: AnalyticsFailure): void {
     const run = this.run;
+
     if (!run || run.incident || !this.view.watched) return;
     run.incident = this.capture("stream_error", { stream_type: run.kind, error_type: failure });
   }
@@ -233,6 +253,7 @@ export class Analytics {
 
   private counting(): boolean {
     const { view } = this;
+
     return (
       this.run !== null && view.playing && view.watched && (this.foreground || view.background)
     );
@@ -241,14 +262,18 @@ export class Analytics {
   /** Opens or closes the counted interval for the current state; a first one starts the run. */
   private count(): void {
     const run = this.run;
+
     if (!run || !this.counting()) {
       this.interval = null;
+
       return;
     }
+
     if (!run.started) {
       run.started = true;
       run.reported = this.capture("stream_started", { stream_type: run.kind });
     }
+
     const mono = this.ports.monotonic();
     this.interval = { mono, until: mono + PLAYING_LEASE_MS };
   }
@@ -259,6 +284,7 @@ export class Analytics {
    */
   private settle(): void {
     const { interval, run } = this;
+
     if (!interval || !run) return;
     const mono = this.ports.monotonic();
     run.watchMs += Math.max(0, Math.min(mono, interval.until) - interval.mono);
@@ -269,8 +295,10 @@ export class Analytics {
     const run = this.run;
     this.run = null;
     this.interval = null;
+
     if (!run?.reported) return;
     this.capture("stream_stopped", this.stopOf(run), run.stop);
+
     if (this.record?.unfinished) this.save({ ...this.record, unfinished: null });
   }
 
@@ -284,9 +312,11 @@ export class Analytics {
   /** Saves the current run's stop as it stands, for the next launch if this one is ended. */
   private checkpoint(): void {
     const { run, record } = this;
+
     if (!run?.reported || !record || !this.enabled()) return;
     this.settle();
     const event = this.event("stream_stopped", this.stopOf(run), run.stop);
+
     if (!event) return;
     run.checkpoint = this.ports.monotonic();
     this.save({ ...record, unfinished: event });
@@ -295,12 +325,15 @@ export class Analytics {
   /** One UTC activity observation per day; the first one also observes the installation. */
   private observe(): void {
     const record = this.record;
+
     if (!record || !this.foreground || !this.enabled() || !this.ports.transport) return;
     const timestamp = new Date().toISOString();
     const day = timestamp.slice(0, 10);
+
     if (record.lastDay !== null && day <= record.lastDay) return;
     const installationId = record.installationId ?? this.ports.uuid();
     const common = this.common();
+
     const observed: CaptureEvent[] = [
       ...(record.installationId === null
         ? [
@@ -321,6 +354,7 @@ export class Analytics {
         properties: { ...common, activity_date: day },
       },
     ];
+
     this.save({
       ...record,
       installationId,
@@ -340,7 +374,9 @@ export class Analytics {
     uuid = this.ports.uuid(),
   ): CaptureEvent | null {
     const installationId = this.record?.installationId;
+
     if (!installationId) return null;
+
     const event = CaptureEvent()({
       uuid,
       distinct_id: installationId,
@@ -348,6 +384,7 @@ export class Analytics {
       event: name,
       properties: { ...this.common(), ...properties },
     });
+
     return event instanceof type.errors ? null : event;
   }
 
@@ -358,17 +395,24 @@ export class Analytics {
     uuid?: string,
   ): boolean {
     const record = this.record;
+
     if (!record || !this.enabled() || !this.ports.transport) return false;
     const event = this.event(name, properties, uuid);
+
     if (!event) return false;
     const now = this.ports.monotonic();
+
     if (now - this.rate.start >= 60_000) this.rate = { start: now, count: 0 };
+
     if (this.rate.count >= RATE_LIMIT) return false;
     this.rate.count++;
+
     if (!this.save({ ...record, pending: bounded([...record.pending, queued(event)]) })) {
       return false;
     }
+
     this.pump();
+
     return true;
   }
 
@@ -377,15 +421,18 @@ export class Analytics {
     const transport = this.ports.transport;
     const record = this.record;
     const next = record?.pending[0];
+
     if (!transport || !record || !next || this.request || this.retryTimer || !this.enabled())
       return;
     const revision = this.revision;
     const attempts = next.attempts + 1;
+
     // An attempt that can't be saved isn't made: a later launch couldn't tell it was.
     const saved = this.save({
       ...record,
       pending: record.pending.map((item) => (item === next ? { ...item, attempts } : item)),
     });
+
     if (!saved) return;
     const request = new AbortController();
     this.request = request;
@@ -394,16 +441,20 @@ export class Analytics {
       .catch(() => "retry" as const)
       .then((result) => {
         if (this.request === request) this.request = null;
+
         if (revision !== this.revision || !this.record || !this.enabled()) return;
         const retry = result === "retry" && attempts < ATTEMPTS;
+
         if (!retry) {
           this.save({
             ...this.record,
             pending: this.record.pending.filter((item) => item.event.uuid !== next.event.uuid),
           });
           this.pump();
+
           return;
         }
+
         this.retryTimer = setTimeout(() => {
           this.retryTimer = null;
           this.pump();
@@ -416,11 +467,13 @@ export class Analytics {
     try {
       this.ports.store.save(record);
       this.record = record;
+
       return true;
     } catch {
       this.available = false;
       this.abort();
       this.settings.set(this.snapshot());
+
       return false;
     }
   }
@@ -429,6 +482,7 @@ export class Analytics {
   private abort(): void {
     this.request?.abort();
     this.request = null;
+
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
   }
@@ -449,8 +503,11 @@ function fresh(): AnalyticsRecord {
 function loaded(saved: unknown): AnalyticsRecord {
   if (saved === null) return fresh();
   const record = AnalyticsRecord()(saved);
+
   if (record instanceof type.errors) throw new Error("Analytics state unavailable.");
+
   if (record.choice === null) return fresh();
+
   if (
     (record.installationId === null) !== (record.lastDay === null) ||
     (record.choice === "off" && (record.pending.length > 0 || record.unfinished !== null)) ||
@@ -460,6 +517,7 @@ function loaded(saved: unknown): AnalyticsRecord {
     (record.unfinished !== null && record.unfinished.event !== "stream_stopped")
   )
     throw new Error("Analytics state unavailable.");
+
   // An event whose attempts ran out while the app was ended mid-request goes no further.
   return { ...record, pending: record.pending.filter((item) => item.attempts < ATTEMPTS) };
 }
@@ -471,9 +529,11 @@ function queued(event: CaptureEvent): AnalyticsRecord["pending"][number] {
 /** Keeps the newest events and a pending first observation when the outbox overflows. */
 function bounded(pending: AnalyticsRecord["pending"]): AnalyticsRecord["pending"] {
   const kept = [...pending];
+
   while (kept.length > OUTBOX_LIMIT) {
     const oldest = kept.findIndex((item) => item.event.event !== "installation_observed");
     kept.splice(oldest, 1);
   }
+
   return kept;
 }

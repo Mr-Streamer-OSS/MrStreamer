@@ -28,13 +28,17 @@ const Identity = type({
   run: { id: Id, attempt: Id, headCommit: Sha },
   artifact: { id: Id, name: FileName, sha256: Hash },
 });
+
 const Schema = Identity.and({
   schemaVersion: "1",
   status: "'success'",
   files: type({ name: FileName, bytes: Id, sha256: Hash }).array(),
 });
+
 export type PackageReceipt = typeof Schema.infer;
+
 export type PackageIdentity = typeof Identity.infer;
+
 export type PackageRequest = Pick<
   PackageIdentity,
   | "sourceCommit"
@@ -88,6 +92,7 @@ function requiredFiles(
   if (identity.distribution === "direct")
     return platformFiles(identity.appVersion, identity.platform);
   const base = `Mr-Streamer-${identity.appVersion}-${identity.platform}`;
+
   return [`${base}.msix`, `${base}.msix.json`, `${base}.wack.xml`];
 }
 
@@ -111,6 +116,7 @@ function readReceipt(value: unknown): PackageReceipt {
     JSON.stringify(names) === JSON.stringify(expected),
     `expected exactly ${expected.join(", ")}.`,
   );
+
   return receipt;
 }
 
@@ -120,6 +126,7 @@ export function producePackageReceipt(
   files: ReadonlyMap<string, Uint8Array>,
 ): PackageReceipt {
   Identity.assert(identity);
+
   return readReceipt({
     ...identity,
     schemaVersion: 1,
@@ -131,17 +138,21 @@ export function producePackageReceipt(
 /** Lists every artifact without mistaking a truncated response for a missing receipt. */
 export async function packageArtifacts(github: PackageGitHub, runId: number) {
   const all: (typeof Artifact.infer)[] = [];
+
   for (let page = 1; page <= 10; page++) {
     const result = type({ total_count: "number.integer >= 0", artifacts: Artifact.array() }).assert(
       await github.json(`/actions/runs/${runId}/artifacts?per_page=100&page=${page}`),
     );
+
     all.push(...result.artifacts);
+
     if (all.length === result.total_count) return all;
     check(
       result.artifacts.length > 0 && all.length < result.total_count,
       "incomplete artifact listing.",
     );
   }
+
   throw new Error("Package receipt: run has too many artifacts to check.");
 }
 
@@ -170,13 +181,16 @@ async function download(
     `${artifact.name} does not match its digest.`,
   );
   const names = new Set<string>();
+
   const entries = unzipSync(archive, {
     filter: (file) => {
       check(!names.has(file.name), `${artifact.name} repeats ${file.name}.`);
       names.add(file.name);
+
       return true;
     },
   });
+
   return { archive, files: new Map(Object.entries(entries)) };
 }
 
@@ -195,10 +209,13 @@ export async function resolvePackageReceipt(
     downloaded.files.size === 1 && downloaded.files.has("package-receipt.json"),
     `${receiptArtifact.name} must hold package-receipt.json alone.`,
   );
+
   const receipt = readReceipt(
     JSON.parse(new TextDecoder().decode(downloaded.files.get("package-receipt.json")!)),
   );
+
   check(receipt.repository === github.repository, "repository does not match the request.");
+
   for (const key of [
     "sourceCommit",
     "workflowCommit",
@@ -208,6 +225,7 @@ export async function resolvePackageReceipt(
     "distribution",
   ] as const)
     check(receipt[key] === request[key], `${key} is ${receipt[key]}, expected ${request[key]}.`);
+
   for (const key of ["id", "attempt", "headCommit"] as const)
     check(receipt.run[key] === request.run[key], `run.${key} does not match the request.`);
   const packages = artifacts.filter((artifact) => artifact.name === artifactName(request));
@@ -223,12 +241,14 @@ export async function resolvePackageReceipt(
     packaged.files.size === receipt.files.length,
     "package artifact has missing or additional files.",
   );
+
   for (const file of receipt.files) {
     const bytes = packaged.files.get(file.name);
     check(bytes, `package artifact is missing ${file.name}.`);
     check(bytes.length === file.bytes, `${file.name} byte count does not match the receipt.`);
     check(hash(bytes) === file.sha256, `${file.name} SHA-256 does not match the receipt.`);
   }
+
   return {
     receipt,
     receiptArtifact,
@@ -245,10 +265,13 @@ if (import.meta.main) {
   const env = process.env;
   const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   check(sourceCommit === env["PACKAGE_SOURCE"], "checkout is not the planned source commit.");
+
   const app = type({ version: AppVersion }).assert(
     JSON.parse(await readFile("package.json", "utf8")),
   );
+
   check(app.version === env["PACKAGE_APP_VERSION"], "package.json is not the planned app version.");
+
   const identity = Identity.assert({
     repository: env["GITHUB_REPOSITORY"],
     sourceCommit,
@@ -268,22 +291,27 @@ if (import.meta.main) {
       sha256: env["PACKAGE_ARTIFACT_SHA256"],
     },
   });
+
   const expected = requiredFiles(identity);
+
   // Match the upload action's extensions so an extra installer fails before a success receipt.
   const uploaded = (await readdir("dist")).filter((file) =>
     identity.distribution === "store"
       ? /\.(?:msix|msix\.json|wack\.xml)$/.test(file)
       : /\.(?:dmg|zip|exe|AppImage|deb|blockmap)$/.test(file) || /^latest.*\.yml$/.test(file),
   );
+
   check(
     JSON.stringify(uploaded.sort()) === JSON.stringify(expected.sort()),
     "dist does not hold the exact uploaded package set.",
   );
+
   const files = new Map(
     await Promise.all(
       expected.map(async (name) => [name, await readFile(join("dist", name))] as const),
     ),
   );
+
   if (identity.distribution === "store") {
     const record = type({
       version: "string",
@@ -295,6 +323,7 @@ if (import.meta.main) {
         new TextDecoder().decode(files.get(expected.find((name) => name.endsWith(".msix.json"))!)!),
       ),
     );
+
     check(
       record.version === identity.appVersion &&
         record.packageVersion === identity.packageVersion &&
@@ -306,6 +335,7 @@ if (import.meta.main) {
       "MSIX verification record does not match the bytes.",
     );
   }
+
   const receipt = producePackageReceipt(identity, files);
   await writeFile("package-receipt.json", `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
 }

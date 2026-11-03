@@ -13,9 +13,11 @@ vi.mock("expo", () => ({
 function native() {
   const sealed = new Map<string, string>();
   let refuse = false;
+
   const guard = () => {
     if (refuse) throw new Error("KeyStoreException");
   };
+
   return {
     sealed,
     refuse: () => void (refuse = true),
@@ -25,6 +27,7 @@ function native() {
       remove: async (id: string) => void (guard(), sealed.delete(id)),
       retain: async (ids: readonly string[]) => {
         guard();
+
         for (const id of sealed.keys()) if (!ids.includes(id)) sealed.delete(id);
       },
     },
@@ -35,6 +38,7 @@ describe("Android credentials", () => {
   it("reads back each source's authority as written, in the JSON native workers read", async () => {
     const phone = native();
     const credentials = nativeCredentials(phone.module);
+
     const authority = {
       kind: "xtream",
       server: "http://tv.example",

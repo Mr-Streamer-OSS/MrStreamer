@@ -33,8 +33,10 @@ const CLI = resolve("apps/desktop/scripts/package-updates.ts");
 
 async function fixture(mode: "stable" | "candidate" = "stable") {
   const version = mode === "stable" ? "0.0.18" : NIGHTLY;
+
   const request: PreparationRequest =
     mode === "stable" ? { mode, version } : { mode, version, run: 900 };
+
   const config = await readConfig(resolve("apps/desktop"));
   // Prove enumeration uses the tag's config, rather than this checkout's archive names.
   config.sources[0] = {
@@ -45,6 +47,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
   const buildScript = await readFile("apps/desktop/scripts/build-ffmpeg.sh");
   const root = await mkdtemp(join(tmpdir(), "package-updates-fixture-"));
   let sources: Awaited<ReturnType<typeof releaseSources>>;
+
   try {
     await mkdir(join(root, "scripts"));
     await writeFile(join(root, "package.json"), JSON.stringify({ version }));
@@ -54,12 +57,14 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+
   const bodies = new Map<string, Uint8Array>(
     [...releaseFiles(version), ...sources.map((source) => source.file)].map((name) => [
       name,
       strToU8(`Synthetic ${name}`),
     ]),
   );
+
   const assets = [...bodies].map(([name, bytes], index) => ({
     id: index + 1,
     name,
@@ -68,10 +73,12 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
     state: "uploaded",
     browser_download_url: `https://github.com/${REPOSITORY}/releases/download/v${version}/${name}`,
   }));
+
   const replaceAsset = (name: string, bytes: Uint8Array) => {
     bodies.set(name, bytes);
     const asset = assets.find((asset) => asset.name === name);
     const facts = { size: bytes.length, digest: `sha256:${sha256(bytes)}` };
+
     if (asset) Object.assign(asset, facts);
     else
       assets.push({
@@ -82,6 +89,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
         browser_download_url: `https://github.com/${REPOSITORY}/releases/download/v${version}/${name}`,
       });
   };
+
   const sums = () =>
     replaceAsset(
       "SHA256SUMS.txt",
@@ -95,7 +103,9 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
           .join(""),
       ),
     );
+
   sums();
+
   const release = {
     tag_name: `v${version}`,
     target_commitish: SOURCE,
@@ -104,12 +114,14 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
     published_at: "2026-10-20T11:59:00Z" as string | null,
     assets,
   };
+
   const histories = new Map(
     [`${SOURCE}...main`, `${MERGE}...${SOURCE}`].map((name) => [
       name,
       { status: "ahead", behind_by: 0 },
     ]),
   );
+
   const run = {
     id: 900,
     run_number: 397,
@@ -122,14 +134,19 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
     head_branch: "main",
     head_repository: { full_name: REPOSITORY },
   };
+
   const artifacts: (typeof Artifact.infer)[] = [];
   const archives = new Map<number, Uint8Array>();
+
   const builds = (["mac-arm64", "linux-x64"] as const).map((platform, index) => {
     const attempt = index + 2;
+
     const files = new Map(
       platformFiles(version, platform).map((name) => [name, bodies.get(name)!]),
     );
+
     const archive = zipSync(Object.fromEntries(files));
+
     const artifact = {
       id: 300 + index * 2,
       name: `release-${platform}-${version}`,
@@ -138,6 +155,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
       expires_at: "2026-10-23T11:57:21Z",
       workflow_run: { id: 900, head_sha: SOURCE },
     };
+
     const receipt = producePackageReceipt(
       {
         repository: REPOSITORY,
@@ -152,52 +170,70 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
       },
       files,
     );
+
     const receiptArtifact = {
       ...artifact,
       workflow_run: { ...artifact.workflow_run },
       id: artifact.id + 1,
       name: `package-receipt-${platform}-direct-${version}-attempt-${attempt}`,
     };
+
     const updateReceipt = (receipt: unknown) => {
       const bytes = zipSync({ "package-receipt.json": strToU8(JSON.stringify(receipt)) });
       archives.set(receiptArtifact.id, bytes);
       receiptArtifact.digest = `sha256:${sha256(bytes)}`;
     };
+
     archives.set(artifact.id, archive);
     artifacts.push(artifact, receiptArtifact);
     updateReceipt(receipt);
+
     return { platform, artifact, receiptArtifact, files, receipt, updateReceipt };
   });
+
   const reads: string[] = [];
+
   const github = {
     repository: REPOSITORY,
     json: async (path: string) => {
       reads.push(path);
+
       if (path === `/releases/tags/v${version}`) return release;
+
       if (path === `/commits/v${version}`) return { sha: SOURCE };
+
       if (path.startsWith("/compare/")) return histories.get(path.slice(9).split("?")[0]!);
+
       if (mode === "candidate" && path === "/actions/runs/900") return run;
+
       if (mode === "candidate" && path === "/actions/runs/900/artifacts?per_page=100&page=1")
         return { artifacts, total_count: artifacts.length };
       throw new Error(`Unexpected GET ${path}`);
     },
     bytes: async (path: string) => {
       reads.push(path);
+
       if (path === `/contents/apps/desktop/licences.config.json?ref=${SOURCE}`)
         return strToU8(JSON.stringify(config));
+
       if (path === `/contents/apps/desktop/scripts/build-ffmpeg.sh?ref=${SOURCE}`)
         return buildScript;
+
       if (path === `/contents/LICENSE?ref=${SOURCE}`)
         return strToU8("Synthetic upstream GPL license\n");
       const asset = assets.find((asset) => path === `/releases/assets/${asset.id}`);
+
       if (asset) return bodies.get(asset.name)!;
+
       const artifact = artifacts.find(
         (artifact) => path === `/actions/artifacts/${artifact.id}/zip`,
       );
+
       if (mode === "candidate" && artifact) return archives.get(artifact.id)!;
       throw new Error(`Unexpected download ${path}`);
     },
   };
+
   return {
     version,
     request,
@@ -216,6 +252,7 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
     prepare: () => preparePackages(github, request, NOW),
   };
 }
+
 type World = Awaited<ReturnType<typeof fixture>>;
 
 describe("package preparation", () => {
@@ -227,6 +264,7 @@ describe("package preparation", () => {
       const templates = await readTemplates();
       const recipes = renderRecipes(preparation, 2, templates);
       const root = await mkdtemp(join(tmpdir(), "package-updates-output-"));
+
       try {
         const receipt = await writePreparation(
           join(root, "first"),
@@ -234,6 +272,7 @@ describe("package preparation", () => {
           recipes,
           templates,
         );
+
         await writePreparation(
           join(root, "second"),
           await world.prepare(),
@@ -246,6 +285,7 @@ describe("package preparation", () => {
           "mr-streamer.rb",
           "preparation.json",
         ]);
+
         for (const name of await readdir(join(root, "first")))
           expect(await readFile(join(root, "first", name))).toEqual(
             await readFile(join(root, "second", name)),
@@ -266,6 +306,7 @@ describe("package preparation", () => {
           `https://github.com/${REPOSITORY}/releases/download/v${world.version}/Mr-Streamer-${world.version}-linux-amd64.deb`,
         );
         expect(recipes.pkgbuild + recipes.cask).not.toMatch(/@[A-Z_]+@|\{\{/);
+
         if (mode === "stable") {
           expect(recipes.pkgbuild).toContain("pkgver=0.0.18\n");
           expect(recipes.cask.startsWith('cask "mr-streamer"')).toBe(true);
@@ -280,6 +321,7 @@ describe("package preparation", () => {
             world.builds[1]!.receipt.artifact.sha256,
           );
         }
+
         // Archive enumeration must not download source archives, even for a candidate.
         for (const source of world.sources)
           expect(world.reads).not.toContain(
@@ -465,13 +507,18 @@ describe("package preparation", () => {
     "refuses a %s checksum entry",
     async (kind) => {
       const world = await fixture();
+
       const lines = new TextDecoder()
         .decode(world.bodies.get("SHA256SUMS.txt"))
         .trimEnd()
         .split("\n");
+
       if (kind === "missing") lines.pop();
+
       if (kind === "duplicate") lines.push(lines[0]!);
+
       if (kind === "extra") lines.push(`${"0".repeat(64)}  unknown.zip`);
+
       if (kind === "malformed") lines[0] = "not a checksum";
       world.replaceAsset("SHA256SUMS.txt", strToU8(`${lines.join("\n")}\n`));
       await expect(world.prepare()).rejects.toThrow(/SHA256SUMS/);
@@ -691,11 +738,15 @@ describe("package preparation", () => {
     async (kind) => {
       const world = await fixture();
       const preparation = await world.prepare();
+
       for (const file of ["pkgbuild", "cask"] as const) {
         const templates = await readTemplates();
         const marker = file === "pkgbuild" ? "@PKGVER@" : "{{VERSION}}";
+
         if (kind === "missing") templates[file] = templates[file].replace(marker, "");
+
         if (kind === "duplicate") templates[file] += marker;
+
         if (kind === "unknown") templates[file] += "{{UNKNOWN}}";
         expect(() => renderRecipes(preparation, 1, templates)).toThrow(/marker/);
       }
@@ -708,6 +759,7 @@ describe("package preparation", () => {
     const templates = await readTemplates();
     const root = await mkdtemp(join(tmpdir(), "package-updates-native-"));
     const dir = join(root, "output");
+
     try {
       const receipt = await writePreparation(
         dir,
@@ -715,6 +767,7 @@ describe("package preparation", () => {
         renderRecipes(preparation, 1, templates),
         templates,
       );
+
       const before = await readFile(join(dir, "preparation.json"));
       await expect(generateSrcinfo(dir, { PATH: root })).rejects.toThrow(
         /Native preparation incomplete/,
@@ -740,6 +793,7 @@ describe("package preparation", () => {
       const templates = await readTemplates();
       const root = await mkdtemp(join(tmpdir(), "package-updates-receipt-"));
       const dir = join(root, "rendered directory");
+
       try {
         const receipt = await writePreparation(
           dir,
@@ -747,6 +801,7 @@ describe("package preparation", () => {
           renderRecipes(preparation, 1, templates),
           templates,
         );
+
         const srcinfo = [
           "pkgbase = mrstreamer-bin",
           `\tpkgver = ${receipt.arch.pkgver}`,
@@ -755,6 +810,7 @@ describe("package preparation", () => {
           `\tsha256sums = ${receipt.assets.deb.sha256}`,
           "",
         ].join("\n");
+
         await writeFile(
           join(root, "makepkg"),
           '#!/bin/sh\ncase "$1" in\n--version) printf "%s\\n" "makepkg protocol stand-in" ;;\n--printsrcinfo) printf "%s" "$SRCINFO_PROTOCOL_FIXTURE" ;;\n*) exit 2 ;;\nesac\n',
@@ -794,11 +850,13 @@ syncBuiltinESMExports();
         await writeFile(join(dir, ".preparation-unrelated", "keep"), "unrelated bytes");
         const before = await readFile(join(dir, "preparation.json"));
         const names = [...(await readdir(dir)), ".SRCINFO"].sort();
+
         const failed = spawnSync(
           process.execPath,
           ["--import", injector, CLI, "srcinfo", "--dir", dir],
           { cwd: root, env, encoding: "utf8" },
         );
+
         expect(failed.status, failed.stdout + failed.stderr).toBe(1);
         expect(failed.stdout).toContain(`::error::Injected receipt ${failure} failure`);
         expect(await readFile(join(dir, "preparation.json"))).toEqual(before);
@@ -815,11 +873,13 @@ syncBuiltinESMExports();
         expect(await readFile(join(dir, "preparation.json"), "utf8")).toBe(
           `${JSON.stringify(completed, null, 2)}\n`,
         );
+
         const rerun = spawnSync(process.execPath, [CLI, "srcinfo", "--dir", dir], {
           cwd: root,
           env,
           encoding: "utf8",
         });
+
         expect(rerun.status, rerun.stdout + rerun.stderr).toBe(0);
         expect(rerun.stdout).toContain(`.SRCINFO ${native.srcinfo} from ${native.makepkg}.`);
         expect(await readFile(join(dir, "preparation.json"), "utf8")).toBe(
@@ -837,6 +897,7 @@ syncBuiltinESMExports();
 
   it("rejects malformed CLI inputs and existing outputs before authentication or network, from any working directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "package-updates-cli-"));
+
     try {
       const cases = [
         [],
@@ -867,17 +928,21 @@ syncBuiltinESMExports();
         ["render", "--candidate", `v${NIGHTLY}`, "--run", "900", "--out", "out"],
         ["srcinfo", "--dir", "out", "--run", "900"],
       ];
+
       for (const args of cases) {
         const result = spawnSync(process.execPath, [CLI, ...args], {
           cwd: root,
           env: { PATH: root },
           encoding: "utf8",
         });
+
         expect(result.status, result.stdout + result.stderr).toBe(1);
         expect(result.stdout).toContain("::error::");
         expect(result.stdout + result.stderr).not.toMatch(/spawnSync gh|ENOENT|GitHub/);
       }
+
       expect(await readdir(root)).toEqual([]);
+
       // The module's real templates still resolve when imported from another cwd.
       const text = execFileSync(
         process.execPath,
@@ -888,16 +953,20 @@ syncBuiltinESMExports();
         ],
         { cwd: root, encoding: "utf8" },
       );
+
       expect(text).toContain('cask "mr-streamer"');
       const blockNetwork = join(root, "block-network.mjs");
       await writeFile(
         blockNetwork,
         'globalThis.fetch = () => { throw new Error("Network blocked by CLI test"); };\n',
       );
+
       for (const populated of [false, true]) {
         const dir = join(root, populated ? "populated" : "empty");
         await mkdir(dir);
+
         if (populated) await writeFile(join(dir, "PKGBUILD"), "Existing recipe\n");
+
         for (const token of [undefined, "blocked-network-test"]) {
           const result = spawnSync(
             process.execPath,
@@ -908,13 +977,16 @@ syncBuiltinESMExports();
               encoding: "utf8",
             },
           );
+
           expect(result.status, result.stdout + result.stderr).toBe(1);
           expect(result.stdout).toMatch(/::error::Refused: Output directory already exists/);
           expect(result.stdout + result.stderr).not.toMatch(
             /spawnSync gh|ENOENT|GitHub|Network blocked/,
           );
         }
+
         expect(await readdir(dir)).toEqual(populated ? ["PKGBUILD"] : []);
+
         if (populated)
           expect(await readFile(join(dir, "PKGBUILD"), "utf8")).toBe("Existing recipe\n");
       }

@@ -7,13 +7,17 @@ import { acceptsEvidence, validationIdentity } from "./validation-evidence.ts";
 
 // One budget covers every candidate run, API call and artifact download.
 const deadline = Date.now() + 5 * 60_000;
+
 function timeout() {
   const remaining = deadline - Date.now();
+
   if (remaining <= 0) throw new Error("Validation lookup budget exhausted");
+
   return Math.min(30_000, remaining);
 }
 
 const repository = "Mr-Streamer-OSS/MrStreamer";
+
 interface Run {
   id: number;
   run_attempt: number;
@@ -26,6 +30,7 @@ interface Run {
   repository: { full_name: string };
   head_repository: { full_name: string };
 }
+
 function api<T>(path: string): T {
   return JSON.parse(
     execFileSync("gh", ["api", `repos/${repository}/${path}`], {
@@ -37,18 +42,23 @@ function api<T>(path: string): T {
 
 async function reusable(): Promise<boolean> {
   const sha = process.env["VALIDATION_SHA"] ?? "";
+
   if (!/^[a-f0-9]{40}$/.test(sha)) return false;
+
   const runs = api<{ workflow_runs: Run[] }>(
     `actions/workflows/checks.yml/runs?event=push&branch=main&head_sha=${sha}&per_page=100`,
   ).workflow_runs;
+
   for (const found of runs) {
     if (Date.now() >= deadline) return false;
     let run = found;
+
     // Bound the wait; fallback retains independent 10/15 minute validation limits.
     while (run.status !== "completed" && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, Math.min(15_000, timeout())));
       run = api<Run>(`actions/runs/${run.id}`);
     }
+
     if (
       run.repository.full_name !== repository ||
       run.head_repository.full_name !== repository ||
@@ -81,12 +91,15 @@ async function reusable(): Promise<boolean> {
       ],
       { timeout: timeout() },
     );
+
     const artifacts = api<{ artifacts: { id: number; name: string; expired: boolean }[] }>(
       `actions/runs/${run.id}/artifacts?per_page=100`,
     ).artifacts;
+
     const artifact = artifacts.find(
       (item) => item.name === `validation-${run.id}-${run.run_attempt}` && !item.expired,
     );
+
     if (!artifact) continue;
     const dir = mkdtempSync(join(tmpdir(), "release-validation-"));
     const zip = join(dir, "evidence.zip");
@@ -98,6 +111,7 @@ async function reusable(): Promise<boolean> {
     );
     execFileSync("unzip", ["-q", zip, "-d", dir], { timeout: timeout() });
     const evidence: unknown = JSON.parse(readFileSync(join(dir, "validation.json"), "utf8"));
+
     if (
       acceptsEvidence(
         evidence,
@@ -116,9 +130,11 @@ async function reusable(): Promise<boolean> {
         process.env["GITHUB_STEP_SUMMARY"]!,
         `Reused Checks run ${run.id}, attempt ${run.run_attempt}, artifact ${artifact.id}, source ${sha}.\n`,
       );
+
       return true;
     }
   }
+
   return false;
 }
 

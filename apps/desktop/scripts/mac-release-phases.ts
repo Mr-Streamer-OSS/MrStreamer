@@ -81,20 +81,28 @@ export function timePhases(startedAt: number, lines: readonly Line[]): PhaseTime
   began[0] = startedAt;
   let current = 0;
   let finishedAt: number | undefined;
+
   for (const { at, text } of lines) {
     // Several markers can match one line, such as the notarizer's name; the latest phase is meant.
     const next = PHASES.findLastIndex((phase, index) => index > current && phase.start?.test(text));
+
     if (next !== -1) {
       current = next;
       began[next] = at;
     }
+
     const id = PHASES[current]?.submission?.exec(text)?.[1];
+
     if (id) submissions[current] = id;
+
     if (FINISHED.test(text)) finishedAt = at;
   }
+
   const endedAt = finishedAt ?? lines.at(-1)?.at ?? startedAt;
+
   return PHASES.map((phase, index) => {
     const start = began[index];
+
     if (start === undefined) {
       return {
         name: phase.name,
@@ -104,10 +112,12 @@ export function timePhases(startedAt: number, lines: readonly Line[]): PhaseTime
         covers: [],
       };
     }
+
     const finished = index < current || finishedAt !== undefined;
     const nextSeen = began.findIndex((at, other) => other > index && at !== undefined);
     const end = nextSeen === -1 ? endedAt : began[nextSeen]!;
     const coveredUntil = nextSeen !== -1 ? nextSeen : finishedAt !== undefined ? PHASES.length : 0;
+
     return {
       name: phase.name,
       waitsOn: phase.waitsOn,
@@ -126,11 +136,15 @@ export function timePhases(startedAt: number, lines: readonly Line[]): PhaseTime
 export function phaseTable(title: string, phases: readonly PhaseTime[]): string {
   const sum = (keep: (phase: PhaseTime) => boolean) =>
     phases.reduce((total, phase) => total + (keep(phase) ? (phase.seconds ?? 0) : 0), 0);
+
   const exact = (waitsOn: Phase["waitsOn"]) =>
     sum((phase) => phase.waitsOn === waitsOn && phase.covers.length === 0);
+
   const unattributed = sum((phase) => phase.covers.length > 0);
+
   const rows = phases.map((phase) => {
     const seconds = phase.seconds === null ? "not observed" : phase.seconds.toFixed(1);
+
     const note = [
       phase.finished ? "" : "did not finish",
       phase.covers.length > 0 ? `also covers ${phase.covers.join(", ")}` : "",
@@ -138,9 +152,12 @@ export function phaseTable(title: string, phases: readonly PhaseTime[]): string 
     ]
       .filter(Boolean)
       .join(", ");
+
     return `| ${phase.name} | ${phase.covers.length > 0 ? "unknown" : phase.waitsOn} | ${seconds} | ${note} |`;
   });
+
   const partial = unattributed > 0 ? " at least: the unattributed time is not in it" : "";
+
   return [
     `### ${title}`,
     "",
@@ -157,12 +174,15 @@ export function phaseTable(title: string, phases: readonly PhaseTime[]): string 
 if (import.meta.main) {
   const startedAt = Date.now();
   const lines: Line[] = [];
+
   for await (const text of createInterface({ input: process.stdin })) {
     console.log(text);
     lines.push({ at: Date.now(), text });
   }
+
   const report = phaseTable(process.argv[2] ?? "Mac release phases", timePhases(startedAt, lines));
   console.log(`\n${report}`);
   const summary = process.env["GITHUB_STEP_SUMMARY"];
+
   if (summary) appendFileSync(summary, `${report}\n`);
 }

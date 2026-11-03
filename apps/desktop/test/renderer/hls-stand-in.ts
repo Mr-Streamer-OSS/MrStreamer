@@ -89,7 +89,9 @@ export const streams = {
   /** The stream the player opened last. */
   latest(): Stream {
     const stream = opened.at(-1);
+
     if (!stream) throw new Error("The player opened no HLS stream.");
+
     return stream;
   },
   /** How many streams the player opened so far. */
@@ -99,6 +101,7 @@ export const streams = {
 /** The stand-in, with the real one's event and error names. */
 export function standIn(real: typeof Hls) {
   const { Events } = real;
+
   return class StandIn implements Stream {
     static isSupported = () => true;
     static Events = Events;
@@ -140,6 +143,7 @@ export function standIn(real: typeof Hls) {
         );
         listener(name, data);
       };
+
       this.on(event, first);
     }
 
@@ -162,6 +166,7 @@ export function standIn(real: typeof Hls) {
       const index = of
         ? this.subtitleTracks.findIndex((track) => track.name === of)
         : this.#subtitle;
+
       if (fatal) this.stopLoad();
       this.#tell(Events.ERROR, {
         fatal,
@@ -200,6 +205,7 @@ export function standIn(real: typeof Hls) {
     }
     subtitleDeferred(afterSuccess = false): void {
       const frag = this.#nextSegment(this.#subtitle);
+
       if (afterSuccess) frag.start -= SEGMENT_S;
       this.#tell(Events.SUBTITLE_FRAG_PROCESSED, {
         success: false,
@@ -237,6 +243,7 @@ export function standIn(real: typeof Hls) {
 
     set audioTrack(index: number) {
       const track = this.audioTracks[index];
+
       if (!track || index === this.#audio) return;
       this.#audio = index;
       this.#defaultSound = false;
@@ -257,14 +264,17 @@ export function standIn(real: typeof Hls) {
       if (index < -1 || index >= this.subtitleTracks.length) return;
       const before = this.#subtitle;
       this.#subtitle = index;
+
       if (index === -1 && before === -1) return;
       this.#tell(Events.SUBTITLE_TRACK_SWITCH, { id: index });
+
       if (index !== -1) this.#loadSubtitles();
     }
 
     /** Loads the playlist of the rendition selected by now, which a listener may have changed. */
     #loadSubtitles(): void {
       const selected = this.subtitleTracks[this.#subtitle];
+
       if (selected) this.subtitlesLoaded.push(selected.name);
     }
 
@@ -276,45 +286,57 @@ export function standIn(real: typeof Hls) {
       const playing = this.audioTracks[this.#audio];
       this.audioTracks = numbered(groups.audio ?? []);
       this.#audio = -1;
+
       if (this.audioTracks.length > 0 || playing) {
         this.#tell(Events.AUDIO_TRACKS_UPDATED, { audioTracks: this.audioTracks });
+
         // Unless a listener picked one just now.
         if (this.#audio === -1) {
           const again = playing ? this.audioTracks.findIndex(same(playing)) : -1;
+
           const preset = this.#defaultSound
             ? this.audioTracks.findIndex((track) => track.default)
             : -1;
+
           this.audioTrack = again !== -1 ? again : Math.max(preset, 0);
         }
       }
+
       const shown = this.subtitleTracks[this.#subtitle];
       const before = this.subtitleTracks;
       this.subtitleTracks = numbered(groups.subtitles ?? []);
       this.#readUntil.clear();
+
       if (this.subtitleTracks.length > 0 || before.length > 0) {
         this.#subtitle = -1;
         this.#tell(Events.SUBTITLE_TRACKS_UPDATED, { subtitleTracks: this.subtitleTracks });
         const again = shown ? this.subtitleTracks.findIndex(same(shown)) : -1;
+
         const preset = this.#defaultSubtitles
           ? this.subtitleTracks.findIndex((track) => track.default)
           : -1;
+
         const next = again !== -1 ? again : preset;
+
         if (next !== -1) {
           this.#subtitle = next;
           this.#tell(Events.SUBTITLE_TRACK_SWITCH, { id: next });
           this.#loadSubtitles();
         }
       }
+
       this.#tell(Events.LEVEL_SWITCHING, { level: 0 });
     }
 
     /** The segment to read next of the rendition at `level`: at the position, or after the last. */
     #nextSegment(level: number) {
       const position = this.#media?.currentTime ?? 0;
+
       const start = Math.max(
         this.#readUntil.get(level) ?? 0,
         Math.floor(position / SEGMENT_S) * SEGMENT_S,
       );
+
       return { level, start, duration: SEGMENT_S };
     }
 
@@ -325,7 +347,9 @@ export function standIn(real: typeof Hls) {
       const level = of
         ? this.subtitleTracks.findIndex((track) => track.name === of)
         : this.#subtitle;
+
       const subtitleTrack = this.subtitleTracks[level];
+
       if (!subtitleTrack) return;
       const frag = this.#nextSegment(level);
       this.#readUntil.set(level, frag.start + frag.duration);
@@ -350,12 +374,14 @@ export function standIn(real: typeof Hls) {
 
     captionLines(channel: number, start: number, end: number, rows: readonly string[]): void {
       const track = `textTrack${channel}`;
+
       if (!this.#announced.has(channel)) {
         this.#announced.add(channel);
         this.#tell(Events.NON_NATIVE_TEXT_TRACKS_FOUND, {
           tracks: [{ _id: track, label: "", kind: "captions", default: false }],
         });
       }
+
       this.#tell(Events.CUES_PARSED, {
         type: "captions",
         track,

@@ -12,6 +12,7 @@
 import { readFileSync } from "node:fs";
 
 const [username, password, ...files] = process.argv.slice(2);
+
 if (!username || !password || files.length === 0) {
   console.error("usage: node scripts/log-scan.ts <username> <password> <log>...");
   process.exit(2);
@@ -32,20 +33,24 @@ const canaries = [
   ...spellings(username).map((form) => ({ name: "username", form })),
   ...spellings(password).map((form) => ({ name: "password", form })),
 ];
+
 const masks = canaries.map(({ name, form }) => ({
   name,
   pattern: new RegExp(form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
 }));
+
 const masked = (line: string) =>
   masks.reduce((text, { name, pattern }) => text.replace(pattern, `<${name}>`), line);
 
 let found = 0;
+
 for (const file of files) {
   const lines = readFileSync(file, "utf8").split("\n");
   let matches = 0;
   lines.forEach((line, index) => {
     const lower = line.toLowerCase();
     const hits = canaries.filter(({ form }) => lower.includes(form));
+
     if (hits.length === 0) return;
     matches += hits.length;
     const names = [...new Set(hits.map(({ name }) => name))].join(", ");
@@ -54,4 +59,5 @@ for (const file of files) {
   console.log(`${file}: ${lines.length} lines, ${matches} canary matches`);
   found += matches;
 }
+
 process.exit(found > 0 ? 1 : 0);

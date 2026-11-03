@@ -15,16 +15,22 @@ const root = join(import.meta.dirname, "../../../..");
 const evidence = await evidenceDirectory(join(root, ".local/verification"), "analytics-downgrade-");
 const source = join(evidence, "archive");
 const tag = process.argv[2] ?? "v0.0.15";
+
 if (!["v0.0.15", "v0.0.18"].includes(tag)) throw new Error("Unsupported compatibility archive.");
+
 const supportsSummaries = tag === "v0.0.18";
+
 const revision = execFileSync("git", ["rev-parse", `${tag}^{commit}`], {
   cwd: root,
   encoding: "utf8",
 }).trim();
+
 const files = ["model.ts", "properties.ts", "storage.ts", "service.ts", "operations.ts"]
   .map((file) => `apps/desktop/src/main/analytics/${file}`)
   .concat("apps/desktop/src/main/platform/json-file.ts");
+
 const hashes: Record<string, string> = {};
+
 for (const file of files) {
   const bytes = execFileSync("git", ["show", `${revision}:${file}`], { cwd: root });
   const destination = join(source, file);
@@ -32,15 +38,19 @@ for (const file of files) {
   await writeFile(destination, bytes);
   hashes[file] = createHash("sha256").update(bytes).digest("hex");
 }
+
 await symlink(join(root, "apps/desktop/node_modules"), join(source, "node_modules"), "dir");
+
 // These assertions describe only public factory/class types. The executed implementations are
 // byte-identical archived files, including their schema, migrations and ordinary write behavior.
 const oldStoreModule = (await import(
   pathToFileURL(join(source, "apps/desktop/src/main/analytics/storage.ts")).href
 )) as { analyticsStore: typeof analyticsStore };
+
 const oldOwnerModule = (await import(
   pathToFileURL(join(source, "apps/desktop/src/main/analytics/service.ts")).href
 )) as { Analytics: typeof Analytics };
+
 const properties = {
   app_version: "0.0.19",
   build_channel: "stable",
@@ -49,19 +59,25 @@ const properties = {
   arch: "x64",
   distribution: "direct",
 } as const;
+
 const owners: Analytics[] = [];
+
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) {
     if (await check()) return;
     await pause(5);
   }
+
   throw new Error("Downgrade side effect did not settle.");
 }
+
 const results: Record<string, unknown> = {};
+
 try {
   const directory = join(evidence, "profile");
   await mkdir(directory);
   const store = analyticsStore(directory);
+
   const current = new Analytics({
     dataDir: directory,
     origin: Promise.resolve("fresh"),
@@ -69,6 +85,7 @@ try {
     store,
     transport: { kind: "local", send: async () => "not_sent" },
   });
+
   owners.push(current);
   await current.settings();
   current.setForeground(true);
@@ -99,9 +116,11 @@ try {
   assert.equal(loaded?.pending.length, saved?.pending.length);
   assert.equal(!!loaded?.summaries, supportsSummaries);
   assert(!loaded?.lifecycle);
+
   const oldError = loaded?.pending
     .map((item) => item.event)
     .find((event) => event.event === "stream_error");
+
   assert.equal(oldError?.properties.diagnostic_stage, supportsSummaries ? "decode" : undefined);
   assert.equal(await readFile(join(directory, "analytics.json"), "utf8"), crash);
   results.noWriteReturn = {
@@ -112,6 +131,7 @@ try {
   };
 
   const delivered: CaptureEvent[] = [];
+
   const legacy = new oldOwnerModule.Analytics({
     dataDir: directory,
     origin: Promise.resolve("unknown"),
@@ -121,10 +141,12 @@ try {
       kind: "local",
       send: async (event) => {
         delivered.push(event);
+
         return "accepted";
       },
     },
   });
+
   owners.push(legacy);
   assert.deepEqual(await legacy.settings(), { enabled: true, transport: "local" });
   legacy.setForeground(true);
@@ -148,6 +170,7 @@ try {
   assert(!(await store.load())?.lifecycle);
   await legacy.close();
   const offEvents: CaptureEvent[] = [];
+
   const upgradedOff = new Analytics({
     dataDir: directory,
     origin: Promise.resolve("unknown"),
@@ -157,15 +180,18 @@ try {
       kind: "local",
       send: async (event) => {
         offEvents.push(event);
+
         return "accepted";
       },
     },
   });
+
   owners.push(upgradedOff);
   upgradedOff.setForeground(true);
   assert.deepEqual(await upgradedOff.settings(), { enabled: false, transport: "local" });
   await upgradedOff.close();
   assert.deepEqual(offEvents, []);
+
   const oldEnabled = new oldOwnerModule.Analytics({
     dataDir: directory,
     origin: Promise.resolve("unknown"),
@@ -173,6 +199,7 @@ try {
     store: old,
     transport: { kind: "local", send: async () => "accepted" },
   });
+
   owners.push(oldEnabled);
   await oldEnabled.configure(true);
   await oldEnabled.close();
@@ -183,6 +210,7 @@ try {
   assert(!upgraded?.summaries?.unfinished);
   assert(!upgraded?.lifecycle);
   const returnedEvents: CaptureEvent[] = [];
+
   const returned = new Analytics({
     dataDir: directory,
     origin: Promise.resolve("unknown"),
@@ -192,10 +220,12 @@ try {
       kind: "local",
       send: async (event) => {
         returnedEvents.push(event);
+
         return "accepted";
       },
     },
   });
+
   owners.push(returned);
   await returned.settings();
   returned.setForeground(true);
@@ -244,4 +274,5 @@ try {
 } finally {
   await Promise.all(owners.map((owner) => owner.close()));
 }
+
 console.log(evidence);

@@ -14,6 +14,7 @@ export const Authority = type({
   username: "string",
   password: "string",
 }).or({ kind: "'m3u'", link: "string" });
+
 export type Authority = typeof Authority.infer;
 
 /** Protected authorities by source id. Every failure is `keychain-refused`. */
@@ -49,8 +50,10 @@ export function nativeCredentials(
     read: (id) =>
       refusedOnFailure(async () => {
         const sealed = await native.read(id);
+
         if (sealed === null) return null;
         const parsed = Authority(JSON.parse(sealed));
+
         return parsed instanceof type.errors ? null : parsed;
       }),
     write: (id, authority) => refusedOnFailure(() => native.write(id, JSON.stringify(authority))),

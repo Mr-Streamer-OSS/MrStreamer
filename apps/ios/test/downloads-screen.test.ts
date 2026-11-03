@@ -27,18 +27,24 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("react-native", async () => {
   const { createElement, Fragment } = await import("react");
+
   type Props = { children?: React.ReactNode; testID?: string };
+
   const box = ({ children }: Props) => createElement("div", null, children);
+
   type Section = { key: string; data: readonly { id: string }[] };
+
   return {
     View: box,
     Text: ({ children }: Props) => createElement("p", null, children),
     Pressable: (props: Props & Touchable & { children?: unknown }) => {
       if (props.testID) scenario.pressables.set(props.testID, props);
+
       const children =
         typeof props.children === "function"
           ? (props.children as (state: object) => React.ReactNode)({ pressed: false })
           : props.children;
+
       return createElement("div", null, children as React.ReactNode);
     },
     SectionList: (props: {
@@ -87,22 +93,29 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#A1A1A6", line: "#2C2C2E" },
     Notice: ({ failure }: { failure: { headline: string; advice: string } }) =>
       createElement("p", null, `${failure.headline} ${failure.advice}`),
   };
 });
+
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => scenario.list,
   downloadList: () => scenario.list,
@@ -117,6 +130,7 @@ vi.mock("../src/downloads.ts", () => ({
   },
   pauseDownload: async (id: string) => {
     scenario.asked.push(`pause ${id}`);
+
     if (id === "t") throw new Error("held");
   },
   resumeDownload: async (id: string) => {
@@ -141,6 +155,7 @@ const base = {
   progress: null,
   series: null,
 } as const;
+
 const movie = (id: string, name: string, rest: Partial<Download>): Download => ({
   ...base,
   id,
@@ -165,24 +180,30 @@ const transferring = {
     restarted: false,
   },
 } satisfies Download;
+
 const waiting = movie("w", "Lowland", { status: { kind: "waiting" }, size: 1_900_000_000 });
 const queued = movie("q", "Glass Orchard", {});
+
 const failed = movie("f", "Kettle Run", {
   status: { kind: "failed", failure: { kind: "disk-full", needed: 1_200_000_000 } },
 });
+
 const complete = movie("c", "North of Quiet", {
   status: { kind: "complete" },
   size: 2_100_000_000,
   progress: { position: 4440, duration: 6720 },
 });
+
 const kept = movie("k", "Small Hours", { status: { kind: "complete" }, subscription: null });
 const missing = movie("m", "Red Meridian", { status: { kind: "missing" } });
+
 const paused = movie("p", "Iron Bay", {
   status: { kind: "paused", received: 300_000_000, size: 1_200_000_000 },
 });
 
 let unmount = () => {};
 let redraw = () => {};
+
 afterEach(() => {
   unmount();
   scenario.pressables.clear();
@@ -197,6 +218,7 @@ function show(items: readonly Download[], bytes = 0, free: number | null = null)
   React.act(() => root.render(React.createElement(DownloadsScreen)));
   unmount = () => React.act(() => root.unmount());
   redraw = () => React.act(() => root.render(React.createElement(DownloadsScreen)));
+
   return container;
 }
 
@@ -207,8 +229,10 @@ function publish(...items: Download[]) {
 }
 
 const row = (id: string) => scenario.pressables.get(`download-${id}`)!;
+
 /** The row's trailing glass button, by what it does. */
 const button = (id: string, label: string) => scenario.pressables.get(`download-${id}-${label}`)!;
+
 /** Answers the sheet on show with the option `label`. */
 async function pick(label: string) {
   const sheet = scenario.sheet!;
@@ -216,6 +240,7 @@ async function pick(label: string) {
   React.act(() => sheet.pick(sheet.options.indexOf(label)));
   await React.act(async () => undefined);
 }
+
 const settled = () => React.act(async () => undefined);
 
 describe("Downloads", () => {
@@ -223,6 +248,7 @@ describe("Downloads", () => {
     const shown = show([
       { ...transferring, status: { ...transferring.status, restarted: true } },
     ]).textContent;
+
     expect(shown).toContain("started again");
     expect(shown).not.toContain("the file changed");
   });
@@ -233,6 +259,7 @@ describe("Downloads", () => {
       3_700_000_000,
       61_000_000_000,
     ).textContent;
+
     const order = [
       "Queue",
       "Paper Harbor",
@@ -247,6 +274,7 @@ describe("Downloads", () => {
       "Provider removed, copy kept",
       "3.7 GB on this device · 61 GB free",
     ];
+
     const at = order.map((text) => shown.indexOf(text));
     expect(at).not.toContain(-1);
     expect(at).toEqual(at.toSorted((a, b) => a - b));

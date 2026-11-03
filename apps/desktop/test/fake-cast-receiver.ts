@@ -66,6 +66,7 @@ export interface FakeMedia {
 function der(tag: number, ...parts: Uint8Array[]): Buffer {
   const body = Buffer.concat(parts);
   const length = body.length < 128 ? [body.length] : [0x82, body.length >> 8, body.length & 0xff];
+
   return Buffer.concat([Buffer.from([tag, ...length]), body]);
 }
 
@@ -75,14 +76,17 @@ function selfSigned(): { key: string; cert: string } {
   const ecdsaWithSha256 = der(0x30, der(0x06, Buffer.from("2a8648ce3d040302", "hex")));
   const commonName = der(0x06, Buffer.from("550403", "hex"));
   const name = der(0x30, der(0x31, der(0x30, commonName, der(0x0c, Buffer.from("Fake Cast")))));
+
   const validity = der(
     0x30,
     der(0x17, Buffer.from("260101000000Z")),
     der(0x17, Buffer.from("460101000000Z")),
   );
+
   const spki = publicKey.export({ type: "spki", format: "der" });
   const body = der(0x30, der(0x02, Buffer.from([1])), ecdsaWithSha256, name, validity, name, spki);
   const signature = der(0x03, Buffer.from([0]), sign("sha256", body, privateKey));
+
   return {
     key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     cert: new X509Certificate(der(0x30, body, ecdsaWithSha256, signature)).toString(),
@@ -126,6 +130,7 @@ export class FakeCastReceiver {
     this.server = server;
     this.port = port;
     let listener: Parameters<CastDiscovery["listen"]>[0] = () => {};
+
     this.discovery = {
       listen: (next) => {
         listener = next;
@@ -138,6 +143,7 @@ export class FakeCastReceiver {
     };
     server.on("connection", (socket) => {
       this.connections++;
+
       if (this.refusing) socket.destroy();
     });
     server.on("secureConnection", (socket) => this.accept(socket));
@@ -202,6 +208,7 @@ export class FakeCastReceiver {
     this.app = null;
     this.media = null;
     this.send(this.receiverStatus(), { sourceId: "receiver-0", namespace: RECEIVER });
+
     if (transportId) this.send({ type: "CLOSE" }, { sourceId: transportId, namespace: CONNECTION });
   }
 
@@ -217,6 +224,7 @@ export class FakeCastReceiver {
 
   private receiverStatus() {
     const app = { appId: "CC1AD845", displayName: "Default Media Receiver", ...this.app };
+
     return {
       type: "RECEIVER_STATUS",
       requestId: 0,
@@ -232,6 +240,7 @@ export class FakeCastReceiver {
 
   private mediaStatus() {
     const playing = { playbackRate: 1, supportedMediaCommands: 12303, ...this.media };
+
     return { type: "MEDIA_STATUS", requestId: 0, status: this.media ? [playing] : [] };
   }
 
@@ -242,6 +251,7 @@ export class FakeCastReceiver {
     let buffered = Buffer.alloc(0);
     socket.on("data", (chunk: Buffer) => {
       buffered = Buffer.concat([buffered, chunk]);
+
       while (buffered.length >= 4 && buffered.length >= 4 + buffered.readUInt32BE(0)) {
         const body = buffered.subarray(4, 4 + buffered.readUInt32BE(0));
         buffered = buffered.subarray(4 + body.length);
@@ -254,24 +264,32 @@ export class FakeCastReceiver {
   private read(socket: TLSSocket, body: Buffer): void {
     let fields: CastFields;
     let payload: Record<string, unknown>;
+
     try {
       const message = CastMessage.decode(body);
+
       if (!body.equals(CastMessage.encode(message).finish())) throw new Error("not canonical");
       fields = CastMessage.toObject(message);
       payload = JSON.parse(fields.payloadUtf8 ?? "");
     } catch (error) {
       this.violations.push(`${String(error)}: ${body.toString("hex")}`);
+
       return;
     }
+
     this.received.push({ ...fields, payload });
+
     if (this.silent) return;
+
     const answer = (reply: object) =>
       socket.write(
         this.framed({ ...reply, requestId: payload.requestId }, fields.destinationId, fields),
       );
 
     if (fields.namespace === HEARTBEAT && payload.type === "PING") answer({ type: "PONG" });
+
     if (fields.namespace === RECEIVER) this.onReceiver(payload, answer);
+
     if (fields.namespace === MEDIA && fields.destinationId === this.app?.transportId) {
       this.onMedia(payload, answer);
     }
@@ -281,8 +299,10 @@ export class FakeCastReceiver {
     const body = this.encode(payload, {
       ...defined({ sourceId, destinationId: to.sourceId, namespace: to.namespace }),
     });
+
     const header = Buffer.alloc(4);
     header.writeUInt32BE(body.length);
+
     return Buffer.concat([header, body]);
   }
 
@@ -290,24 +310,31 @@ export class FakeCastReceiver {
     switch (payload.type) {
       case "LAUNCH":
         if (this.answers.launch === "ignore") return;
+
         if (this.answers.launch === "refuse" || payload.appId !== "CC1AD845") {
           return answer({ type: "LAUNCH_ERROR", reason: "NOT_FOUND" });
         }
+
         this.app = { sessionId: randomUUID(), transportId: `transport-${randomUUID()}` };
+
         return answer(this.receiverStatus());
       case "GET_STATUS":
         return answer(this.receiverStatus());
       case "SET_VOLUME":
         Object.assign(this.volume, payload.volume);
+
         return answer(this.receiverStatus());
       case "STOP": {
         const app = this.app;
+
         if (!app || payload.sessionId !== app.sessionId) {
           return answer({ type: "INVALID_REQUEST", reason: "INVALID_SESSION_ID" });
         }
+
         this.app = null;
         this.media = null;
         answer(this.receiverStatus());
+
         return this.send({ type: "CLOSE" }, { sourceId: app.transportId, namespace: CONNECTION });
       }
     }
@@ -315,11 +342,14 @@ export class FakeCastReceiver {
 
   private onMedia(payload: Record<string, unknown>, answer: (body: object) => void): void {
     if (payload.type === "GET_STATUS") return answer(this.mediaStatus());
+
     if (payload.type === "LOAD") {
       if (this.answers.load === "ignore") return;
+
       if (this.answers.load === "refuse") {
         return answer({ type: "LOAD_FAILED", detailedErrorCode: 104 });
       }
+
       // What played makes way first, and every sender hears it.
       if (this.media) this.idle("INTERRUPTED");
       this.media = {
@@ -329,14 +359,19 @@ export class FakeCastReceiver {
         activeTrackIds: [],
         media: { ...(payload.media as object), duration: this.duration, tracks: this.tracks },
       };
+
       return answer(this.mediaStatus());
     }
+
     if (this.answers.command === "ignore") return;
+
     if (this.answers.command === "refuse") return answer({ type: "INVALID_PLAYER_STATE" });
     const media = this.media;
+
     if (!media || payload.mediaSessionId !== media.mediaSessionId) {
       return answer({ type: "INVALID_REQUEST", reason: "INVALID_MEDIA_SESSION_ID" });
     }
+
     switch (payload.type) {
       case "PLAY":
         media.playerState = "PLAYING";
@@ -354,10 +389,12 @@ export class FakeCastReceiver {
         Object.assign(media, { playerState: "IDLE", idleReason: "CANCELLED" });
         answer(this.mediaStatus());
         this.media = null;
+
         return;
       default:
         return answer({ type: "INVALID_REQUEST", reason: "INVALID_COMMAND" });
     }
+
     answer(this.mediaStatus());
   }
 }
@@ -367,6 +404,8 @@ export async function startFakeCastReceiver(): Promise<FakeCastReceiver> {
   const server = createServer(selfSigned());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (address === null || typeof address === "string") throw new Error("no port");
+
   return new FakeCastReceiver(server, address.port);
 }

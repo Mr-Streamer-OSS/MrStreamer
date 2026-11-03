@@ -15,7 +15,9 @@ export const cases: readonly ProofCase[] = [
     run: async () => {
       const key =
         "Queued {count} episodes. {complete} already downloaded, {queued} already queued.";
+
       const out: Record<string, Observed> = {};
+
       for (const locale of ["en-US", "nl-NL", "de-DE", "fr-FR", "es-ES"] as const) {
         setLanguage({ locale, formats: locale });
         out[locale] = [
@@ -27,7 +29,9 @@ export const cases: readonly ProofCase[] = [
           formatLanguageName("nl"),
         ];
       }
+
       setLanguage({ locale: "en-US", formats: "en-US" });
+
       return out;
     },
   },

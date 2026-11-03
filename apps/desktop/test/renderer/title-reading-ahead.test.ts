@@ -39,6 +39,7 @@ class MovieBuffer extends EventTarget {
     queueMicrotask(() => this.dispatchEvent(new Event("updateend")));
   }
 }
+
 class MovieSource extends EventTarget {
   static isTypeSupported = () => true;
   readyState = "open";
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fixture");
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 });
+
 afterEach(() => {
   titlePlayer.close();
   vi.useRealTimers();
@@ -75,6 +77,7 @@ async function heldStart(paused: boolean) {
   vi.stubGlobal("fetch", (_url: string, init: RequestInit) => {
     signal = init.signal ?? null;
     signal?.addEventListener("abort", () => answer.reject(new Error("Stopped.")), { once: true });
+
     return answer.promise;
   });
   const opened = ipc.hold("playback.openTitle");
@@ -100,6 +103,7 @@ async function heldStart(paused: boolean) {
   await vi.advanceTimersByTimeAsync(0);
   // The browser is paused while loading; also cover its unpaused start-watchdog branch.
   vi.spyOn(player.element, "paused", "get").mockReturnValue(paused);
+
   return {
     release: () =>
       answer.resolve(
@@ -121,10 +125,12 @@ it.each([true, false])(
   async (paused) => {
     expect(movie.status).toBe(0);
     const held = await heldStart(paused);
+
     for (let second = 0; second < 75; second += 3) {
       ipc.emit("playback.readingAhead", { sessionId: "s1" });
       await vi.advanceTimersByTimeAsync(3000);
     }
+
     expect(titlePlayer.state().phase.kind).toBe("starting");
     expect(held.signal()?.aborted).toBe(false);
     held.release();
@@ -142,10 +148,12 @@ it.each([true, false])(
   async (paused) => {
     const held = await heldStart(paused);
     const deadline = paused ? 45_000 : 30_000;
+
     for (let ms = 0; ms < deadline; ms += 3000) {
       ipc.emit("playback.readingAhead", { sessionId: "another-session" });
       await vi.advanceTimersByTimeAsync(3000);
     }
+
     expect(titlePlayer.state().phase.kind).toBe("starting");
     await vi.advanceTimersByTimeAsync(1000);
     expect(held.signal()?.aborted).toBe(true);

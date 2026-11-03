@@ -9,9 +9,11 @@ const packages = path.resolve(__dirname, "../../packages");
 const fromApp = path.join(__dirname, "index.ts");
 
 config.watchFolders = [...config.watchFolders, packages];
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const bare = !moduleName.startsWith(".") && !path.isAbsolute(moduleName);
   const shared = context.originModulePath.startsWith(packages + path.sep);
+
   return context.resolveRequest(
     bare && shared ? { ...context, originModulePath: fromApp } : context,
     moduleName,

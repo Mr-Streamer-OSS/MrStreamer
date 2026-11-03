@@ -147,6 +147,7 @@ function writeLongTitle(): void {
     join(fixtures, "title-long-subs-uncued.mkv"),
     withoutIndexEntry(readFileSync(plain), 3, 29),
   );
+
   // What mkvmerge writes about each track, and who wrote it: the application that wrote the file,
   // which ffmpeg calls "Lavf" here.
   const counts = [2, 3, 4].flatMap((stream) => {
@@ -161,12 +162,14 @@ function writeLongTitle(): void {
       .split("\n")
       .filter(Boolean)
       .map(Number);
+
     return [
       ...[`-metadata:s:${stream}`, `NUMBER_OF_FRAMES=${sizes.length}`],
       ...[`-metadata:s:${stream}`, `NUMBER_OF_BYTES=${sizes.reduce((sum, size) => sum + size, 0)}`],
       ...[`-metadata:s:${stream}`, "_STATISTICS_WRITING_APP=Lavf"],
     ];
   });
+
   const counted = join(work, "long-counted.mkv");
   ffmpeg(
     ...["-i", plain, "-map", "0", "-c", "copy", ...counts, "-max_interleave_delta", "0"],
@@ -191,6 +194,7 @@ function withoutIndexEntry(file: Buffer, track: number, seconds: number): Buffer
   out.fill(0, point.at, point.end);
   out[point.at] = 0xec;
   out[point.at + 1] = 0x80 | (point.end - point.at - 2);
+
   return out;
 }
 
@@ -201,11 +205,14 @@ function withoutIndexEntry(file: Buffer, track: number, seconds: number): Buffer
 function withIndexEntryTwice(file: Buffer, track: number, seconds: number, over: number): Buffer {
   const twice = indexEntry(file, track, seconds);
   const gone = indexEntry(file, track, over);
+
   if (twice.end - twice.at !== gone.end - gone.at) {
     throw new Error("The two index entries differ in size");
   }
+
   const out = Buffer.from(file);
   file.copy(out, gone.at, twice.at, twice.end);
+
   return out;
 }
 
@@ -216,32 +223,44 @@ function indexEntry(file: Buffer, track: number, seconds: number): { at: number;
     const idLength = Math.clz32(file[at]!) - 23;
     const sizeLength = Math.clz32(file[at + idLength]!) - 23;
     let size = file[at + idLength]! & (0xff >> sizeLength);
+
     for (let index = 1; index < sizeLength; index++)
       size = size * 256 + file[at + idLength + index]!;
     const start = at + idLength + sizeLength;
+
     return { id: file.readUIntBE(at, idLength), start, end: start + size };
   };
+
   const children = (parent: { start: number; end: number }) => {
     const found = [];
+
     for (let at = parent.start; at < parent.end;) {
       const child = element(at);
       found.push({ ...child, at });
       at = child.end;
     }
+
     return found;
   };
+
   const value = (each: { start: number; end: number }) =>
     file.readUIntBE(each.start, each.end - each.start);
+
   const cues = file.lastIndexOf(Buffer.from([0x1c, 0x53, 0xbb, 0x6b]));
+
   for (const point of children(element(cues))) {
     const parts = children(point);
     const time = parts.find((part) => part.id === 0xb3);
     const positions = parts.filter((part) => part.id === 0xb7);
     const tracks = positions.map((part) => children(part).find((each) => each.id === 0xf7));
+
     if (!time || value(time) !== seconds * 1000 || tracks.length !== 1) continue;
+
     if (!tracks[0] || value(tracks[0]) !== track) continue;
+
     return point;
   }
+
   throw new Error(`No index entry for track ${track} at ${seconds} s`);
 }
 
@@ -304,11 +323,13 @@ function writeCaptionTrack(): void {
     ...["-g", "10", "-bf", "0", "-fflags", "+bitexact", picture],
   );
   const twice = (pair: readonly [number, number]) => [pair, pair];
+
   const letters = (text: string) =>
     Array.from({ length: Math.ceil(text.length / 2) }, (_, index): readonly [number, number] => [
       text.charCodeAt(index * 2),
       text.charCodeAt(index * 2 + 1) || 0,
     ]);
+
   /** Resume caption loading, then row 15: what follows goes into the hidden memory. */
   const load = (text: string) => [...twice([0x14, 0x20]), ...twice([0x14, 0x70]), ...letters(text)];
   const captions = join(work, "captions.scc");
@@ -337,10 +358,13 @@ function writeCaptionTrack(): void {
 /** A Scenarist caption file: the CEA-608 pairs sent at each second, for channel 1. */
 function scc(sent: readonly (readonly [number, readonly (readonly [number, number])[]])[]): string {
   const hex = (value: number) => oddParity(value).toString(16).padStart(2, "0");
+
   const lines = sent.map(([at, pairs]) => {
     const time = [0, Math.floor(at / 60), at % 60, 0].map((part) => String(part).padStart(2, "0"));
+
     return `${time.join(":")}\t${pairs.map(([a, b]) => hex(a) + hex(b)).join(" ")}`;
   });
+
   return `Scenarist_SCC V1.0\n\n${lines.join("\n\n")}\n`;
 }
 
@@ -417,9 +441,11 @@ function draw(text: string, scale: number): { width: number; height: number; pix
   const pixels = new Uint8Array(width * height);
   [...text].forEach((char, index) => {
     const glyph = FONT[char] ?? FONT[" "]!;
+
     for (let row = 0; row < 7; row++) {
       for (let column = 0; column < 5; column++) {
         if (glyph[row]?.[column] !== "#") continue;
+
         for (let y = 0; y < scale; y++) {
           for (let x = 0; x < scale; x++) {
             const px = edge + (index * 6 + column) * scale + x;
@@ -432,9 +458,11 @@ function draw(text: string, scale: number): { width: number; height: number; pix
   });
   // The black edge: every clear pixel next to a white one.
   const edged = pixels.slice();
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       if (pixels[y * width + x] !== 0) continue;
+
       for (const [dx, dy] of [
         [1, 0],
         [-1, 0],
@@ -447,6 +475,7 @@ function draw(text: string, scale: number): { width: number; height: number; pix
       }
     }
   }
+
   return { width, height, pixels: edged };
 }
 
@@ -454,12 +483,14 @@ function draw(text: string, scale: number): { width: number; height: number; pix
 function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]): Buffer {
   const segments: Buffer[] = [];
   let composition = 0;
+
   const segment = (at: number, type: number, data: number[]) => {
     const pts = Math.round(at * 90_000);
     segments.push(
       Buffer.from([0x50, 0x47, ...u32(pts), ...u32(0), type, ...u16(data.length), ...data]),
     );
   };
+
   for (const line of lines) {
     const picture = draw(line.text, Math.max(2, Math.round(canvasHeight / 120)));
     const x = Math.round((canvasWidth - picture.width) / 2);
@@ -482,6 +513,7 @@ function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]):
       ...u16(y),
     ]);
     segment(line.from, 0x17, [1, ...window]);
+
     if (!line.again) {
       // Palette: entry 0 stays undefined, which is clear; 1 white and 2 black, as Y, Cr, Cb,
       // alpha.
@@ -497,6 +529,7 @@ function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]):
         ...rle,
       ]);
     }
+
     segment(line.from, 0x80, []);
     // Cleared: a composition without objects.
     segment(line.to, 0x16, [
@@ -512,17 +545,21 @@ function pgs(canvasWidth: number, canvasHeight: number, lines: readonly Line[]):
     segment(line.to, 0x17, [1, ...window]);
     segment(line.to, 0x80, []);
   }
+
   return Buffer.concat(segments);
 }
 
 /** PGS run-length coding, a line at a time. */
 function pgsRle(pixels: Uint8Array, width: number, height: number): number[] {
   const out: number[] = [];
+
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width;) {
       const colour = pixels[y * width + x]!;
       let run = 1;
+
       while (x + run < width && pixels[y * width + x + run] === colour && run < 16_383) run++;
+
       if (colour !== 0 && run < 3) {
         for (let i = 0; i < run; i++) out.push(colour);
       } else if (colour === 0) {
@@ -530,10 +567,13 @@ function pgsRle(pixels: Uint8Array, width: number, height: number): number[] {
       } else {
         out.push(0, ...(run < 64 ? [0x80 | run] : [0xc0 | (run >> 8), run & 0xff]), colour);
       }
+
       x += run;
     }
+
     out.push(0, 0);
   }
+
   return out;
 }
 
@@ -548,15 +588,18 @@ function captionPairs(): (readonly [number, number])[] {
   twice([0x14, 0x20]);
   twice([0x14, 0x70]);
   const text = "HELLO CAPTIONS";
+
   for (let i = 0; i < text.length; i += 2) {
     sequence.push([text.charCodeAt(i), i + 1 < text.length ? text.charCodeAt(i + 1) : 0]);
   }
+
   twice([0x14, 0x2f]);
   // Shown from 1 s once the last pair arrives; erased at 3 s.
   const start = 25 - sequence.length;
   sequence.forEach((pair, index) => (frames[start + index] = pair));
   frames[75] = [0x14, 0x2c];
   frames[76] = [0x14, 0x2c];
+
   return frames.map(([a, b]) => [oddParity(a), oddParity(b)] as const);
 }
 
@@ -571,26 +614,32 @@ function swappedCaptionPairs(rate: number, seconds: number): (readonly [number, 
   const frames: (readonly [number, number])[] = Array.from({ length: rate * seconds }, () => [
     0x80, 0x80,
   ]);
+
   /** Loads `text` into the hidden memory and shows it at `at` seconds. */
   const load = (at: number, text: string) => {
     const sequence: (readonly [number, number])[] = [];
     const twice = (pair: readonly [number, number]) => sequence.push(pair, pair);
     twice([0x14, 0x20]);
     twice([0x14, 0x70]);
+
     for (let i = 0; i < text.length; i += 2) {
       sequence.push([text.charCodeAt(i), i + 1 < text.length ? text.charCodeAt(i + 1) : 0]);
     }
+
     twice([0x14, 0x2f]);
     sequence.forEach((pair, index) => (frames[at * rate - sequence.length + index] = pair));
   };
+
   const twiceAt = (at: number, pair: readonly [number, number]) => {
     frames[at * rate] = pair;
     frames[at * rate + 1] = pair;
   };
+
   load(11, "FIRST");
   load(23, "SECOND");
   twiceAt(29, [0x14, 0x2f]);
   twiceAt(31, [0x14, 0x2c]);
+
   return frames.map(([a, b]) => [oddParity(a), oddParity(b)] as const);
 }
 
@@ -599,6 +648,7 @@ function withCaptions(stream: Buffer, pairs: readonly (readonly [number, number]
   const out: Buffer[] = [];
   let frame = 0;
   let last = 0;
+
   for (let i = 0; i + 4 < stream.length; i++) {
     // An access unit delimiter: 00 00 00 01 09.
     if (stream[i] === 0 && stream[i + 1] === 0 && stream[i + 2] === 0 && stream[i + 3] === 1) {
@@ -611,7 +661,9 @@ function withCaptions(stream: Buffer, pairs: readonly (readonly [number, number]
       i = end - 1;
     }
   }
+
   out.push(stream.subarray(last));
+
   return Buffer.concat(out);
 }
 
@@ -635,6 +687,7 @@ function captionSei([a, b]: readonly [number, number]): Buffer {
     0x80,
     0xff,
   ];
+
   return Buffer.from([0, 0, 0, 1, 0x06, 0x04, userData.length, ...userData, 0x80]);
 }
 
@@ -654,9 +707,11 @@ interface TeletextPage {
 /** The transport packets of a stream, a copy of each. */
 function transportPackets(stream: Buffer): Buffer[] {
   const packets: Buffer[] = [];
+
   for (let offset = 0; offset + 188 <= stream.length; offset += 188) {
     packets.push(Buffer.from(stream.subarray(offset, offset + 188)));
   }
+
   return packets;
 }
 
@@ -673,38 +728,55 @@ function dvbUpdates(stream: Buffer, times: readonly number[]): Buffer {
   const first = Math.min(...packets.flatMap((packet) => ptsOf(packet) ?? []));
   /** Each subtitle PES: where each of its bytes sits in the stream's packets. */
   const open = new Map<number, { pts: number; bytes: [Buffer, number][] }>();
+
   const update = (pes: { pts: number; bytes: [Buffer, number][] }) => {
     const at = (index: number) => pes.bytes[index]![0][pes.bytes[index]![1]]!;
+
     const set = (index: number, value: number) => {
       pes.bytes[index]![0][pes.bytes[index]![1]] = value;
     };
+
     const start = 9 + at(8);
+
     // A subtitle PES: private stream 1, a data identifier of 0x20 and a stream id of 0.
     if (at(3) !== 0xbd || at(start) !== 0x20 || at(start + 1) !== 0x00) return;
+
     if (!times.some((time) => Math.abs((pes.pts - first) / 90_000 - time) < 0.1)) return;
+
     for (let offset = start + 2; offset + 6 <= pes.bytes.length && at(offset) === 0x0f;) {
       const type = at(offset + 1);
+
       // The page composition's state, two bits: 0 is the normal case.
       if (type === 0x10) set(offset + 7, at(offset + 7) & ~0x0c);
+
       if (type === 0x11 || type === 0x12 || type === 0x13) set(offset + 1, 0x7f);
       offset += 6 + ((at(offset + 4) << 8) | at(offset + 5));
     }
   };
+
   for (const packet of packets) {
     const pid = pidOf(packet);
+
     if (pid === 0x1fff || !(packet[3]! & 0x10)) continue;
     const pts = ptsOf(packet);
+
     if (packet[1]! & 0x40) {
       const before = open.get(pid);
+
       if (before) update(before);
       open.delete(pid);
+
       if (pts !== null) open.set(pid, { pts, bytes: [] });
     }
+
     const pes = open.get(pid);
     const from = 4 + (packet[3]! & 0x20 ? 1 + packet[4]! : 0);
+
     for (let index = from; pes && index < 188; index++) pes.bytes.push([packet, index]);
   }
+
   for (const pes of open.values()) update(pes);
+
   return Buffer.concat(packets);
 }
 
@@ -712,39 +784,52 @@ function dvbUpdates(stream: Buffer, times: readonly number[]): Buffer {
 function withTeletext(stream: Buffer, sent: readonly TeletextPage[]): Buffer {
   const packets = transportPackets(stream);
   const pid = pidOf;
+
   const pmtPid = (() => {
     const pat = packets.find((packet) => pid(packet) === 0)!;
     const section = pat.subarray(5 + pat[4]!);
+
     return ((section[10]! & 0x1f) << 8) | section[11]!;
   })();
+
   let videoPid = -1;
+
   for (const packet of packets) {
     if (pid(packet) === pmtPid && packet[1]! & 0x40) {
       videoPid = addTeletextStream(packet);
     }
   }
+
   // Pages count from the first picture, and go in where the stream's clock reaches their time,
   // as a broadcaster sends them: readers trust that clock over a teletext page's own time.
   const firstPts = ptsOf(
     packets.find((packet) => pid(packet) === videoPid && ptsOf(packet) !== null)!,
   )!;
+
   const pages = sent.map((page, index) => {
     const pts = firstPts + Math.round(page.at * 90_000);
+
     return { pts, packet: teletextPacket(pts, page, index & 0x0f) };
   });
+
   const out: Buffer[] = [];
+
   for (const packet of packets) {
     const clock = pcrOf(packet);
+
     while (clock !== null && pages[0] && pages[0].pts <= clock) out.push(pages.shift()!.packet);
     out.push(packet);
   }
+
   for (const page of pages) out.push(page.packet);
+
   return Buffer.concat(out);
 }
 
 /** The program clock a transport packet carries, in 90 kHz units, or null. */
 function pcrOf(packet: Buffer): number | null {
   if (!(packet[3]! & 0x20) || packet[4]! < 7 || !(packet[5]! & 0x10)) return null;
+
   return (
     packet[6]! * 2 ** 25 +
     (packet[7]! << 17) +
@@ -762,12 +847,15 @@ function addTeletextStream(packet: Buffer): number {
   const section = packet.subarray(start, start + 3 + length - 4);
   const programInfo = ((section[10]! & 0x0f) << 8) | section[11]!;
   let video = -1;
+
   for (let offset = 12 + programInfo; offset + 5 <= section.length;) {
     const type = section[offset]!;
+
     if (type === 0x1b && video < 0)
       video = ((section[offset + 1]! & 0x1f) << 8) | section[offset + 2]!;
     offset += 5 + (((section[offset + 3]! & 0x0f) << 8) | section[offset + 4]!);
   }
+
   // Stream type 6 with a teletext descriptor: Dutch, a subtitle page, magazine 8, page 88.
   const entry = [
     0x06,
@@ -781,6 +869,7 @@ function addTeletextStream(packet: Buffer): number {
     (0x02 << 3) | (MAGAZINE & 7),
     PAGE,
   ];
+
   const body = [...section, ...entry];
   const newLength = body.length - 3 + 4;
   body[1] = (body[1]! & 0xf0) | (newLength >> 8);
@@ -789,6 +878,7 @@ function addTeletextStream(packet: Buffer): number {
   const rebuilt = Buffer.from([...body, ...u32(crc)]);
   packet.fill(0xff, start);
   rebuilt.copy(packet, start);
+
   return video;
 }
 
@@ -797,8 +887,11 @@ function teletextPacket(pts: number, page: TeletextPage, continuity: number): Bu
   const units: Buffer[] = [];
   // A subtitle, no header shown, and the page erased or kept: C6, C7 and C4.
   units.push(teletextUnit(0, header({ erase: page.erase, subtitle: true, suppressHeader: true })));
+
   for (const each of page.rows) units.push(teletextUnit(each.row, row(each.text)));
+
   while (units.length < 3) units.push(Buffer.from([0xff, 0x2c, ...new Array(44).fill(0xff)]));
+
   const pesHeader = [
     0,
     0,
@@ -811,7 +904,9 @@ function teletextPacket(pts: number, page: TeletextPage, continuity: number): Bu
     ...ptsBytes(pts),
     ...new Array(31).fill(0xff),
   ];
+
   const pes = Buffer.from([...pesHeader, 0x10, ...Buffer.concat(units)]);
+
   return Buffer.from([
     0x47,
     0x40 | (TELETEXT_PID >> 8),
@@ -826,6 +921,7 @@ function teletextUnit(rowNumber: number, data: readonly number[]): Buffer {
   const mrag = [hamming((MAGAZINE & 7) | ((rowNumber & 1) << 3)), hamming(rowNumber >> 1)];
   // Bytes go out least significant bit first, so each is reversed.
   const line = [...mrag, ...data].map(reverse);
+
   // EBU teletext subtitle data, field one, line 22, the framing code.
   return Buffer.from([0x03, 0x2c, 0xe0 | 22, 0xe4, ...line]);
 }
@@ -833,6 +929,7 @@ function teletextUnit(rowNumber: number, data: readonly number[]): Buffer {
 function header(control: { erase: boolean; subtitle: boolean; suppressHeader: boolean }): number[] {
   const units = PAGE & 0x0f;
   const tens = PAGE >> 4;
+
   return [
     hamming(units),
     hamming(tens),
@@ -852,7 +949,9 @@ function row(text: string): number[] {
   const content = [0x07, 0x0b, 0x0b, ...[...text].map((char) => char.charCodeAt(0)), 0x0a, 0x0a];
   const left = Math.floor((40 - content.length) / 2);
   const cells = [...new Array(left).fill(0x20), ...content];
+
   while (cells.length < 40) cells.push(0x20);
+
   return cells.map(oddParity);
 }
 
@@ -867,13 +966,17 @@ function hamming(value: number): number {
 
 function oddParity(value: number): number {
   let bits = 0;
+
   for (let bit = 0; bit < 7; bit++) bits += (value >> bit) & 1;
+
   return (value & 0x7f) | (bits % 2 === 0 ? 0x80 : 0);
 }
 
 function reverse(byte: number): number {
   let out = 0;
+
   for (let bit = 0; bit < 8; bit++) out |= ((byte >> bit) & 1) << (7 - bit);
+
   return out;
 }
 
@@ -882,7 +985,9 @@ function ptsOf(packet: Buffer): number | null {
   if (!(packet[1]! & 0x40)) return null;
   const offset = 4 + (packet[3]! & 0x20 ? 1 + packet[4]! : 0);
   const pes = packet.subarray(offset);
+
   if (pes[0] !== 0 || pes[1] !== 0 || pes[2] !== 1 || !(pes[7]! & 0x80)) return null;
+
   return (
     (pes[9]! & 0x0e) * 2 ** 29 +
     (pes[10]! << 22) +
@@ -904,10 +1009,13 @@ function ptsBytes(pts: number): number[] {
 
 function crc32(bytes: readonly number[]): number {
   let crc = 0xffffffff;
+
   for (const byte of bytes) {
     crc ^= byte << 24;
+
     for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
   }
+
   return crc >>> 0;
 }
 

@@ -28,6 +28,7 @@ export function libraryHandlers({
     "library.refresh": ({ subscriptionId }) =>
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
+
         return source.kind === "m3u"
           ? (yield* roster.refreshPlaylist(subscriptionId)).catalogue
           : yield* library.refresh(subscriptionId);

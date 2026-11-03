@@ -26,8 +26,11 @@ const Stored = lazy(() =>
     opensubtitles: "string | null",
   }),
 );
+
 type Stored = Infer<typeof Stored>;
+
 const SubDL = lazy(() => type({ apiKey: "0 < string <= 4096" }));
+
 const OpenSubtitles = lazy(() =>
   type({
     apiKey: "0 < string <= 4096",
@@ -35,6 +38,7 @@ const OpenSubtitles = lazy(() =>
     password: "0 < string <= 4096",
   }),
 );
+
 type Credentials = Infer<typeof SubDL> | Infer<typeof OpenSubtitles>;
 
 export class SubtitleAccounts extends Context.Service<
@@ -58,6 +62,7 @@ function make(dataDir: string, secrets: Secrets) {
     const path = join(dataDir, "subtitle-accounts.json");
     const one = yield* Semaphore.make(1);
     let current: Stored | null = null;
+
     const stored = Effect.tryPromise({
       try: async () => {
         current ??= (await readJsonFile(path, Stored())) ?? {
@@ -67,10 +72,12 @@ function make(dataDir: string, secrets: Secrets) {
           subdl: null,
           opensubtitles: null,
         };
+
         return current;
       },
       catch: failedWith,
     });
+
     const settings = ({
       subdl,
       opensubtitles,
@@ -79,12 +86,14 @@ function make(dataDir: string, secrets: Secrets) {
       ...preferences,
       configured: { subdl: subdl !== null, opensubtitles: opensubtitles !== null },
     });
+
     return {
       get: one.withPermits(1)(Effect.map(stored, settings)),
       update: (preferences: OnlineSubtitlePreferences, credentials: SubtitleCredentials = {}) =>
         one.withPermits(1)(
           Effect.gen(function* () {
             const previous = yield* stored;
+
             const next = yield* Effect.try({
               try: () => ({
                 ...previous,
@@ -108,8 +117,10 @@ function make(dataDir: string, secrets: Secrets) {
               }),
               catch: secretFailure,
             });
+
             yield* Effect.tryPromise({ try: () => writeJsonFile(path, next), catch: failedWith });
             current = next;
+
             return settings(next);
           }),
         ),
@@ -117,10 +128,13 @@ function make(dataDir: string, secrets: Secrets) {
         one.withPermits(1)(
           Effect.gen(function* () {
             const saved = (yield* stored)[service];
+
             if (saved === null) return null;
+
             return yield* Effect.try({
               try: () => {
                 const plain: unknown = JSON.parse(secrets.open(saved));
+
                 return service === "subdl" ? SubDL().assert(plain) : OpenSubtitles().assert(plain);
               },
               catch: secretFailure,

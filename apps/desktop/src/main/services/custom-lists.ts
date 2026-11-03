@@ -120,8 +120,10 @@ function resolve(
 ): { readonly channel: LiveChannel; readonly via: string } | null {
   for (const via of stored.streams) {
     const channel = channelOf(via);
+
     if (channel) return { channel, via };
   }
+
   return null;
 }
 
@@ -134,14 +136,18 @@ function shownOf(found: readonly Catalogued[], adults: boolean, list: StoredList
   const members: CustomListMember[] = [];
   const seen = new Set<string>();
   let away = 0;
+
   for (const stored of list.members) {
     const owner = byAccount.get(stored.account);
+
     if (!owner) {
       if (adults || !stored.adult) away++;
       continue;
     }
+
     if (owner.fetchedAt === null) continue;
     const resolved = resolve(owner.channelOf, stored);
+
     if (!resolved) {
       if (adults || !stored.adult) {
         members.push({
@@ -151,15 +157,19 @@ function shownOf(found: readonly Catalogued[], adults: boolean, list: StoredList
           subscriptionId: owner.subscription.id,
         });
       }
+
       continue;
     }
+
     if (resolved.channel.adult && !adults) continue;
     const channel = { subscriptionId: owner.subscription.id, id: resolved.channel.id };
+
     // Two of its channels the provider joined since show as one.
     if (seen.has(ownedKey(channel))) continue;
     seen.add(ownedKey(channel));
     members.push({ member: stored.member, kind: "listed", channel });
   }
+
   return { id: list.id, name: list.name, revision: list.revision, members, away };
 }
 
@@ -181,6 +191,7 @@ function make() {
     /** The saved subscriptions in their order, each with its channels. */
     const catalogued = Effect.gen(function* () {
       const statuses = yield* library.status;
+
       return yield* Effect.forEach(yield* subscriptions.saved, (subscription) =>
         Effect.map(library.lookup(subscription.id), (channelOf): Catalogued => ({
           subscription,
@@ -199,19 +210,23 @@ function make() {
     const align = (subscription: SavedSubscription) =>
       Effect.gen(function* () {
         const channelOf = yield* library.lookup(subscription.id);
+
         // Its catalogue went meanwhile, or the subscription did: asked last, with nothing waiting
         // after.
         if (!(yield* subscriptions.stands(subscription))) return false;
         yield* store.align(subscription.key, (stored) => {
           const resolved = resolve(channelOf, stored);
+
           if (!resolved) return null;
           const { channel, via } = resolved;
+
           return {
             streams: [...new Set([via, ...streamsOf(channel), ...stored.streams])],
             name: channel.title,
             adult: channel.adult === true,
           };
         });
+
         return true;
       }).pipe(
         Effect.catchTag("Failed", (failed) =>
@@ -229,8 +244,11 @@ function make() {
           const fetchedAt = statuses.find(
             (status) => status.subscriptionId === subscription.id,
           )?.fetchedAt;
+
           if (fetchedAt === null || fetchedAt === undefined) continue;
+
           if (alignedTo.get(subscription.id) === fetchedAt) continue;
+
           if (yield* align(subscription)) {
             alignedTo = new Map([...alignedTo, [subscription.id, fetchedAt]]);
           }
@@ -247,6 +265,7 @@ function make() {
       yield* Effect.flatMap(library.status, alignTo);
       const found = yield* catalogued;
       const shown = yield* adults;
+
       return (yield* store.lists).map((list) => shownOf(found, shown, list));
     });
 
@@ -256,6 +275,7 @@ function make() {
 
     const nameOf = (name: string) => {
       const trimmed = name.trim();
+
       return trimmed.length > 0 && trimmed.length <= CUSTOM_LIST_NAME_MAX
         ? Effect.succeed(trimmed)
         : Effect.fail(
@@ -277,15 +297,19 @@ function make() {
         const subscription = (yield* subscriptions.saved).find(
           (each) => each.id === named.subscriptionId,
         );
+
         if (!subscription) return yield* noSubscription;
         const channelOf = yield* library.lookup(subscription.id);
         const channel = channelOf(named.id);
+
         if (!channel) {
           // The lookup reads the saved subscriptions again, and finds nothing of one that went
           // since: that is a subscription that went, not a channel it doesn't list.
           if (!subscriptions.standsNow(subscription)) return yield* noSubscription;
+
           return yield* new Failed({ error: { kind: "channel-not-found", channelId: named.id } });
         }
+
         const listed: ListedChannel = {
           account: subscription.key,
           streams: streamsOf(channel),
@@ -293,6 +317,7 @@ function make() {
           adult: channel.adult === true,
           stands: () => subscriptions.standsNow(subscription),
         };
+
         return { subscription, channelOf, channel, listed };
       });
 
@@ -305,12 +330,14 @@ function make() {
           const first = channel ? yield* listedOf(channel) : null;
           const at = yield* Clock.currentTimeMillis;
           yield* store.create({ id, name: named, first: first?.listed ?? null, at });
+
           return yield* after(true);
         }),
 
       rename: (id, name) =>
         Effect.gen(function* () {
           yield* store.rename(id, yield* nameOf(name));
+
           return yield* after(true);
         }),
 
@@ -322,6 +349,7 @@ function make() {
         Effect.gen(function* () {
           const { channelOf, channel, listed } = yield* listedOf(named);
           const at = yield* Clock.currentTimeMillis;
+
           const changed = yield* store.setMember({
             list,
             channel: listed,
@@ -330,6 +358,7 @@ function make() {
             same: (stored) => resolve(channelOf, stored)?.channel.id === channel.id,
             at,
           });
+
           return yield* after(changed);
         }),
 
@@ -341,12 +370,14 @@ function make() {
           const shown = yield* adults;
           // The order was made from the channels of the subscriptions saved then.
           const saved = yield* subscriptions.saved;
+
           if (
             saved.length !== found.length ||
             saved.some((each, at) => !sameSource(each, found[at]?.subscription))
           ) {
             return yield* listChanged;
           }
+
           const changed = yield* store.arrange({
             list,
             revision,
@@ -358,11 +389,13 @@ function make() {
                 ),
               ),
           });
+
           return yield* after(changed);
         }),
 
       changes: Stream.fromPubSub(changes),
     };
+
     return service;
   });
 }

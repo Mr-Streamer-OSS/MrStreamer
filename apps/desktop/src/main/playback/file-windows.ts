@@ -17,12 +17,16 @@ export function fileWindows(limit: number) {
     read(start: number, length: number, size: number | null): Buffer | null {
       for (const [at, data] of windows) {
         const end = at + data.length;
+
         if (at > start || end <= start) continue;
+
         if (start + length > end && end !== size) continue;
         windows.delete(at);
         windows.set(at, data);
+
         return data.subarray(start - at, start - at + length);
       }
+
       return null;
     },
 
@@ -31,11 +35,13 @@ export function fileWindows(limit: number) {
       bytes += data.length - (windows.get(start)?.length ?? 0);
       windows.delete(start);
       windows.set(start, data);
+
       for (const [at, oldest] of windows) {
         if (bytes <= limit) break;
         windows.delete(at);
         bytes -= oldest.length;
       }
+
       most = Math.max(most, bytes);
     },
 

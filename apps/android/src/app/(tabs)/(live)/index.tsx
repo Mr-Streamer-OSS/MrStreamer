@@ -11,6 +11,7 @@ export default function Live() {
   const state = useStore(sources.state);
   const [adding, setAdding] = useState(false);
   const close = () => setAdding(false);
+
   return (
     <Screen title="Live">
       <CatalogueScreen

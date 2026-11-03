@@ -9,10 +9,12 @@ const context = {
   pip: false,
   external: false,
 } as const;
+
 describe("fixture playback export", () => {
   it("retains native waiting independently of UI paused, sanitized identity and intent", () => {
     let output = "";
     let time = 50;
+
     const record = measurementRecords(
       () => time,
       (json) => {
@@ -20,6 +22,7 @@ describe("fixture playback export", () => {
       },
       { source: "synthetic", overlay: "test" },
     );
+
     record({
       kind: "native",
       context,
@@ -154,6 +157,7 @@ describe("fixture playback export", () => {
   ])("seals at its $end without inventing later observations", (bound) => {
     let time = 0;
     const writes: string[] = [];
+
     const record = measurementRecords(
       () => time,
       (json) => {
@@ -161,7 +165,9 @@ describe("fixture playback export", () => {
       },
       { source: "synthetic", overlay: "test" },
     );
+
     time = bound.start;
+
     for (let i = 0; i < 300; i++) record({ kind: "foreground", active: true });
     const last = JSON.parse(writes.at(-1)!);
     expect(last.records).toHaveLength(bound.records);
@@ -172,6 +178,7 @@ describe("fixture playback export", () => {
   });
   it("never propagates export IO failure into playback", () => {
     let attempts = 0;
+
     const record = measurementRecords(
       () => 0,
       () => {
@@ -180,6 +187,7 @@ describe("fixture playback export", () => {
       },
       { source: "synthetic", overlay: "test" },
     );
+
     expect(() => {
       record({ kind: "foreground", active: true });
       record({ kind: "foreground", active: false });
@@ -188,6 +196,7 @@ describe("fixture playback export", () => {
   });
   it("stops capture after projection fails while playback can continue", () => {
     const writes: string[] = [];
+
     const record = measurementRecords(
       () => 0,
       (json) => {
@@ -195,6 +204,7 @@ describe("fixture playback export", () => {
       },
       { source: "synthetic", overlay: "test" },
     );
+
     record({ kind: "foreground", active: true });
     expect(() => {
       record({
@@ -221,6 +231,7 @@ describe("fixture playback export", () => {
   });
   it("exports a truthful byte-limit boundary for populated failures", () => {
     let output = "";
+
     const record = measurementRecords(
       () => 0,
       (json) => {
@@ -228,6 +239,7 @@ describe("fixture playback export", () => {
       },
       { source: "synthetic", overlay: "test" },
     );
+
     for (let sequence = 1; sequence <= 300; sequence++)
       record({
         kind: "native",

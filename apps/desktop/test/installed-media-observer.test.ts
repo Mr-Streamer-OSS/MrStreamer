@@ -13,6 +13,7 @@ function observer(fetch: typeof globalThis.fetch) {
       throw new Error("No native MSE in this Node contract check");
     }
   }
+
   const context = createContext({
     fetch,
     MediaSource,
@@ -21,20 +22,24 @@ function observer(fetch: typeof globalThis.fetch) {
     Date,
     document: { baseURI: "http://127.0.0.1/", addEventListener() {} },
   });
+
   runInContext("window=globalThis", context);
   const listeners = new Map<string, (data: unknown) => void>();
+
   const page = {
     async evaluate<T>(expression: string): Promise<T> {
       return structuredClone(await runInContext(expression, context)) as T;
     },
     on(method: string, listener: (data: unknown) => void) {
       listeners.set(method, listener);
+
       return () => listeners.delete(method);
     },
     async send() {
       return {};
     },
   } satisfies Pick<Page, "evaluate" | "on" | "send">;
+
   return { page, context, listeners };
 }
 
@@ -44,15 +49,18 @@ describe("installed media response observation", () => {
       status: 200,
       headers: { "X-Title-Video": "copy", "X-Title-Audio": "copy" },
     });
+
     Object.defineProperty(response, "url", { value: "http://127.0.0.1/title/actual.mp4?start=0" });
     const original = vi.fn<typeof fetch>().mockResolvedValue(response);
     const { page, context, listeners } = observer(original);
     const seen = await probe(page);
     const window = await seen.beginWindow("offline-short");
+
     const delivered = await runInContext(
       "fetch('http://127.0.0.1/title/actual.mp4?start=0')",
       context,
     );
+
     expect(delivered).toBe(response);
     expect(response.bodyUsed).toBe(false);
     // The title consumer has its Response; Node has not received the CDP notification.
@@ -81,9 +89,11 @@ describe("installed media response observation", () => {
       value: "http://127.0.0.1/title/actual.mp4?picture=convert",
     });
     let finish!: (response: Response) => void;
+
     const pending = new Promise<Response>((resolve) => {
       finish = resolve;
     });
+
     const original = vi.fn<typeof fetch>().mockReturnValueOnce(pending).mockResolvedValue(response);
     const { page, context } = observer(original);
     const seen = await probe(page);

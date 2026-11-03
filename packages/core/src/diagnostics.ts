@@ -111,6 +111,7 @@ export function diagnosed(op: Step) {
     Effect.gen(function* () {
       const diagnostics = yield* Diagnostics;
       const started = yield* Clock.currentTimeMillis;
+
       return yield* effect.pipe(
         Effect.onExit((exit) =>
           Effect.map(Clock.currentTimeMillis, (now) =>
@@ -125,6 +126,8 @@ export function diagnosed(op: Step) {
 export function outcomeOf(exit: Exit.Exit<unknown, unknown>): Outcome {
   if (Exit.isSuccess(exit)) return "ok";
   const failed = Cause.findErrorOption(exit.cause);
+
   if (failed._tag === "Some" && failed.value instanceof Failed) return failed.value.error.kind;
+
   return Cause.hasInterruptsOnly(exit.cause) ? "interrupted" : "unexpected";
 }

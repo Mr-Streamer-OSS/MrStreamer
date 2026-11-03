@@ -40,6 +40,7 @@ import { QUALITY_STREAM_IDS, startFakeProvider } from "../fake-provider.ts";
 import { connect, delay, key, launch, login, MODIFIERS, press, waitFor, type Page } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) {
   throw new Error("Usage: node test/e2e/favourite-order.ts <app executable> [-- args]");
 }
@@ -55,6 +56,7 @@ const HIDDEN = ["4000", "gone"] as const;
 const KEYS = { ArrowUp: 38, ArrowDown: 40, PageUp: 33, PageDown: 34, End: 35, Home: 36 } as const;
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, problems: readonly string[]): void {
   console.log(
@@ -72,15 +74,20 @@ const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
+
   if (!result.ok) throw new Error(`${method}: ${JSON.stringify(result.error)}`);
+
   return result.value;
 };
+
 /** The favourites as the record holds them, hidden ones included. */
 const favourites = async (page: Page) =>
   (await invoke<{ favourites: OwnedId[] }>(page, "viewing.get")).favourites;
+
 /** The favourites the lists show, in their order. */
 const listed = async (page: Page) =>
   invoke<Channel[]>(page, "library.channels", { channels: await favourites(page) });
+
 /** Where the one subscription's channel `id` stands among `channels`, from 0. */
 const placeOf = (channels: readonly OwnedId[], id: string) =>
   channels.findIndex((channel) => channel.id === id);
@@ -119,20 +126,28 @@ async function listProblems(
 ): Promise<string[]> {
   await delay(400);
   const now = await drawn(page);
+
   const problems = now.rows
     .filter((row) => order[row.index]?.title !== row.title)
     .map((row) => `row ${row.index + 1} shows ${row.title}, not ${order[row.index]?.title}`);
+
   if (now.rows.length < 5) problems.push(`only ${now.rows.length} rows drawn`);
+
   if (now.rows.length >= order.length) problems.push("every row is drawn: the list isn't virtual");
+
   if (focused) {
     const row = now.rows.find((each) => each.title === focused.title);
     const at = order.indexOf(focused);
+
     if (now.focus !== focused.title)
       problems.push(`the focus is on ${now.focus}, not ${focused.title}`);
+
     if (!row?.inView) problems.push(`${focused.title} is out of view at place ${at + 1}`);
+
     if (row && row.index !== at)
       problems.push(`${focused.title} stands at ${row.index + 1}, not ${at + 1}`);
   }
+
   return problems;
 }
 
@@ -140,6 +155,7 @@ async function listProblems(
 const moved = (order: readonly Channel[], channel: Channel, to: number): Channel[] => {
   const rest = order.filter((each) => each !== channel);
   const at = Math.min(Math.max(to, 0), rest.length);
+
   return [...rest.slice(0, at), channel, ...rest.slice(at)];
 };
 
@@ -153,11 +169,13 @@ async function click(page: Page, label: string, modifiers = 0): Promise<void> {
       if (!box || (list && (box.top < list.top || box.bottom > list.bottom))) return null;
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     })()`);
+
   await waitFor(async () => (await where()) !== null, 10_000).catch(() => {
     throw new Error(`No button "${label}" in view.`);
   });
   await delay(150);
   const point = await where();
+
   for (const type of ["mousePressed", "mouseReleased"]) {
     await page.send("Input.dispatchMouseEvent", {
       type,
@@ -167,6 +185,7 @@ async function click(page: Page, label: string, modifiers = 0): Promise<void> {
       modifiers,
     });
   }
+
   await delay(150);
 }
 
@@ -189,6 +208,7 @@ try {
   await login(page, provider);
   // Every channel is the one subscription's, and is named with it.
   const [saved] = await invoke<{ id: string }[]>(page, "subscription.list");
+
   if (!saved) throw new Error("The login saved no subscription.");
   const subscriptionId = saved.id;
   const own = (id: string): OwnedId => ({ subscriptionId, id });
@@ -199,6 +219,7 @@ try {
     .filter((channel) => !channel.offline && !channel.adult && channel.streamId < 4000)
     .slice(0, 37)
     .map((channel) => String(channel.streamId));
+
   const starred = [
     ...plain.slice(0, 3),
     HIDDEN[0],
@@ -206,6 +227,7 @@ try {
     String(QUALITY_STREAM_IDS + 2),
     HIDDEN[1],
   ];
+
   for (const channelId of starred) {
     await invoke(page, "viewing.setFavourite", {
       commandId: crypto.randomUUID(),
@@ -213,6 +235,7 @@ try {
       favourite: true,
     });
   }
+
   const record = await favourites(page);
   let order = await listed(page);
   const streams = provider.streamRequests();
@@ -227,8 +250,10 @@ try {
     await delay(300);
     const problems: string[] = [];
     const asked = await drawn(page);
+
     if (!(await says(page, "Clear the search to reorder.")))
       problems.push("no line asked to clear it");
+
     if (asked.editing || asked.rows.length !== 1) problems.push("the search didn't stay as it was");
     await click(page, "Clear search and reorder");
     problems.push(
@@ -238,6 +263,7 @@ try {
         order.find((channel) => channel.title === asked.rows[0]?.title),
       )),
     );
+
     if (!(await drawn(page)).editing) problems.push("the link didn't start ordering");
     await key(page, "Escape", 27);
     report("Reorder asks for a search to be cleared, and the link clears it and starts", problems);
@@ -247,7 +273,9 @@ try {
     await key(page, "r", 82);
     const problems = await listProblems(page, order);
     const now = await drawn(page);
+
     if (!now.editing) problems.push("R didn't start ordering");
+
     if (now.focus === null) problems.push("no row has the focus");
     report("R starts ordering, with the focus on a row", problems);
   }
@@ -258,6 +286,7 @@ try {
     order = moved(order, second, 2);
     const problems = await listProblems(page, order, second);
     const said = (await drawn(page)).saying;
+
     if (said !== `${second.title}, 3 of ${order.length}`) problems.push(`it said "${said}"`);
     await click(page, `Move ${second.title} down`, MODIFIERS.shift);
     order = moved(order, second, order.length - 1);
@@ -267,21 +296,27 @@ try {
 
   {
     const problems: string[] = [];
+
     const step = async (name: keyof typeof KEYS, alt: boolean, expect: () => Channel) => {
       await key(page, name, KEYS[name], alt ? MODIFIERS.alt : 0);
       const channel = expect();
+
       for (const problem of await listProblems(page, order, channel)) {
         problems.push(`${alt ? "Alt " : ""}${name}: ${problem}`);
       }
     };
+
     await step("Home", false, () => order[0]!);
     await step("ArrowDown", false, () => order[1]!);
     await step("ArrowDown", false, () => order[2]!);
     const third = order[2]!;
+
     const to = (place: number) => () => {
       order = moved(order, third, place);
+
       return third;
     };
+
     await step("ArrowDown", true, to(3));
     await step("PageDown", true, to(13));
     await step("ArrowUp", true, to(12));
@@ -303,6 +338,7 @@ try {
       const box = document.querySelector("main .overflow-y-auto").getBoundingClientRect();
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     })()`);
+
     await page.send("Input.dispatchMouseEvent", {
       type: "mouseWheel",
       ...list,
@@ -312,9 +348,11 @@ try {
     await delay(600);
     const away = await drawn(page);
     const problems: string[] = [];
+
     if (away.rows.find((row) => row.title === selected.title)?.inView !== false) {
       problems.push("the wheel didn't take the row out of view, or the list no longer draws it");
     }
+
     if (away.focus !== selected.title) problems.push(`the focus went to ${away.focus}`);
     await key(page, "ArrowUp", KEYS.ArrowUp, MODIFIERS.alt);
     order = moved(order, selected, order.indexOf(selected) - 1);
@@ -324,9 +362,12 @@ try {
 
   {
     const problems: string[] = [];
+
     const focused = () =>
       page.evaluate<string | null>(`document.activeElement?.getAttribute("aria-label") ?? null`);
+
     await key(page, "Tab", 9);
+
     if ((await focused()) !== `Move ${selected.title} up`)
       problems.push(`Tab went to ${await focused()}`);
     // A real press of Space, which a button takes as a click when the key comes up.
@@ -335,12 +376,15 @@ try {
     await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...space });
     order = moved(order, selected, order.indexOf(selected) - 1);
     await delay(400);
+
     if ((await focused()) !== `Move ${selected.title} up`)
       problems.push(`after Space the focus is on ${await focused()}`);
     const row = (await drawn(page)).rows.find((each) => each.title === selected.title);
+
     if (row?.index !== order.indexOf(selected) || !row.inView)
       problems.push(`${selected.title} is at ${(row?.index ?? -1) + 1}, in view: ${row?.inView}`);
     await key(page, "Tab", 9);
+
     if ((await focused()) !== `Move ${selected.title} down`)
       problems.push(`the second Tab went to ${await focused()}`);
     report("Tab reaches a row's buttons, which Space presses and which keep the focus", problems);
@@ -351,8 +395,11 @@ try {
     order = await listed(page);
     const problems = await listProblems(page, order);
     const now = await drawn(page);
+
     if (now.editing) problems.push("still ordering after Escape");
+
     if (now.focus !== null) problems.push(`a row kept the focus: ${now.focus}`);
+
     if (JSON.stringify(await favourites(page)) !== JSON.stringify(record))
       problems.push("the record changed");
     report("Escape throws the draft away", problems);
@@ -372,9 +419,11 @@ try {
     const problems = await listProblems(page, order);
     const saved = await favourites(page);
     const shown = (await listed(page)).map((channel) => channel.id);
+
     if (JSON.stringify(shown) !== JSON.stringify(order.map((channel) => channel.id))) {
       problems.push(`the record lists ${shown.join(" ")}`);
     }
+
     // The hidden favourites stand where they stood, counted among every favourite.
     for (const id of HIDDEN) {
       if (placeOf(saved, id) !== placeOf(record, id)) {
@@ -383,9 +432,11 @@ try {
         );
       }
     }
+
     if (saved.length !== record.length)
       problems.push(`${saved.length} favourites, not ${record.length}`);
     const qualities = order[0]!.variants.length;
+
     if (qualities !== 3) problems.push(`the channel moved first has ${qualities} streams, not 3`);
     report("Enter saves the order, with the hidden favourites where they were", problems);
   }
@@ -404,12 +455,14 @@ try {
       problems.push("no failure showed"),
     );
     problems.push(...(await listProblems(page, wanted, second)));
+
     if (
       JSON.stringify((await listed(page)).map((c) => c.id)) !==
       JSON.stringify(order.map((c) => c.id))
     ) {
       problems.push("the record changed though saving failed");
     }
+
     other.exec("rollback");
     other.close();
     await press(page, "Retry");
@@ -418,12 +471,14 @@ try {
     );
     order = wanted;
     problems.push(...(await listProblems(page, order)));
+
     if (
       JSON.stringify((await listed(page)).map((c) => c.id)) !==
       JSON.stringify(order.map((c) => c.id))
     ) {
       problems.push("the record doesn't hold the order after Retry");
     }
+
     report("A save that fails keeps the draft, and Retry saves it", problems);
   }
 
@@ -434,15 +489,19 @@ try {
     const other = new DatabaseSync(join(profile, "mrstreamer.db"));
     const state = other.prepare("select account, favourites from state").get();
     const account = String(state?.["account"]);
+
     const kept = (JSON.parse(String(state?.["favourites"])) as string[]).filter(
       (id) => id !== gone.id,
     );
+
     other.exec("begin immediate");
+
     const event = other
       .prepare(
         "insert into events (account, type, version, channel_id, at, command_id) values (?, 'favourite-removed', 1, ?, ?, 'another-build')",
       )
       .run(account, gone.id, Date.now());
+
     other
       .prepare("update state set favourites = ?, sequence = ? where account = ?")
       .run(JSON.stringify(kept), Number(event.lastInsertRowid), account);
@@ -470,22 +529,26 @@ try {
     await waitFor(async () => !(await drawn(page)).editing, 10_000).catch(() =>
       problems.push("the order made after Reload didn't save"),
     );
+
     if (
       JSON.stringify((await listed(page)).map((c) => c.id)) !==
       JSON.stringify(order.map((c) => c.id))
     ) {
       problems.push("the record doesn't hold the order made after Reload");
     }
+
     report("Favourites changed behind the page are read again before an order saves", problems);
   }
 
   {
     await key(page, "r", 82);
     await key(page, "End", KEYS.End, MODIFIERS.alt);
+
     const extra = provider.catalogue.channels.find(
       (channel) =>
         !channel.offline && !starred.includes(String(channel.streamId)) && channel.streamId > 2100,
     );
+
     await invoke(page, "viewing.setFavourite", {
       commandId: crypto.randomUUID(),
       channel: own(String(extra?.streamId)),
@@ -496,6 +559,7 @@ try {
       problems.push("the draft stayed"),
     );
     order = await listed(page);
+
     if (order.at(-1)?.id !== String(extra?.streamId)) problems.push("the new favourite isn't last");
     problems.push(...(await listProblems(page, order)));
     report("A favourite starred meanwhile ends the draft, and goes last", problems);
@@ -507,15 +571,18 @@ try {
   {
     await press(page, "Home");
     await delay(1500);
+
     const tiles = await page.evaluate<string[]>(`(() => {
       const section = [...document.querySelectorAll("section")].find((each) => each.querySelector("h2")?.textContent === "Favourites");
       return [...(section?.querySelectorAll(".grid > button") ?? [])].map((tile) => tile.innerText);
     })()`);
+
     const problems = tiles.flatMap((tile, index) =>
       tile.includes(order[index]?.title ?? "\n")
         ? []
         : [`tile ${index + 1} is ${tile.replaceAll("\n", " / ")}, not ${order[index]?.title}`],
     );
+
     if (tiles.length < 2) problems.push(`${tiles.length} tiles`);
     report("Home's Favourites row follows the order", problems);
   }
@@ -523,12 +590,15 @@ try {
   {
     await openFavourites(page);
     const problems: string[] = [];
+
     const playing = () =>
       page.evaluate<string>(`document.querySelector('[data-view="watch"] h2')?.textContent ?? ""`);
+
     await page.evaluate(`document.querySelector("main [data-index='1'] [role=button]").click()`);
     await waitFor(async () => (await playing()) === order[1]!.title, 15_000).catch(() =>
       problems.push("the second favourite didn't open"),
     );
+
     for (const [name, next] of [
       ["ArrowDown", 2],
       ["ArrowDown", 3],
@@ -539,20 +609,26 @@ try {
       await key(page, name, KEYS[name]);
       await delay(600);
       const title = await playing();
+
       if (title !== order[next]!.title)
         problems.push(`${name} went to ${title}, not ${order[next]!.title}`);
     }
+
     await key(page, "Enter", 13);
     await delay(800);
+
     const rows = await page.evaluate<string[]>(
       `[...document.querySelectorAll('[data-view="watch"] [role=button] [title]')].map((name) => name.getAttribute("title"))`,
     );
+
     const names = await invoke<{ id: string; name: string }[]>(page, "library.channels", {
       channels: order.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
     });
+
     rows.slice(0, 6).forEach((name, index) => {
       if (name !== names[index]?.name) problems.push(`Watch's list has ${name} at ${index + 1}`);
     });
+
     if (rows.length < 3) problems.push(`Watch's list shows ${rows.length} rows`);
     await key(page, "Escape", 27);
     await key(page, "Escape", 27);
@@ -563,12 +639,14 @@ try {
     await invoke(page, "library.refresh", { subscriptionId });
     await delay(1000);
     const problems: string[] = [];
+
     if (
       JSON.stringify((await listed(page)).map((c) => c.id)) !==
       JSON.stringify(order.map((c) => c.id))
     ) {
       problems.push("the order changed with the catalogue");
     }
+
     page.close();
     app.kill("SIGKILL");
     await delay(1500);
@@ -579,14 +657,17 @@ try {
     await waitFor(() => page.evaluate<boolean>("!!document.querySelector('header')"));
     await openFavourites(page);
     problems.push(...(await listProblems(page, order)));
+
     if (
       JSON.stringify((await listed(page)).map((c) => c.id)) !==
       JSON.stringify(order.map((c) => c.id))
     ) {
       problems.push("the record lost the order over the restart");
     }
+
     report("The order holds after a new catalogue and a restart", problems);
   }
+
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -597,4 +678,5 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);

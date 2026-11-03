@@ -26,6 +26,7 @@ export function SavedSheet({ entry }: { entry: WatchlistEntry }) {
   const nameOf = useSubscriptionNames();
   const several = useSubscriptions().length > 1;
   const from = several ? entry.sources.flatMap((source) => nameOf(source) ?? []) : [];
+
   const facts = [
     entry.year,
     kindLabel(entry.kind),
@@ -33,6 +34,7 @@ export function SavedSheet({ entry }: { entry: WatchlistEntry }) {
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <Sheet onClose={close} short>
       <div className="relative h-44 overflow-hidden rounded-t-3xl">

@@ -19,6 +19,7 @@ const options: FilterOptions = {
   verified: [],
   files: 0,
 };
+
 const film: Title = {
   kind: "movie",
   key: "movie:603",
@@ -44,9 +45,11 @@ const film: Title = {
 };
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -71,11 +74,15 @@ async function mount() {
   client.setQueryData(queries.subscriptions().queryKey, [subscription]);
   const mounted = queryView(client);
   const { container } = mounted;
+
   const render = (kind: TitleKind, active = true) =>
     mounted.render(createElement(TitlesPage, { kind, active }));
+
   const showDetails = (target: DetailsTarget) =>
     mounted.render(createElement(DetailsView, { target }));
+
   cleanup = mounted.unmount;
+
   // Lets the page's timers and answers run on the fake clock until `check` passes.
   const until = (check: () => void) =>
     vi.waitFor(
@@ -85,20 +92,26 @@ async function mount() {
       },
       { interval: 1 },
     );
+
   const group = (label: string) =>
     container.querySelector<HTMLElement>(`[role=group][aria-label="${label}"]`)!;
+
   const click = async (label: string, inGroup?: string) => {
     if (inGroup && !document.querySelector(`[role="menu"][aria-label="${inGroup}"]`)) {
       const trigger = group(inGroup).querySelector<HTMLButtonElement>("button")!;
       await act(async () => trigger.click());
       await until(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
     }
+
     const parent = inGroup ? document.querySelector('[role="menu"]')! : container;
+
     const button = [...parent.querySelectorAll<HTMLElement>("button, [role=menuitemradio]")].find(
       (each) => each.textContent === label,
     );
+
     expect(button).toBeDefined();
     await act(async () => button!.click());
+
     // After choosing with the pointer, let the menu close, then leave it before handing keys to
     // the grid.
     if (inGroup) {
@@ -106,20 +119,24 @@ async function mount() {
       await act(async () => (document.activeElement as HTMLElement)?.blur());
     }
   };
+
   await render("movie");
   await click("All movies");
   await until(() => expect(container.textContent).toContain("10 of 10"));
+
   return { client, container, group, click, render, until, showDetails };
 }
 
 it("keeps grid arrows and Enter after a mouse click on an inline filter word", async () => {
   const page = await mount();
+
   const second: Title = {
     ...film,
     id: "second",
     key: "movie:second",
     versions: [{ subscriptionId: SUBSCRIPTION, id: "second", tags: ["4K", "EN"] }],
   };
+
   ipc.always("ondemand.collection", {
     name: "All",
     titles: [film, second],
@@ -151,9 +168,11 @@ it("keeps additional languages reachable in one menu and returns keyboard focus 
   const trigger = page.group("Language").querySelector<HTMLButtonElement>("button")!;
   await act(async () => trigger.click());
   await page.until(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+
   const polish = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
     (each) => each.textContent === "Polski",
   )!;
+
   await act(async () => {
     polish.focus();
     polish.click();
@@ -172,10 +191,12 @@ it.each(["Quality", "Sort"])(
   async (label) => {
     const page = await mount();
     await act(async () => openCollection("movie", "genre:Drama"));
+
     const back = () =>
       [...page.container.querySelectorAll("button")].find(
         (button) => button.textContent === "Back",
       );
+
     await page.until(() => expect(back()).toBeDefined());
     const trigger = page.group(label).querySelector<HTMLButtonElement>("button")!;
     await act(async () => {
@@ -213,6 +234,7 @@ it.each(["Quality", "Sort"])(
     const trigger = page.group(label).querySelector<HTMLButtonElement>("button")!;
     const shortcut = vi.fn();
     window.addEventListener("keydown", shortcut);
+
     try {
       await act(async () => {
         trigger.focus();
@@ -234,6 +256,7 @@ it.each(["filter", "4k tab", "normal list"] as const)(
   "opens the correct version over a remembered choice from %s and keeps menu alternatives",
   async (entry) => {
     const page = await mount();
+
     const details: MovieDetails = {
       kind: "movie",
       title: film,
@@ -246,6 +269,7 @@ it.each(["filter", "4k tab", "normal list"] as const)(
       duration: null,
       backdropUrl: null,
     };
+
     page.client.setQueryData(queries.subscriptionPreferences(SUBSCRIPTION).queryKey, {
       ...defaultSubscriptionPreferences,
       titleVersions: { "movie:603": "hd" },
@@ -254,10 +278,12 @@ it.each(["filter", "4k tab", "normal list"] as const)(
     ipc.always("ondemand.titles", [film]);
     ipc.always("viewing.progress", []);
     ipc.always("ondemand.details", details);
+
     if (entry === "filter") await page.click("4K", "Quality");
     else if (entry === "4k tab") await page.click("4K");
     else await page.client.invalidateQueries({ queryKey: ["ondemand", "collection"] });
     await page.until(() => expect(page.container.textContent).toContain("1 of 10"));
+
     if (entry === "filter") {
       const control = page.group("Quality").querySelector<HTMLButtonElement>("button")!;
       expect(document.activeElement).not.toBe(control);
@@ -270,6 +296,7 @@ it.each(["filter", "4k tab", "normal list"] as const)(
       // Leaving a keyboard-focused word returns the keys to the grid.
       control.blur();
     }
+
     await act(async () => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "End", bubbles: true }),
@@ -303,9 +330,11 @@ it.each(["filter", "4k tab", "normal list"] as const)(
       document.querySelector<HTMLButtonElement>('[aria-label="Versions"]')!.click(),
     );
     await page.until(() => expect(document.querySelector('[role="menuitemradio"]')).not.toBeNull());
+
     const hd = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) =>
       item.textContent?.includes("FHD"),
     );
+
     expect(hd).toBeDefined();
     await act(async () => hd!.click());
     await page.until(() => expect(ipc.argsOf("ondemand.details").at(-1)?.version.id).toBe("hd"));

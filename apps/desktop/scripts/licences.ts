@@ -96,6 +96,7 @@ const Component = type({
   /** A project on Chromium's credits page, or `*` for the whole page. */
   "credits?": "string",
 });
+
 type Component = typeof Component.infer;
 
 /** A component under `components`: what no bundle shows, some of it not open source. */
@@ -126,6 +127,7 @@ const Source = type({ file: "string", url: "string", sha256: "string" }).or({
   git: "string",
   commit: "string",
 });
+
 export type Source = typeof Source.infer;
 
 const Override = type({
@@ -141,6 +143,7 @@ const Override = type({
    */
   "standardText?": "true",
 });
+
 type Override = typeof Override.infer;
 
 /** licences.config.json */
@@ -175,6 +178,7 @@ const Config = type({
    */
   installer: { setup: { "[string]": "string" }, uninstaller: { "[string]": "string" } },
 });
+
 type Config = typeof Config.infer;
 
 const PackageJson = type({
@@ -185,6 +189,7 @@ const PackageJson = type({
   "homepage?": "string",
   "author?": type("string").or({ name: "string" }),
 });
+
 type PackageJson = typeof PackageJson.infer;
 
 const SourceMap = type({ "sources?": "(string | null)[]" });
@@ -213,6 +218,7 @@ export function thirdPartyNotices(
   bundles: readonly string[],
 ): (bundle: string) => Plugin {
   const modules = new Map<string, readonly string[]>();
+
   return (bundle) => ({
     name: "mrstreamer:third-party-notices",
     apply: "build",
@@ -230,11 +236,13 @@ export function thirdPartyNotices(
     },
     async writeBundle() {
       if (!bundles.every((name) => modules.has(name))) return;
+
       const manifest = await collectNotices({
         root,
         modules: [...modules.values()].flat(),
         variables: await buildVariables(root),
       });
+
       modules.clear();
       const dir = join(root, "out", "licences");
       await mkdir(dir, { recursive: true });
@@ -252,6 +260,7 @@ export async function readConfig(root: string): Promise<Config> {
 export async function releaseSources(root: string): Promise<Source[]> {
   const config = await readConfig(root);
   const variables = { ...(await buildVariables(root)), ...pinned(config) };
+
   return config.sources.map((source) => filledSource(source, variables));
 }
 
@@ -268,11 +277,14 @@ export function linkProblems(
   const attached = new Set(files);
   const linked = new Set<string>();
   const problems = new Set<string>();
+
   for (const notice of notices) {
     const text = typeof notice.text === "string" ? notice.text : "";
     const places = [notice.source, notice.homepage ?? "", text].join("\n");
+
     for (const [, tag = "", file = ""] of places.matchAll(RELEASE_LINK)) {
       linked.add(file);
+
       if (tag !== `v${version}`) {
         problems.add(`${notice.id} links ${file} on release ${tag}, not on v${version}.`);
       } else if (!attached.has(file)) {
@@ -282,9 +294,11 @@ export function linkProblems(
       }
     }
   }
+
   for (const file of attached) {
     if (!linked.has(file)) problems.add(`The release attaches ${file}, which no notice links.`);
   }
+
   return [...problems];
 }
 
@@ -301,9 +315,11 @@ export async function collectNotices({
   // What was reviewed for one version of Electron or electron-builder says nothing about another.
   for (const [name, { version }] of Object.entries(config.reviewed)) {
     const manifest = join(root, "node_modules", name, "package.json");
+
     const installed = existsSync(manifest)
       ? (await readJson(manifest, type({ version: "string" }))).version
       : null;
+
     if (installed !== version) {
       problems.push(
         `${name} ${installed ? `${installed} is` : "isn't"} installed, and the notices and source archives were reviewed for ${version}: go through docs/maintainers/licences.md#upgrading-electron-or-electron-builder, then update "reviewed" in licences.config.json.`,
@@ -313,23 +329,32 @@ export async function collectNotices({
 
   // The files each installed package contributes, by package folder.
   const bundled = new Map<string, Set<string>>();
+
   for (const id of modules) {
     const file = id.replace(/^\0/, "").replace(/\?.*$/, "");
     const packageRoot = packageRootOf(file);
+
     if (!packageRoot) continue;
     const files = bundled.get(packageRoot) ?? new Set();
     bundled.set(packageRoot, files.add(file));
   }
+
   const packages = new Map<string, Package>();
+
   const add = async (packageRoot: string) => {
     const real = await realpath(packageRoot);
+
     if (packages.has(real)) return;
     const json = await readJson(join(real, "package.json"), PackageJson);
+
     if (!json.name.startsWith("@mrstreamer/")) packages.set(real, { root: real, json });
   };
+
   for (const packageRoot of bundled.keys()) await add(packageRoot);
+
   for (const name of Object.keys(config.packages)) {
     const packageRoot = join(root, "node_modules", name);
+
     if (existsSync(packageRoot)) await add(packageRoot);
     else problems.push(`"packages" names ${name}, which isn't installed.`);
   }
@@ -337,18 +362,23 @@ export async function collectNotices({
   // Packages carried inside prebuilt files: installed ones get their own notice, the others need
   // one in the config under the carrying package's name and version.
   const described: Component[] = [];
+
   const unused = new Set(
     Object.entries(config.embedded).flatMap(([host, list]) =>
       list.map((component) => `${host} ${component.name}`),
     ),
   );
+
   for (const [packageRoot, files] of bundled) {
     const host = packages.get(await realpath(packageRoot));
+
     if (!host) continue;
     const key = `${host.json.name}@${host.json.version}`;
+
     for (const name of await carriedIn(files, host.json.name)) {
       const entry = config.embedded[key]?.find((component) => component.name === name);
       const installed = entry ? null : installedNear(host.root, name);
+
       if (entry) {
         described.push(entry);
         unused.delete(`${key} ${name}`);
@@ -361,11 +391,13 @@ export async function collectNotices({
       }
     }
   }
+
   for (const stale of unused) problems.push(`"embedded" lists ${stale}, which no bundle carries.`);
 
   // Only what "components" describes takes exceptions, by the id of its notice. A package with
   // the same id fails the build as listed twice.
   const exceptions = new Map<string, Readonly<Record<string, string>>>();
+
   const results = await Promise.allSettled([
     ...[...packages.values()].map((found) =>
       packageNotice(found, config.overrides[found.json.name], root, variables),
@@ -374,10 +406,13 @@ export async function collectNotices({
     ...config.components.map(async (component) => {
       const notice = await componentNotice(component, root, variables);
       exceptions.set(notice.id, component.exceptions ?? {});
+
       return notice;
     }),
   ]);
+
   const notices: Notice[] = [];
+
   for (const result of results) {
     if (result.status === "fulfilled") {
       notices.push(result.value);
@@ -385,15 +420,20 @@ export async function collectNotices({
       problems.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
     }
   }
+
   const ids = new Set<string>();
+
   for (const notice of notices) {
     const excepted = exceptions.get(notice.id) ?? {};
+
     if (!accepted(notice.licence, excepted)) {
       problems.push(
         `${notice.id} is licensed ${notice.licence}, which isn't known to be compatible with GPL-3.0 (COMPATIBLE in scripts/licences.ts).`,
       );
     }
+
     const terms = notice.licence.split(/\s+(?:AND|OR)\s+|[()]/).map((term) => term.trim());
+
     for (const licence of Object.keys(excepted)) {
       if (COMPATIBLE.has(licence) || !terms.includes(licence)) {
         problems.push(
@@ -401,18 +441,22 @@ export async function collectNotices({
         );
       }
     }
+
     const line = FULL_TEXT[notice.licence];
+
     if (line && typeof notice.text === "string" && !notice.text.includes(line)) {
       problems.push(
         `${notice.id}'s notice refers to ${notice.licence} without its text: give it an override with "standardText".`,
       );
     }
+
     if (ids.has(notice.id)) problems.push(`${notice.id} is listed twice.`);
     ids.add(notice.id);
   }
 
   // Every file a notice says is on this release has to be one the release attaches.
   const files: string[] = [];
+
   for (const source of config.sources) {
     try {
       files.push(filledSource(source, variables).file);
@@ -420,18 +464,22 @@ export async function collectNotices({
       problems.push(error instanceof Error ? error.message : String(error));
     }
   }
+
   problems.push(...linkProblems(notices, variables["app"] ?? "", files));
+
   if (problems.length > 0) {
     throw new Error(
       `Third-party notices:\n${problems.map((problem) => `- ${problem}`).join("\n")}`,
     );
   }
+
   notices.sort(
     (a, b) =>
       compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
       compare(a.name, b.name) ||
       compare(a.version, b.version),
   );
+
   return { version: 1, notices };
 }
 
@@ -443,28 +491,36 @@ async function packageNotice(
 ): Promise<Notice> {
   const id = `${json.name}@${json.version}`;
   const licence = override?.licence ?? licenceOf(json);
+
   if (!licence) {
     throw new Error(
       `${id} declares no licence: give it an override with "licence" in licences.config.json.`,
     );
   }
+
   const own = override?.files
     ? await texts(app, override.files, (text) => filled(text, variables, id))
     : await licenceFiles(root);
+
   const standard = override?.standardText
     ? await standardText(app, json, licence, own !== null)
     : null;
+
   const text = own && standard ? `${own}${SEPARATOR}${standard}` : (own ?? standard);
+
   if (!text) {
     throw new Error(
       `${id} has no licence file: give it an override with "files" or "standardText" in licences.config.json.`,
     );
   }
+
   const source =
     repositoryOf(json) ??
     json.homepage ??
     `https://www.npmjs.com/package/${json.name}/v/${json.version}`;
+
   const homepage = json.homepage?.replace(/#readme$/, "");
+
   return {
     id,
     name: json.name,
@@ -483,10 +539,13 @@ async function componentNotice(
 ): Promise<Notice> {
   const fill = (text: string) => filled(text, variables, component.name);
   const { files, credits } = component;
+
   if ((files === undefined) === (credits === undefined)) {
     throw new Error(`${component.name} needs either "files" or "credits" in licences.config.json.`);
   }
+
   const version = fill(component.version);
+
   return {
     id: `${component.name}@${version}`,
     name: component.name,
@@ -501,9 +560,11 @@ async function componentNotice(
 /** What `reviewed` pins: each package's version under its name, and the facts recorded for it. */
 function pinned(config: Config): Record<string, string> {
   const values: Record<string, string> = {};
+
   for (const [name, { version, pins }] of Object.entries(config.reviewed)) {
     Object.assign(values, { [name]: version }, pins);
   }
+
   return values;
 }
 
@@ -514,20 +575,27 @@ function pinned(config: Config): Record<string, string> {
 function filledSource(source: Source, variables: Readonly<Record<string, string>>): Source {
   const fill = (text: string) => filled(text, variables, `"sources" > ${source.file}`);
   const file = fill(source.file);
+
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file)) {
     throw new Error(`"sources" names ${file}, which isn't a plain file name.`);
   }
+
   if ("url" in source) {
     const sha256 = fill(source.sha256);
+
     if (!/^[0-9a-f]{64}$/.test(sha256)) {
       throw new Error(`"sources" > ${file} needs a SHA-256 in lower-case hex.`);
     }
+
     return { file, url: fill(source.url), sha256 };
   }
+
   const commit = fill(source.commit);
+
   if (!/^[0-9a-f]{40}$/.test(commit) || !file.endsWith(".tar.gz")) {
     throw new Error(`"sources" > ${file} needs a full commit hash and a name ending in .tar.gz.`);
   }
+
   return { file, git: fill(source.git), commit };
 }
 
@@ -535,9 +603,11 @@ function filledSource(source: Source, variables: Readonly<Record<string, string>
 async function buildVariables(root: string): Promise<Record<string, string>> {
   const app = await readJson(join(root, "package.json"), type({ version: "string" }));
   const script = await readFile(join(root, "scripts", "build-ffmpeg.sh"), "utf8");
+
   const pinned = [...script.matchAll(/^([A-Z][A-Z0-9_]*)=["']?([^"'\s$]+)["']?$/gm)].flatMap(
     ([, name, value]) => (name && value ? [[name, value] as const] : []),
   );
+
   return { ...Object.fromEntries(pinned), app: app.version };
 }
 
@@ -545,29 +615,37 @@ async function buildVariables(root: string): Promise<Record<string, string>> {
 function packageRootOf(file: string): string | null {
   const marker = "/node_modules/";
   const at = file.lastIndexOf(marker) + marker.length;
+
   if (at < marker.length) return null;
   const [first, second] = file.slice(at).split("/");
   const name = first?.startsWith("@") ? `${first}/${second}` : first;
+
   return name ? file.slice(0, at) + name : null;
 }
 
 /** Packages other than `self` whose code the source maps of `files` place inside them. */
 async function carriedIn(files: Iterable<string>, self: string): Promise<Set<string>> {
   const carried = new Set<string>();
+
   for (const file of files) {
     if (!existsSync(file)) continue;
     const code = await readFile(file, "utf8");
     const url = /\/\/# sourceMappingURL=(\S+)\s*$/.exec(code)?.[1];
+
     if (url?.startsWith("data:")) continue;
     const path = url ? join(dirname(file), url) : `${file}.map`;
+
     if (!existsSync(path)) continue;
     const { sources = [] } = await readJson(path, SourceMap);
+
     for (const source of sources) {
       const names = [...(source ?? "").matchAll(/node_modules\/((?:@[^/]+\/)?[^/.][^/]*)/g)];
       const name = names.at(-1)?.[1];
+
       if (name && name !== self) carried.add(name);
     }
   }
+
   return carried;
 }
 
@@ -576,6 +654,7 @@ function installedNear(host: string, name: string): string | null {
   // Forward slashes, so Windows paths find their node_modules too.
   const path = host.replaceAll("\\", "/");
   const modules = path.slice(0, path.lastIndexOf("/node_modules/") + "/node_modules/".length);
+
   return (
     [join(host, "node_modules", name), join(modules, name)].find((dir) =>
       existsSync(join(dir, "package.json")),
@@ -594,16 +673,21 @@ async function licenceFiles(root: string): Promise<string | null> {
     )
     .map((entry) => entry.name)
     .sort((a, b) => compare(a.toLowerCase(), b.toLowerCase()));
+
   const read = await Promise.all(
     names.map(async (name) => ({
       name,
       text: normalized(await readFile(join(root, name), "utf8")),
     })),
   );
+
   const sections = read.filter((section) => section.text.length > 0);
   const [first] = sections;
+
   if (!first) return null;
+
   if (sections.length === 1) return first.text;
+
   return sections.map(({ name, text }) => `${name}\n\n${text}`).join(SEPARATOR);
 }
 
@@ -619,14 +703,18 @@ async function standardText(
 ): Promise<string> {
   const id = `${json.name}@${json.version}`;
   const template = join(app, "licences", "standard", `${licence}.txt`);
+
   if (!existsSync(template)) throw new Error(`${id}: licences/standard has no ${licence}.txt.`);
   const author = typeof json.author === "string" ? json.author : json.author?.name;
   const holder = author?.replace(/\s*[<(].*$/, "").trim();
   const text = normalized(await readFile(template, "utf8"));
+
   if (text.includes("{holder}") && !holder) {
     throw new Error(`${id} names no author for the standard ${licence} text.`);
   }
+
   const standard = filled(text, holder ? { holder } : {}, id);
+
   return afterNotice
     ? `The ${licence} licence, which the notice above refers to:\n\n${standard}`
     : `${json.name} ${json.version} publishes no licence file. This is the standard ${licence} text, with the author its package.json names.\n\n${standard}`;
@@ -641,6 +729,7 @@ async function texts(
   const sections = await Promise.all(
     files.map(async (file) => fill(normalized(await readFile(join(app, file), "utf8")))),
   );
+
   return sections.join(SEPARATOR);
 }
 
@@ -648,7 +737,9 @@ async function texts(
 function filled(text: string, variables: Readonly<Record<string, string>>, where: string): string {
   return text.replace(/\{(\w+)\}/g, (placeholder, name: string) => {
     const value = variables[name];
+
     if (value !== undefined) return value;
+
     if (RUNTIME_PLACEHOLDERS.has(name)) return placeholder;
     throw new Error(`${where}: nothing fills ${placeholder}.`);
   });
@@ -661,13 +752,16 @@ function licenceOf(json: PackageJson): string | null {
 /** The repository as a web address: `git+https://github.com/a/b.git` and `a/b` become https://github.com/a/b. */
 function repositoryOf(json: PackageJson): string | null {
   const raw = typeof json.repository === "string" ? json.repository : json.repository?.url;
+
   if (!raw) return null;
+
   const url = raw
     .replace(/^git\+/, "")
     .replace(/^(git|ssh):\/\/(git@)?/, "https://")
     .replace(/^git@github\.com:/, "https://github.com/")
     .replace(/^github:/, "")
     .replace(/(\.git)?(#.*)?$/, "");
+
   return /^[\w.-]+\/[\w.-]+$/.test(url) ? `https://github.com/${url}` : url;
 }
 
@@ -677,10 +771,13 @@ function repositoryOf(json: PackageJson): string | null {
  */
 function accepted(expression: string, excepted: Readonly<Record<string, string>>): boolean {
   const alternatives = splitOutside(expression, " OR ");
+
   if (alternatives.length > 1) return alternatives.some((each) => accepted(each, excepted));
   const parts = splitOutside(expression, " AND ");
+
   if (parts.length > 1) return parts.every((each) => accepted(each, excepted));
   const single = expression.trim();
+
   return single.startsWith("(") && single.endsWith(")")
     ? accepted(single.slice(1, -1), excepted)
     : COMPATIBLE.has(single) || Object.hasOwn(excepted, single);
@@ -691,6 +788,7 @@ function splitOutside(text: string, separator: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
+
   for (let at = 0; at < text.length; at++) {
     if (text[at] === "(") depth++;
     else if (text[at] === ")") depth--;
@@ -699,6 +797,7 @@ function splitOutside(text: string, separator: string): string[] {
       start = at + separator.length;
     }
   }
+
   return [...parts, text.slice(start)];
 }
 
@@ -713,6 +812,8 @@ function compare(a: string, b: string): number {
 
 async function readJson<T>(path: string, schema: (data: unknown) => T | ArkErrors): Promise<T> {
   const parsed = schema(JSON.parse(await readFile(path, "utf8")));
+
   if (parsed instanceof type.errors) throw new Error(`${path}: ${parsed.summary}`);
+
   return parsed;
 }

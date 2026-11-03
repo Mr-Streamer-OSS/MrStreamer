@@ -79,14 +79,17 @@ export interface Run {
 }
 
 const runs = store<Run | null>(null);
+
 /** The run under way or the last one, rendering again as it moves. */
 export const useSeriesRun = () => useStore(runs);
+
 /** The same, for owners outside React. */
 export const seriesRun = () => runs.get();
 
 /** The run under way, and whether the viewer cancelled it. */
 let running: { readonly id: number; cancelled: boolean } | null = null;
 let made = 0;
+
 /** The episodes that failed in the last run, with the plan they came from. */
 let lastFailed: {
   readonly id: number;
@@ -108,14 +111,18 @@ const NONE: Result = {
 /** Whether the login `plan` was made under is still the one signed in. */
 function sameLogin(plan: Plan): boolean {
   const now = currentSource(plan.version.subscriptionId);
+
   return now !== undefined && now === plan.source;
 }
 
 /** How an episode stands in the queue now. */
 function statusOf(ref: EpisodeRef): "none" | "held" | "failed" | "missing" {
   const status = downloadOf(ref)?.status.kind;
+
   if (status === undefined) return "none";
+
   if (status === "failed" || status === "missing") return status;
+
   return "held";
 }
 
@@ -124,14 +131,18 @@ function sorted(base: Omit<Plan, "seasons" | "held" | "add" | "retry" | "missing
   const retry: EpisodeRef[] = [];
   const missing: EpisodeRef[] = [];
   let held = 0;
+
   for (const ref of base.episodes) {
     const now = statusOf(ref);
+
     if (now === "none") add.push(ref);
     else if (now === "failed") retry.push(ref);
     else if (now === "missing") missing.push(ref);
     else held++;
   }
+
   const seasons = new Set(base.episodes.map((ref) => ref.season)).size;
+
   return { ...base, seasons, held, add, retry, missing };
 }
 
@@ -142,11 +153,14 @@ function sorted(base: Omit<Plan, "seasons" | "held" | "add" | "retry" | "missing
 function episodesIn(details: SeriesDetails, version: OwnedId, scope: Scope): EpisodeRef[] {
   const seen = new Set<string>();
   const episodes: EpisodeRef[] = [];
+
   for (const episode of seriesEpisodeOrder(details)) {
     if (episode.subscriptionId !== version.subscriptionId || episode.seriesId !== version.id) {
       continue;
     }
+
     if (scope.kind === "season" && episode.season !== scope.season) continue;
+
     if (seen.has(episode.id)) continue;
     seen.add(episode.id);
     episodes.push({
@@ -158,12 +172,14 @@ function episodesIn(details: SeriesDetails, version: OwnedId, scope: Scope): Epi
       episode: episode.number,
     });
   }
+
   return episodes;
 }
 
 /** How many episodes `scope` covers, and how many of them are saved or queued already. */
 export function countDownload(details: SeriesDetails, version: OwnedId, scope: Scope) {
   const episodes = episodesIn(details, version, scope);
+
   return {
     total: episodes.length,
     held: episodes.filter((ref) => statusOf(ref) === "held").length,
@@ -177,7 +193,9 @@ export function countDownload(details: SeriesDetails, version: OwnedId, scope: S
 export function planDownload(details: SeriesDetails, version: OwnedId, scope: Scope): Plan {
   const { subscriptionId } = version;
   const source = currentSource(subscriptionId);
+
   if (!source) throw new AppFailure({ kind: "needs-secret", subscriptionId });
+
   return sorted({ scope, version, source, episodes: episodesIn(details, version, scope) });
 }
 
@@ -197,23 +215,29 @@ export function startDownload(
   { replace, stands }: { readonly replace: boolean; readonly stands: () => boolean },
 ): number | null {
   if (running || !stands() || !sameLogin(plan)) return null;
+
   const confirmed = new Map<EpisodeRef, Was>([
     ...plan.add.map((ref) => [ref, "none"] as const),
     ...plan.retry.map((ref) => [ref, "failed"] as const),
     ...(replace ? plan.missing.map((ref) => [ref, "missing"] as const) : []),
   ]);
+
   const steps = plan.episodes.flatMap((ref) => {
     const was = confirmed.get(ref);
+
     return was ? [{ ref, was }] : [];
   });
+
   const me = { id: ++made, cancelled: false };
   const total = steps.length;
   running = me;
   lastFailed = null;
   runs.set({ id: me.id, phase: "running", done: 0, total, result: NONE });
+
   /** Why the run no longer stands, or null while it does. */
   const ended = (): Result["stopped"] =>
     me.cancelled ? "cancelled" : !sameLogin(plan) ? "login" : !stands() ? "left" : null;
+
   const standing = () => ended() === null;
   void (async () => {
     const failed: { ref: EpisodeRef; error: string }[] = [];
@@ -223,39 +247,49 @@ export function startDownload(
     /** The run as it stands, a snapshot of its own for each report. */
     const result = (): Result => ({ ...tally, failed: [...failed], cancelled, stopped });
     let done = 0;
+
     for (const { ref, was } of steps) {
       await yieldNow();
       const left = ended();
+
       if (left) {
         stopped = left;
         cancelled = total - done;
         break;
       }
+
       let asked: Asked;
+
       try {
         asked = statusOf(ref) === was ? await ask(was, ref, standing) : "unchanged";
       } catch (cause) {
         failed.push({ ref, error: describeError(inLanguage(appError(cause))) });
         asked = "failed";
       }
+
       if (asked === "stopped" || asked === "removed") {
         if (asked === "removed") {
           done++;
           tally.removed++;
         }
+
         stopped = ended() ?? "left";
         cancelled = total - done;
         break;
       }
+
       if (asked === "unchanged") tally.skipped++;
       else if (asked !== "failed") tally[asked]++;
       done++;
       runs.set({ id: me.id, phase: "running", done, total, result: result() });
     }
+
     running = null;
+
     if (failed.length > 0) lastFailed = { id: me.id, plan, refs: failed.map((each) => each.ref) };
     runs.set({ id: me.id, phase: "done", done, total, result: result() });
   })();
+
   return me.id;
 }
 
@@ -271,18 +305,22 @@ async function ask(was: Was, ref: EpisodeRef, stands: () => boolean): Promise<As
   switch (was) {
     case "none":
       await addDownload(ref);
+
       return "added";
     case "missing": {
       const replaced = await replaceMissingDownload(ref, stands);
+
       return replaced.kind === "replaced"
         ? "replaced"
         : replaced.kind === "stopped"
           ? "removed"
           : "unchanged";
     }
+
     case "failed": {
       const download = downloadOf(ref);
       const retried = download ? await retryDownload(download.id, stands) : "unchanged";
+
       return retried === "queued" ? "retried" : retried;
     }
   }
@@ -300,5 +338,6 @@ export function cancelRemaining(id: number): void {
 export function planRetry(id: number): Plan | null {
   if (lastFailed?.id !== id || !sameLogin(lastFailed.plan)) return null;
   const { plan, refs } = lastFailed;
+
   return sorted({ scope: plan.scope, version: plan.version, source: plan.source, episodes: refs });
 }

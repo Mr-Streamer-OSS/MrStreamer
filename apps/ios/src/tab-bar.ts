@@ -14,6 +14,7 @@ export function useFixedTabBar(shown: boolean) {
   useFocusEffect(
     useCallback(() => {
       virtualised.set(shown);
+
       return () => virtualised.set(false);
     }, [shown]),
   );

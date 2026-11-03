@@ -29,10 +29,13 @@ const PLAYLIST = [
 function read(text: string, size: number) {
   const reader = m3uReader();
   const entries: PlaylistEntry[] = [];
+
   for (let at = 0; at < text.length; at += size) {
     entries.push(...reader.push(text.slice(at, at + size)));
   }
+
   entries.push(...reader.end());
+
   return { entries, playlist: reader.playlist, guideUrl: reader.guideUrl };
 }
 
@@ -65,7 +68,9 @@ describe("playlists", () => {
       "#EXTINF:-1,After empty",
       "https://fixture.test/after-empty.ts",
     ].join("\n");
+
     const whole = read(text, text.length);
+
     for (const size of [1, 7, 64]) expect(read(text, size)).toEqual(whole);
     const catalogue = playlistCatalogue(whole.entries);
     expect(catalogue.channels.map((channel) => channel.categoryIds)).toEqual([
@@ -89,6 +94,7 @@ describe("playlists", () => {
 
   it("reads the same entries whatever pieces the text arrives in", () => {
     const whole = read(PLAYLIST, PLAYLIST.length);
+
     for (const size of [1, 7, 64]) expect(read(PLAYLIST, size)).toEqual(whole);
 
     expect(whole.playlist).toBe(true);

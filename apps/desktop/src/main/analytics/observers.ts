@@ -12,6 +12,7 @@ export interface UsageObservers {
   action(action: AnalyticsAction): () => void;
   setting(setting: AnalyticsSetting): () => void;
 }
+
 export interface RemotePlaybackObserver {
   state(state: AnalyticsPlaybackState): void;
   failure(failure: AnalyticsFailure, diagnostic?: PlaybackDiagnostic): void;
@@ -20,6 +21,7 @@ export interface RemotePlaybackObserver {
   /** The play ended for good: stopped by the viewer or the receiver, or played to its end. */
   end(): void;
 }
+
 export type RemotePlaybackObservers = (
   kind: AnalyticsPlaybackKind,
   control: string | null,

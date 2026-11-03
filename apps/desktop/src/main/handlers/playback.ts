@@ -52,6 +52,7 @@ export function playbackHandlers({
       frame,
     ) => {
       const token = analytics.admitPlayback("live", preview ? undefined : measurement, frame);
+
       return observeOpen(
         coordination,
         () => analytics.playbackFailureObserver(token ?? undefined),
@@ -59,6 +60,7 @@ export function playbackHandlers({
           Effect.gen(function* () {
             const channel = yield* library.channel(named);
             const variants = yield* streamsOf(settings, channel, variant, archive);
+
             return yield* playback.open(ownedId(channel), decoders, {
               variants,
               archive: archive ?? null,
@@ -83,6 +85,7 @@ export function playbackHandlers({
     },
     "playback.openTitle": ({ title, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
+
       return observeOpen(
         coordination,
         () => analytics.playbackFailureObserver(token ?? undefined),
@@ -92,6 +95,7 @@ export function playbackHandlers({
             // connection beside the one about to open.
             yield* playback.closeAll;
             const { url, revision, headers, listingKey } = yield* onDemand.file(title);
+
             return yield* playback.openTitle(title, url, decoders, {
               turn,
               revision,
@@ -103,12 +107,14 @@ export function playbackHandlers({
     },
     "playback.openCopy": ({ copy, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
+
       return observeOpen(
         coordination,
         () => analytics.playbackFailureObserver(token ?? undefined),
         (turn) =>
           Effect.gen(function* () {
             const recorded = yield* recordings.copy(copy);
+
             return yield* playback.openCopy(
               recorded ?? (yield* downloads.copy(copy)),
               decoders,

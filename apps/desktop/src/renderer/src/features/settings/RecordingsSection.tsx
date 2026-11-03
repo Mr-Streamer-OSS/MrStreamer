@@ -28,15 +28,19 @@ export function RecordingsSection() {
   const storage = useRecordingStorage();
   const folder = useMutation({ mutationFn: () => changeStorage(client, "folder") });
   const opening = useMutation({ mutationFn: () => call("recordings.openFolder") });
+
   const limits = useMutation({
     mutationFn: (next: RecordingLimits) => changeStorage(client, next),
   });
+
   const saved = storage.data;
   const keepFree = saved?.keepFree ?? DEFAULT_KEEP_FREE;
   const space = saved?.space ?? null;
+
   const setLimits = (next: Partial<RecordingLimits>) => {
     if (!limits.isPending) limits.mutate({ keepFree, space, ...next });
   };
+
   return (
     <>
       <Section title={t("Storage")}>

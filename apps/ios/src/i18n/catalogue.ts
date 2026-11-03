@@ -50,14 +50,19 @@ export function catalogue<const E extends English>(
     // The key is English, should a message ever be missing at runtime.
     let text: string | Plural = (locale === "en-US" ? english : others[locale])[key] ?? key;
     const values: Readonly<Record<string, string | number>> = params ?? {};
+
     if (typeof text !== "string") {
       let plural = rules.get(locale);
+
       if (!plural) rules.set(locale, (plural = new Intl.PluralRules(locale)));
       text = text[plural.select(Number(values["count"] ?? 0))] ?? text.other;
     }
+
     return text.replace(/\{(\w+)\}/g, (whole, name: string) => {
       const value = values[name];
+
       if (value === undefined) return whole;
+
       return typeof value === "number" ? formatNumber(value) : value;
     });
   };

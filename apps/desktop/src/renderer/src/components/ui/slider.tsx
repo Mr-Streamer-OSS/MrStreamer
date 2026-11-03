@@ -5,6 +5,7 @@ import { cn } from "../../lib/utils.ts";
 /** Blurs the thumb of `control` when it has focus, and nothing outside it. */
 function blurThumb(control: HTMLElement): void {
   const active = document.activeElement;
+
   if (active instanceof HTMLElement && control.contains(active)) active.blur();
 }
 
@@ -27,12 +28,14 @@ export function SliderControl({ className, children }: { className: string; chil
   // "down" while pressed and the thumb's focus is still to come, "focused" once the thumb has
   // had it, "owed" once let go before it came.
   const press = useRef<"down" | "focused" | "owed" | null>(null);
+
   const release = (event: PointerEvent<HTMLDivElement>) => {
     if (press.current === "focused") {
       blurThumb(event.currentTarget);
       press.current = null;
     } else if (press.current === "down") press.current = "owed";
   };
+
   return (
     <SliderPrimitive.Control
       className={className}
@@ -41,6 +44,7 @@ export function SliderControl({ className, children }: { className: string; chil
         if (event.button !== 0 || event.defaultPrevented) return;
         // A thumb that has focus already is sent none.
         press.current = event.currentTarget.contains(document.activeElement) ? "focused" : "down";
+
         if (event.pointerType === "touch") event.preventBaseUIHandler();
       }}
       onPointerUp={release}

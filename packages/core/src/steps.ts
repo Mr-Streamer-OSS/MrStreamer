@@ -11,6 +11,7 @@ const SLICE = 100;
 /** Counts the items a piece of work handles: true after each `SLICE`, where it pauses. */
 export function pacer(): () => boolean {
   let count = 0;
+
   return () => ++count % SLICE === 0;
 }
 
@@ -24,6 +25,7 @@ export type InTasks = <A>(steps: Steps<A>, wanted: () => boolean) => Promise<A |
 export function finish<A>(steps: Steps<A>): A {
   for (;;) {
     const next = steps.next();
+
     if (next.done) return next.value;
   }
 }

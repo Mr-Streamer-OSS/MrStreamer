@@ -52,17 +52,20 @@ export const profilesLayer: Layer.Layer<Profiles, never, Database> = Layer.effec
     const opened = yield* Database;
     // Only this module changes the registry, so once read it holds for the runtime's life.
     let bound: ActiveProfile | null = null;
+
     const active =
       "failure" in opened
         ? unavailable(opened.failure)
         : Effect.suspend(() =>
             bound ? Effect.succeed(bound) : attempt(() => (bound = activeIn(opened.db))),
           );
+
     yield* active.pipe(
       Effect.catch((failure) =>
         Effect.logWarning("[profiles] the active profile can't be read", failure.error),
       ),
     );
+
     return { active };
   }),
 );
@@ -78,9 +81,11 @@ function activeIn(db: DatabaseSync): ActiveProfile {
     db.prepare(
       "insert or ignore into active_profile (slot, profile_id, revision) values (1, ?, 1)",
     ).run(DEFAULT_PROFILE_ID);
+
     const row = ActiveRow().assert(
       db.prepare("select profile_id, revision from active_profile where slot = 1").get(),
     );
+
     if (row.profile_id !== DEFAULT_PROFILE_ID) {
       throw new Failed({
         error: {
@@ -89,6 +94,7 @@ function activeIn(db: DatabaseSync): ActiveProfile {
         },
       });
     }
+
     return { id: row.profile_id, revision: row.revision };
   });
 }

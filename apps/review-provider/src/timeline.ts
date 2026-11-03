@@ -32,12 +32,15 @@ export function rollingPlaylist(
 ): string | null {
   const last = completedSequence(now);
   let first = last - 149;
+
   if (boundary(first) || first === 0) first--;
+
   if (!Number.isSafeInteger(first) || first < 0) return null;
   const through = first - 1;
   const cycles = Math.floor(through / 55);
   const rest = through % 55;
   const discontinuities = cycles * 3 + Number(rest >= 25) + Number(rest >= 40);
+
   const rows = [
     "#EXTM3U",
     "#EXT-X-VERSION:6",
@@ -45,9 +48,12 @@ export function rollingPlaylist(
     `#EXT-X-MEDIA-SEQUENCE:${first}`,
     `#EXT-X-DISCONTINUITY-SEQUENCE:${discontinuities}`,
   ];
+
   for (let n = first; n <= last; n++) {
     const segment = media.segments[n % media.segments.length];
+
     if (!segment) return null;
+
     if (boundary(n)) rows.push("#EXT-X-DISCONTINUITY");
     rows.push(
       `#EXT-X-PROGRAM-DATE-TIME:${new Date(EPOCH + n * SEGMENT_MS).toISOString()}`,
@@ -55,6 +61,7 @@ export function rollingPlaylist(
       `${rendition}/${n}.ts`,
     );
   }
+
   return rows.join("\n") + "\n";
 }
 
@@ -73,6 +80,7 @@ const xml = (value: string) =>
         return "&apos;";
     }
   });
+
 const xmlTime = (time: number) =>
   new Date(time).toISOString().replace(/[-:T]/g, "").slice(0, 14) + " +0000";
 
@@ -80,15 +88,19 @@ export function guideDocument(now: number): string {
   const since = now - 3_600_000;
   const until = now + 86_400_000;
   const firstCycle = Math.max(0, Math.floor((since - EPOCH) / CYCLE_MS));
+
   const rows = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<tv generator-info-name="Mr. Streamer original samples">',
     `<channel id="${CHANNEL.guideId}"><display-name>${xml(CHANNEL.name)}</display-name></channel>`,
   ];
+
   for (let cycle = firstCycle; EPOCH + cycle * CYCLE_MS < until; cycle++) {
     let start = EPOCH + cycle * CYCLE_MS;
+
     for (const original of ORIGINALS) {
       const stop = start + (original.frames / 24) * 1000;
+
       if (stop > since && start < until)
         rows.push(
           `<programme channel="${CHANNEL.guideId}" start="${xmlTime(start)}" stop="${xmlTime(stop)}"><title>${xml(original.name)}</title><desc>Original generated shapes and a quiet tone. No speech.</desc></programme>`,
@@ -96,6 +108,8 @@ export function guideDocument(now: number): string {
       start = stop;
     }
   }
+
   rows.push("</tv>");
+
   return rows.join("\n") + "\n";
 }

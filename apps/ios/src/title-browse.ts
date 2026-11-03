@@ -27,17 +27,21 @@ export function browseCollection(
   files: FilterFiles = declaredFiles,
 ) {
   const titles = made.list(id, choices.sort ?? collectionSort(id));
+
   // A language filter in 4K must still open a 4K version, as that collection already promises.
   const eligible = (version: Title["versions"][number]) =>
     id !== "4k" || version.tags.some((tag) => tag === "4K" || tag === "UHD");
+
   const options = filterOptions(
     id === "4k"
       ? titles.map((title) => ({ ...title, versions: title.versions.filter(eligible) }))
       : titles,
     files,
   );
+
   const matching = (filters: BrowseChoices["filters"]) =>
     filterTitles(titles, filters, files, eligible);
+
   return {
     titles: matching(choices.filters),
     total: titles.length,

@@ -74,7 +74,9 @@ export function newestOn(channel: Channel, offers: readonly Offer[]): Offer | nu
 /** The update metadata file electron-builder writes for this platform. */
 export function metadataFileFor(platform: NodeJS.Platform): string {
   if (platform === "darwin") return "latest-mac.yml";
+
   if (platform === "win32") return "latest.yml";
+
   return "latest-linux.yml";
 }
 
@@ -102,22 +104,29 @@ export interface DiscoveryOptions {
 export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => Promise<Offer[]> {
   const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
+
   const filesFrom =
     options.filesFrom ?? `https://github.com/${options.repository}/releases/download/`;
+
   let githubBusyUntil = 0;
 
   return async (signal) => {
     const answers: SourceAnswer[] = [];
+
     const fromFeed = await attempt("feed", signal, answers, async (response) => {
       const feed = readFeed(await response.json());
+
       return [feed.stable, feed.nightly].flatMap((entry): Offer[] => {
         const version = entry && parseVersion(entry.version);
+
         if (!entry || !version || !entry.platforms.includes(options.metadataFile)) return [];
+
         // Unreadable, like a broken feed, so the check asks GitHub instead.
         // Resolved first, so dot segments can't climb out of the folder.
         if (!new URL(entry.files).href.startsWith(filesFrom)) {
           throw new Error(`Files from ${entry.files}.`);
         }
+
         return [
           {
             version,
@@ -129,17 +138,24 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
         ];
       });
     });
+
     if (fromFeed.ok) return fromFeed.offers;
+
     // Offline reaches GitHub no better; asking it while it limits us only extends the wait.
     if (fromFeed.failure.kind === "offline") throw new DiscoveryFailed(fromFeed.failure, answers);
+
     if (now() < githubBusyUntil) {
       throw new DiscoveryFailed({ kind: "busy", until: githubBusyUntil }, answers);
     }
+
     const fromGitHub = await githubReleases(signal, answers);
+
     if (fromGitHub.ok) return fromGitHub.offers;
+
     if (fromGitHub.failure.kind === "busy") {
       githubBusyUntil = fromGitHub.failure.until ?? now() + 60 * 60_000;
     }
+
     throw new DiscoveryFailed(fromGitHub.failure, answers);
   };
 
@@ -152,6 +168,7 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
     path: string = options.feedUrl,
   ): Promise<{ ok: true; offers: Offer[] } | { ok: false; failure: CheckFailure }> {
     let response: Response;
+
     try {
       response = await fetchImpl(path, {
         headers: {
@@ -163,18 +180,24 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
     } catch {
       signal.throwIfAborted();
       answers.push({ source, status: null, remaining: null, reset: null, retryAfter: null });
+
       return { ok: false, failure: { kind: "offline" } };
     }
+
     const answer = answerOf(source, response);
     answers.push(answer);
+
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
+
       return { ok: false, failure: failureOf(answer, now()) };
     }
+
     try {
       return { ok: true, offers: await read(response) };
     } catch {
       signal.throwIfAborted();
+
       return { ok: false, failure: { kind: "invalid" } };
     }
   }
@@ -186,6 +209,7 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
    */
   async function githubReleases(signal: AbortSignal, answers: SourceAnswer[]) {
     const base = `${options.api}/repos/${options.repository}`;
+
     const page = await attempt(
       "github",
       signal,
@@ -198,7 +222,9 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
         ),
       `${base}/releases?per_page=100`,
     );
+
     if (!page.ok) return page;
+
     const latest = await attempt(
       "github",
       signal,
@@ -206,13 +232,16 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
       async (response) => offersOf([GitHubRelease().assert(await response.json())]),
       `${base}/releases/latest`,
     );
+
     // No stable release yet answers 404; the page alone has everything then. Any other failure
     // fails the check, since the newest stable release may be missing from the page.
     const none = !latest.ok && latest.failure.kind === "http" && latest.failure.status === 404;
+
     if (!latest.ok && !none) return latest;
     const stable = latest.ok ? latest.offers : [];
     const known = new Set(page.offers.map((offer) => offer.feedUrl));
     const offers = [...page.offers, ...stable.filter((each) => !known.has(each.feedUrl))];
+
     return {
       ok: true as const,
       offers: offers.map((offer) => {
@@ -220,6 +249,7 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
           "stable",
           offers.filter((each) => compareVersions(each.version, offer.version) < 0),
         );
+
         return !offer.version.nightly && previous
           ? { ...offer, previousStable: previous.version }
           : offer;
@@ -230,11 +260,15 @@ export function discovery(options: DiscoveryOptions): (signal: AbortSignal) => P
   function offersOf(releases: readonly Infer<typeof GitHubRelease>[]): Offer[] {
     return releases.flatMap((release): Offer[] => {
       const version = parseVersion(release.tag_name);
+
       if (!version || release.draft) return [];
+
       if ((channelOf(version) === "nightly") !== release.prerelease) return [];
       const metadata = release.assets.find((asset) => asset.name === options.metadataFile);
+
       if (!metadata) return [];
       const url = metadata.browser_download_url;
+
       return [
         {
           version,
@@ -261,8 +295,10 @@ const GitHubRelease = lazy(() =>
 function answerOf(source: SourceAnswer["source"], response: Response): SourceAnswer {
   const number = (name: string) => {
     const value = Number(response.headers.get(name));
+
     return response.headers.has(name) && Number.isFinite(value) ? value : null;
   };
+
   return {
     source,
     status: response.status,
@@ -278,9 +314,13 @@ function answerOf(source: SourceAnswer["source"], response: Response): SourceAns
  */
 function failureOf(answer: SourceAnswer, now: number): CheckFailure {
   const status = answer.status ?? 0;
+
   const limited =
     status === 429 || (status === 403 && (answer.remaining === 0 || answer.retryAfter !== null));
+
   if (!limited) return { kind: "http", status };
+
   if (answer.retryAfter !== null) return { kind: "busy", until: now + answer.retryAfter * 1000 };
+
   return { kind: "busy", until: answer.reset !== null ? answer.reset * 1000 : null };
 }

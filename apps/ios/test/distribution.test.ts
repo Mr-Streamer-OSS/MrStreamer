@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 const roots: string[] = [];
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -22,9 +23,11 @@ afterEach(() => {
 function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.ProcessEnv> } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ios-distribution-"));
   const environment = { ...process.env };
+
   for (const name of Object.keys(environment)) {
     if (name.startsWith("EXPO_PUBLIC_")) delete environment[name];
   }
+
   roots.push(root);
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, "bin"));
@@ -42,9 +45,12 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
     { mode: 0o755 },
   );
   writeFileSync(join(root, "bin/xcbeautify"), "#!/bin/sh\ncat\n", { mode: 0o755 });
+
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+
   git("init", "-q");
+
   const commit = (message: string) => {
     git("add", ".");
     git(
@@ -57,19 +63,24 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
       message,
     );
   };
+
   commit("candidate");
+
   if (!options.fresh) {
     writeFileSync(join(root, "build/source.txt"), `${git("rev-parse", "HEAD")}\n`);
     symlinkSync("main.jsbundle", join(root, "build/MrStreamer.xcarchive/bundle-link"));
+
     const files = {
       "build/MrStreamer.xcarchive/main.jsbundle": "fixture archive bytes",
       "build/main.jsbundle.map": "fixture map",
       "build/configuration.json": "{}",
       "build/archive-symlinks.json": `${JSON.stringify([["build/MrStreamer.xcarchive/bundle-link", "main.jsbundle"]])}\n`,
     };
+
     for (const [path, contents] of Object.entries(files)) {
       writeFileSync(join(root, path), contents);
     }
+
     writeFileSync(
       join(root, "build/archive.sha256"),
       Object.entries(files)
@@ -79,6 +90,7 @@ function candidate(options: { fresh?: boolean; environment?: Partial<NodeJS.Proc
         .join(""),
     );
   }
+
   return {
     run: (...args: string[]) =>
       spawnSync("bash", ["scripts/testflight.sh", ...args], {
@@ -131,6 +143,7 @@ it.each(["app-store", "internal-only"])(
 
 it("requires an explicit intent for export and upload", () => {
   const c = candidate();
+
   for (const args of [["export"], ["upload"], ["upload", "public"]]) {
     const result = c.run(...args);
     expect(result.status).toBe(1);
@@ -151,6 +164,7 @@ it.each(["export", "upload"])("refuses added archive resources before %s", (comm
   const c = candidate({
     environment: { ASC_KEY_PATH: "/fixture/key", ASC_KEY_ID: "fixture", ASC_ISSUER_ID: "fixture" },
   });
+
   c.addResource();
   const result = c.run(command, "app-store");
   expect(result.status).toBe(1);
@@ -169,6 +183,7 @@ it.each(
   const c = candidate({
     environment: { ASC_KEY_PATH: "/fixture/key", ASC_KEY_ID: "fixture", ASC_ISSUER_ID: "fixture" },
   });
+
   c[change]();
   const result = c.run(command, "app-store");
   expect(result.status).toBe(1);

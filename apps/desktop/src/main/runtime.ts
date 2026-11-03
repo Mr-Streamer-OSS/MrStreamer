@@ -116,6 +116,7 @@ export type MainServices =
 /** Every main-process service, with the app's adapters for their ports. */
 export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const { dataDir } = config;
+
   const accounts = Settings.layer(dataDir, config.usage).pipe(
     Layer.provideMerge(
       Subscriptions.layer({
@@ -126,10 +127,12 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       }),
     ),
   );
+
   const database = databaseLayer(dataDir);
   const verifiedFiles = verifiedFilesLayer.pipe(Layer.provide(database));
   const detailCache = detailCacheLayer.pipe(Layer.provide(database));
   const savedSubtitles = savedSubtitlesLayer.pipe(Layer.provide(database));
+
   const services = Layer.mergeAll(
     Library.layer({ usage: config.usage }),
     OnDemand.layer({
@@ -165,17 +168,22 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     Effect.gen(function* () {
       const playback = yield* Playback;
       const catalogue = yield* OnDemand;
+
       return {
         playing: (id: string) => playback.subtitleContext(id),
         resolve: (id: string) =>
           Effect.gen(function* () {
             const session = yield* playback.subtitleContext(id);
+
             if (!session) return null;
+
             // A copy is searched for nowhere: what was saved for it is all it has.
             if (session.kind === "copy") return { ...session, query: null };
             const identity = yield* catalogue.subtitleQuery(session.title, session.file.listingKey);
+
             if (!identity) return null;
             const tmdbId = Number(identity.tmdbId);
+
             const match =
               Number.isSafeInteger(tmdbId) && tmdbId > 0
                 ? { tmdbId }
@@ -183,6 +191,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
                     title: identity.title.slice(0, 512),
                     ...defined({ year: identity.year ?? undefined }),
                   };
+
             const query =
               session.title.kind === "movie"
                 ? { kind: "movie" as const, ...match, languages: [] }
@@ -197,6 +206,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
                       languages: [],
                     }
                   : null;
+
             return {
               ...session,
               query,
@@ -213,6 +223,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       };
     }),
   ).pipe(Layer.provide(services));
+
   const onlineSubtitles = OnlineSubtitles.layer({ userAgent: config.userAgent }).pipe(
     Layer.provide(Layer.mergeAll(services, subtitleSessions)),
   );
@@ -229,8 +240,10 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
               const sources = new Map(
                 (yield* subscriptions.sources).map((each) => [each.id, each]),
               );
+
               return (yield* subscriptions.saved).map(({ id, revision, key, dir }) => {
                 const provider = sources.get(id)?.provider;
+
                 return {
                   id,
                   revision,
@@ -270,6 +283,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
+
   // One connection for viewing, saved titles, channel lists, verified tracks and downloaded
   // subtitle cues.
   const stores = Layer.mergeAll(
@@ -277,6 +291,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
     watchlistStoreLayer,
     customListStoreLayer,
   ).pipe(Layer.provide(database));
+
   const viewing = ViewingRecord.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -311,8 +326,10 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
       ),
     ),
   );
+
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
+
   const downloads = Downloads.layer({
     dataDir,
     userAgent: config.userAgent,
@@ -320,13 +337,17 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   }).pipe(
     Layer.provide(Layer.mergeAll(services, downloadStoreLayer.pipe(Layer.provide(database)))),
   );
+
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
+
   const reminders = Reminders.layer({ dataDir, notifier: config.notifier ?? null }).pipe(
     Layer.provide(Layer.mergeAll(guide, services)),
   );
+
   const recordings = Recordings.layer({ dataDir, userAgent: config.userAgent }).pipe(
     Layer.provide(Layer.mergeAll(guide, services)),
   );
+
   return Roster.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(

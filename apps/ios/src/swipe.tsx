@@ -23,12 +23,15 @@ export function Swipe({
 }) {
   const x = useRef(new Animated.Value(0)).current;
   const open = useRef(false);
+
   const settle = (to: number) => {
     open.current = to !== 0;
     Animated.timing(x, { toValue: to, duration: 180, useNativeDriver: true }).start();
   };
+
   const settleRef = useRef(settle);
   settleRef.current = settle;
+
   const pan = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, move) =>
@@ -41,7 +44,9 @@ export function Swipe({
       onPanResponderTerminate: () => settleRef.current(open.current ? -REVEAL : 0),
     }),
   ).current;
+
   if (!action) return children;
+
   return (
     <View style={styles.swipe}>
       <Pressable

@@ -12,13 +12,17 @@ vi.mock("node:timers/promises", () => ({ setTimeout: async () => undefined }));
  * attempt runs for that share of it, so a minute's cap ends a hanging attempt in moments.
  */
 const attempts = vi.hoisted(() => ({ given: [] as (number | undefined)[], scale: 1 }));
+
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
+
   const spawnSync = ((command: string, args: readonly string[], options: { timeout?: number }) => {
     attempts.given.push(options.timeout);
     const timeout = options.timeout && Math.round(options.timeout * attempts.scale);
+
     return actual.spawnSync(command, args, { ...options, timeout });
   }) as typeof actual.spawnSync;
+
   return { ...actual, spawnSync };
 });
 
@@ -114,16 +118,20 @@ describe.skipIf(process.platform === "win32")("notarizing and stapling a release
 
   const run = () => import("../scripts/notarize-dmg.ts");
   const commands = () => readFileSync(calls, "utf8").trim().split("\n");
+
   const assertStaplerExited = (): number => {
     const pid = Number(readFileSync(staplePid, "utf8"));
     expect(pid).toBeGreaterThan(0);
     let error: unknown;
+
     try {
       process.kill(pid, 0);
     } catch (caught) {
       error = caught;
     }
+
     expect(error).toMatchObject({ code: "ESRCH" });
+
     return pid;
   };
 

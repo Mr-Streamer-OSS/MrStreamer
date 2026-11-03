@@ -26,6 +26,7 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 afterEach(() => unmount());
 
 const holiday: SubscriptionSummary = {
@@ -37,8 +38,10 @@ const holiday: SubscriptionSummary = {
   account: { state: "active", expiresAt: null, maxConnections: 2, activeConnections: 0 },
   needsSecret: false,
 };
+
 /** A source of Settings > Guides, whose channels the sheet lists after the own guide's. */
 const ORIGIN = "https://guide.example.org";
+
 const guide: GuideStatus = {
   subscriptionId: holiday.id,
   channels: 412,
@@ -63,6 +66,7 @@ const channel = (id: string, title: string, mappedTo: string | null = null): Map
   mapped: mappedTo === null ? null : sourced(mappedTo),
   listed: true,
 });
+
 /** The channels a search of those without programmes found. */
 const WITHOUT: MapChannelPage = {
   total: 3,
@@ -73,6 +77,7 @@ const WITHOUT: MapChannelPage = {
   ],
   revision: "7.2",
 };
+
 const OPTIONS: GuideChannelPage = {
   total: 3,
   listed: 1204,
@@ -106,6 +111,7 @@ async function sheet(
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["subscriptions"], [holiday]);
   client.setQueryData(["guide", "status"], [guide]);
+
   if (pages.sources) client.setQueryData(["guide", "sources"], pages.sources);
   client.setQueryData(["library", "status"], []);
   client.setQueryData(["ondemand", "status"], { lists: [], metadata: null });
@@ -118,24 +124,30 @@ async function sheet(
     stopSync();
     view.unmount();
   };
+
   const dialog = () => document.body.querySelector('[role="dialog"]');
   const lists = () => [...(dialog()?.querySelectorAll('[role="listbox"]') ?? [])];
+
   /** A list's rows as they read, with the one the keyboard is on marked. */
   const rows = (list: Element | undefined) =>
     [...(list?.querySelectorAll('[role="option"]') ?? [])].map(
       (row) => `${row.getAttribute("aria-selected") === "true" ? "> " : ""}${row.textContent}`,
     );
+
   const press = async (target: Element | null | undefined, key: string) => {
     await act(async () => {
       target?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
     });
   };
+
   const click = async (element: Element | null | undefined) => {
     await act(async () => (element as HTMLElement | null | undefined)?.click());
   };
+
   const type = async (field: Element | null | undefined, value: string) => {
     const method =
       field === dialog()?.querySelector("input") ? "guide.mapChannels" : "guide.mapOptions";
+
     const asked = ipc.argsOf(method).length;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     await act(async () => {
@@ -162,6 +174,7 @@ async function sheet(
     expect(rows(lists()[1])).toHaveLength((pages.options ?? OPTIONS).channels.length + 1);
     expect(document.activeElement).toBe(lists()[0]);
   });
+
   return {
     dialog,
     press,
@@ -216,6 +229,7 @@ describe("mapping channels to a guide's by hand", () => {
     const page = Array.from({ length: 120 }, (_, at) =>
       channel(String(at + 1), `Channel ${at + 1}`),
     );
+
     const { channels } = await sheet({ channels: { total: 768, channels: page, revision: "7.2" } });
 
     expect(channels().length).toBeLessThan(40);
@@ -226,12 +240,14 @@ describe("mapping channels to a guide's by hand", () => {
   it("maps the channel to the exact guide channel picked, reads the channels again, and back to automatic", async () => {
     const { click, button, channels, options, optionList } = await sheet();
     const sport = channel("12", "Canal Nord Sport", "canalnordsport.ex");
+
     /** Answers the channels' next reading with the first of them as `first`. */
     const readAgain = (first: MapChannel) =>
       ipc.hold("guide.mapChannels").resolve({
         ...WITHOUT,
         channels: [first, ...WITHOUT.channels.slice(1)],
       });
+
     const mapped = ipc.hold("guide.map");
     readAgain(sport);
 
@@ -277,9 +293,11 @@ describe("mapping channels to a guide's by hand", () => {
     const without = Array.from({ length: 250 }, (_, at) =>
       channel(String(at + 1), `Channel ${at + 1}`),
     );
+
     /** Answers the next reading of a page from `without` as it is then, as the main process does. */
     const page = () => {
       const held = ipc.hold("guide.mapChannels");
+
       return (offset: number) =>
         held.resolve({
           total: without.length,
@@ -287,9 +305,11 @@ describe("mapping channels to a guide's by hand", () => {
           revision: "7.2",
         });
     };
+
     const { click, button, dialog, channels, channelList, optionList } = await sheet({
       channels: { total: 250, channels: without.slice(0, 120), revision: "7.2" },
     });
+
     const mapped = ipc.hold("guide.map");
     const first = page();
 
@@ -394,6 +414,7 @@ describe("mapping channels to a guide's by hand", () => {
       locked: false,
       processing: { state: "empty" },
     };
+
     const { channels, options } = await sheet({ sources: [named] });
 
     expect(channels()[2]).toBe("22News 24mapped · United Kingdom · news24.ex");
@@ -480,6 +501,7 @@ describe("mapping channels to a guide's by hand", () => {
       shown: null,
       listed: false,
     };
+
     const { click, button, channels, options, dialog, fields } = await sheet({
       channels: { total: 1, channels: [gone], revision: "7.2" },
     });

@@ -9,18 +9,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const given: Array<{ uri: string } | null> = [];
 const fakePlayer = nativePlayer((source) => void given.push(source));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
+
   const promise = new Promise<T>((done, refuse) => {
     resolve = done;
     reject = refuse;
   });
+
   return { promise, resolve, reject };
 }
+
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise((done) => setTimeout(done, 0));
 };
@@ -36,32 +41,41 @@ interface Sent {
 /** Reads one protobuf CastMessage frame, as a TV would. */
 function readFrames(bytes: Buffer): Sent[] {
   const out: Sent[] = [];
+
   for (let at = 0; at < bytes.length;) {
     const length = bytes.readUInt32BE(at);
     const body = bytes.subarray(at + 4, at + 4 + length);
     at += 4 + length;
     const fields = new Map<number, string>();
+
     for (let i = 0; i < body.length;) {
       const tag = body[i++]!;
+
       if ((tag & 7) === 0) {
         while (body[i++]! & 0x80);
         continue;
       }
+
       let size = 0;
+
       for (let shift = 0; ; shift += 7) {
         const byte = body[i++]!;
         size |= (byte & 0x7f) << shift;
+
         if (byte < 0x80) break;
       }
+
       fields.set(tag >> 3, body.subarray(i, i + size).toString("utf8"));
       i += size;
     }
+
     out.push({
       to: fields.get(3)!,
       namespace: fields.get(4)!,
       payload: JSON.parse(fields.get(6)!) as Record<string, unknown>,
     });
   }
+
   return out;
 }
 
@@ -69,8 +83,10 @@ function readFrames(bytes: Buffer): Sent[] {
 function frame(from: string, namespace: string, payload: object): string {
   const text = (field: number, value: string) => {
     const bytes = Buffer.from(value);
+
     return Buffer.concat([Buffer.from([(field << 3) | 2, ...varint(bytes.length)]), bytes]);
   };
+
   const body = Buffer.concat([
     Buffer.from([8, 0]),
     text(2, from),
@@ -79,13 +95,18 @@ function frame(from: string, namespace: string, payload: object): string {
     Buffer.from([40, 0]),
     text(6, JSON.stringify(payload)),
   ]);
+
   const length = Buffer.alloc(4);
   length.writeUInt32BE(body.length);
+
   return Buffer.concat([length, body]).toString("base64");
 }
+
 function varint(value: number): number[] {
   const bytes = [];
+
   for (; value > 0x7f; value >>>= 7) bytes.push((value & 0x7f) | 0x80);
+
   return [...bytes, value];
 }
 
@@ -94,17 +115,20 @@ const MEDIA = "urn:x-cast:com.google.cast.media";
 
 /** Everything the TV was sent, in order. */
 let sent: Sent[] = [];
+
 /** What the TV does with what it's sent; tests replace parts. */
 let tvTime = 0;
 let tvState = "PLAYING";
 
 const listeners = new Map<string, (event: never) => void>();
 const emit = (event: string, payload: unknown) => listeners.get(event)?.(payload as never);
+
 const tvSays = (channel: string, from: string, namespace: string, payload: object) =>
   emit("onData", { channel, data: frame(from, namespace, payload) });
 
 function answerAsTv(channel: string, message: Sent) {
   const { type, requestId } = message.payload;
+
   const status = () => ({
     type: "MEDIA_STATUS",
     requestId,
@@ -120,6 +144,7 @@ function answerAsTv(channel: string, message: Sent) {
             },
           ],
   });
+
   if (message.namespace === RECEIVER && type === "LAUNCH") {
     tvSays(channel, "receiver-0", RECEIVER, {
       type: "RECEIVER_STATUS",
@@ -155,13 +180,16 @@ let served: Array<{
   headers: Record<string, string> | null;
   revoked: ReturnType<typeof deferred<void>> | null;
 }> = [];
+
 /** Each playlist the relay reads, by address. */
 const playlists = new Map<string, string>();
 const routes = new Map<string, string>();
 let events: string[] = [];
 let wifi = true;
+
 /** Whether revocations wait for `relayCloses`, for tests that check what waits on them. */
 let holding = false;
+
 /** The channel the sender opened last. */
 let channel = "";
 let openChannel = async () => {};
@@ -186,6 +214,7 @@ Object.assign(globalThis, {
           const token = `tok${served.length + 1}`;
           served.push({ token, url, headers, revoked: null });
           routes.set(`${token}/0`, url);
+
           return { address: `http://192.168.1.20:5000/${token}/`, token };
         },
         route: (token: string, made: Array<{ id: string; url: string }>) => {
@@ -193,6 +222,7 @@ Object.assign(globalThis, {
         },
         read: async (token: string, id: string) => {
           const url = routes.get(`${token}/${id}`)!;
+
           return { url, body: playlists.get(url) ?? "" };
         },
         answer: () => {},
@@ -200,12 +230,15 @@ Object.assign(globalThis, {
           const entry = served.find((each) => each.token === token)!;
           events.push(`revoke ${token}`);
           entry.revoked = deferred();
+
           if (!holding) entry.revoked.resolve();
+
           return entry.revoked.promise.then(() => void events.push(`revoked ${token}`));
         },
         endBackground: () => events.push("end background"),
         addListener: (event: string, listener: (event: never) => void) => {
           listeners.set(event, listener);
+
           return { remove: () => listeners.delete(event) };
         },
       },
@@ -233,6 +266,7 @@ onAdmission({
 const tv = { id: "tv1", name: "Living Room TV", model: "Chromecast" };
 const PROVIDER = "http://provider.example:8080/movie/user/secret/42";
 const options = { watch: true, login: ["user", "secret"], from: 120 };
+
 const title = (id: string) => ({
   id,
   subscriptionId: "sub",
@@ -242,6 +276,7 @@ const title = (id: string) => ({
   next: false,
   versions: false,
 });
+
 const file = (container: string) => ({
   kind: "file" as const,
   originalLanguage: null,
@@ -251,11 +286,13 @@ const file = (container: string) => ({
     container,
   }),
 });
+
 /** Settles every revocation asked so far, as the native relay does once its readers ended. */
 const relayCloses = async () => {
   for (const each of served) each.revoked?.resolve();
   await settle();
 };
+
 const loads = () => sent.filter((each) => each.payload["type"] === "LOAD");
 
 beforeEach(async () => {
@@ -282,6 +319,7 @@ describe("Play on TV", () => {
     openChannel = () => refused.promise;
     const first = playOnTv(tv);
     openChannel = async () => {};
+
     const other = { ...tv, id: "tv2", name: "Bedroom TV" };
     expect(await playOnTv(other)).toBeNull();
 

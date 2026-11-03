@@ -75,15 +75,18 @@ const ERASED = `from custom_list_members as kept where not exists (
 export function prepareCustomLists(db: DatabaseSync): void {
   db.exec(SCHEMA);
   const record = db.prepare("select 1 from sqlite_master where type = 'table' and name = 'events'");
+
   if (!record.get() || !db.prepare(`select 1 ${ERASED} limit 1`).get()) return;
   // As an erase deletes: SQLite zeroes what it deletes, and the checkpoint moves it out of the
   // write-ahead log.
   db.exec("pragma secure_delete = on");
+
   try {
     transaction(db, () => db.prepare(`delete ${ERASED}`).run());
   } finally {
     db.exec("pragma secure_delete = off");
   }
+
   db.exec("pragma wal_checkpoint(truncate)");
 }
 
@@ -192,6 +195,7 @@ export class CustomListStore extends Context.Service<
 >()("mrstreamer/CustomListStore") {}
 
 const ListRow = lazy(() => type({ id: "string", name: "string", revision: "number" }));
+
 const MemberRow = lazy(() =>
   type({
     list: "string",
@@ -208,10 +212,13 @@ export const customListStoreLayer: Layer.Layer<CustomListStore, never, Database>
   CustomListStore,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return closed(opened.failure);
     const { db } = opened;
+
     return yield* Effect.try(() => {
       prepareCustomLists(db);
+
       return storeOn(db);
     }).pipe(
       Effect.catchTag("UnknownError", (failure) =>
@@ -264,6 +271,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
       "update custom_list_members set streams = ?, name = ?, adult = ? where list = ? and member = ?",
     ),
   };
+
   // These read and write the viewing record's events, which an older profile may lack until the
   // record is prepared: made the first time an account gets a channel.
   let anchors: { readonly kept: StatementSync; readonly write: StatementSync } | null = null;
@@ -284,7 +292,9 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
       ),
     };
     const kept = anchors.kept.get(account)?.["anchor"];
+
     if (typeof kept === "number") return kept;
+
     return Number(
       anchors.write.run(account, ANCHOR, EVENT_VERSION, at, randomUUID()).lastInsertRowid,
     );
@@ -293,13 +303,16 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
   const membersOf = (rows: readonly unknown[]): (StoredMember & { readonly list: string })[] =>
     rows.flatMap((raw) => {
       const row = MemberRow()(raw);
+
       if (row instanceof type.errors) return [];
       const { list, member, account, streams, name, adult } = row;
+
       return [{ list, member, account, streams, name, adult: adult === 1 }];
     });
 
   const listOf = (id: string) => {
     const row = ListRow()(statements.list.get(id));
+
     return row instanceof type.errors ? null : row;
   };
 
@@ -310,7 +323,9 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
   const unclaimed = (id: string, name: string): string => {
     const folded = foldedOf(name);
     const holder = statements.named.get(folded)?.["id"];
+
     if (holder !== undefined && holder !== id) fail("list-name-taken");
+
     return folded;
   };
 
@@ -332,10 +347,13 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
   return {
     lists: attempt(() => {
       const members = Map.groupBy(membersOf(statements.allMembers.all()), (each) => each.list);
+
       return statements.lists.all().flatMap((raw) => {
         const row = ListRow()(raw);
+
         if (row instanceof type.errors) return [];
         const own = members.get(row.id) ?? [];
+
         return [{ ...row, members: own.map(({ list: _list, ...member }) => member) }];
       });
     }),
@@ -344,14 +362,18 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
       attempt(() =>
         transaction(db, () => {
           if (first && !first.stands()) fail("no-subscription");
+
           if (statements.made.get(id)) {
             existing(id);
+
             return;
           }
+
           const folded = unclaimed(id, name);
           const last = Number(statements.last.get()?.["position"] ?? -1);
           statements.insertList.run(id, name, folded, last + 1);
           statements.receipt.run(id);
+
           if (first) append(id, first, at);
         }),
       ),
@@ -369,8 +391,11 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
         transaction(db, () => {
           const ids = statements.lists.all().map((row) => String(row["id"]));
           const asked = new Set(order);
+
           if (asked.size !== order.length || ids.length !== order.length) fail("list-changed");
+
           if (ids.some((id) => !asked.has(id))) fail("list-changed");
+
           for (const [position, id] of order.entries()) statements.placeList.run(position, id);
         }),
       ),
@@ -388,14 +413,20 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
         transaction(db, () => {
           if (!channel.stands()) fail("no-subscription");
           existing(list);
+
           const found = membersOf(statements.members.all(list)).filter(
             (stored) => stored.account === channel.account && same(stored),
           );
+
           if (member && found.length > 0) return false;
+
           if (!member && found.length === 0) return false;
+
           if (member) append(list, channel, at);
+
           for (const stored of found) statements.dropMember.run(list, stored.member);
           statements.revise.run(list);
+
           return true;
         }),
       ),
@@ -404,8 +435,10 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
       attempt(() =>
         transaction(db, () => {
           existing(list);
+
           if (statements.dropMember.run(list, member).changes === 0) return false;
           statements.revise.run(list);
+
           return true;
         }),
       ),
@@ -417,19 +450,26 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
           const members = membersOf(statements.members.all(list));
           const visible = shown(members);
           const moved = new Set(order);
+
           if (moved.size !== order.length || order.some((each) => !visible.has(each))) {
             fail("list-changed");
           }
+
           // The channels arranged take one another's places; every other keeps its own.
           let next = 0;
+
           const placed = members.map((each) =>
             moved.has(each.member) ? (order[next++] ?? each.member) : each.member,
           );
+
           if (placed.every((each, at) => each === members[at]?.member)) return false;
+
           for (const [position, member] of placed.entries()) {
             statements.placeMember.run(position, list, member);
           }
+
           statements.revise.run(list);
+
           return true;
         }),
       ),
@@ -439,6 +479,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
         transaction(db, () => {
           for (const stored of membersOf(statements.accountMembers.all(account))) {
             const listed = now(stored);
+
             if (
               !listed ||
               (listed.name === stored.name &&
@@ -448,6 +489,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
             ) {
               continue;
             }
+
             statements.alignMember.run(
               JSON.stringify(listed.streams),
               listed.name,
@@ -469,6 +511,7 @@ function fail(kind: "no-list" | "list-name-taken" | "list-changed" | "no-subscri
 /** A store for when the database can't open: every call reports why. */
 function closed(detail: string): CustomListStore["Service"] {
   const failure = unavailable(detail);
+
   return {
     lists: failure,
     create: () => failure,

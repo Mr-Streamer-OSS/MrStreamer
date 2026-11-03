@@ -77,8 +77,10 @@ const listeners = new Set<() => void>();
 /** Makes `locale` this process's language, with dates and numbers in `formats`. */
 export function setLanguage({ locale, formats }: ActiveLanguage): void {
   const tag = validTag(formats) ?? locale;
+
   if (active.locale === locale && active.formats === tag) return;
   active = { locale, formats: tag };
+
   for (const listener of listeners) listener();
 }
 
@@ -90,6 +92,7 @@ export function currentLanguage(): ActiveLanguage {
 /** Calls `listener` after the language changes. Returns the unsubscribe function. */
 export function onLanguageChange(listener: () => void): () => void {
   listeners.add(listener);
+
   return () => void listeners.delete(listener);
 }
 
@@ -110,15 +113,19 @@ export function translate<K extends MessageKey>(
   const message: string | Plural | undefined = catalogues[locale]?.[key] ?? en[key];
   const values: Readonly<Record<string, string | number>> = params ?? {};
   const tag = locale === active.locale ? active.formats : locale;
+
   const text =
     message === undefined
       ? key
       : typeof message === "string"
         ? message
         : pluralForm(locale, message, Number(values["count"] ?? 0));
+
   return text.replace(/\{(\w+)\}/g, (whole, name: string) => {
     const value = values[name];
+
     if (value === undefined) return whole;
+
     return typeof value === "number" ? numbers("count", {}, tag).format(value) : value;
   });
 }
@@ -134,8 +141,10 @@ export type MessagePart<K extends MessageKey> = string | { readonly placeholder:
 export function messageParts<K extends TextKey>(key: K): readonly MessagePart<K>[] {
   const message: string | Plural = catalogues[active.locale][key] ?? en[key];
   const text = typeof message === "string" ? message : message.other;
+
   return text.split(/\{(\w+)\}/).flatMap((part, at): MessagePart<K>[] => {
     if (at % 2 === 0) return part ? [part] : [];
+
     return isPlaceholder(key, part) ? [{ placeholder: part }] : [`{${part}}`];
   });
 }
@@ -146,6 +155,7 @@ function isPlaceholder<K extends MessageKey>(key: K, name: string): name is Plac
 
 function pluralForm(locale: Locale, forms: Plural, count: number): string {
   const category = rules(locale).select(count);
+
   return forms[category] ?? forms.other;
 }
 
@@ -162,8 +172,10 @@ export function resolveLanguage(
   const tags = systemTags.flatMap((tag) => validTag(tag) ?? []);
   const system = tags.flatMap((tag) => LOCALES.find((each) => sameLanguage(each, tag)) ?? [])[0];
   const choice = saved === undefined || saved === "system" ? "system" : saved;
+
   const locale =
     choice === "system" ? (system ?? SOURCE_LOCALE) : isLocale(choice) ? choice : SOURCE_LOCALE;
+
   return {
     choice: choice === "system" || isLocale(choice) ? choice : locale,
     system: system ?? SOURCE_LOCALE,
@@ -195,10 +207,12 @@ const languageNames = new Map<string, Intl.DisplayNames>();
 
 function made<A>(kept: Map<string, A>, key: string, make: () => A): A {
   let value = kept.get(key);
+
   if (value === undefined) {
     value = make();
     kept.set(key, value);
   }
+
   return value;
 }
 
@@ -241,6 +255,7 @@ export function formatBytes(bytes: number): string {
       maximumFractionDigits: 1,
     }).format(bytes / 1e9);
   }
+
   if (bytes >= 1e6) {
     return numbers("megabytes", {
       style: "unit",
@@ -248,6 +263,7 @@ export function formatBytes(bytes: number): string {
       maximumFractionDigits: 0,
     }).format(bytes / 1e6);
   }
+
   return numbers("kilobytes", { style: "unit", unit: "kilobyte", maximumFractionDigits: 0 }).format(
     Math.max(bytes, 0) / 1e3,
   );
@@ -292,8 +308,10 @@ export function formatDate(at: number | Date, style: DateStyle): string {
   const tag = active.formats;
   const options = DATE_STYLES[style];
   const time = Number(at);
+
   const wallClock =
     "timeZone" in options ? time : time - new Date(time).getTimezoneOffset() * 60_000;
+
   return made(
     dateFormats,
     `${style} ${tag}`,
@@ -305,8 +323,10 @@ export function formatDate(at: number | Date, style: DateStyle): string {
 export function formatLanguageName(code: string): string | null {
   const tag = active.locale;
   const names = made(languageNames, tag, () => new Intl.DisplayNames(tag, { type: "language" }));
+
   try {
     const name = names.of(code);
+
     return name && name !== code ? name : null;
   } catch {
     return null;
@@ -316,6 +336,7 @@ export function formatLanguageName(code: string): string | null {
 /** "A, B and C", "A, B et C". */
 export function formatList(items: readonly string[]): string {
   const tag = active.formats;
+
   return made(listFormats, tag, () => new Intl.ListFormat(tag, { type: "conjunction" })).format(
     items,
   );

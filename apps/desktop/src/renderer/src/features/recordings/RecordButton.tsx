@@ -54,14 +54,17 @@ function stopOf(
     case "end": {
       if (!programme) return null;
       const stop = programme.stop + LATE_MS;
+
       return stop > now && stop <= now + RECORDING_MAX_MS ? stop : null;
     }
+
     case "1h":
       return now + HOUR_MS;
     case "2h":
       return now + 2 * HOUR_MS;
     case "at": {
       const stop = atTime(now, at);
+
       return typeof stop === "number" ? stop : null;
     }
   }
@@ -74,6 +77,7 @@ function stopOf(
  */
 function atTime(now: number, at: string): number | "skipped" | null {
   const [hours, minutes] = at.split(":").map(Number);
+
   if (hours === undefined || minutes === undefined || Number.isNaN(hours + minutes)) return null;
   const stop = new Date(now);
   stop.setHours(hours, minutes, 0, 0);
@@ -81,6 +85,7 @@ function atTime(now: number, at: string): number | "skipped" | null {
   // much after the first.
   const back = new Date(stop.getTime() + HOUR_MS).getTimezoneOffset() - stop.getTimezoneOffset();
   const again = new Date(stop.getTime() + back * 60_000);
+
   if (
     stop.getTime() <= now &&
     back > 0 &&
@@ -88,18 +93,22 @@ function atTime(now: number, at: string): number | "skipped" | null {
     again.getMinutes() === minutes
   )
     stop.setTime(again.getTime());
+
   if (stop.getTime() <= now) {
     stop.setDate(stop.getDate() + 1);
     stop.setHours(hours, minutes, 0, 0);
   }
+
   // A time the clocks go forward past isn't there: setHours moves it on by the change.
   if (stop.getHours() !== hours || stop.getMinutes() !== minutes) return "skipped";
+
   return stop.getTime() <= now + RECORDING_MAX_MS ? stop.getTime() : null;
 }
 
 /** "22:30" in this computer's time, as a time input takes it. */
 function inputTime(at: number): string {
   const date = new Date(at);
+
   return [date.getHours(), date.getMinutes()]
     .map((part) => String(part).padStart(2, "0"))
     .join(":");
@@ -121,10 +130,12 @@ export function RecordButton({
   // Started from the popover: the keys go to Recording, which takes Record's place, whether the
   // list or the answer says so first.
   const started = useRef(false);
+
   const recordingButton = useCallback((button: HTMLButtonElement | null) => {
     if (button && started.current) button.focus();
     started.current = false;
   }, []);
+
   if (recording) {
     return (
       <Button ref={recordingButton} variant="secondary" onClick={() => openView("recordings")}>
@@ -133,6 +144,7 @@ export function RecordButton({
       </Button>
     );
   }
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
@@ -158,12 +170,15 @@ export function RecordButton({
             // button keeps its Enter and Space, and Escape and Tab do what they do in a popup.
             onKeyDown={(event) => {
               if (event.metaKey || event.ctrlKey || event.altKey) return;
+
               // The stop time's field keeps its keys; the page leaves a field's alone.
               if (event.target instanceof HTMLInputElement) return;
+
               const pressed =
                 (event.key === "Enter" || event.key === " ") &&
                 event.target instanceof Element &&
                 event.target.closest("button");
+
               if (event.key !== "Escape" && event.key !== "Tab" && !pressed) event.preventDefault();
             }}
             className={cn(
@@ -198,53 +213,70 @@ function RecordPanel({
   onDone: () => void;
 }) {
   const now = useNow();
+
   const [choice, setChoice] = useState<StopChoice>(
     stopOf("end", programme, now, "") !== null ? "end" : "1h",
   );
+
   // The half hour after an hour from now, until one is typed.
   const [at, setAt] = useState(() => {
     const when = new Date(now + HOUR_MS);
+
     const past =
       when.getMinutes() % 30 !== 0 || when.getSeconds() > 0 || when.getMilliseconds() > 0;
+
     when.setMinutes(Math.floor(when.getMinutes() / 30) * 30 + (past ? 30 : 0), 0, 0);
+
     return inputTime(when.getTime());
   });
+
   const time = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<RecordingConnections | null>(null);
+
   // At a time is offered with any time typed; Start waits for one it can record to.
   const offered = CHOICES.flatMap((each) =>
     each.choice !== "at" && stopOf(each.choice, programme, now, at) === null ? [] : [each.choice],
   );
+
   const stop = stopOf(choice, programme, now, at);
+
   const connections = useQuery({
     queryKey: ["recordings", "connections", channel.subscriptionId],
     queryFn: () => call("recordings.connections", { subscriptionId: channel.subscriptionId }),
   });
+
   const start = useMutation({
     mutationFn: async (stopPlaying: boolean) => {
       // Times are taken as it starts: the popover may have stood open a while.
       const stop = stopOf(choice, programme, Date.now(), at);
+
       // Its time went since the last tick: the popover reads the clock again and says so.
       if (stop === null) {
         refreshNow();
+
         return null;
       }
+
       if (stopPlaying) player.stop();
       onStarting(true);
+
       return call("recordings.start", { channel: ownedId(channel), stop, stopPlaying });
     },
     onError: () => onStarting(false),
     onSuccess: (answer) => {
       if (answer === null) return;
+
       if (answer.kind === "started") return onDone();
       onStarting(false);
       setBusy(answer.connections);
       void connections.refetch();
     },
   });
+
   const shown = busy ?? connections.data ?? null;
   // Playing here is all that holds them: stopping it frees one.
   const onlyWatch = busy !== null && busy.uses.every((use) => use === "watch");
+
   return (
     <>
       <div className="flex flex-col gap-1 px-2 pt-2 pb-2.5">
@@ -269,6 +301,7 @@ function RecordPanel({
         // The arrows move the choice, and the keys with it, as in any radio group.
         onKeyDown={(event) => {
           const by = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+
           if (by === undefined) return;
           const index = offered.indexOf(choice);
           const next = offered[(index + by + offered.length) % offered.length] ?? choice;
@@ -280,6 +313,7 @@ function RecordPanel({
           if (!offered.includes(each.choice)) return null;
           const stop = stopOf(each.choice, programme, now, at);
           const chosen = each.choice === choice;
+
           return (
             <button
               key={each.choice}
@@ -296,8 +330,10 @@ function RecordPanel({
                 // The time field may hold the focus, and goes with At a time: the keys stay here.
                 if (each.choice !== "at") {
                   event.currentTarget.focus();
+
                   return setChoice(each.choice);
                 }
+
                 // Picked, as by a click, it opens on its time to type.
                 flushSync(() => setChoice("at"));
                 time.current?.focus();
@@ -388,6 +424,7 @@ function RecordPanel({
 function startFailure(error: AppError): string {
   if (error.kind !== "stream") return describeError(error);
   const { failure } = error;
+
   switch (failure.kind) {
     case "refused":
       return t("The provider refused the stream. Another device may be using your connection.");

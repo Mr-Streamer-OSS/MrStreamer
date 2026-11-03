@@ -22,8 +22,10 @@ const theme = {
 export default function RootLayout() {
   const state = useStore(sources.state);
   useEffect(() => void sources.restore(), []);
+
   if (state.kind === "restoring") return null;
   const signedIn = state.sources.length > 0;
+
   return (
     <ThemeProvider value={theme}>
       <StatusBar barStyle="light-content" />

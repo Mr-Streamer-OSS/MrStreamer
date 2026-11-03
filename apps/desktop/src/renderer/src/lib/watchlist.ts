@@ -41,10 +41,12 @@ export function useSaveToggle(kind: TitleKind, version: OwnedId, listed: boolean
   const query = queries.saved(kind, version);
   const entry = useQuery({ ...query, enabled: listed });
   const underWay = useRef(false);
+
   const change = useMutation({
     mutationFn: async (saved: OwnedId | null): Promise<OwnedId | null> => {
       if (!saved) return call("watchlist.save", { kind, version: ownedId(version) });
       await call("watchlist.remove", { entry: ownedId(saved) });
+
       return null;
     },
     // Stored by now: the button says so at once, and the lists read again.
@@ -56,6 +58,7 @@ export function useSaveToggle(kind: TitleKind, version: OwnedId, listed: boolean
       underWay.current = false;
     },
   });
+
   return {
     ready: listed && !entry.isPending,
     saved: Boolean(entry.data),
@@ -76,6 +79,7 @@ export function useSaveToggle(kind: TitleKind, version: OwnedId, listed: boolean
 export function useRemoveSaved() {
   const client = useQueryClient();
   const underWay = useRef(false);
+
   const removal = useMutation({
     mutationFn: (entry: OwnedId) => call("watchlist.remove", { entry: ownedId(entry) }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["watchlist"] }),
@@ -83,6 +87,7 @@ export function useRemoveSaved() {
       underWay.current = false;
     },
   });
+
   return {
     isPending: removal.isPending,
     error: removal.error,

@@ -25,6 +25,7 @@ export function analyticsHandlers({
     "analytics.action": (action) =>
       Effect.sync(() => {
         analytics.noteAction(action);
+
         return null;
       }),
     // Registration happens at invocation, never when an optional reply later settles.
@@ -34,8 +35,10 @@ export function analyticsHandlers({
       Effect.succeed(analytics.admitPlayback(kind, measurement, frame)),
     "analytics.playbackBind": ({ kind, measurement, sessionId }, frame) => {
       const token = analytics.admitPlayback(kind, measurement, frame);
+
       return Effect.gen(function* () {
         const session = yield* playback.measurement(sessionId);
+
         if (
           !token ||
           !session ||
@@ -44,37 +47,46 @@ export function analyticsHandlers({
           analytics.controlledPlayback(measurement.control, frame) !== token
         )
           return null;
+
         return analytics.bindPlayback(token, "local", session.kind, session.closed);
       });
     },
     "analytics.playbackState": ({ token: control, binding, sequence, state }, frame) => {
       const token = analytics.controlledPlayback(control, frame);
+
       return Effect.sync(() => {
         if (token) analytics.notePlaybackState(token, binding, sequence, state);
+
         return null;
       });
     },
     "analytics.playbackFailure": ({ token: control, binding, failure, diagnostic }, frame) => {
       const token = analytics.controlledPlayback(control, frame);
+
       return Effect.sync(() => {
         if (token) analytics.notePlaybackFailure(token, binding, failure, diagnostic);
+
         return null;
       });
     },
     "analytics.playbackEligible": ({ token: control, eligible }, frame) => {
       const token = analytics.controlledPlayback(control, frame);
+
       return Effect.sync(() => {
         if (token) analytics.setPlaybackEligible(token, eligible);
+
         return null;
       });
     },
     "analytics.playbackEnd": ({ token: control }, frame) => {
       analytics.endControlledPlayback(control, frame);
+
       return Effect.succeed(null);
     },
     "analytics.feature": (feature) =>
       Effect.sync(() => {
         analytics.noteFeature(feature);
+
         return null;
       }),
   };

@@ -15,6 +15,7 @@ export function h264ImageArguments(
   picture: { readonly width: number; readonly height: number } | null,
 ) {
   const [filterOption, filter, ...pixelFormat] = H264_IMAGE_ARGUMENTS;
+
   return [
     filterOption,
     picture

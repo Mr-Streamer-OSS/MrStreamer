@@ -19,6 +19,7 @@ it.skipIf(process.platform === "win32")(
   "comparison CLI retains the original failure and removes a signal-exited warmup profile",
   () => {
     const directory = mkdtempSync(join(tmpdir(), "measurement-signal-contract-"));
+
     try {
       const executable = join(directory, "signalled-executable");
       const receipt = join(directory, "arguments.txt");
@@ -28,6 +29,7 @@ it.skipIf(process.platform === "win32")(
         '#!/bin/sh\nprintf \'%s\\n\' "$$" "$@" > "$MR_STREAMER_FIXTURE_ARGUMENTS"\nkill -TERM "$$"\n',
         { mode: 0o755 },
       );
+
       const result = spawnSync(
         process.execPath,
         [comparisonCli, "--rounds", "1", "--runs", "1", "--output", output, executable, executable],
@@ -37,6 +39,7 @@ it.skipIf(process.platform === "win32")(
           timeout: 15_000,
         },
       );
+
       expect(result.error).toBeUndefined();
       expect(result.status, result.stderr).toBe(1);
       expect(result.stderr).toContain("The app exited (SIGTERM) before opening a window.");
@@ -61,6 +64,7 @@ it.skipIf(process.platform === "win32")(
   "app CLI records checkout metadata with a trailing app flag and cleans up its failed process",
   () => {
     const directory = mkdtempSync(join(tmpdir(), "measurement-metadata-contract-"));
+
     try {
       const executable = join(directory, "malformed-cdp.cjs");
       const output = join(directory, "app.json");
@@ -81,6 +85,7 @@ http.createServer((_request, response) => {
       mkdirSync(join(appDirectory, "out/main"), { recursive: true });
       writeFileSync(join(appDirectory, "out/main/index.js"), "fixture main bundle");
       writeFileSync(join(appDirectory, "package.json"), JSON.stringify({ version: "fixture" }));
+
       const result = spawnSync(
         process.execPath,
         [
@@ -96,6 +101,7 @@ http.createServer((_request, response) => {
         ],
         { encoding: "utf8", timeout: 25_000 },
       );
+
       expect(result.error).toBeUndefined();
       expect(result.status, result.stderr).toBe(1);
       const raw = JSON.parse(readFileSync(output, "utf8"));

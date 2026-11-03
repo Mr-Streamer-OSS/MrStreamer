@@ -87,47 +87,60 @@ export function* partSteps({
 }: Pick<LiveSource, "subscriptionId" | "catalogue">): Steps<Part> {
   const due = pacer();
   const { categories, streams } = yield* normalizeSteps(catalogue);
+
   const adultCategories = new Set(
     catalogue.categories.filter((each) => isAdultCategory(each.name)).map((each) => each.id),
   );
+
   const adultStreams = new Set(
     catalogue.channels
       .filter((each) => each.adult || each.categoryIds.some((id) => adultCategories.has(id)))
       .map((each) => each.id),
   );
+
   const byId = new Map<string, Channel>();
   const channels: Channel[] = [];
   const normalized = yield* liveChannelSteps(streams);
   const guideIds = new Map<string, readonly string[]>();
+
   for (const listed of normalized.channels) {
     if (due()) yield;
+
     if (listed.variants.some((variant) => adultStreams.has(variant.id))) continue;
     const channel = { ...listed, subscriptionId, key: ownedKey({ subscriptionId, id: listed.id }) };
     channels.push(channel);
     guideIds.set(channel.id, normalized.guideIds.get(channel.id) ?? []);
     byId.set(channel.id, channel);
+
     // A channel can have thousands of streams.
     for (const variant of channel.variants) {
       if (due()) yield;
       byId.set(variant.id, channel);
     }
   }
+
   // A channel shows in each of its streams' categories once, where its first stream there is.
   const inCategory = new Map<string, Channel[]>();
   const placed = new Set<string>();
+
   for (const stream of streams) {
     if (due()) yield;
     const channel = byId.get(stream.id);
+
     if (!channel) continue;
+
     for (const categoryId of stream.categoryIds) {
       const key = `${categoryId}\n${channel.id}`;
+
       if (placed.has(key)) continue;
       placed.add(key);
       const listed = inCategory.get(categoryId);
+
       if (listed) listed.push(channel);
       else inCategory.set(categoryId, [channel]);
     }
   }
+
   return {
     subscriptionId,
     guideIds,
@@ -135,6 +148,7 @@ export function* partSteps({
     byId,
     categories: categories.flatMap((category) => {
       const listed = inCategory.get(category.id);
+
       return listed?.length ? [{ ...category, channels: listed }] : [];
     }),
   };
@@ -166,16 +180,20 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
 
   // A name two subscriptions list marks every channel shown under it.
   const listedBy = new Map<string, string | null>();
+
   for (const { subscriptionId, channels } of members) {
     for (const { title } of channels) {
       if (due()) yield;
       const owner = listedBy.get(title);
+
       if (owner === undefined) listedBy.set(title, subscriptionId);
       else if (owner !== subscriptionId) listedBy.set(title, null);
     }
   }
+
   const shown = new Map<Channel, Channel>();
   const byKey = new Map<string, Channel>();
+
   for (const { subscriptionId, channels, byId } of members) {
     for (const channel of channels) {
       if (due()) yield;
@@ -184,6 +202,7 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
         listedBy.get(channel.title) === null ? { ...channel, ambiguous: true } : channel,
       );
     }
+
     for (const [id, channel] of byId) {
       if (due()) yield;
       byKey.set(ownedKey({ subscriptionId, id }), shown.get(channel) ?? channel);
@@ -195,14 +214,17 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
     string,
     Map<string, { id: string; title: string; channels: Channel[]; keys: Set<string> }>
   >();
+
   for (const { subscriptionId, categories } of members) {
     for (const category of categories) {
       if (due()) yield;
       const name = category.group ?? category.title;
       let shelves = regions.get(name);
+
       if (!shelves) regions.set(name, (shelves = new Map()));
       const listed = category.channels.map((channel) => shown.get(channel) ?? channel);
       const known = shelves.get(category.title);
+
       if (!known) {
         shelves.set(category.title, {
           id: ownedKey({ subscriptionId, id: category.id }),
@@ -212,6 +234,7 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
         });
         continue;
       }
+
       // A channel may be in several of its provider's categories that show under one name.
       for (const channel of listed) {
         if (known.keys.has(channel.key)) continue;
@@ -223,26 +246,32 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
 
   const placeOf = new Map<string, string>();
   const listed: Region[] = [];
+
   for (const [name, joined] of regions) {
     const shelves = [...joined.values()].map(({ id, title, channels }) => ({
       id,
       title,
       channels,
     }));
+
     const seen = new Set<string>();
     const channels: Channel[] = [];
+
     for (const shelf of shelves) {
       for (const channel of shelf.channels) {
         if (due()) yield;
+
         if (seen.has(channel.key)) continue;
         seen.add(channel.key);
         channels.push(channel);
+
         if (placeOf.has(channel.key)) continue;
         const place = shelf.title === name ? name : `${name} · ${shelf.title}`;
         const label = channel.ambiguous ? labels.get(channel.subscriptionId) : undefined;
         placeOf.set(channel.key, label ? `${place} · ${label}` : place);
       }
     }
+
     listed.push({ name, shelves, channels });
   }
 
@@ -251,36 +280,44 @@ export function* combineSteps(parts: readonly Labelled[]): Steps<Library> {
   // category.
   const others = listed.length > 0 ? "Other channels" : "All channels";
   const unplaced: Channel[] = [];
+
   for (const { channels } of members) {
     for (const each of channels) {
       if (due()) yield;
       const channel = shown.get(each) ?? each;
+
       if (placeOf.has(channel.key)) continue;
       const label = channel.ambiguous ? labels.get(channel.subscriptionId) : undefined;
       placeOf.set(channel.key, label ? `${others} · ${label}` : others);
       unplaced.push(channel);
     }
   }
+
   // A region is named once: a provider's own "Other channels" takes them in, so Live's country
   // menu, which goes by name, never holds two of one name.
   const named = listed.findIndex((region) => region.name === others);
   const region = listed[named];
+
   if (unplaced.length > 0 && region) {
     listed[named] = { ...region, channels: [...region.channels, ...unplaced] };
   } else if (unplaced.length > 0) {
     listed.push({ name: others, shelves: [], channels: unplaced });
   }
+
   // A channel in categories of several regions shows in each, but once in all of them.
   const channels: Channel[] = [];
   const seen = new Set<string>();
+
   for (const region of listed) {
     for (const channel of region.channels) {
       if (due()) yield;
+
       if (seen.has(channel.key)) continue;
       seen.add(channel.key);
       channels.push(channel);
     }
   }
+
   return { regions: listed, channels, byKey, placeOf, labels };
 }
 
@@ -294,10 +331,13 @@ const TASK_MS = 8;
 export async function inTasks<A>(steps: Steps<A>, wanted: () => boolean): Promise<A | null> {
   for (;;) {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
     if (!wanted()) return null;
     const started = Date.now();
+
     do {
       const next = steps.next();
+
       if (next.done) return next.value;
     } while (Date.now() - started < TASK_MS);
   }
@@ -313,21 +353,28 @@ export function* sameSteps<A extends Record<keyof A, readonly unknown[]>>(
   b: A,
 ): Steps<boolean> {
   const due = pacer();
+
   for (const key of Object.keys(a) as (keyof A)[]) {
     const left = a[key];
     const right = b[key];
+
     if (left.length !== right.length) return false;
+
     for (let at = 0; at < left.length; at++) {
       if (due()) yield;
+
       if (!same(left[at], right[at])) return false;
     }
   }
+
   return true;
 }
 
 function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
+
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+
   if (Array.isArray(a) || Array.isArray(b)) {
     return (
       Array.isArray(a) &&
@@ -336,10 +383,14 @@ function same(a: unknown, b: unknown): boolean {
       a.every((each, at) => same(each, b[at]))
     );
   }
+
   const left = a as Record<string, unknown>;
   const right = b as Record<string, unknown>;
+
   for (const key in left) if (!same(left[key], right[key])) return false;
+
   for (const key in right) if (!(key in left) && right[key] !== undefined) return false;
+
   return true;
 }
 
@@ -351,13 +402,17 @@ export function searchChannels(library: Library, query: string): readonly Channe
 /** The same full channel matches, in catalogue order, yielding between slices for input. */
 export function* searchChannelsSteps(library: Library, query: string): Steps<readonly Channel[]> {
   const words = searchWords(query);
+
   if (words.length === 0) return [];
   const found: Channel[] = [];
   const due = pacer();
+
   for (const channel of library.channels) {
     if (due()) yield;
+
     if (matchRanges(channel.title, words).length > 0) found.push(channel);
   }
+
   return found;
 }
 
@@ -375,23 +430,30 @@ export type Place =
  */
 export function searchPlaces(library: Library, query: string): readonly Place[] {
   const words = searchWords(query);
+
   if (words.length === 0) return [];
   const matches = (name: string) => matchRanges(name, words).length > 0;
+
   // A region that is one category of its own name and no more: Live may add channels in no
   // category to a provider's own "Other channels", which its category then doesn't hold.
   const alone = (region: Region) => {
     const [shelf, ...more] = region.shelves;
+
     if (!shelf || more.length > 0 || shelf.title !== region.name) return false;
     const held = new Set(shelf.channels.map((channel) => channel.key));
+
     return region.channels.every((channel) => held.has(channel.key));
   };
+
   const countries = library.regions.flatMap((region): Place[] =>
     !alone(region) && matches(region.name) ? [{ kind: "country", region }] : [],
   );
+
   const categories = library.regions.flatMap((region) =>
     region.shelves.flatMap((shelf): Place[] =>
       matches(shelf.title) ? [{ kind: "category", region, shelf }] : [],
     ),
   );
+
   return [...countries, ...categories];
 }
