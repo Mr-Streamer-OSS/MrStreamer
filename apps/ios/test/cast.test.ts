@@ -469,15 +469,61 @@ describe("Play on TV", () => {
   it.each([
     ["interrupts it", { mediaSessionId: 1, playerState: "IDLE", idleReason: "INTERRUPTED" }],
     ["loads its own", { mediaSessionId: 2, playerState: "PLAYING" }],
-  ])("ends the TV route when another sender %s", async (_, status) => {
+  ])(
+    "ends the TV route when another sender %s, keeping the title's place and their receiver",
+    async (_, status) => {
+      void play(title("m1"), file("mp4"), options);
+      await settle();
+      await playOnTv(tv);
+      await relayCloses();
+      tvSays(channel, "t1", MEDIA, {
+        type: "MEDIA_STATUS",
+        status: [{ mediaSessionId: 1, playerState: "PLAYING", currentTime: 300 }],
+      });
+      sent = [];
+      tvSays(channel, "t1", MEDIA, { type: "MEDIA_STATUS", status: [status] });
+      await relayCloses();
+      expect(playbackState.get().tv).toEqual({ kind: "ended", tv, why: "stopped" });
+      expect(events.some((each) => each.startsWith("release"))).toBe(true);
+      expect(
+        sent.some((each) => each.namespace === RECEIVER && each.payload["type"] === "STOP"),
+      ).toBe(false);
+      retry();
+      await settle();
+      fakePlayer.ready();
+      expect(fakePlayer.currentTime).toBe(300);
+    },
+  );
+
+  it("says the TV stopped, not that it was lost, when its receiver goes", async () => {
     void play(title("m1"), file("mp4"), options);
     await settle();
     await playOnTv(tv);
     await relayCloses();
-    tvSays(channel, "t1", MEDIA, { type: "MEDIA_STATUS", status: [status] });
+    tvSays(channel, "receiver-0", RECEIVER, {
+      type: "RECEIVER_STATUS",
+      status: { applications: [] },
+    });
     await relayCloses();
     expect(playbackState.get().tv).toEqual({ kind: "ended", tv, why: "stopped" });
-    expect(events.some((each) => each.startsWith("release"))).toBe(true);
+    expect(playbackState.get().phase).toMatchObject({
+      error: "Living Room TV stopped playing it.",
+    });
+  });
+
+  it("takes no answer to another load's request as this load's end", async () => {
+    void play(title("m1"), file("mp4"), options);
+    await settle();
+    await playOnTv(tv);
+    await relayCloses();
+    tvSays(channel, "t1", MEDIA, {
+      type: "MEDIA_STATUS",
+      requestId: 9999,
+      status: [{ mediaSessionId: 7, playerState: "IDLE", idleReason: "FINISHED" }],
+    });
+    await settle();
+    expect(playbackState.get().tv).toEqual({ kind: "on", tv });
+    expect(playbackState.get().phase.kind).toBe("playing");
   });
 
   it("doesn't start the TV when the app leaves while it connects", async () => {

@@ -439,7 +439,8 @@ function Controls({
       </Glass>
       {streaming || tvButton || screens.length > 0 ? (
         <Glass style={[styles.capsule, { top: insets.top + 12, right: edge.right }]}>
-          {streaming ? (
+          {/* The TV route has no item here for AirPlay to take: Disconnect and play here first. */}
+          {streaming && tv.kind !== "on" ? (
             <VideoAirPlayButton
               style={styles.airplay}
               tint={colors.text}

@@ -454,6 +454,8 @@ let current: {
 let link: TvLink | null = null;
 /** Rises with every change of route, so a connect that ends late never takes over a newer one. */
 let routes = 0;
+/** Settles once the latest connect to a TV did, and was closed if it came too late. */
+let connecting: Promise<void> = Promise.resolve();
 
 type FormatReader = ReturnType<typeof openFormat>;
 type Group = "audio" | "subtitles";
@@ -1819,8 +1821,16 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
     );
   } catch (cause) {
     if (!attemptStands(owned, resource)) return;
-    if (cause instanceof TvRefused) failOnTv(owned, refusalText(cause.refusal), "unsupported");
-    else failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }), "unavailable");
+    if (cause instanceof TvRefused) {
+      const category =
+        cause.refusal === "network"
+          ? "network"
+          : cause.refusal === "unreadable"
+            ? "unavailable"
+            : "unsupported";
+      failOnTv(owned, refusalText(cause.refusal), category);
+    } else
+      failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }), "unavailable");
   }
 }
 
@@ -1845,6 +1855,11 @@ function refusalText(refusal: TvRefused["refusal"]): string {
 function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, status: TvStatus) {
   const tv = resource.tv;
   if (!tv || current !== owned || !stands(resource)) return;
+  // Another sender's media there now, or a stop on the TV: the route ends where the title got to,
+  // and the TV is left to whoever plays there.
+  if (status.state === "stopped" || status.state === "taken") {
+    return void (link === tv.link && endTv("stopped"));
+  }
   const before = tv.status?.state;
   tv.status = status;
   clock.set(Math.max(0, status.time - owned.offset));
@@ -1858,12 +1873,14 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
       "unavailable",
     );
   }
-  // Another sender's load or the TV's own remote ended it: the TV is no longer this route's.
-  if (status.state === "stopped") return void (link === tv.link && endTv("stopped"));
   const { phase } = state.get();
   if (phase.kind === "idle" || phase.kind === "failed") return;
   if (status.state === "ended") {
-    if (before === "ended" || owned.item.live) return;
+    if (before === "ended") return;
+    // A channel the TV says finished has stopped coming.
+    if (owned.item.live) {
+      return failOnTv(owned, t("The stream stopped delivering data."), "network");
+    }
     playingTime(owned.epoch, false);
     const saved = report();
     owned.options.ended?.();
@@ -1872,8 +1889,9 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
     return;
   }
   const playing = status.state === "playing";
-  if (playing && !owned.loaded) {
-    owned.loaded = true;
+  // Paused from the start, as after Pause while connecting, its place on the TV still counts.
+  if (playing || status.state === "paused") owned.loaded = true;
+  if (playing && owned.epoch.playedOn === null) {
     owned.epoch.playedOn = owned.epoch.candidate;
     if (!owned.epoch.played) {
       owned.epoch.played = true;
@@ -1929,9 +1947,9 @@ function replay(from: number | undefined, paused: boolean) {
 }
 
 /** Closes a TV's connection once `readers`, the stream it played, closed. */
-async function closeAfter(ending: TvLink, readers: Promise<void> | null | undefined) {
+async function closeAfter(ending: TvLink, readers: Promise<void> | null | undefined, stop = true) {
   await readers?.catch(() => undefined);
-  await ending.close();
+  await ending.close(stop);
 }
 
 /** The TV's volume while one is connected, as it last said. */
@@ -1950,19 +1968,24 @@ export async function playOnTv(tv: Tv): Promise<string | null> {
   if (route.kind === "on" && route.tv.id === tv.id && link) return null;
   const mine = ++routes;
   state.set((s) => ({ ...s, tv: { kind: "connecting", tv } }));
+  let settled!: () => void;
+  connecting = new Promise<void>((resolve) => (settled = resolve));
   let opened: TvLink;
   try {
     opened = await connectTv(tv);
   } catch {
+    settled();
     if (mine === routes) {
       state.set((s) => ({ ...s, tv: link ? { kind: "on", tv: link.tv } : { kind: "off" } }));
     }
     return tvText("Couldn't connect to {tv}.", { tv: tv.name });
   }
   if (mine !== routes) {
-    void opened.close();
+    await opened.close();
+    settled();
     return null;
   }
+  settled();
   const before = link;
   const from = handover();
   link = opened;
@@ -1982,8 +2005,8 @@ function follow(opened: TvLink) {
   unfollowVolume = opened.volume.subscribe(() => {
     if (link === opened) volume.set(opened.volume.get());
   });
-  void opened.lost.then(() => {
-    if (link === opened) endTv("lost");
+  void opened.lost.then((why) => {
+    if (link === opened) endTv(why);
   });
 }
 
@@ -2024,10 +2047,12 @@ export function playHere(paused = true) {
 function endTv(why: TvEnd, done?: () => void) {
   const ending = link;
   if (!ending) {
-    // Left while still connecting: the TV doesn't start once the app is away.
+    // Left while still connecting: the TV doesn't start once the app is away, and the time iOS
+    // gave lasts until the connect settled and was closed.
     if (state.get().tv.kind === "connecting") {
       routes++;
       state.set((s) => ({ ...s, tv: { kind: "off" } }));
+      return void connecting.finally(() => done?.());
     }
     return done?.();
   }
@@ -2055,7 +2080,8 @@ function endTv(why: TvEnd, done?: () => void) {
         ? { kind: "failed", item: owned.item, error: message }
         : s.phase,
   }));
-  void closeAfter(ending, owned?.resource.settlement).finally(() => done?.());
+  // Ended on the TV, its receiver is idle or another sender's: only the connection closes.
+  void closeAfter(ending, owned?.resource.settlement, why !== "stopped").finally(() => done?.());
 }
 
 // The TV plays only while the app is open: leaving it stops the TV in the time iOS gives.

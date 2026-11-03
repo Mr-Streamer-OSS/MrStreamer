@@ -89,7 +89,11 @@ const written = (values: Map<string, string>) =>
  */
 function profiled(codecs: string | null, strict: boolean): string | null | undefined {
   if (codecs === null) return strict ? null : undefined;
-  const named = codecs.split(",").map((codec) => codec.trim());
+  // Text tracks, such as WebVTT or TTML, are left out with the subtitles.
+  const named = codecs
+    .split(",")
+    .map((codec) => codec.trim())
+    .filter((codec) => !/^(wvtt|stpp|tx3g|c608|c708)\b/i.test(codec));
   const pictures = named.filter((codec) => !codec.startsWith("mp4a.") && !/^[ae]c-3$/.test(codec));
   const sounds = named.filter((codec) => !pictures.includes(codec));
   const picturesFit = pictures.every((codec) => {
@@ -251,7 +255,9 @@ function resolveUri(uri: string, base: string): string | null {
   if (!from) return null;
   const [, scheme = "", authority = "", path = "", query = ""] = from;
   const target = uri.trim().replace(/#.*$/, "");
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return HTTP.test(target) ? target : null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+    return HTTP.test(target) ? target.replace(/^[a-z]+/i, (name) => name.toLowerCase()) : null;
+  }
   if (target.startsWith("//")) return `${scheme}${target}`;
   if (target === "") return `${scheme}//${authority}${path}${query}`;
   if (target.startsWith("?")) return `${scheme}//${authority}${path}${target}`;

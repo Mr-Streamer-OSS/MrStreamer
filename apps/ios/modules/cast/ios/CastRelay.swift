@@ -58,6 +58,8 @@ final class CastRelay {
   private var port: UInt16 = 0
   private var source: DispatchSourceRead?
   private var tokens: [String: Served] = [:]
+  /// Connections whose request head hasn't arrived yet, cut when the listener stops.
+  private var waiting = Set<Int32>()
   /// Playlists waiting for JavaScript's rewriting, with the token each is read under.
   private var answers: [String: (token: String, answer: (String?) -> Void)] = [:]
   private var requests = 0
@@ -69,8 +71,9 @@ final class CastRelay {
   )? {
     lock.lock()
     defer { lock.unlock() }
-    guard let host = Self.wifiAddress(), start(on: host) else { return nil }
-    guard let token = Self.token() else { return nil }
+    guard let token = Self.token(), let host = Self.wifiAddress(), start(on: host) else {
+      return nil
+    }
     tokens[token] = Served(headers: headers, entry: Route(url: url, playlist: playlist))
     return ("http://\(address):\(port)/\(token)/", token)
   }
@@ -81,7 +84,8 @@ final class CastRelay {
     guard let served = tokens[token] else { return }
     // Only the entry route may be a copy's file; what a playlist names is http or https.
     for route in routes {
-      guard let url = URL(string: route.url), url.scheme == "http" || url.scheme == "https",
+      guard let url = URL(string: route.url),
+        ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
         served.routes[route.id] == nil
       else { continue }
       served.routes[route.id] = Route(url: url, playlist: route.playlist)
@@ -199,6 +203,7 @@ final class CastRelay {
     source?.cancel()
     source = nil
     listening = -1
+    for client in waiting { shutdown(client, SHUT_RDWR) }
   }
 
   private func accept(_ fd: Int32) {
@@ -207,11 +212,10 @@ final class CastRelay {
       if client < 0 { return }
       var on: Int32 = 1
       setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-      // A request's head must arrive within ten seconds, so a client that never finishes one
-      // doesn't hold a connection open after casting stops.
-      var patience = timeval(tv_sec: 10, tv_usec: 0)
-      setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &patience, socklen_t(MemoryLayout<timeval>.size))
       _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
+      lock.lock()
+      waiting.insert(client)
+      lock.unlock()
       DispatchQueue(label: "app.mrstreamer.cast.connection").async { [weak self] in
         self?.handle(client)
         close(client)
@@ -244,14 +248,34 @@ final class CastRelay {
     for waiter in finished { waiter() }
   }
 
+  /// The most a request's head may take, however slowly it trickles in.
+  private static let headDeadline: TimeInterval = 10
+
   private func handle(_ client: Int32) {
     var pending = Data()
     var chunk = [UInt8](repeating: 0, count: 8 * 1024)
+    let deadline = Date().addingTimeInterval(Self.headDeadline)
+    defer {
+      lock.lock()
+      waiting.remove(client)
+      lock.unlock()
+    }
     while pending.range(of: Data("\r\n\r\n".utf8)) == nil {
+      // Each read waits only for what is left of the deadline.
+      let left = deadline.timeIntervalSinceNow
+      if left <= 0 || pending.count > 32 * 1024 { return }
+      var patience = timeval(tv_sec: Int(left), tv_usec: Int32((left - floor(left)) * 1_000_000))
+      setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &patience, socklen_t(MemoryLayout<timeval>.size))
       let read = chunk.withUnsafeMutableBytes { recv(client, $0.baseAddress, $0.count, 0) }
-      if read <= 0 || pending.count > 32 * 1024 { return }
+      if read <= 0 { return }
       pending.append(contentsOf: chunk[0..<read])
     }
+    lock.lock()
+    waiting.remove(client)
+    lock.unlock()
+    // Streaming to the TV can take long: the deadline was for the head only.
+    var unlimited = timeval(tv_sec: 0, tv_usec: 0)
+    setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &unlimited, socklen_t(MemoryLayout<timeval>.size))
     let head = String(decoding: pending, as: UTF8.self).components(separatedBy: "\r\n\r\n")[0]
     let lines = head.components(separatedBy: "\r\n")
     let parts = lines.first?.split(separator: " ") ?? []

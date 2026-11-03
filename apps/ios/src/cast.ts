@@ -41,7 +41,11 @@ export interface Volume {
 
 /** How what a TV plays stands, as it last said. */
 export interface TvStatus {
-  readonly state: "loading" | "playing" | "paused" | "ended" | "failed" | "stopped";
+  /**
+   * "stopped": ended on the TV, by its remote or another sender; "taken": another sender's media
+   * plays there now. Neither says where it got to.
+   */
+  readonly state: "loading" | "playing" | "paused" | "ended" | "failed" | "stopped" | "taken";
   /** Seconds into it. */
   readonly time: number;
   /** Its length in seconds; null for a channel or before the TV knows. */
@@ -82,10 +86,16 @@ export interface TvLink {
    * aborts, after which a late answer's media is stopped.
    */
   load(media: TvMedia, status: (status: TvStatus) => void, signal: AbortSignal): Promise<TvLoaded>;
-  /** Stops the receiver and closes the connection, within a few seconds whatever the TV does. */
-  close(): Promise<void>;
-  /** Resolves when the link went on its own: the TV, the network or another sender ended it. */
-  readonly lost: Promise<void>;
+  /**
+   * Stops the receiver and closes the connection, within a few seconds whatever the TV does. With
+   * `stop` false, as when another sender's media now plays there, it only closes the connection.
+   */
+  close(stop?: boolean): Promise<void>;
+  /**
+   * Resolves when the link went on its own: "lost" when the connection failed or fell silent,
+   * "stopped" when the TV ended it, as its remote or another sender's app does.
+   */
+  readonly lost: Promise<"lost" | "stopped">;
 }
 
 /** A refusal said before anything reached the TV, for playback.ts to show. */
@@ -243,6 +253,9 @@ export interface Relay {
 }
 
 /** The file extension `url`'s path ends in, else `fallback`. */
+/** The relay's most segment routes per token (`CastRelay.routesKept`). */
+const ROUTES_KEPT = 100_000;
+
 const extension = (url: string, fallback: string) =>
   /\.([a-z0-9]{2,4})$/i.exec(url.replace(/[?#].*$/, ""))?.[1]?.toLowerCase() ?? fallback;
 
@@ -289,9 +302,12 @@ export async function serveOnRelay(
     };
   }
   let next = 1;
-  /** Rewrites one playlist read from `base`, adding the routes it names to the token. */
-  /** Each address a playlist named and its path, so a refreshed playlist names the same ones. */
+  /**
+   * Each address a playlist named and its path, so a refreshed playlist names the same ones; as
+   * many as the relay keeps.
+   */
   const known = new Map<string, string>();
+  /** Rewrites one playlist read from `base`, adding the routes it names to the token. */
   const rewrite = (base: string, body: string) => {
     const made: RelayRoute[] = [];
     const fresh = new Map<string, string>();
@@ -309,6 +325,10 @@ export async function serveOnRelay(
     if (rewritten.kind === "playlist") {
       module.route(token, made);
       for (const [key, path] of fresh) known.set(key, path);
+      for (const key of known.keys()) {
+        if (known.size <= ROUTES_KEPT) break;
+        known.delete(key);
+      }
     }
     return rewritten;
   };
@@ -553,11 +573,16 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   const waiting = new Map<number, (payload: Record<string, unknown>) => void>();
   let transport: string | null = null;
   let session: string | null = null;
-  let media: { id: number | null; status: (status: TvStatus) => void } | null = null;
+  /** The load whose statuses count: its media session once the LOAD named it, and its requests. */
+  let media: {
+    id: number | null;
+    status: (status: TvStatus) => void;
+    readonly requests: Set<number>;
+  } | null = null;
   const volume = store<Volume | null>(null);
   let heard = Date.now();
-  let lostNow!: () => void;
-  const lost = new Promise<void>((resolve) => (lostNow = resolve));
+  let lostNow!: (why: "lost" | "stopped") => void;
+  const lost = new Promise<"lost" | "stopped">((resolve) => (lostNow = resolve));
   let timers: ReturnType<typeof setInterval>[] = [];
 
   const send = (to: string, namespace: string, payload: object) => {
@@ -588,7 +613,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       send(to, namespace, { ...payload, requestId });
     });
   };
-  const end = (by: "us" | "them") => {
+  const end = (by: "us" | "lost" | "stopped") => {
     if (!open) return;
     open = false;
     for (const timer of timers) clearInterval(timer);
@@ -596,7 +621,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     channels.delete(channel);
     module.disconnect(channel);
     // What the TV last said stands: where a title got to is kept for playing it again.
-    if (by === "them") lostNow();
+    if (by !== "us") lostNow(by);
   };
 
   const receiverStatus = (payload: Record<string, unknown>) => {
@@ -614,7 +639,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     const ours = applications.some(
       (app) => isRecord(app) && app["sessionId"] === session && app["transportId"] === transport,
     );
-    if (!ours && !closing) end("them");
+    if (!ours && !closing) end("stopped");
   };
 
   const mediaStatus = (payload: Record<string, unknown>) => {
@@ -626,7 +651,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     // can't end it. Another sender's load in its place ends it.
     if (!media || media.id === null) return;
     if (ids.length > 0 && !ids.includes(media.id)) {
-      return media.status({ state: "stopped", time: 0, duration: null });
+      return media.status({ state: "taken", time: 0, duration: null });
     }
     for (const status of statuses) {
       if (!isRecord(status) || !media) continue;
@@ -644,7 +669,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   channels.set(channel, {
     read(bytes) {
       const messages = read(bytes);
-      if (!messages) return end("them");
+      if (!messages) return end("lost");
       heard = Date.now();
       for (const message of messages) {
         if (!open) return;
@@ -655,7 +680,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           continue;
         }
         if (message.namespace === NAMESPACE.connection) {
-          if (payload["type"] === "CLOSE") end("them");
+          if (payload["type"] === "CLOSE") end("stopped");
           continue;
         }
         const requestId = numberOr(payload["requestId"], 0);
@@ -665,10 +690,17 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
           answer(payload);
         }
         if (payload["type"] === "RECEIVER_STATUS") receiverStatus(payload);
-        else if (payload["type"] === "MEDIA_STATUS") mediaStatus(payload);
+        // The TV's own word, or an answer to this load's requests; an answer to a load given up
+        // or one before says nothing of this one.
+        else if (
+          payload["type"] === "MEDIA_STATUS" &&
+          (requestId === 0 || media?.requests.has(requestId))
+        ) {
+          mediaStatus(payload);
+        }
       }
     },
-    closed: () => end("them"),
+    closed: () => end("lost"),
   });
 
   try {
@@ -681,7 +713,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     send(PLATFORM, NAMESPACE.connection, { type: "CONNECT", origin: {} });
     timers.push(
       setInterval(() => {
-        if (Date.now() - heard > TIMING.silence) return end("them");
+        if (Date.now() - heard > TIMING.silence) return end("lost");
         send(PLATFORM, NAMESPACE.heartbeat, { type: "PING" });
       }, TIMING.ping),
     );
@@ -711,15 +743,17 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
   }
   const to = transport;
 
-  const close = async () => {
+  const close = async (stop = true) => {
     if (!open || closing) return;
     closing = true;
-    await ask(
-      PLATFORM,
-      NAMESPACE.receiver,
-      { type: "STOP", sessionId: session },
-      TIMING.close,
-    ).catch(() => undefined);
+    if (stop) {
+      await ask(
+        PLATFORM,
+        NAMESPACE.receiver,
+        { type: "STOP", sessionId: session },
+        TIMING.close,
+      ).catch(() => undefined);
+    }
     send(to, NAMESPACE.connection, { type: "CLOSE" });
     send(PLATFORM, NAMESPACE.connection, { type: "CLOSE" });
     end("us");
@@ -746,7 +780,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     lost,
     close,
     async load(loaded, status, signal) {
-      const mine: NonNullable<typeof media> = { id: null, status };
+      const mine: NonNullable<typeof media> = { id: null, status, requests: new Set() };
       media = mine;
       const asked = ask(to, NAMESPACE.media, {
         type: "LOAD",
@@ -800,12 +834,14 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       mediaStatus(answer);
       const poll = setInterval(() => {
         if (media !== mine) return clearInterval(poll);
-        send(to, NAMESPACE.media, { type: "GET_STATUS", requestId: ++requests });
+        mine.requests.add(++requests);
+        send(to, NAMESPACE.media, { type: "GET_STATUS", requestId: requests });
       }, TIMING.poll);
       timers.push(poll);
       const command = (payload: object) => {
         if (media === mine && mine.id !== null) {
-          send(to, NAMESPACE.media, { ...payload, mediaSessionId: mine.id, requestId: ++requests });
+          mine.requests.add(++requests);
+          send(to, NAMESPACE.media, { ...payload, mediaSessionId: mine.id, requestId: requests });
         }
       };
       return {

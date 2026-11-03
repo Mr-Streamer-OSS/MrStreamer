@@ -55,11 +55,13 @@ final class CastChannel {
     })
   }
 
-  /// Closes it without telling `closed`.
+  /// Closes it without telling `closed`; an open still under way is told it didn't open.
   func close() {
     ended = true
+    let waiting = opening
     opening = nil
     connection.cancel()
+    waiting?("closed")
   }
 
   private func fail(_ why: String) {
