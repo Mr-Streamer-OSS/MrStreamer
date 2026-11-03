@@ -2,7 +2,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { t } from "@mrstreamer/core/i18n";
 import { router, useIsFocused, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   Pressable,
@@ -20,7 +20,7 @@ import { LIVE_RED, playPause } from "../player/mini-player.tsx";
 import type { NativeFailure } from "../player/native.ts";
 import type { PlaybackFailure, Playing } from "../player/player.ts";
 import { PlayerSurface } from "../player/surface.ts";
-import { useKeyboardFocus } from "../ui/focus.ts";
+import { FocusWithin, useKeyboardFocus } from "../ui/focus.ts";
 import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
 
@@ -28,7 +28,7 @@ import { colors } from "../ui/theme.ts";
 // `play` param unless that already plays, so a Watch opened again from the mini player, a link or
 // a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
-// something else is shown, and always while TalkBack runs.
+// something else is shown or one of them has keyboard focus, and always while TalkBack runs.
 
 /** Paper A's secondary text over the picture, a step brighter than over black. */
 const DIM = "#D0D0D0";
@@ -69,108 +69,120 @@ export default function Watch() {
     setTouched((count) => count + 1);
   };
 
+  // A finger on the seek bar, or keyboard or D-pad focus on any control, keeps the controls up;
+  // the wait to hide them starts again once it lets go.
+  const [held, setHeld] = useState(false);
+  const [focusedControls, setFocusedControls] = useState(0);
+
+  const within = useCallback(
+    (focused: boolean) => setFocusedControls((count) => count + (focused ? 1 : -1)),
+    [],
+  );
+
+  const kept = held || focusedControls > 0;
+
   const phase = state.kind === "playing" ? state.phase : null;
   useEffect(() => {
-    if (!shown || phase !== "playing") return;
+    if (!shown || phase !== "playing" || kept) return;
     const timer = setTimeout(() => setShown(false), HIDE_AFTER_MS);
 
     return () => clearTimeout(timer);
-  }, [shown, phase, touched]);
-  // A finger on the seek bar keeps the controls up until it lifts.
-  const [held, setHeld] = useState(false);
-  const controls = shown || reader || held || phase !== "playing";
+  }, [shown, phase, touched, kept]);
+  const controls = shown || reader || kept || phase !== "playing";
   // Rebuffering keeps play, pause and the jumps; only a start with nothing yet shows Loading.
   const loading = phase === "resolving" || phase === "preparing";
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <StatusBar hidden />
-      <PlayerSurface style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
-      <Pressable
-        accessible={false}
-        importantForAccessibility="no"
-        onPress={() => setShown((now) => !now)}
-        style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
-      />
-      {state.kind === "playing" && state.failure ? (
-        <Failed
-          failure={state.failure}
-          playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
-          onRetry={() => player.retry()}
+    <FocusWithin value={within}>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <StatusBar hidden />
+        <PlayerSurface style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
+        <Pressable
+          accessible={false}
+          importantForAccessibility="no"
+          onPress={() => setShown((now) => !now)}
+          style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
         />
-      ) : loading ? (
-        <Centre>
-          <Text
-            accessibilityLiveRegion="polite"
-            style={{ color: colors.text, fontSize: 16, lineHeight: 22, fontWeight: "500" }}
-          >
-            {t("Loading…")}
-          </Text>
-        </Centre>
-      ) : null}
-      {controls ? (
-        <>
-          <View
-            pointerEvents="box-none"
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              minHeight: 88 + insets.top,
-              flexDirection: "row",
-              alignItems: "flex-start",
-              paddingTop: 8 + insets.top,
-              paddingLeft: 24 + insets.left,
-              paddingRight: 24 + insets.right,
-              backgroundImage: "linear-gradient(180deg, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0))",
-            }}
-          >
-            <IconButton icon="arrow-back" label={t("Back")} onPress={leave} />
+        {state.kind === "playing" && state.failure ? (
+          <Failed
+            failure={state.failure}
+            playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
+            onRetry={() => player.retry()}
+          />
+        ) : loading ? (
+          <Centre>
             <Text
-              accessibilityRole="header"
-              pointerEvents="none"
-              numberOfLines={1}
-              style={{
-                flex: 1,
-                minHeight: 48,
-                paddingLeft: 8,
-                paddingVertical: 13,
-                color: colors.text,
-                fontSize: 18,
-                lineHeight: 22,
-                fontWeight: "700",
-              }}
+              accessibilityLiveRegion="polite"
+              style={{ color: colors.text, fontSize: 16, lineHeight: 22, fontWeight: "500" }}
             >
-              {state.kind === "playing" ? state.intent.title : ""}
+              {t("Loading…")}
             </Text>
-          </View>
-          {state.kind === "playing" && !loading && !state.failure ? (
-            <Centre>
-              <Transport now={state} onTouch={touch} />
-            </Centre>
-          ) : null}
-          {state.kind === "playing" && (state.live || state.seekable) ? (
+          </Centre>
+        ) : null}
+        {controls ? (
+          <>
             <View
               pointerEvents="box-none"
               style={{
                 position: "absolute",
+                top: 0,
                 left: 0,
                 right: 0,
-                bottom: 0,
-                paddingTop: 24,
-                paddingBottom: 12 + insets.bottom,
+                minHeight: 88 + insets.top,
+                flexDirection: "row",
+                alignItems: "flex-start",
+                paddingTop: 8 + insets.top,
                 paddingLeft: 24 + insets.left,
                 paddingRight: 24 + insets.right,
-                backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
+                backgroundImage: "linear-gradient(180deg, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0))",
               }}
             >
-              <Progress now={state} onTouch={touch} onHold={setHeld} />
+              <IconButton icon="arrow-back" label={t("Back")} onPress={leave} />
+              <Text
+                accessibilityRole="header"
+                pointerEvents="none"
+                numberOfLines={1}
+                style={{
+                  flex: 1,
+                  minHeight: 48,
+                  paddingLeft: 8,
+                  paddingVertical: 13,
+                  color: colors.text,
+                  fontSize: 18,
+                  lineHeight: 22,
+                  fontWeight: "700",
+                }}
+              >
+                {state.kind === "playing" ? state.intent.title : ""}
+              </Text>
             </View>
-          ) : null}
-        </>
-      ) : null}
-    </View>
+            {state.kind === "playing" && !loading && !state.failure ? (
+              <Centre>
+                <Transport now={state} onTouch={touch} />
+              </Centre>
+            ) : null}
+            {state.kind === "playing" && (state.live || state.seekable) ? (
+              <View
+                pointerEvents="box-none"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  paddingTop: 24,
+                  paddingBottom: 12 + insets.bottom,
+                  paddingLeft: 24 + insets.left,
+                  paddingRight: 24 + insets.right,
+                  backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
+                }}
+              >
+                <Progress now={state} onTouch={touch} onHold={setHeld} />
+              </View>
+            ) : null}
+          </>
+        ) : null}
+      </View>
+    </FocusWithin>
   );
 }
 
@@ -356,6 +368,8 @@ function SeekBar({
 }) {
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState<number | null>(null);
+  // Keyboard focus on the bar keeps the controls up as on any other control.
+  const { handlers } = useKeyboardFocus();
   // The bar's left edge on screen, from where the finger first touched it.
   const origin = useRef(0);
   // Gone mid-drag (the attempt failed or was replaced): the controls may hide again.
@@ -389,6 +403,7 @@ function SeekBar({
         onAccessibilityAction={({ nativeEvent }) =>
           seek(position + (nativeEvent.actionName === "increment" ? JUMP_MS : -JUMP_MS))
         }
+        {...handlers}
         onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}
         onStartShouldSetResponder={() => true}
         onResponderTerminationRequest={() => false}
