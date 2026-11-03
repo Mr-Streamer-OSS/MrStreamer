@@ -1,18 +1,12 @@
-import type { Activation, GuideNative, Match, Query, Result } from "../src/guide/guide-native.ts";
+import type { Activation, GuideNative, Query, Result } from "../src/guide/guide-native.ts";
 
 /** Linux lifecycle fixture, not a parser or a claim of native ingest support. */
 export function guideFixture() {
   let next = 0;
   const activations = new Map<string, Activation>();
   const revoked = new Set<string>();
-  const calls: string[] = [];
-  const refused = new Set<string>();
-  const cancelled = new Set<string>();
 
   const control = {
-    calls,
-    refused,
-    cancelled,
     activations,
     prepare: async (): Promise<Awaited<ReturnType<GuideNative["prepare"]>>> => ({
       kind: "failed",
@@ -22,20 +16,10 @@ export function guideFixture() {
       kind: "ok",
       value: { guideId: null, rows: [], more: false },
     }),
-    current: async (): Promise<Result<{ readonly ids: readonly string[] }>> => ({
-      kind: "ok",
-      value: { ids: [] },
-    }),
-    search: async (): Promise<Result<{ readonly rows: readonly Match[] }>> => ({
-      kind: "ok",
-      value: { rows: [] },
-    }),
-    forget: async (_id: string) => true,
   };
 
   const native: GuideNative = {
     async restore(ids, kept) {
-      calls.push(`restore:${ids.join(",")}`);
       const restored = [];
 
       for (const [key, activation] of activations) {
@@ -51,9 +35,7 @@ export function guideFixture() {
         activation: activations.get(subscriptionId)!,
       }));
     },
-    async attach(id, revision) {
-      calls.push(`attach:${id}:${revision}`);
-
+    async attach(id) {
       if (revoked.has(id)) throw new Error("disk");
 
       const activation = {
@@ -66,28 +48,20 @@ export function guideFixture() {
       return activation;
     },
     revoke(id) {
-      calls.push(`revoke:${id}`);
       revoked.add(id);
     },
     async forget(id) {
-      calls.push(`forget:${id}`);
-
-      if (refused.has(id) || !(await control.forget(id))) return false;
       activations.delete(id);
       revoked.delete(id);
 
       return true;
     },
-    begin(lease, job) {
-      calls.push(`begin:${job}`);
-
+    begin(lease) {
       return [...activations].some(
         ([id, activation]) => !revoked.has(id) && activation.lease === lease,
       );
     },
-    async cancel(job) {
-      cancelled.add(job);
-    },
+    async cancel() {},
     async prepare() {
       return control.prepare();
     },
@@ -107,20 +81,12 @@ export function guideFixture() {
       return control.query();
     },
     async current() {
-      return control.current();
+      return { kind: "ok", value: { ids: [] } };
     },
     async search() {
-      return control.search();
+      return { kind: "ok", value: { rows: [] } };
     },
   };
 
   return { native, control };
 }
-
-const host: { expo?: { modules?: { Guide?: GuideNative } } } = globalThis;
-
-host.expo ??= {};
-
-host.expo.modules ??= {};
-
-host.expo.modules.Guide ??= guideFixture().native;

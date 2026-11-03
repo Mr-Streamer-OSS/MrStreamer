@@ -1,7 +1,5 @@
 import { catalogue } from "./catalogue.ts";
 
-export { currentLanguage, onLanguageChange, t as sharedT } from "@mrstreamer/core/i18n";
-
 // Shared labels (Guides, Save, Cancel, ...) use core t; only guide-owned copy lives here.
 const english = {
   Today: "Today",
@@ -9,7 +7,6 @@ const english = {
   "Guide may be out of date": "Guide may be out of date",
   "Guide unavailable": "Guide unavailable",
   "Loading guide…": "Loading guide…",
-  "Next {time} · {title}": "Next {time} · {title}",
   "Programme progress": "Programme progress",
   Programme: "Programme",
   "Loading channels…": "Loading channels…",
@@ -18,14 +15,9 @@ const english = {
   "No programme information for this day": "No programme information for this day",
   "Show more": "Show more",
   "Couldn't update schedule": "Couldn't update schedule",
-  "Back to Schedule": "Back to Schedule",
-  "catch-up": "catch-up",
-  "Cancel reminder": "Cancel reminder",
-  "reminder.cancel": "Cancel",
   "Loading programme…": "Loading programme…",
   "Programme unavailable. Go Back and choose it again.":
     "Programme unavailable. Go Back and choose it again.",
-  "Play {title} from start": "Play {title} from start",
   "The guide's server refused the link": "The guide's server refused the link",
   "The guide's server answered with an error": "The guide's server answered with an error",
   "The guide's server didn't answer": "The guide's server didn't answer",
@@ -79,8 +71,6 @@ const english = {
   "No longer listed": "No longer listed",
   Mapped: "Mapped",
   "Couldn't load channels": "Couldn't load channels",
-  "Enter playlist link for {provider}": "Enter playlist link for {provider}",
-  "Enter password for {provider}": "Enter password for {provider}",
   "Search {count} channels": {
     one: "Search {count} channel",
     other: "Search {count} channels",
@@ -98,11 +88,9 @@ const english = {
   Clear: "Clear",
   "Clear goes back to Automatic: its own ids, in its provider's guide first.":
     "Clear goes back to Automatic: its own ids, in its provider's guide first.",
-  "Choose a channel's Schedule": "Choose a channel's Schedule",
   "Provider settings": "Provider settings",
   "Previous day": "Previous day",
   "Next day": "Next day",
-  "Schedule for {channel}": "Schedule for {channel}",
   "Its provider's guide": "Its provider's guide",
 } as const;
 
@@ -112,7 +100,6 @@ const dutch = {
   "Guide may be out of date": "Gids is mogelijk verouderd",
   "Guide unavailable": "Gids niet beschikbaar",
   "Loading guide…": "Gids laden…",
-  "Next {time} · {title}": "Hierna {time} · {title}",
   "Programme progress": "Voortgang van programma",
   Programme: "Programma",
   "Loading channels…": "Zenders laden…",
@@ -121,14 +108,9 @@ const dutch = {
   "No programme information for this day": "Geen programma-informatie voor deze dag",
   "Show more": "Meer tonen",
   "Couldn't update schedule": "Zendschema kon niet worden bijgewerkt",
-  "Back to Schedule": "Terug naar zendschema",
-  "catch-up": "terugkijken",
-  "Cancel reminder": "Herinnering annuleren",
-  "reminder.cancel": "Annuleren",
   "Loading programme…": "Programma laden…",
   "Programme unavailable. Go Back and choose it again.":
     "Programma niet beschikbaar. Ga terug en kies het opnieuw.",
-  "Play {title} from start": "{title} vanaf het begin afspelen",
   "The guide's server refused the link": "De server van de gids weigerde de link",
   "The guide's server answered with an error": "De server van de gids gaf een fout",
   "The guide's server didn't answer": "De server van de gids antwoordde niet",
@@ -182,8 +164,6 @@ const dutch = {
   "No longer listed": "Niet meer in de lijst",
   Mapped: "Toegewezen",
   "Couldn't load channels": "Zenders konden niet worden geladen",
-  "Enter playlist link for {provider}": "Afspeellijstlink voor {provider} invoeren",
-  "Enter password for {provider}": "Wachtwoord voor {provider} invoeren",
   "Search {count} channels": {
     one: "{count} zender doorzoeken",
     other: "{count} zenders doorzoeken",
@@ -201,11 +181,9 @@ const dutch = {
   Clear: "Wissen",
   "Clear goes back to Automatic: its own ids, in its provider's guide first.":
     "Wissen gaat terug naar Automatisch: de eigen id's, eerst in de gids van de provider.",
-  "Choose a channel's Schedule": "Kies het zendschema van een zender",
   "Provider settings": "Providerinstellingen",
   "Previous day": "Vorige dag",
   "Next day": "Volgende dag",
-  "Schedule for {channel}": "Zendschema van {channel}",
   "Its provider's guide": "Gids van de provider",
 } as const;
 

@@ -1,9 +1,7 @@
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { formatDate, t as sharedT } from "@mrstreamer/core/i18n";
-import { localDay } from "./days.ts";
 import { GUIDE_LIMIT, MAPPING_MAX, type GuideLink, type GuideRefusal } from "./guide-sources.ts";
-import type { Day } from "./guide.ts";
-import type { GuideChannel } from "./part.ts";
+import { localDay, type Day, type GuideChannel } from "./guide.ts";
 import { t } from "./strings.ts";
 
 // What the guide screens write, apart from React: day headings, programme times, the add form's

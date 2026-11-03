@@ -10,6 +10,22 @@ const params = (values: Record<string, string>) => new URLSearchParams(values).t
 export const guidesHref = (destination: DestinationRoute) => on(destination, "guides");
 export const mapHref = (destination: DestinationRoute) => on(destination, "map");
 
+/** Successor owners admit these intents; this service performs none of their side effects. */
+export interface ProgrammeIntent extends ChannelIdentity {
+  readonly kind: "watch-live" | "catch-up" | "remind";
+  readonly start: number;
+}
+
+/** From 840dp (Screen's expanded window class) a detail opens in the pane beside its list. */
+export const BESIDE = 840;
+
+/** A route param as one string, "" when missing or repeated. */
+export const param = (value: string | string[] | undefined) =>
+  typeof value === "string" ? value : "";
+
+/** The `Channel.key` the guide reads a channel by. */
+export const channelKey = ({ sourceId, channelId }: ChannelIdentity) => `${sourceId}:${channelId}`;
+
 /** Channel identity is the stable source id plus the provider's channel id, never its name. */
 export interface ChannelIdentity {
   readonly sourceId: string;

@@ -9,12 +9,11 @@ import { useStore } from "../platform/store.ts";
 import { IconButton } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
 import { useLocale } from "./catalogue.ts";
-import { localDay } from "./days.ts";
 import { guides } from "./guide-sources.ts";
-import type { GuideStatus, ScheduleItem } from "./guide.ts";
+import { localDay, type GuideStatus, type ScheduleItem } from "./guide.ts";
 import { useGuideStart, useListingRevision, useProgramme, useSchedule } from "./hooks.ts";
 import { dayLabel, programmeRange, progressOf, timeLeft } from "./present.ts";
-import { programmeHref, type ChannelIdentity } from "./routes.ts";
+import { BESIDE, channelKey, param, programmeHref, type ChannelIdentity } from "./routes.ts";
 import { guide, useGuideStatus } from "./runtime.ts";
 import { t } from "./strings.ts";
 import { Button, OutOfDate, Press, Progress, Still, guideColors, text } from "./ui.tsx";
@@ -24,10 +23,6 @@ import { Button, OutOfDate, Press, Progress, Still, guideColors, text } from "./
 // 840dp (Screen's pane width) a programme opens in the pane beside its Schedule, its identity kept
 // in the route's params; narrower it is pushed (`programmeHref`). Play from start, Watch live and
 // Remind me belong to their own owners and show only once those are wired.
-
-const BESIDE = 840;
-
-const one = (value: string | string[] | undefined) => (typeof value === "string" ? value : "");
 
 const positive = (value: string) => {
   const number = Number(value);
@@ -40,10 +35,11 @@ const outOfDate = (status: GuideStatus) =>
   status.availability === "available" && (status.stale || status.error !== null);
 
 /** A channel's name, once its catalogue is read; `known` once the guide has read it. */
-function useChannel({ sourceId, channelId }: ChannelIdentity) {
+function useChannel(identity: ChannelIdentity) {
   useListingRevision();
+  const { sourceId } = identity;
   const state = useStore(sources.state);
-  const channel = guide.channel(`${sourceId}:${channelId}`);
+  const channel = guide.channel(channelKey(identity));
   const read = guide.channels().has(sourceId);
   const gone = state.kind === "ready" && !state.sources.some((source) => source.id === sourceId);
 
@@ -64,12 +60,12 @@ export function ScheduleScreen() {
     detail?: string;
   }>();
 
-  const identity = { sourceId: one(params.source), channelId: one(params.channel) };
+  const identity = { sourceId: param(params.source), channelId: param(params.channel) };
   const { channel, missing } = useChannel(identity);
   const beside = useWindowDimensions().width >= BESIDE;
   const destination = destinationIn(useSegments());
-  const start = positive(one(params.start));
-  const detail = one(params.detail) || undefined;
+  const start = positive(param(params.start));
+  const detail = param(params.detail) || undefined;
   const close = () => router.setParams({ start: undefined, detail: undefined });
 
   const open = (item: ScheduleItem) => {
@@ -103,7 +99,7 @@ export function ScheduleScreen() {
         <Schedule
           key={channel.key}
           identity={identity}
-          day={positive(one(params.day))}
+          day={positive(param(params.day))}
           selected={start}
           onProgramme={open}
         />
@@ -126,7 +122,7 @@ function Schedule({
   selected: number | null;
   onProgramme: (item: ScheduleItem) => void;
 }) {
-  const key = `${identity.sourceId}:${identity.channelId}`;
+  const key = channelKey(identity);
   const now = Date.now();
   const insets = useSafeAreaInsets();
   const openShared = useOpenShared();
@@ -372,10 +368,10 @@ export function ProgrammeScreen() {
     detail?: string;
   }>();
 
-  const identity = { sourceId: one(params.source), channelId: one(params.channel) };
+  const identity = { sourceId: param(params.source), channelId: param(params.channel) };
   const { channel, missing } = useChannel(identity);
-  const start = positive(one(params.start));
-  const detail = one(params.detail) || undefined;
+  const start = positive(param(params.start));
+  const detail = param(params.detail) || undefined;
 
   return (
     <Screen title={channel?.title ?? t("Programme")} pushed>
@@ -415,7 +411,7 @@ function ProgrammeDetails({
   detail?: string;
   pane: boolean;
 }) {
-  const key = `${identity.sourceId}:${identity.channelId}`;
+  const key = channelKey(identity);
   const { pending, value } = useProgramme(key, start, detail);
   const insets = useSafeAreaInsets();
   const inset = pane ? 24 : 16;

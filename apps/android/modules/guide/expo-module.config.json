@@ -1,1 +1,1 @@
-{"platforms":["android"],"android":{"modules":["app.mrstreamer.guide.GuideModule"]}}
+{ "platforms": ["android"], "android": { "modules": ["app.mrstreamer.guide.GuideModule"] } }

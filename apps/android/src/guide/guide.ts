@@ -1,4 +1,4 @@
-import { GUIDE_DAY_MS, type Listing, type Programme } from "@mrstreamer/contracts/guide";
+import type { Listing, Programme } from "@mrstreamer/contracts/guide";
 import {
   GuideFault,
   ingest,
@@ -13,11 +13,22 @@ import {
 } from "./guide-native.ts";
 import type { Provider } from "@mrstreamer/core/provider";
 import { searchWords } from "@mrstreamer/core/text";
-import type { GuideChannel, Part } from "./part.ts";
-import type { SourceLogin } from "./types.ts";
-import { currentSource } from "./origins.ts";
+import type { SourceLogin } from "./guide-native.ts";
 import { store } from "../platform/store.ts";
 import { defined } from "@mrstreamer/core/defined";
+
+export interface GuideChannel {
+  readonly id: string;
+  readonly key: string;
+  readonly title: string;
+}
+
+/** A subscription's channels as the guide reads them (runtime.ts `partSteps`). */
+export interface Part {
+  readonly subscriptionId: string;
+  readonly guideIds: ReadonlyMap<string, readonly string[]>;
+  readonly byId: ReadonlyMap<string, GuideChannel>;
+}
 
 /**
  * What a guide downloads with: a subscription's Source, or an external guide's link
@@ -99,12 +110,18 @@ const listingOf = (rows: readonly Programme[], at: number): Listing => ({
   next: rows.find((row) => row.start > at) ?? null,
 });
 
-/** The start of the local day `at` is in, as a Schedule's day starts. */
-const dayOf = (at: number) => {
+/** The local day `at` is in, `offset` days on: calendar arithmetic keeps 23 and 25 hour days. */
+export function localDay(at: number, offset = 0): Day {
   const date = new Date(at);
 
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-};
+  return {
+    from: new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset).getTime(),
+    until: new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset + 1).getTime(),
+  };
+}
+
+/** Runtime-owned provider origins; removal deletes the origin before revoking native work. */
+export const origins = new Map<string, GuideOrigin>();
 
 const FRESH = 6 * 3600_000;
 
@@ -132,7 +149,7 @@ const EMPTY: GuideStatus = {
 export function createGuide(
   port: () => GuideNative = nativeGuide,
   now: () => number = Date.now,
-  sourceOf: (key: string) => GuideOrigin | undefined = currentSource,
+  sourceOf: (key: string) => GuideOrigin | undefined = (key) => origins.get(key),
 ) {
   const entries = new Map<string, Entry>();
   const parts = new Map<string, Part>();
@@ -216,8 +233,6 @@ export function createGuide(
   let floor = 0;
   /** Changes once after a run of withdrawals, which evictions make without another notification. */
   const withdrawing = store(0);
-  /** Whether the app is in the foreground, as foreground() and background() last said. */
-  const awake = store(true);
   let announced = false;
   const read = (key: string, on: number) => JSON.stringify([key, on]);
 
@@ -620,8 +635,6 @@ export function createGuide(
     withdrawn: (key: string, on: number) => withdrawals.get(read(key, on)) ?? floor,
     /** Notifies, once a run of them is over, that `withdrawn` changed. */
     withdrawals: { get: withdrawing.get, subscribe: withdrawing.subscribe },
-    /** Whether the app is in the foreground; the Guide grid reads only then. */
-    awake: { get: awake.get, subscribe: awake.subscribe },
     subscribe(listener: () => void) {
       const stop = state.subscribe(listener);
       listeners++;
@@ -938,7 +951,7 @@ export function createGuide(
             start,
             stop,
             title,
-            detail: token({ ...captured, ids: [guideId], start, on: dayOf(start) }),
+            detail: token({ ...captured, ids: [guideId], start, on: localDay(start).from }),
           },
         }));
 
@@ -966,14 +979,12 @@ export function createGuide(
     foreground() {
       foregroundCycle++;
       foreground = true;
-      awake.set(true);
 
       if (listeners && !clock) clock = setInterval(tick, 60_000);
       tick();
     },
     background() {
       foreground = false;
-      awake.set(false);
       clearInterval(clock);
       clock = undefined;
 
@@ -1013,19 +1024,10 @@ export function createGuide(
       cursor?: string,
       options?: { readonly signal?: AbortSignal },
     ): Promise<DayPage> {
-      if (
-        !Number.isFinite(day.from) ||
-        !Number.isFinite(day.until) ||
-        day.until <= day.from ||
-        day.until - day.from > GUIDE_DAY_MS
-      )
-        throw new GuideFault("time");
-      const date = new Date(day.from);
-      const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      const tomorrow = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+      // One whole local day; NaN and infinities fail the comparison too.
+      const whole = localDay(day.from);
 
-      if (start.getTime() !== day.from || tomorrow.getTime() !== day.until)
-        throw new GuideFault("time");
+      if (whole.from !== day.from || whole.until !== day.until) throw new GuideFault("time");
       let read: Awaited<ReturnType<typeof first>> = null;
 
       if (cursor) {

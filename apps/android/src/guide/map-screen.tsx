@@ -21,7 +21,7 @@ import { useLocale } from "./catalogue.ts";
 import { guides, type GuideRefusal } from "./guide-sources.ts";
 import { useGuideStart, useListingRevision, useMapInput } from "./hooks.ts";
 import { describe, initials, labelOf, mapSections, refusalText, type Mappable } from "./present.ts";
-import { channelMapHref } from "./routes.ts";
+import { BESIDE, channelKey, channelMapHref, param } from "./routes.ts";
 import { guide } from "./runtime.ts";
 import { t } from "./strings.ts";
 import { Button, Icon, Labelled, Press, guideColors, text, useFieldFocus } from "./ui.tsx";
@@ -31,10 +31,6 @@ import { Button, Icon, Labelled, Press, guideColors, text, useFieldFocus } from 
 // page shows its own ids, a Guide id field with what that id has on now and next, Save, and Clear
 // back to Automatic. From 840dp (Screen's pane width) a channel's page opens beside the list, its
 // selection kept in the route's params; narrower it is pushed (`channelMapHref`).
-
-const BESIDE = 840;
-
-const one = (value: string | string[] | undefined) => (typeof value === "string" ? value : "");
 
 /** Map channels, with a channel's mapping beside it on wide windows. */
 export function MapScreen() {
@@ -47,10 +43,8 @@ export function MapScreen() {
   const beside = useWindowDimensions().width >= BESIDE;
   const params = useLocalSearchParams<{ source?: string; channel?: string }>();
 
-  const selected =
-    one(params.source) && one(params.channel)
-      ? `${one(params.source)}:${one(params.channel)}`
-      : null;
+  const identity = { sourceId: param(params.source), channelId: param(params.channel) };
+  const selected = identity.sourceId && identity.channelId ? channelKey(identity) : null;
 
   const [query, setQuery] = useState("");
   const sections = mapSections(input, query);
@@ -254,7 +248,7 @@ export function ChannelMapScreen() {
   useLocale();
   const input = useMapInput();
   const params = useLocalSearchParams<{ source?: string; channel?: string }>();
-  const key = `${one(params.source)}:${one(params.channel)}`;
+  const key = channelKey({ sourceId: param(params.source), channelId: param(params.channel) });
 
   return (
     <Screen title={describe(key, input).title} pushed>

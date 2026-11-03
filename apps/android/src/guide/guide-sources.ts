@@ -3,10 +3,10 @@ import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { GuideRequest } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
 import Constants from "expo-constants";
-import { readJsonStrictly, writeJson } from "./files.ts";
+import { File as DiskFile, Paths } from "expo-file-system";
 import { guide, type GuideOrigin } from "./guide.ts";
-import { playlistSecrets, playlistUncertain } from "./secrets.ts";
-import { sealedLinks, type SecretStore } from "./secrets.ts";
+import { playlistSecrets, playlistUncertain, sealedLinks, type SecretStore } from "./secrets.ts";
+import { writeJson } from "../platform/storage.ts";
 import { store, useStore } from "../platform/store.ts";
 
 // XMLTV guides added in Settings > Guides, apart from every provider's own, and channels mapped
@@ -73,14 +73,24 @@ const FILE_NAME = "guides.json";
 const PREFIX = "xmltv-";
 const EMPTY: GuidesFile = { version: 1, guides: [], mappings: {}, pendingSecrets: [] };
 
-/** As runtime.ts's providers send. */
+/** What an external guide's download names the app as. */
 const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (Android)`;
+
+/**
+ * The file's JSON, or null when there is none. Unlike storage.ts `readJson`, text that isn't JSON
+ * throws: a damaged registry must not read as an empty one and be written over.
+ */
+function readStrictly(name: string): unknown {
+  const file = new DiskFile(Paths.document, name);
+
+  return file.exists ? (JSON.parse(file.textSync()) as unknown) : null;
+}
 
 /** Builds the owner; the app has one (`guides` below), tests their own. */
 export function createGuides(
   secrets: SecretStore = sealedLinks,
   owner: Pick<typeof guide, "configure" | "attach" | "forget" | "refresh"> = guide,
-  read: () => unknown = () => readJsonStrictly(FILE_NAME),
+  read: () => unknown = () => readStrictly(FILE_NAME),
   write: (value: GuidesFile) => void = (value) => writeJson(FILE_NAME, value),
   now: () => number = Date.now,
 ) {
@@ -132,7 +142,7 @@ export function createGuides(
           return request;
         },
       },
-      // What no saved programme may hold, as a playlist link's (runtime.ts `loginFor`).
+      // What no saved programme may hold, as runtime.ts gives a playlist source's.
       login: [...playlistSecrets(link), link],
       uncertain: playlistUncertain(link),
     };
@@ -240,11 +250,10 @@ export function createGuides(
     mappings: mapped.get,
     /**
      * At launch, before the native guide store restores: the saved guides' ids, which it restores,
-     * and the id prefixes it keeps unread (guide.ts `restore`). Without a file, or with text that
-     * isn't JSON (files.ts), it starts empty, and every external guide's saved programmes go. A
-     * file that can't be read now, or that another build wrote (custom-lists-file.ts "foreign"),
-     * shows none and is never written over: its guides' saved programmes and links stay for a
-     * launch that reads it.
+     * and the id prefixes it keeps unread (guide.ts `restore`). Without a file it starts empty,
+     * and every external guide's saved programmes go. A file that can't be read now, isn't JSON or
+     * doesn't match its schema shows none and is never written over: its guides' saved programmes
+     * and links stay for a launch that reads it.
      */
     load(): { readonly ids: readonly string[]; readonly kept: readonly string[] } {
       let parsed: GuidesFile | type.errors | null = null;

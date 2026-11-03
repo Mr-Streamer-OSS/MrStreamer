@@ -4,14 +4,22 @@ import { sources } from "../bootstrap/sources.ts";
 import { nativeCredentials } from "../platform/credentials.ts";
 import { inTasks } from "../platform/tasks.ts";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
-import { nextProviderRedirect, providerFetch, type GuideRequest } from "@mrstreamer/core/provider";
+import {
+  nextProviderRedirect,
+  providerFetch,
+  type GuideRequest,
+  type LiveCatalogue,
+} from "@mrstreamer/core/provider";
 import { m3uReader } from "@mrstreamer/core/playlist/m3u";
+import { normalizeSteps } from "@mrstreamer/core/catalogue/normalize";
+import { liveChannelSteps } from "@mrstreamer/core/catalogue/variants";
+import { isAdultCategory } from "@mrstreamer/core/adult";
+import type { Steps } from "@mrstreamer/core/steps";
 import { playlistReader } from "../connect/playlist.ts";
-import { guide } from "./guide.ts";
+import type { CatalogueReader } from "../connect/sources.ts";
+import { guide, origins, type GuideChannel, type Part } from "./guide.ts";
 import { GuideFault } from "./guide-native.ts";
 import { guides } from "./guide-sources.ts";
-import { origins } from "./origins.ts";
-import { partSteps } from "./part.ts";
 import { playlistSecrets, playlistUncertain } from "./secrets.ts";
 
 const userAgent = "MrStreamer-Android/0.1.0";
@@ -71,6 +79,35 @@ async function playlistGuide(link: string, signal?: AbortSignal): Promise<GuideR
   });
 
   return { kind: "request", url, from: link, headers: { "User-Agent": userAgent } };
+}
+
+/** Canonical channels and trusted ids use the same normalization as the mobile catalogue. */
+export function* partSteps(subscriptionId: string, catalogue: LiveCatalogue): Steps<Part> {
+  const adultCategories = new Set(
+    catalogue.categories.filter((c) => isAdultCategory(c.name)).map((c) => c.id),
+  );
+
+  const adult = new Set(
+    catalogue.channels
+      .filter((c) => c.adult || c.categoryIds.some((id) => adultCategories.has(id)))
+      .map((c) => c.id),
+  );
+
+  const { streams } = yield* normalizeSteps(catalogue);
+  const normalized = yield* liveChannelSteps(streams);
+  const byId = new Map<string, GuideChannel>();
+  const guideIds = new Map<string, readonly string[]>();
+
+  for (const channel of normalized.channels) {
+    if (channel.variants.some((v) => adult.has(v.id))) continue;
+    const row = { id: channel.id, key: `${subscriptionId}:${channel.id}`, title: channel.title };
+    byId.set(channel.id, row);
+
+    for (const variant of channel.variants) byId.set(variant.id, row);
+    guideIds.set(channel.id, normalized.guideIds.get(channel.id) ?? []);
+  }
+
+  return { subscriptionId, byId, guideIds };
 }
 
 let started: Promise<void> | undefined;
@@ -134,39 +171,29 @@ export function startGuide(): Promise<void> {
 
           if (!authority) throw new GuideFault("login");
 
-          const provider =
-            authority.kind === "xtream"
-              ? xtreamProvider(authority, { fetch: safeFetch, userAgent, inTasks })
-              : playlistReader(authority.link, { fetch: safeFetch, userAgent });
+          let reader: CatalogueReader;
 
-          const origin = {
-            revision: ++revision,
-            login:
-              authority.kind === "xtream"
-                ? [authority.username, authority.password]
-                : [...playlistSecrets(authority.link), authority.link],
-            uncertain: authority.kind === "xtream" ? [] : playlistUncertain(authority.link),
-            provider: {
-              liveGuideRequest:
-                authority.kind === "xtream"
-                  ? (signal?: AbortSignal) => {
-                      const request = xtreamProvider(authority, {
-                        fetch: safeFetch,
-                        userAgent,
-                        inTasks,
-                      }).liveGuideRequest;
+          if (authority.kind === "xtream") {
+            const provider = xtreamProvider(authority, { fetch: safeFetch, userAgent, inTasks });
+            reader = provider;
+            origins.set(source.id, {
+              revision: ++revision,
+              login: [authority.username, authority.password],
+              provider,
+            });
+          } else {
+            const { link } = authority;
+            reader = playlistReader(link, { fetch: safeFetch, userAgent });
+            origins.set(source.id, {
+              revision: ++revision,
+              login: [...playlistSecrets(link), link],
+              uncertain: playlistUncertain(link),
+              provider: { liveGuideRequest: (signal) => playlistGuide(link, signal) },
+            });
+          }
 
-                      if (!request) throw new Error("unavailable");
-
-                      return request(signal);
-                    }
-                  : (signal?: AbortSignal) => playlistGuide(authority.link, signal),
-            },
-          };
-
-          origins.set(source.id, origin);
           await guide.attach(source.id);
-          const catalogue = await provider.liveCatalogue(controller.signal);
+          const catalogue = await reader.liveCatalogue(controller.signal);
           const part = await inTasks(partSteps(source.id, catalogue), wanted);
 
           if (part && wanted()) guide.setPart(part);

@@ -2,10 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("expo", () => ({ requireNativeModule: vi.fn() }));
 
-import { createGuide, type GuideOrigin } from "../src/guide/guide.ts";
+import { createGuide, localDay, type GuideOrigin } from "../src/guide/guide.ts";
 import { ingest } from "../src/guide/guide-native.ts";
 import { guideFixture } from "./guide-fixture.ts";
-import { localDay } from "../src/guide/days.ts";
 import { scheduleHref, programmeHref } from "../src/guide/routes.ts";
 
 const at = new Date(2026, 10, 3, 12).getTime();
@@ -151,15 +150,15 @@ describe("Android guide public service", () => {
     const previous = process.env["TZ"];
     process.env["TZ"] = "Europe/Brussels";
 
+    const hours = (month: number, date: number) => {
+      const { from, until } = localDay(new Date(2026, month, date, 12).getTime());
+
+      return (until - from) / 3600000;
+    };
+
     try {
-      expect(
-        localDay(new Date(2026, 2, 29, 12).getTime()).until -
-          localDay(new Date(2026, 2, 29, 12).getTime()).from,
-      ).toBe(23 * 3600000);
-      expect(
-        localDay(new Date(2026, 9, 25, 12).getTime()).until -
-          localDay(new Date(2026, 9, 25, 12).getTime()).from,
-      ).toBe(25 * 3600000);
+      expect(hours(2, 29)).toBe(23);
+      expect(hours(9, 25)).toBe(25);
     } finally {
       if (previous === undefined) delete process.env["TZ"];
       else process.env["TZ"] = previous;

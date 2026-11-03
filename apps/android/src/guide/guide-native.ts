@@ -1,7 +1,12 @@
 import { requireNativeModule } from "expo";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { nextProviderRedirect, type GuideRequest } from "@mrstreamer/core/provider";
-import type { SourceLogin } from "./types.ts";
+
+/** What no saved programme may hold: a source's login, and values that may be one. */
+export interface SourceLogin {
+  readonly login: readonly string[];
+  readonly uncertain?: readonly string[];
+}
 
 /** Fixed codes only. Native errors, URLs, headers and Location never enter public state. */
 export type GuideProblem =

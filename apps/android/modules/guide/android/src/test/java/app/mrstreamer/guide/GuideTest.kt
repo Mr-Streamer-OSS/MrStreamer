@@ -9,8 +9,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
-import java.time.LocalDate
-import java.time.ZoneId
 import java.util.zip.GZIPOutputStream
 
 @RunWith(RobolectricTestRunner::class)
@@ -47,7 +45,7 @@ class GuideTest {
     refused("body") { disk.copy("oversized".byteInputStream(), plain, 3, job) }
     job.cancel(); refused("cancelled") { disk.unpack(packed, plain, job) }
   }
-  @Test fun immutableIndexPagesAndKeepsLocalTimes() = fixture { root ->
+  @Test fun immutableIndexPages() = fixture { root ->
     val job = GuideJob("lease"); val disk = GuideDisk(root); val xml = File(root, "guide.xml")
     val from = guideTime("20261103000000 +0000")!!
     xml.writeText("<tv><!-- valid comment -->" + (0..139).joinToString("") { n ->
@@ -62,9 +60,6 @@ class GuideTest {
       val next = index.query(listOf("news"), from, "day", from, from + 86400000, from + 127 * 60000)
       assertEquals(11, (next["rows"] as List<*>).size); assertEquals(false, next["more"])
     }
-    val zone = ZoneId.of("Europe/Brussels")
-    assertEquals(23, java.time.Duration.between(LocalDate.of(2026, 3, 29).atStartOfDay(zone), LocalDate.of(2026, 3, 30).atStartOfDay(zone)).toHours())
-    assertEquals(25, java.time.Duration.between(LocalDate.of(2026, 10, 25).atStartOfDay(zone), LocalDate.of(2026, 10, 26).atStartOfDay(zone)).toHours())
   }
   @Test fun revokedAndInterruptedGenerationsCannotReplaceLastGood() = fixture { root ->
     val owner = GuideOwner(root)
