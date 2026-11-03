@@ -73,12 +73,19 @@ class TransferSchedulingTest {
     val previous = probe()
     SchedulingProbe.release.countDown()
     observed { manager.getWorkInfoById(previous.id).get()?.let { it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount == 1 } == true }
+    assertTrue(manager.getWorkInfoById(previous.id).get()!!.nextScheduleTimeMillis > System.currentTimeMillis())
     Transfers.kick(context)
-    observed { manager.getWorkInfoById(previous.id).get()?.state == WorkInfo.State.CANCELLED }
+    // REPLACE deletes the old record, so CANCELLED need not remain observable.
+    observed { manager.getWorkInfoById(previous.id).get().let { it == null || it.state == WorkInfo.State.CANCELLED } }
+    observed { manager.getWorkInfosForUniqueWork("downloads").get().any { it.id != previous.id && it.state == WorkInfo.State.ENQUEUED } }
     val successor = manager.getWorkInfosForUniqueWork("downloads").get().single { it.id != previous.id }
     assertEquals(0, successor.runAttemptCount)
     assertEquals(0L, successor.initialDelayMillis)
-    assertNotEquals(WorkInfo.State.BLOCKED, successor.state)
+    assertEquals(WorkInfo.State.ENQUEUED, successor.state)
+    // TestDriver rewinds scheduling time. Check eligibility before releasing its network gate.
+    assertTrue(successor.nextScheduleTimeMillis <= System.currentTimeMillis())
+    WorkManagerTestInitHelper.getTestDriver(context)!!.setAllConstraintsMet(successor.id)
+    observed { manager.getWorkInfoById(successor.id).get()?.state == WorkInfo.State.SUCCEEDED }
   }
 
   @Test fun explicitKickPreservesRunningWorkAndAppendsItsSuccessor() {
