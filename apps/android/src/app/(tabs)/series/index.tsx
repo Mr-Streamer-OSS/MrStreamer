@@ -1,6 +1,5 @@
-import { Screen } from "../../../navigation/screen.tsx";
+import { BrowseScreen } from "../../../library/screens.tsx";
 
-/** Series's root, until the card that builds Series replaces it. */
-export default function Series() {
-  return <Screen title="Series" />;
+export default function Browse() {
+  return <BrowseScreen kind="series" />;
 }
