@@ -6,6 +6,7 @@ import { signIns, type SignIns } from "../accounts/sign-ins.ts";
 // contract both rely on.
 
 type Login = { readonly name: string };
+
 const login = (name: string): Login => ({ name });
 
 describe("sign-ins", () => {

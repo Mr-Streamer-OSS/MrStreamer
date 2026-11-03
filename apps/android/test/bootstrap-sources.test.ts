@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { startFakePlaylist, type FakePlaylist } from "../../desktop/test/fake-playlist.ts";
 import { startFakeProvider, type FakeProvider } from "../../desktop/test/fake-provider.ts";
 import { sourcesOwner, type ConnectedSource, type SourcesOwner } from "../src/connect/sources.ts";
@@ -423,24 +423,32 @@ describe("Android sources", () => {
         // fails or answers as the provider would, whatever its signal says.
         let release = () => {};
         const held = new Promise<void>((resolve) => (release = resolve));
+        onTestFinished(() => release());
         let asked = 0;
         let open = 0;
+
         const holding: typeof fetch = async (input, init) => {
           open++;
+
           try {
             if (String(input).includes("get_live_streams") && asked++ === 0) {
               await held;
+
               if (late === "fails") throw new TypeError("Network request failed");
+
               return await fetch(input);
             }
+
             return await fetch(input, init);
           } finally {
             open--;
           }
         };
+
         const owner = launch(newPhone(), holding);
         await owner.restore();
         const connected = await owner.connect(xtream());
+
         if (connected.kind !== "connected") throw new Error("not connected");
         // Only the held list is left of the first load.
         await expect.poll(() => [asked, open]).toEqual([1, 1]);
@@ -450,7 +458,7 @@ describe("Android sources", () => {
         const shown = listed(owner)[0]?.channels;
         release();
         await expect.poll(() => open).toBe(0);
-        // Whatever the late answer would do is done once a source connected after it lists.
+        // A source connected after the late answer, and listed, leaves it time to have shown too.
         await owner.connect(m3u());
         await expect.poll(() => rowCount(listed(owner)[1])).toBeGreaterThan(0);
 

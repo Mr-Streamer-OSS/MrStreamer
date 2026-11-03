@@ -7,8 +7,9 @@ import { AppFailure } from "@mrstreamer/contracts/errors";
 //
 // A load answers for the login it began under. It stops counting (`stands`) once another load of
 // the same list begins, its source signs in again with another login, or its source signs out;
-// each of those aborts its signal too, so its requests end. An answer that no longer stands is
-// dropped, whenever it arrives.
+// each of those aborts its signal too, so its requests end. It also checks that its login is still
+// current, a second guard should a change ever forget to abort. An answer that no longer stands
+// is dropped, whenever it arrives.
 
 /** One list load, begun for its source's login of that moment. */
 export interface Load<Login> {

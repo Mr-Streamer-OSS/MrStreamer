@@ -75,12 +75,14 @@ const passThrough = globalThis.fetch;
 
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   memory.open++;
+
   try {
     return await panelAnswer(input, init);
   } finally {
     memory.open--;
   }
 });
+
 async function panelAnswer(input: string, init?: RequestInit) {
   const url = new URL(input);
   memory.caching.push(new Headers(init?.headers).get("Cache-Control"));
@@ -90,7 +92,9 @@ async function panelAnswer(input: string, init?: RequestInit) {
 
   if (url.searchParams.get("action") === "get_live_streams" && memory.holdChannels) {
     await new Promise<void>((go) => memory.heldChannels.push(go));
+
     if (memory.lateChannels === "fails") throw new TypeError("Network request failed");
+
     if (memory.lateChannels === "answers") return passThrough(input);
   }
 
@@ -296,6 +300,7 @@ beforeEach(() => {
   memory.holdChannels = false;
   memory.heldChannels.length = 0;
   memory.lateChannels = null;
+  memory.open = 0;
   memory.holdMovies = false;
   memory.heldMovies.length = 0;
   memory.holdSecrets = false;
@@ -781,13 +786,15 @@ describe("everything together", () => {
         again(app, b);
         await until(() => member(app, b)?.live.kind === "ready", "the later list");
         const shown = member(app, b)?.live;
+
         for (const go of memory.heldChannels.splice(0)) go();
         await until(() => memory.open === 0, "the late answer");
-        // Whatever the late answer would do is done once a list asked after it shows.
+        // A list asked after the late answer, and shown, leaves it time to have shown too.
         const other = member(app, a)?.live;
         app.reloadChannels(a);
         await until(() => {
           const now = member(app, a)?.live;
+
           return now !== other && now?.kind === "ready";
         }, "the other provider's list");
 
