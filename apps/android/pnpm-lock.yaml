@@ -75,8 +75,8 @@ importers:
         specifier: 58.0.18
         version: 58.0.18(@expo/log-box@58.0.14)(@expo/metro-runtime@58.0.14)(@types/react@19.3.0)(expo-constants@58.0.11)(expo-linking@58.0.12)(expo@58.0.9)(react-native-safe-area-context@5.9.1(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0))(react-native-screens@4.29.0(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0))(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
       expo-splash-screen:
-        specifier: 58.0.8
-        version: 58.0.8(expo@58.0.9)(supports-color@8.1.1)
+        specifier: 58.0.12
+        version: 58.0.12(expo@58.0.9)(supports-color@8.1.1)
       expo-system-ui:
         specifier: 58.0.5
         version: 58.0.5(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(supports-color@8.1.1)
@@ -1545,8 +1545,8 @@ packages:
     resolution: {integrity: sha512-6DBlSZwxk3J0y1j2s4XebAWNiwGaMp32NcWX7b2kJC2+EFf1g+pCcVmx8ylawt2tyLmbDHswm4MHOfrd4bqfvA==}
     engines: {node: ^22.13.0 || ^24.3.0 || ^26.0.0 || >=27.0.0}
 
-  expo-splash-screen@58.0.8:
-    resolution: {integrity: sha512-0JsLzisL4SGzK87Vi05uOezNORL/DAxMc4NptsQcG4aAbfiF7R+Q2AHmc6dV7Vi86lpsY7VFQXqUGbLGjXw6JQ==}
+  expo-splash-screen@58.0.12:
+    resolution: {integrity: sha512-8TceS1bu1R0IuLP9VPa6cPeVytR/V/+NqhA4rOqwqDr5MIu6u4hryIxxLYWKwWXGLOzoPC6paaBiqnMsr+nLuw==}
     peerDependencies:
       expo: '*'
 
@@ -4328,7 +4328,7 @@ snapshots:
 
   expo-server@58.0.6: {}
 
-  expo-splash-screen@58.0.8(expo@58.0.9)(supports-color@8.1.1):
+  expo-splash-screen@58.0.12(expo@58.0.9)(supports-color@8.1.1):
     dependencies:
       '@expo/config-plugins': 58.0.11(supports-color@8.1.1)
       '@expo/image-utils': 0.12.6(supports-color@8.1.1)
