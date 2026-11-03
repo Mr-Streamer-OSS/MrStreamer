@@ -12,7 +12,7 @@ updates:
     schedule:
       interval: weekly
     groups:
-      # Both stay pinned at the same exact version, so they move together.
+      # One PR for both; grouping doesn't force equal versions, so keep both exact pins identical.
       oxlint:
         patterns:
           - oxlint
