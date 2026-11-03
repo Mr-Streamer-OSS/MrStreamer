@@ -22,6 +22,7 @@ import { t as guideText } from "./strings.ts";
 import { Button, Icon, OutOfDate, Press, Still, guideColors, text } from "./ui.tsx";
 
 const HALF = 30 * 60_000;
+const QUARTER = HALF / 2;
 
 export const t = catalogue(
   {
@@ -196,7 +197,8 @@ export function GuideGrid({
   const day = localDay(chosen ?? now);
   const span = (large ? 45 : width >= BESIDE ? 120 : 60) * 60_000;
   const latest = day.until - day.from - span;
-  const relative = offset ?? Math.floor((now - localDay(now).from) / HALF) * HALF;
+  // Following now, the window starts a quarter span before it, on the quarter hour (as on iOS).
+  const relative = offset ?? Math.floor((now - localDay(now).from - span / 4) / QUARTER) * QUARTER;
   const from = day.from + Math.max(0, Math.min(latest, relative));
   const until = from + span;
 
