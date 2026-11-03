@@ -1446,6 +1446,69 @@ describe("live captures", () => {
     await captures.idle("watch");
     await captures.idle("record");
   });
+
+  it("keeps an HLS variant itself at the address its playlist sends on to, and its numbering its own", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/master.m3u8" });
+    const asked: string[] = [];
+    const from = { hd: 10, sd: 10 };
+    let started = 1;
+    const read = async (owner: string, name: string) => {
+      const answer = await captures.resource(
+        key,
+        owner,
+        new URL(name, "http://provider/").href,
+        (address) => {
+          const url = new URL(address);
+          asked.push(url.pathname.slice(1));
+          const answer = (body: string, at = address) => {
+            const response = new Response(body);
+            Object.defineProperty(response, "url", { value: at });
+            return Promise.resolve(response);
+          };
+          if (url.pathname === "/master.m3u8")
+            return answer(
+              "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1920x1080\nhd.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1280x720\nsd.m3u8\n",
+            );
+          const variant = /^\/(?:t\/)?(hd|sd)\.m3u8$/.exec(url.pathname)?.[1] as "hd" | "sd";
+          if (variant) {
+            const list = `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:${from[variant]}\n#EXTINF:2,\n${variant}-${from[variant]}.ts\n`;
+            // hd's playlist sends on to one under a token.
+            return answer(list, variant === "hd" ? "http://provider/t/hd.m3u8?token=1" : address);
+          }
+          return answer(`${url.pathname.slice(1)} ${started}`);
+        },
+        new AbortController().signal,
+      );
+      return answer.text();
+    };
+
+    await read("watch", "master.m3u8");
+    await read("watch", "hd.m3u8");
+    await read("record", "master.m3u8");
+    expect(captures.fixed("record")).toBe("http://provider/hd.m3u8");
+    // The recording reads hd again where it was sent: hd still, held, its segment asked once.
+    await read("record", "t/hd.m3u8?token=1");
+    expect(captures.fixed("record")).toBe("http://provider/hd.m3u8");
+    expect(await read("watch", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
+    expect(await read("record", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
+    expect(asked.filter((each) => each.endsWith(".ts"))).toEqual(["t/hd-10.ts"]);
+    await captures.idle("record");
+
+    // sd's packager starts again from 0 while Watch reads it: hd's kept segment stays hd's.
+    await read("watch", "sd.m3u8");
+    expect(await read("watch", "sd-10.ts")).toBe("sd-10.ts 1");
+    started = 2;
+    from.sd = 0;
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await read("watch", "sd.m3u8");
+    from.sd = 10;
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await read("watch", "sd.m3u8");
+    expect(await read("watch", "sd-10.ts")).toBe("sd-10.ts 2");
+    expect(await read("watch", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
+    await captures.idle("watch");
+  });
 });
 
 describe.skipIf(!hasFfmpeg)("live history", () => {
