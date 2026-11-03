@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Agent, request } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -171,6 +171,40 @@ describe("the native verification fixture", () => {
     expect(dutch).toMatch(/X-TIMESTAMP-MAP=MPEGTS:\d+,LOCAL:00:00:00\.000/);
     expect(dutch).toContain("00:00:12.250 --> 00:00:13.750\nNederlands 0:12");
   }, 90_000);
+
+  it("plays the TEST channel with subtitles and two sound tracks live, and keeps answering", async () => {
+    const { channels } = await provider().liveCatalogue();
+    const channel = channels.find((each) => each.name === "TEST | Subtitles and two sound tracks");
+    if (!channel) throw new Error("no subtitles channel");
+    const { url } = await provider().liveStream(channel.id);
+    const playlist = await fetch(url);
+    expect(playlist.status).toBe(200);
+    const segment = /^\/hls\/.*$/m.exec(await playlist.text())?.[0] ?? "";
+    expect(segment).toMatch(new RegExp(`^/hls/${channel.id}/\\d+\\.ts$`));
+
+    // The picture, both sound tracks, silent, and the captions the picture carries.
+    const file = join(out, "subtitles-channel.ts");
+    writeFileSync(file, (await download(`${panel}${segment}`)).body);
+    const probe = (args: string[]) =>
+      execFileSync("ffprobe", ["-v", "error", "-of", "compact", ...args], { encoding: "utf8" });
+    const streams = probe([
+      "-show_entries",
+      "stream=codec_type,codec_name:stream_tags=language",
+      file,
+    ]);
+    expect(streams).toMatch(/codec_name=h264\|codec_type=video/);
+    expect(streams).toMatch(/codec_name=aac\|codec_type=audio\|tag:language=eng/);
+    expect(streams).toMatch(/codec_name=aac\|codec_type=audio\|tag:language=dut/);
+    expect(peak(file)).toBeLessThanOrEqual(-60);
+    const captions = probe([
+      ...["-f", "lavfi", "-i", `movie=${file}[out0+subcc]`, "-select_streams", "s"],
+      ...["-show_entries", "packet=stream_index"],
+    ]);
+    expect(captions).toContain("packet");
+
+    expect(await (await fetch(`${control}/live`)).json()).toContain(channel.id);
+    expect((await fetch((await provider().liveStream("1001")).url)).status).toBe(200);
+  }, 60_000);
 
   it("serves silence in the tracks and codecs its media has, and TEST clips already silent as they are", async () => {
     const { channels } = await provider().liveCatalogue();
