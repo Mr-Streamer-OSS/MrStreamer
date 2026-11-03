@@ -95,8 +95,8 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   re-export so each opens on the stack it was opened from (`hrefOn`), at most once. Each stack
   starts on its `index`, and a link that opens the app straight to a pushed screen gets that
   root under it; navigating into another destination's stack while the app runs passes
-  `withAnchor: true` for the same. A link to no screen opens Live, or Connect while no source is
-  saved (`+not-found.tsx`). Live's root shows the bootstrap's channel list under its own header
+  `withAnchor: true` for the same. A link to no screen is dropped while the app runs, and one that
+  opens the app opens Live, or Connect while no source is saved (`+not-found.tsx`). Live's root shows the bootstrap's channel list under its own header
   until the Live card replaces it.
 - **Screens.** Each screen frames itself with `Screen` (`src/navigation/screen.tsx`): its top
   app bar, and the insets `useSafeAreaInsets` still gives its content (the bottom only beside
