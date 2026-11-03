@@ -4,7 +4,7 @@
 
 The operational workflow set is Checks, Release and Website.
 
-- `checks.yml` validates every PR and push to main. Check always reports and includes the desktop production build. Test and Website use conservative input selection; unknown inputs run both. Main validates its actual merged source. PR evidence is diagnostic only.
+- `checks.yml` validates every PR and push to main. Check always reports and includes the desktop production build. Test and Website use conservative input selection; unknown inputs run both. Main validates its actual merged source. PR evidence is diagnostic only. Test runs as three shards merged into the one Test status, described [below](#test-shards).
 - `release.yml` plans one candidate, authenticates prior Checks evidence or runs secretless fallback, builds one versioned shared JS bundle, packages native targets and sources, performs installed checks, then publishes when authorized by the selected operation. Dry runs publish nothing.
 - `website.yml` owns website builds and publication. A workflow-only merge cannot deploy the production website. A stable version commit receives an explicit Website handoff after finalization because workflow-token pushes start no new workflow.
 
@@ -17,6 +17,23 @@ Release's validation job searches exact-source main push Checks runs. It waits a
 Fallback runs the shared validation action with separate Check and Test jobs and their existing 10/15-minute bounds. Only the Check production build is omitted: Release's required final versioned bundle supplies that build. PR/main Check keeps its default build. Test retains default discovery, workers, retries, timeouts, multimedia setup, JSON report and candidate completeness gate. See the [shared action contract](../../.github/actions/validation/README.md).
 
 The bundle is built once per candidate. macOS/Linux and Windows package independently after it. MSIX begins after Windows, without waiting for the other platforms. Stable installed-upgrade proof runs beside packaging and gates publication. Source archives, receipts, checksums, native integrity, signatures, app and DMG notarizations, installed checks and their historical version guards remain mandatory as documented in [releasing](releasing.md).
+
+## Test shards
+
+Checks runs the unchanged suite as three `Test shard <n>` jobs, each a standard runner with the same setup, multimedia tools and Vitest settings, running `pnpm test --shard=<n>/3`. `test/sequencer.ts` splits the files by the seconds `test/durations.json` records for each: longest first, each to the shard with the fewest seconds so far, so every shard computes the same split and each file runs in exactly one. A file the table doesn't name counts as its median file. Each shard, and every other run, starts its longest files first. Each test job installs ffmpeg alongside Node and the dependencies. Every shard runs to the end even when another fails, and uploads its Vitest blob report.
+
+The iOS native fixture test (`apps/ios/test/native-fixtures.test.ts`) serves about 97 MB of silent media its server encodes with ffmpeg, which took most of three minutes on a shard. Each test job restores it from the `fixture-media-<ffmpeg packages key>-<fixture sources hash>` Actions cache into `.local/fixture-media`, which the server reads as `FIXTURE_MEDIA_CACHE`, and the job that ran the fixture and encoded it saves it after passing. A kept piece's name hashes its ffmpeg command, inputs and version (`apps/ios/scripts/native-fixtures/media.ts`), so the server copies only the same piece and encodes any other. A miss, after a new runner image or week or a change to the fixture's sources, encodes everything once: the file takes about 165 seconds longer, and its shard runs about as long as it did before the cache. An older release candidate without the variable encodes as before.
+
+The table holds each file's import, setup, hooks and tests, from a hosted run's shards. Test writes a fresh one from every merge, `test-durations.json` in the `test-results-<run id>-<attempt>` artifact. Refresh the committed table from a green run when the shards drift apart, as new or grown test files shift the work:
+
+```sh
+gh run download <run id> -R Mr-Streamer-OSS/MrStreamer -n test-results-<run id>-<attempt> -D .local/ci-report
+cp .local/ci-report/test-durations.json test/durations.json
+```
+
+Test, the required merge status, then merges the blobs into the same `test-results-<run id>-<attempt>` JSON report a whole run writes and holds that union to `scripts/ci-test-results.ts`: every test file once, with tests, each passed. It installs only the root's dependencies, which the merge needs, and its log shows only failed tests' output; the shards' logs have the rest. Test fails when any shard failed, timed out, was cancelled or skipped, when a shard's report is missing or doubled, or when the union misses a file. After a failed shard it still merges and uploads what the shards reported, so the failure keeps its report. A cancelled run never passes Test: it fails at its first step or, when GitHub starts it after the cancellation, on the missing or unsuccessful shards. When the inputs leave desktop out, the shards and Test skip together, as Test did before. Test's validation identity is recorded only when every shard and the merge ran under the same one; otherwise Test can still pass but Release won't reuse that run.
+
+A shard that failed can be rerun alone with "Re-run failed jobs" while the shard blobs are kept, seven days: it replaces its own blob, and Test merges it with the other shards' earlier results from the same run and commit. After that, "Re-run all jobs". Release fallback runs the whole suite in one Test job, unsharded.
 
 ## Operations
 

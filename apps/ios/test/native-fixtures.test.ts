@@ -72,15 +72,19 @@ describe("the native verification fixture", () => {
     const [port, controlPort] = [await freePort(), await freePort()];
     panel = `http://127.0.0.1:${port}`;
     control = `http://127.0.0.1:${controlPort}`;
-    // The default fixture, whatever FIXTURE_ settings the shell running the tests has.
+    // The default fixture, whatever FIXTURE_ settings the shell running the tests has, but for
+    // the media cache CI gives, which serves the same media without encoding it again.
     const env = Object.fromEntries(
-      Object.entries(process.env).filter(([name]) => !name.startsWith("FIXTURE_")),
+      Object.entries(process.env).filter(
+        ([name]) => !name.startsWith("FIXTURE_") || name === "FIXTURE_MEDIA_CACHE",
+      ),
     );
     server = spawn(
       process.execPath,
       [join(root, "apps/ios/scripts/fixture-server.ts"), String(port), String(controlPort)],
       {
-        env: { ...env, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
+        // Filtering drops the NODE_ENV type the app's ProcessEnv requires, though not its value.
+        env: { ...env, NODE_ENV: process.env.NODE_ENV, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
         stdio: ["ignore", "pipe", "inherit"],
       },
     );

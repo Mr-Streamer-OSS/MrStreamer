@@ -4,7 +4,11 @@
 // Each piece is made once into `<out>/media/<name>-<hash>`, a hash of its command, its input files
 // and the ffmpeg making it, so a change to any of them makes it again instead of serving what was
 // made before. It is made in a directory of its own and moved there only once complete. Its sound
-// is silence, in the same tracks and codecs, unless FIXTURE_SOUND=1 (`tone`, `silencing`).
+// is silence, in the same tracks and codecs, unless FIXTURE_SOUND=1 (`tone`, `silencing`). With a
+// `cache` directory (FIXTURE_MEDIA_CACHE), a piece is kept there under the same name and copied
+// from it rather than made again, so sessions and CI runs encode each command once; its name
+// changes with the command, the inputs and the ffmpeg, so a kept piece is only ever the same one,
+// and silent and sounding pieces, whose commands differ, never share one.
 //
 // The provenance the server declares (its control port's /provenance and provenance.json) names
 // the commit and whether the fixture sources differ from it, the ffmpeg that made the media, and
@@ -16,6 +20,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -24,7 +29,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 
 /** A looped recording, cut into segments of the durations its playlist gives. */
 export interface Media {
@@ -121,6 +126,30 @@ function alive(pid: number) {
   }
 }
 
+/**
+ * Fills `dir` through `fill`, in a directory of this server's own beside it so a second one
+ * starting beside it fills its own, then moves it there once complete. What a server stopped
+ * while filling left is removed, and a `dir` another server completed first is kept: it is the same.
+ */
+function settle(dir: string, fill: (making: string) => void) {
+  const parent = dirname(dir);
+  mkdirSync(parent, { recursive: true });
+  for (const left of readdirSync(parent)) {
+    const pid = Number(/\.making-(\d+)$/.exec(left)?.[1]);
+    if (left.startsWith(`${basename(dir)}.making-`) && (pid === process.pid || !alive(pid))) {
+      rmSync(join(parent, left), { recursive: true, force: true });
+    }
+  }
+  const making = `${dir}.making-${process.pid}`;
+  fill(making);
+  try {
+    renameSync(making, dir);
+  } catch (error) {
+    if (!existsSync(dir)) throw error;
+    rmSync(making, { recursive: true, force: true });
+  }
+}
+
 /** One piece of media and how it was made. */
 interface Artifact {
   readonly name: string;
@@ -141,8 +170,9 @@ const declaredPath = (from: string, to: string) => relative(from, to).split(sep)
 /**
  * Makes and records media under `out`, for a server whose sources are in the checkout at `root`.
  * `make` cuts what ffmpeg `args` give into HLS segments; `record` adds files written otherwise.
+ * Made pieces are kept in, and taken from, `cache` when given.
  */
-export function mediaMaker(root: string, out: string, declaration: string) {
+export function mediaMaker(root: string, out: string, declaration: string, cache?: string) {
   const artifacts: Artifact[] = [];
   const provenance = () => ({ source, ffmpeg, artifacts });
   /** Adds `artifact` to what `declaration` in `out` declares. */
@@ -204,24 +234,15 @@ export function mediaMaker(root: string, out: string, declaration: string) {
     const key = sha256(JSON.stringify([ffmpeg, options, local("."), output, inputs]));
     const dir = join(out, "media", `${name}-${key.slice(0, 12)}`);
     if (!existsSync(dir)) {
-      // A directory of this server's own, so a second one starting beside it makes its own. What
-      // a server stopped while making it left is removed.
-      mkdirSync(join(out, "media"), { recursive: true });
-      for (const left of readdirSync(join(out, "media"))) {
-        const pid = Number(/\.making-(\d+)$/.exec(left)?.[1]);
-        if (left.startsWith(`${basename(dir)}.making-`) && (pid === process.pid || !alive(pid))) {
-          rmSync(join(out, "media", left), { recursive: true, force: true });
-        }
-      }
-      const making = `${dir}.making-${process.pid}`;
-      mkdirSync(making, { recursive: true });
-      execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
-      try {
-        renameSync(making, dir);
-      } catch (error) {
-        // The other one finished first: its media is the same.
-        if (!existsSync(dir)) throw error;
-        rmSync(making, { recursive: true, force: true });
+      const kept = cache && join(cache, basename(dir));
+      if (kept && existsSync(kept)) {
+        settle(dir, (making) => cpSync(kept, making, { recursive: true }));
+      } else {
+        settle(dir, (making) => {
+          mkdirSync(making, { recursive: true });
+          execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
+        });
+        if (kept) settle(kept, (making) => cpSync(dir, making, { recursive: true }));
       }
     }
     const path = join(dir, output);

@@ -783,7 +783,10 @@ describe.skipIf(!hasTools)("recordings", () => {
     const manifest = join(dataDir, "recordings", "recordings.json");
     await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
-    const [ended] = await until(recordings.list, ([first]) => first?.status.kind !== "recording");
+    const [ended] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "complete" && first.unsaved === true,
+    );
     expect(ended).toMatchObject({ status: { kind: "complete" }, unsaved: true });
     await expect(recordings.stop(started.recording.id)).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "Recordings could not be saved." },

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
+import { DurationSequencer } from "./test/sequencer.ts";
 import { exclude, include } from "./test/suites.ts";
 
 // Node keeps the code it compiles, with TypeScript's types stripped, on disk and loads it from
@@ -38,5 +39,7 @@ export default defineConfig({
     exclude,
     environment: "node",
     globalSetup: ["apps/desktop/test/catalogue-worker-bundle.ts"],
+    // CI's shards split by recorded file durations, and every run starts its longest files first.
+    sequence: { sequencer: DurationSequencer },
   },
 });

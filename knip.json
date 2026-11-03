@@ -25,6 +25,7 @@
     },
     "packages/*": {}
   },
+  "ignoreUnresolved": ["^\\$ACTION_PATH/\\.\\./\\.\\./\\.\\./scripts/test-durations\\.ts$"],
   "ignoreBinaries": [
     "ffmpeg",
     "ffprobe",
