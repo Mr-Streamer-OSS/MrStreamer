@@ -1,19 +1,28 @@
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState } from "react";
-import { FlatList, Text, useWindowDimensions, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FlatList, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { Bar, Body, Frame, TextButton, useFrame } from "../live/chrome.tsx";
+import { t as liveText } from "../live/copy.ts";
 import { destinationIn } from "../navigation/open.ts";
-import { Screen } from "../navigation/screen.tsx";
+import { IconButton } from "../ui/icon-button.tsx";
 import { useLocale } from "./catalogue.ts";
-import { BrowseProgramme, t } from "./grid.tsx";
+import { Beside, t } from "./grid.tsx";
 import { type FoundProgramme, type ProgrammeSearch, localDay } from "./guide.ts";
 import { useGuideStart, useListingRevision } from "./hooks.ts";
-import { dayLabel, programmeRange } from "./present.ts";
+import { dayLabel, initials, programmeRange } from "./present.ts";
 import { BESIDE, guidesHref, param, programmeHref, type ChannelIdentity } from "./routes.ts";
 import { guide, useGuideStatus } from "./runtime.ts";
-import { Button, Field, Press, Still, text } from "./ui.tsx";
+import { ProgrammeDetails } from "./schedule-screen.tsx";
+import { Press, guideColors } from "./ui.tsx";
 
-/** Search is owned by this route, so a programme push leaves its query, results and list mounted. */
+/** A status line under the field: Searching., or Nothing named "x". */
+const quiet = { color: guideColors.secondary, fontSize: 14, lineHeight: 20, padding: 16 } as const;
+
+/**
+ * Guide Search, pushed with its field in the top app bar as Live's Find. The query is the route's,
+ * so a programme pushed from it leaves the text, results and list mounted. From 840dp a programme
+ * shows beside the results. Some programmes not searched. stays under them with Guides and Retry.
+ */
 export function GuideSearchScreen() {
   useGuideStart();
   useLocale();
@@ -23,7 +32,7 @@ export function GuideSearchScreen() {
   const query = param(params.query);
   const destination = destinationIn(useSegments());
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  const { layout, framed } = useFrame();
   const [attempt, retry] = useState(0);
   const [read, setRead] = useState<{ query: string; value: ProgrammeSearch } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,83 +97,221 @@ export function GuideSearchScreen() {
     return null;
   };
 
+  const field = (
+    <TextInput
+      autoFocus={!query}
+      accessibilityLabel={t("Search programmes")}
+      placeholder={t("Search programmes")}
+      placeholderTextColor={guideColors.secondary}
+      cursorColor={guideColors.text}
+      selectionColor={guideColors.focus}
+      value={query}
+      onChangeText={(query) => router.setParams({ query })}
+      returnKeyType="search"
+      style={{
+        flex: 1,
+        minHeight: 48,
+        paddingLeft: 12,
+        color: guideColors.text,
+        fontSize: 18,
+        lineHeight: 24,
+      }}
+    />
+  );
+
+  const pane = selection ? (
+    <ProgrammeDetails
+      key={`${selection.found.key} ${selection.found.programme.start}`}
+      identity={selection.identity}
+      start={selection.found.programme.start}
+      detail={selection.found.programme.detail}
+      pane
+    />
+  ) : null;
+
   return (
-    <Screen
-      title={t("Search programmes")}
-      pushed
-      detail={
-        selection
-          ? {
-              title: selection.found.programme.title,
-              content: (
-                <BrowseProgramme
-                  identity={selection.identity}
-                  start={selection.found.programme.start}
-                  detail={selection.found.programme.detail}
-                />
-              ),
-              onClose: () => setSelection(null),
-            }
-          : undefined
+    <Frame
+      framed={framed}
+      bar={
+        <Bar
+          layout={layout}
+          framed={framed}
+          height={64}
+          rule
+          leading={{ icon: "arrow-back", label: liveText("Back"), onPress: () => router.back() }}
+          title={field}
+          trailing={
+            query ? (
+              <IconButton
+                icon="close"
+                label={liveText("Clear")}
+                color={guideColors.secondary}
+                onPress={() => router.setParams({ query: "" })}
+              />
+            ) : null
+          }
+        />
       }
     >
-      <Field
-        icon="search"
-        label={t("Search programmes")}
-        value={query}
-        onChangeText={(query) => router.setParams({ query })}
-      />
-      {busy ? <Still text={t("Searching.")} /> : null}
-      {value?.unsearched ? (
-        <View style={{ padding: 16, gap: 8 }}>
-          <Text accessibilityLiveRegion="polite" style={text.note}>
-            {t("Some programmes not searched.")}
-          </Text>
-          <Button label={t("Guides")} onPress={() => router.push(guidesHref(destination))} />
-          <Button label={t("Retry")} onPress={() => retry((n) => n + 1)} />
-        </View>
-      ) : null}
-      <FlatList
-        data={found}
-        keyExtractor={(f) => `${f.key} ${f.programme.start}`}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-        ListEmptyComponent={
-          !busy && value && !found.length ? (
-            <Still text={t('Nothing named "{query}"', { query })} />
-          ) : undefined
-        }
-        renderItem={({ item }) => {
-          const channel = guide.channel(item.key);
-          const day = localDay(item.programme.start);
-          const line = `${day.from === localDay(now).from ? "" : `${dayLabel(day, now)} · `}${programmeRange(item.programme)} · ${channel?.title ?? ""}`;
+      <Body>
+        <Beside detail={pane} onClose={() => setSelection(null)}>
+          <FlatList
+            data={found}
+            keyboardShouldPersistTaps="handled"
+            keyExtractor={(f) => `${f.key} ${f.programme.start}`}
+            contentContainerStyle={{ paddingBottom: 16 }}
+            ListHeaderComponent={
+              <>
+                {busy ? (
+                  <Text accessibilityLiveRegion="polite" style={quiet}>
+                    {t("Searching.")}
+                  </Text>
+                ) : null}
+                {found.length ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "baseline",
+                      justifyContent: "space-between",
+                      paddingTop: 12,
+                      paddingBottom: 8,
+                      paddingHorizontal: 16,
+                      borderBottomWidth: 1,
+                      borderColor: guideColors.hairline,
+                    }}
+                  >
+                    <Text
+                      accessibilityRole="header"
+                      style={{
+                        color: guideColors.text,
+                        fontSize: 20,
+                        lineHeight: 26,
+                        fontWeight: "700",
+                        letterSpacing: -0.2,
+                      }}
+                    >
+                      {t("Programmes")}
+                    </Text>
+                    <Text style={{ color: guideColors.secondary, fontSize: 14, lineHeight: 18 }}>
+                      {found.length}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            }
+            ListEmptyComponent={
+              !busy && value && !found.length ? (
+                <Text accessibilityLiveRegion="polite" style={quiet}>
+                  {t('Nothing named "{query}"', { query })}
+                </Text>
+              ) : undefined
+            }
+            renderItem={({ item }) => {
+              const channel = guide.channel(item.key)?.title ?? "";
+              const day = localDay(item.programme.start);
+              const line = `${day.from === localDay(now).from ? "" : `${dayLabel(day, now)} · `}${programmeRange(item.programme)} · ${channel}`;
+              const shown = selection?.found === item;
 
-          return (
-            <Press
-              accessibilityLabel={`${item.programme.title}, ${line}`}
-              onPress={() => {
-                const identity = identityOf(item.key);
+              return (
+                <Press
+                  accessibilityLabel={`${item.programme.title}, ${line}`}
+                  accessibilityState={{ selected: shown }}
+                  onPress={() => {
+                    const identity = identityOf(item.key);
 
-                if (!identity) return;
+                    if (!identity) return;
 
-                if (width >= BESIDE) setSelection({ identity, found: item });
-                else
-                  router.push(
-                    programmeHref(
-                      destination,
-                      identity,
-                      item.programme.start,
-                      item.programme.detail,
-                    ),
-                  );
-              }}
-              style={{ padding: 16, gap: 4 }}
+                    if (width >= BESIDE) setSelection({ identity, found: item });
+                    else
+                      router.push(
+                        programmeHref(
+                          destination,
+                          identity,
+                          item.programme.start,
+                          item.programme.detail,
+                        ),
+                      );
+                  }}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 16,
+                    minHeight: 72,
+                    paddingVertical: 8,
+                    paddingHorizontal: 16,
+                    backgroundColor: shown ? guideColors.current : undefined,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 48,
+                      height: 36,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 4,
+                      backgroundColor: guideColors.surface,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: guideColors.text,
+                        fontSize: 12,
+                        lineHeight: 16,
+                        fontWeight: "700",
+                      }}
+                    >
+                      {initials(channel)}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      style={{
+                        color: guideColors.text,
+                        fontSize: 15,
+                        lineHeight: 20,
+                        fontWeight: "500",
+                      }}
+                    >
+                      {item.programme.title}
+                    </Text>
+                    <Text style={{ color: guideColors.secondary, fontSize: 13, lineHeight: 18 }}>
+                      {line}
+                    </Text>
+                  </View>
+                </Press>
+              );
+            }}
+          />
+        </Beside>
+        {value?.unsearched ? (
+          <View
+            style={{
+              gap: 4,
+              paddingTop: 12,
+              paddingBottom: 4,
+              paddingLeft: 16,
+              paddingRight: 4,
+              borderTopWidth: 1,
+              borderColor: guideColors.hairline,
+            }}
+          >
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{ color: guideColors.text, fontSize: 14, lineHeight: 20, paddingRight: 12 }}
             >
-              <Text style={text.heading}>{item.programme.title}</Text>
-              <Text style={text.secondary}>{line}</Text>
-            </Press>
-          );
-        }}
-      />
-    </Screen>
+              {t("Some programmes not searched.")}
+            </Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <TextButton
+                label={t("Guides")}
+                strong
+                onPress={() => router.push(guidesHref(destination))}
+              />
+              <TextButton label={t("Retry")} strong onPress={() => retry((n) => n + 1)} />
+            </View>
+          </View>
+        ) : null}
+      </Body>
+    </Frame>
   );
 }

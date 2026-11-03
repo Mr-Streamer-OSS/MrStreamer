@@ -230,9 +230,9 @@ export function Channel({
       // Android's click label: TalkBack says "Double-tap to play" for a playable row.
       accessibilityActions={[
         { name: "activate", label: t("Play") },
+        { name: "schedule", label: t("Schedule") },
         ...(saved.kind === "ready" ? [{ name: "star", label: favourite }] : []),
         { name: "lists", label: t("Lists") },
-        { name: "schedule", label: t("Schedule") },
       ]}
       onAccessibilityAction={({ nativeEvent }) => {
         if (nativeEvent.actionName === "activate") play();
@@ -257,16 +257,7 @@ export function Channel({
       }}
     >
       <Badge title={title} />
-      <Pressable
-        onPress={(event) => {
-          event.stopPropagation();
-          schedule();
-        }}
-        accessibilityLabel={`${t("Schedule")}: ${title}`}
-        style={{ flex: 1 }}
-      >
-        <Lines title={title} detail={now} />
-      </Pressable>
+      <Lines title={title} detail={now} />
       {saved.kind === "ready" ? (
         <View importantForAccessibility="no-hide-descendants">
           <IconButton
@@ -616,7 +607,7 @@ export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose: (
       </View>
       <View style={{ paddingTop: 8 }}>
         <SheetRow
-          icon="view-list"
+          icon="event-note"
           label={t("Schedule")}
           onPress={() => {
             if (entry) {

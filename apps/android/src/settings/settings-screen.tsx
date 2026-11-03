@@ -218,11 +218,6 @@ export function SettingsScreen() {
           />
         </Section>
         <Section name={t("Providers")}>
-          <Row
-            label={t("Guides")}
-            trailing="next"
-            onPress={() => router.push(guidesHref(destinationIn(segments)))}
-          />
           {all.map((source) => (
             <ProviderRow
               key={source.id}
@@ -258,6 +253,11 @@ export function SettingsScreen() {
               {t("Add provider")}
             </Text>
           </Pressed>
+          <Row
+            label={t("Guides")}
+            trailing="next"
+            onPress={() => router.push(guidesHref(destinationIn(segments)))}
+          />
         </Section>
         <Section name={t("Privacy")}>
           <SwitchRow

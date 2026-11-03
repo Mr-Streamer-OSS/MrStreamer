@@ -21,11 +21,15 @@ vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "test" } } 
 
 vi.mock("expo-file-system", () => ({ File: class {}, Paths: {} }));
 
+vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
+
 vi.mock("expo-router", () => ({
+  useIsFocused: () => true,
   useSegments: () => ["(tabs)", "(live)"],
   useLocalSearchParams: () => ui.params,
   router: {
     push: ui.push,
+    back: vi.fn(),
     setParams: (p: Partial<typeof ui.params>) => Object.assign(ui.params, p),
   },
 }));
@@ -57,15 +61,31 @@ vi.mock("../src/guide/ui.tsx", () => ({
   Button: ({ label, onPress }: { label: string; onPress: () => void }) =>
     h("button", { onClick: onPress }, label),
   Still: ({ text }: { text: string }) => h("p", {}, text),
-  Field: ({ value, onChangeText }: { value: string; onChangeText: (s: string) => void }) =>
-    h("input", {
-      value,
-      onChange: (e: { target: { value: string } }) => onChangeText(e.target.value),
-    }),
+  Icon: () => null,
+  Progress: () => null,
+  OutOfDate: ({ label }: { label: string }) => h("p", {}, label),
+}));
+
+vi.mock("../src/live/chrome.tsx", () => ({
+  useFrame: () => ({ layout: "bar", framed: {} }),
+  Frame: ({ bar, children }: { bar: ReactNode; children: ReactNode }) =>
+    h("main", {}, bar, children),
+  Body: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  Bar: ({ title, trailing }: { title: ReactNode; trailing?: ReactNode }) =>
+    h("header", {}, title, trailing),
+  TextButton: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    h("button", { onClick: onPress }, label),
 }));
 
 vi.mock("react-native", () => ({
   View: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  Pressable: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  TextInput: ({ value, onChangeText }: { value: string; onChangeText: (s: string) => void }) =>
+    h("input", {
+      value,
+      onChange: (e: { target: { value: string } }) => onChangeText(e.target.value),
+    }),
+  BackHandler: { addEventListener: () => ({ remove() {} }) },
   Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
   ScrollView: ({ children }: { children: ReactNode }) => h("div", {}, children),
   useWindowDimensions: () => ({ width: ui.width, fontScale: ui.fontScale }),
