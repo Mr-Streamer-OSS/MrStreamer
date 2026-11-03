@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Pressable, Text } from "react-native";
+import { Text } from "react-native";
 import { router } from "expo-router";
 import { t } from "../downloads/copy.ts";
+import { Icon, Press } from "../library/parts.tsx";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { sources } from "../bootstrap/sources.ts";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
@@ -49,13 +50,32 @@ export default function Connect() {
         onConnected={() => {}}
         footer={
           hasDownloads ? (
-            <Pressable
-              accessibilityRole="button"
+            // As Connect's own action rows: a 24dp icon 16dp before its 16sp label.
+            <Press
+              label={t("Downloads")}
               onPress={() => router.push("/offline")}
-              style={{ minHeight: 48, padding: 16 }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 16,
+                minHeight: 48,
+                marginTop: 8,
+                paddingHorizontal: 16,
+              }}
             >
-              <Text style={{ color: "white" }}>{t("Downloads")}</Text>
-            </Pressable>
+              <Icon name="download" />
+              <Text
+                style={{
+                  flex: 1,
+                  color: colors.text,
+                  fontSize: 16,
+                  lineHeight: 20,
+                  fontWeight: "500",
+                }}
+              >
+                {t("Downloads")}
+              </Text>
+            </Press>
           ) : null
         }
       />

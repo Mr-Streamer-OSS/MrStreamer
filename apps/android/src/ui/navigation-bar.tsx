@@ -58,6 +58,8 @@ export function NavigationRail({
   downloadsSelected = false,
   insets,
 }: Props & { onOpen: (screen: SharedScreen) => void; downloadsSelected?: boolean }) {
+  const downloadsFocus = useKeyboardFocus();
+
   // Scrolls when the window is shorter than the rail, as a phone in landscape is (about 484dp of
   // rail against 360dp), and more so at large text, so Downloads and Settings stay reachable.
   return (
@@ -102,9 +104,20 @@ export function NavigationRail({
         accessibilityLabel={t("Downloads")}
         accessibilityState={{ selected: downloadsSelected }}
         onPress={() => onOpen("downloads")}
-        style={{ width: 56, height: 56, alignItems: "center", justifyContent: "center" }}
+        {...downloadsFocus.handlers}
+        android_ripple={{ color: colors.ripple, borderless: true, radius: 28 }}
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: downloadsFocus.focused ? colors.focus : undefined,
+        }}
       >
+        {/* White while Downloads is open over the destination, as Paper A's tablet frame. */}
         <MaterialIcons
+          importantForAccessibility="no-hide-descendants"
           name="download"
           size={24}
           color={downloadsSelected ? colors.text : colors.secondary}
