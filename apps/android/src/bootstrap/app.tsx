@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { StatusBar, View } from "react-native";
-import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { CatalogueScreen } from "../connect/catalogue-screen.tsx";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
 import { sourcesOwner, type SourcesOwner } from "../connect/sources.ts";
@@ -20,7 +20,12 @@ export const sources: SourcesOwner = sourcesOwner({
   credentials: nativeCredentials(),
   readJson,
   writeJson,
-  fetch: (input, init) => fetch(input, init),
+  // Xtream addresses carry the login in their path: no response is kept in an HTTP cache.
+  fetch: (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set("Cache-Control", "no-store");
+    return fetch(input, { ...init, headers });
+  },
   userAgent: USER_AGENT,
 });
 
@@ -33,7 +38,12 @@ export function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" />
-      <View style={{ flex: 1, backgroundColor: "#000000" }}>
+      {/* Edge to edge on API 36: the screens pad their own scrolling content above the
+          navigation bar, so lists still scroll behind it. */}
+      <SafeAreaView
+        edges={["top", "left", "right"]}
+        style={{ flex: 1, backgroundColor: "#000000" }}
+      >
         {state.kind === "restoring" ? null : empty || adding ? (
           <ConnectScreen
             owner={sources}
@@ -43,7 +53,7 @@ export function App() {
         ) : (
           <CatalogueScreen owner={sources} sources={state.sources} onAdd={() => setAdding(true)} />
         )}
-      </View>
+      </SafeAreaView>
     </SafeAreaProvider>
   );
 }

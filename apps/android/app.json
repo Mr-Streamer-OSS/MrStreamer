@@ -9,6 +9,9 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
     "icon": "./assets/icon.png",
+    "experiments": {
+      "tsconfigPaths": false
+    },
     "android": {
       "package": "app.mrstreamer.player",
       "versionCode": 1,
