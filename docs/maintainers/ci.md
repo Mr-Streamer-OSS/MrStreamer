@@ -80,3 +80,5 @@ JS bundle stays one day. Failed native profiles keep their existing seven-day bo
 Maintenance with dry-run selected deliberately performs no operation and remains green. Choose
 operation=release for signed nonpublishing packaging proof. The MSIX checksum is exposed only
 after installed acceptance, upload and receipt succeed, independently of job-level error tolerance.
+
+<!-- Documentation-only CI probe. -->
