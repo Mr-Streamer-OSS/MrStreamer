@@ -66,7 +66,8 @@ describe("rewritePlaylist", () => {
       [
         "#EXTM3U",
         '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="English 1",LANGUAGE="eng",DEFAULT=YES,URI="a0.m3u8"',
-        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Nederlands 2",LANGUAGE="dut",DEFAULT=NO,URI="a1.m3u8"',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Commentaar 2",LANGUAGE="dut",DEFAULT=NO,URI="a1.m3u8"',
+        '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="Nederlands 3",LANGUAGE="nld",DEFAULT=YES,URI="a2.m3u8"',
         '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English 1",URI="s0.m3u8"',
         '#EXT-X-STREAM-INF:BANDWIDTH=4000000,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"',
         "v.m3u8",
@@ -74,8 +75,9 @@ describe("rewritePlaylist", () => {
       "nl",
     );
     if (result.kind !== "playlist") throw new Error(result.kind);
-    expect(result.text).toContain("Nederlands 2");
-    expect(result.text).not.toContain("English 1");
+    // Of the two Dutch tracks, the default one, as the phone would pick.
+    expect(result.text).toContain("Nederlands 3");
+    expect(result.text).not.toMatch(/English 1|Commentaar 2/);
     expect(result.text).not.toMatch(/SUBTITLES/);
     expect(result.variant).toMatch(/\.m3u8$/);
   });
