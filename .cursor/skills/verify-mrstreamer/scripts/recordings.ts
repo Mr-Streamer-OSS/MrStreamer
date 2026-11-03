@@ -5,7 +5,9 @@
 // the recording leaves Watch playing, all on that one request. A second recording takes Now
 // again, and the stopped one plays from this computer. Its menu deletes it. Each state is captured at 1280 × 800 and the
 // Recordings page also at 960 × 600. `recordingsHlsScenario` does the same for a live HLS channel
-// of one quality, Watch on hls.js, the provider asked once for each segment.
+// of one quality, Watch on hls.js, the provider asked once for each segment, or with `qualities`
+// for one offered in 1080 and 720 lines: the Recording popover says the quality stays fixed, and
+// the provider sends one of them while both read.
 import { spawnSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -287,22 +289,28 @@ interface HlsFixture {
 }
 
 /**
- * The sequence numbers of the live HLS channel's segments the host sent, in order: each once
- * while Watch and its recording share them.
+ * The live HLS channel's segments the host sent from its `from`th request on, in order, as
+ * "{stream} {sequence}": each once while Watch and its recording share them.
  */
-const segmentsSent = (fixture: HlsFixture) =>
+const segmentsSent = (fixture: HlsFixture, from = 0) =>
   fixture
     .requests()
-    .flatMap((path) => /^\/media\/(?:t\d+\/)?compatible-(\d+)\.ts$/.exec(path)?.[1] ?? []);
+    .slice(from)
+    .flatMap((path) => {
+      const found = /^\/media\/(?:t\d+\/)?(compatible|qualities-\w+)-(\d+)\.ts$/.exec(path);
+      return found ? [`${found[1]} ${found[2]}`] : [];
+    });
 
-export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture) {
+export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qualities = false) {
+  const name = qualities ? "qualities" : "compatible";
+  const shot = (what: string) => (qualities ? `hls-qualities-${what}` : `hls-${what}`);
   await size(d, 1280, 800);
   await d.click("Open global Search", "document.querySelector('button[aria-label=Search]')");
-  d.action("Search TEST | HLS compatible");
-  await d.send("Input.insertText", { text: "TEST | HLS compatible" });
+  d.action(`Search TEST | HLS ${name}`);
+  await d.send("Input.insertText", { text: `TEST | HLS ${name}` });
   await d.wait(() =>
     d.evaluate<boolean>(
-      "document.querySelector('[aria-label=\"Search results\"] [aria-selected=true]')?.textContent.includes('HLS compatible') ?? false",
+      `document.querySelector('[aria-label="Search results"] [aria-selected=true]')?.textContent.includes('HLS ${name}') ?? false`,
     ),
   );
   await d.key("Enter", 13);
@@ -322,12 +330,14 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture) {
 
   await d.click("Open Record", record);
   await d.wait(() => d.exists(POPUP));
-  // The playlist names one stream, which plays here: recording it shares that connection.
+  // The stream plays here, in one quality or the one Watch picked: recording it shares that
+  // connection.
   await d.wait(() =>
     d.evaluate<boolean>(`${POPUP}.innerText.includes("Shares the connection playing here.")`),
   );
   d.observed["hlsPopover"] = await d.evaluate<string>(`${POPUP}.innerText`);
-  await d.capture("hls-record-popover");
+  await d.capture(shot("record-popover"));
+  const shared = fixture.requests().length;
   await d.click("Start recording", named("button", "Start recording", POPUP));
   const recordingButton = named("button", "Recording");
   await d.wait(() => d.exists(recordingButton), 60_000);
@@ -340,12 +350,34 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture) {
   const grown = await listed(d);
   expect(grown[0]!.bytes > 0, "The recording took nothing", grown);
   d.observed["hlsRecording"] = { list: grown, segments: segmentsSent(fixture) };
-  await d.capture("hls-live-recording");
+  await d.capture(shot("live-recording"));
 
   // The recording stops from the strip's Recording, by keyboard: Watch plays on.
   const RECORDING = "document.querySelector('[role=dialog][aria-label=Recording]')";
   await d.click("Open Recording", recordingButton);
   await d.wait(() => d.exists(RECORDING));
+  const FIXED = "Quality stays fixed while this records.";
+  if (qualities) {
+    // Watch holds one quality while the recording reads it, and the provider sends that one.
+    await d.wait(() =>
+      d.evaluate<boolean>(`${RECORDING}.innerText.includes(${JSON.stringify(FIXED)})`),
+    );
+    d.observed["hlsFixed"] = {
+      popover: await d.evaluate<string>(`${RECORDING}.innerText`),
+      playlists: fixture
+        .requests()
+        .slice(shared)
+        .filter((path) => path.endsWith(".m3u8")),
+    };
+    await d.capture(shot("fixed"));
+    const streams = new Set(segmentsSent(fixture, shared).map((each) => each.split(" ")[0]));
+    expect(streams.size === 1, "More than one quality was sent while both read", [...streams]);
+  } else {
+    expect(
+      !(await d.evaluate<boolean>(`${RECORDING}.innerText.includes(${JSON.stringify(FIXED)})`)),
+      "A stream of one quality said its quality is fixed",
+    );
+  }
   await d.key("Tab", 9);
   await d.key("Tab", 9);
   await d.wait(() =>
@@ -357,7 +389,7 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture) {
   await playsOn(d);
   await playsOn(d);
   d.observed["hlsStopped"] = { list: await listed(d), segments: segmentsSent(fixture) };
-  await d.capture("hls-watch-after-recording");
+  await d.capture(shot("watch-after-recording"));
 
   // The host sent each segment once, Watch and the recording reading the same ones.
   const sent = segmentsSent(fixture);

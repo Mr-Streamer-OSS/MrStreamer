@@ -1491,7 +1491,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   }, 30_000);
 
   it("records the quality Watch plays of an HLS channel offered in several, holding Watch to it until the recording stops", async () => {
-    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: true });
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: ["hd", "sd", "uhd"] });
     onTestFinished(() => host.close());
     const dataDir = await tempDir();
     const { recordings, subscriptions, library, playback, runtime } = await app(dataDir);
@@ -1569,7 +1569,7 @@ describe.skipIf(!hasTools)("recordings", () => {
   }, 30_000);
 
   it("holds Watch joining a recording of an HLS channel to the recorded quality, and shares none it can't record", async () => {
-    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: true });
+    const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: ["hd", "sd", "uhd"] });
     onTestFinished(() => host.close());
     const { recordings, subscriptions, library, playback, runtime } = await app(await tempDir());
     const held = heldQualities(runtime);

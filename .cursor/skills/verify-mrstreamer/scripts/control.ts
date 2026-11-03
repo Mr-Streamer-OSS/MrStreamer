@@ -89,6 +89,7 @@ const scenarios = [
   "reminders",
   "recordings",
   "recordings-hls",
+  "recordings-hls-qualities",
   "schedules",
   "titles",
   "details-back",
@@ -350,6 +351,9 @@ async function run(scenario: Scenario, prior?: string) {
     if (scenario.startsWith("hls-compatibility")) playlist = await startFakeHls({ realtime: true });
     // A live playlist, whose address sends on to one under a token.
     if (scenario === "recordings-hls") playlist = await startFakeHls({ live: {}, tokens: true });
+    // A live playlist offered in 1080 and 720 lines.
+    if (scenario === "recordings-hls-qualities")
+      playlist = await startFakeHls({ live: {}, qualities: ["hd", "sd"] });
     if (scenario === "home-stage-live-only") playlist = await startFakePlaylist();
     if (scenario === "catch-up-hls") {
       playlist = await startFakePlaylist({ catchup: true });
@@ -1140,7 +1144,7 @@ async function run(scenario: Scenario, prior?: string) {
           }),
         },
       );
-    } else if (scenario === "recordings-hls") {
+    } else if (scenario === "recordings-hls" || scenario === "recordings-hls-qualities") {
       await recordingsHlsScenario(
         {
           profile,
@@ -1157,6 +1161,7 @@ async function run(scenario: Scenario, prior?: string) {
           quit,
         },
         { requests: () => playlist!.requests() },
+        scenario === "recordings-hls-qualities",
       );
     } else if (scenario === "reminders") {
       await remindersScenario(

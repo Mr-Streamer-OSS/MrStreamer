@@ -206,8 +206,9 @@ export function RecordButton({
 
 /**
  * Recording, while the channel records: its popover names the recording and when it stops, says
- * while what plays here keeps one quality to share its stream, and stops it here, which leaves what plays of the channel playing, or opens Recordings, which stops
- * that. Escape gives the keys back to Recording.
+ * while what plays here keeps one quality to share its stream, and stops it here, which leaves
+ * what plays of the channel playing, or opens Recordings, which stops that. Escape gives the keys
+ * back to Recording.
  */
 function RecordingPopover({
   recording,

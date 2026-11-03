@@ -13,10 +13,10 @@ export async function startFakeHls(
     /** A playlist's address sends on to the same one under a token, as a panel's session. */
     readonly tokens?: boolean;
     /**
-     * A channel "qualities" too, whose multivariant playlist offers H.264 and AAC in 1080, 720
-     * and 2160 lines, as `qualities-hd`, `qualities-sd` and `qualities-uhd`.
+     * A channel "qualities" too, whose multivariant playlist offers H.264 and AAC in these of
+     * 1080, 720 and 2160 lines, as `qualities-hd`, `qualities-sd` and `qualities-uhd`.
      */
-    readonly qualities?: boolean;
+    readonly qualities?: readonly ("hd" | "sd" | "uhd")[];
   } = {},
 ) {
   const began = Date.now();
@@ -115,26 +115,30 @@ export async function startFakeHls(
       return response.writeHead(302, { Location: path.replace("/media/", "/media/t1/") }).end();
     const name = /^\/media\/(?:t\d+\/)?([\w-]+)\.m3u8$/.exec(path)?.[1];
     if (name)
-      return response.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" }).end(
-        name === "epochs" || name === "archive"
-          ? `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=256x144,CODECS="mp2v.61,ac-3"\n${name}-selected.m3u8\n`
-          : name === "qualities"
-            ? [
-                "#EXTM3U",
-                ...[
-                  ["hd", "1920x1080", 3_000_000],
-                  ["sd", "1280x720", 1_500_000],
-                  ["uhd", "3840x2160", 12_000_000],
-                ].flatMap(([variant, size, bandwidth]) => [
-                  `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${size},CODECS="avc1.640028,mp4a.40.2"`,
-                  `qualities-${variant}.m3u8`,
-                ]),
-                "",
-              ].join("\n")
-            : name === "excluded"
-              ? '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=100000,AUDIO="a"\nac3.m3u8\n'
-              : media(name.replace("-selected", "")),
-      );
+      return response
+        .writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" })
+        .end(
+          name === "epochs" || name === "archive"
+            ? `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=256x144,CODECS="mp2v.61,ac-3"\n${name}-selected.m3u8\n`
+            : name === "qualities"
+              ? [
+                  "#EXTM3U",
+                  ...[
+                    ["hd", "1920x1080", 3_000_000] as const,
+                    ["sd", "1280x720", 1_500_000] as const,
+                    ["uhd", "3840x2160", 12_000_000] as const,
+                  ]
+                    .filter(([variant]) => options.qualities?.includes(variant))
+                    .flatMap(([variant, size, bandwidth]) => [
+                      `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${size},CODECS="avc1.640028,mp4a.40.2"`,
+                      `qualities-${variant}.m3u8`,
+                    ]),
+                  "",
+                ].join("\n")
+              : name === "excluded"
+                ? '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="English",URI="audio.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=100000,AUDIO="a"\nac3.m3u8\n'
+                : media(name.replace("-selected", "")),
+        );
     const segment = /^\/media\/(?:t\d+\/)?([\w-]+)-(\d+)\.ts$/.exec(path);
     if (!segment) return response.writeHead(404).end();
     const kind = segment[1];
