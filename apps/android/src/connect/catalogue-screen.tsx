@@ -83,6 +83,7 @@ export function CatalogueScreen({
             {/* The channel rows' badge lane, so source and channel names line up. */}
             <View style={{ width: 48, alignItems: "center", flexShrink: 0 }}>
               <MaterialIcons
+                importantForAccessibility="no-hide-descendants"
                 name={source.kind === "m3u" ? "playlist-play" : "dns"}
                 size={24}
                 color="#FFFFFF"
@@ -196,7 +197,12 @@ function IconButton({
         justifyContent: "center",
       }}
     >
-      <MaterialIcons name={icon} size={24} color="#FFFFFF" />
+      <MaterialIcons
+        importantForAccessibility="no-hide-descendants"
+        name={icon}
+        size={24}
+        color="#FFFFFF"
+      />
     </Pressable>
   );
 }

@@ -69,7 +69,12 @@ export function ConnectScreen({
         borderColor: HAIRLINE,
       }}
     >
-      <MaterialIcons name={icon} size={24} color={SECONDARY} />
+      <MaterialIcons
+        importantForAccessibility="no-hide-descendants"
+        name={icon}
+        size={24}
+        color={SECONDARY}
+      />
       <TextInput
         accessibilityLabel={label}
         placeholder={label}
@@ -88,6 +93,7 @@ export function ConnectScreen({
   const action = (label: string, icon: IconName, onPress: () => void, primary = false) => (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       disabled={busy}
       onPress={onPress}
       style={{
@@ -99,7 +105,12 @@ export function ConnectScreen({
         paddingRight: 16,
       }}
     >
-      <MaterialIcons name={icon} size={24} color={busy ? SECONDARY : "#FFFFFF"} />
+      <MaterialIcons
+        importantForAccessibility="no-hide-descendants"
+        name={icon}
+        size={24}
+        color={busy ? SECONDARY : "#FFFFFF"}
+      />
       <Text
         style={{
           flex: 1,
@@ -133,7 +144,12 @@ export function ConnectScreen({
             onPress={onDone}
             style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center" }}
           >
-            <MaterialIcons name="close" size={24} color="#FFFFFF" />
+            <MaterialIcons
+              importantForAccessibility="no-hide-descendants"
+              name="close"
+              size={24}
+              color="#FFFFFF"
+            />
           </Pressable>
         ) : null}
         <Text
@@ -163,7 +179,12 @@ export function ConnectScreen({
             accessibilityLiveRegion="polite"
             style={{ flexDirection: "row", gap: 16, paddingHorizontal: 16, paddingVertical: 14 }}
           >
-            <MaterialIcons name="error-outline" size={24} color="#FFFFFF" />
+            <MaterialIcons
+              importantForAccessibility="no-hide-descendants"
+              name="error-outline"
+              size={24}
+              color="#FFFFFF"
+            />
             <Text
               style={{ flex: 1, color: "#FFFFFF", fontSize: 14, lineHeight: 20, paddingTop: 2 }}
             >

@@ -43,7 +43,7 @@ export type Channels =
 export interface SavedSource {
   readonly id: string;
   readonly kind: Authority["kind"];
-  /** The provider's host, as screens name it: "tv.example.net". */
+  /** The provider's host, as screens name it: "tv.example.net", with a port that isn't the default. */
   readonly label: string;
 }
 
@@ -77,8 +77,8 @@ const Registry = type({
   sources: type({ id: "string", kind: "'xtream' | 'm3u'", label: "string" }).array(),
 });
 
-/** "tv.example.net" from "http://tv.example.net:8080/path". */
-const hostOf = (address: string) => URL.parse(address)?.hostname ?? address;
+/** "tv.example.net:8080" from "http://tv.example.net:8080/path": the port only when it isn't the default. */
+const hostOf = (address: string) => URL.parse(address)?.host ?? address;
 
 /** A source's id, the same for the same account however often it is connected. */
 function idOf(authority: Authority): string {
