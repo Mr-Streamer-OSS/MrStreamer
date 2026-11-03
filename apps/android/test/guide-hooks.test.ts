@@ -8,7 +8,10 @@ const { document } = new Window();
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: ReturnType<typeof document.createElement>): {
+    render(node: unknown): void;
+    unmount(): void;
+  };
 };
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
