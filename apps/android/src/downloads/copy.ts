@@ -5,6 +5,7 @@ import { catalogue } from "../library/catalogue.ts";
 const english = {
   Downloads: "Downloads",
   Downloaded: "Downloaded",
+  Downloading: "Downloading",
   Queue: "Queue",
   "On this device": "On this device",
   "{size} on this device": "{size} on this device",
@@ -62,6 +63,7 @@ const english = {
 const dutch = {
   Downloads: "Downloads",
   Downloaded: "Gedownload",
+  Downloading: "Downloaden",
   Queue: "Wachtrij",
   "On this device": "Op dit apparaat",
   "{size} on this device": "{size} op dit apparaat",

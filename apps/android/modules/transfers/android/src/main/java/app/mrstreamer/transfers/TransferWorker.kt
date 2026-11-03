@@ -7,8 +7,6 @@ import android.os.Build
 import androidx.work.*
 import app.mrstreamer.credentials.Credentials
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.io.FileOutputStream
 
@@ -62,20 +60,15 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
     val address = auth.getString("server").trimEnd('/') + "/$folder/" +
       encoded(auth.getString("username")) + "/" + encoded(auth.getString("password")) + "/" +
       encoded(row.getString("mediaId")) + "." + encoded(row.getString("container"))
-    // Cleartext requests are refused rather than silently exposing a login.
-    check(URL(address).protocol == "https")
     var offset = ledger.media(id, true).length()
     var restarted = false
     while (true) {
-      val connection = URL(address).openConnection() as HttpURLConnection
-      connection.connectTimeout = 20000; connection.readTimeout = 20000
-      connection.instanceFollowRedirects = false
-      connection.setRequestProperty("Accept-Encoding", "identity")
-      connection.setRequestProperty("User-Agent", "MrStreamer-Android/0.1.0")
+      val headers = mutableMapOf("Accept-Encoding" to "identity", "User-Agent" to "MrStreamer-Android/0.1.0")
       if (offset > 0) {
-        connection.setRequestProperty("Range", "bytes=$offset-")
-        connection.setRequestProperty("If-Range", row.optString("etag").ifEmpty { row.optString("modified") })
+        headers["Range"] = "bytes=$offset-"
+        headers["If-Range"] = row.optString("etag").ifEmpty { row.optString("modified") }
       }
+      val connection = TransferHttp.open(address, headers)
       try {
         val status = connection.responseCode
         val etag = connection.getHeaderField("ETag") ?: ""
@@ -153,7 +146,7 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
     val dutch = context.resources.configuration.locales[0].language == "nl"
     val remaining = synchronized(Ledger.lock) { ledger.read().count { it.getString("state") in listOf("queued", "running") && it.getString("id") != id } }
     val message = if (remaining > 0) {
-      if (dutch) "$remaining meer in de wachtrij" else "$remaining more in the queue"
+      notificationQueue(remaining, dutch)
     } else if (dutch) "Downloaden" else "Downloading"
     val builder = Notification.Builder(context, "downloads").setContentTitle(title)
       .setContentText(message).setSmallIcon(android.R.drawable.stat_sys_download).setOngoing(true)
@@ -166,7 +159,15 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
       else ForegroundInfo(666, builder.build())
   }
 
-  companion object { const val RESERVE = 16L * 1024 * 1024 }
+  companion object {
+    const val RESERVE = 16L * 1024 * 1024
+    fun notificationQueue(count: Int, dutch: Boolean): String = when {
+      dutch && count == 1 -> "Nog 1 download in de wachtrij"
+      dutch -> "Nog $count downloads in de wachtrij"
+      count == 1 -> "1 more in the queue"
+      else -> "$count more in the queue"
+    }
+  }
 }
 
 class TransferAction : BroadcastReceiver() {

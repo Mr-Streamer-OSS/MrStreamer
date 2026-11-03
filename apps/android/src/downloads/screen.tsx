@@ -15,6 +15,7 @@ import { colors } from "../ui/theme.ts";
 import { t } from "./copy.ts";
 import {
   isCopy,
+  rowFacts,
   rowStatus,
   sheetChoices,
   trailingChoice,
@@ -326,8 +327,8 @@ function Row({
         <Text style={{ color: colors.text, fontSize: 15, lineHeight: 20, fontWeight: "500" }}>
           {row.title}
         </Text>
-        {row.total > 0 ? (
-          <Text style={{ ...small, color: colors.secondary }}>{formatBytes(row.total)}</Text>
+        {rowFacts(row) ? (
+          <Text style={{ ...small, color: colors.secondary }}>{rowFacts(row)}</Text>
         ) : null}
         {status.progress === null ? null : (
           <View

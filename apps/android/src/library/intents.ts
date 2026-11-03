@@ -43,3 +43,35 @@ export function intentRegistry() {
 }
 
 export const libraryIntents = intentRegistry();
+
+/** Downloads owns the words and actions; Library only renders this optional presentation. */
+export interface DownloadPresentation {
+  readonly text: string;
+  readonly label: string;
+  readonly icon: "done" | "stop" | "empty" | "retry";
+  readonly progress: number;
+  readonly activate: () => void;
+}
+
+export interface DownloadPresentationAdapter {
+  readonly read: (media: MediaIdentity) => DownloadPresentation | undefined;
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly snapshot: () => unknown;
+}
+
+export function downloadPresentationRegistry() {
+  const state = store<DownloadPresentationAdapter | undefined>(undefined);
+
+  return {
+    state,
+    register(adapter: DownloadPresentationAdapter) {
+      state.set(adapter);
+
+      return () => {
+        if (state.get() === adapter) state.set(undefined);
+      };
+    },
+  };
+}
+
+export const libraryDownloads = downloadPresentationRegistry();

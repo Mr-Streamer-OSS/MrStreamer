@@ -18,11 +18,7 @@ class TransfersModule : Module() {
     AsyncFunction("command") { id: String, action: String -> Transfers.command(appContext.reactContext ?: error("context"), id, action) }
     AsyncFunction("cacheArtwork") { id: String, address: String ->
       val context = appContext.reactContext ?: error("context")
-      require(java.net.URL(address).protocol == "https")
-      val connection = java.net.URL(address).openConnection() as java.net.HttpURLConnection
-      connection.connectTimeout = 15000
-      connection.readTimeout = 15000
-      connection.instanceFollowRedirects = false
+      val connection = TransferHttp.open(address)
       try {
         check(connection.responseCode == 200)
         val bytes = connection.inputStream.use { input ->
@@ -48,7 +44,7 @@ class TransfersModule : Module() {
           row.put("artwork", android.net.Uri.fromFile(file).toString())
           ledger.save(rows)
         }
-      } finally { connection.disconnect() }
+      } catch (_: Exception) { error("artwork") } finally { connection.disconnect() }
     }
     AsyncFunction("filePath") { id: String -> Ledger(appContext.reactContext ?: error("context")).media(id).absolutePath }
     AsyncFunction("path") { id: String ->

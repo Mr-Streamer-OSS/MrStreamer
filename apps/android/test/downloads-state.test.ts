@@ -75,3 +75,48 @@ it("rejects a damaged native snapshot rather than claiming an empty queue", asyn
   await model.refresh(true);
   expect(model.state.get().error).toBe("read");
 });
+
+it("keeps optional title facts and accepts ledgers created before facts were saved", async () => {
+  const old = {
+    id: "old",
+    key: "old",
+    sourceId: "source",
+    title: "Title",
+    sourceLabel: "Source",
+    kind: "movie",
+    mediaId: "one",
+    container: "mkv",
+    state: "queued",
+    bytes: 0,
+    total: 0,
+    reason: "",
+  };
+
+  const facts = {
+    ...old,
+    id: "new",
+    year: 2026,
+    duration: 2700,
+    season: 2,
+    episode: 3,
+    episodeName: "Crossing",
+  };
+
+  const read = async () => JSON.stringify({ rows: [old, facts], free: 10 });
+
+  const port: TransferPort = {
+    snapshot: read,
+    restore: read,
+    enqueue: vi.fn(),
+    command: vi.fn(),
+    path: vi.fn(),
+    filePath: vi.fn(),
+    blockSource: vi.fn(),
+    cacheArtwork: vi.fn(),
+  };
+
+  const model = downloadState(port);
+  await model.refresh();
+  expect(model.state.get().error).toBeNull();
+  expect(model.state.get().rows).toEqual([old, facts]);
+});

@@ -6,8 +6,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.json.JSONObject
+import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class LedgerTest {
   @Test fun duplicateAndObsoleteCompletionsCannotReplaceState() {
     val row = JSONObject().put("state", "running").put("attempt", "new")
@@ -52,6 +54,18 @@ class LedgerTest {
       assertNotEquals("old", row.getString("attempt"))
       ledger.save(listOf(row))
       assertEquals(row.toString(), Ledger(context).read().single().toString())
+    } finally { ledger.root.deleteRecursively() }
+  }
+
+  @Test fun legacyRowsWithoutTitleFactsStillRestore() {
+    val ledger = Ledger(RuntimeEnvironment.getApplication())
+    try {
+      val row = JSONObject().put("state", "complete").put("total", 8)
+      ledger.save(listOf(row))
+      val restored = Ledger(RuntimeEnvironment.getApplication()).read().single()
+      Ledger.reconcile(restored, 8, true)
+      assertEquals("complete", restored.getString("state"))
+      assertFalse(restored.has("episode"))
     } finally { ledger.root.deleteRecursively() }
   }
 

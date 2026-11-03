@@ -1,3 +1,4 @@
+import { runtime } from "@mrstreamer/core/viewing/continue";
 import { formatBytes, formatPercent } from "@mrstreamer/core/i18n";
 import type { DownloadRow } from "./state.ts";
 import { t } from "./copy.ts";
@@ -126,4 +127,17 @@ export function sheetChoices(row: DownloadRow, rows: readonly DownloadRow[]): Ro
       ];
     }
   }
+}
+
+/** Saved title facts remain useful without the provider; legacy rows still show their size. */
+export function rowFacts(row: DownloadRow): string {
+  return [
+    row.year,
+    row.season !== undefined && row.episode !== undefined ? `S${row.season} E${row.episode}` : null,
+    row.episodeName,
+    row.duration ? runtime(row.duration) : null,
+    row.total > 0 ? formatBytes(row.total) : null,
+  ]
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .join(" · ");
 }

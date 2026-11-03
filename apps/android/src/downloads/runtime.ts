@@ -2,7 +2,8 @@ import { requireNativeModule } from "expo";
 import { AppState } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
-import { libraryIntents, type DownloadIntent } from "../library/intents.ts";
+import { libraryDownload } from "./library-presentation.ts";
+import { libraryDownloads, libraryIntents, type DownloadIntent } from "../library/intents.ts";
 import { player } from "../player/instance.ts";
 import { downloadState, type TransferPort, type DownloadRow, type Action } from "./state.ts";
 
@@ -22,6 +23,15 @@ function createRuntime() {
       subscriptionId: media.sourceId,
       id: media.titleId,
     });
+
+    const episode =
+      media.kind === "episode" && details.value?.kind === "series"
+        ? details.value.seasons
+            .flatMap((season) => season.episodes)
+            .find(
+              (entry) => entry.id === media.episodeId && entry.subscriptionId === media.sourceId,
+            )
+        : undefined;
 
     const id = media.kind === "movie" ? media.titleId : media.episodeId;
     const container = details.containers.get(id) ?? media.version.container;
@@ -43,6 +53,11 @@ function createRuntime() {
         mediaId: id,
         container,
         title: title.title,
+        year: title.year,
+        duration: episode?.duration ?? details.value?.duration ?? null,
+        season: episode?.season,
+        episode: episode?.number,
+        episodeName: episode?.title,
       }),
     );
 
@@ -95,6 +110,19 @@ function createRuntime() {
         download: (intent) => void model.change(() => enqueue(intent)),
       });
 
+      const unregisterPresentation = libraryDownloads.register({
+        snapshot: model.state.get,
+        subscribe: model.state.subscribe,
+        read: (media) =>
+          libraryDownload(model.state.get().rows, media, (row, action) => {
+            if (action === "play")
+              void downloads()
+                .playCopy(row)
+                .catch(() => {});
+            else void model.change(() => native.command(row.id, action));
+          }),
+      });
+
       const unsubscribe = player.state.subscribe(() => void syncPlayer().catch(() => {}));
 
       const app = AppState.addEventListener("change", (state) => {
@@ -117,6 +145,7 @@ function createRuntime() {
         .catch(() => {});
       stop = () => {
         unregister();
+        unregisterPresentation();
         unsubscribe();
         app.remove();
         clearInterval(timer);

@@ -87,3 +87,72 @@ it("moves a row only among those waiting", () => {
     "remove",
   ]);
 });
+
+it("distinguishes saved episodes with facts and keeps legacy size-only rows readable", async () => {
+  const { rowFacts } = await import("../src/downloads/presentation.ts");
+  expect(rowFacts(row("legacy", { total: 0 }))).toBe("");
+  expect(rowFacts(row("legacy"))).toContain("GB");
+
+  const facts = rowFacts(
+    row("episode", {
+      year: 2026,
+      duration: 2700,
+      season: 2,
+      episode: 3,
+      episodeName: "The crossing",
+    }),
+  );
+
+  expect(facts).toContain("2026");
+  expect(facts).toContain("S2 E3 · The crossing");
+  expect(facts).toContain("45");
+});
+
+it("presents only the exact episode file and dispatches its state action", async () => {
+  const { libraryDownload } = await import("../src/downloads/library-presentation.ts");
+  const { vi } = await import("vitest");
+  const act = vi.fn();
+
+  const media = {
+    sourceId: "kade",
+    titleKey: "series",
+    titleId: "series",
+    kind: "episode" as const,
+    episodeId: "one",
+    version: { subscriptionId: "kade", id: "series", tags: [], container: "mkv" },
+  };
+
+  const queued = row("one", { kind: "episode" });
+  const identity = media;
+  expect(libraryDownload([queued], { ...identity, sourceId: "other" }, act)).toBeUndefined();
+  expect(
+    libraryDownload([queued], { ...identity, kind: "episode", episodeId: "two" }, act),
+  ).toBeUndefined();
+
+  for (const [state, icon, action] of [
+    ["queued", "stop", "pause"],
+    ["running", "stop", "pause"],
+    ["paused", "empty", "resume"],
+    ["failed", "retry", "retry"],
+    ["complete", "done", "play"],
+  ] as const) {
+    const saved = { ...queued, state };
+    const shown = libraryDownload([saved], identity, act);
+    expect(shown?.icon).toBe(icon);
+    shown?.activate();
+    expect(act).toHaveBeenLastCalledWith(saved, action);
+  }
+});
+
+it("keeps the successor presentation adapter when an older registration cleans up", async () => {
+  const { downloadPresentationRegistry } = await import("../src/library/intents.ts");
+  const registry = downloadPresentationRegistry();
+  const adapter = { read: () => undefined, snapshot: () => 0, subscribe: () => () => {} };
+  const first = registry.register(adapter);
+  const successor = { ...adapter };
+  const second = registry.register(successor);
+  first();
+  expect(registry.state.get()).toBe(successor);
+  second();
+  expect(registry.state.get()).toBeUndefined();
+});
