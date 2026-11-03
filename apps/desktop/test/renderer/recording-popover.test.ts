@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 // Recording, in Live TV's now strip while the channel records: its popover stops that recording in
 // place, gives the keys to Record once Recording gives way to it, and says why a refused Stop
-// failed. Escape closes it and gives the keys back to Recording. While what plays here shares the
-// recording's stream, it says the quality stays fixed.
+// failed. Escape closes it and gives the keys back to Recording, even while a stop is under way.
+// While what plays here shares the recording's stream, it says the quality stays fixed.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { queryView } from "./mount.ts";
 import { expect, it, onTestFinished, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -42,7 +42,10 @@ const noon: Recording = {
 const button = (name: string) =>
   [...document.querySelectorAll("button")].find((each) => each.textContent?.trim() === name);
 
-/** The strip's control while `recording` records, its popover opened. */
+/**
+ * The strip's control while `recording` records, its popover opened by pointer while the keys were
+ * on Settings, elsewhere in the window, as a click that doesn't take the focus leaves them.
+ */
 async function opened(recording: Recording = noon) {
   ipc.reset();
   ipc.always("recordings.list", [recording]);
@@ -53,8 +56,16 @@ async function opened(recording: Recording = noon) {
     stopSync();
     view.unmount();
   });
-  await view.render(createElement(RecordButton, { channel, programme: null }));
+  await view.render(
+    createElement(
+      Fragment,
+      null,
+      createElement("button", { type: "button" }, "Settings"),
+      createElement(RecordButton, { channel, programme: null }),
+    ),
+  );
   const trigger = await vi.waitFor(() => button("Recording") ?? Promise.reject(new Error("none")));
+  button("Settings")?.focus();
   await act(async () => trigger.click());
   const popup = document.querySelector<HTMLElement>("[role=dialog][aria-label=Recording]");
   expect(popup?.textContent).toContain(recording.title);
@@ -105,6 +116,8 @@ it("asks to stop once while its popover reopens before and after the reply", asy
   await act(async () => {
     popup.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   });
+  // Escape gives the keys back to Recording while the stop is under way too.
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
   await act(async () => trigger.click());
   expect(button("Stop recording")?.disabled).toBe(true);
   await act(async () => button("Stop recording")?.click());

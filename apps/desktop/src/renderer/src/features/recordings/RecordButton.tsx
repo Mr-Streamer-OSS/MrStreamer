@@ -221,6 +221,14 @@ function RecordingPopover({
   onStopping: (stopping: boolean) => void;
 }) {
   const popup = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const triggerButton = useCallback(
+    (button: HTMLButtonElement | null) => {
+      trigger.current = button;
+      triggerRef(button);
+    },
+    [triggerRef],
+  );
   const now = useNow();
   // Watch plays this channel's stream with the recording, so it holds one quality meanwhile.
   const fixed = usePlayer(
@@ -240,7 +248,7 @@ function RecordingPopover({
     >
       <Popover.Trigger
         render={
-          <Button ref={triggerRef} variant="secondary" className={triggerClass}>
+          <Button ref={triggerButton} variant="secondary" className={triggerClass}>
             {dot}
             {t("Recording")}
           </Button>
@@ -253,6 +261,10 @@ function RecordingPopover({
             tabIndex={-1}
             // As Record's, the popup takes the keys as it opens; Tab reaches its buttons.
             initialFocus={popup}
+            // Stopped from here, Recording gives way to Record, which takes the keys: the popup
+            // leaves them be rather than give them back to where they were before it opened, as
+            // Settings when a click opened it without taking them. Escape still gives them back.
+            finalFocus={() => !(stop.isPending || stop.isSuccess) || !!trigger.current?.isConnected}
             aria-label={t("Recording")}
             onKeyDown={ownKeys}
             className={popupClass}
