@@ -29,8 +29,12 @@ export interface ResolvePlatform {
   readonly now: () => number;
 }
 
+// The app's playlist reader's limits (src/connect/playlist.ts).
 const PLAYLIST_TIMEOUT_MS = 90_000;
 const PLAYLIST_BYTES = 64 * 1024 * 1024;
+const PLAYLIST_ENTRIES = 100_000;
+/** What a playlist host answers a link it no longer serves with. */
+const REFUSED: ReadonlySet<number> = new Set([401, 403, 404, 410]);
 
 /** Query names whose values are a playlist link's login, as src/connect/playlist.ts reads them. */
 const LOGIN_NAMES: ReadonlySet<string> = new Set([
@@ -115,6 +119,12 @@ async function playlistStream(
   }
   if (!response.ok || !response.body) {
     void response.body?.cancel().catch(() => {});
+    if (REFUSED.has(response.status))
+      throw new AppFailure({
+        kind: "incomplete-login",
+        detail:
+          "Your provider refused this playlist link. Check it, or get a new one from your provider.",
+      });
     throw new AppFailure({ kind: "provider-error", status: response.status });
   }
   const pieces = response.body.getReader();
@@ -122,27 +132,41 @@ async function playlistStream(
   const reader = m3uReader();
   const entries: PlaylistEntry[] = [];
   let bytes = 0;
-  // An entry names the channel only when the id starts with its tvg-id, else its name: the
-  // catalogue is worked out again only after such an entry, not after every piece read.
+  // An entry names the channel only when the id starts with its tvg-id, else its name, else the
+  // "Channel <n>" one without either gets: the catalogue is worked out again only after such an
+  // entry, not after every piece read.
   const couldName = (entry: PlaylistEntry) => {
     const base = entry.attributes["tvg-id"] || entry.name || entry.attributes["tvg-name"];
-    return !base || channelId.startsWith(base);
+    return channelId.startsWith(base || "Channel ");
   };
   const found = (read: readonly PlaylistEntry[]) => {
     const more = read.map(asListed);
     entries.push(...more);
+    if (entries.length > PLAYLIST_ENTRIES)
+      throw new AppFailure({
+        kind: "unexpected",
+        detail: "This playlist has more than 100,000 entries, more than the phone reads.",
+      });
     return more.some(couldName) ? playlistCatalogue(entries).streams.get(channelId) : undefined;
   };
   try {
     for (;;) {
       const { done, value } = await pieces.read();
+      if (!done) {
+        bytes += value.byteLength;
+        if (bytes > PLAYLIST_BYTES)
+          throw new AppFailure({
+            kind: "unexpected",
+            detail: "This playlist is larger than 64 MB, more than the phone reads.",
+          });
+      }
       const stream = done
         ? found([...reader.push(decoder.decode()), ...reader.end()])
         : found(reader.push(decoder.decode(value, { stream: true })));
       if (stream) return stream;
-      if (done || reader.playlist === false) break;
-      bytes += value.byteLength;
-      if (bytes > PLAYLIST_BYTES) break;
+      if (done) break;
+      if (reader.playlist === false)
+        throw unreachable("The address answered, but not with a playlist.");
     }
   } catch (cause) {
     if (signal.aborted || cause instanceof AppFailure) throw cause;
@@ -158,7 +182,7 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
   return async (intent, signal) => {
     if (intent.kind === "file") {
       return {
-        url: `file://${encodeURI(intent.path)}`,
+        url: `file://${intent.path.split("/").map(encodeURIComponent).join("/")}`,
         headers: {},
         format: "progressive",
         mode: "file",

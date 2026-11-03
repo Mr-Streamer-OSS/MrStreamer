@@ -8,8 +8,9 @@ import { sourceStreams } from "./resolve.ts";
 const USER_AGENT = "MrStreamer-Android/0.1.0";
 
 /** The app's one player, for every screen. */
-export const player: PlayerOwner = playerOwner(nativePlayer(), {
-  resolve: sourceStreams({
+export const player: PlayerOwner = playerOwner(
+  nativePlayer(),
+  sourceStreams({
     credentials: nativeCredentials(),
     // As the sources' reads: no HTTP cache and no cookies, where a login would outlive Remove.
     fetch: (input, init) => {
@@ -20,7 +21,7 @@ export const player: PlayerOwner = playerOwner(nativePlayer(), {
     userAgent: USER_AGENT,
     now: Date.now,
   }),
-});
+);
 
 // A source that leaves the saved list (Remove) stops playing at once: no attempt goes on with a
 // login the app no longer keeps.

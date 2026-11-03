@@ -26,7 +26,7 @@ const NAVIGATION_BAR = 80;
 
 /**
  * What the play button does for what plays: pause it, play it on (a finished title from its start),
- * or start a failed attempt again. Watch and the mini player share it.
+ * or try a failed attempt again where it was. Watch and the mini player share it.
  */
 export function playPause(now: Playing): { icon: IconName; label: string; run: () => void } {
   switch (now.phase) {
@@ -35,7 +35,7 @@ export function playPause(now: Playing): { icon: IconName; label: string; run: (
     case "ended":
       return { icon: "replay", label: t("Play again"), run: () => void player.resume() };
     case "failed":
-      return { icon: "refresh", label: t("Try again"), run: () => void player.play(now.intent) };
+      return { icon: "refresh", label: t("Try again"), run: () => void player.retry() };
     default:
       return { icon: "pause", label: t("Pause"), run: () => void player.pause() };
   }

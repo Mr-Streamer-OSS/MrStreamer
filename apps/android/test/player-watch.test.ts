@@ -13,6 +13,7 @@ const scenario = vi.hoisted(() => ({
   params: {} as { play?: string },
   asked: [] as string[],
   played: [] as unknown[],
+  retries: 0,
 }));
 
 vi.mock("react-native", async () => {
@@ -58,6 +59,9 @@ vi.mock("../src/player/instance.ts", async () => {
         scenario.played.push(intent);
         state.set(playing(intent));
         return "attempt";
+      },
+      async retry() {
+        scenario.retries++;
       },
     },
   };
@@ -116,6 +120,7 @@ function open(intent: PlayIntent | null) {
 beforeEach(() => {
   scenario.asked = [];
   scenario.played = [];
+  scenario.retries = 0;
   player.state.set({ kind: "idle" });
 });
 
@@ -147,7 +152,7 @@ describe("Watch", () => {
     expect(scenario.played).toEqual([]);
   });
 
-  it("says why a stream was refused, and Try again plays it again", () => {
+  it("says why a stream was refused, and Try again tries it again", () => {
     player.state.set(
       playing(estuary, {
         phase: "failed",
@@ -158,11 +163,14 @@ describe("Watch", () => {
       }),
     );
     const shown = open(estuary);
-    expect(shown.textContent).toContain("Another device may be using your connection.");
+    expect(shown.textContent).toContain(
+      "If another device is watching on this subscription, stop it there first.",
+    );
     const retry = Array.from(shown.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Try again"),
     );
     act(() => (retry as unknown as { click(): void }).click());
-    expect(scenario.played).toEqual([estuary]);
+    expect(scenario.retries).toBe(1);
+    expect(scenario.played).toEqual([]);
   });
 });

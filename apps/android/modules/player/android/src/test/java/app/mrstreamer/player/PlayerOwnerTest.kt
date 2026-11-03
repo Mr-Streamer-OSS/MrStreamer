@@ -9,7 +9,12 @@ import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.WebServerDispatcher
 import androidx.media3.test.utils.robolectric.RobolectricUtil
 import java.io.File
+import java.util.concurrent.TimeUnit
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -80,6 +85,24 @@ class PlayerOwnerTest {
   private fun file(attempt: String, file: File, format: String = "progressive", startMs: Long = 0) =
     Admission(attempt, file.toURI().toString(), emptyMap(), format, "file", startMs, HoldRef.LocalFile(file.path))
 
+  /**
+   * A live channel: MPEG-TS with no length, as a provider sends it, still arriving for seconds
+   * when [throttled]. (Robolectric's clock runs ahead while the player waits, so a throttled
+   * stream is stopped before it plays: waiting would trip Media3's stuck-buffering timeout.)
+   */
+  private fun live(throttled: Boolean): MockWebServer {
+    val bytes = javaClass.classLoader!!.getResourceAsStream("media/h264-aac.m2ts")!!.readBytes()
+    val server = MockWebServer().also { servers += it }
+    server.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse {
+          val response = MockResponse().setChunkedBody(Buffer().write(bytes), 4096)
+          return if (throttled) response.throttleBody(16_384, 1, TimeUnit.SECONDS) else response
+        }
+      }
+    return server
+  }
+
   private fun until(condition: () -> Boolean) = RobolectricUtil.runMainLooperUntil(condition)
 
   private fun untilPhase(attempt: String, vararg phases: Phase) =
@@ -147,15 +170,7 @@ class PlayerOwnerTest {
 
   @Test
   fun sendsTheSourcesHeadersAndClosesItsConnectionsWhenStopped() {
-    val bytes = javaClass.classLoader!!.getResourceAsStream("media/h264-aac.m2ts")!!.readBytes()
-    val server = MockWebServer().also { servers += it }
-    server.dispatcher =
-      WebServerDispatcher.forResources(
-        // A live stream names no length: it goes on until the viewer stops it.
-        listOf(
-          WebServerDispatcher.Resource.Builder().setPath("/live/7.ts").setData(bytes).resolvesToUnknownLength(true).build(),
-        ),
-      )
+    val server = live(throttled = true)
     val owner = owner()
     owner.admit(
       Admission(
@@ -168,7 +183,8 @@ class PlayerOwnerTest {
         HoldRef.Source("m3u:1"),
       ),
     )
-    untilPhase("a", Phase.PLAYING, Phase.ENDED)
+    // Stopped while the stream is still arriving, its connection open.
+    until { server.requestCount > 0 }
     val request = server.takeRequest()
     assertEquals("MrStreamer-Android/0.1.0", request.getHeader("User-Agent"))
     assertEquals("https://lists.example/", request.getHeader("Referer"))
@@ -179,6 +195,39 @@ class PlayerOwnerTest {
     assertTrue(owner.stop("a"))
     until { recorder.releases.isNotEmpty() }
     assertEquals(Release("a", HoldRef.Source("m3u:1"), "connections-closed"), recorder.releases.single())
+  }
+
+  @Test
+  fun choosesAVideoQualityAndThenChoosesByItselfAgain() {
+    val ladder = listOf("index.m3u8") + listOf("v0", "v1").flatMap { variant ->
+      listOf("index.m3u8", "segment0.m2ts", "segment1.m2ts").map { "$variant/$it" }
+    }
+    val files = ladder.map { fixture("hls-ladder/$it") }
+    val owner = owner()
+    owner.admit(file("a", files.first(), format = "hls"))
+    untilPhase("a", Phase.PLAYING)
+    val video = recorder.tracks.getValue("a").filter { it.type == "video" }
+    assertEquals(listOf(180, 90), video.map { it.height })
+    val (high, low) = video
+
+    assertTrue(owner.setQuality("a", low.id))
+    until { recorder.tracks.getValue("a").filter { it.selected }.map { it.id }.containsAll(listOf(low.id)) &&
+      recorder.tracks.getValue("a").none { it.id == high.id && it.selected } }
+    assertFalse(owner.setQuality("a", "99:0"))
+    assertFalse(owner.setQuality("b", low.id))
+    assertTrue(owner.setQuality("a", null))
+    until { recorder.tracks.getValue("a").first { it.id == high.id }.selected }
+  }
+
+  @Test
+  fun saysALiveStreamThatEndedLostItsConnection() {
+    val server = live(throttled = false)
+    val owner = owner()
+    owner.admit(Admission("a", server.url("/live/7.ts").toString(), emptyMap(), "mpegts", "live", 0, HoldRef.Source("x")))
+    untilPhase("a", Phase.FAILED)
+    assertEquals(Failure("network", "STREAM_ENDED"), recorder.of("a").last().failure)
+    assertTrue(owner.resume("a"))
+    until { recorder.of("a").last().phase != Phase.FAILED }
   }
 
   @Test

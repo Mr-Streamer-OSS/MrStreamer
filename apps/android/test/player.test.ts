@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
-import type { PlayIntent } from "../src/player/intent.ts";
+import { intentKey, linkedIntent, type PlayIntent } from "../src/player/intent.ts";
 import type { Admission, NativePlayer, Observation, Release, Track } from "../src/player/native.ts";
 import { playerOwner, type Settled } from "../src/player/player.ts";
 import type { Resolve, StreamRequest } from "../src/player/resolve.ts";
@@ -107,7 +107,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe("player", () => {
   it("admits a resolved intent under its attempt and shows what the native player observes", async () => {
     const native = fakeNative();
-    const owner = playerOwner(native.module, { resolve: async () => request() });
+    const owner = playerOwner(native.module, async () => request());
     const attempt = owner.play(live("7"));
     expect(owner.state.get()).toMatchObject({ kind: "playing", attempt, phase: "resolving" });
     await flush();
@@ -143,7 +143,7 @@ describe("player", () => {
   it("replaces what plays, stopping it at once and ignoring everything late from it", async () => {
     const native = fakeNative();
     const held = heldResolve();
-    const owner = playerOwner(native.module, { resolve: held.resolve });
+    const owner = playerOwner(native.module, held.resolve);
 
     const first = owner.play(live("1"));
     held.pending[0]!.answer.resolve(request("http://tv.example/1.ts"));
@@ -174,10 +174,8 @@ describe("player", () => {
 
   it("says why an intent couldn't be resolved, and refuses commands for it", async () => {
     const native = fakeNative();
-    const owner = playerOwner(native.module, {
-      resolve: async () => {
-        throw new AppFailure({ kind: "needs-secret", subscriptionId: "xtream:1" });
-      },
+    const owner = playerOwner(native.module, async () => {
+      throw new AppFailure({ kind: "needs-secret", subscriptionId: "xtream:1" });
     });
     owner.play(live("7"));
     await flush();
@@ -191,10 +189,8 @@ describe("player", () => {
 
   it("keeps no address in an unexpected failure's text", async () => {
     const native = fakeNative();
-    const owner = playerOwner(native.module, {
-      resolve: async () => {
-        throw new TypeError(`Network request failed for ${SECRET_URL}`);
-      },
+    const owner = playerOwner(native.module, async () => {
+      throw new TypeError(`Network request failed for ${SECRET_URL}`);
     });
     owner.play(live("7"));
     await flush();
@@ -213,18 +209,18 @@ describe("player", () => {
       title: "Film",
       resumeAt: 60_000,
     };
-    const owner = playerOwner(native.module, {
-      resolve: async () => ({
-        ...request(),
-        mode: "title",
-        format: "progressive",
-        startMs: 60_000,
-      }),
-      onSettled: (each) => settled.push(each),
-    });
+    const owner = playerOwner(native.module, async () => ({
+      ...request(),
+      mode: "title",
+      format: "progressive",
+      startMs: 60_000,
+    }));
+    owner.onSettled((each) => settled.push(each));
     const attempt = owner.play(title);
     await flush();
     expect(native.admitted[0]).toMatchObject({ startMs: 60_000 });
+    native.observe(attempt, { phase: "paused", positionMs: 61_000, durationMs: 5_400_000 });
+    // A paused stream observed again, as a live window refreshes, settles once.
     native.observe(attempt, { phase: "paused", positionMs: 61_000, durationMs: 5_400_000 });
     owner.play(live("7"));
     native.observe(attempt, { phase: "stopped", positionMs: 61_500, durationMs: 5_400_000 });
@@ -236,7 +232,7 @@ describe("player", () => {
 
   it("releases a source only once the native player says what it let go of", async () => {
     const native = fakeNative();
-    const owner = playerOwner(native.module, { resolve: async () => request() });
+    const owner = playerOwner(native.module, async () => request());
     const attempt = owner.play(live("7"));
     await flush();
 
@@ -259,5 +255,90 @@ describe("player", () => {
     expect(released).toEqual([release]);
     // Nothing holds it any more.
     expect(await owner.release(() => true)).toEqual([]);
+  });
+
+  it("counts a release the native player reports while it is still stopping", async () => {
+    const native = fakeNative();
+    const owner = playerOwner(native.module, async () => request());
+    const attempt = owner.play(live("7"));
+    await flush();
+    const release: Release = {
+      attempt,
+      hold: { kind: "source", sourceId: "xtream:1" },
+      outcome: "connections-closed",
+    };
+    const stop = native.module.stop;
+    native.module.stop = async (each) => {
+      native.release(release);
+      return stop(each);
+    };
+    expect(await owner.release(() => true)).toEqual([release]);
+  });
+
+  it("tries a failed stream again where it was, and an unresolved intent afresh", async () => {
+    const native = fakeNative();
+    let fail = true;
+    const owner = playerOwner(native.module, async () => {
+      if (fail) throw new AppFailure({ kind: "needs-secret", subscriptionId: "xtream:1" });
+      return request();
+    });
+    owner.play(live("7"));
+    await flush();
+    fail = false;
+    await owner.retry();
+    await flush();
+    const attempt = native.admitted[0]!.attempt;
+    expect(owner.state.get()).toMatchObject({ attempt, phase: "resolving" });
+
+    native.observe(attempt, {
+      phase: "failed",
+      positionMs: 30_000,
+      failure: { kind: "network", code: "STREAM_ENDED", status: null },
+    });
+    await owner.retry();
+    expect(native.calls.at(-1)).toBe(`resume ${attempt}`);
+    expect(native.admitted).toHaveLength(1);
+  });
+
+  it("reports a release as unconfirmed when the native player refused the admission", async () => {
+    const native = fakeNative();
+    const refusal = Promise.withResolvers<void>();
+    native.module.admit = () => refusal.promise;
+    const owner = playerOwner(native.module, async () => request());
+    const attempt = owner.play(live("7"));
+    await flush();
+    const releasing = owner.release(() => true);
+    refusal.reject(new Error("React context lost"));
+    expect(await releasing).toEqual([
+      { attempt, hold: { kind: "source", sourceId: "xtream:1" }, outcome: "unconfirmed" },
+    ]);
+  });
+});
+
+describe("watch links", () => {
+  const title: PlayIntent = {
+    kind: "title",
+    sourceId: "xtream:1",
+    media: "movie",
+    id: "42",
+    container: "mkv",
+    title: "Film",
+  };
+
+  it("carries what screens play, never a file and never an impossible position", () => {
+    const linked = (value: unknown) => linkedIntent(JSON.stringify(value));
+    expect(linked(live("7"))).toEqual(live("7"));
+    expect(linked({ ...title, resumeAt: 90_000 })).toEqual({ ...title, resumeAt: 90_000 });
+    expect(linked({ kind: "file", path: "/data/files/a.mkv", title: "A" })).toBeNull();
+    expect(linked({ ...title, resumeAt: -5_000 })).toBeNull();
+    const catchUp = { ...live("7"), kind: "catch-up", days: 3, window: { start: 2, end: 1 } };
+    expect(linked(catchUp)).toBeNull();
+    expect(linked({ ...catchUp, days: -3, window: { start: 1, end: 2 } })).toBeNull();
+    expect(linkedIntent("not json")).toBeNull();
+  });
+
+  it("tells two versions of a title apart", () => {
+    expect(intentKey(title)).not.toBe(intentKey({ ...title, container: "mp4" }));
+    expect(intentKey({ ...title, resumeAt: 5 })).toBe(intentKey(title));
   });
 });

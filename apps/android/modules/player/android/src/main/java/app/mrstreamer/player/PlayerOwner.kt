@@ -1,6 +1,7 @@
 package app.mrstreamer.player
 
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
@@ -14,6 +15,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -145,6 +147,8 @@ class PlayerOwner(
               Player.EVENT_POSITION_DISCONTINUITY,
               Player.EVENT_TIMELINE_CHANGED,
               Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+              Player.EVENT_IS_PLAYING_CHANGED,
+              Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
             )
           ) observe()
         }
@@ -164,7 +168,7 @@ class PlayerOwner(
 
   /** Plays [admission], replacing what played before. */
   fun admit(admission: Admission) {
-    retire()
+    val ending = end()
     val hold =
       Hold(main) { closed ->
         events?.released(Release(admission.attempt, admission.hold, if (closed) outcomeOf(admission) else "unconfirmed"))
@@ -174,12 +178,15 @@ class PlayerOwner(
     if (local != null && !File(local.path).isFile) {
       player.stop()
       player.clearMediaItems()
+      ending?.let(::letGo)
       observe(Failure("file-missing", "ERROR_CODE_IO_FILE_NOT_FOUND"))
       return
     }
     val http =
       DefaultHttpDataSource.Factory()
-        .setAllowCrossProtocolRedirects(true)
+        // An http address may move to https; an https one never moves to http, where its login
+        // would travel in the clear (core's providerFetch holds the app's other requests to that).
+        .setAllowCrossProtocolRedirects(Uri.parse(admission.url).scheme == "http")
         .setConnectTimeoutMs(CONNECT_TIMEOUT_MS)
         .setReadTimeoutMs(READ_TIMEOUT_MS)
         .setDefaultRequestProperties(admission.headers)
@@ -188,7 +195,7 @@ class PlayerOwner(
     }
     val item =
       MediaItem.Builder()
-        .setUri(admission.url)
+        .setUri(if (local != null) Uri.fromFile(File(local.path)) else Uri.parse(admission.url))
         .setMediaId(admission.attempt)
         .setMimeType(
           when (admission.format) {
@@ -198,10 +205,12 @@ class PlayerOwner(
           },
         )
         .build()
-    val source =
-      DefaultMediaSourceFactory(hold.factory(DefaultDataSource.Factory(context, http)), extractors)
-        .createMediaSource(item)
+    // A file reads only files: a downloaded playlist naming an address can't stream through it.
+    val upstream = if (local != null) FileDataSource.Factory() else DefaultDataSource.Factory(context, http)
+    val source = DefaultMediaSourceFactory(hold.factory(upstream), extractors).createMediaSource(item)
     if (admission.mode == "live") player.setMediaSource(source) else player.setMediaSource(source, admission.startMs)
+    // Only now that its media is no longer the player's can what the last attempt held settle.
+    ending?.let(::letGo)
     player.setPlaybackSpeed(1f)
     player.trackSelectionParameters =
       player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
@@ -215,14 +224,15 @@ class PlayerOwner(
   /** Plays on; a live stream that can't be seeked rejoins its live edge, a failed one tries again. */
   fun resume(attempt: String) =
     command(attempt, ::ownsCurrentItem) {
-      if (player.isCurrentMediaItemLive && !player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
+      val live = current?.admission?.mode == "live"
+      if (live || player.isCurrentMediaItemLive) player.seekToDefaultPosition()
+      else if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
       if (player.playbackState == Player.STATE_IDLE) player.prepare()
-      if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
       player.play()
     }
 
   fun seek(attempt: String, positionMs: Long) =
-    command(attempt, { ownsCurrentItem() && player.isCurrentMediaItemSeekable }) { player.seekTo(positionMs.coerceAtLeast(0)) }
+    command(attempt, { ownsCurrentItem() && seekable() }) { player.seekTo(positionMs.coerceAtLeast(0)) }
 
   fun setSpeed(attempt: String, speed: Float) =
     command(attempt, { current?.admission?.mode != "live" && !player.isCurrentMediaItemLive && speed in 0.25f..4f }) {
@@ -253,9 +263,10 @@ class PlayerOwner(
   fun stop(attempt: String) =
     command(attempt) {
       observe()
-      retire()
+      val ending = end()
       player.stop()
       player.clearMediaItems()
+      ending?.let(::letGo)
     }
 
   /** Ends whatever plays, as when the app's JS goes away. */
@@ -289,18 +300,29 @@ class PlayerOwner(
     return true
   }
 
-  /** Reports the current attempt's last position as stopped, and lets go of what it holds. */
-  private fun retire() {
-    val ending = current ?: return
+  /** Reports the current attempt's last position as stopped, and returns it for [letGo]. */
+  private fun end(): Current? {
+    val ending = current ?: return null
     if (!ending.stopped) {
       ending.stopped = true
       main.removeCallbacks(tick)
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
     current = null
+    return ending
+  }
+
+  /**
+   * Settles what [ending] held once the player no longer has its media: no reader of it opens
+   * after this, and the release is reported when the last open one closes.
+   */
+  private fun letGo(ending: Current) {
     ending.hold.retire()
     main.postDelayed({ ending.hold.timeOut() }, RELEASE_TIMEOUT_MS)
   }
+
+  /** Live plays at its live edge: going back in a channel is catch-up's, a mode of its own. */
+  private fun seekable() = current?.admission?.mode != "live" && player.isCurrentMediaItemSeekable
 
   private fun ownsCurrentItem(): Boolean {
     val now = current ?: return false
@@ -312,6 +334,10 @@ class PlayerOwner(
     if (now.stopped) return
     if (failure != null) now.failure = failure
     else if (player.playbackState != Player.STATE_IDLE) now.failure = null
+    // A live stream has no end: one that ends lost its connection to the provider.
+    if (player.playbackState == Player.STATE_ENDED && now.admission.mode == "live") {
+      now.failure = Failure("network", "STREAM_ENDED")
+    }
     val phase =
       when {
         now.failure != null -> Phase.FAILED
@@ -332,8 +358,9 @@ class PlayerOwner(
       positionMs = player.currentPosition.coerceAtLeast(0),
       durationMs = player.duration.takeIf { it != C.TIME_UNSET && !player.isCurrentMediaItemLive },
       bufferedMs = player.totalBufferedDuration,
-      live = admission.mode == "live" || player.isCurrentMediaItemLive,
-      seekable = player.isCurrentMediaItemSeekable,
+      // A recording is never live, whatever its playlist says: Live and catch-up stay apart.
+      live = admission.mode == "live",
+      seekable = admission.mode != "live" && player.isCurrentMediaItemSeekable,
       speed = player.playbackParameters.speed,
       failure = failure,
     )

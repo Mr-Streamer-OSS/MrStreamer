@@ -139,13 +139,15 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   successor. `player.state` holds what the native player observed (phase, position, duration,
   buffer, live and seekable, speed, failure) and the tracks the media declares, each saying
   whether this phone decodes it; `capabilities()` lists the decoders the phone declares.
-  `setSpeed` and `setQuality` take effect on titles, recordings and files; `onSettled` (see
-  `playerOwner`) reports where an attempt paused, stopped or ended, for history to save.
-  `release(matches)` stops what holds a source or file and resolves once the native player says
-  how it let go: `file-closed`, or `connections-closed`, after which whether the provider counts
-  the connection as ended can't be observed. Watch is `src/app/watch.tsx`, opened with
-  `watchHref(intent)` after `player.play(intent)`; the mini player shows while something plays
-  and Watch doesn't. `PlayerSurface` shows the picture: the newest one mounted has it.
+  Live plays at its live edge and doesn't seek or change speed: going back is catch-up's.
+  `setQuality` chooses a video track wherever there are several. `retry()` prepares a failed
+  attempt again where it was, and `onSettled(listener)` reports once where each attempt paused,
+  stopped or ended, for history to save. `release(matches)` stops what holds a source or file and
+  resolves once the native player says how it let go: `file-closed`; `connections-closed`, after
+  which whether the provider counts the connection as ended can't be observed; or `unconfirmed`
+  when a reader was still open ten seconds later. No reader of an attempt opens once it is let go.
+  Watch is `src/app/watch.tsx`, opened with `watchHref(intent)` after `player.play(intent)`; the
+  mini player shows while something plays and Watch doesn't. `PlayerSurface` shows the picture: the newest one mounted has it.
   Playlist channels are found by reading the playlist link again until their entry; the shared
   playlist adapter can answer that from its catalogue instead.
 

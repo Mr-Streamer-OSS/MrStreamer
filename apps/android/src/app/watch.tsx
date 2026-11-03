@@ -48,6 +48,12 @@ export default function Watch() {
   }, [intent]);
 
   const state = useStore(player.state);
+  // Stopped from elsewhere (the mini player's Close, a notification): nothing is left to watch.
+  const played = useRef(false);
+  useEffect(() => {
+    if (state.kind === "playing") played.current = true;
+    else if (played.current) leave();
+  }, [state.kind]);
   const insets = useSafeAreaInsets();
   const reader = useScreenReader();
   const [shown, setShown] = useState(true);
@@ -60,8 +66,11 @@ export default function Watch() {
     const timer = setTimeout(() => setShown(false), HIDE_AFTER_MS);
     return () => clearTimeout(timer);
   }, [shown, phase, touched]);
-  const controls = shown || reader || phase !== "playing";
-  const loading = phase === "resolving" || phase === "preparing" || phase === "buffering";
+  // A finger on the seek bar keeps the controls up until it lifts.
+  const [held, setHeld] = useState(false);
+  const controls = shown || reader || held || phase !== "playing";
+  // Rebuffering keeps play, pause and the jumps; only a start with nothing yet shows Loading.
+  const loading = phase === "resolving" || phase === "preparing";
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -74,7 +83,11 @@ export default function Watch() {
         style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
       />
       {state.kind === "playing" && state.failure ? (
-        <Failed failure={state.failure} onRetry={() => player.play(state.intent)} />
+        <Failed
+          failure={state.failure}
+          playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
+          onRetry={() => void player.retry()}
+        />
       ) : loading ? (
         <Centre>
           <Text
@@ -88,6 +101,7 @@ export default function Watch() {
       {controls ? (
         <>
           <View
+            pointerEvents="box-none"
             style={{
               position: "absolute",
               top: 0,
@@ -127,6 +141,7 @@ export default function Watch() {
           ) : null}
           {state.kind === "playing" && (state.live || state.seekable) ? (
             <View
+              pointerEvents="box-none"
               style={{
                 position: "absolute",
                 left: 0,
@@ -139,7 +154,7 @@ export default function Watch() {
                 backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
               }}
             >
-              <Progress now={state} onTouch={touch} />
+              <Progress now={state} onTouch={touch} onHold={setHeld} />
             </View>
           ) : null}
         </>
@@ -261,7 +276,15 @@ function Round({
 }
 
 /** The Live marker, and for media that seeks its position, seek bar and duration. */
-function Progress({ now, onTouch }: { now: Playing; onTouch: () => void }) {
+function Progress({
+  now,
+  onTouch,
+  onHold,
+}: {
+  now: Playing;
+  onTouch: () => void;
+  onHold: (held: boolean) => void;
+}) {
   const duration = now.seekable && now.durationMs ? now.durationMs : null;
   return (
     <View
@@ -290,7 +313,9 @@ function Progress({ now, onTouch }: { now: Playing; onTouch: () => void }) {
           </Text>
         </View>
       ) : null}
-      {duration === null ? null : <SeekBar now={now} durationMs={duration} onTouch={onTouch} />}
+      {duration === null ? null : (
+        <SeekBar now={now} durationMs={duration} onTouch={onTouch} onHold={onHold} />
+      )}
     </View>
   );
 }
@@ -303,10 +328,12 @@ function SeekBar({
   now,
   durationMs,
   onTouch,
+  onHold,
 }: {
   now: Playing;
   durationMs: number;
   onTouch: () => void;
+  onHold: (held: boolean) => void;
 }) {
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -342,14 +369,19 @@ function SeekBar({
         onResponderGrant={(event) => {
           origin.current = event.nativeEvent.pageX - event.nativeEvent.locationX;
           onTouch();
+          onHold(true);
           setDragging(at(event));
         }}
         onResponderMove={(event) => setDragging(at(event))}
         onResponderRelease={(event) => {
           setDragging(null);
+          onHold(false);
           seek(at(event));
         }}
-        onResponderTerminate={() => setDragging(null)}
+        onResponderTerminate={() => {
+          setDragging(null);
+          onHold(false);
+        }}
         style={{ flex: 1, height: 48, justifyContent: "center" }}
       >
         <View
@@ -382,8 +414,16 @@ function clock(ms: number): string {
 }
 
 /** Why it doesn't play, and Try again. */
-function Failed({ failure, onRetry }: { failure: PlaybackFailure; onRetry: () => void }) {
-  const { headline, detail } = describePlayback(failure);
+function Failed({
+  failure,
+  playlist,
+  onRetry,
+}: {
+  failure: PlaybackFailure;
+  playlist: boolean;
+  onRetry: () => void;
+}) {
+  const { headline, detail } = describePlayback(failure, playlist);
   const { focused, handlers } = useKeyboardFocus();
   return (
     <Centre>
@@ -440,11 +480,14 @@ interface Described {
   readonly detail: string | null;
 }
 
-/** A failure in the desktop's and iOS app's words, which share their translations. */
-function describePlayback(failure: PlaybackFailure): Described {
+/**
+ * A failure in the desktop's and iOS app's words, which share their translations. `playlist`: the
+ * source is a playlist link, whose refusals are more often a country's than another device's.
+ */
+function describePlayback(failure: PlaybackFailure, playlist: boolean): Described {
   return failure.kind === "resolve"
     ? { headline: t("Didn't start"), detail: describeResolve(failure.error) }
-    : describeNative(failure.failure);
+    : describeNative(failure.failure, playlist);
 }
 
 /** Why the address couldn't be worked out. */
@@ -464,7 +507,7 @@ function describeResolve(error: AppError): string {
 }
 
 /** What the native player met. Media3's own code names stay out of the screen. */
-function describeNative(failure: NativeFailure): Described {
+function describeNative(failure: NativeFailure, playlist: boolean): Described {
   switch (failure.kind) {
     case "network":
       return {
@@ -480,10 +523,16 @@ function describeNative(failure: NativeFailure): Described {
             "The provider answered that it gets too many requests. Wait a moment before trying again.",
           ),
         };
+      // As the desktop words it (features/watch/problems.ts): a check only for 401 and 403.
       if ([401, 403, 458, 509].includes(status))
         return {
           headline: t("Refused by the provider"),
-          detail: t("Another device may be using your connection."),
+          detail:
+            status !== 401 && status !== 403
+              ? null
+              : playlist
+                ? t("Some playlist channels only play in certain countries.")
+                : t("If another device is watching on this subscription, stop it there first."),
         };
       if (status === 404 || status === 410)
         return { headline: t("No stream right now"), detail: null };

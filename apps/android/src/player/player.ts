@@ -68,18 +68,22 @@ export interface PlayerOwner {
   setQuality(trackId: string | null): Promise<boolean>;
   stop(): Promise<void>;
   /**
+   * Tries a failed attempt again: the native player prepares it again where it was, and an intent
+   * whose address couldn't be worked out is played afresh.
+   */
+  retry(): Promise<void>;
+  /**
+   * Calls `listener` as each attempt pauses, stops, is replaced or ends, once per change: where
+   * history saves it to continue from. Returns the unsubscribe.
+   */
+  onSettled(listener: (settled: Settled) => void): () => void;
+  /**
    * Stops whatever holds a source or file `matches` names, as before removing a source or
    * deleting a download, and resolves with how each attempt holding one let go of it once the
    * native player says (none when nothing held one).
    */
   release(matches: (hold: HoldRef) => boolean): Promise<readonly Release[]>;
   capabilities(): Capabilities;
-}
-
-export interface PlayerOptions {
-  readonly resolve: Resolve;
-  /** Called as each attempt pauses, stops, is replaced or ends. */
-  readonly onSettled?: (settled: Settled) => void;
 }
 
 const holdOf = (intent: PlayIntent): HoldRef =>
@@ -98,6 +102,8 @@ const failureOf = (cause: unknown): AppError =>
 
 interface Admitted {
   readonly intent: PlayIntent;
+  /** The phase it last settled in, so an unchanged one isn't reported twice. */
+  settled: NativePhase | null;
   readonly released: Promise<Release>;
   readonly settle: (release: Release) => void;
 }
@@ -105,11 +111,12 @@ interface Admitted {
 function admittedOf(intent: PlayIntent): Admitted {
   let settle!: (release: Release) => void;
   const released = new Promise<Release>((resolve) => (settle = resolve));
-  return { intent, released, settle };
+  return { intent, settled: null, released, settle };
 }
 
-export function playerOwner(native: NativePlayer, options: PlayerOptions): PlayerOwner {
+export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner {
   const state = store<PlayerState>({ kind: "idle" });
+  const settledListeners = new Set<(settled: Settled) => void>();
   let attempts = 0;
   /** The attempt under way while its address is worked out. */
   let resolving: AbortController | null = null;
@@ -127,13 +134,17 @@ export function playerOwner(native: NativePlayer, options: PlayerOptions): Playe
     const entry = admitted.get(observation.attempt);
     if (!entry) return;
     const { phase } = observation;
-    if (phase === "paused" || phase === "stopped" || phase === "ended")
-      options.onSettled?.({
+    const settles = phase === "paused" || phase === "stopped" || phase === "ended";
+    if (settles && entry.settled !== phase) {
+      const settled = {
         intent: entry.intent,
         phase,
         positionMs: observation.positionMs,
         durationMs: observation.durationMs,
-      });
+      };
+      for (const listener of settledListeners) listener(settled);
+    }
+    entry.settled = settles ? phase : null;
     if (phase === "stopped") return;
     update(observation.attempt, (now) => ({
       ...now,
@@ -169,7 +180,7 @@ export function playerOwner(native: NativePlayer, options: PlayerOptions): Playe
     return now && admitted.has(now.attempt) ? run(now.attempt) : false;
   };
 
-  return {
+  const owner: PlayerOwner = {
     state,
 
     play(intent) {
@@ -201,12 +212,16 @@ export function playerOwner(native: NativePlayer, options: PlayerOptions): Playe
           phase: "failed",
           failure: { kind: "resolve", error: failureOf(cause) },
         }));
-      options.resolve(intent, controller.signal).then(
+      resolve(intent, controller.signal).then(
         (request) => {
           if (resolving !== controller) return;
           resolving = null;
           admitted.set(attempt, admittedOf(intent));
           native.admit({ ...request, attempt }).catch((cause: unknown) => {
+            // Whatever the native player opened before it failed is unknown: say so.
+            admitted
+              .get(attempt)
+              ?.settle({ attempt, hold: holdOf(intent), outcome: "unconfirmed" });
             admitted.delete(attempt);
             failed(cause);
           });
@@ -227,13 +242,26 @@ export function playerOwner(native: NativePlayer, options: PlayerOptions): Playe
     setQuality: (trackId) => command((attempt) => native.setQuality(attempt, trackId)),
     stop: end,
 
+    async retry() {
+      const now = playing();
+      if (now?.failure?.kind === "native" && (await native.resume(now.attempt))) return;
+      if (now) owner.play(now.intent);
+    },
+
+    onSettled(listener) {
+      settledListeners.add(listener);
+      return () => settledListeners.delete(listener);
+    },
+
     async release(matches) {
+      // Taken before stopping: a release reported while the stop is under way is still counted.
+      const holding = [...admitted.values()].filter((entry) => matches(holdOf(entry.intent)));
       const now = playing();
       if (now && matches(holdOf(now.intent))) await end();
-      const holding = [...admitted.values()].filter((entry) => matches(holdOf(entry.intent)));
       return Promise.all(holding.map((entry) => entry.released));
     },
 
     capabilities: () => native.capabilities(),
   };
+  return owner;
 }

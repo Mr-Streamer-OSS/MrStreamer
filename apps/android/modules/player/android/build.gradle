@@ -10,7 +10,7 @@ version = '0.1.0'
 def media3 = '1.11.1'
 
 android {
-  namespace "app.mrstreamer.player"
+  namespace "app.mrstreamer.playback"
   defaultConfig {
     versionCode 1
     versionName "0.1.0"

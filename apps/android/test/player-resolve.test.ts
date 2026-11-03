@@ -229,24 +229,41 @@ describe("player addresses", () => {
     ).rejects.toMatchObject({ error: { kind: "catch-up", reason: "none" } });
   });
 
+  it("says a refused link and an address that isn't a playlist apart from a missing channel", async () => {
+    const link = "https://lists.example/tv.m3u";
+    const live = { kind: "live", sourceId: "source", channelId: "news.uk", title: "News" } as const;
+    await expect(
+      resolveWith({ kind: "m3u", link }, async () => new Response("", { status: 403 }))(
+        live,
+        signal,
+      ),
+    ).rejects.toMatchObject({ error: { kind: "incomplete-login" } });
+    await expect(
+      resolveWith({ kind: "m3u", link }, serving("<html>Not here</html>\n".repeat(50)).fetchImpl)(
+        live,
+        signal,
+      ),
+    ).rejects.toMatchObject({ error: { kind: "unreachable" } });
+  });
+
   it("plays a file on this phone from where it was left", async () => {
     await expect(
       resolveWith(xtream)(
         {
           kind: "file",
-          path: "/data/files/Downloads/A film.mkv",
+          path: "/data/files/Downloads/A film #1.mkv",
           title: "A film",
           resumeAt: 5_000,
         },
         signal,
       ),
     ).resolves.toEqual({
-      url: "file:///data/files/Downloads/A%20film.mkv",
+      url: "file:///data/files/Downloads/A%20film%20%231.mkv",
       headers: {},
       format: "progressive",
       mode: "file",
       startMs: 5_000,
-      path: "/data/files/Downloads/A film.mkv",
+      path: "/data/files/Downloads/A film #1.mkv",
     });
   });
 });

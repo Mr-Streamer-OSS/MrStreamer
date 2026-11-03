@@ -44,7 +44,7 @@ export type PlayIntent =
       readonly resumeAt?: number;
     };
 
-/** The same for intents that play the same thing, whatever position they start from. */
+/** The same for intents that play the same file or channel, whatever position they start from. */
 export function intentKey(intent: PlayIntent): string {
   switch (intent.kind) {
     case "live":
@@ -58,13 +58,19 @@ export function intentKey(intent: PlayIntent): string {
         intent.window.end,
       ]);
     case "title":
-      return JSON.stringify([intent.kind, intent.sourceId, intent.media, intent.id]);
+      return JSON.stringify([
+        intent.kind,
+        intent.sourceId,
+        intent.media,
+        intent.id,
+        intent.container,
+      ]);
     case "file":
       return JSON.stringify([intent.kind, intent.path]);
   }
 }
 
-const window = type({ start: "number", end: "number" });
+const window = type({ start: "number", end: "number" }).narrow((each) => each.start < each.end);
 /** An intent a link can carry: not a file, which only the app itself names. */
 const Linked = type({
   kind: "'live'",
@@ -78,8 +84,8 @@ const Linked = type({
     channelId: "string",
     title: "string",
     window,
-    days: "number",
-    "from?": "number",
+    days: "number.integer > 0",
+    "from?": "number >= 0",
   })
   .or({
     kind: "'title'",
@@ -88,7 +94,7 @@ const Linked = type({
     id: "string",
     container: "string",
     title: "string",
-    "resumeAt?": "number",
+    "resumeAt?": "number >= 0",
   });
 
 /**

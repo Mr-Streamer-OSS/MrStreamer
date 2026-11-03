@@ -78,10 +78,7 @@ class PlayerModule : Module() {
     }
 
     // A reload of the app's JS leaves nothing playing that its new JS doesn't know of.
-    OnDestroy {
-      val app = appContext.reactContext?.applicationContext ?: return@OnDestroy
-      Handler(Looper.getMainLooper()).post { PlayerHost.owner(app).stopAll() }
-    }
+    OnDestroy { Handler(Looper.getMainLooper()).post { PlayerHost.existing()?.stopAll() } }
 
     View(PlayerSurface::class) {}
   }
