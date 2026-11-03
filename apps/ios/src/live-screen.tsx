@@ -1032,6 +1032,12 @@ function GuideGrid({
         list.current?.scrollToOffset({ offset: saved.current, animated: false });
         saved.current = undefined;
       }}
+      onScroll={({ nativeEvent }) => {
+        // A touch can stop momentum without an end event. Keep user-driven samples as a fallback.
+        if ("responderIgnoreScroll" in nativeEvent && nativeEvent.responderIgnoreScroll === false) {
+          if (navigation.isFocused()) gridScroll.set(scope, nativeEvent.contentOffset.y);
+        }
+      }}
       onScrollEndDrag={remember}
       onMomentumScrollEnd={remember}
       onScrollToTop={remember}
