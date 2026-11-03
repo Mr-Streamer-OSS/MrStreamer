@@ -17,6 +17,7 @@ it("keeps channel subscribers still for title progress but publishes changed cha
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = queryView(client);
   const own = (id: string) => ({ subscriptionId: SAVED.id, id });
+
   let snapshot: Viewing = {
     sequence: 1,
     favourites: [own("1"), own("3")],
@@ -24,9 +25,11 @@ it("keeps channel subscribers still for title progress but publishes changed cha
     continueWatching: [],
     marked: [],
   };
+
   ipc.always("viewing.get", snapshot);
   client.setQueryData(queries.viewing().queryKey, snapshot);
   let renders = 0;
+
   function Channels() {
     useListChannels({ kind: "favourites" });
     useListChannels({ kind: "recent" });
@@ -34,8 +37,10 @@ it("keeps channel subscribers still for title progress but publishes changed cha
     useListOrder({ kind: "favourites" }, false, []);
     const favourites = useFavouriteKeys();
     renders++;
+
     return createElement("output", null, [...favourites].join(","));
   }
+
   const publish = async (patch: Partial<Viewing>) => {
     snapshot = { ...snapshot, ...patch, sequence: snapshot.sequence + 1 };
     await act(async () => {
@@ -43,10 +48,12 @@ it("keeps channel subscribers still for title progress but publishes changed cha
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
   };
+
   const browsed = (id: string) =>
     ipc
       .argsOf("library.browse")
       .some((request) => request.scope.kind === "channels" && request.scope.channels[0]?.id === id);
+
   try {
     await view.render(createElement(Channels));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));

@@ -20,6 +20,7 @@ import {
 } from "./e2e/installed-upgrade-windows.ts";
 
 const INSTALL = "C:\\Users\\runner\\AppData\\Local\\Programs\\mrstreamer";
+
 const RUNNER: Runner = {
   id: "test",
   temp: "C:\\a\\_temp",
@@ -27,6 +28,7 @@ const RUNNER: Runner = {
   executable: `${INSTALL}\\Mr. Streamer.exe`,
   tools: [],
 };
+
 const at = (second: number) => `2026-10-10T06:00:${String(second).padStart(2, "0")}.0000000Z`;
 
 describe.skipIf(process.platform === "win32")(
@@ -35,13 +37,16 @@ describe.skipIf(process.platform === "win32")(
     let folder = "";
     let path = "";
     let app: ChildProcess;
+
     const shown = (list: WinProcess[]) =>
       writeFile(join(folder, "processes.json"), JSON.stringify(list));
+
     const kills = () =>
       readFileSync(join(folder, "kills.jsonl"), "utf8")
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line) as string[]);
+
     const ours = (pid: number, parent: number, second: number): WinProcess => ({
       pid,
       parent,
@@ -49,6 +54,7 @@ describe.skipIf(process.platform === "win32")(
       path: RUNNER.executable,
       created: at(second),
     });
+
     const foreign = (pid: number, parent: number, second: number): WinProcess => ({
       pid,
       parent,
@@ -56,6 +62,7 @@ describe.skipIf(process.platform === "win32")(
       path: "C:\\other\\other.exe",
       created: at(second),
     });
+
     const exit = (child: ChildProcess) =>
       child.exitCode !== null || child.signalCode !== null
         ? Promise.resolve()
@@ -65,6 +72,7 @@ describe.skipIf(process.platform === "win32")(
       folder = await mkdtemp(join(tmpdir(), "installed-upgrade-windows-"));
       const state = JSON.stringify(join(folder, "processes.json"));
       const log = JSON.stringify(join(folder, "kills.jsonl"));
+
       const command = async (name: string, body: string) => {
         await writeFile(join(folder, `${name}.cjs`), `const fs = require("node:fs");\n${body}`);
         await writeFile(
@@ -73,6 +81,7 @@ describe.skipIf(process.platform === "win32")(
           { mode: 0o755 },
         );
       };
+
       await command("powershell.exe", `process.stdout.write(fs.readFileSync(${state}, "utf8"));`);
       // Any use of taskkill is recorded: the check must never stop a process by its id.
       await command(
@@ -170,6 +179,7 @@ describe("what an installed upgrade run leaves behind", () => {
     await writeFile(join(profile, "Default", "Preferences"), "{}");
     const lock = join(root, "profile.lock");
     await writeFile(lock, "{}");
+
     return { root, profile, lock, installRoot: join(root, "install") };
   }
 

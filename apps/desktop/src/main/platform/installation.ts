@@ -15,6 +15,7 @@ import {
 export function snapName(env: NodeJS.ProcessEnv, resources: string): string | null {
   const root = env["SNAP"];
   const name = env["SNAP_INSTANCE_NAME"];
+
   return root && name && resources.startsWith(`${root}/`) ? name : null;
 }
 
@@ -25,8 +26,10 @@ export function snapName(env: NodeJS.ProcessEnv, resources: string): string | nu
  */
 export function snapPasswordStore(env: NodeJS.ProcessEnv): string {
   const desktops = (env["XDG_CURRENT_DESKTOP"] ?? "").split(":");
+
   if (!desktops.includes("KDE")) return "gnome-libsecret";
   const version = env["KDE_SESSION_VERSION"];
+
   return version === "5" || version === "6" ? `kwallet${version}` : "kwallet";
 }
 
@@ -38,8 +41,10 @@ export async function installedDistribution(options: {
   readonly resources: string;
 }): Promise<Distribution> {
   if (options.store) return "store";
+
   if (options.platform !== "linux" || !options.packaged) return "direct";
   const path = join(options.resources, INSTALLATION_MARKER);
+
   try {
     await lstat(path);
   } catch (error) {
@@ -51,7 +56,9 @@ export async function installedDistribution(options: {
       },
     );
   }
+
   let text: string;
+
   try {
     text = await readFile(path, "utf8");
   } catch (error) {
@@ -62,8 +69,10 @@ export async function installedDistribution(options: {
       },
     );
   }
+
   try {
     const value: unknown = JSON.parse(text);
+
     if (
       typeof value === "object" &&
       value !== null &&
@@ -76,5 +85,6 @@ export async function installedDistribution(options: {
   } catch {
     // A present marker is authoritative; damage must never enable direct updating.
   }
+
   throw new Error(t("Invalid {path}. Reinstall Mr. Streamer with your package manager.", { path }));
 }

@@ -27,17 +27,22 @@ export interface Runner {
 /** Refuses anywhere but a GitHub-hosted Windows runner, where installing replaces nobody's app. */
 export function disposableRunner(): Runner {
   const env = process.env;
+
   if (process.platform !== "win32") throw new Error("This check installs on Windows only.");
+
   if (env["GITHUB_ACTIONS"] !== "true" || env["RUNNER_ENVIRONMENT"] !== "github-hosted")
     throw new Error("This check runs only on a GitHub-hosted runner, never on a person's PC.");
+
   const [temp, local, run, attempt] = [
     env["RUNNER_TEMP"],
     env["LOCALAPPDATA"],
     env["GITHUB_RUN_ID"],
     env["GITHUB_RUN_ATTEMPT"],
   ];
+
   if (!temp || !local || !run || !attempt) throw new Error("The runner's environment is missing.");
   const installRoot = join(local, "Programs", "mrstreamer");
+
   return {
     id: `mrstreamer-upgrade-${run}-${attempt}-${crypto.randomUUID().slice(0, 8)}`,
     temp,
@@ -66,18 +71,24 @@ const FleetOwner = type({
 export function fleetRunner(input: unknown): Runner {
   const owner = FleetOwner.assert(input);
   const env = process.env;
+
   if (process.platform !== "win32") throw new Error("This check installs on Windows only.");
+
   if (env["GITHUB_ACTIONS"] || env["GH_TOKEN"] || env["GITHUB_TOKEN"])
     throw new Error("Fleet mode must not impersonate Actions or receive GitHub tokens.");
   const local = env["LOCALAPPDATA"];
   const roaming = env["APPDATA"];
+
   if (!local || !roaming || env["USERNAME"]?.toLowerCase() !== "agent")
     throw new Error("Fleet mode requires its disposable agent account.");
   const expected = win32.join(local, "Temp", `mrstreamer-${owner.task}-${owner.nonce}`);
+
   if (!same(owner.temp, expected)) throw new Error("Fleet temp must be the isolated task root.");
   const model = powershell("(Get-CimInstance Win32_ComputerSystem).Manufacturer");
+
   if (!/QEMU/i.test(model)) throw new Error("Fleet mode requires a disposable QEMU guest.");
   const installRoot = join(local, "Programs", "mrstreamer");
+
   for (const path of [installRoot, join(roaming, "mrstreamer"), join(roaming, "Mr. Streamer")])
     if (existsSync(path))
       throw new Error(
@@ -98,7 +109,9 @@ export function fleetRunner(input: unknown): Runner {
     }`,
     { MRS_TEMP: owner.temp, MRS_INSTALL: installRoot, MRS_ROAMING: roaming },
   );
+
   if (!existsSync(owner.temp)) throw new Error("Provision the task temp in the owned VM first.");
+
   const runner = {
     id: `mrstreamer-fleet-${owner.vmId}-${owner.nonce.slice(0, 16)}`,
     temp: owner.temp,
@@ -108,8 +121,11 @@ export function fleetRunner(input: unknown): Runner {
       join(installRoot, "resources", "ffmpeg", name),
     ),
   };
+
   assertNoAppRunning(runner, "Before Fleet execution");
+
   if (uninstallEntries().length) throw new Error("Fleet VM already has an installation.");
+
   return runner;
 }
 
@@ -128,6 +144,7 @@ function list<T>(script: string, values?: Record<string, string>): T[] {
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 const inside = (root: string, path: string | null) =>
   !!path && path.toLowerCase().startsWith(`${root.toLowerCase()}\\`);
 
@@ -168,6 +185,7 @@ function appProcesses(runner: Runner): WinProcess[] {
 /** Fails while any Mr. Streamer runs: the setup stops them by name, whoever started them. */
 export function assertNoAppRunning(runner: Runner, when: string): void {
   const running = appProcesses(runner);
+
   if (running.length > 0)
     throw new Error(
       `${when}: Mr. Streamer processes run (${running.map((p) => p.pid).join(", ")}).`,
@@ -191,28 +209,35 @@ export type Started = Pick<ChildProcess, "pid" | "exitCode" | "signalCode" | "ki
 export function ownedTree(runner: Runner, app: Started, childGraceMs = 20_000) {
   const exited = () => app.exitCode !== null || app.signalCode !== null;
   const root = processes().find((each) => each.pid === app.pid);
+
   if (!root || exited() || !same(root.path ?? "", runner.executable)) {
     app.kill("SIGKILL");
     throw new Error(
       `Process ${app.pid} can't be shown to be the installed app this run started: ${JSON.stringify(root ?? null)}.`,
     );
   }
+
   const owned = new Map([[key(root), root]]);
+
   /** The owned processes running now, after adding the children of those. */
   const alive = () => {
     const all = processes();
     let parents = all.filter((each) => owned.has(key(each)));
+
     while (parents.length > 0) {
       const children = all.filter(
         (each) =>
           !owned.has(key(each)) &&
           parents.some((parent) => parent.pid === each.parent && each.created >= parent.created),
       );
+
       for (const child of children) owned.set(key(child), child);
       parents = children;
     }
+
     return all.filter((each) => owned.has(key(each)));
   };
+
   return {
     root,
     sample: () => void alive(),
@@ -227,20 +252,27 @@ export function ownedTree(runner: Runner, app: Started, childGraceMs = 20_000) {
       alive();
       const forced: string[] = [];
       await close().catch(() => undefined);
+
       for (let i = 0; i < 150 && !exited(); i++) await delay(100);
+
       if (!exited()) {
         forced.push(`kill ${root.pid} through its handle`);
         app.kill("SIGKILL");
+
         for (let i = 0; i < 50 && !exited(); i++) await delay(100);
       }
+
       const until = Date.now() + childGraceMs;
+
       while (alive().length > 0 && Date.now() < until) await delay(200);
       const remaining = alive();
       const others = appProcesses(runner).filter((each) => !owned.has(key(each)));
+
       if (!exited() || remaining.length > 0 || others.length > 0)
         throw new Error(
           `The app's processes did not all end, and are left to the runner's disposal: ${[...remaining, ...others].map((p) => `${p.pid} ${p.name}`).join(", ") || root.pid}.`,
         );
+
       return {
         owned: [...owned.values()].map(({ pid, parent, name, created }) => ({
           pid,
@@ -279,8 +311,10 @@ function uninstallEntries(): UninstallEntry[] {
 function uninstaller(runner: Runner, entry: UninstallEntry): { path: string; args: string[] } {
   const command = entry.QuietUninstallString ?? `${entry.UninstallString ?? ""} /S`;
   const match = /^"([^"]+)"\s*(.*)$/.exec(command.trim());
+
   if (!match || !inside(runner.installRoot, match[1]!))
     throw new Error(`Installed apps names an uninstaller outside the install: ${command}`);
+
   return { path: match[1]!, args: match[2]!.split(/\s+/).filter(Boolean) };
 }
 
@@ -296,28 +330,35 @@ export async function install(
 ) {
   assertNoAppRunning(runner, "Before installing");
   const before = uninstallEntries();
+
   if (previous === null) {
     if (existsSync(runner.installRoot) || before.length > 0)
       throw new Error("Mr. Streamer is installed already: this runner isn't ours to replace.");
   } else if (before.length !== 1 || before[0]!.DisplayVersion !== previous) {
     throw new Error(`Installed apps doesn't hold ${previous} alone before the upgrade.`);
   }
+
   const started = Date.now();
+
   const code = await new Promise<number | null>((resolve, reject) => {
     const child = spawn(setup, ["/S"], { stdio: "ignore" });
     child.on("error", reject);
     child.on("exit", resolve);
   });
+
   if (code !== 0) throw new Error(`The setup of ${version} exited with ${code}.`);
   const after = uninstallEntries();
+
   if (after.length !== 1 || after[0]!.DisplayVersion !== version)
     throw new Error(`Installed apps doesn't name ${version} alone after the setup.`);
   uninstaller(runner, after[0]!);
+
   if (!existsSync(runner.executable)) throw new Error(`The setup left no ${runner.executable}.`);
   // A silent setup starts nothing; the next launch is this run's own.
   await delay(3000);
   assertNoAppRunning(runner, "After installing");
   const asar = join(runner.installRoot, "resources", "app.asar");
+
   return {
     version,
     seconds: Math.round((Date.now() - started) / 1000),
@@ -335,16 +376,20 @@ export async function install(
 export async function uninstall(runner: Runner) {
   assertNoAppRunning(runner, "Before uninstalling");
   const entries = uninstallEntries();
+
   if (entries.length !== 1)
     throw new Error("Installed apps doesn't hold this run's install alone.");
   const { path, args } = uninstaller(runner, entries[0]!);
   const run = spawn(path, args.includes("/S") ? args : [...args, "/S"], { stdio: "ignore" });
   await new Promise((resolve) => run.on("exit", resolve).on("error", resolve));
+
   // The uninstaller copies itself to a temporary folder and goes on from there.
   for (let i = 0; i < 120 && (existsSync(runner.executable) || uninstallEntries().length); i++)
     await delay(1000);
+
   if (existsSync(runner.executable) || uninstallEntries().length > 0)
     throw new Error("Uninstalling left the app installed.");
+
   return { uninstalled: true };
 }
 
@@ -379,6 +424,7 @@ export function outboundBlock(runner: Runner) {
   const created: string[] = [];
   let profiles: Profile[] | null = null;
   let audit: { success: boolean; failure: boolean } | null = null;
+
   const readProfiles = (store: string) =>
     list<Profile>(
       `$p = Get-NetFirewallProfile -PolicyStore $env:MRS_STORE | Select-Object Name,
@@ -387,20 +433,25 @@ export function outboundBlock(runner: Runner) {
       ConvertTo-Json -Compress -InputObject @($p)`,
       { MRS_STORE: store },
     );
+
   // auditpol through PowerShell, which reports its exit code.
   const auditpol = (args: string) =>
     powershell(`auditpol ${args}; if ($LASTEXITCODE) { exit $LASTEXITCODE }`, {
       MRS_AUDIT: AUDIT_CONNECTIONS,
     });
+
   const readAudit = () => {
     const csv = auditpol('/get "/subcategory:$env:MRS_AUDIT" /r');
     const setting = csv.split("\n").at(-1)?.split(",")[4] ?? "";
+
     return { success: /Success/.test(setting), failure: /Failure/.test(setting) };
   };
+
   const setAudit = (to: { success: boolean; failure: boolean }) =>
     auditpol(
       `/set "/subcategory:$env:MRS_AUDIT" /success:${to.success ? "enable" : "disable"} /failure:${to.failure ? "enable" : "disable"}`,
     );
+
   const readRule = (name: string) =>
     list<{ Enabled: string; Direction: string; Action: string; Status: string; Program: string }>(
       `$r = Get-NetFirewallRule -Name $env:MRS_RULE -PolicyStore ActiveStore -ErrorAction SilentlyContinue
@@ -434,11 +485,13 @@ export function outboundBlock(runner: Runner) {
       profiles = readProfiles("PersistentStore");
       audit = readAudit();
       setAudit({ success: audit.success, failure: true });
+
       for (const profile of profiles.filter((each) => each.Enabled !== "True"))
         powershell(
           "Set-NetFirewallProfile -Name $env:MRS_PROFILE -Enabled True -DefaultInboundAction Allow -DefaultOutboundAction Allow",
           { MRS_PROFILE: profile.Name },
         );
+
       for (const rule of rules) {
         powershell(
           "New-NetFirewallRule -Name $env:MRS_RULE -DisplayName $env:MRS_RULE -Description 'Mr. Streamer installed upgrade check; removed by the run that made it.' -Direction Outbound -Action Block -Program $env:MRS_PROGRAM -Profile Any -Enabled True | Out-Null",
@@ -446,8 +499,10 @@ export function outboundBlock(runner: Runner) {
         );
         created.push(rule.name);
       }
+
       const active = readProfiles("ActiveStore");
       const inForce = rules.map((rule) => ({ ...rule, read: readRule(rule.name) }));
+
       const working =
         active.every((each) => each.Enabled === "True") &&
         inForce.every(
@@ -460,8 +515,11 @@ export function outboundBlock(runner: Runner) {
             same(read[0]!.Program, program),
         ) &&
         readAudit().failure;
+
       const record = { profilesBefore: profiles, activeProfiles: active, rules: inForce };
+
       if (!working) throw new Error(`The outbound block isn't in force: ${JSON.stringify(record)}`);
+
       return record;
     },
     /** Connections of the blocked programs the platform refused since `since`. */
@@ -474,13 +532,16 @@ export function outboundBlock(runner: Runner) {
         ConvertTo-Json -Compress -InputObject @($e)`,
         { MRS_SINCE: since.toISOString() },
       );
+
       // The event names a program by its device path: \device\harddiskvolume3\users\...
       const ours = (application: string) =>
         programs.find((program) =>
           application.toLowerCase().endsWith(program.slice(2).toLowerCase()),
         );
+
       return events.flatMap((event) => {
         const program = ours(event["Application"] ?? "");
+
         return program
           ? [
               {
@@ -497,6 +558,7 @@ export function outboundBlock(runner: Runner) {
     /** Removes this run's rules, by name alone, and puts back the profiles and audit it changed. */
     restore() {
       const errors: string[] = [];
+
       const attempt = (what: string, action: () => unknown) => {
         try {
           action();
@@ -504,10 +566,12 @@ export function outboundBlock(runner: Runner) {
           errors.push(`${what}: ${String(error)}`);
         }
       };
+
       for (const name of created.splice(0))
         attempt(`remove ${name}`, () =>
           powershell("Remove-NetFirewallRule -Name $env:MRS_RULE", { MRS_RULE: name }),
         );
+
       for (const profile of (profiles ?? []).filter((each) => each.Enabled !== "True"))
         attempt(`restore ${profile.Name}`, () =>
           powershell(
@@ -520,10 +584,14 @@ export function outboundBlock(runner: Runner) {
             },
           ),
         );
+
       if (audit) attempt("restore audit", () => setAudit(audit!));
       const left = rules.flatMap((rule) => (readRule(rule.name).length > 0 ? [rule.name] : []));
+
       if (left.length > 0) errors.push(`rules still present: ${left.join(", ")}`);
+
       if (errors.length > 0) throw new Error(`Restoring the network: ${errors.join("; ")}`);
+
       return { rulesRemoved: rules.map((rule) => rule.name), profilesRestored: true, audit };
     },
   };
@@ -553,11 +621,13 @@ export function toolProbe(tool: string, url: string): Promise<ToolProbe> {
       { timeout: 30_000 },
       (error, _out, err) => {
         const lines = err.trim().split(/\r?\n/);
+
         const connection = lines.filter((line) =>
           /(Starting connection attempt|Successfully connected|Connection attempt .+ failed|Connection to .+ failed)/.test(
             line,
           ),
         );
+
         resolve({
           code: error ? (typeof error.code === "number" ? error.code : null) : 0,
           attempted: connection.some((line) => line.includes("Starting connection attempt")),

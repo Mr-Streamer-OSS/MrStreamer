@@ -27,8 +27,10 @@ import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 
 /** The id caption channels share among the subtitle tracks, their `page` apart: no rendition's. */
 const CAPTIONS_ID = -1;
+
 /** Lines that ended this long ago are let go. */
 const KEEP_BEHIND_S = 5;
+
 /** Discovery borrows the subtitle controller for one segment at a time. */
 const PROBES_PER_BURST = 3;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -124,6 +126,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   function listed(): ChannelTracks {
     const ids = renditionIds(hls.audioTracks);
     const subtitles = renditionIds(hls.subtitleTracks);
+
     return {
       audio: renditionAudio(hls.audioTracks.map((track, at) => facts(track, ids[at] ?? at))),
       subtitles: renditionSubtitles([
@@ -149,6 +152,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     if (released || !ready) return;
     const tracks = listed();
     const next = JSON.stringify(tracks);
+
     if (next === told) return;
     told = next;
     changeListener?.(tracks);
@@ -161,6 +165,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   /** Loads the viewer's choice, or the one bounded probe while that choice is off. */
   function assert(): void {
     if (released) return;
+
     const index =
       wanted?.format === "text"
         ? recoveryTimer
@@ -169,6 +174,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
         : probing === null
           ? -1
           : renditionIds(hls.subtitleTracks).indexOf(probing);
+
     if (hls.subtitleTrack !== index) hls.subtitleTrack = index;
   }
 
@@ -185,10 +191,12 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   function finishProbe(): void {
     stopProbe();
+
     if (released || nextProbe) return;
     const delay = probesInBurst >= PROBES_PER_BURST ? PROBE_REST_MS : 0;
     nextProbe = setTimeout(() => {
       nextProbe = null;
+
       if (delay > 0) probesInBurst = 0;
       discover();
     }, delay);
@@ -206,19 +214,24 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       wanted?.format === "text"
     )
       return;
+
     if (probesInBurst >= PROBES_PER_BURST) {
       finishProbe();
+
       return;
     }
+
     const candidates = listed().subtitles.filter(
       (track) => track.format === "text" && !proven.has(keyOf(track)) && !failed.has(track.id),
     );
+
     candidates.sort(
       (a, b) =>
         (triedAt.get(a.id) ?? 0) - (triedAt.get(b.id) ?? 0) ||
         Number(b.language === preferredLanguage) - Number(a.language === preferredLanguage),
     );
     const track = candidates[0];
+
     if (!track) return;
     probing = track.id;
     triedAt.set(track.id, Date.now());
@@ -238,6 +251,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   function armProbe(): void {
     if (probing === null) return;
+
     if (probeTimer) clearTimeout(probeTimer);
     const id = probing;
     probeTimer = setTimeout(
@@ -248,6 +262,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
 
   function armSelection(): void {
     if (!pictureStarted || wanted?.format !== "text") return;
+
     if (selectionTimer) clearTimeout(selectionTimer);
     const id = wanted.id;
     selectionTimer = setTimeout(
@@ -259,10 +274,12 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   /** Give a selected rendition time to recover without changing the viewer's choice. */
   function retrySelection(id: number): boolean {
     if (wanted?.format !== "text" || wanted.id !== id) return false;
+
     if (!selectionTimer) {
       selectionStartedAt = Date.now();
       armSelection();
     }
+
     return true;
   }
 
@@ -281,6 +298,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
         ),
       );
     }
+
     assert();
     hls.startLoad(-1);
   }
@@ -289,17 +307,23 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   function abandon(id: number, fatal = false): void {
     if (released) return;
     const selected = wanted?.format === "text" && wanted.id === id ? wanted : null;
+
     if (selected) {
       wanted = null;
+
       if (selectionTimer) clearTimeout(selectionTimer);
       selectionTimer = null;
+
       if (recoveryTimer) clearTimeout(recoveryTimer);
       recoveryTimer = null;
     }
+
     if (probing === id) finishProbe();
     assert();
+
     // Only a fatal error has stopped the video loaders. Resume after clearing the bad choice.
     if (fatal) hls.startLoad(-1);
+
     if (selected) unavailableListener?.(selected);
     discover();
   }
@@ -307,13 +331,16 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   /** Handles subtitle errors after hls.js's controllers, before the engine's fatal handler. */
   function subtitleError(data: ErrorData): boolean {
     if (released) return false;
+
     const subtitle =
       data.context?.type === "subtitleTrack" ||
       data.frag?.type === "subtitle" ||
       data.parent === "subtitle" ||
       data.details === Hls.ErrorDetails.SUBTITLE_LOAD_ERROR ||
       data.details === Hls.ErrorDetails.SUBTITLE_TRACK_LOAD_TIMEOUT;
+
     if (!subtitle) return false;
+
     if (
       data.details === Hls.ErrorDetails.INTERNAL_ABORTED ||
       data.details === Hls.ErrorDetails.FRAG_GAP
@@ -321,20 +348,24 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
       return true;
     const index = data.frag?.level ?? data.context?.id;
     const id = index == null ? undefined : renditionIds(hls.subtitleTracks)[index];
+
     if (id !== undefined) {
       failed.add(id);
+
       if (retrySelection(id)) {
         if (data.fatal) recoverSelection(id);
       } else abandon(id, data.fatal);
     } else if (data.fatal) {
       hls.startLoad(-1);
     }
+
     return true;
   }
 
   function prove(key: string): void {
     if (proven.has(key)) return;
     const track = listed().subtitles.find((each) => keyOf(each) === key);
+
     if (!track) return;
     proven.add(key);
     availableListener?.(track);
@@ -347,14 +378,17 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     lines.set(key, kept);
     // A line that spans two segments comes with each.
     const id = `${line.start}|${line.end}|${line.text}`;
+
     if (kept.has(id)) return;
     kept.set(id, line);
+
     if (wanted && keyOf(wanted) === key) lineListener?.(line);
   }
 
   /** Lets go of the lines that ended a while ago, on every track. */
   function forgetOld(): void {
     const before = video.currentTime - KEEP_BEHIND_S;
+
     for (const kept of lines.values()) {
       for (const [id, line] of kept) if (line.end < before) kept.delete(id);
     }
@@ -363,6 +397,7 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.MANIFEST_LOADED, (_event, data) => {
     for (const declared of data.captions ?? []) {
       const channel = /^CC([1-4])$/.exec(declared.instreamId ?? "")?.[1];
+
       if (channel) captions.set(Number(channel), declared);
     }
   });
@@ -371,36 +406,47 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     if (released || ready) return;
     const { audio } = listed();
     const chosen = audio.findIndex((track) => track.id === sound.audio);
+
     const spoken = audio.findIndex(
       (track) => sound.audioLanguage !== null && track.language === sound.audioLanguage,
     );
+
     const start = chosen !== -1 ? chosen : spoken;
+
     if (start !== -1) hls.audioTrack = start;
   });
+
   // hls.js's own handlers ran before these: the renditions are those of the variant it goes to.
   for (const event of [Hls.Events.LEVEL_SWITCHING, Hls.Events.LEVEL_LOADING] as const) {
     hls.on(event, () => {
       ready = true;
       assert();
       tell();
+
       if (probing !== null && !renditionIds(hls.subtitleTracks).includes(probing)) stopProbe();
       discover();
     });
   }
+
   function playing(): void {
     if (pictureStarted || released) return;
     pictureStarted = true;
     selectionStartedAt = Date.now();
+
     if (wanted?.format === "text" && (readUntil.get(wanted.id) ?? 0) <= video.currentTime)
       armSelection();
     discover();
   }
+
   video.addEventListener("playing", playing);
   hls.on(Hls.Events.SUBTITLE_TRACK_LOADED, (_event, data) => {
     const id = renditionIds(hls.subtitleTracks)[data.id];
+
     if (released || id === undefined) return;
     cadence.set(id, data.details.live ? data.details.targetduration : 0);
+
     if (probing === id) armProbe();
+
     if (wanted?.id === id && selectionTimer) armSelection();
   });
   hls.on(Hls.Events.AUDIO_TRACK_SWITCHING, tell);
@@ -411,19 +457,23 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.NON_NATIVE_TEXT_TRACKS_FOUND, (_event, data) => {
     for (const track of data.tracks) {
       const channel = captionChannel(track._id);
+
       if (channel !== null && !captions.get(channel)) {
         captions.set(channel, track.closedCaptions ?? null);
       }
     }
+
     tell();
   });
   hls.on(Hls.Events.CUES_PARSED, (_event, data) => {
     if (released) return;
     forgetOld();
     const cues = cuesOf(data.cues);
+
     if (data.type === "captions") {
       const channel = captionChannel(data.track);
       const [first] = cues;
+
       if (channel === null || !first) return;
       // One cue for each row of the screen, top to bottom: together they are one line.
       read(keyOf({ id: CAPTIONS_ID, page: channel }), {
@@ -431,11 +481,15 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
         end: Math.max(...cues.map((cue) => cue.end)),
         text: cues.map((cue) => cue.text).join("\n"),
       });
+
       return;
     }
+
     const at = data.subtitleTrack ? hls.subtitleTracks.indexOf(data.subtitleTrack) : -1;
     const id = renditionIds(hls.subtitleTracks)[at];
+
     if (id === undefined) return;
+
     for (const cue of cues) read(keyOf({ id, page: null }), cue);
   });
   // Told after a segment's lines, and alone for a segment without any. The segment's `level` is
@@ -444,26 +498,35 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.SUBTITLE_FRAG_PROCESSED, (_event, data) => {
     if (released) return;
     const id = renditionIds(hls.subtitleTracks)[data.frag.level];
+
     if (id === undefined) return;
     const { start, duration } = data.part ?? data.frag;
+
     // hls.js can report failure after successful IMSC fallback, or defer parsing until a
     // timestamp arrives. Only an actual error abandons the track; the deadline bounds no data.
     if (!data.success) {
       if ((readUntil.get(id) ?? 0) >= start + duration) return;
+
       if (data.error) {
         // hls.js can reject queued VTT before the matching picture timestamp arrives.
         if (data.error.message !== "Subtitle discontinuity domain does not match main")
           failed.add(id);
+
         if (!retrySelection(id)) abandon(id);
       }
+
       return;
     }
+
     if (probing === id) finishProbe();
+
     if (wanted?.id === id && selectionTimer) {
       clearTimeout(selectionTimer);
       selectionTimer = null;
     }
+
     readUntil.set(id, Math.max(readUntil.get(id) ?? 0, start + duration));
+
     if (wanted?.id === id) loadedListener?.();
   });
 
@@ -473,33 +536,44 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     },
     setAudio(id) {
       const index = renditionIds(hls.audioTracks).indexOf(id);
+
       if (!released && index !== -1) hls.audioTrack = index;
     },
     setSubtitle(track) {
       if (released) return;
+
       if (selectionTimer) clearTimeout(selectionTimer);
       selectionTimer = null;
+
       if (recoveryTimer) clearTimeout(recoveryTimer);
       recoveryTimer = null;
       wanted = track;
       selectionStartedAt = Date.now();
+
       if (track?.format === "text" && (readUntil.get(track.id) ?? 0) <= video.currentTime)
         armSelection();
+
       if (track?.format === "text") stopProbe();
+
       // Captions chosen before this stream's picture told of them, as when the channel opens
       // again with them: listed all the same, or the player would take the choice for gone.
       if (track?.id === CAPTIONS_ID && track.page !== null && !captions.has(track.page)) {
         captions.set(track.page, null);
         tell();
       }
+
       assert();
       discover();
+
       if (!track || released) return;
+
       for (const line of lines.get(keyOf(track))?.values() ?? []) {
         if (line.end > video.currentTime) lineListener?.(line);
       }
+
       // Captions are read from the picture, so the stream has none left to load for them.
       const read = track.format === "text" ? (readUntil.get(track.id) ?? 0) : Infinity;
+
       if (read > video.currentTime) loadedListener?.();
     },
     onLine(listener) {
@@ -514,10 +588,13 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     onSubtitleAvailable(listener, language, known) {
       availableListener = listener;
       preferredLanguage = language ?? null;
+
       for (const track of known ?? []) proven.add(keyOf(track));
+
       for (const track of listed().subtitles) {
         if (proven.has(keyOf(track))) listener(track);
       }
+
       discover();
     },
   };
@@ -528,9 +605,13 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
     release(): void {
       released = true;
       video.removeEventListener("playing", playing);
+
       if (probeTimer) clearTimeout(probeTimer);
+
       if (nextProbe) clearTimeout(nextProbe);
+
       if (selectionTimer) clearTimeout(selectionTimer);
+
       if (recoveryTimer) clearTimeout(recoveryTimer);
       unavailableListener = null;
       probeTimer = nextProbe = null;
@@ -552,11 +633,13 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
  */
 function renditionIds(renditions: readonly MediaPlaylist[]): number[] {
   const seen = new Map<string, number>();
+
   return renditions.map((rendition) => {
     const { name, lang = "", assocLang = "", characteristics = "", forced } = rendition;
     const identity = JSON.stringify([name, lang, assocLang, characteristics, forced]);
     const nth = seen.get(identity) ?? 0;
     seen.set(identity, nth + 1);
+
     return hashed(`${identity}#${nth}`);
   });
 }
@@ -566,15 +649,18 @@ function renditionIds(renditions: readonly MediaPlaylist[]): number[] {
  */
 function hashed(text: string): number {
   let hash = 0x811c9dc5;
+
   for (let at = 0; at < text.length; at++) {
     hash = Math.imul(hash ^ text.charCodeAt(at), 0x01000193);
   }
+
   return hash >>> 0;
 }
 
 /** What the playlist declares about a rendition, or about a caption channel if anything. */
 function facts(rendition: MediaPlaylist | null, id: number) {
   const marks = rendition?.characteristics ?? "";
+
   return {
     id,
     name: rendition?.name ?? null,
@@ -588,16 +674,20 @@ function facts(rendition: MediaPlaylist | null, id: number) {
 /** The caption channel hls.js names "textTrack1" to "textTrack4", or null for anything else. */
 function captionChannel(name: string | undefined): number | null {
   const channel = /^textTrack([1-4])$/.exec(name ?? "")?.[1];
+
   return channel ? Number(channel) : null;
 }
 
 /** The cues hls.js parsed, which it types loosely, as lines; whatever isn't a cue is left out. */
 function cuesOf(parsed: unknown): Cue[] {
   if (!Array.isArray(parsed)) return [];
+
   return parsed.flatMap((cue: unknown): Cue[] => {
     if (typeof cue !== "object" || cue === null) return [];
+
     if (!("startTime" in cue) || !("endTime" in cue) || !("text" in cue)) return [];
     const { startTime: start, endTime: end, text } = cue;
+
     return typeof start === "number" && typeof end === "number" && typeof text === "string" && text
       ? [{ start, end, text }]
       : [];

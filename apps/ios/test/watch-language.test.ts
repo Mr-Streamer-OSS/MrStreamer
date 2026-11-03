@@ -29,9 +29,12 @@ const native = vi.hoisted(() => ({
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => ({ items: [], series: {}, bytes: 0, free: null, ended: 0 }),
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", async () => {
   const { Component } = await import("react");
+
   class VideoView extends Component {
     readonly id = ++native.made;
     override componentDidMount() {
@@ -46,6 +49,7 @@ vi.mock("expo-video", async () => {
       return null;
     }
   }
+
   return {
     VideoView,
     VideoAirPlayButton: () => null,
@@ -53,6 +57,7 @@ vi.mock("expo-video", async () => {
     createVideoPlayer: () => (native.port = nativePlayer()),
   };
 });
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -62,31 +67,41 @@ vi.mock("react-native", async () => ({
     ) => void native.sheets.push({ ...options, pick }),
   },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined, dismiss: () => undefined },
   useRootNavigationState: () => ({ index: 0, routes: [] }),
   usePathname: () => "/films",
 }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   type Props = { testID?: string; label: string; onPress: () => void };
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, label, onPress }: Props) =>
       createElement("button", { "data-testid": testID, "aria-label": label, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#8E8E93" } }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("../src/account.ts", () => ({
   useCatalogue: () => ({ kind: "loading" }),
   currentCatalogue: () => ({ kind: "loading" }),
@@ -107,14 +122,17 @@ const movie: Playing = {
   next: false,
   versions: false,
 };
+
 const open = async () => ({ url: "file:fixture", container: "mp4" });
 const settle = () => act(() => new Promise((done) => setTimeout(done, 0)));
 const speak = (locale: Locale) => act(() => setLanguage({ locale, formats: locale }));
 const port = () => native.port!;
 
 const byId = (id: string) => document.querySelector(`[data-testid="${id}"]`);
+
 const button = (id: string) =>
   [...document.querySelectorAll("button")].find((each) => each.getAttribute("data-testid") === id);
+
 const label = (id: string) => byId(id)?.getAttribute("aria-label");
 const text = (id: string) => byId(id)?.textContent;
 
@@ -127,11 +145,13 @@ async function sheetOf(id: string) {
   expect(native.sheets.length).toBe(before + 1);
   // Closed with its last option, Cancel, so the next sheet can show.
   act(() => sheet!.pick(sheet!.options.length - 1));
+
   return sheet!;
 }
 
 function tracks(): ObservedTrackSnapshot {
   const identity = { ...port().identity(), revision: 1, isDefault: false, isPlayable: true };
+
   return {
     ...identity,
     audio: {
@@ -149,9 +169,11 @@ function tracks(): ObservedTrackSnapshot {
 }
 
 let unmount = () => {};
+
 beforeEach(() => {
   native.sheets = [];
 });
+
 afterEach(async () => {
   unmount();
   await stop();
@@ -168,6 +190,7 @@ async function watching() {
     act(() => root.unmount());
     container.remove();
   };
+
   await act(() =>
     play(movie, { kind: "file", originalLanguage: null, open }, { watch: true, login: [] }),
   );

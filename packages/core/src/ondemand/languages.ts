@@ -55,14 +55,17 @@ const WORD_END = /[\s-]/;
 
 /** Provider conventions used by existing catalogue suitability ranking. */
 const MULTI = new Set(["MULTI", "MULTI AUDIO", "MULTISUB", "MULTI SUB", "VO"]);
+
 /** Only these name marks hint at several audio languages in a filter. */
 const MULTI_AUDIO = new Set(["MULTI", "MULTI AUDIO"]);
+
 const LANGUAGE_MARKS = new Map<string, (typeof TITLE_LANGUAGES)[number]>(
   TITLE_LANGUAGES.flatMap((language) => language.marks.map((mark) => [mark, language] as const)),
 );
 
 /** Words after a mark that say the sound was replaced: "NL AUDIO", "NL DUBBED". */
 const DUBBED = /\b(AUDIO|DUB|DUBBED)\b/;
+
 /** Words after a mark that say it names the subtitles: "ENG SUB", "GER SUBS". */
 const SUBTITLED = /\b(SUBS?|SUBBED|SUBTITLED)\b/;
 
@@ -78,17 +81,21 @@ function markOf(tag: string) {
   const rest = space < 0 ? "" : mark.slice(space);
   const named = SUBTITLED.test(rest);
   const subtitles = named || (language?.subtitled === true && !DUBBED.test(rest));
+
   return { mark, language, subtitles, named };
 }
 
 /** Name hints only. A Dutch mark can mean subtitles; it never proves Dutch audio. */
 export function languageHints(tags: readonly string[]): readonly string[] {
   const hints = new Set<string>();
+
   for (const tag of tags) {
     const { mark, language } = markOf(tag);
+
     if (MULTI_AUDIO.has(mark)) hints.add("multi");
     else if (language) hints.add(language.code);
   }
+
   return hints.size ? [...hints] : ["unknown"];
 }
 
@@ -105,13 +112,17 @@ export function suitability(tags: readonly string[], language: string): number {
   let multi = false;
   let subtitled = false;
   let dubbed = false;
+
   for (const tag of tags) {
     const { mark, language: marked, subtitles } = markOf(tag);
+
     if (marked?.code === language) return 4;
+
     if (MULTI.has(mark)) multi = true;
     else if (marked && subtitles) subtitled = true;
     else if (marked) dubbed = true;
   }
+
   return multi ? 3 : subtitled ? 2 : dubbed ? 0 : 1;
 }
 
@@ -137,26 +148,36 @@ const MULTI_NAMES: Readonly<Record<string, PlainKey>> = {
 export function versionHint(tags: readonly string[], madeIn: string | null) {
   let named = false;
   let asListed = false;
+
   const parts = tags.map((tag) => {
     const { mark, language, subtitles, named: explicit } = markOf(tag);
     const multi = MULTI_NAMES[mark];
+
     if (multi) {
       named = true;
+
       return t(multi);
     }
+
     if (!language) {
       asListed = true;
+
       return tag;
     }
+
     named = true;
+
     if (subtitles && (explicit || madeIn !== language.code)) {
       const original = madeIn && languageName(madeIn);
+
       return original
         ? t("{sound} sound, {subtitles} subtitles", { sound: original, subtitles: language.name })
         : t("Original sound, {subtitles} subtitles", { subtitles: language.name });
     }
+
     return t("{language} sound", { language: language.name });
   });
+
   return { label: parts.join(" · ") || t("Standard"), named, asListed };
 }
 
@@ -176,9 +197,11 @@ export function versionLabels(
 ): string[] {
   const labels = versions.map(({ tags }) => versionHint(tags, madeIn).label);
   const seen = new Map<string, number>();
+
   return labels.map((label) => {
     const count = (seen.get(label) ?? 0) + 1;
     seen.set(label, count);
+
     return count === 1 ? label : `${label} ${count}`;
   });
 }

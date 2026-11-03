@@ -7,14 +7,19 @@ import { execFileSync } from "node:child_process";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const [source, output] = process.argv.slice(2);
+
 if (!source || !/^[a-f0-9]{40}$/.test(source) || !output) {
   throw new Error(
     "Usage: node apps/ios/scripts/measurement-overlay.ts <exact-source-sha> <new-output-directory>",
   );
 }
+
 const destination = resolve(output);
+
 await mkdir(destination); // Refuse reuse: identity and bytes must never be silently mixed.
+
 const hashes: Record<string, { sha256: string; bytes: number; provenance: string }> = {};
+
 async function emit(path: string, text: string, provenance: string) {
   await writeFile(resolve(destination, path), text);
   hashes[path] = {
@@ -23,13 +28,18 @@ async function emit(path: string, text: string, provenance: string) {
     provenance,
   };
 }
+
 function replace(text: string, anchor: string, replacement: string) {
   if (text.split(anchor).length !== 2) throw new Error(`Unsupported source seam: ${anchor}`);
+
   return text.replace(anchor, replacement);
 }
+
 const context =
   "{ generation: current?.epoch.id ?? null, phase: state.get().phase.kind, pip: state.get().pip, external: state.get().external, watch: state.get().watch, aside: state.get().aside }";
+
 const intent = (action: string) => `{ kind: "intent", action: ${action}, context: ${context} }`;
+
 /** Each instrumented source file and its anchored edits. */
 const overlays: Record<string, (text: string) => string> = {
   "playback.ts": (text) => {
@@ -50,6 +60,7 @@ const overlays: Record<string, (text: string) => string> = {
     ] as const) {
       text = replace(text, anchor, `${anchor}\n  recordMeasurement(${record});`);
     }
+
     return text;
   },
   "loading.tsx": (text) =>
@@ -63,6 +74,7 @@ const overlays: Record<string, (text: string) => string> = {
       'AppState.addEventListener("change", (state) => {\n      recordMeasurement({ kind: "foreground", active: state === "active" });\n      foreground.set(state === "active");\n    });',
     ),
 };
+
 for (const [name, overlay] of Object.entries(overlays)) {
   const path = `apps/ios/src/${name}`;
   const text = execFileSync("git", ["show", `${source}:${path}`], { cwd: root, encoding: "utf8" });
@@ -72,19 +84,24 @@ for (const [name, overlay] of Object.entries(overlays)) {
     `generated full-source overlay of ${source}:${path}; not pristine released source`,
   );
 }
+
 const generatorCommit = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: root,
   encoding: "utf8",
 }).trim();
+
 const generatorDirty =
   execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
     cwd: root,
     encoding: "utf8",
   }).trim().length > 0;
+
 const generatorBytes = await readFile(fileURLToPath(import.meta.url));
 let overlayIdentity = "";
+
 for (const name of ["measurement-records.ts", "measurement-runtime.ts"]) {
   let content = await readFile(new URL(name, import.meta.url), "utf8");
+
   if (name === "measurement-runtime.ts") {
     overlayIdentity = createHash("sha256")
       .update(JSON.stringify({ source, hashes }))
@@ -97,8 +114,10 @@ for (const name of ["measurement-records.ts", "measurement-runtime.ts"]) {
       JSON.stringify({ source, overlay: overlayIdentity }),
     );
   }
+
   await emit(name, content, "dedicated authored support; exact copy");
 }
+
 await writeFile(
   resolve(destination, "identity.json"),
   JSON.stringify(

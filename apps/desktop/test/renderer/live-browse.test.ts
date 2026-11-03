@@ -18,6 +18,7 @@ import { queries, keepViewing, rosterOf } from "../../src/renderer/src/lib/queri
 import { acceptPreferences } from "../../src/renderer/src/lib/preferences.ts";
 
 const own = (id: string) => ({ subscriptionId: SUBSCRIPTION, id });
+
 const channel = (id: string): LiveChannel => ({
   ...own(id),
   name: id,
@@ -29,6 +30,7 @@ const channel = (id: string): LiveChannel => ({
   variants: [{ id, name: id, tags: [], quality: null }],
   catchupDays: null,
 });
+
 const result = (ids: readonly string[]): LiveBrowseResult => ({
   channels: ids.map(channel),
   total: ids.length,
@@ -43,6 +45,7 @@ const result = (ids: readonly string[]): LiveBrowseResult => ({
     subscriptions: [],
   },
 });
+
 const viewing = (sequence: number, ids: readonly string[]): Viewing => ({
   sequence,
   favourites: ids.map(own),
@@ -51,20 +54,26 @@ const viewing = (sequence: number, ids: readonly string[]): Viewing => ({
   continueWatching: [],
   marked: [],
 });
+
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
   ipc.answer("liveBrowse.remember", (selection) => selection);
   useUi.setState({ list: { kind: "all" } });
 });
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
+
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
+
 async function mount({ loadPreferences = true } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   if (loadPreferences) await client.fetchQuery(queries.preferences());
   client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
   client.setQueryData(queries.viewing().queryKey, viewing(1, ["1", "2"]));
@@ -74,12 +83,14 @@ async function mount({ loadPreferences = true } = {}) {
   }));
   const mounted = queryView(client);
   const { container } = mounted;
+
   function View() {
     const list = useUi((state) => state.list);
     const browse = useListChannels(list);
     const ordinary = useListChannels(list, "ordinary");
     const show = useShowList();
     const home = useHomeDiscovery();
+
     return createElement(
       "div",
       {},
@@ -96,17 +107,21 @@ async function mount({ loadPreferences = true } = {}) {
       createElement(BrowseFilters, { list, result: browse.data }),
     );
   }
+
   await mounted.render(createElement(View));
   cleanup = mounted.unmount;
   await settle();
+
   const click = (text: string) =>
     act(async () => {
       const button = [...container.querySelectorAll("button")].find(
         (each) => each.textContent === text,
       );
+
       expect(button).toBeDefined();
       button!.click();
     });
+
   return {
     client,
     container,

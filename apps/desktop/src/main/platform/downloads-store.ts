@@ -35,6 +35,7 @@ const About = lazy(() =>
     wide: "string | null",
   }),
 );
+
 export type About = Infer<typeof About>;
 
 /**
@@ -45,6 +46,7 @@ export type About = Infer<typeof About>;
 const PartIdentity = lazy(() =>
   type({ resource: "string", mark: "string", size: "number.integer >= 0" }),
 );
+
 export type PartIdentity = Infer<typeof PartIdentity>;
 
 /**
@@ -62,6 +64,7 @@ const SeriesKept = lazy(() =>
     sourceOrder: "boolean",
   }),
 );
+
 export type SeriesKept = Infer<typeof SeriesKept>;
 
 const Stored = lazy(() =>
@@ -107,6 +110,7 @@ const Stored = lazy(() =>
     progress: type({ position: "number >= 0", duration: "number > 0", at: "number" }).or("null"),
   }),
 );
+
 type Stored = Infer<typeof Stored>;
 
 /** A download's record as the service keeps it. */
@@ -151,23 +155,31 @@ export const downloadStoreLayer = Layer.effect(
   DownloadStore,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return closed(() => opened.failure);
+
     return yield* attempt(() => {
       const { db } = opened;
       prepareDownloads(db);
       const all = db.prepare("select id, record from downloads order by added_at, rowid");
+
       const write = db.prepare(`insert into downloads (id, added_at, record) values (?, ?, ?)
         on conflict (id) do update set record = excluded.record`);
+
       const remove = db.prepare("delete from downloads where id = ?");
+
       return {
         list: attempt((): Inventory => {
           const records: StoredDownload[] = [];
           const unreadable = new Set<string>();
+
           for (const row of all.all()) {
             const parsed = readRecord(row.record);
+
             if (parsed !== null && parsed.id === row.id) records.push(parsed);
             else unreadable.add(String(row.id));
           }
+
           return { records, unreadable };
         }),
         put: (download: StoredDownload) =>
@@ -195,9 +207,11 @@ export const downloadStoreLayer = Layer.effect(
 function readRecord(record: unknown): StoredDownload | null {
   try {
     const parsed = Stored()(JSON.parse(String(record)));
+
     if (parsed instanceof type.errors) return null;
     const { failure, series, ...rest } = parsed;
     const kept = series === undefined ? null : SeriesKept()(series);
+
     return {
       ...rest,
       ...defined({
@@ -223,5 +237,6 @@ function failureOf(stored: object): DownloadFailure {
  */
 function closed(detail: () => string): DownloadStore["Service"] {
   const fail = Effect.suspend(() => unavailable(detail()));
+
   return { list: fail, put: () => fail, putMany: () => fail, remove: () => fail };
 }

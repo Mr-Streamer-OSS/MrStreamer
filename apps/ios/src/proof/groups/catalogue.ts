@@ -30,6 +30,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: () => {
       const normalized = normalizeCatalogue(CATALOGUE);
+
       return plain({
         categories: normalized.categories.map((c) => [c.group, c.title]),
         streams: normalized.streams.map((s) => [s.title, s.tags]),

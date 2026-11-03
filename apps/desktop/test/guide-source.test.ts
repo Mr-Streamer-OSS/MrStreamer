@@ -60,13 +60,16 @@ vi.setConfig({ testTimeout: 20_000 });
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
+
 /** 20:10 at +02:00, where every guide here writes its times. */
 const NOW = Date.parse("2026-10-02T20:10:00+02:00");
 const at = (time: string) => Date.parse(`2026-10-02T${time}:00+02:00`);
+
 /** The guide id the fake provider gives its quality channel, which its own guide here lacks. */
 const QUALITY = "kwaliteit1.be";
 
 const closing: { close(): Promise<void> }[] = [];
+
 afterEach(async () => {
   for (const each of closing.splice(0)) await each.close();
 });
@@ -74,16 +77,20 @@ afterEach(async () => {
 async function guideHost(): Promise<GuideHost> {
   const host = await startGuideHost();
   closing.push(host);
+
   return host;
 }
 
 /** A programme on a guide channel that day, from "2000" to "2100". */
 const programme = (id: string, from: string, to: string, title: string) =>
   `<programme start="20261002${from}00 +0200" stop="20261002${to}00 +0200" channel="${id}"><title>${title}</title></programme>`;
+
 /** An hour's programme on a guide channel, on at NOW. */
 const slot = (id: string, title: string) => programme(id, "2000", "2100", title);
+
 const named = (id: string, name: string) =>
   `<channel id="${id}"><display-name>${name}</display-name></channel>`;
+
 const tv = (...elements: string[]) =>
   `<?xml version="1.0" encoding="utf-8"?><tv>${elements.join("")}</tv>`;
 
@@ -114,8 +121,10 @@ async function app(dataDir: string, changes: Partial<MainConfig> = {}) {
   const runtime = runtimeFor(
     mainLayer({ ...testConfig(dataDir), ...changes }).pipe(Layer.provideMerge(clock())),
   );
+
   const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
   const guide = await runtime.runPromise(Guide);
+
   return {
     run,
     guide,
@@ -132,7 +141,9 @@ async function app(dataDir: string, changes: Partial<MainConfig> = {}) {
       const status = (await run(guide.status)).find(
         (each) => each.subscriptionId === subscriptionId,
       );
+
       if (!status) throw new Error("No such subscription");
+
       return status;
     },
     /** The sources, in their order. */
@@ -140,6 +151,7 @@ async function app(dataDir: string, changes: Partial<MainConfig> = {}) {
     /** Adds a source, and waits for its download to be done. */
     add: async (address: string) => {
       const added = await run(guide.addSource(address));
+
       return run(guide.refreshSource(added.id));
     },
     /** Moves the clock on, short of the service's own quarter-hourly look at the guides. */
@@ -154,6 +166,7 @@ async function app(dataDir: string, changes: Partial<MainConfig> = {}) {
 async function openIn(dir: string): Promise<string[]> {
   const fds = await readdir("/proc/self/fd").catch(() => []);
   const paths = await Promise.all(fds.map((fd) => readlink(`/proc/self/fd/${fd}`).catch(() => "")));
+
   return paths
     .filter((path) => path.startsWith(`${dir}/`))
     .map((path) => path.slice(dir.length + 1));
@@ -165,6 +178,7 @@ async function openIn(dir: string): Promise<string[]> {
  */
 async function guideFiles(dir: string): Promise<string[]> {
   const names = await readdir(dir).catch(() => []);
+
   return names
     .filter((name) => /^guide[-.]/.test(name) || name === "sources.json")
     .map((name) => name.replace(/\.[0-9a-f-]{36}\./, ".*."))
@@ -173,6 +187,7 @@ async function guideFiles(dir: string): Promise<string[]> {
 
 /** An own guide alone, as it is kept: its index, named by guide.json. */
 const OWN_ONLY = ["guide-index.*.sqlite", "guide.json"];
+
 /** One source, as the sources' folder keeps it: its index, named by sources.json. */
 const ONE_SOURCE = ["guide-index.*.sqlite", "sources.json"];
 
@@ -186,6 +201,7 @@ const sourcesIn = (dataDir: string) => join(dataDir, "guides");
  */
 async function written(dir: string): Promise<string> {
   const parts: string[] = [];
+
   for (const entry of await readdir(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue;
     const path = join(entry.parentPath, entry.name);
@@ -193,11 +209,14 @@ async function written(dir: string): Promise<string> {
       await readFile(path, "latin1").catch((cause: unknown) => {
         const named = /^(.+)\.[0-9a-f-]{36}\.tmp$/.exec(path)?.[1];
         const gone = cause instanceof Error && "code" in cause && cause.code === "ENOENT";
+
         if (!named || !gone) throw cause;
+
         return readFile(named, "latin1");
       }),
     );
   }
+
   return parts.join("\n");
 }
 
@@ -225,6 +244,7 @@ async function connected() {
   const channel = (channelId: string): OwnedId => ({ subscriptionId: id, id: channelId });
   await services.run(services.guide.refresh(id));
   const catalogue = await services.run(services.library.guideChannels(id));
+
   return {
     ...services,
     provider,
@@ -240,7 +260,9 @@ async function connected() {
 /** The catalogue channel that names `guideId`, by its id. */
 function namingChannel(catalogue: CatalogueChannels, guideId: string): string {
   const found = catalogue.all.find((each) => catalogue.guideIdsOf(each.id).includes(guideId));
+
   if (!found) throw new Error(`No channel names ${guideId}.`);
+
   return found.id;
 }
 
@@ -249,7 +271,9 @@ function unguided(provider: FakeProvider): string {
   const channel = provider.catalogue.channels.find(
     (each) => each.streamId >= 2000 && !each.offline && !each.guideId,
   );
+
   if (!channel) throw new Error("The fake catalogue has no channel without a guide id.");
+
   return String(channel.streamId);
 }
 
@@ -257,6 +281,7 @@ describe("the sources of Settings > Guides", () => {
   it("adds a source at once, downloads it in the background, and gives it the channels the own guide lacks", async () => {
     const { run, guide, provider, host, dataDir, id, first, quality, nowOn, status, sources } =
       await connected();
+
     expect(await nowOn(quality)).toBeUndefined();
 
     const added = await run(guide.addSource(host.address()));
@@ -333,6 +358,7 @@ describe("the sources of Settings > Guides", () => {
     );
     const early = await add(host.address("/early.xml"));
     const late = await add(host.address("/late.xml"));
+
     const day = async () =>
       (await run(guide.schedule(quality, NOW, NOW + 6 * HOUR))).map(({ title }) => title);
 
@@ -358,6 +384,7 @@ describe("the sources of Settings > Guides", () => {
   it("keeps a failing source's last download and its place, says why and since when, also after a restart", async () => {
     const { run, guide, provider, host, dataDir, quality, nowOn, sources, add, advance } =
       await connected();
+
     host.serve("/other.xml", tv(slot("other.test", "Other")));
     const failing = await add(host.address());
     const other = await add(host.address("/other.xml"));
@@ -372,6 +399,7 @@ describe("the sources of Settings > Guides", () => {
     });
     await advance(10 * 60 * 1000);
     host.serve("/guide.xml", tv(slot(QUALITY, "Cut off")).slice(0, -20));
+
     const told = {
       id: failing.id,
       processing: {
@@ -382,6 +410,7 @@ describe("the sources of Settings > Guides", () => {
         kept: NOW,
       },
     };
+
     expect(await run(guide.refreshSource(failing.id))).toMatchObject(told);
     expect(await nowOn(quality)).toBe("Elsewhere");
     // Its place in the order, and the other source, are as they were.
@@ -437,6 +466,7 @@ describe("the sources of Settings > Guides", () => {
     });
     expect(await sources()).toEqual([]);
     const ended = programme(QUALITY, "1800", "1900", "Earlier");
+
     const refusals: [answer: Parameters<GuideHost["serve"]>[1], failure: object][] = [
       [404, { kind: "provider-error", status: 404 }],
       ["<!doctype html><title>Sign in</title>", { kind: "guide", failure: { kind: "not-xmltv" } }],
@@ -457,6 +487,7 @@ describe("the sources of Settings > Guides", () => {
         { kind: "guide", failure: { kind: "too-large", limit: "element" } },
       ],
     ];
+
     for (const [index, [answer, failure]] of refusals.entries()) {
       host.serve(`/bad-${index}.xml`, answer);
       const told = await add(host.address(`/bad-${index}.xml`));
@@ -505,9 +536,11 @@ describe("the sources of Settings > Guides", () => {
     host.serve("/guide.xml", tv(named(guideId, "Tracks"), slot(guideId, "Test card")));
     const dataDir = await tempDir();
     const { run, guide, subscriptions, nowOn, status, add } = await app(dataDir);
+
     const { id } = await run(
       subscriptions.add({ server: playlist.link, username: "", password: "" }),
     );
+
     const channel = { subscriptionId: id, id: guideId };
     await run(guide.refresh(id));
 
@@ -547,8 +580,10 @@ describe("one source for every subscription", () => {
 
     const shows = async () => {
       const listings = await run(guide.listings([channel(a), channel(b)]));
+
       return [channel(a), channel(b)].map((each) => listings[ownedKey(each)]?.now?.title);
     };
+
     expect(await shows()).toEqual(["Journaal", "Shared"]);
     expect(await run(guide.schedule(channel(b), NOW, NOW + 24 * HOUR))).toMatchObject([
       { title: "Shared" },
@@ -573,6 +608,7 @@ describe("one source for every subscription", () => {
     // Asked for and indexed once.
     expect(host.requests()).toHaveLength(1);
     await vi.waitFor(async () => expect(await guideFiles(sourcesIn(dataDir))).toEqual(ONE_SOURCE));
+
     // Each keeps its own guide in its own folder, the first where a profile kept its one.
     for (const folder of [dataDir, join(dataDir, "subscriptions", b)]) {
       await vi.waitFor(async () => expect(await guideFiles(folder)).toEqual(OWN_ONLY));
@@ -606,10 +642,13 @@ describe("channels mapped to a guide's by hand", () => {
     host.serve("/guide.xml", guideWith("Source"));
     const source = await add(host.address());
     const loose = unguided(provider);
+
     /** The first page of the channels a filter and a search find. */
     const list = (filter: "without" | "mapped" | "all", query = "") =>
       run(guide.mapChannels({ subscriptionId: id, filter, query, offset: 0, limit: 200 }));
+
     const { revision } = await list("all");
+
     return {
       ...base,
       source,
@@ -623,8 +662,10 @@ describe("channels mapped to a guide's by hand", () => {
 
   it("lists every guide's channels by name and id, its own first, and a subscription's channels by how they get programmes", async () => {
     const { run, guide, host, id, list, loose, first, own, sourced, source } = await mapping();
+
     const options = (query: string, offset = 0, limit = 200) =>
       run(guide.mapOptions({ subscriptionId: id, query, offset, limit }));
+
     const ofOwn = (guideId: string, name: string, programmes: boolean) => ({
       ref: own(guideId),
       id: guideId,
@@ -633,6 +674,7 @@ describe("channels mapped to a guide's by hand", () => {
       name,
       programmes,
     });
+
     const ofSource = (guideId: string, name: string, programmes: boolean) => ({
       ref: sourced(guideId),
       id: guideId,
@@ -691,6 +733,7 @@ describe("channels mapped to a guide's by hand", () => {
   it("shows a mapped channel the guide channel of the guide it names everywhere at once, past the order, and its own again once automatic", async () => {
     const { run, guide, host, id, list, revision, loose, first, nowOn, status, own, sourced } =
       await mapping();
+
     const covered = (await status(id)).channels;
 
     const mapped = await run(guide.map(id, loose.id, sourced("spare.test"), revision));
@@ -728,6 +771,7 @@ describe("channels mapped to a guide's by hand", () => {
 
   it("maps only to a channel a guide of the subscription lists, by its exact id, for a channel the provider lists", async () => {
     const { run, guide, id, revision, loose, nowOn, status, own, sourced } = await mapping();
+
     const map = (channelId: string, ref: string, from = revision) =>
       failureOf(run(guide.map(id, channelId, ref, from)));
 
@@ -750,8 +794,10 @@ describe("channels mapped to a guide's by hand", () => {
   it("keeps mappings through a restart and a new channel list, and leaves one unresolved rather than point it elsewhere", async () => {
     const { run, guide, library, provider, host, dataDir, id, list, revision, loose, source } =
       await mapping();
+
     const nowOn = async (channel: OwnedId) =>
       (await run(guide.listings([channel])))[ownedKey(channel)]?.now?.title;
+
     const sourced = (guideId: string) => guideRef(source.id, guideId);
     const status = async () => (await run(guide.status)).find((each) => each.subscriptionId === id);
     await run(guide.map(id, loose.id, sourced("spare.test"), revision));
@@ -835,8 +881,10 @@ describe("work that finishes after what it was for changed", () => {
     const b = (await run(subscriptions.add(demoLogin(second)))).id;
     const folder = join(dataDir, "subscriptions", b);
     const source = await add(host.address());
+
     const page = (id: string) =>
       run(guide.mapChannels({ subscriptionId: id, filter: "all", query: "", offset: 0, limit: 1 }));
+
     const revisions = { a: (await page(a)).revision, b: (await page(b)).revision };
 
     // Each has a download under way, and a mapping asked for just as it is removed.
@@ -844,11 +892,14 @@ describe("work that finishes after what it was for changed", () => {
     const downloads = [a, b].map((id) => failureOf(run(guide.refresh(id))));
     await Promise.all(holds.map((hold) => hold.arrived));
     const ref = guideRef(source.id, "spare.test");
+
     const mappings = [
       failureOf(run(guide.map(a, "1000", ref, revisions.a))),
       failureOf(run(guide.map(b, "1000", ref, revisions.b))),
     ];
+
     await Promise.all([run(roster.remove(b, false)), run(roster.remove(a, false))]);
+
     // The providers answer only now, for subscriptions that are gone.
     for (const hold of holds) hold.release();
     await Promise.all([...mappings, ...downloads]);
@@ -876,9 +927,11 @@ describe("a subscription removed while its guide takes its time", () => {
     await before.close();
     // What 0.0.12 kept: the document itself, named by a guide.json without an index.
     const { key, fetchedAt } = JSON.parse(await readFile(join(dataDir, "guide.json"), "utf8"));
+
     for (const name of await readdir(dataDir)) {
       if (name.startsWith("guide-index.")) await rm(join(dataDir, name));
     }
+
     await writeFile(join(dataDir, "guide.json"), JSON.stringify({ key, fetchedAt }));
     await writeFile(
       join(dataDir, "guide.xml"),
@@ -934,7 +987,9 @@ function listing(subscriptionId: string, ...ids: string[]): CatalogueChannels {
     catchupDays: null,
     variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
   }));
+
   const byId = new Map(all.map((each) => [each.id, each]));
+
   return {
     all,
     searchNames: all.map((each) => each.title.toLowerCase()),
@@ -946,9 +1001,11 @@ function listing(subscriptionId: string, ...ids: string[]): CatalogueChannels {
 
 describe("a mapping whose channels or guide changed under it", () => {
   const ID = "held";
+
   /** A step a test can make wait once: a port takes `pass` where it is to wait. */
   function gate() {
     let waiting: { readonly arrived: () => void; readonly released: Promise<void> } | null = null;
+
     return {
       pass: Effect.promise(async () => {
         const hold = waiting;
@@ -961,6 +1018,7 @@ describe("a mapping whose channels or guide changed under it", () => {
         const arrived = Promise.withResolvers<void>();
         const released = Promise.withResolvers<void>();
         waiting = { arrived: arrived.resolve, released: released.promise };
+
         return { arrived: arrived.promise, release: released.resolve };
       },
     };
@@ -974,6 +1032,7 @@ describe("a mapping whose channels or guide changed under it", () => {
   async function held(given: { channels: CatalogueChannels; document: string }) {
     const dir = await tempDir();
     const ownWrites = gate();
+
     const store = Layer.effect(
       GuideStore,
       Effect.map(GuideStore, (kept) => ({
@@ -982,6 +1041,7 @@ describe("a mapping whose channels or guide changed under it", () => {
           Effect.andThen(ownWrites.pass, kept.setOwn(...write)),
       })),
     ).pipe(Layer.provide(guideStoreLayer));
+
     const ports = Layer.mergeAll(
       store,
       Layer.succeed(GuideSource, {
@@ -1010,8 +1070,10 @@ describe("a mapping whose channels or guide changed under it", () => {
       guideIndexerLayer(guideIndexWorker),
       guideSearcherLayer(guideSearchWorker),
     );
+
     const runtime = runtimeFor(Guide.layer.pipe(Layer.provide(ports), Layer.provideMerge(clock())));
     const guide = await runtime.runPromise(Guide);
+
     return {
       dir,
       guide,
@@ -1023,6 +1085,7 @@ describe("a mapping whose channels or guide changed under it", () => {
   it("is made against the channels and the guide as they are when its turn at the files comes", async () => {
     const guides = (...ids: string[]) =>
       tv(...ids.map((id) => named(id, id)), ...ids.map((id) => slot(id, id)));
+
     const given = { channels: listing(ID, "1", "2", "3"), document: guides("a.test", "b.test") };
     const { dir, guide, run, holdOwnWrite } = await held(given);
     await run(guide.refresh(ID));
@@ -1074,6 +1137,7 @@ describe("the guide store", () => {
         }),
       ),
     );
+
     const download = failureOf(runtime.runPromise(store.download(place, store.newDownload())));
 
     expect(await set).toMatchObject({ kind: "unexpected" });
@@ -1088,7 +1152,9 @@ describe("a source across starts", () => {
     seal: testSecrets.seal,
     open(sealed) {
       const plain = testSecrets.open(sealed);
+
       if (plain.includes(GUIDE_KEY)) throw new AppFailure({ kind: "keychain-refused" });
+
       return plain;
     },
   };
@@ -1232,6 +1298,7 @@ describe("an address a release before gave one subscription", () => {
   ) {
     const { key }: { key: string } = JSON.parse(await readFile(join(folder, "guide.json"), "utf8"));
     const found = guideAddress(address);
+
     if (!found) throw new Error("No address.");
     await writeFile(
       join(folder, "guide-source.json"),
@@ -1267,6 +1334,7 @@ describe("an address a release before gave one subscription", () => {
       () => {},
     );
     await rm(document);
+
     return file;
   }
 
@@ -1280,6 +1348,7 @@ describe("an address a release before gave one subscription", () => {
   it("moves to the sources with what it downloaded and its mappings, the same address of two subscriptions becoming one", async () => {
     const { run, guide, subscriptions, provider, host, dataDir, id, quality, close } =
       await connected();
+
     const second = await fakeProvider({ channels: 200 });
     second.serveGuide(tv(slot("nothing.test", "Nothing")));
     const other = (await run(subscriptions.add(demoLogin(second)))).id;
@@ -1324,12 +1393,14 @@ describe("an address a release before gave one subscription", () => {
     });
     // One copy in the sources: the second's was the same download.
     await vi.waitFor(async () => expect(await guideFiles(sourcesIn(dataDir))).toEqual(ONE_SOURCE));
+
     const keptBoth = [
       "guide-index.*.sqlite",
       "guide-index.*.sqlite",
       "guide-source.json",
       "guide.json",
     ];
+
     expect(await guideFiles(otherFolder)).toEqual(keptBoth);
     expect(await written(dataDir)).not.toContain(GUIDE_KEY);
     // Asking nobody.
@@ -1359,9 +1430,11 @@ describe("an address a release before gave one subscription", () => {
     const loose = unguided(provider);
     // What 0.0.12 kept instead: the documents themselves, named as it named them.
     const { key, fetchedAt } = JSON.parse(await readFile(join(dataDir, "guide.json"), "utf8"));
+
     for (const name of await readdir(dataDir)) {
       if (name.startsWith("guide-index.")) await rm(join(dataDir, name));
     }
+
     await writeFile(join(dataDir, "guide.json"), JSON.stringify({ key, fetchedAt }));
     await writeFile(
       join(dataDir, "guide.xml"),
@@ -1417,8 +1490,10 @@ describe("an address a release before gave one subscription", () => {
 describe("an address a release before gave, moving to the sources", () => {
   /** How long a wait for a download indexed in a worker gives a busy machine. */
   const INDEXED = { timeout: 15_000 };
+
   /** The steps of a move, and the reads, a test can make fail. */
   type Step = "copy" | "setSources" | "setConfig" | "sources" | "config";
+
   const ADDRESS = "https://guide.example.org/guide.xml?key=s3cret";
 
   /**
@@ -1436,12 +1511,16 @@ describe("an address a release before gave, moving to the sources", () => {
   ) {
     let asked = 0;
     let fails = failing;
+
     const once = (step: Step) => {
       if (fails !== step) return false;
       fails = null;
+
       return true;
     };
+
     const disk = Effect.fail(failedWith(new Error("The disk is full.")));
+
     const store = Layer.effect(
       GuideStore,
       Effect.map(GuideStore, (kept) => ({
@@ -1458,6 +1537,7 @@ describe("an address a release before gave, moving to the sources", () => {
           once("config") ? disk : kept.config(...args),
       })),
     ).pipe(Layer.provide(guideStoreLayer));
+
     const ports = Layer.mergeAll(
       store,
       Layer.succeed(GuideSource, {
@@ -1481,15 +1561,18 @@ describe("an address a release before gave, moving to the sources", () => {
         open: (sealed) => Effect.succeed(sealed),
         fetch: async () => {
           asked += 1;
+
           return { body: new Blob([host.xml]).stream(), size: null };
         },
       }),
       guideIndexerLayer(indexWorker),
       guideSearcherLayer(guideSearchWorker),
     );
+
     const runtime = runtimeFor(Guide.layer.pipe(Layer.provide(ports), Layer.provideMerge(clock())));
     const guide = await runtime.runPromise(Guide);
     const run = <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect);
+
     return {
       run,
       guide,
@@ -1519,8 +1602,10 @@ describe("an address a release before gave, moving to the sources", () => {
     const folder = join(root, id);
     await mkdir(folder, { recursive: true });
     const found = guideAddress(ADDRESS);
+
     if (!found) throw new Error("No address.");
     let file = `guide-external.${randomUUID()}.xml`;
+
     if (indexed) {
       file = `guide-index.${randomUUID()}.sqlite`;
       await writeFile(join(folder, "document.xml"), xml);
@@ -1539,6 +1624,7 @@ describe("an address a release before gave, moving to the sources", () => {
     } else {
       await writeFile(join(folder, file), xml);
     }
+
     await writeFile(
       join(folder, "guide-source.json"),
       JSON.stringify({
@@ -1553,6 +1639,7 @@ describe("an address a release before gave, moving to the sources", () => {
         mappings,
       }),
     );
+
     return file;
   }
 
@@ -1685,6 +1772,7 @@ describe("an address a release before gave, moving to the sources", () => {
         slot("shared.test", `${id} shared`),
         ...(spare ? [named("spare.test", "Spare"), slot("spare.test", `${id} spare`)] : []),
       );
+
     const cases = [
       // The newer: what only the older one listed waits for the source's own download.
       { a: { spare: true, fetchedAt: NOW - 2 * HOUR }, b: { spare: false, fetchedAt: NOW - HOUR } },
@@ -1693,16 +1781,19 @@ describe("an address a release before gave, moving to the sources", () => {
       // As large too, the first by name.
       { a: { spare: true, fetchedAt: NOW - HOUR }, b: { spare: true, fetchedAt: NOW - HOUR } },
     ];
+
     for (const [at, { a, b }] of cases.entries()) {
       for (const order of [
         ["a", "b"],
         ["b", "a"],
       ]) {
         const root = await tempDir();
+
         const mappings = {
           "1": { guideId: "shared.test", name: "One" },
           "2": { guideId: "spare.test", name: "Two" },
         };
+
         const files = {
           a: await legacy(
             root,
@@ -1717,6 +1808,7 @@ describe("an address a release before gave, moving to the sources", () => {
             mappings,
           ),
         };
+
         const read = at === 2 ? (files.a < files.b ? "a" : "b") : "b";
         const spare = read === "a" ? a.spare : b.spare;
         const host = { xml: kept("fresh", true) };
@@ -1731,6 +1823,7 @@ describe("an address a release before gave, moving to the sources", () => {
               ]),
             INDEXED,
           );
+
           for (const id of ["a", "b"]) {
             expect(await app.nowOn(id, "1"), `${label}, ${start}`).toBe(`${read} shared`);
             expect(await app.nowOn(id, "2"), `${label}, ${start}`).toBe(
@@ -1741,6 +1834,7 @@ describe("an address a release before gave, moving to the sources", () => {
               unresolved: spare ? 0 : 1,
             });
           }
+
           // The other stays where it was, with its address, unread.
           expect(await readdir(join(root, read === "a" ? "b" : "a")), label).toContain(
             files[read === "a" ? "b" : "a"],
@@ -1765,9 +1859,11 @@ describe("an address a release before gave, moving to the sources", () => {
     // What is set for "a" can't be read once: the run keeps everything.
     const failing = await started(root, ["a"], "config", host);
     const [source] = await failing.sources();
+
     for (let download = 0; download < 3; download++) {
       await failing.run(failing.guide.refreshSource(source?.id ?? ""));
     }
+
     expect(await failing.nowOn("a", "1")).toBe("Fresh");
     expect((await readdir(sourcesIn(root))).filter((name) => name.endsWith(".sqlite")).length).toBe(
       4,
@@ -1823,6 +1919,7 @@ describe("an address a release before gave, moving to the sources", () => {
     await app.run(app.guide.refreshSource(source?.id ?? ""));
 
     expect(await app.nowOn("a", "1")).toBe("Fresh");
+
     for (const id of ["a", "b"]) {
       await vi.waitFor(
         async () => expect(await guideFiles(join(root, id))).toEqual(["guide-source.json"]),
@@ -1831,6 +1928,7 @@ describe("an address a release before gave, moving to the sources", () => {
       expect((await config(root, id)).external).toBeNull();
       expect((await config(root, id)).mappings["1"]).toMatchObject({ source: source?.id });
     }
+
     await vi.waitFor(
       async () => expect(await guideFiles(sourcesIn(root))).toEqual(ONE_SOURCE),
       INDEXED,
@@ -1882,17 +1980,20 @@ describe("the guide store's copy of a release before's download", () => {
     await writeFile(join(from, "guide-index.kept.sqlite"), "index");
     const runtime = runtimeFor(guideStoreLayer);
     const store = await runtime.runPromise(GuideStore);
+
     const copy = (file: string) =>
       runtime.runPromise(store.copy({ store: from }, { store: to }, file));
 
     expect(await copy("guide-index.gone.sqlite")).toBe("missing");
     // A folder it may not look into: the file may well be there.
     await chmod(from, 0o600);
+
     try {
       expect(await copy("guide-index.kept.sqlite")).toBe("failed");
     } finally {
       await chmod(from, 0o700);
     }
+
     expect(await copy("guide-index.kept.sqlite")).toBe("copied");
     expect(await readFile(join(to, "guide-index.kept.sqlite"), "utf8")).toBe("index");
     expect(await readFile(join(from, "guide-index.kept.sqlite"), "utf8")).toBe("index");
@@ -1912,8 +2013,10 @@ describe("a source taking a channel over with time alone", () => {
       tv(named("aac.test", "AAC One"), programme("aac.test", "2000", "2300", "Elsewhere on")),
     );
     await services.add(host.address());
+
     const range = async () =>
       (await run(guide.range([first], NOW - HOUR, NOW + 3 * HOUR)))[ownedKey(first)] ?? [];
+
     const [ending] = await range();
     expect(ending?.title).toBe("Ending");
     expect(
@@ -1924,21 +2027,27 @@ describe("a source taking a channel over with time alone", () => {
 
     // At 20:30 the own guide has nothing left on it: the window is told, with nothing else new.
     let told = 0;
+
     const counting = Effect.runFork(
       Stream.runForEach(guide.changes, () => Effect.sync(() => told++)),
     );
+
     const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
     await settle();
+
     // A minute at a time, as the service checks the time each minute.
     for (let minute = 0; minute < 19; minute++) {
       await advance(MINUTE);
       await settle();
     }
+
     expect(told).toBe(0);
+
     for (let minute = 0; minute < 2; minute++) {
       await advance(MINUTE);
       await settle();
     }
+
     await vi.waitFor(() => expect(told).toBe(1));
     await Effect.runPromise(Fiber.interrupt(counting));
 
@@ -1950,23 +2059,30 @@ describe("a source taking a channel over with time alone", () => {
 
 describe("the request for a guide's address", () => {
   const ADDRESS = `https://guide.example.org/xmltv.gz?key=${GUIDE_KEY}`;
+
   /** A fetch that answers each address from `answers`, noting what it was asked. */
   function fetching(answers: Readonly<Record<string, () => Response>>) {
     const asked: { readonly url: string; readonly init: RequestInit | undefined }[] = [];
+
     const fetch = xmltvFetch({
       userAgent,
       fetch: async (input, init) => {
         const url = String(input);
         asked.push({ url, init });
         const answer = answers[url];
+
         if (!answer) throw new TypeError(`fetch failed for ${url}`);
+
         return answer();
       },
     });
+
     return { asked, fetch: (address: string) => fetch(address, new AbortController().signal) };
   }
+
   const redirect = (location: string) => () =>
     new Response(null, { status: 302, headers: { Location: location } });
+
   const refusal = (work: Promise<unknown>) =>
     work.then(
       () => null,
@@ -1976,6 +2092,7 @@ describe("the request for a guide's address", () => {
   it("follows a few redirects, never from https to http, and sends nothing but its own headers", async () => {
     const moved = `https://cdn.example.net/guide.xml?token=${GUIDE_KEY}`;
     const plain = `http://cdn.example.net/guide.xml?token=${GUIDE_KEY}`;
+
     const { asked, fetch } = fetching({
       [ADDRESS]: redirect(moved),
       [moved]: () => new Response("<tv></tv>"),
@@ -1986,6 +2103,7 @@ describe("the request for a guide's address", () => {
 
     const { body, size } = await fetch(ADDRESS);
     let text = "";
+
     for await (const piece of body) text += Buffer.from(piece).toString();
 
     expect(text).toBe("<tv></tv>");
@@ -2027,6 +2145,7 @@ describe("the request for a guide's address", () => {
           }),
         ),
     });
+
     const read = async (address: string) => {
       for await (const _piece of (await fetch(address)).body) void _piece;
     };
@@ -2040,6 +2159,7 @@ describe("the request for a guide's address", () => {
       kind: "provider-error",
       status: 403,
     });
+
     for (const told of [unreachable, lost]) {
       expect(JSON.stringify(told)).not.toContain(GUIDE_KEY);
       expect(JSON.stringify(told)).not.toContain("xmltv.gz");

@@ -24,6 +24,7 @@ export function ConnectScreen() {
   const kept = useDownloads().data?.items.length ?? 0;
   const recorded = useRecordings().data?.length ?? 0;
   const controls = !useWindowFullScreen();
+
   return (
     <div className="relative flex h-full items-center justify-center overflow-y-auto">
       <div

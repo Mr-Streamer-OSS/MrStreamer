@@ -57,17 +57,23 @@ export interface SavedFile {
 }
 
 const VERSION = 1;
+
 /** A record larger than this isn't written or read. */
 const RECORD_BYTES = 8 * 1024 * 1024;
+
 /** What every record together may take, and how many there may be; the oldest go past either. */
 const TOTAL_BYTES = 64 * 1024 * 1024;
 const RECORDS = 2048;
+
 /** The most records one write deletes to make room; one that still doesn't fit isn't written. */
 const PRUNE_BATCH = 64;
+
 /** Provider records have their own retention limit, independent of TMDB's policy. */
 const MAX_AGE = 182 * 24 * 60 * 60 * 1000;
+
 /** A record from further ahead than the clock may drift isn't shown. */
 const MAX_AHEAD = 10 * 60 * 1000;
+
 /** Files kept per subscription, the latest found; a file's tracks per kind; a text's length. */
 const FILES = 2048;
 const FILE_TRACKS = 32;
@@ -77,19 +83,24 @@ const FILES_NAME = "files.json";
 const folder = () => new Directory(Paths.cache, "details");
 const providers = () => new Directory(folder(), "providers");
 const tmdbFolder = () => new Directory(folder(), "tmdb");
+
 /** A name part: letters, digits and "-" as they are, every other UTF-16 unit as "_" and hex. */
 const encoded = (text: string) =>
   text.replace(/[^A-Za-z0-9-]/g, (unit) => `_${unit.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
 const subscriptionFolder = (id: string) => new Directory(providers(), encoded(id));
 
 const Finite = lazy(() =>
   type("number").narrow((value, ctx) => Number.isFinite(value) || ctx.mustBe("a finite number")),
 );
+
 const MaybeFinite = lazy(() => Finite().or("null"));
 const Url = lazy(() => type(`string <= ${URL_LENGTH}`).or("null"));
+
 const Person = lazy(() =>
   type({ "+": "reject", name: "string", character: "string | null", profile: "string | null" }),
 );
+
 const Provider = lazy(() =>
   type({
     "+": "reject",
@@ -125,6 +136,7 @@ const Provider = lazy(() =>
     container: "string | null",
   }),
 );
+
 const About = lazy(() =>
   type({
     "+": "reject",
@@ -139,6 +151,7 @@ const About = lazy(() =>
     directors: "string[]",
   }),
 );
+
 const Episode = lazy(() =>
   type({
     "+": "reject",
@@ -153,6 +166,7 @@ const Episode = lazy(() =>
     directors: "string[]",
   }),
 );
+
 const SavedFiles = lazy(() =>
   type({
     "+": "reject",
@@ -166,6 +180,7 @@ const SavedFiles = lazy(() =>
     at: Finite(),
   }).array(),
 );
+
 const Records = {
   files: lazy(() =>
     type({
@@ -214,6 +229,7 @@ function queued<A>(queue: string, fallback: A, operation: () => Promise<A>) {
   void run.then(() => {
     if (queues.get(queue) === run) queues.delete(queue);
   });
+
   return run;
 }
 
@@ -223,8 +239,10 @@ function queued<A>(queue: string, fallback: A, operation: () => Promise<A>) {
  * way have reserved, these are what a write is admitted against (`admit`).
  */
 let index: Map<string, { readonly bytes: number; readonly at: number }> | null = null;
+
 /** The bytes every record in `index` takes together. */
 let stored = 0;
+
 /** Bytes and records reserved by writes under way, one record each; and the records they write. */
 let reserved = { bytes: 0, records: 0 };
 const writing = new Set<string>();
@@ -235,6 +253,7 @@ const owned = (uri: string) => writing.has(uri.replace(/\.next$/, ""));
 /** Forgets the record at `uri`, gone from the disk. */
 function forget(uri: string) {
   const known = index?.get(uri);
+
   if (!known || !index) return;
   index.delete(uri);
   stored -= known.bytes;
@@ -245,6 +264,7 @@ function discard(file: File): boolean {
   try {
     if (file.exists) file.delete();
     forget(file.uri);
+
     return true;
   } catch {
     // Left for a later write, or the next launch, to try again.
@@ -263,16 +283,21 @@ async function load<R extends { readonly at: number }>(
   stands: () => boolean,
 ): Promise<R | null> {
   if (!stands() || !file.exists) return null;
+
   try {
     if (file.size > RECORD_BYTES) throw new RangeError("Too large");
     const json: unknown = JSON.parse(await file.text());
+
     if (!stands()) return null;
     const record = check(json);
     const age = record ? Date.now() - record.at : NaN;
+
     if (!record || !(age <= maxAge && age >= -MAX_AHEAD)) throw new TypeError();
+
     return record;
   } catch {
     discard(file);
+
     return null;
   }
 }
@@ -284,8 +309,10 @@ async function load<R extends { readonly at: number }>(
 function abandon(file: File, all: Map<string, { readonly bytes: number; readonly at: number }>) {
   if (discard(file) || !file.exists) return;
   const bytes = file.size;
+
   if (all === index) forget(file.uri);
   all.set(file.uri, { bytes, at: file.modificationTime ?? Date.now() });
+
   if (all === index) stored += bytes;
 }
 
@@ -297,15 +324,19 @@ function abandon(file: File, all: Map<string, { readonly bytes: number; readonly
 function indexed() {
   if (index) return index;
   const found = new Map<string, { readonly bytes: number; readonly at: number }>();
+
   const folders = providers().exists
     ? providers()
         .list()
         .filter((entry) => entry instanceof Directory)
     : [];
+
   for (const at of [...folders, tmdbFolder()]) {
     if (!at.exists) continue;
+
     for (const file of at.list()) {
       if (!(file instanceof File)) continue;
+
       if (file.name.endsWith(".json")) {
         found.set(file.uri, { bytes: file.size, at: file.modificationTime ?? 0 });
       } else if (!owned(file.uri)) {
@@ -313,8 +344,10 @@ function indexed() {
       }
     }
   }
+
   index = found;
   stored = [...found.values()].reduce((sum, each) => sum + each.bytes, 0);
+
   return found;
 }
 
@@ -334,21 +367,27 @@ interface Reservation {
  */
 function admit(file: File, bytes: number): Reservation | null {
   const all = indexed();
+
   const fits = () =>
     stored + reserved.bytes + bytes <= TOTAL_BYTES && all.size + reserved.records + 1 <= RECORDS;
+
   if (!fits()) {
     const oldest = [...all]
       .filter(([uri]) => uri !== file.uri && !owned(uri))
       .toSorted(([, a], [, b]) => a.at - b.at)
       .slice(0, PRUNE_BATCH);
+
     for (const [uri] of oldest) {
       if (fits()) break;
       discard(new File(uri));
     }
+
     if (!fits()) return null;
   }
+
   reserved = { bytes: reserved.bytes + bytes, records: reserved.records + 1 };
   writing.add(file.uri);
+
   return { uri: file.uri, bytes };
 }
 
@@ -359,6 +398,7 @@ function release(reservation: Reservation, placed: boolean) {
     records: reserved.records - 1,
   };
   writing.delete(reservation.uri);
+
   if (!placed || !index) return;
   // The record takes the place of what it replaced, and of the file beside it it was written to.
   forget(reservation.uri);
@@ -375,16 +415,20 @@ function release(reservation: Reservation, placed: boolean) {
 async function store(at: Directory, name: string, text: string, stands: () => boolean) {
   if (!stands() || text.length > RECORD_BYTES) return;
   const bytes = new TextEncoder().encode(text);
+
   if (bytes.length > RECORD_BYTES) return;
   at.create({ intermediates: true, idempotent: true });
   const file = new File(at, name);
   const reservation = admit(file, bytes.length);
+
   if (!reservation) return;
   const pending = new File(at, `${name}.next`);
   let placed = false;
+
   try {
     pending.create({ overwrite: true });
     await pending.write(bytes);
+
     if (!stands()) return;
     await pending.move(file, { overwrite: true });
     placed = true;
@@ -392,16 +436,21 @@ async function store(at: Directory, name: string, text: string, stands: () => bo
     // Not written: what is left of it goes below.
   } finally {
     release(reservation, placed);
+
     if (!placed && index) abandon(new File(at, `${name}.next`), index);
   }
+
   if (!stands()) discard(file);
 }
 
 const titleName = (kind: TitleKind, titleId: string) => `${kind}.${encoded(titleId)}.json`;
+
 const aboutName = (kind: TitleKind, tmdbId: string, language: string) =>
   `about.${kind}.${encoded(tmdbId)}.${encoded(language)}.json`;
+
 const seasonName = (tmdbId: string, season: number, language: string) =>
   `season.${encoded(tmdbId)}.${season}.${encoded(language)}.json`;
+
 const always = () => true;
 
 /** `id`'s saved facts of a title, or null. Null too once `stands` fails while it is read. */
@@ -416,8 +465,10 @@ export function readTitle(
       new File(subscriptionFolder(id), titleName(kind, titleId)),
       (json) => {
         const record = Records.title()(json);
+
         if (record instanceof type.errors) return null;
         const same = record.subscriptionId === id && record.kind === kind && record.id === titleId;
+
         return same ? { at: record.at, listedAt: record.listedAt, value: record.value } : null;
       },
       MAX_AGE,
@@ -441,7 +492,9 @@ export function writeTitle(
   return queued(`provider|${id}`, undefined, async () => {
     const known = loginFrom(login);
     const value = providerCopy(saved.value, (url) => safeUrl(url, known));
+
     if (holds(value, known)) return;
+
     const text = JSON.stringify({
       version: VERSION,
       subscriptionId: id,
@@ -451,6 +504,7 @@ export function writeTitle(
       listedAt: saved.listedAt,
       value,
     });
+
     await store(subscriptionFolder(id), titleName(kind, titleId), text, stands);
   });
 }
@@ -458,11 +512,13 @@ export function writeTitle(
 /** TMDB's about of a title in `language`, as last answered, or null. Null as its value: missing. */
 export function readAbout(kind: TitleKind, tmdbId: string, language: string) {
   const name = aboutName(kind, tmdbId, language);
+
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
       (json): Saved<TitleAbout | null> | null => {
         const record = Records.about()(json);
+
         return record instanceof type.errors ? null : { at: record.at, value: record.value };
       },
       TMDB_EXPIRE_MS,
@@ -479,6 +535,7 @@ export function writeAbout(
 ): Promise<void> {
   const name = aboutName(kind, tmdbId, language);
   const value = saved.value && aboutCopy(saved.value);
+
   return queued(name, undefined, () =>
     store(tmdbFolder(), name, JSON.stringify({ version: VERSION, at: saved.at, value }), always),
   );
@@ -487,11 +544,13 @@ export function writeAbout(
 /** TMDB's episodes of a season in `language`, as last answered, or null. Null as its value: missing. */
 export function readSeason(tmdbId: string, season: number, language: string) {
   const name = seasonName(tmdbId, season, language);
+
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
       (json): Saved<readonly EpisodeAbout[] | null> | null => {
         const record = Records.season()(json);
+
         return record instanceof type.errors ? null : { at: record.at, value: record.value };
       },
       TMDB_EXPIRE_MS,
@@ -508,6 +567,7 @@ export function writeSeason(
 ): Promise<void> {
   const name = seasonName(tmdbId, season, language);
   const value = saved.value && saved.value.map(episodeCopy);
+
   return queued(name, undefined, () =>
     store(tmdbFolder(), name, JSON.stringify({ version: VERSION, at: saved.at, value }), always),
   );
@@ -523,6 +583,7 @@ function keepable(file: SavedFile, now: number, login: SourceLogin): boolean {
   const { username } = known;
   const texts = [file.id, file.seriesId ?? "", file.name, file.container];
   const age = now - file.at;
+
   return (
     texts.every((text) => text.length <= FILE_TEXT && (username === "" || text !== username)) &&
     file.audio.length <= FILE_TRACKS &&
@@ -548,13 +609,16 @@ export function readFiles(
       new File(subscriptionFolder(id), FILES_NAME),
       (json) => {
         const parsed = Records.files()(json);
+
         return parsed instanceof type.errors || parsed.subscriptionId !== id ? null : parsed;
       },
       MAX_AGE,
       stands,
     );
+
     if (!record) return null;
     const now = Date.now();
+
     return record.files
       .filter((file) => keepable(file, now, login))
       .toSorted((a, b) => b.at - a.at)
@@ -574,6 +638,7 @@ export function writeFiles(
 ): Promise<void> {
   return queued(`provider|${id}`, undefined, async () => {
     const now = Date.now();
+
     const kept = files
       .filter((file) => keepable(file, now, login))
       .toSorted((a, b) => b.at - a.at)
@@ -588,6 +653,7 @@ export function writeFiles(
         subtitles: [...file.subtitles],
         at: file.at,
       }));
+
     const text = JSON.stringify({ version: VERSION, subscriptionId: id, at: now, files: kept });
     await store(subscriptionFolder(id), FILES_NAME, text, stands);
   });
@@ -600,8 +666,10 @@ export function writeFiles(
 export function dropTitles(id: string): Promise<boolean> {
   return queued(`provider|${id}`, false, async () => {
     const at = subscriptionFolder(id);
+
     if (!at.exists) return true;
     const files = at.list().filter((entry) => entry instanceof File);
+
     // Every deletion is tried, whatever one refuses; the folder goes at the next launch's tidying.
     return files.map(discard).every(Boolean);
   });
@@ -614,9 +682,11 @@ export function dropTitles(id: string): Promise<boolean> {
  */
 export function pruneDetails(ids: readonly string[]): void {
   index = null;
+
   try {
     if (!providers().exists) return;
     const kept = new Set(ids.map(encoded));
+
     for (const entry of providers().list()) {
       if (!kept.has(entry.name)) entry.delete();
     }

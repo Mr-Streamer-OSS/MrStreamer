@@ -3,13 +3,16 @@ import { type } from "arktype";
 import { lazy, type Infer } from "./lazy.ts";
 
 export const PlaylistMode = lazy(() => type("'live' | 'movie' | 'series' | 'skip'"));
+
 export type PlaylistMode = Infer<typeof PlaylistMode>;
+
 export const PlaylistMapping = lazy(() =>
   type({
     version: "1",
     groups: type({ group: "string <= 512", mode: PlaylistMode() }).array().atMostLength(10_000),
   }),
 );
+
 export type PlaylistMapping = Infer<typeof PlaylistMapping>;
 
 export type PlaylistOmissionReason =

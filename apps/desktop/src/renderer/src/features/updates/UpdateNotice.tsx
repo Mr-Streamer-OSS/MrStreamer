@@ -24,6 +24,7 @@ export const NOTE_LINES = 4;
 /** Whether the top bar shows the notice at all. A version the reminder showed (`kept`) stays. */
 function noticed(status: UpdateStatus, kept: string | null): boolean {
   const { update, dismissed } = status;
+
   switch (update.kind) {
     case "downloading":
     case "ready":
@@ -63,6 +64,7 @@ export function updateNoticeLabel(
   )
     return undefined;
   const { update } = status;
+
   return update.kind === "downloading"
     ? `${t("Updating")} · ${formatPercent(update.percent / 100)}`
     : update.kind === "ready"
@@ -79,8 +81,10 @@ export function UpdateNotice({ compact = false }: { compact?: boolean }) {
   const { status, recording } = useUpdates();
   const open = useUi((state) => state.updateDialog === "panel");
   const label = updateNoticeLabel(status, open, useKeptUpdate(), recording.length > 0);
+
   if (!status || !label) return null;
   const { update } = status;
+
   return (
     <Popover.Root
       open={open}
@@ -140,12 +144,14 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
     stopPending,
     retryStop,
   } = useUpdates();
+
   const { update, offer, channel } = status;
   // When a ready update installs while something records.
   const waiting = update.kind === "ready" ? waitText(recording) : null;
   const version = "version" in update ? update.version : (offer?.version ?? "");
   const notes = noteItems(offer?.notes ?? null);
   const close = () => useUi.setState({ updateDialog: null });
+
   const later = () => {
     if (version) dismiss(version);
     useUi.setState((state) => ({
@@ -153,6 +159,7 @@ function UpdatePanel({ status }: { status: UpdateStatus }) {
       updateReminder: shownReminder(state.updateReminder) ? "done" : state.updateReminder,
     }));
   };
+
   return (
     <>
       <div className="text-lg font-semibold tracking-tight">Mr. Streamer {version}</div>

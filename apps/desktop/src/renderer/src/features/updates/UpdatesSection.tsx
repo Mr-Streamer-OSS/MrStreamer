@@ -34,6 +34,7 @@ function describeCheckFailure(failure: CheckFailure): string {
 
 export function UpdatesSection() {
   const { status, statusRead, setChannel, channelChange, openStore } = useUpdates();
+
   if (!status)
     return (
       <Section title={t("Updates")}>
@@ -45,10 +46,12 @@ export function UpdatesSection() {
         />
       </Section>
     );
+
   const channels: readonly { value: Channel; label: string }[] = [
     { value: "stable", label: t("Stable") },
     { value: "nightly", label: t("Nightly") },
   ];
+
   // The Microsoft Store updates a copy it installed, and carries one release line.
   if (status.distribution === "store") {
     return (
@@ -61,6 +64,7 @@ export function UpdatesSection() {
       </Section>
     );
   }
+
   if (status.distribution === "pacman" || status.distribution === "snap") {
     const instructions =
       status.distribution === "pacman"
@@ -68,6 +72,7 @@ export function UpdatesSection() {
         : t(
             "Quit Mr. Streamer first. Snap Store: sudo snap refresh mr-streamer. Local install: install a newer Snap file.",
           );
+
     return (
       <Section title={t("Updates")}>
         <Row
@@ -79,7 +84,9 @@ export function UpdatesSection() {
       </Section>
     );
   }
+
   status.distribution satisfies "direct";
+
   return (
     <Section title={t("Updates")}>
       <State status={status} />
@@ -120,10 +127,12 @@ function State({ status }: { status: UpdateStatus }) {
     stopPending,
     retryStop,
   } = useUpdates();
+
   const { update, version, checked, nextCheckAt, offer } = status;
   // A ready update waits for what records, unless Restart now stops it.
   const waits = update.kind === "ready" && recording.length > 0;
   let note: string;
+
   switch (update.kind) {
     case "idle":
       note = nextCheckAt
@@ -163,12 +172,14 @@ function State({ status }: { status: UpdateStatus }) {
             : t("{version} couldn't be installed", { version: update.version });
       break;
   }
+
   const failure =
     update.kind === "failed"
       ? update.step === "check"
         ? describeCheckFailure(update.failure)
         : update.detail
       : null;
+
   // An automatic check that failed keeps the last result on screen, and says so quietly.
   const quietFailure =
     checked?.failure && update.kind !== "failed" && update.kind !== "checking"
@@ -180,8 +191,10 @@ function State({ status }: { status: UpdateStatus }) {
           ...(nextCheckAt ? [t("Trying again at {time}.", { time: time(nextCheckAt) })] : []),
         ].join(" ")
       : null;
+
   const busy = update.kind === "downloading" || update.kind === "ready";
   const offered = update.kind === "available" || update.kind === "failed" || busy;
+
   return (
     <>
       <Row id="update-check" label={version} note={note}>
@@ -261,7 +274,9 @@ function State({ status }: { status: UpdateStatus }) {
 function Notes({ status }: { status: UpdateStatus }) {
   const { offer } = status;
   const items = noteItems(offer?.notes ?? null);
+
   if (!offer || items.length === 0) return null;
+
   return (
     <div className="mt-5">
       <h3 className="text-[0.9375rem] font-medium">

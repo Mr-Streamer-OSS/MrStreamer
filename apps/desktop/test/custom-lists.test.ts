@@ -23,6 +23,7 @@ import { demoLogin, fakeProvider, promised, runtimeFor, tempDir, testConfig } fr
 /** The app's services on `dataDir`, as a start of the app has them. */
 async function started(dataDir: string) {
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+
   return {
     quit: () => runtime.dispose(),
     /**
@@ -37,10 +38,13 @@ async function started(dataDir: string) {
       const viewing = Context.get(services, ViewingRecord);
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
+
       const wait = Effect.promise(() => {
         arrived.resolve();
+
         return released.promise;
       });
+
       const slowed =
         held === "queued"
           ? Context.add(services, Subscriptions, {
@@ -54,12 +58,15 @@ async function started(dataDir: string) {
                   ? Effect.andThen(viewing.erase(account), wait)
                   : Effect.andThen(wait, Effect.fail(refused)),
             });
+
       const roster = await promised(
         runtimeFor(Roster.layer.pipe(Layer.provide(Layer.succeedContext(slowed)))),
         Roster,
       );
+
       const done = roster.remove(subscriptionId, true);
       await arrived.promise;
+
       return { done, release: () => released.resolve() };
     },
     lists: await promised(runtime, CustomLists),
@@ -86,6 +93,7 @@ async function withTwo(options: { adultChannels?: boolean } = {}) {
   await app.library.refresh(a);
   const b = (await app.roster.add(demoLogin(second))).id;
   await app.library.refresh(b);
+
   return { ...app, dataDir, first, second, a, b };
 }
 
@@ -111,6 +119,7 @@ function plain(provider: FakeProvider, category: string, count: number): FakeCha
 /** Opens the database as a separate program would: for what is kept on disk, not what shows. */
 function onDisk<A>(dataDir: string, read: (db: DatabaseSync) => A): A {
   const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
   try {
     return read(db);
   } finally {
@@ -139,8 +148,10 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       { name: "News 24", members: [`${b}:2014`] },
       { name: "Late sport", members: [`${b}:2014`, `${a}:2014`, `${a}:2015`] },
     ];
+
     const read = (all: readonly CustomList[]) =>
       all.map((list) => ({ name: list.name, members: shown(list).members }));
+
     expect(read(await lists.lists())).toEqual(expected);
     await app.quit();
     const again = await started(app.dataDir);
@@ -244,6 +255,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     await lists.create({ id: two, name: "Two", channel: { subscriptionId: a, id: "2014" } });
     await lists.setMember(two, { subscriptionId: b, id: "2015" }, true);
     await viewing.setFavourite(randomUUID(), { subscriptionId: b, id: "2016" }, true);
+
     const named = () =>
       onDisk(dataDir, (db) =>
         db
@@ -251,6 +263,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
           .all()
           .map((row) => [row["account"], row["name"]]),
       );
+
     const account = `${second.url}|demo`;
     expect(named().filter(([owner]) => owner === account)).toHaveLength(2);
 
@@ -278,9 +291,11 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     // Then, added again there, it records a watch and a favourite under the same account.
     onDisk(dataDir, (db) => {
       db.prepare("delete from events where account = ?").run(account);
+
       const event = db.prepare(
         "insert into events (account, type, version, channel_id, at, command_id) values (?, ?, 1, ?, ?, ?)",
       );
+
       event.run(account, "watched", "2014", Date.now(), randomUUID());
       event.run(account, "favourite-added", "2015", Date.now(), randomUUID());
     });
@@ -304,6 +319,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     // BE | KWALITEIT 1 in Full HD, HD and SD: one channel, by the Full HD stream's id.
     const [fhd, hd] = [QUALITY_STREAM_IDS, QUALITY_STREAM_IDS + 1].map(String);
     const [one, two] = plain(first, "2", 2);
+
     if (!one || !two || !fhd || !hd) throw new Error("The fake catalogue needs these channels");
     await lists.create({ id, name: "Followed", channel: { subscriptionId: a, id: hd } });
     await lists.setMember(id, { subscriptionId: a, id: String(one.streamId) }, true);
@@ -319,6 +335,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     first.serveChannels((all) => all.filter((each) => String(each.streamId) !== fhd));
     await library.refresh(a);
     expect(await members()).toEqual([`${a}:${hd}`, `${a}:${one.streamId}`, `${a}:${two.streamId}`]);
+
     // And the provider gives that id to another channel: the list keeps the one it had.
     const elsewhere = (all: readonly FakeChannel[]) =>
       all.map((each) =>
@@ -326,6 +343,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
           ? { ...each, name: "BE | ANOTHER CHANNEL", offline: false }
           : each,
       );
+
     first.serveChannels(elsewhere);
     await library.refresh(a);
     expect(await members()).toEqual([`${a}:${hd}`, `${a}:${one.streamId}`, `${a}:${two.streamId}`]);
@@ -333,6 +351,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     // Two channels the provider joins show once, and split again, both are back in their places.
     const rename = (streamId: number, name: string) => (all: readonly FakeChannel[]) =>
       all.map((each) => (each.streamId === streamId ? { ...each, name } : each));
+
     first.serveChannels((all) =>
       rename(two.streamId, "UK: JOINED SD")(rename(one.streamId, "UK: JOINED HD")(elsewhere(all))),
     );
@@ -357,6 +376,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     const { lists, library, first, a } = app;
     const id = randomUUID();
     const [one, two] = plain(first, "3", 2);
+
     if (!one || !two) throw new Error("The fake catalogue needs these channels");
     await lists.create({
       id,
@@ -371,6 +391,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     const [list] = await lists.lists();
     expect(shown(list).members).toEqual([`unlisted:${a}:${title}`, `${a}:${two.streamId}`]);
     const placeholder = list?.members[0];
+
     if (!placeholder) throw new Error("The list holds the channel");
     await lists.removeMember(id, placeholder.member);
     expect(shown((await lists.lists())[0]).members).toEqual([`${a}:${two.streamId}`]);
@@ -414,6 +435,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     const { lists, roster, second, a, b } = app;
     const id = randomUUID();
     await lists.create({ id, name: "Order" });
+
     for (const [subscriptionId, channel] of [
       [a, "2014"],
       [b, "2014"],
@@ -422,11 +444,14 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     ] as const) {
       await lists.setMember(id, { subscriptionId, id: channel }, true);
     }
+
     const read = async () => (await lists.lists())[0];
     const list = await read();
+
     if (!list) throw new Error("The list is there");
     const ids = list.members.map((each) => each.member);
     const [w, x, y, z] = ids;
+
     if (!w || !x || !y || !z) throw new Error("The list holds four channels");
 
     // An order made before a change is refused, and so is one naming a channel twice.
@@ -435,6 +460,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       lists.arrange({ list: id, revision: list.revision, order: [z, y, x, w] }),
     ).rejects.toMatchObject({ error: { kind: "list-changed" } });
     const now = await read();
+
     if (!now) throw new Error("The list is there");
     await expect(
       lists.arrange({ list: id, revision: now.revision, order: [z, z] }),
@@ -443,11 +469,13 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
     // The other subscription away: its channel isn't shown, and keeps its second place.
     await roster.remove(b, false);
     const away = await read();
+
     if (!away) throw new Error("The list is there");
     await expect(
       lists.arrange({ list: id, revision: away.revision, order: [x, w] }),
     ).rejects.toMatchObject({ error: { kind: "list-changed" } });
     const v = away.members[3]?.member;
+
     if (!v) throw new Error("The list holds the new channel");
     await lists.arrange({ list: id, revision: away.revision, order: [v, z, y, w] });
     const back = (await roster.add(demoLogin(second))).id;
@@ -492,6 +520,7 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
       /** The rounds whose change was refused, with why: only because its subscription went. */
       const refused: { readonly turns: number; readonly reason: unknown }[] = [];
       let made: string | null = null;
+
       // The change starts a few turns of the event loop after the removal, a few more each round:
       // whichever comes first, the account's channel is erased with its record or never stored.
       for (let turns = 0; turns <= 32; turns++) {
@@ -499,27 +528,37 @@ describe("custom channel lists", { timeout: 30_000 }, () => {
         // can: its list holds none of that account's channels.
         const owner = (await app.roster.add(demoLogin(provider))).id;
         await app.library.refresh(owner);
+
         if (made !== null) {
           const last = (await app.lists.lists()).find((each) => each.id === made);
+
           for (const member of last?.members ?? []) restored.push(`${turns - 1}:${member.kind}`);
         }
+
         if (turns === 32) break;
         const id = randomUUID();
         made = id;
         const channel = { subscriptionId: owner, id: "2014" };
+
         if (change === "setMember") await app.lists.create({ id, name: id });
         const removal = app.roster.remove(owner, true);
+
         for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+
         const [, outcome] = await Promise.allSettled([
           removal,
           change === "create"
             ? app.lists.create({ id, name: id, channel })
             : app.lists.setMember(id, channel, true),
         ]);
+
         await removal;
+
         if (outcome.status === "rejected") refused.push({ turns, reason: outcome.reason });
+
         if ((await app.lists.lists()).find((each) => each.id === id)?.away) away.push(turns);
       }
+
       expect({ away, restored }).toEqual({ away: [], restored: [] });
       // A change that went through was erased; one refused was refused for no other reason.
       expect(refused).toMatchObject(

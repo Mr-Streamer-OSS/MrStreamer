@@ -29,15 +29,18 @@ export async function removeDuringGuideScenario(d: Driver, guide: ProviderGuide)
       const own = read.ok ? read.value[0] : undefined;
       return { state: own?.processing?.state ?? null, availability: own?.availability ?? null };
     })()`);
+
   await d.wait(async () => (await status()).availability === "available");
   await d.quit();
 
   // What 0.0.12 kept: the document itself, named by a guide.json without an index.
   const meta = join(d.profile, "guide.json");
+
   const { key, fetchedAt } = JSON.parse(await readFile(meta, "utf8")) as {
     key: string;
     fetchedAt: number;
   };
+
   for (const name of await readdir(d.profile))
     if (name.startsWith("guide-index.")) await rm(join(d.profile, name));
   await writeFile(meta, JSON.stringify({ key, fetchedAt }));
@@ -52,21 +55,26 @@ export async function removeDuringGuideScenario(d: Driver, guide: ProviderGuide)
     "Open Subscriptions",
     `[...document.querySelectorAll('nav button')].find(b => b.textContent.trim() === 'Subscriptions')`,
   );
+
   // As the installed check does: a press while the list settles can go unseen.
   for (let attempt = 1; ; attempt++) {
     await d.click(
       `Open the subscription (attempt ${attempt})`,
       `(${ROW})?.querySelector('button')`,
     );
+
     const opened = await d
       .wait(() => d.exists(`(${ROW})?.querySelector('[role=region]')`), 3000)
       .then(
         () => true,
         () => false,
       );
+
     if (opened) break;
+
     if (attempt === 3) throw new Error("The subscription's row didn't open.");
   }
+
   await d.click(
     "Ask to remove it",
     `[...(${ROW})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim().startsWith("Remove "))`,
@@ -74,6 +82,7 @@ export async function removeDuringGuideScenario(d: Driver, guide: ProviderGuide)
   await d.wait(() => d.evaluate<boolean>(`document.body.innerText.includes("from this device?")`));
   await d.capture("removal-question");
   const indexing = (await status()).state;
+
   if (indexing !== "reading") throw new Error(`The guide was no longer being indexed: ${indexing}`);
   const asked = guide.requests();
   const began = performance.now();
@@ -86,9 +95,11 @@ export async function removeDuringGuideScenario(d: Driver, guide: ProviderGuide)
   await d.capture("connect-after-removal");
 
   d.observed["guideRequestsAfterRemoval"] = guide.requests() - asked;
+
   if (guide.requests() !== asked) throw new Error("A guide was asked for after the removal.");
   const left = (await readdir(d.profile)).filter((name) => /^guide[-.]/.test(name));
   d.observed["guideFilesLeft"] = left;
+
   if (left.length > 0) throw new Error(`The guide left ${left.join(", ")}.`);
 }
 
@@ -99,11 +110,14 @@ export async function removeDuringGuideScenario(d: Driver, guide: ProviderGuide)
 function largeGuide(): string {
   const stamp = (at: number) =>
     `${new Date(at).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
   const first = Math.floor(Date.now() / 60_000) * 60_000;
   const parts = ['<?xml version="1.0" encoding="utf-8"?><tv>'];
+
   for (let channel = 0; channel < 20; channel++) {
     const id = `slow-${channel}.test`;
     parts.push(`<channel id="${id}"><display-name>${id}</display-name></channel>`);
+
     for (let minute = 0; minute < 30_000; minute++) {
       const start = first + minute * 60_000;
       parts.push(
@@ -111,6 +125,8 @@ function largeGuide(): string {
       );
     }
   }
+
   parts.push("</tv>");
+
   return parts.join("\n");
 }

@@ -27,8 +27,10 @@ const UNKNOWN = new Set(["und", "unk", "mis", "mul", "zxx", "qaa"]);
 /** The code Intl and the viewer's remembered choice use: "ger" and "deu" both give "de". */
 export function languageCode(code: string | null | undefined): string | null {
   const lower = code?.trim().toLowerCase();
+
   if (!lower || UNKNOWN.has(lower)) return null;
   const mapped = BIBLIOGRAPHIC[lower] ?? lower;
+
   try {
     return Intl.getCanonicalLocales(mapped)[0]?.split("-")[0] ?? null;
   } catch {
@@ -39,10 +41,14 @@ export function languageCode(code: string | null | undefined): string | null {
 /** "Nederlands" for "dut", "English" for "eng"; null when the code names no known language. */
 export function languageName(code: string | null | undefined): string | null {
   const canonical = languageCode(code);
+
   if (!canonical) return null;
+
   try {
     const name = new Intl.DisplayNames([canonical], { type: "language" }).of(canonical);
+
     if (!name || name.toLowerCase() === canonical) return null;
+
     return name.charAt(0).toLocaleUpperCase(canonical) + name.slice(1);
   } catch {
     return null;
@@ -56,11 +62,15 @@ export function languageName(code: string | null | undefined): string | null {
 export function regionalLanguageName(code: string | null | undefined): string | null {
   const language = languageCode(code);
   const plain = languageName(language);
+
   if (!language || !plain) return plain;
+
   try {
     const { region } = new Intl.Locale(code!.trim());
+
     const name =
       region && new Intl.DisplayNames([language], { type: "language" }).of(`${language}-${region}`);
+
     return name ? name.charAt(0).toLocaleUpperCase(language) + name.slice(1) : plain;
   } catch {
     return plain;
@@ -94,12 +104,15 @@ export interface SubtitleFacts extends TrackFacts {
 export function audioTracks(tracks: readonly AudioFacts[]): AudioTrack[] {
   const labelled = tracks.map((track) => {
     const parts = [languageName(track.language) ?? t("Sound"), layout(track.channels)];
+
     if (track.name && /comment/i.test(track.name)) parts.push(t("Commentary"));
     else if (track.description || (track.name && /descri/i.test(track.name))) {
       parts.push(t("Audio description"));
     }
+
     return { track, label: parts.filter(Boolean).join(" · ") };
   });
+
   return distinct(labelled).map(({ track, label }) => ({
     id: track.id,
     language: languageCode(track.language),
@@ -115,12 +128,16 @@ export function subtitleTracks(tracks: readonly SubtitleFacts[]): SubtitleTrack[
       languageName(track.language) ??
         (track.format === "captions" ? t("Captions") : t("Subtitles")),
     ];
+
     if (track.forced || (track.name && /forced/i.test(track.name))) parts.push(t("Forced"));
+
     if (track.hearingImpaired || (track.name && /\b(sdh|cc)\b|hearing/i.test(track.name))) {
       parts.push(t("SDH"));
     }
+
     return { track, label: parts.join(" · ") };
   });
+
   return apart(labelled).map(({ track, label }) => ({
     id: track.id,
     page: track.page,
@@ -169,6 +186,7 @@ export function renditionAudio(renditions: readonly RenditionFacts[]): AudioTrac
       rendition.accessible && t("Audio description"),
     ]),
   );
+
   return distinct(labelled).map(({ track, label }) => ({
     id: track.id,
     language: track.language,
@@ -191,6 +209,7 @@ export function renditionSubtitles(renditions: readonly SubtitleRenditionFacts[]
       [rendition.forced && t("Forced"), rendition.accessible && t("SDH")],
     ),
   );
+
   return apart(labelled).map(({ track, label }) => ({
     id: track.id,
     page: track.page,
@@ -217,6 +236,7 @@ function named<T extends RenditionFacts>(
   const coded = name !== null && /^[a-z]{2,3}$/i.test(name) && languageName(name) !== null;
   const own = coded ? null : name;
   const language = languageCode(rendition.language) ?? (coded ? languageCode(name) : null);
+
   return {
     // The name is the label or says nothing more, so it tells no two renditions apart.
     track: { ...rendition, name: null, language },
@@ -233,10 +253,12 @@ function apart<T extends TrackFacts & { readonly format: SubtitleFormat }>(
 ): { track: T; label: string }[] {
   const told = labelled.map(({ track, label }) => {
     const twins = labelled.filter((other) => other.label === label);
+
     return twins.some((other) => other.track.format !== track.format)
       ? { track, label: `${label} · ${t(FORMAT_NAMES[track.format])}` }
       : { track, label };
   });
+
   return distinct(told);
 }
 
@@ -255,13 +277,16 @@ function distinct<T extends TrackFacts>(
   labelled: readonly { track: T; label: string }[],
 ): { track: T; label: string }[] {
   const counts = new Map<string, number>();
+
   for (const { label } of labelled) counts.set(label, (counts.get(label) ?? 0) + 1);
   const seen = new Map<string, number>();
+
   return labelled.map(({ track, label }) => {
     if ((counts.get(label) ?? 0) < 2) return { track, label };
     const index = (seen.get(label) ?? 0) + 1;
     seen.set(label, index);
     const name = track.name?.trim();
+
     return { track, label: `${label} · ${name && !label.includes(name) ? name : index}` };
   });
 }
@@ -307,15 +332,19 @@ export function chooseTracks(
     audio.find((track) => track.default) ??
     audio[0] ??
     null;
+
   const shown = subtitles.filter((track) => formats.has(track.format));
+
   const wanted =
     choice.subtitleLanguage && choice.subtitleLanguage !== "off"
       ? shown.find((track) => track.language === choice.subtitleLanguage && !track.forced)
       : undefined;
+
   const forced =
     choice.subtitleLanguage === "off"
       ? undefined
       : shown.find((track) => track.forced && track.language === sound?.language);
+
   return { audio: sound?.id ?? null, subtitle: wanted ?? forced ?? null };
 }
 
@@ -329,7 +358,9 @@ export function channelSubtitle(
   subtitleLanguage: string | null,
 ): SubtitleTrack | null {
   const code = subtitleLanguage === "off" ? null : languageCode(subtitleLanguage);
+
   if (!code || tracks.audio.some((track) => track.language === code)) return null;
   const wanted = tracks.subtitles.filter((track) => track.language === code);
+
   return wanted.find((track) => !track.forced) ?? wanted[0] ?? null;
 }

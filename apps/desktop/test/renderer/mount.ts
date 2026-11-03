@@ -7,6 +7,7 @@ export function bareView() {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
+
   return {
     container,
     render: (node?: ReactNode) => act(async () => root.render(node)),
@@ -20,6 +21,7 @@ export function bareView() {
 /** A bare view whose tree has `client`, cleared once it unmounts. */
 export function queryView(client: QueryClient) {
   const view = bareView();
+
   return {
     container: view.container,
     render: (node?: ReactNode) => view.render(createElement(QueryClientProvider, { client }, node)),

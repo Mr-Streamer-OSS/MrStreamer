@@ -18,8 +18,10 @@ const PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d{8})\.(\d+))?$/;
 /** Reads "0.2.0" or "0.3.0-nightly.20261002.14", with or without a leading "v". Null otherwise. */
 export function parseVersion(text: string): Version | null {
   const match = PATTERN.exec(text.replace(/^v/, ""));
+
   if (!match) return null;
   const [, major, minor, patch, date, run] = match;
+
   return {
     major: Number(major),
     minor: Number(minor),
@@ -30,6 +32,7 @@ export function parseVersion(text: string): Version | null {
 
 export function formatVersion(version: Version): string {
   const base = `${version.major}.${version.minor}.${version.patch}`;
+
   return version.nightly ? `${base}-nightly.${version.nightly.date}.${version.nightly.run}` : base;
 }
 
@@ -40,7 +43,10 @@ export function channelOf(version: Version): Channel {
 /** Negative when `a` is older than `b`, positive when newer, 0 when the same build. */
 export function compareVersions(a: Version, b: Version): number {
   const base = a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+
   if (base !== 0) return base;
+
   if (!a.nightly || !b.nightly) return (a.nightly ? -1 : 0) - (b.nightly ? -1 : 0);
+
   return a.nightly.date - b.nightly.date || a.nightly.run - b.nightly.run;
 }

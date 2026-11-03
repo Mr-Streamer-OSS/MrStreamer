@@ -29,31 +29,40 @@ const properties: BuildProperties = {
   arch: "x64",
   distribution: "direct",
 };
+
 const owners: Analytics[] = [];
 const servers: ReturnType<typeof createServer>[] = [];
+
 afterEach(async () => {
   const closing = Promise.all(owners.splice(0).map((owner) => owner.close()));
+
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1500);
   await closing;
+
   for (const server of servers.splice(0)) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+
   vi.useRealTimers();
 });
+
 function clock(at = "2026-10-24T23:59:00Z") {
   vi.useFakeTimers({
     toFake: ["Date", "performance", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
   });
   vi.setSystemTime(new Date(at));
 }
+
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) {
     if (await check()) return;
     await pause(5);
   }
+
   throw new Error("Observable analytics work did not settle.");
 }
+
 async function start(
   options: {
     store?: ReturnType<typeof analyticsStore>;
@@ -64,6 +73,7 @@ async function start(
   const directory = options.directory ?? (await tempDir());
   let record: AnalyticsRecord | null = null;
   const writes: AnalyticsRecord[] = [];
+
   const store = options.store ?? {
     load: async () => record && structuredClone(record),
     save: async (next: AnalyticsRecord) => {
@@ -71,7 +81,9 @@ async function start(
       writes.push(record);
     },
   };
+
   const events: CaptureEvent[] = [];
+
   const owner = new Analytics({
     dataDir: directory,
     properties,
@@ -81,21 +93,27 @@ async function start(
       kind: "local",
       send: async (event) => {
         if (event.event !== "app_version_observed") events.push(structuredClone(event));
+
         return "accepted";
       },
     },
   });
+
   owners.push(owner);
   await owner.settings();
   owner.setForeground(true);
+
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
   else await until(async () => !!(await store.load())?.installationId);
+
   return { owner, events, writes, store, directory };
 }
+
 function run(owner: Analytics, ongoing = false) {
   const token = owner.beginPlayback("live", ongoing)!;
   const binding = owner.bindPlayback(token, "local")!;
   owner.notePlaybackState(token, binding, 1, "playing");
+
   return { token, binding };
 }
 
@@ -107,14 +125,17 @@ describe("durable usage and logical-play summaries", () => {
       const directory = await tempDir();
       const store = analyticsStore(directory);
       const id = randomUUID();
+
       const common = {
         ...properties,
         profile_origin: "fresh" as const,
         $process_person_profile: false as const,
         $geoip_disable: true as const,
       };
+
       const old = new Date(Date.now() - 8 * 86_400_000).toISOString();
       const fresh = new Date(Date.now() - 3_600_000).toISOString();
+
       const summary = (timestamp: string): StreamSummary => ({
         uuid: randomUUID(),
         distinct_id: id,
@@ -129,11 +150,14 @@ describe("durable usage and logical-play summaries", () => {
           end_reason: "ended",
         },
       });
+
       const expired = summary(old);
       const ended = summary(fresh);
+
       const windowStart = new Date(
         Math.floor(Date.parse(expiredSlot === "usage" ? old : fresh) / WINDOW_MS) * WINDOW_MS,
       ).toISOString();
+
       const usage = {
         uuid: randomUUID(),
         distinct_id: id,
@@ -146,8 +170,10 @@ describe("durable usage and logical-play summaries", () => {
           counts: { action_search_used: 3 },
         },
       };
+
       const interrupted = summary(expiredSlot === "unfinished" ? old : fresh);
       interrupted.properties.end_reason = "interrupted";
+
       const direct = {
         event: {
           uuid: randomUUID(),
@@ -158,6 +184,7 @@ describe("durable usage and logical-play summaries", () => {
         },
         attempts: 0,
       };
+
       await store.save({
         format: 2,
         enabled: true,
@@ -188,28 +215,33 @@ describe("durable usage and logical-play summaries", () => {
       expect(loaded?.summaries?.unfinished).toEqual(
         expiredSlot === "unfinished" ? null : { event: interrupted, watchMs: 12_000 },
       );
+
       const { owner } = await start({
         directory,
         store,
         transport: localCapture(receiver.endpoint)!,
       });
+
       const expected = [
         direct.event,
         ended,
         ...(expiredSlot === "usage" ? [] : [usage]),
         ...(expiredSlot === "unfinished" ? [] : [interrupted]),
       ];
+
       await until(() => receiver.bodies.length === expected.length);
       await until(async () => (await store.load())?.summaries?.pending.length === 0);
       expect(receiver.bodies.map((body) => JSON.parse(body).uuid).sort()).toEqual(
         expected.map((event) => event.uuid).sort(),
       );
+
       for (const body of receiver.bodies) {
         const raw: unknown = JSON.parse(body);
         const event = CaptureEvent().assert(structuredClone(raw));
         expect(raw).toEqual({ api_key: "mrstreamer-local-verification", ...event });
         expect(event.distinct_id).toBe(id);
       }
+
       expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
     },
   );
@@ -219,13 +251,16 @@ describe("durable usage and logical-play summaries", () => {
     const directory = await tempDir();
     const store = analyticsStore(directory);
     const id = randomUUID();
+
     const common = {
       ...properties,
       profile_origin: "fresh" as const,
       $process_person_profile: false as const,
       $geoip_disable: true as const,
     };
+
     const timestamp = new Date().toISOString();
+
     const exhausted = {
       event: {
         uuid: randomUUID(),
@@ -236,6 +271,7 @@ describe("durable usage and logical-play summaries", () => {
       },
       attempts: 3,
     };
+
     const third = {
       event: {
         uuid: randomUUID(),
@@ -246,6 +282,7 @@ describe("durable usage and logical-play summaries", () => {
       },
       attempts: 2,
     };
+
     await store.save({
       format: 2,
       enabled: true,
@@ -256,6 +293,7 @@ describe("durable usage and logical-play summaries", () => {
       pending: [exhausted, third],
     });
     const sent: CaptureEvent[] = [];
+
     const { owner } = await start({
       directory,
       store,
@@ -263,10 +301,12 @@ describe("durable usage and logical-play summaries", () => {
         kind: "local",
         send: async (event) => {
           sent.push(event);
+
           return new Promise(() => {});
         },
       },
     });
+
     await until(() => sent.length === 1);
     expect(sent[0]).toEqual(third.event);
     expect((await store.load())?.pending).toEqual([{ ...third, attempts: 3 }]);
@@ -296,6 +336,7 @@ describe("durable usage and logical-play summaries", () => {
       event: { properties: { watch_duration_seconds: 0 } },
     });
     let sequence = 1;
+
     for (let tick = 1; tick <= 120; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
       first.owner.notePlaybackState(
@@ -305,33 +346,41 @@ describe("durable usage and logical-play summaries", () => {
         tick % 2 === 0 ? "playing" : tick % 4 === 1 ? "waiting" : "seeking",
       );
     }
+
     await vi.advanceTimersByTimeAsync(0);
     expect((await first.store.load())?.summaries?.unfinished).toEqual(admitted);
     first.owner.notePlaybackState(token, binding, ++sequence, "paused");
     await vi.advanceTimersByTimeAsync(0);
     const paused = await first.store.load();
     expect(paused?.summaries?.unfinished?.watchMs).toBe(60_000);
+
     for (let tick = 0; tick < 60; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
+
       for (const state of ["waiting", "seeking", "paused"] as const)
         first.owner.notePlaybackState(token, binding, ++sequence, state);
     }
+
     await vi.advanceTimersByTimeAsync(0);
     expect(await first.store.load()).toEqual(paused);
     first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+
     for (let tick = 0; tick < 302; tick++) {
       await vi.advanceTimersByTimeAsync(1000);
       first.owner.notePlaybackState(token, binding, ++sequence, "playing");
+
       if (tick === 119) {
         await vi.advanceTimersByTimeAsync(0);
         expect(await first.store.load()).toEqual(paused);
       }
     }
+
     await vi.advanceTimersByTimeAsync(0);
     const threshold = await first.store.load();
     expect(threshold?.summaries?.unfinished?.watchMs).toBe(360_000);
     expect(first.events.filter((event) => event.event === "stream_summary")).toEqual([]);
     vi.setSystemTime(new Date("2026-10-25T06:00:00Z"));
+
     for (const [snapshot, seconds, timestamp] of [
       [paused, 60, "2026-10-25T00:02:00.000Z"],
       [threshold, 360, "2026-10-25T00:08:00.000Z"],
@@ -339,6 +388,7 @@ describe("durable usage and logical-play summaries", () => {
       const gate = Promise.withResolvers<void>();
       let current = snapshot;
       const events: CaptureEvent[] = [];
+
       const owner = new Analytics({
         dataDir: first.directory,
         origin: Promise.resolve("unknown"),
@@ -354,10 +404,12 @@ describe("durable usage and logical-play summaries", () => {
           kind: "local",
           send: async (event) => {
             events.push(event);
+
             return "accepted";
           },
         },
       });
+
       owners.push(owner);
       expect(await owner.settings()).toEqual({ enabled: true, transport: "local" });
       gate.resolve();
@@ -379,6 +431,7 @@ describe("durable usage and logical-play summaries", () => {
       ]);
       expect(current?.summaries?.unfinished).toBeNull();
     }
+
     first.owner.notePlaybackState(token, binding, ++sequence, "paused");
     await vi.advanceTimersByTimeAsync(0);
     expect((await first.store.load())?.summaries?.unfinished?.watchMs).toBe(362_000);
@@ -396,6 +449,7 @@ describe("durable usage and logical-play summaries", () => {
     clock();
     const { owner, events, writes, store } = await start();
     const before = writes.length;
+
     for (let i = 0; i < 30; i++) owner.noteAction("search_used");
     owner.noteFeature("search");
     await vi.advanceTimersByTimeAsync(0);
@@ -439,11 +493,14 @@ describe("durable usage and logical-play summaries", () => {
     clock();
     const { owner, events } = await start();
     const playing = run(owner);
+
     for (let i = 0; i < 100; i++) {
       owner.noteFeature("home");
       owner.noteRendererExit("crashed");
     }
+
     await vi.advanceTimersByTimeAsync(0);
+
     for (let i = 0; i < 70; i++) {
       const token = owner.beginPlayback("vod")!;
       const binding = owner.bindPlayback(token, "local")!;
@@ -451,6 +508,7 @@ describe("durable usage and logical-play summaries", () => {
       owner.endPlayback(token);
       await vi.advanceTimersByTimeAsync(0);
     }
+
     // One live plus 59 titles admitted, independently of saturated reliability and usage.
     expect(events.filter((event) => event.event === "stream_summary")).toHaveLength(60);
     expect(
@@ -469,12 +527,14 @@ describe("durable usage and logical-play summaries", () => {
   it("drops invalid/future/wrong-identity optional blocks while preserving base consent, identity and every retired legacy name", async () => {
     const directory = await tempDir();
     const id = randomUUID();
+
     const common = {
       ...properties,
       profile_origin: "fresh",
       $process_person_profile: false,
       $geoip_disable: true,
     };
+
     const pending = [
       ["stream_started", { stream_type: "live" }],
       ["stream_stopped", { stream_type: "vod", watch_duration_seconds: 4 }],
@@ -497,6 +557,7 @@ describe("durable usage and logical-play summaries", () => {
       },
       attempts: 1,
     }));
+
     for (const summaries of [
       { version: 9 },
       { version: 1 },
@@ -534,27 +595,34 @@ describe("durable usage and logical-play summaries", () => {
 
   it("shares the 64-slot budget, discards oldest summaries first and synchronously clears all work on consent ABA", async () => {
     clock();
+
     const { owner, store } = await start({
       transport: { kind: "local", send: () => new Promise(() => {}) },
     });
+
     const run = owner.beginPlayback("live")!;
     const binding = owner.bindPlayback(run, "local")!;
     owner.notePlaybackState(run, binding, 1, "playing");
+
     for (let i = 0; i < 10; i++) {
       owner.noteAction("search_used");
       owner.setUpdateChannel(i % 2 ? "stable" : "nightly");
       await vi.advanceTimersByTimeAsync(0);
     }
+
     owner.noteAction("epg_opened");
+
     for (let i = 0; i < 60; i++) owner.noteRendererExit("crashed");
     await vi.advanceTimersByTimeAsync(0);
     const record = await store.load();
+
     const durableCount = (record: AnalyticsRecord) =>
       record.pending.length +
       (record.lifecycle?.pending.length ?? 0) +
       (record.summaries?.pending.length ?? 0) +
       Number(!!record.summaries?.usage) +
       Number(!!record.summaries?.unfinished);
+
     expect(record?.summaries?.usage).toMatchObject({
       properties: { counts: { action_epg_opened: 1 } },
     });
@@ -602,6 +670,7 @@ describe("durable usage and logical-play summaries", () => {
     const first = await start();
     const before = await first.store.load();
     let saved = false;
+
     const owner = new Analytics({
       dataDir: first.directory,
       origin: Promise.resolve("unknown"),
@@ -614,6 +683,7 @@ describe("durable usage and logical-play summaries", () => {
       },
       transport: { kind: "local", send: async () => "accepted" },
     });
+
     owners.push(owner);
     await owner.settings();
     owner.noteFeature("home");
@@ -627,6 +697,7 @@ describe("durable usage and logical-play summaries", () => {
     clock();
     const first = await start();
     const snapshot = await first.store.load();
+
     const owner = new Analytics({
       dataDir: first.directory,
       origin: Promise.resolve("fresh"),
@@ -634,6 +705,7 @@ describe("durable usage and logical-play summaries", () => {
       store: { load: async () => snapshot, save: () => new Promise(() => {}) },
       transport: { kind: "local", send: async () => "accepted" },
     });
+
     owners.push(owner);
     await owner.settings();
     run(owner);
@@ -645,18 +717,25 @@ describe("durable usage and logical-play summaries", () => {
 
 async function sink(withhold: boolean) {
   const bodies: string[] = [];
+
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
+
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks).toString();
+
     // This suite inspects summary/reliability receipts; version receipts are covered separately.
     if (JSON.parse(body).event !== "app_version_observed") bodies.push(body);
+
     if (!withhold || JSON.parse(body).event !== "usage_window") res.end("ok");
   });
+
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
+
   if (!address || typeof address === "string") throw new Error("No loopback listener.");
+
   return { bodies, endpoint: `http://127.0.0.1:${address.port}/i/v0/e/` };
 }
 
@@ -667,11 +746,13 @@ describe("real HTTP summary delivery", () => {
     const receiver = await sink(true);
     const directory = await tempDir();
     const store = analyticsStore(directory);
+
     const { owner } = await start({
       directory,
       store,
       transport: localCapture(receiver.endpoint)!,
     });
+
     await until(() => receiver.bodies.length === 2);
     owner.noteAction("search_used");
     await until(async () => !!(await store.load())?.summaries?.usage);
@@ -679,6 +760,7 @@ describe("real HTTP summary delivery", () => {
     await until(() => receiver.bodies.length === 3);
     owner.noteRendererExit("crashed");
     await until(() => receiver.bodies.some((body) => JSON.parse(body).event === "renderer_exited"));
+
     for (let attempt = 1; attempt <= 2; attempt++) {
       await until(async () => (await store.load())?.summaries?.pending[0]?.attempts === attempt);
       await pause(1100);
@@ -690,6 +772,7 @@ describe("real HTTP summary delivery", () => {
           attempt + 1,
       );
     }
+
     await until(async () => (await store.load())?.summaries?.pending.length === 0);
     const deliveries = receiver.bodies.filter((body) => JSON.parse(body).event === "usage_window");
     expect(deliveries).toHaveLength(3);
@@ -701,11 +784,13 @@ describe("real HTTP summary delivery", () => {
     const receiver = await sink(false);
     const directory = await tempDir();
     const store = analyticsStore(directory);
+
     const { owner } = await start({
       directory,
       store,
       transport: localCapture(receiver.endpoint)!,
     });
+
     await until(() => receiver.bodies.length === 2);
     receiver.bodies.length = 0;
     const server = servers.at(-1)!;

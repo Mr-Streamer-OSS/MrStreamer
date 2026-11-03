@@ -17,7 +17,9 @@ export function NowPlaying() {
   useLocale();
   const placement = NativeTabs.BottomAccessory.usePlacement();
   const { phase, pip, external } = usePlayback();
+
   if (phase.kind === "idle") return null;
+
   const where = external
     ? "AirPlay"
     : t(
@@ -29,7 +31,9 @@ export function NowPlaying() {
               ? "Connecting"
               : "Playing",
       );
+
   const status = phase.kind === "failed" ? phase.error : where;
+
   return (
     <View style={styles.row}>
       <Pressable

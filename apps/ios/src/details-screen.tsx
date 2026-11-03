@@ -109,17 +109,22 @@ export function DetailsScreen({
   const lists = useTitleLists();
   const metadata = useMetadataVersion();
   const opened = useMemo(() => versionOf(version), [version]);
+
   const title = useMemo(
     () => (lists.kind === "ready" && opened ? titleOf(lists.index, kind, opened) : undefined),
     [lists, kind, opened, metadata],
   );
+
   // Its tab layout draws this route edge to edge (`title/[id]`'s `contentStyle`), so the backdrop
   // runs under the side safe-area column; everything else keeps inside `tabSides` here.
   const sides = useStore(tabSides);
+
   if (lists.kind === "ready" && title && opened) {
     return <Details title={title} opened={opened} asked={asked} sides={sides} />;
   }
+
   const inside = { paddingLeft: sides.left, paddingRight: sides.right };
+
   if (lists.kind !== "ready" && lists.kind !== "failed") {
     // The placeholder backdrop as wide as the one it stands for, so nothing jumps once it loads.
     return (
@@ -134,6 +139,7 @@ export function DetailsScreen({
       </Docked>
     );
   }
+
   return (
     <View style={[styles.screen, inside]}>
       {lists.kind === "failed" ? (
@@ -165,8 +171,10 @@ function usePressed(key: string): () => Request {
     },
     [key],
   );
+
   return () => {
     const at = shown.current;
+
     return { stands: () => shown.current === at };
   };
 }
@@ -196,6 +204,7 @@ function Details({
   const listedNow = useRef<Title | null>(null);
   useEffect(() => {
     listedNow.current = title;
+
     return () => {
       listedNow.current = null;
     };
@@ -212,7 +221,9 @@ function Details({
     ),
     sequence,
   );
+
   const played = progress.kind === "ready" ? progress.value : NONE;
+
   // A version picked in this screen from a subscription removed since, or from a menu shown
   // before then, is forgotten here. A pick saved with history kept plays again once that
   // subscription is added back (storage.ts `pickedVersion`).
@@ -220,6 +231,7 @@ function Details({
     picked === AUTOMATIC || (picked && title.versions.some((each) => sameOwned(each, picked)))
       ? picked
       : null;
+
   if (picked !== listed) setPicked(null);
   // The menu's choice here first, then the version asked for, then the one picked before while
   // it is listed (storage.ts), then the title's own choice. Kept by its ids, so a render that
@@ -230,17 +242,20 @@ function Details({
   // provider; Automatic chosen here leaves out that progress too. Both stay saved, and count again
   // once the password is back. A version chosen from the menu or asked for stays.
   const roster = useRoster();
+
   const lost = new Set(
     (roster.kind === "ready" ? roster.members : members()).flatMap((member) =>
       member.needsSecret ? [member.entry.id] : [],
     ),
   );
+
   const remembered = pickedVersion(title, state);
   const usable = played.filter((each) => !lost.has(each.title.subscriptionId));
   // Automatic falls back to the title's own version; while that one's provider needs its
   // password, to the first version of a provider that signs in, if any.
   const automatic = automaticVersion(title, usable, title);
   const signedIn = title.versions.find((each) => !lost.has(each.subscriptionId));
+
   const chosen =
     listed === AUTOMATIC
       ? lost.has(automatic.subscriptionId) && signedIn
@@ -250,10 +265,12 @@ function Details({
         askedFor ??
         (remembered && !lost.has(remembered.subscriptionId) ? remembered : null) ??
         automaticVersion(title, usable, opened));
+
   const version = useMemo(
     () => ({ subscriptionId: chosen.subscriptionId, id: chosen.id }),
     [chosen.subscriptionId, chosen.id],
   );
+
   const shownTitle = useMemo(() => ({ ...title, ...version }), [title, version]);
   const pressed = usePressed(`${title.key}|${ownedKey(version)}`);
   // Details answer only the version they were read for: another version shows loading at once.
@@ -264,6 +281,7 @@ function Details({
   const [again, setAgain] = useState(0);
   const metadata = useMetadataVersion();
   const [retried, setRetried] = useState<Loaded<TitleDetails> | null>(null);
+
   const details = useRead(
     `${title.kind}|${ownedKey(version)}`,
     useCallback(
@@ -272,21 +290,26 @@ function Details({
     ),
     `${again}|${metadata}|${locale}`,
   );
+
   const failedHere = useFailure(title.kind, version);
+
   // Versions from several subscriptions say which each is from, in the order they were added.
   const providers = useMemo(() => {
     const listed = roster.kind === "ready" ? roster.members : members();
     const labels = new Map(listed.map((member) => [member.entry.id, member.label]));
     const several = new Set(title.versions.map((each) => each.subscriptionId)).size > 1;
+
     return {
       order: listed.map((member) => member.entry.id),
       label: (subscriptionId: string) => (several ? labels.get(subscriptionId) : undefined),
     };
   }, [roster, title]);
+
   const saved = savedEntry(watchlist, title) !== undefined;
 
   const chooseVersion = () => {
     const groups = versionOptions(title.versions, title.originalLanguage, providers.order);
+
     const choices = groups.flatMap((group) =>
       group.versions.map((each, at) => ({
         version: ownedId(each),
@@ -300,6 +323,7 @@ function Details({
           .join(" · "),
       })),
     );
+
     // Automatic first, as on the desktop. A choice is remembered for the title; Automatic
     // forgets it.
     ActionSheetIOS.showActionSheetWithOptions(
@@ -312,16 +336,21 @@ function Details({
         // A menu shown before the lists changed answers only for the same title, still shown, and
         // only with a version still listed: otherwise it changes nothing, the pick saved included.
         const now = listedNow.current;
+
         if (!now || now.key !== title.key) return;
+
         // A choice is the viewer's newest ask: a Resume still waiting plays nothing (`request`).
         if (index === 0) {
           request();
           accepted.current++;
           setPicked(AUTOMATIC);
           pickVersion(now, null);
+
           return;
         }
+
         const choice = choices[index - 1];
+
         if (!choice || !now.versions.some((each) => sameOwned(each, choice.version))) return;
         request();
         accepted.current++;
@@ -330,9 +359,11 @@ function Details({
       },
     );
   };
+
   const versionLabel = useMemo(() => {
     const groups = versionOptions(title.versions, title.originalLanguage, providers.order);
     const group = groups.find((each) => each.versions.some((v) => sameOwned(v, version)));
+
     return group
       ? [providers.label(group.subscriptionId), group.quality, group.label]
           .filter(Boolean)
@@ -342,6 +373,7 @@ function Details({
   }, [title, version, providers, locale]);
 
   const facts = details.kind === "ready" ? details.value : null;
+
   const movieProgress =
     title.kind === "movie" ? played.find(({ title: ref }) => sameOwned(ref, version)) : undefined;
 
@@ -489,6 +521,7 @@ function failedNote(failed: Failure, version: string): string {
       ? t("An episode of {version} didn't play on this iPhone.", { version })
       : t("An episode of this version didn't play on this iPhone.");
   }
+
   return version
     ? t("{version} didn't play on this iPhone.", { version })
     : t("This version didn't play on this iPhone.");
@@ -497,9 +530,12 @@ function failedNote(failed: Failure, version: string): string {
 /** " · Downloaded, 2.1 GB" or " · Downloading 42%": the facts line's word for a download. */
 function DownloadFact({ of: ref }: { of: TitleRef }) {
   const download = useDownloadOf(ref);
+
   if (!download) return null;
+
   const size =
     download.status.kind === "complete" && download.size ? `, ${formatBytes(download.size)}` : "";
+
   return ` · ${stateWord(download)}${size}`;
 }
 
@@ -523,7 +559,9 @@ function About({ facts, onRetry }: { facts: ShownDetails; onRetry: () => void })
         })
       : null,
   ].filter(Boolean);
+
   const why = aboutReason(facts.about);
+
   return (
     <>
       {facts.plot ? <Text style={styles.plot}>{facts.plot}</Text> : null}
@@ -556,11 +594,14 @@ function aboutReason(about: AboutStanding | undefined): string | null {
   const savedAt = "savedAt" in about ? about.savedAt : null;
   // "12 Oct" this year, "12 Oct 2025" before it.
   const style = new Date(savedAt ?? 0).getFullYear() === new Date().getFullYear() ? "day" : "date";
+
   const shown =
     savedAt === null
       ? t("Provider details only.")
       : t("Saved TMDB facts from {date}.", { date: formatDate(savedAt, style) });
+
   const reason = REASONS[about.kind];
+
   return reason ? `${shown} ${t(reason)}` : shown;
 }
 
@@ -576,20 +617,24 @@ function SeriesPlay({
 }) {
   const viewing = useViewing();
   const pressed = usePressed(ownedKey(version));
+
   const standing = useRead(
     ownedKey(version),
     useCallback(() => seriesViewing(version), [version]),
     viewing?.sequence ?? 0,
   );
+
   const goesOn =
     details && standing.kind === "ready"
       ? continuation(details, standing.value.progress, standing.value.marks)
       : null;
+
   const label = !goesOn
     ? t("Play")
     : t(goesOn.resume ? "Resume {episode}" : "Play {episode}", {
         episode: episodeLabel(goesOn.episode.season, goesOn.episode.number),
       });
+
   return (
     <CapsuleButton
       symbol="play.fill"
@@ -621,24 +666,30 @@ function Seasons({
   onVersions: () => void;
 }) {
   const pressed = usePressed(ownedKey(version));
+
   // The bulk downloads' word: the Resume word, also ended by a version accepted in the menu since,
   // even the same one. Playing or stopping anything else leaves it standing.
   const bulk = () => {
     const word = pressed();
     const at = accepted.current;
+
     return { stands: () => accepted.current === at && word.stands() };
   };
+
   const standing = useRead(
     ownedKey(version),
     useCallback(() => seriesViewing(version), [version]),
     sequence,
   );
+
   const [season, setSeason] = useState<number | null>(null);
+
   const [undo, setUndo] = useState<{
     mark: EpisodeMark;
     episode: Episode;
     watched: boolean;
   } | null>(null);
+
   // The record goes by the episodes these details list.
   useEffect(() => {
     void relist(version, title).catch(() => undefined);
@@ -646,10 +697,12 @@ function Seasons({
 
   const value: SeriesViewing | null = standing.kind === "ready" ? standing.value : null;
   const watching = value ? continuation(details, value.progress, value.marks) : null;
+
   const shown =
     details.seasons.find((each) => each.number === season) ??
     details.seasons.find((each) => each.number === watching?.episode.season) ??
     details.seasons[0];
+
   // Until the season shown answers, its own provider rows show, never another season's.
   const episodes = useRead(
     shown ? `${ownedKey(title)}|${shown.number}` : null,
@@ -659,9 +712,12 @@ function Seasons({
       [title, shown],
     ),
   );
+
   if (!shown) return <Message text={t("No episodes listed.")} />;
+
   const rows: readonly (Episode | EpisodeDetails)[] =
     episodes.kind === "ready" ? episodes.value : shown.episodes;
+
   const stateOf = value ? episodeStates(value.progress, value.marks) : null;
   const undoable = undo && value?.undoable === undo.mark.revision ? undo : null;
 
@@ -723,6 +779,7 @@ function Seasons({
       {rows.map((episode) => {
         const state = stateOf?.(episode) ?? { kind: "unwatched" as const };
         const progress = state.kind === "partial" ? state.progress : undefined;
+
         return (
           <EpisodeRow
             key={episode.id}
@@ -773,14 +830,17 @@ function EpisodeRow({
     season: episode.season,
     episode: episode.number,
   };
+
   const download = useDownloadOf(ref);
   const named = `${name} · ${episodeLabel(episode.season, episode.number)}`;
   // Marking first, then what its download allows, as the sheet and VoiceOver offer them.
   const mark = watched ? "Mark unwatched" : "Mark watched";
+
   const actions: readonly DownloadAction[] = [
     { name: mark, label: t(mark), destructive: false, run: () => onMark(!watched) },
     ...(download ? actionsOf(download) : [downloadAction(ref, named)]),
   ];
+
   const line = [
     episode.duration ? runtime(episode.duration) : null,
     watched ? t("Watched") : timeLeftOf(progress),
@@ -788,6 +848,7 @@ function EpisodeRow({
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -799,6 +860,7 @@ function EpisodeRow({
       ]}
       onAccessibilityAction={(event: AccessibilityActionEvent) => {
         const { actionName } = event.nativeEvent;
+
         if (actionName === "activate") onPlay();
         else actions.find((action) => action.name === actionName)?.run();
       }}
@@ -839,11 +901,14 @@ function EpisodeRow({
 /** More like this: titles sharing the most genres, from TMDB's metadata. */
 function Related({ title }: { title: Title }) {
   const made = useCollections(title.kind, [ownedKey(title)]);
+
   const like = useMemo(
     () => made?.list(`like:${ownedKey(title)}`).slice(0, 24) ?? [],
     [made, title],
   );
+
   if (like.length === 0) return null;
+
   return <Shelf name={t("More like this")} titles={like} onPress={(each) => openDetails(each)} />;
 }
 

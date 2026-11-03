@@ -4,8 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { removeMediaSubscription } from "./e2e/installed-media-input.ts";
 
 type MediaDriver = Parameters<typeof removeMediaSubscription>[0];
+
 type Evidence = Parameters<Parameters<typeof removeMediaSubscription>[1]>[0];
+
 const windows: Window[] = [];
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(windows.splice(0).map((window) => window.happyDOM.close()));
@@ -21,6 +24,7 @@ function standIn(collapsed = true) {
     ${collapsed ? "" : '<div role="region"><button>Remove Fixture</button></div>'}</li></ul></section>`;
   const row = document.querySelector("li")!;
   const header = row.querySelector("button")!;
+
   const app = {
     window,
     row,
@@ -40,25 +44,33 @@ function standIn(collapsed = true) {
     waits: [] as { what: string; timeout: number }[],
     saved: [] as Evidence[],
   };
+
   Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     value() {},
   });
+
   const rect = (element: { textContent: string | null }) => {
     const y = element === header ? 20 : app.shift + 100;
+
     return { x: 10, y, width: 101, height: 31, top: y, bottom: y + 31, left: 10, right: 111 };
   };
+
   window.HTMLElement.prototype.getBoundingClientRect = function () {
     const r = rect(this);
+
     return new window.DOMRect(r.x, r.y, r.width, r.height);
   };
+
   const hit = (x: number, y: number) =>
     (app.covered
       ? undefined
       : [...row.querySelectorAll("button")].find((button) => {
           const r = rect(button);
+
           return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
         })) ?? document.body;
+
   Object.defineProperty(document, "elementFromPoint", { value: hit });
   header.addEventListener("click", () => {
     header.setAttribute("aria-expanded", "true");
@@ -66,7 +78,9 @@ function standIn(collapsed = true) {
   });
   row.addEventListener("click", (event) => {
     const target = event.target;
+
     if (!(target instanceof window.HTMLButtonElement)) return;
+
     if (target.textContent === "Remove Fixture") {
       row.querySelector('[role="region"]')?.remove();
       header.setAttribute("aria-expanded", "false");
@@ -80,6 +94,7 @@ function standIn(collapsed = true) {
       document.body.insertAdjacentHTML("beforeend", "<form><input></form>");
     }
   });
+
   const context = createContext({
     document,
     window,
@@ -90,23 +105,30 @@ function standIn(collapsed = true) {
     requestAnimationFrame: (callback: () => void) => callback(),
     Date,
   });
+
   let pressed: ReturnType<typeof hit> | undefined;
+
   const d: MediaDriver = {
     actions: [],
     page: {
       async evaluate<T>(expression: string, timeout?: number): Promise<T> {
         app.commands.push({ method: "evaluate", timeout });
         const result: unknown = await runInContext(expression, context);
+
         if (result && typeof result === "object" && "events" in result) app.onSnapshot();
+
         return structuredClone(result) as T;
       },
       async send(method, params = {}, timeout) {
         app.commands.push({ method, type: params["type"], timeout });
+
         if (app.inputReply.error) return app.inputReply;
+
         if (params["type"] === "mouseMoved") app.onMove();
         else {
           if (params["type"] === "mousePressed") app.beforePress();
           const target = hit(Number(params["x"]), Number(params["y"]));
+
           const dispatch = (type: string) =>
             target.dispatchEvent(
               new window.MouseEvent(type, {
@@ -115,28 +137,36 @@ function standIn(collapsed = true) {
                 clientY: Math.round(Number(params["y"])),
               }),
             );
+
           if (params["type"] === "mousePressed") {
             pressed = target;
             dispatch("mousedown");
+
             if (app.flood) for (let i = 0; i < 130; i++) dispatch("mousedown");
           } else {
             dispatch("mouseup");
+
             if (target === pressed && !app.dropClick) dispatch("click");
           }
         }
+
         return {};
       },
     },
     async wait(check, timeout = 30_000, what = "condition") {
       app.waits.push({ what, timeout });
+
       if (["subscription row", "removal confirmation", "Connect"].includes(what)) {
         app.onOutcome(what);
+
         if (app.primary) throw app.primary;
       }
+
       for (let attempt = 0; attempt < 3; attempt++) if (await check()) return;
       throw new Error(`Timed out waiting for ${what}`);
     },
   };
+
   return {
     window,
     row,
@@ -147,6 +177,7 @@ function standIn(collapsed = true) {
       removeMediaSubscription(d, async (evidence) => {
         app.commands.push({ method: "save", timeout: undefined });
         app.saved.push(structuredClone(evidence));
+
         if (app.writeError) throw app.writeError;
       }),
     evidence: () => app.saved.at(-1)!,
@@ -159,6 +190,7 @@ describe("installed media removal delivery, synthetic only", () => {
     await s.run();
     const evidence = s.evidence();
     expect(evidence.phases.map((phase) => phase.stage)).toEqual(["header", "ask", "confirm"]);
+
     for (const phase of evidence.phases) {
       expect(phase.commands.map((command) => command.type)).toEqual([
         "mouseMoved",
@@ -176,6 +208,7 @@ describe("installed media removal delivery, synthetic only", () => {
       expect(phase.outcome!.remainingMs).toBeGreaterThan(0);
       expect(phase.outcome!.remainingMs).toBeLessThanOrEqual(phase.outcome!.budgetMs);
     }
+
     expect(evidence.phases[1]!.snapshots.at(-1)!.connected).toBe(false);
     expect(evidence.phases[2]!.snapshots.at(-1)!.rowConnected).toBe(false);
     expect(
@@ -186,8 +219,10 @@ describe("installed media removal delivery, synthetic only", () => {
     expect(s.app.waits.find((wait) => wait.what === "Open collapsed subscription")!.timeout).toBe(
       10_000,
     );
+
     for (let i = 0; i < s.app.commands.length; i++) {
       const command = s.app.commands[i]!;
+
       if (command.type === "mousePressed") expect(s.app.commands[i - 1]!.method).toBe("evaluate");
     }
   });
@@ -197,6 +232,7 @@ describe("installed media removal delivery, synthetic only", () => {
     s.app.onOutcome = (what) => {
       if (what === "subscription row") s.row.querySelector('[role="region"] button')?.remove();
     };
+
     await expect(s.run()).rejects.toThrow("Timed out waiting for Ask removal");
     const phases = s.evidence().phases;
     expect(phases[0]!.snapshots.at(-1)!.events).toHaveLength(3);
@@ -208,6 +244,7 @@ describe("installed media removal delivery, synthetic only", () => {
     s.app.onMove = () => {
       s.app.shift = 52;
     };
+
     await s.run();
     const ask = s.evidence().phases[0]!;
     expect(ask.initial!.y).not.toBe(ask.final!.y);
@@ -225,11 +262,13 @@ describe("installed media removal delivery, synthetic only", () => {
           button.replaceWith(button.cloneNode(true));
         }
       };
+
       // Model an independently visible outcome so delivery completeness decides after the wait.
       s.app.onOutcome = (what) => {
         if (what === "removal confirmation")
           s.row.insertAdjacentHTML("beforeend", "<p>from this device?</p>");
       };
+
       await expect(s.run()).rejects.toThrow("evidence incomplete");
       expect(s.app.waits.some((wait) => wait.what === "removal confirmation")).toBe(true);
       expect(
@@ -246,18 +285,23 @@ describe("installed media removal delivery, synthetic only", () => {
     async (mode) => {
       const s = standIn(false);
       const button = s.row.querySelector('[role="region"] button')!;
+
       if (mode === "ambiguous") button.parentElement!.append(button.cloneNode(true));
+
       if (mode === "disabled") button.setAttribute("disabled", "");
+
       if (mode === "wrong row") {
         const nested = s.window.document.createElement("li");
         button.parentElement!.append(nested);
         nested.append(button);
       }
+
       if (mode === "disconnected" || mode === "replaced")
         s.app.onMove = () => {
           if (mode === "disconnected") button.remove();
           else button.replaceWith(button.cloneNode(true));
         };
+
       await expect(s.run()).rejects.toThrow(/target/);
       expect(s.app.commands.some((command) => command.type === "mousePressed")).toBe(false);
     },
@@ -273,6 +317,7 @@ describe("installed media removal delivery, synthetic only", () => {
         if (what === "removal confirmation")
           s.row.insertAdjacentHTML("beforeend", "<p>from this device?</p>");
       };
+
       await expect(s.run()).rejects.toThrow("evidence incomplete");
       const last = s.evidence().phases[0]!.snapshots.at(-1)!;
       expect(last.events.length).toBeLessThanOrEqual(128);
@@ -306,6 +351,7 @@ describe("installed media removal delivery, synthetic only", () => {
     s.app.onSnapshot = () => {
       throw new Error("diagnostic unavailable");
     };
+
     await expect(s.run()).rejects.toThrow("evidence incomplete");
     expect(s.app.waits.some((wait) => wait.what === "removal confirmation")).toBe(true);
   });
@@ -314,6 +360,7 @@ describe("installed media removal delivery, synthetic only", () => {
     "fails otherwise successful removal when %s evidence is incomplete",
     async (mode) => {
       const s = standIn(false);
+
       if (mode === "write") s.app.writeError = new Error("disk unavailable");
       else
         vi.spyOn(s.window.document, "removeEventListener").mockImplementation(() => {
@@ -333,6 +380,7 @@ describe("installed media removal delivery, synthetic only", () => {
     s.app.onMove = () => {
       s.app.covered = true;
     };
+
     await expect(s.run()).rejects.toThrow("target not under pointer");
     expect(s.evidence().phases[0]!.final!.contained).toBe(false);
     expect(s.app.commands.some((command) => command.type === "mousePressed")).toBe(false);
@@ -345,6 +393,7 @@ describe("installed media removal delivery, synthetic only", () => {
     s.app.onSnapshot = () => {
       clock.mockReturnValue(now + 10_001);
     };
+
     await expect(s.run()).rejects.toThrow("instrumentation/evidence overrun");
     expect(s.app.waits.some((wait) => wait.what === "removal confirmation")).toBe(false);
   });

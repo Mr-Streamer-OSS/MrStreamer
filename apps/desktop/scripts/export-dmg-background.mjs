@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { app, BrowserWindow } from "electron";
 
 const WIDTH = 660;
+
 /** 420 points of design, plus room for the title bar. */
 const HEIGHT = 420 + 32;
 const ICONS_X = [190, 470];
@@ -19,10 +20,12 @@ const LABEL_Y = 295;
 const scale = Number(process.argv.at(-1)) === 2 ? 2 : 1;
 
 const mark = readFileSync(new URL("../assets/brand/mark.svg", import.meta.url), "utf8");
+
 const plates = ICONS_X.map(
   (x) => `<div style="position:absolute;left:${x - 50}px;top:${LABEL_Y - 11}px;width:100px;
     height:22px;border-radius:6px;background:#77777c"></div>`,
 ).join("");
+
 const html = `<!doctype html>
 <html><body style="margin:0;width:${WIDTH}px;height:${HEIGHT}px;overflow:hidden;color:#fff;
   font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;
@@ -56,6 +59,7 @@ void app.whenReady().then(async () => {
     backgroundColor: "#000000",
     webPreferences: { offscreen: true, zoomFactor: scale },
   });
+
   await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
   await new Promise((resolve) => setTimeout(resolve, 500));
   const image = await window.webContents.capturePage();

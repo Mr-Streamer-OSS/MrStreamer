@@ -86,6 +86,7 @@ export const native: Native = ((
   undeletable: null,
   sizeOf: null,
 });
+
 const { root } = native;
 
 type Part = string | File | Directory;
@@ -117,6 +118,7 @@ export class File {
   }
   get size() {
     if (!this.exists) return 0;
+
     return native.sizeOf?.(this.path) ?? statSync(this.path).size;
   }
   get modificationTime() {
@@ -127,10 +129,12 @@ export class File {
   }
   textSync() {
     native.sync?.("text", this.path);
+
     return readFileSync(this.path, "utf8");
   }
   async text() {
     await through("text", this.path);
+
     return this.textSync();
   }
   writeSync(text: string) {
@@ -144,21 +148,25 @@ export class File {
   /** Matches pinned Expo: refuse an existing destination unless overwrite, then delete before move. */
   moveSync(to: File, options?: { readonly overwrite?: boolean }) {
     native.sync?.("move", this.path);
+
     if (to.exists) {
       if (!options?.overwrite) throw new Error(`A file is already at ${to.path}`);
       to.delete();
       native.sync?.("move-after-delete", this.path);
     }
+
     renameSync(this.path, to.path);
     this.path = to.path;
   }
   /** As on iOS: with `overwrite`, the file there is deleted, then this one moved in its place. */
   async move(to: File, options?: { readonly overwrite?: boolean }) {
     await through("move", this.path);
+
     if (to.exists) {
       if (!options?.overwrite) throw new Error(`A file is already at ${to.path}`);
       rmSync(to.path);
     }
+
     renameSync(this.path, to.path);
     this.path = to.path;
   }
@@ -172,10 +180,13 @@ export class File {
     options?: { readonly signal?: AbortSignal },
   ): Promise<File> {
     const response = await fetch(url, options?.signal ? { signal: options.signal } : {});
+
     if (!response.ok) {
       throw new Error(`Unable to download a file: server returned HTTP ${response.status}`);
     }
+
     writeFileSync(destination.path, Buffer.from(await response.arrayBuffer()));
+
     return destination;
   }
 }
@@ -210,6 +221,7 @@ export class DownloadTask {
     if (this.state !== "idle")
       throw new Error(`Cannot call downloadAsync() in state "${this.state}"`);
     const { signal, onProgress, headers, sessionType = "background" } = this.#options ?? {};
+
     if (signal?.aborted) throw aborted();
     this.state = "active";
     const cancel = () => this.cancel();
@@ -222,32 +234,39 @@ export class DownloadTask {
         return state();
       },
     });
+
     try {
       const response = await fetch(this.#url, {
         signal: this.#request.signal,
         headers: headers ?? {},
       });
+
       const totalBytes = Number(response.headers.get("content-length") ?? -1);
       const chunks: Uint8Array[] = [];
       let bytesWritten = 0;
+
       for await (const chunk of response.body ?? []) {
         chunks.push(chunk);
         bytesWritten += chunk.length;
         onProgress?.({ bytesWritten, totalBytes });
       }
+
       if (!response.ok) {
         throw new Error(`Unable to download a file: server returned HTTP ${response.status}`);
       }
+
       if (this.#destination.exists) rmSync(this.#destination.path);
       mkdirSync(dirname(this.#destination.path), { recursive: true });
       writeFileSync(this.#destination.path, Buffer.concat(chunks));
       this.state = "completed";
+
       return new File(this.#destination.uri);
     } catch (error) {
       if (signal?.aborted) {
         this.state = "cancelled";
         throw aborted();
       }
+
       if (this.#request.signal.aborted) throw new Error("Download was cancelled");
       this.state = "error";
       throw error;
@@ -292,7 +311,9 @@ export class Directory {
 
 const documents = new Directory(root, "documents");
 const cache = new Directory(root, "cache");
+
 documents.create({ idempotent: true });
+
 cache.create({ idempotent: true });
 
 export const Paths = {

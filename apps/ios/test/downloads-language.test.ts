@@ -31,18 +31,24 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("react-native", async () => {
   const { createElement, Fragment } = await import("react");
+
   type Props = { children?: React.ReactNode; testID?: string };
+
   const box = ({ children }: Props) => createElement("div", null, children);
+
   type Section = { key: string; data: readonly { id: string }[] };
+
   return {
     View: box,
     Text: ({ children }: Props) => createElement("p", null, children),
     Pressable: (props: Props & Touchable & { children?: unknown }) => {
       if (props.testID) scenario.pressables.set(props.testID, props);
+
       const children =
         typeof props.children === "function"
           ? (props.children as (state: object) => React.ReactNode)({ pressed: false })
           : props.children;
+
       return createElement(
         "div",
         { "aria-label": props.accessibilityLabel },
@@ -96,25 +102,33 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/titles-ui.tsx", () => ({ Artwork: () => null }));
+
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#A1A1A6", line: "#2C2C2E" },
   Notice: () => null,
 }));
+
 vi.mock("../src/downloads.ts", async () => {
   const { useSyncExternalStore } = await import("react");
+
   return {
     useDownloads: () =>
       useSyncExternalStore(
         (listener) => {
           scenario.listeners.add(listener);
+
           return () => scenario.listeners.delete(listener);
         },
         () => scenario.list,
@@ -146,6 +160,7 @@ const base = {
   progress: null,
   series: null,
 } as const;
+
 const movie = (id: string, name: string, status: Download["status"]): Download => ({
   ...base,
   id,
@@ -153,21 +168,26 @@ const movie = (id: string, name: string, status: Download["status"]): Download =
   title: { kind: "movie", id },
   status,
 });
+
 const paused = movie("p", "Iron Bay", { kind: "paused", received: 0, size: null });
 const queued = movie("q", "Glass Orchard", { kind: "queued" });
+
 const stopped = movie("f", "Kettle Run", {
   kind: "failed",
   failure: { kind: "app", error: { kind: "unexpected", detail: "This download stopped." } },
 });
+
 const offline = movie("o", "Salt Meridian", {
   kind: "failed",
   failure: { kind: "stream", failure: { kind: "network", detail: "You seem to be offline." } },
 });
+
 // Saved by an earlier version in Dutch: its offline sentence, and the generic one.
 const savedDutch = movie("d", "Lantern Weir", {
   kind: "failed",
   failure: { kind: "stream", failure: { kind: "network", detail: "Je lijkt offline te zijn." } },
 });
+
 const savedGeneric = movie("g", "Copper Fen", {
   kind: "failed",
   failure: {
@@ -175,7 +195,9 @@ const savedGeneric = movie("g", "Copper Fen", {
     failure: { kind: "network", detail: "De verbinding met de provider is mislukt." },
   },
 });
+
 const copy = movie("c", "North of Quiet", { kind: "complete" });
+
 const transferring = movie("t", "Paper Harbor", {
   kind: "transferring",
   received: 42,
@@ -185,6 +207,7 @@ const transferring = movie("t", "Paper Harbor", {
 });
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   scenario.pressables.clear();
@@ -194,19 +217,23 @@ afterEach(() => {
 });
 
 const speak = (locale: Locale) => React.act(() => setLanguage({ locale, formats: locale }));
+
 function show(node: React.ReactElement, items: readonly Download[]) {
   scenario.list = { items, series: {}, bytes: 0, free: null, ended: 0 };
   const container = document.createElement("div");
   const root = createRoot(container);
   React.act(() => root.render(node));
   unmount = () => React.act(() => root.unmount());
+
   return container;
 }
+
 const row = (id: string) => scenario.pressables.get(`download-${id}`)!;
 const actions = (id: string) => row(id).accessibilityActions?.slice();
 
 it("shows Downloads in the language picked and redraws it in a new one, the queue untouched", () => {
   speak("nl-NL");
+
   const screen = show(React.createElement(DownloadsScreen), [
     paused,
     queued,
@@ -216,6 +243,7 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
     savedGeneric,
     copy,
   ]);
+
   expect(screen.textContent).toContain("Wachtrij");
   expect(screen.textContent).toContain("Op dit apparaat");
   expect(screen.textContent).toContain("Gepauzeerd");
@@ -241,6 +269,7 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
   const names = [paused, queued, stopped, offline, savedDutch, savedGeneric, copy].map(
     ({ name }) => name,
   );
+
   const text = () => screen.textContent ?? "";
   const order = () => names.toSorted((a, b) => text().indexOf(a) - text().indexOf(b));
   const before = order();
@@ -280,10 +309,12 @@ it("shows Downloads in the language picked and redraws it in a new one, the queu
 
 it("says the top bar's queue state in the language, and again in a new one", () => {
   speak("fr-FR");
+
   const bar = show(
     React.createElement(DownloadStatusButton, { onPress: () => scenario.asked.push("open") }),
     [transferring, queued],
   );
+
   const label = () => bar.querySelector("[aria-label]")?.getAttribute("aria-label");
   expect(label()).toBe(`Téléchargements, Paper Harbor, ${formatPercent(0.42)} téléchargés`);
 
@@ -294,12 +325,14 @@ it("says the top bar's queue state in the language, and again in a new one", () 
       ...scenario.list,
       items: [queued, movie("r", "Low Tide", { kind: "queued" })],
     };
+
     for (const listener of scenario.listeners) listener();
   });
   expect(label()).toBe("Descargas, 2 en cola");
   expect(bar.textContent).toBe("2");
   React.act(() => {
     scenario.list = { ...scenario.list, items: [paused] };
+
     for (const listener of scenario.listeners) listener();
   });
   expect(bar.textContent).toBe("En pausa");

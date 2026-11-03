@@ -15,8 +15,10 @@ import { digest, fixture, FIXTURE_NOW, FIXTURE_ORIGIN, PASSWORD, USER } from "./
 let runtime: Miniflare;
 let origin: string;
 let data: Awaited<ReturnType<typeof fixture>>;
+
 beforeAll(async () => {
   data = await fixture();
+
   const output = await build({
     absWorkingDir: fileURLToPath(new NodeURL("..", import.meta.url)),
     entryPoints: ["test/worker.ts"],
@@ -29,7 +31,9 @@ beforeAll(async () => {
     // Bundle the committed measured index for the production-entry smoke. All
     // other HTTP tests inject NON-MEDIA data; no private media stage is needed.
   });
+
   const script = output.outputFiles[0]?.text;
+
   if (!script) throw new Error("Missing local worker bundle");
   runtime = new Miniflare({
     modules: true,
@@ -44,8 +48,10 @@ beforeAll(async () => {
   });
   origin = (await runtime.ready).origin;
   const bucket = await runtime.getR2Bucket("MEDIA");
+
   for (const [key, value] of data.objects) await bucket.put(key, new Uint8Array(value).buffer);
 });
+
 afterAll(async () => {
   await runtime?.dispose();
 });
@@ -54,20 +60,27 @@ function clockFetch(now = FIXTURE_NOW, extra: Readonly<Record<string, string>> =
   return (input, init) => {
     const headers = new Headers(init?.headers);
     headers.set("X-Fixture-Clock", String(now));
+
     for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+
     return fetch(input, { ...init, headers });
   };
 }
+
 function provider(now = FIXTURE_NOW, extra: Readonly<Record<string, string>> = {}) {
   return xtreamProvider(
     { server: origin, username: USER, password: PASSWORD },
     { userAgent: "MrStreamer/local-service-contract", live: "hls", fetch: clockFetch(now, extra) },
   );
 }
+
 const credentials = () => new URLSearchParams({ username: USER, password: PASSWORD });
+
 const live = (tail = `${CHANNEL.id}.m3u8`, password = PASSWORD) =>
   `/live/${USER}/${password}/${tail}`;
+
 const movie = (password = PASSWORD) => `/movie/${USER}/${password}/movie.mp4`;
+
 async function get(path: string, init: RequestInit = {}, now = FIXTURE_NOW) {
   return clockFetch(now)(origin + path, init);
 }
@@ -100,6 +113,7 @@ function raw(path: string, method = "GET", headers: Readonly<Record<string, stri
         response.on("error", reject);
       },
     );
+
     request.on("error", reject);
     request.setTimeout(7000, () => request.destroy(new Error("Local HTTP deadline")));
     request.end();
@@ -163,13 +177,16 @@ describe("normal Xtream review contract", () => {
     const descriptor = await p.liveGuideRequest?.();
     expect(descriptor).toMatchObject({ kind: "request", headers: { Accept: "application/xml" } });
     const guide = await p.liveGuide();
+
     if (guide.kind !== "document") throw new Error("Expected real XMLTV body");
     const programmes: XmltvProgramme[] = [];
     const channels: string[] = [];
+
     const reader = xmltvReader(
       { programme: (row) => programmes.push(row), channel: (row) => channels.push(row.id) },
       16_384,
     );
+
     for await (const bytes of guide.body) reader.push(bytes);
     expect(reader.end()).toBe("whole");
     expect(channels).toEqual([CHANNEL.guideId]);
@@ -197,6 +214,7 @@ describe("normal Xtream review contract", () => {
         movie(bad || "missing_fixture"),
         `/series/${USER}/${bad || "missing_fixture"}/unknown.mp4`,
       ];
+
       for (const path of paths)
         for (const method of ["GET", "HEAD"]) {
           const answer = await get(path, { method, headers: { "X-Fixture-No-Bucket": "1" } });
@@ -206,6 +224,7 @@ describe("normal Xtream review contract", () => {
           const body = await answer.text();
           expect(body).not.toContain(PASSWORD);
         }
+
       expect((await get(movie(), { headers: { "X-Fixture-No-Bucket": "1" } })).status).toBe(503);
     },
   );
@@ -215,17 +234,21 @@ describe("normal Xtream review contract", () => {
     expect((await get(path, { headers: { "X-Fixture-Login": "{}" } })).status).toBe(503);
     const currentHash = await digest("new_nonsecret_fixture_password");
     const oldHash = await digest(PASSWORD);
+
     const active = JSON.stringify({
       username: USER,
       passwordSha256: currentHash,
       retiring: { passwordSha256: oldHash, retireAfterUtc: null },
     });
+
     expect((await get(path, { headers: { "X-Fixture-Login": active } })).status).toBe(200);
+
     const retired = JSON.stringify({
       username: USER,
       passwordSha256: currentHash,
       retiring: { passwordSha256: oldHash, retireAfterUtc: new Date(FIXTURE_NOW).toISOString() },
     });
+
     for (const endpoint of [path, movie(), live()])
       expect((await get(endpoint, { headers: { "X-Fixture-Login": retired } })).status).toBe(401);
     expect(
@@ -257,6 +280,7 @@ describe("normal Xtream review contract", () => {
     [() => "/art/unknown.png", 404],
     [() => "/public/movie.mp4", 404],
   ];
+
   it.each(refusedRequests)(
     "refuses unsupported/malformed resources through HTTP",
     async (path, status) => {
@@ -271,6 +295,7 @@ describe("normal Xtream review contract", () => {
       expect(answer.headers.get("content-type")).toBe("image/png");
       expect(await answer.text()).toContain("NON-MEDIA HTTP fixture");
     }
+
     for (const method of ["POST", "PUT", "DELETE"]) {
       const answer = await get(movie(), { method });
       expect(answer.status).toBe(405);
@@ -281,15 +306,19 @@ describe("normal Xtream review contract", () => {
   it("keeps real Provider guide failures as failures, never invented success", async () => {
     const offline: typeof fetch = () =>
       Promise.reject(new TypeError("Explicit fixture network outage"));
+
     const p = xtreamProvider(
       { server: origin, username: USER, password: PASSWORD },
       { userAgent: "nonsecret fixture", live: "hls", fetch: offline },
     );
+
     await expect(p.liveGuide()).rejects.toMatchObject({ error: { kind: "unreachable" } });
+
     const bad = xtreamProvider(
       { server: origin, username: USER, password: "bad_fixture" },
       { userAgent: "nonsecret fixture", live: "hls", fetch: clockFetch() },
     );
+
     await expect(bad.liveGuide()).rejects.toMatchObject({ error: { kind: "invalid-login" } });
   });
 });
@@ -300,6 +329,7 @@ describe("linear clock and Guide", () => {
     const entries: { uri: string; time: number; discontinuity: boolean }[] = [];
     let time = NaN;
     let discontinuity = false;
+
     for (const row of rows) {
       if (row === "#EXT-X-DISCONTINUITY") discontinuity = true;
       else if (row.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) time = Date.parse(row.slice(25));
@@ -308,6 +338,7 @@ describe("linear clock and Guide", () => {
         discontinuity = false;
       }
     }
+
     return {
       rows,
       sequence: Number(rows.find((r) => r.startsWith("#EXT-X-MEDIA-SEQUENCE:"))?.split(":")[1]),
@@ -317,16 +348,20 @@ describe("linear clock and Guide", () => {
       times: entries.map((entry) => entry.time),
     };
   }
+
   const mediaPath = (rendition = "540p"): string =>
     live(`${CHANNEL.id}/${data.media.release}/${rendition}.m3u8`);
 
   async function guideRows(at: number): Promise<XmltvProgramme[]> {
     const guide = await provider(at).liveGuide();
+
     if (guide.kind !== "document") throw new Error("Expected guide");
     const programmes: XmltvProgramme[] = [];
     const reader = xmltvReader({ programme: (p) => programmes.push(p), channel: () => {} }, 16_384);
+
     for await (const chunk of guide.body) reader.push(chunk);
     expect(reader.end()).toBe("whole");
+
     return programmes;
   }
 
@@ -335,15 +370,19 @@ describe("linear clock and Guide", () => {
     expect(stream.format).toBe("hls");
     const text = await (await provider().request(stream.url)).text();
     expect(text).toContain("#EXT-X-INDEPENDENT-SEGMENTS");
+
     for (const r of data.media.renditions)
       expect(text).toContain(
         `BANDWIDTH=${r.bandwidth},AVERAGE-BANDWIDTH=${r.averageBandwidth},CODECS="${r.codecs}",RESOLUTION=${r.width}x${r.height},FRAME-RATE=24.000`,
       );
+
     const variants = text
       .trim()
       .split("\n")
       .filter((r) => !r.startsWith("#"));
+
     expect(variants).toHaveLength(2);
+
     for (const relative of variants) {
       const url = new NodeURL(relative, stream.url);
       expect(url.origin).toBe(origin);
@@ -358,6 +397,7 @@ describe("linear clock and Guide", () => {
 
   it("advances the UTC video clock across all seams and retains older absolute segment URIs", async () => {
     let before: ReturnType<typeof mediaRows> | undefined;
+
     for (const offset of [0, 6_000, 150_000, 240_000, 330_000, 990_000]) {
       const at = FIXTURE_NOW + offset;
       const current = mediaRows(await (await get(mediaPath(), {}, at)).text());
@@ -377,9 +417,11 @@ describe("linear clock and Guide", () => {
       expect(current.rows.filter((r) => r === "#EXT-X-DISCONTINUITY")).toHaveLength(
         current.segments.filter((_, i) => [0, 25, 40].includes((current.sequence + i) % 55)).length,
       );
+
       if (before) expect(current.sequence).toBeGreaterThanOrEqual(before.sequence);
       before = current;
     }
+
     const past = mediaRows(await (await get(mediaPath())).text());
     const old = new NodeURL(past.segments[0]!, origin + mediaPath()).pathname;
     const firstBytes = await (await get(old)).arrayBuffer();
@@ -444,8 +486,10 @@ describe("linear clock and Guide", () => {
 
   it("matches every in-window Guide start to HLS discontinuity PDT in movie and episode order", async () => {
     const order = ["Generated sample movie", "Episode 1", "Episode 2"];
+
     for (const at of [FIXTURE_NOW + 90_000, FIXTURE_NOW + 96_000]) {
       const programmes = await guideRows(at);
+
       for (const rendition of ["540p", "180p"]) {
         const answer = await get(mediaPath(rendition), {}, at);
         expect(answer.status).toBe(200);
@@ -461,6 +505,7 @@ describe("linear clock and Guide", () => {
         expect(inside.map((p) => p.title)).toEqual(
           inside.map((_, i) => order[(initial + i) % order.length]),
         );
+
         for (const programme of inside) {
           expect(programme.channel).toBe(CHANNEL.guideId);
           expect(programme.stop! - programme.start).toBe(
@@ -481,9 +526,11 @@ describe("linear clock and Guide", () => {
     const programmes = await guideRows(at);
     const current = programmes.filter((p) => p.start <= at && (p.stop ?? 0) > at);
     expect(current).toHaveLength(1);
+
     for (const [i, row] of programmes.entries()) {
       expect(row.channel).toBe(CHANNEL.guideId);
       expect([150_000, 90_000]).toContain((row.stop ?? 0) - row.start);
+
       if (i) expect(row.start).toBe(programmes[i - 1]?.stop);
     }
   });
@@ -492,10 +539,12 @@ describe("linear clock and Guide", () => {
 describe("local workerd binary and gzip transmission", () => {
   it("aborts a deliberately pending R2 transfer and admits an independent subsequent read", async () => {
     const controller = new AbortController();
+
     const answer = await get(movie(), {
       signal: controller.signal,
       headers: { "X-Fixture-R2-Fault": "slow" },
     });
+
     if (!answer.body) throw new Error("Missing stream");
     const reader = answer.body.getReader();
     expect((await reader.read()).done).toBe(false);
@@ -510,11 +559,13 @@ describe("local workerd binary and gzip transmission", () => {
   it("fails before headers for a missing object and never completes short/long/failed source bodies", async () => {
     expect((await raw(movie(), "GET", { "X-Fixture-R2-Fault": "missing" })).status).toBe(503);
     expect((await raw(movie(), "GET", { "X-Fixture-R2-Fault": "reject" })).status).toBe(503);
+
     for (const mode of ["short", "long", "error"]) {
       const outcome = await raw(movie(), "GET", { "X-Fixture-R2-Fault": mode }).then(
         (response) => ({ kind: "response" as const, response }),
         () => ({ kind: "transfer-failed" as const }),
       );
+
       if (outcome.kind === "response") expect(outcome.response.status).toBeGreaterThanOrEqual(500);
     }
   });
@@ -531,6 +582,7 @@ describe("local workerd binary and gzip transmission", () => {
     expect(Number(head.headers["content-length"])).toBe(source.length);
     expect(head.body.length).toBe(0);
     expect(head.headers["content-range"]).toBeUndefined();
+
     for (const [range, start, end] of [
       ["bytes=0-5", 0, 5],
       ["bytes=6-", 6, source.length - 1],
@@ -546,14 +598,17 @@ describe("local workerd binary and gzip transmission", () => {
 
   it("refuses unsatisfiable ranges, ignores malformed/multi-range and implements If-Range", async () => {
     const size = data.media.originals.movie.bytes;
+
     for (const range of [`bytes=${size}-`, "bytes=-0"]) {
       const answer = await raw(movie(), "GET", { Range: range });
       expect(answer.status).toBe(416);
       expect(answer.headers["content-range"]).toBe(`bytes */${size}`);
     }
+
     for (const range of ["bytes=9-1", "bytes=", "bytes=0-1,4-5"])
       expect((await raw(movie(), "GET", { Range: range })).status).toBe(200);
     const etag = (await raw(movie())).headers.etag;
+
     if (typeof etag !== "string") throw new Error("Missing ETag");
     expect((await raw(movie(), "GET", { Range: "bytes=0-3", "If-Range": etag })).status).toBe(206);
     expect(

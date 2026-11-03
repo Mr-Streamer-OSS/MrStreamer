@@ -109,6 +109,7 @@ const unreachable = () => new ReceiverFailed({ kind: "unreachable" });
 function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(unreachable());
+
     if (signal.aborted) return abort();
     signal.addEventListener("abort", abort, { once: true });
     promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
@@ -123,7 +124,9 @@ function unlessAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
 function describe(answer: Answer): string {
   const name = (text: string | null | undefined) =>
     text && /^[A-Z_]{1,40}$/.test(text) ? text : "";
+
   const code = Number.isInteger(answer.detailedErrorCode) ? String(answer.detailedErrorCode) : "";
+
   return [name(answer.type) || "UNKNOWN", name(answer.reason), code].filter(Boolean).join(" ");
 }
 
@@ -140,9 +143,11 @@ function stateOf(status: MediaStatus, shown: boolean): TransportState | "failed"
       return "loading";
     case "IDLE":
       if (status.idleReason === "FINISHED") return "ended";
+
       if (status.idleReason === "CANCELLED" || status.idleReason === "INTERRUPTED") {
         return "stopped";
       }
+
       return status.idleReason === "ERROR" ? "failed" : null;
     default:
       return null;
@@ -164,10 +169,12 @@ export async function openSession(
 ): Promise<Session> {
   /** Aborts when the session ends, whichever way: it stops a reconnect that is under way. */
   const ended = new AbortController();
+
   const pending = new Map<
     number,
     { readonly timer: NodeJS.Timeout; resolve(answer: Answer): void; reject(error: Error): void }
   >();
+
   let nextRequest = 1;
   let channel: Channel | null = null;
   /** The media app as started for this session, and the apps the receiver last said it runs. */
@@ -193,6 +200,7 @@ export async function openSession(
       clearTimeout(waiting.timer);
       waiting.reject(unreachable());
     }
+
     pending.clear();
   };
 
@@ -210,11 +218,14 @@ export async function openSession(
     new Promise<Answer>((resolve, reject) => {
       // While a broken channel is being reopened, the app isn't joined yet and hears nothing.
       if (!channel || (recovering && destinationId !== PLATFORM)) return reject(unreachable());
+
       const timer = setTimeout(() => {
         pending.delete(requestId);
         reject(unreachable());
       }, deadline);
+
       pending.set(requestId, { timer, resolve, reject });
+
       try {
         channel.send(destinationId, namespace, { ...body, requestId });
       } catch {
@@ -227,6 +238,7 @@ export async function openSession(
   /** Hands an answer to the request it names, if one still waits. */
   const settle = (answer: Answer) => {
     const waiting = pending.get(answer.requestId ?? 0);
+
     if (!waiting) return;
     pending.delete(answer.requestId ?? 0);
     clearTimeout(waiting.timer);
@@ -236,6 +248,7 @@ export async function openSession(
   /** A request to the receiver itself. Rejects unless it answers with its status. */
   const ask = async (body: object, deadline?: number): Promise<void> => {
     const answer = await request(PLATFORM, NAMESPACE.receiver, body, deadline);
+
     if (answer.type !== "RECEIVER_STATUS") {
       throw new ReceiverFailed({ kind: "unavailable", detail: describe(answer) });
     }
@@ -268,10 +281,12 @@ export async function openSession(
   /** A request about the media of `current`, which the receiver named. */
   const mediaRequest = async (current: Load, body: object): Promise<void> => {
     if (!app || current.mediaSessionId === null) return;
+
     const answer = await request(app.transportId, NAMESPACE.media, {
       ...body,
       mediaSessionId: current.mediaSessionId,
     });
+
     // The receiver let go of the media meanwhile: there is nothing left to command.
     if (answer.type === "MEDIA_STATUS" || answer.reason === "INVALID_MEDIA_SESSION_ID") return;
     throw new ReceiverFailed({ kind: "media", detail: describe(answer) });
@@ -283,8 +298,10 @@ export async function openSession(
    */
   const syncSubtitles = async (current: Load): Promise<void> => {
     const track = current.textTrack;
+
     if (track === null) return;
     const showing = current.asked ?? current.activeTracks.includes(track);
+
     if (showing === current.subtitles) return;
     current.asked = current.subtitles;
     const others = current.activeTracks.filter((id) => id !== track);
@@ -296,17 +313,23 @@ export async function openSession(
 
   const mediaStatus = (current: Load, status: MediaStatus) => {
     const text = status.media?.tracks?.find((track) => track.type === "TEXT");
+
     if (text) current.textTrack = text.trackId;
+
     if (status.activeTrackIds) current.activeTracks = status.activeTrackIds;
     const duration = status.media?.duration;
+
     if (!current.live && typeof duration === "number" && duration > 0) current.duration = duration;
 
     const state = stateOf(status, current.shown);
+
     // An idle receiver says 0 or nothing for the position: where the media got to stands.
     if (typeof status.currentTime === "number" && status.playerState !== "IDLE") {
       current.position = Math.max(0, status.currentTime);
     }
+
     if (state === "playing" || state === "paused") current.shown = true;
+
     if (state === "failed") {
       current.state = "stopped";
       report({
@@ -317,13 +340,16 @@ export async function openSession(
     } else if (state) {
       reportState(current, state);
     }
+
     void syncSubtitles(current).catch(() => {});
   };
 
   /** A media status message: every media the app holds, in answer to `requestId` or as news. */
   const mediaStatuses = (statuses: readonly MediaStatus[], requestId: number | undefined) => {
     const current = load;
+
     if (closed || !current || !channel || !app) return;
+
     for (const status of statuses) {
       // The load's media is the one the answer to its LOAD names, or one playing its address,
       // as found when asking again after the connection broke before the answer.
@@ -332,6 +358,7 @@ export async function openSession(
         (requestId === current.requestId || status.media?.contentId === current.url)
       ) {
         current.mediaSessionId = status.mediaSessionId;
+
         if (current.dropped) {
           try {
             channel.send(app.transportId, NAMESPACE.media, {
@@ -346,10 +373,12 @@ export async function openSession(
           }
         }
       }
+
       if (status.mediaSessionId === current.mediaSessionId && !current.dropped) {
         mediaStatus(current, status);
       }
     }
+
     // Asked what it plays, the receiver no longer names this load: it went unannounced.
     if (
       requestId === polled &&
@@ -365,17 +394,22 @@ export async function openSession(
 
   const receiverStatus = (status: ReceiverStatus) => {
     applications = status.applications ?? [];
+
     if (!established) return;
+
     if (typeof status.volume?.level === "number") {
       const level = Math.min(1, Math.max(0, status.volume.level));
       const muted = status.volume.muted ?? false;
+
       if (level !== volume?.level || muted !== volume.muted) {
         volume = { level, muted };
         report({ type: "volume", level, muted });
       }
     }
+
     // A status that doesn't list the app, or lists none, says it is gone.
     const session = app?.sessionId;
+
     if (!applications.some((application) => application.sessionId === session)) {
       finish({ type: "released" });
     }
@@ -384,21 +418,28 @@ export async function openSession(
   const receive = (message: CastMessage) => {
     if (message.namespace === NAMESPACE.connection) {
       if (readPlatformMessage(message.payload)?.type !== "CLOSE") return;
+
       // The app closing its end is the app going; the receiver closing its own is the channel
       // going, though the socket may stay.
       if (message.sourceId === app?.transportId) finish({ type: "released" });
       else if (message.sourceId === PLATFORM) broken();
+
       return;
     }
+
     // What it says is taken in first, so whoever waits for the answer finds it done.
     if (message.namespace === NAMESPACE.receiver && message.sourceId === PLATFORM) {
       const answer = readReceiverMessage(message.payload);
+
       if (!answer) return;
+
       if (answer.type === "RECEIVER_STATUS" && answer.status) receiverStatus(answer.status);
       settle(answer);
     } else if (message.namespace === NAMESPACE.media && message.sourceId === app?.transportId) {
       const answer = readMediaMessage(message.payload);
+
       if (!answer) return;
+
       if (answer.type === "MEDIA_STATUS") mediaStatuses(answer.status ?? [], answer.requestId);
       settle(answer);
     }
@@ -416,12 +457,15 @@ export async function openSession(
       message: receive,
       broken,
     });
+
     if (closed) {
       opened.close();
       throw unreachable();
     }
+
     channel = opened;
     opened.send(PLATFORM, NAMESPACE.connection, { type: "CONNECT", origin: {} });
+
     return opened;
   };
 
@@ -439,6 +483,7 @@ export async function openSession(
     end();
     emit(event);
   }
+
   const end = () => {
     ended.abort();
     clearInterval(watching);
@@ -451,29 +496,36 @@ export async function openSession(
    */
   const recover = async () => {
     recovering = true;
+
     for (const wait of timings.reconnect) {
       await sleep(wait, undefined, { signal: ended.signal }).catch(() => {});
+
       if (closed || !app) return;
+
       try {
         const opened = await open(timings.attempt, ended.signal);
         // Its status says whether the app still runs: the session is released when not.
         await ask({ type: "GET_STATUS" }, timings.attempt);
+
         if (closed) return;
         opened.send(app.transportId, NAMESPACE.connection, { type: "CONNECT", origin: {} });
         poll();
         recovering = false;
+
         return;
       } catch {
         if (closed) return;
         drop();
       }
     }
+
     finish({ type: "lost", failure: { kind: "unreachable" } });
   };
 
   function broken() {
     if (closed) return;
     drop();
+
     if (established && !recovering) void recover();
   }
 
@@ -481,18 +533,23 @@ export async function openSession(
   const command = async (generation: number, body: object): Promise<void> => {
     if (closed) throw unreachable();
     const current = load;
+
     if (current?.generation !== generation || current.dropped) return;
     // A command during a load waits for the receiver to name its media.
     await current.answered;
+
     if (closed) throw unreachable();
+
     if (load === current && !current.dropped) await mediaRequest(current, body);
   };
 
   let leaving: Promise<void> | null = null;
+
   const disconnect = () =>
     (leaving ??= (async () => {
       if (closed) return;
       closed = true;
+
       if (channel && app) {
         // Stopping the app ends its media too; the media's own stop is for a receiver that is
         // slow about the app. Nothing waits longer than `close` for the receiver to confirm.
@@ -507,6 +564,7 @@ export async function openSession(
             // The app's STOP can still fit when its media's STOP cannot.
           }
         }
+
         await ask({ type: "STOP", sessionId: app.sessionId }, timings.close).catch(() => {});
         channel?.send(app.transportId, NAMESPACE.connection, { type: "CLOSE" });
         channel?.send(PLATFORM, NAMESPACE.connection, { type: "CLOSE" });
@@ -518,24 +576,31 @@ export async function openSession(
 
   /** The LAUNCH, once sent: a connect given up meanwhile still has an app to stop. */
   let launching: Promise<unknown> = Promise.resolve();
+
   const started = () =>
     applications.find((application) => application.appId === MEDIA_RECEIVER) ?? null;
+
   let localAddress: string | null;
+
   try {
     const opened = await open(timings.request, signal);
     localAddress = opened.localAddress;
+
     const launch = request(
       PLATFORM,
       NAMESPACE.receiver,
       { type: "LAUNCH", appId: MEDIA_RECEIVER },
       timings.launch,
     );
+
     launching = launch;
     const answer = await unlessAborted(launch, signal);
     const application = started();
+
     if (answer.type !== "RECEIVER_STATUS" || !application?.sessionId || !application.transportId) {
       throw new ReceiverFailed({ kind: "unavailable", detail: describe(answer) });
     }
+
     app = { sessionId: application.sessionId, transportId: application.transportId };
     opened.send(app.transportId, NAMESPACE.connection, { type: "CONNECT", origin: {} });
   } catch (error) {
@@ -547,6 +612,7 @@ export async function openSession(
         .catch(() => {})
         .then(() => {
           const sessionId = started()?.sessionId;
+
           if (sessionId) {
             channel?.send(PLATFORM, NAMESPACE.receiver, {
               type: "STOP",
@@ -584,6 +650,7 @@ export async function openSession(
       // A load that can't be sent leaves the one before it as the receiver's.
       if (closed || !app || !channel || recovering || loading.aborted) throw unreachable();
       const requestId = nextRequest++;
+
       const answer = unlessAborted(
         request(
           app.transportId,
@@ -620,6 +687,7 @@ export async function openSession(
         ),
         loading,
       );
+
       const current: Load = {
         generation: media.generation,
         url: media.url,
@@ -640,12 +708,15 @@ export async function openSession(
         textTrack: null,
         activeTracks: [],
       };
+
       load = current;
+
       const taken = await answer.catch((error: unknown) => {
         // The receiver may take it yet, after the service heard it didn't.
         current.dropped = true;
         throw error;
       });
+
       if (taken.type !== "MEDIA_STATUS") {
         throw new ReceiverFailed({ kind: "media", detail: describe(taken) });
       }
@@ -657,6 +728,7 @@ export async function openSession(
     stop: (generation) => command(generation, { type: "STOP" }),
     async showSubtitles(generation, on) {
       if (closed) throw unreachable();
+
       if (load?.generation !== generation || load.dropped) return;
       // Before the receiver listed the tracks, this is what it is asked once it does.
       load.subtitles = on;
@@ -664,13 +736,16 @@ export async function openSession(
     },
     async setVolume({ level, muted }) {
       if (closed) throw unreachable();
+
       // A level or a mute a request, as Cast's own senders send them.
       if (level !== undefined) {
         await ask({ type: "SET_VOLUME", volume: { level: Math.min(1, Math.max(0, level)) } });
       }
+
       if (muted !== undefined) await ask({ type: "SET_VOLUME", volume: { muted } });
     },
     disconnect,
   };
+
   return { connection, disconnect };
 }

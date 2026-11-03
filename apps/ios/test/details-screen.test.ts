@@ -81,16 +81,22 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#8E8E93" },
     Message: ({ text, action }: { text: string; action?: { label: string; onPress(): void } }) =>
@@ -108,10 +114,13 @@ vi.mock("../src/ui.tsx", async () => {
       ),
   };
 });
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   const pass = ({ children }: { children?: React.ReactNode }) =>
     createElement(Fragment, null, children);
+
   return {
     Docked: pass,
     Placeholders: pass,
@@ -120,24 +129,29 @@ vi.mock("../src/loading.tsx", async () => {
     loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
   };
 });
+
 vi.mock("../src/titles-ui.tsx", () => ({
   Artwork: () => null,
   ProgressLine: () => null,
   Shelf: () => null,
   TextTabs: () => null,
 }));
+
 vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   retryTitles: () => undefined,
   useRoster: () => ({ kind: "ready", members: scenario.members }),
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: () => undefined,
   versionOf: (key: string) => {
     const at = key.indexOf(":");
+
     return { subscriptionId: key.slice(0, at), id: key.slice(at + 1) };
   },
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
   useMetadataVersion: () => 0,
@@ -148,6 +162,7 @@ vi.mock("../src/titles.ts", () => ({
   useCollections: () => null,
   episodesOf: async () => [],
 }));
+
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
@@ -157,9 +172,11 @@ vi.mock("../src/play-title.ts", () => ({
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));
+
 // A version chosen asks playback to retire a Resume still waiting; details-resume.test.ts runs
 // that with the real owners.
 vi.mock("../src/playback.ts", () => ({ request: () => ({ stands: () => true }) }));
+
 vi.mock("../src/viewing.ts", () => ({
   useViewing: () => null,
   progressOf: async () => scenario.progress,
@@ -168,33 +185,43 @@ vi.mock("../src/viewing.ts", () => ({
   seriesViewing: async () => ({ progress: [], marks: [] }),
   undoMark: async () => undefined,
 }));
+
 vi.mock("../src/sources.ts", () => ({
   currentSource: (id: string) => scenario.sources.get(id),
 }));
+
 vi.mock("../src/header.tsx", () => ({
   useTabs: () => ({ tab: "series", above: 0 }),
   openOnTabs: ({ tab }: { tab: string }, screen: string) =>
     scenario.opened.push(`${tab}/${screen}`),
 }));
+
 vi.mock("../src/downloads.ts", async () => {
   const { useSyncExternalStore } = await import("react");
   const keyOf = (ref: TitleRef) => `${ref.subscriptionId}:${ref.id}`;
   const downloadOf = (ref: TitleRef) => scenario.episodes.get(keyOf(ref)) ?? scenario.download;
+
   const subscribe = (listener: () => void) => {
     scenario.heard.add(listener);
+
     return () => scenario.heard.delete(listener);
   };
+
   let version = 0;
+
   /** Queues an episode as the owner would, telling the screens. */
   const queued = (ref: TitleRef) => {
     if (ref.kind !== "episode") return;
     scenario.episodes.set(keyOf(ref), episodeDownload(ref, "queued"));
     version++;
+
     for (const listener of scenario.heard) listener();
   };
+
   return {
     useDownloadOf: (ref: TitleRef) => {
       useSyncExternalStore(subscribe, () => version);
+
       return downloadOf(ref);
     },
     useDownloads: () => useSyncExternalStore(subscribe, () => version),
@@ -214,6 +241,7 @@ vi.mock("../src/downloads.ts", async () => {
     replaceMissingDownload: async (ref: TitleRef) => {
       scenario.asked.push(`replace ${keyOf(ref)}`);
       queued(ref);
+
       return { kind: "replaced", download: downloadOf(ref) };
     },
     playDownload: (id: string) => scenario.asked.push(`play ${id}`),
@@ -223,12 +251,15 @@ vi.mock("../src/downloads.ts", async () => {
     retryDownload: async (id: string) => {
       scenario.asked.push(`retry ${id}`);
       const found = [...scenario.episodes.values()].find((each) => each.id === id);
+
       if (found?.title.kind !== "episode") return "unchanged";
       queued({ ...found.title, subscriptionId: found.subscription!.id });
+
       return "queued";
     },
   };
 });
+
 /** An episode's download in `kind`, as the owner lists it. */
 function episodeDownload(
   ref: TitleRef,
@@ -236,6 +267,7 @@ function episodeDownload(
 ): Download {
   if (ref.kind !== "episode") throw new Error("Not an episode");
   const { subscriptionId, ...title } = ref;
+
   return {
     id: `d-${subscriptionId}-${ref.id}`,
     title,
@@ -256,6 +288,7 @@ function episodeDownload(
     series: null,
   };
 }
+
 vi.mock("../src/watchlist.ts", () => ({
   useWatchlist: () => [],
   savedEntry: () => undefined,
@@ -273,19 +306,24 @@ interface App {
   readonly createRoot: typeof createRoot;
   readonly DetailsScreen: typeof DetailsScreen;
 }
+
 const launched: App = { React, createRoot, DetailsScreen };
 
 /** The app's modules as a relaunch starts them, over the same files, with state.json read. */
 const REACT_DOM = "react-dom/client";
+
 async function relaunch(): Promise<App> {
   vi.resetModules();
   const fresh = (await import(REACT_DOM)) as { createRoot: typeof createRoot };
+
   const app = {
     React: await import("react"),
     createRoot: fresh.createRoot,
     DetailsScreen: (await import("../src/details-screen.tsx")).DetailsScreen,
   };
+
   (await import("../src/storage.ts")).readState();
+
   return app;
 }
 
@@ -324,6 +362,7 @@ const catalogue: OnDemandCatalogue = {
     },
   ],
 };
+
 const LABELS: Record<string, string> = { a: "Home", b: "Cabin" };
 
 /** The providers saved now, each listing the film. */
@@ -352,6 +391,7 @@ function lost(...ids: string[]) {
 }
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   scenario.menu = null;
@@ -392,16 +432,20 @@ function mount({
   const { React, createRoot, DetailsScreen } = app;
   const container = document.createElement("div");
   const root = createRoot(container);
+
   const render = () =>
     React.act(() => root.render(React.createElement(DetailsScreen, { kind, version, asked })));
+
   render();
   unmount = () => React.act(() => root.unmount());
+
   const press = (testID: string) =>
     React.act(() =>
       container
         .querySelector(`[data-testid="${testID}"]`)!
         .dispatchEvent(new Event("click", { bubbles: true })),
     );
+
   return {
     /** The screen again, as a change of the lists draws it. */
     render,
@@ -411,12 +455,15 @@ function mount({
     /** Plays, and answers whose version played. */
     play() {
       press("details-play");
+
       return scenario.played.at(-1)?.subscriptionId;
     },
     openVersions() {
       press("details-version");
       const menu = scenario.menu;
+
       if (!menu) throw new Error("No version menu");
+
       return (label: string) =>
         React.act(() => menu.pick(menu.options.findIndex((each) => each.startsWith(label))));
     },
@@ -609,8 +656,10 @@ function unansweredReads() {
   const read: string[] = [];
   scenario.details = (version) => {
     read.push(version);
+
     return new Promise(() => undefined);
   };
+
   return read;
 }
 
@@ -832,8 +881,10 @@ describe("a film's facts", () => {
     let answer: (facts: unknown) => void = () => undefined;
     scenario.details = (_version, show) => {
       show(factsOf("The story saved on the phone."));
+
       return new Promise((resolve) => (answer = resolve));
     };
+
     const page = mount();
     await React.act(async () => undefined);
     expect(page.text()).toContain("The story saved on the phone.");
@@ -849,8 +900,10 @@ describe("a film's facts", () => {
     const shows = new Map<string, (facts: unknown) => void>();
     scenario.details = (version, show) => {
       shows.set(version, show);
+
       return new Promise(() => undefined);
     };
+
     const page = mount();
     await React.act(async () => undefined);
     page.openVersions()("Cabin");
@@ -885,6 +938,7 @@ const listed = (subscriptionId: string, id: string, season: number, number: numb
 function seriesFacts(subscriptionId: string, order?: readonly string[]) {
   const at = (id: string, season: number, number: number) =>
     listed(subscriptionId, id, season, number);
+
   return {
     kind: "series",
     plot: null,
@@ -921,6 +975,7 @@ const episodeRef = (subscriptionId: string, id: string, season = 1, episode = 1)
   season,
   episode,
 });
+
 /** Gives `subscriptionId`'s episode `id` a download in `kind`. */
 function has(
   subscriptionId: string,
@@ -948,14 +1003,17 @@ async function mountSeries(
   scenario.details = async (read) => facts(read);
   const page = mount({ kind: "series", version });
   await settled();
+
   return page;
 }
 
 /** Picks the sheet's option starting with `label`. */
 function choose(label: string) {
   const menu = scenario.menu;
+
   if (!menu) throw new Error("No sheet");
   const at = menu.options.findIndex((each) => each.startsWith(label));
+
   if (at < 0) throw new Error(`No "${label}" in ${menu.options.join(", ")}`);
   React.act(() => menu.pick(at));
 }
@@ -963,6 +1021,7 @@ function choose(label: string) {
 /** Presses the last alert's `label`. */
 function answer(label: string) {
   const button = scenario.alerts.at(-1)?.buttons.find((each) => each.text === label);
+
   if (!button) throw new Error(`No "${label}" in the last alert`);
   React.act(() => button.onPress?.());
 }
@@ -975,6 +1034,7 @@ async function heldRun() {
   page.press("bulk-season-start");
   choose("Download 3 episodes");
   await ran();
+
   return { page, release: () => React.act(async () => held.resolve()) };
 }
 
@@ -1005,9 +1065,11 @@ describe("a series' bulk download", () => {
   it("reviews the whole series in its own order, specials included, each exact file once", async () => {
     providers("a", "b");
     const order = ["201", "101", "900", "102", "202", "103"];
+
     const page = await mountSeries("a:2", (read) => {
       const facts = seriesFacts(read.split(":")[0]!, order);
       const [first, specials, second] = facts.seasons;
+
       // Details that list a file twice, or another provider's file, queue neither again.
       return {
         ...facts,
@@ -1018,6 +1080,7 @@ describe("a series' bulk download", () => {
         ],
       };
     });
+
     expect(page.text()).toContain("Whole series · 6 episodes");
     page.press("bulk-series-start");
     expect(scenario.menu).toMatchObject({
@@ -1083,6 +1146,7 @@ describe("a series' bulk download", () => {
         throw new Error("The provider didn't answer");
       }
     };
+
     const page = await mountSeries();
     page.press("bulk-season-start");
     choose("Download 3 episodes");
@@ -1159,6 +1223,7 @@ describe("a series' bulk download", () => {
     it(`stops before the next episode on ${change}`, async () => {
       providers("a", "b");
       const { page, release } = await heldRun();
+
       if (change === "another version") {
         page.openVersions()("Cabin");
         await settled();
@@ -1228,6 +1293,7 @@ describe("a series' bulk download", () => {
 
   it("opens Downloads on the series tab once everything is saved or queued", async () => {
     providers("a");
+
     for (const id of ["101", "102", "103"]) has("a", id, "complete");
     const page = await mountSeries();
     page.press("bulk-season-start");

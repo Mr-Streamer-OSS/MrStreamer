@@ -17,6 +17,7 @@ export async function fetchPicture(
 ): Promise<number> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   const task = new DownloadTask(url, file, {
     sessionType: "foreground",
     signal: controller.signal,
@@ -24,13 +25,16 @@ export async function fetchPicture(
       if (bytesWritten > maxBytes || totalBytes > maxBytes) controller.abort();
     },
   });
+
   try {
     const done = await task.downloadAsync();
     const bytes = done?.size ?? 0;
+
     if (bytes < 1 || bytes > maxBytes) {
       if (done?.exists) done.delete();
       throw new Error("Not a picture to keep");
     }
+
     return bytes;
   } finally {
     clearTimeout(timer);

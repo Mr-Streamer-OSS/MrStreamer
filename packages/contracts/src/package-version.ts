@@ -22,15 +22,20 @@ const PART_MAX = 65535;
 /** The package version for a release version, such as 1.0.4.0 for 0.0.4. Throws when it has none. */
 export function packageVersion(release: string): string {
   const version = parseVersion(release);
+
   if (!version) throw new Error(`${release} is not a release version.`);
   const { major, minor, patch, nightly } = version;
+
   if (nightly && patch === 0) {
     throw new Error(`${release} previews a .0 release, so no test package sorts before it.`);
   }
+
   const parts = nightly ? [major + 1, minor, patch - 1, nightly.run] : [major + 1, minor, patch, 0];
+
   if (parts.some((part) => part > PART_MAX)) {
     throw new Error(`${release} makes ${parts.join(".")}, past the Store's ${PART_MAX} per part.`);
   }
+
   return parts.join(".");
 }
 
@@ -41,14 +46,19 @@ export function packageVersion(release: string): string {
 export function comparePackageVersions(a: string, b: string): number {
   const [left, right] = [a, b].map((version) => {
     const parts = /^\d+\.\d+\.\d+\.\d+$/.test(version) ? version.split(".").map(Number) : [];
+
     if (parts.length !== 4 || parts.some((part) => part > PART_MAX)) {
       throw new Error(`"${version}" is not a package version such as 1.0.4.0.`);
     }
+
     return parts;
   });
+
   for (let part = 0; part < 4; part++) {
     const difference = (left?.[part] ?? 0) - (right?.[part] ?? 0);
+
     if (difference !== 0) return difference;
   }
+
   return 0;
 }

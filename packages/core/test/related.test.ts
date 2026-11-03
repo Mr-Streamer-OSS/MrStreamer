@@ -23,6 +23,7 @@ const title = (id: string, overrides: Partial<Title> = {}): Title => ({
   versions: [{ subscriptionId: "home", id, tags: [] }],
   ...overrides,
 });
+
 const facts = (name: string, categoryIds: readonly string[]) =>
   relatedProviderFacts([
     {
@@ -38,17 +39,20 @@ const facts = (name: string, categoryIds: readonly string[]) =>
       container: null,
     },
   ]).get("row")!;
+
 const version = { subscriptionId: "home", id: "opened" };
 
 describe("available related titles", () => {
   it("ranks shared genres and original language before provider fallbacks across saved owners", () => {
     const opened = title("opened", { genres: ["Drama"], originalLanguage: "nl" });
+
     const other = title("dutch", {
       subscriptionId: "other",
       genres: ["Drama"],
       originalLanguage: "nl",
       versions: [{ subscriptionId: "other", id: "dutch", tags: [] }],
     });
+
     const found = relatedTitles({
       opened,
       version,
@@ -61,6 +65,7 @@ describe("available related titles", () => {
         opened,
       ],
     });
+
     expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
       ["dutch", "Drama · Dutch"],
       ["english", "Drama"],
@@ -71,6 +76,7 @@ describe("available related titles", () => {
 
   it("uses category then meaningful name words within the opened version's provider without metadata", () => {
     const opened = title("opened", { title: "The Quiet Harbour" });
+
     const found = relatedTitles({
       opened,
       version,
@@ -97,6 +103,7 @@ describe("available related titles", () => {
         }),
       ],
     });
+
     expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
       ["category", "Same category"],
       ["words", "Similar name"],
@@ -105,6 +112,7 @@ describe("available related titles", () => {
 
   it("excludes the opened film and its alternate files, adult titles, other kinds and duplicates, and caps at twelve", () => {
     const opened = title("opened");
+
     const found = relatedTitles({
       opened,
       version,
@@ -119,6 +127,7 @@ describe("available related titles", () => {
         title("pick0"),
       ],
     });
+
     expect(found.titles.map(({ title }) => title.id)).toEqual(
       Array.from({ length: 12 }, (_, n) => `pick${n}`),
     );
@@ -139,6 +148,7 @@ describe("available related titles", () => {
         }),
       ],
     });
+
     expect(found.titles[0]?.title).toMatchObject({
       subscriptionId: "home",
       id: "local",
@@ -171,6 +181,7 @@ describe("available related titles", () => {
         title("false", { title: "Harbour Lights" }),
       ],
     });
+
     expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
       ["local", "Similar name"],
     ]);
@@ -217,6 +228,7 @@ describe("available related titles", () => {
       titles: [title("candidate")],
       provider: (each) => facts(each.id === "opened" ? opened : candidate, []),
     });
+
     expect(found.titles.map(({ title, reason }) => [title.id, reason])).toEqual([
       ["candidate", "Similar name"],
     ]);
@@ -237,6 +249,7 @@ describe("available related titles", () => {
         }),
       ],
     });
+
     expect(found.basis).toBe("Same category");
     expect(found.titles[0]?.title).toEqual(
       title("first", {

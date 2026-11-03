@@ -78,12 +78,15 @@ export function favouriteList(
   const shown: Favourite[] = [];
   const seen = new Set<string>();
   const hidden = new Map<string, { why: Unavailable; channels: Set<string>; streams: boolean }>();
+
   for (const saved of viewing.favourites) {
     const { subscriptionId } = saved;
     const member = byId.get(subscriptionId);
+
     // The record names only saved subscriptions; one the roster dropped meanwhile shows nothing.
     if (!member) continue;
     const channel = library?.byKey.get(ownedKey(saved));
+
     if (channel && !member.needsSecret) {
       // The record read by older channels can name one channel twice for a moment.
       if (seen.has(channel.key)) continue;
@@ -91,8 +94,10 @@ export function favouriteList(
       shown.push({ channel, saved });
       continue;
     }
+
     // Its channels show: the library has its part, a reload or failure keeping the last.
     const listed = library?.labels.has(subscriptionId) ?? false;
+
     const why: Unavailable = member.needsSecret
       ? "needs-secret"
       : listed
@@ -100,18 +105,23 @@ export function favouriteList(
         : member.live.kind === "failed"
           ? "failed"
           : "loading";
+
     const known = hidden.get(subscriptionId) ?? { why, channels: new Set(), streams: false };
+
     if (channel) known.channels.add(channel.key);
     else known.streams = true;
     hidden.set(subscriptionId, known);
   }
+
   return {
     original: viewing.favourites,
     shown,
     hidden: members.flatMap(({ entry, label }) => {
       const found = hidden.get(entry.id);
+
       if (!found) return [];
       const count = found.streams ? null : found.channels.size;
+
       return [{ subscriptionId: entry.id, label, why: found.why, count }];
     }),
   };
@@ -122,6 +132,7 @@ export function useFavourites(): FavouriteList | null {
   const viewing = useViewing();
   const catalogue = useCatalogue();
   const roster = useRoster();
+
   return useMemo(
     () => favouriteList(viewing, catalogue, roster.kind === "ready" ? roster.members : []),
     [viewing, catalogue, roster],
@@ -135,11 +146,14 @@ export function useFavourites(): FavouriteList | null {
 export function useFavouriteKeys(): ReadonlySet<string> {
   const viewing = useViewing();
   const catalogue = useCatalogue();
+
   return useMemo(() => {
     const library = catalogue.kind === "ready" ? catalogue.library : null;
+
     return new Set(
       (viewing?.favourites ?? []).flatMap((saved) => {
         const channel = library?.byKey.get(ownedKey(saved));
+
         return channel ? [channel.key] : [];
       }),
     );
@@ -161,8 +175,10 @@ export function sameFavourites(
   now: FavouriteList | null,
 ): boolean {
   const records = (list: readonly OwnedId[]) => list.map(ownedKey).join("\n");
+
   const rows = (list: readonly Favourite[]) =>
     list.map(({ channel, saved }) => `${channel.key} ${ownedKey(saved)}`).join("\n");
+
   return (
     now !== null &&
     records(now.original) === records(then.original) &&
@@ -190,15 +206,21 @@ export function listedNow(
   saved: readonly Member[],
 ): Listed {
   const { subscriptionId } = channel;
+
   if (!saved.some((member) => member.entry.id === subscriptionId)) return { kind: "removed" };
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const found = new Map<string, Channel>();
+
   for (const id of new Set([channel.id, ...channel.variants.map((variant) => variant.id)])) {
     const now = library?.byKey.get(ownedKey({ subscriptionId, id }));
+
     if (now) found.set(now.key, now);
   }
+
   const [only, ...more] = found.values();
+
   if (!only) return { kind: "gone" };
+
   return more.length > 0 ? { kind: "split" } : { kind: "listed", channel: only };
 }
 
@@ -218,6 +240,7 @@ const UNLISTED: Record<Exclude<Listed["kind"], "listed">, string> = {
 export function starChannel(channel: Channel, favourite: boolean) {
   const title = favourite ? `Couldn't add ${channel.title}` : `Couldn't remove ${channel.title}`;
   const now = listedNow(channel, currentCatalogue(), members());
+
   if (now.kind !== "listed") return Alert.alert(title, UNLISTED[now.kind]);
   setFavourite(now.channel, favourite).catch((cause: unknown) =>
     Alert.alert(title, describeError(appError(cause)), [

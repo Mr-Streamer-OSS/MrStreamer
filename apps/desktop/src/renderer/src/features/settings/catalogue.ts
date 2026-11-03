@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   { id: "privacy", label: "Privacy" },
   { id: "about", label: "About" },
 ] as const satisfies readonly { id: string; label: PlainKey }[];
+
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 /** Destinations name real controls. Forms remain handwritten beside their existing owners. */
@@ -187,23 +188,30 @@ const SETTINGS_CONTROLS = [
   label: PlainKey;
   synonyms: PlainKey;
 }[];
+
 export type SettingsControl = (typeof SETTINGS_CONTROLS)[number]["id"];
+
 export const settingSection = (id: SettingsControl): SettingsSection =>
   SETTINGS_CONTROLS.find((control) => control.id === id)!.section;
 
 const normalize = (text: string) =>
   text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+
 /** Every word must match a translated label, section or synonym. Nothing leaves the window. */
 export function findSettings(query: string, distribution: Distribution = "direct") {
   const words = normalize(query).trim().split(/\s+/).filter(Boolean);
+
   return SETTINGS_CONTROLS.filter((control) => {
     if (control.id === "update-channel" && !updatesInApp(distribution)) return false;
     const section = SETTINGS_SECTIONS.find((section) => section.id === control.section)!;
+
     const synonyms =
       control.id === "update-check" && (distribution === "pacman" || distribution === "snap")
         ? t(`settings.search.${distribution}`)
         : t(control.synonyms);
+
     const text = normalize(`${t(control.label)} ${t(section.label)} ${synonyms}`);
+
     return words.every((word) => text.includes(word));
   });
 }

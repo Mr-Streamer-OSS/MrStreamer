@@ -13,6 +13,7 @@ try {
   const summary = await buildGuideIndex(build, (programmes) =>
     tell({ kind: "progress", programmes }),
   );
+
   tell({ kind: "done", summary });
 } catch (cause) {
   tell({

@@ -18,9 +18,11 @@ import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   titlePlayer.close();
@@ -41,6 +43,7 @@ const subscription = (id: string, name: string): SubscriptionSummary => ({
   account: { state: "active", expiresAt: null, maxConnections: 1, activeConnections: 0 },
   needsSecret: false,
 });
+
 const northline = subscription("northline", "Northline");
 const holiday = subscription("holiday", "Holiday house");
 const openlist = subscription("openlist", "Openlist playlist");
@@ -68,6 +71,7 @@ function reads() {
   const channels = ipc.hold("library.status");
   const guides = ipc.hold("guide.status");
   const titles = ipc.hold("ondemand.status");
+
   return async (left: readonly SubscriptionSummary[]) => {
     await act(async () => {
       subscriptions.resolve(left);
@@ -96,18 +100,23 @@ async function removing(
   await mounted.render(createElement(SubscriptionSection));
   unmount = mounted.unmount;
   await opened(saved);
+
   const button = (text: string) =>
     [...container.querySelectorAll("button")].find((each) => each.textContent?.trim() === text);
+
   const click = async (element: Element | undefined | null) => {
     await act(async () => (element as HTMLElement | undefined | null)?.click());
     await settled();
   };
+
   const row = [...container.querySelectorAll("li")].find((each) =>
     each.textContent?.startsWith(removed.name ?? ""),
   );
+
   // Its details hold Remove, at their foot; one subscription alone shows them already.
   if (saved.length > 1) await click(row?.querySelector("button"));
   await click(button(`Remove ${removed.name}`));
+
   return { container, client, button, click };
 }
 
@@ -129,12 +138,14 @@ describe("removing a subscription", () => {
       progress: null,
       series: null,
     });
+
     const { container } = await removing([northline, holiday], holiday, [
       of("queued", { kind: "queued" }, holiday.id),
       of("waiting", { kind: "waiting" }, holiday.id),
       of("copy", { kind: "complete" }, holiday.id),
       of("other", { kind: "queued" }, northline.id),
     ]);
+
     expect(container.textContent).toContain(
       "Its 2 unfinished downloads end. Downloaded copies stay.",
     );
@@ -152,6 +163,7 @@ describe("removing a subscription", () => {
       );
       const box = container.querySelector('[role="checkbox"]');
       expect(box?.getAttribute("aria-checked")).toBe("false");
+
       // The label, as the viewer clicks its text or the box inside it.
       if (ticked) await click(box?.closest("label"));
 
@@ -166,6 +178,7 @@ describe("removing a subscription", () => {
   it("says what stops and what stays when its stream plays, and stops that stream first", async () => {
     await act(async () => player.watch(channelOf(northline)));
     useUi.setState({ details: { kind: "movie", subscriptionId: holiday.id, id: "91001" } });
+
     const { container, client, button, click } = await removing(
       [northline, holiday, openlist],
       northline,
@@ -336,19 +349,24 @@ describe("removing a subscription", () => {
       const answer = ipc.hold("subscription.remove");
       await click(button("Remove"));
       const options = browseChannels(null);
+
       const result = (owners: readonly SubscriptionSummary[]) =>
         browseResult(owners.map(channelOf));
+
       if (cached) client.setQueryData(options.queryKey, result([northline, holiday]));
       const during = ipc.hold("library.browse");
       const observer = new QueryObserver(client, { ...options, refetchOnMount: "always" });
       const asked = inactive ? client.fetchQuery(options) : undefined;
       let stop = inactive ? () => {} : observer.subscribe(() => {});
+
       try {
         expect(ipc.argsOf("library.browse")).toHaveLength(1);
+
         if (!held) {
           await act(async () => during.resolve(result([holiday])));
           await settled();
         }
+
         // Main restores the source before refusing. An older first browse read may still finish
         // afterward, captured while main temporarily excluded it, without a cached answer to replace.
         ipc.always("library.browse", result([northline, holiday]));
@@ -361,15 +379,18 @@ describe("removing a subscription", () => {
         );
         await settled();
         expect(container.textContent).toContain("Login deletion refused.");
+
         if (held) await act(async () => during.resolve(result([holiday])));
         await settled();
         await settled();
+
         if (inactive) {
           await expect(asked).resolves.toEqual(result([holiday]));
           expect(client.getQueryState(options.queryKey)?.isInvalidated).toBe(true);
           stop = observer.subscribe(() => {});
           await settled();
         }
+
         expect(
           observer.getCurrentResult().data?.channels.map(({ subscriptionId }) => subscriptionId),
         ).toEqual([northline.id, holiday.id]);

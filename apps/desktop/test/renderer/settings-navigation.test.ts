@@ -17,6 +17,7 @@ import { OnlineSubtitlesSection } from "../../src/renderer/src/features/settings
 import { findSettings } from "../../src/renderer/src/features/settings/catalogue.ts";
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
@@ -29,13 +30,16 @@ beforeEach(() => {
     formats: "en-US",
   });
 });
+
 afterEach(() => {
   cleanup();
   setLanguage({ locale: "en-US", formats: "en-US" });
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
+
 async function render(component = createElement(SettingsPage)) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const mounted = queryView(client);
@@ -43,8 +47,10 @@ async function render(component = createElement(SettingsPage)) {
   await mounted.render(component);
   await settle();
   cleanup = mounted.unmount;
+
   return { view, client };
 }
+
 async function type(field: HTMLInputElement, value: string) {
   await act(async () => {
     field.focus();
@@ -53,6 +59,7 @@ async function type(field: HTMLInputElement, value: string) {
   });
   await settle();
 }
+
 async function nav(view: HTMLElement, label: string) {
   await act(async () =>
     [...view.querySelectorAll<HTMLButtonElement>("nav button")]
@@ -90,9 +97,11 @@ it("search focuses the real control, preserves an independent draft and recovers
   await settle();
   expect(delay.value).toBe("43");
   await nav(view, "Movies and series");
+
   const ownKey = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
     (b) => b.textContent === "Own key…",
   )!;
+
   await act(async () => ownKey.click());
   const key = view.querySelector<HTMLInputElement>('[aria-label="Your own TMDB key"]')!;
   await type(key, "draft-key");
@@ -156,9 +165,11 @@ it("keeps acknowledged quality after a failed reset and retries only at that row
   });
   const failed = ipc.hold("subscription.updatePreferences");
   const { view } = await render(createElement(LiveSettingsSection));
+
   const reset = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
     (b) => b.textContent === "Reset",
   )!;
+
   await act(async () => reset.click());
   await settle();
   await act(async () => failed.reject({ kind: "unexpected", detail: "reset failed" }));
@@ -186,12 +197,15 @@ it.each(["", "quality"])("recovers a preference read failure with search %j", as
   const { view } = await render();
   expect(view.textContent).toContain("Settings could not be read.");
   const search = view.querySelector<HTMLInputElement>('[aria-label="Find a setting"]')!;
+
   if (query) await type(search, query);
   ipc.always("preferences.get", ipc.snapshot(defaultPreferences));
   const read = ipc.hold("preferences.get");
+
   const retry = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "Try again",
   )!;
+
   const current = query ? search : view.querySelector('nav button[aria-current="page"]');
   await act(async () => {
     retry.focus();
@@ -208,12 +222,15 @@ it("recovers a subtitle settings read failure without losing keyboard focus", as
   ipc.refuse("subtitles.settings", { kind: "unexpected", detail: "read failed" });
   useUi.setState({ settings: "subtitles" });
   const { view } = await render();
+
   const alert = [...view.querySelectorAll('[role="alert"]')].find((each) =>
     each.textContent?.includes("Subtitle settings could not be saved or read"),
   )!;
+
   const retry = [...alert.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "Try again",
   )!;
+
   const current = view.querySelector('nav button[aria-current="page"]');
   const read = ipc.hold("subtitles.settings");
   await act(async () => {
@@ -287,6 +304,7 @@ it("keeps delay editing keys inside the field and clamps typed whole seconds", a
   const { view } = await render();
   await nav(view, "Playback");
   const delay = view.querySelector<HTMLInputElement>('[aria-label="Next episode delay"]')!;
+
   const press = async (key: string, shiftKey = false) => {
     await act(async () =>
       delay.dispatchEvent(
@@ -294,6 +312,7 @@ it("keeps delay editing keys inside the field and clamps typed whole seconds", a
       ),
     );
   };
+
   await type(delay, "10");
   await press("ArrowUp", true);
   expect(delay.value).toBe("15");
@@ -391,12 +410,14 @@ it("blocks repeated quality writes while pending, preserves acknowledgement on r
   const { view } = await render();
   await nav(view, "Live TV");
   const quality = view.querySelector<HTMLSelectElement>('select[aria-label="Quality"]')!;
+
   const choose = async (value: string) =>
     act(async () => {
       quality.focus();
       quality.value = value;
       quality.dispatchEvent(new Event("change", { bubbles: true }));
     });
+
   await choose("hd");
   await settle();
   await choose("sd");
@@ -404,9 +425,11 @@ it("blocks repeated quality writes while pending, preserves acknowledgement on r
   expect(quality.value).toBe("fhd");
   await act(async () => first.reject({ kind: "unexpected", detail: "quality refused" }));
   await settle();
+
   const retry = [...view.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent === "Try again",
   )!;
+
   const save = ipc.hold("preferences.update");
   await act(async () => {
     retry.focus();
@@ -430,14 +453,17 @@ it("keeps the acknowledged interface language and update channel while rejecting
     nextCheckAt: null,
     dismissed: null,
   } as const;
+
   ipc.always("updates.status", status);
   const { view } = await render();
+
   const change = async (label: string, value: string) =>
     act(async () => {
       const control = view.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
       control.value = value;
       control.dispatchEvent(new Event("change", { bubbles: true }));
     });
+
   const language = ipc.hold("language.set");
   await change("Interface language", "en-US");
   await settle();

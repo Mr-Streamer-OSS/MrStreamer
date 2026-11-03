@@ -4,10 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { streams } from "./hls-stand-in.ts";
+
 const support = vi.hoisted(() => ({ hls: true }));
+
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return {
     default: class extends standIn(real.default) {
       static override isSupported() {
@@ -16,6 +19,7 @@ vi.mock("hls.js", async (original) => {
     },
   };
 });
+
 const channel = (id: string): LiveChannel => ({
   subscriptionId: SUBSCRIPTION,
   id,
@@ -28,10 +32,12 @@ const channel = (id: string): LiveChannel => ({
   catchupDays: null,
   variants: [{ id, name: id, tags: [], quality: null }],
 });
+
 const wait = async () => {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
   else await new Promise((resolve) => setTimeout(resolve));
 };
+
 async function open(id = "one") {
   const opened = streams.count();
   ipc.always("playback.open", {
@@ -52,19 +58,23 @@ async function open(id = "one") {
   });
   player.element.dispatchEvent(new Event("playing"));
   await wait();
+
   return stream;
 }
+
 beforeEach(() => {
   support.hls = true;
   player.reset();
   ipc.reset();
   player.element.currentTime = 0;
 });
+
 afterEach(() => {
   player.reset();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
 it("hides HLS renditions that have only an empty WebVTT segment", async () => {
   const stream = await open();
   stream.subtitleLines([], "English");
@@ -73,6 +83,7 @@ it("hides HLS renditions that have only an empty WebVTT segment", async () => {
   player.toggleSubtitles();
   expect(player.state().subtitle).toBeNull();
 });
+
 it("discovers working renditions with CC off, retains all proven choices and draws none until chosen", async () => {
   const stream = await open();
   expect(stream.subtitleTrack).toBe(0);
@@ -99,6 +110,7 @@ it("discovers working renditions with CC off, retains all proven choices and dra
   player.toggleSubtitles();
   expect(player.state().subtitle).toBeNull();
 });
+
 it("tries the preferred language first and enables it only after a cue", async () => {
   ipc.prefer({ subtitleLanguage: "de" });
   const stream = await open();
@@ -113,6 +125,7 @@ it("tries the preferred language first and enables it only after a cue", async (
   expect(stream.subtitleTrack).toBe(1);
   expect(ipc.argsOf("preferences.update")).toEqual([]);
 });
+
 it("keeps captions hidden until their picture data arrives and respects Off", async () => {
   ipc.prefer({ subtitleLanguage: "off" });
   const stream = await open();
@@ -125,6 +138,7 @@ it("keeps captions hidden until their picture data arrives and respects Off", as
   expect(player.state().tracks?.subtitles.map((track) => track.label)).toEqual(["English"]);
   expect(player.state().subtitle).toBeNull();
 });
+
 /** Advances a moving picture, so discovery is checked independently of stall recovery. */
 async function playingFor(ms: number) {
   for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
@@ -134,6 +148,7 @@ async function playingFor(ms: number) {
     await vi.advanceTimersByTimeAsync(Math.min(1000, ms - elapsed));
   }
 }
+
 it("bounds stalled discovery to three probes per burst, retries later, and cancels on channel release", async () => {
   vi.useFakeTimers();
   const stream = await open();
@@ -156,6 +171,7 @@ it("bounds stalled discovery to three probes per burst, retries later, and cance
   expect(stream.destroyed).toBe(true);
   expect(stream.subtitlesLoaded).toHaveLength(atStop);
 });
+
 it("never interrupts a selected rendition for discovery, and resumes when the viewer turns it off", async () => {
   vi.useFakeTimers();
   const stream = await open();
@@ -171,6 +187,7 @@ it("never interrupts a selected rendition for discovery, and resumes when the vi
   expect(stream.subtitleTrack).toBe(1);
   expect(player.state().subtitle).toBeNull();
 });
+
 it("accepts later cues without reopening and forgets proof on a different channel", async () => {
   const first = await open("first");
   first.subtitleLines([]);
@@ -218,6 +235,7 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
     expect(ipc.argsOf("playback.open")).toHaveLength(1);
   },
 );
+
 it("keeps all HLS languages reachable while a remembered language is on", async () => {
   ipc.prefer({ subtitleLanguage: "de" });
   const stream = await open();
@@ -272,6 +290,7 @@ it("waits for picture before discovery, permits a six-second reload, and retries
   expect(player.state().subtitle?.label).toBe("English");
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
 });
+
 it("ignores internal abort notices on Off, language switches and replaced probes", async () => {
   const stream = await open();
   stream.subtitleLines([{ start: 0, end: 60, text: "Hello" }], "English");
@@ -410,12 +429,15 @@ async function expiredSelection() {
   await wait();
   player.setSubtitle(player.state().tracks!.subtitles[0]!);
   stream.subtitlePlaylist(6);
+
   for (const _ of [0, 6, 12]) {
     stream.error("subtitle-segment", true, "English");
     await playingFor(6000);
   }
+
   expect(player.state().subtitle).toBeNull();
   expect(player.state().phase.kind).toBe("playing");
+
   return stream;
 }
 
@@ -424,7 +446,9 @@ it.each(["restore", "off", "other language"] as const)(
   async (choice) => {
     vi.useFakeTimers();
     const first = await expiredSelection();
+
     if (choice === "off") player.setSubtitle(null);
+
     if (choice === "other language") player.setSubtitle(player.state().tracks!.subtitles[1]!);
     await playingFor(9000);
     first.error("video");
@@ -470,6 +494,7 @@ it.each(["timestamp domain", "malformed"] as const)(
   async (failure) => {
     vi.useFakeTimers();
     const stream = await open();
+
     if (failure === "timestamp domain") stream.subtitleDiscontinuityMismatch();
     else stream.subtitleUnreadable();
     await wait();
@@ -478,6 +503,7 @@ it.each(["timestamp domain", "malformed"] as const)(
     const before = stream.subtitlesLoaded.filter((name) => name === "English").length;
     await playingFor(70_000);
     const after = stream.subtitlesLoaded.filter((name) => name === "English").length;
+
     if (failure === "timestamp domain") expect(after).toBeGreaterThan(before);
     else expect(after).toBe(before);
     expect(player.state().subtitle).toBeNull();

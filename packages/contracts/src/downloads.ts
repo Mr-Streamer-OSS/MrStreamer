@@ -142,6 +142,7 @@ export interface CopySession {
 
 /** The artwork a download keeps: what `posterUrl` and `wideUrl` serve. */
 export const DOWNLOAD_ARTWORK = ["poster", "wide"] as const;
+
 export type DownloadArtwork = (typeof DOWNLOAD_ARTWORK)[number];
 
 /** The app's own scheme for kept artwork: `mrstreamer://download/<id>/<poster|wide>`. */

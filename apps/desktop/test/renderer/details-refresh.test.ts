@@ -46,9 +46,11 @@ describe("a title's details", () => {
     const client = new QueryClient();
     syncOnDemand(client);
     const first = ipc.hold("ondemand.details");
+
     const opening = client.fetchQuery(
       queries.details("movie", { subscriptionId: SUBSCRIPTION, id: "1" }),
     );
+
     first.resolve(details);
     await opening;
 
@@ -64,9 +66,11 @@ describe("a title's details", () => {
 
 describe("TMDB's progress", () => {
   const metadata = { known: 5, wanted: 10, refused: false, fetching: true };
+
   const lists = [
     { subscriptionId: SUBSCRIPTION, movies: 1, series: 0, fetchedAt: 1, failure: null },
   ];
+
   const statusKey = queries.onDemandStatus().queryKey;
 
   it("updates only the progress of the status, and reads no list again", async () => {

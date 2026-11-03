@@ -22,6 +22,7 @@ afterEach(async () => {
 export async function fakeProvider(options: FakeProviderOptions = {}): Promise<FakeProvider> {
   const provider = await startFakeProvider(options);
   cleanups.push(() => provider.close());
+
   return provider;
 }
 
@@ -29,6 +30,7 @@ export async function tempDir(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "mr-streamer-test-"));
   // The diagnostics log may still append a line a step took, as the runtime that took it closes.
   cleanups.push(() => rm(dir, { recursive: true, force: true, maxRetries: 3 }));
+
   return dir;
 }
 
@@ -36,6 +38,7 @@ export async function tempDir(): Promise<string> {
 export function runtimeFor<R>(layer: Layer.Layer<R>): ManagedRuntime.ManagedRuntime<R, never> {
   const runtime = ManagedRuntime.make(layer);
   cleanups.push(() => runtime.dispose());
+
   return runtime;
 }
 
@@ -57,20 +60,26 @@ export async function promised<I, S extends object>(
   key: Context.Key<I, S>,
 ): Promise<Promised<S>> {
   const service = await runtime.runPromise(key);
+
   // A service's effects need nothing more from the context: they run on `runtime` for its clock.
   const run = (effect: Effect.Effect<unknown, unknown, unknown>) =>
     runtime.runPromise(effect as Effect.Effect<unknown, unknown, never>);
+
   const calls = Object.entries(service).map(([name, member]: [string, unknown]) => {
     if (Effect.isEffect(member)) return [name, () => run(member)];
+
     if (typeof member !== "function") return [name, member];
+
     return [
       name,
       (...args: unknown[]) => {
         const result: unknown = member(...args);
+
         return Effect.isEffect(result) ? run(result) : result;
       },
     ];
   });
+
   return Object.fromEntries(calls) as Promised<S>;
 }
 
@@ -83,26 +92,31 @@ export async function collect<A, R>(
   runtime.runFork(Stream.runForEach(stream, (item) => Effect.sync(() => seen.push(item))));
   // Lets the subscription start before the test goes on.
   await new Promise((resolve) => setTimeout(resolve, 10));
+
   return seen;
 }
 
 /** A fetch that can hold the provider's answer to the next request until the test releases it. */
 export function holdableFetch() {
   let next: { arrived: () => void; answer: Promise<void> } | null = null;
+
   const holdable: typeof fetch = async (input, init) => {
     const held = next;
     next = null;
     held?.arrived();
     const response = await fetch(input, init);
     await held?.answer;
+
     return response;
   };
+
   return {
     fetch: holdable,
     holdNext() {
       const arrived = Promise.withResolvers<void>();
       const answer = Promise.withResolvers<void>();
       next = { arrived: arrived.resolve, answer: answer.promise };
+
       return { arrived: arrived.promise, release: answer.resolve };
     },
   };

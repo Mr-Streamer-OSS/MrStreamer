@@ -20,9 +20,11 @@ it("offers native field edits only where allowed by the focused field", () => {
       canEditRichly: false,
     },
   };
+
   const actions = fieldMenu(context)
     .filter((item) => item.role)
     .map((item) => [item.role, item.enabled]);
+
   expect(actions).toEqual([
     ["undo", false],
     ["redo", true],

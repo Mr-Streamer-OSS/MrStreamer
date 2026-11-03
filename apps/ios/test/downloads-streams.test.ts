@@ -40,6 +40,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     let elapsed = 0;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => readNow() + elapsed);
     let advanced = false;
+
     const off = app.onDownloads(() => {
       if (
         !advanced &&
@@ -51,6 +52,7 @@ describe("downloads", { timeout: 30_000 }, () => {
         elapsed = 6_000;
       }
     });
+
     onTestFinished(() => {
       off();
       clock.mockRestore();
@@ -62,12 +64,15 @@ describe("downloads", { timeout: 30_000 }, () => {
     off();
     app = await launch();
     const continued: boolean[] = [];
+
     const offContinued = app.onDownloads(() => {
       const status = statusOf(app, film.id);
+
       if (status?.kind === "transferring" && status.received > 300_000) {
         continued.push(status.restarted);
       }
     });
+
     onTestFinished(offContinued);
     await until(
       () => isComplete(app, film.id),
@@ -96,10 +101,13 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.replaceMovieFile(id, replacement);
     one.stallMovieFile(id, 0, 0);
     let restarted = false;
+
     const off = app.onDownloads(() => {
       const status = statusOf(app, film.id);
+
       if (status?.kind === "transferring" && status.restarted) restarted = true;
     });
+
     app.stop();
     await until(() => isComplete(app, film.id), "the copy of the new file");
     off();
@@ -144,10 +152,12 @@ describe("downloads", { timeout: 30_000 }, () => {
     background.grants.clear();
     background.requests.clear();
     const stored = doc();
+
     for (const row of stored.items) {
       delete row.transfer;
       row.attempt = "a-build14";
     }
+
     new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(stored));
     const { keychainSecrets } = await import("../src/secrets.ts");
     await keychainSecrets.write(
@@ -203,6 +213,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     await install();
     const app = await launch();
     const { a, b } = await withProviders(app, true);
+
     const item = (subscriptionId: string | null) => ({
       id: "format",
       subscriptionId,
@@ -212,6 +223,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       next: false,
       versions: false,
     });
+
     // Another provider's film, then a copy on the phone, plays after A's Matroska title.
     for (const next of [b!, null]) {
       let end!: () => void;
@@ -242,6 +254,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       const film = await app.addDownload(movieRef(a));
       expect(statusOf(app, film.id)?.kind).toBe("waiting");
       native.requests.length = 0;
+
       const playing = app.playback.play(
         item(next),
         {
@@ -251,6 +264,7 @@ describe("downloads", { timeout: 30_000 }, () => {
         },
         options,
       );
+
       // Longer than the provider's moment to free a connection: A's session still holds it.
       await new Promise((done) => setTimeout(done, 1_500));
       expect(native.requests).toEqual([]);
@@ -296,6 +310,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const held = native.held;
     native.held = null;
     native.leaseDeadlines = null;
+
     for (const ending of held) ending();
     await until(() => statusOf(app, film.id)?.kind !== "transferring", "the transfer to end");
     app.playback.retry();

@@ -52,11 +52,13 @@ const isFile = (value: unknown): value is FileResult =>
 /** The report's file entries, or why the file at `path` is no Vitest JSON report. */
 function readReport(path: string): readonly FileResult[] | string {
   let report: unknown;
+
   try {
     report = JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     return `Couldn't read ${path} as JSON: ${error instanceof Error ? error.message : error}`;
   }
+
   if (
     typeof report !== "object" ||
     report === null ||
@@ -65,22 +67,29 @@ function readReport(path: string): readonly FileResult[] | string {
     !report.testResults.every(isFile)
   )
     return `${path} is no Vitest JSON report: each of its testResults needs a name, a status and assertionResults.`;
+
   return report.testResults;
 }
 
 /** What keeps `file`'s results from counting as complete; nothing when they do. */
 function problems(file: string, results: readonly FileResult[]): string[] {
   const [result, ...others] = results;
+
   if (!result) return [`${file}: not in the report. Did it fail to load, or the run stop early?`];
+
   if (others.length) return [`${file}: in the report ${results.length} times.`];
   const message = typeof result.message === "string" && result.message ? ` ${result.message}` : "";
+
   if (result.assertionResults.length === 0) return [`${file}: ran no tests.${message}`];
   const platform = platformOnly[file];
   const allowed = platform && platform !== process.platform ? ["passed", "skipped"] : ["passed"];
   const unfinished = result.assertionResults.filter((test) => !allowed.includes(test.status));
   const found = unfinished.slice(0, 5).map((test) => `${file}: ${test.fullName} (${test.status})`);
+
   if (unfinished.length > 5) found.push(`${file}: ${unfinished.length - 5} more did not pass.`);
+
   if (result.status !== "passed" && found.length === 0) found.push(`${file}: failed.${message}`);
+
   return found;
 }
 
@@ -91,33 +100,44 @@ function fail(found: readonly string[]): never {
 }
 
 const [path] = process.argv.slice(2);
+
 if (!path) {
   console.error("Name the Vitest JSON report: node scripts/ci-test-results.ts <report.json>");
   process.exit(1);
 }
+
 // Found as Vitest 5 finds them (globProjectFiles), dot-named files and folders included.
 const files = globSync(include, { dot: true, ignore: exclude, expandDirectories: false });
+
 if (files.length === 0)
   fail([`No test files under ${process.cwd()}. Run this from the repository's root.`]);
+
 const report = readReport(path);
+
 if (typeof report === "string") fail([report]);
 
 const byFile = Map.groupBy(report, (result) =>
   relative(process.cwd(), result.name).replaceAll("\\", "/"),
 );
+
 const found = files.flatMap((file) => problems(file, byFile.get(file) ?? []));
+
 for (const file of byFile.keys())
   if (!files.includes(file))
     found.push(
       `${file}: in the report, but no test file here. Run this from the root of the checkout the report came from.`,
     );
+
 if (found.length) fail(found);
 
 const passed = report.flatMap((result) =>
   result.assertionResults.filter((test) => test.status === "passed"),
 );
+
 console.log(`All ${files.length} test files are in the report: ${passed.length} tests passed.`);
+
 for (const [file, [result]] of byFile) {
   const skipped = result?.assertionResults.filter((test) => test.status === "skipped").length;
+
   if (skipped) console.log(`${file} skipped ${skipped}, which run on ${platformOnly[file]} alone.`);
 }

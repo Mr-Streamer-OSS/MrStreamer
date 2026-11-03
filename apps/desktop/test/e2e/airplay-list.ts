@@ -37,13 +37,17 @@ import { connect, delay, key, launch, login, press, says, waitFor, type Page } f
 import { segmentsOf } from "./tv-player.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) throw new Error("Usage: node test/e2e/airplay-list.ts <Electron> [-- args]");
+
 if (process.platform !== "darwin") throw new Error("Apple's list of receivers is macOS's.");
+
 if (lanAddresses().length === 0) {
   throw new Error("This computer has no address on a local network for a TV to reach.");
 }
 
 const results: boolean[] = [];
+
 function check(ok: boolean, what: string, detail = ""): void {
   results.push(ok);
   console.log(`${ok ? "PASS" : "FAIL"} ${what}${detail ? `: ${detail}` : ""}`);
@@ -63,6 +67,7 @@ function within<T>(what: string, ms: number, pending: Promise<T>): Promise<T> {
  * nothing else.
  */
 const started: (() => unknown)[] = [];
+
 async function takeDown(): Promise<void> {
   for (const end of started.reverse()) await end();
 }
@@ -77,11 +82,13 @@ const start = async () => {
   const helper = await startFakeAirplayHelper();
   started.push(() => helper.close());
   const desktop = fileURLToPath(new URL("../..", import.meta.url));
+
   const built = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8")) as {
     readonly productName: string;
     readonly version: string;
     readonly main: string;
   };
+
   const folder = join(work, "app");
   const standIn = join(folder, "vendor", "airplay", "mac-arm64", "MrStreamerAirPlay");
   mkdirSync(join(standIn, ".."), { recursive: true });
@@ -105,24 +112,30 @@ const start = async () => {
   const provider = await startFakeProvider();
   started.push(() => provider.close());
   const port = 20000 + Math.floor(Math.random() * 20000);
+
   const app = launch(
     executable,
     [`--inspect=${port + 1}`, "--use-mock-keychain", folder, ...rest],
     { port, profile: join(work, "profile") },
   );
+
   // Killed, the app takes a moment to let go of its profile, which the folder holds.
   started.push(async () => {
     app.kill("SIGKILL");
     await delay(1000);
   });
+
   // An app that can't start, as from a wrong path, fails the wait for its inspector.
   const main = await Promise.race([
     connect(port + 1, "node"),
     new Promise<never>((_, reject) => app.once("error", reject)),
   ]);
+
   started.push(() => main.close());
+
   return { helper, provider, port, main };
 };
+
 const { helper, provider, port, main } = await start().catch(async (error: unknown) => {
   await takeDown();
   throw error;
@@ -138,8 +151,10 @@ interface Box {
 /** The app's window and Electron's `screen` in its main process, for the inspector. */
 const ELECTRON = `process.getBuiltinModule("node:module").createRequire(process.cwd() + "/")("electron")`;
 const WINDOW = `${ELECTRON}.BrowserWindow.getAllWindows()[0]`;
+
 /** Where the window's page is on screen, in points. */
 const content = () => main.evaluate<Box>(`${WINDOW}.getContentBounds()`);
+
 /**
  * How often the window arrived in full screen and how often it was back out of it, by its own
  * events. macOS takes over half a second for each, and the window says it is full screen from
@@ -156,21 +171,25 @@ const fullScreens = () =>
     })();
     return { ...globalThis.fullScreens };
   })()`);
+
 /** Does `act`, and waits until the window has then arrived in full screen, or is back out of it. */
 async function until(what: "arrived" | "left", act: () => Promise<unknown>): Promise<void> {
   const before = (await fullScreens())[what];
   await act();
   await waitFor(async () => (await fullScreens())[what] > before, 10_000);
 }
+
 /**
  * Where the output button is on screen now, in points. The page's own pixels count `zoom` points
  * each: what the page draws a pixel with, over what the display draws a point with.
  */
 async function button(page: Page): Promise<Box & { readonly zoom: number }> {
   const at = await content();
+
   const scale = await main.evaluate<number>(
     `${ELECTRON}.screen.getDisplayMatching(${WINDOW}.getBounds()).scaleFactor`,
   );
+
   const seen = await page.evaluate<{ box: Box; ratio: number }>(`(() => {
     const box = document.querySelector("[data-output]").getBoundingClientRect();
     return {
@@ -178,7 +197,9 @@ async function button(page: Page): Promise<Box & { readonly zoom: number }> {
       ratio: devicePixelRatio,
     };
   })()`);
+
   const zoom = seen.ratio / scale;
+
   return {
     x: at.x + seen.box.x * zoom,
     y: at.y + seen.box.y * zoom,
@@ -187,23 +208,29 @@ async function button(page: Page): Promise<Box & { readonly zoom: number }> {
     zoom,
   };
 }
+
 const near = (one: Box, other: Box) =>
   (["x", "y", "width", "height"] as const).every((side) => Math.abs(one[side] - other[side]) <= 1);
+
 const text = (box: Box) =>
   `${box.x.toFixed(0)},${box.y.toFixed(0)} ${box.width.toFixed(0)}x${box.height.toFixed(0)}`;
 
 /** How often the app asked for Apple's list, and how often it took one back. */
 const sent = (cmd: "showPicker" | "hidePicker") =>
   helper.commands.filter((command) => command.cmd === cmd).length;
+
 /** Presses O and gives the place the app then asked for the list at. */
 async function openList(page: Page): Promise<Box> {
   const before = sent("showPicker");
   await key(page, "o", 79);
   await waitFor(async () => sent("showPicker") > before, 20_000);
   const asked = helper.commands.findLast((command) => command.cmd === "showPicker");
+
   if (asked?.cmd !== "showPicker") throw new Error("The app asked for no list.");
+
   return asked.anchor;
 }
+
 /**
  * Presses F and waits until the window says it is on its way into full screen, from where the
  * app holds a list back until the window has settled there. Gives how often the window had
@@ -212,20 +239,26 @@ async function openList(page: Page): Promise<Box> {
 async function startsFilling(page: Page): Promise<number> {
   const { arrived } = await fullScreens();
   await key(page, "f", 70);
+
   while (!(await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`))) await delay(5);
+
   return arrived;
 }
+
 /** Presses F, and O once the window is on its way into full screen. */
 async function listWhileFilling(page: Page): Promise<number> {
   const arrived = await startsFilling(page);
   await key(page, "o", 79);
+
   return arrived;
 }
+
 /** What the main process answered a call from the page with. */
 interface Answer {
   readonly ok: boolean;
   readonly value?: { readonly output: { readonly kind: string } };
 }
+
 /**
  * Asks for a list as the page does, under a name the script knows. The answer comes once the
  * viewer is done at the list or it was given up, and is waited for later: a call that fails
@@ -235,14 +268,18 @@ function pickAs(page: Page, request: string): Promise<Answer> {
   const answer = page.evaluate<Answer>(
     `window.mrStreamer.invoke("output.pick", { anchor: { x: 10, y: 10, width: 10, height: 10 }, request: ${JSON.stringify(request)} })`,
   );
+
   answer.catch(() => {});
+
   return answer;
 }
+
 /** Takes the list of that name back, as the page does when the view it was asked from closes. */
 const takeBack = (page: Page, request: string) =>
   page.evaluate(
     `window.mrStreamer.invoke("output.closePicker", { request: ${JSON.stringify(request)} })`,
   );
+
 /**
  * Whether the window is still on its way into full screen for the first time since `arrived`,
  * and then waits until it has been there for a second, well past the time it takes to settle.
@@ -251,16 +288,20 @@ async function settles(arrived: number): Promise<boolean> {
   const onItsWay = (await fullScreens()).arrived === arrived;
   await waitFor(async () => (await fullScreens()).arrived > arrived, 10_000);
   await delay(1000);
+
   return onItsWay;
 }
+
 /** Whether the app took a list back since `before` of them, within a few seconds. */
 const tookBack = (before: number) =>
   waitFor(async () => sent("hidePicker") > before, 5000).then(
     () => true,
     () => false,
   );
+
 /** Whether the window has the keyboard, as the window of the app in front does. */
 const hasKeyboard = () => main.evaluate<boolean>(`${WINDOW}.isFocused()`);
+
 /**
  * Brings Finder to the front, as a viewer does who goes to another app, and says whether the
  * window lost the keyboard to it within a few seconds. The window stays where it is.
@@ -268,12 +309,15 @@ const hasKeyboard = () => main.evaluate<boolean>(`${WINDOW}.isFocused()`);
 async function goesElsewhere(): Promise<boolean> {
   execFileSync("open", ["-a", "Finder"]);
   const until = Date.now() + 5000;
+
   while (await hasKeyboard()) {
     if (Date.now() > until) return false;
     await delay(10);
   }
+
   return true;
 }
+
 /** Brings the app back to the front, and says whether its window has the keyboard again. */
 const comesBack = () =>
   main
@@ -290,6 +334,7 @@ const output = async (page: Page) =>
       value?: { output: { kind: string; media?: { state: string } | null } };
     }>(`window.mrStreamer.invoke("output.status")`)
   ).value?.output;
+
 const clock = (page: Page) =>
   page.evaluate<number>(`document.querySelector("video")?.currentTime ?? 0`);
 
@@ -302,8 +347,10 @@ async function playEpisode(page: Page): Promise<void> {
   const poster = `[...document.querySelectorAll("button[title]")].find((b) => b.title.includes("Formats"))`;
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`), 60_000);
   await page.evaluate(`${poster}.click()`);
+
   const row = `[...document.querySelectorAll('[role="dialog"] button')].find((b) =>
     b.firstElementChild?.tagName === "SPAN" && b.firstElementChild.textContent.trim() === "1")`;
+
   await waitFor(() => page.evaluate<boolean>(`!!${row}`), 20_000);
   await page.evaluate(`${row}.click()`);
 }
@@ -314,38 +361,50 @@ async function playEpisode(page: Page): Promise<void> {
  */
 async function tvPlays(): Promise<{ readonly url: string; readonly since: number }> {
   const load = await within("the app sends the TV a stream", 40_000, helper.took("load"));
+
   const get = async (url: string) => {
     const response = await fetch(url, { signal: AbortSignal.timeout(25_000) }).catch(() => null);
+
     return response?.ok ? Buffer.from(await response.arrayBuffer()) : null;
   };
+
   const segments = await segmentsOf(load.url, get);
   const at = segments.find((each) => each.start + each.length > load.position) ?? segments[0];
+
   if (at) await get(at.url);
   const last = segments.at(-1);
   helper.status("playing", load.position, last ? last.start + last.length : 0);
+
   return { url: load.url, since: helper.commands.length };
 }
+
 /**
  * What the TV lost of what it played, or null when it has it all: connected and playing, in the
  * helper it was given to, which was told nothing that ends it.
  */
 async function tvLost(page: Page, tv: Awaited<ReturnType<typeof tvPlays>>): Promise<string | null> {
   const now = await output(page);
+
   if (now?.kind !== "receiver" || now.media?.state !== "playing") {
     return `output ${now?.kind}, ${now?.media?.state ?? "no media"}`;
   }
+
   const ended = helper.commands
     .slice(tv.since)
     .filter(
       (command) => command.cmd === "stop" || command.cmd === "unload" || command.cmd === "quit",
     );
+
   if (ended.length > 0) return `the helper was told ${ended.map((each) => each.cmd).join(", ")}`;
+
   if (helper.running().length !== 1) return "the helper was started again";
   const answers = await fetch(tv.url, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
+
   return answers?.ok ? null : "its stream no longer answers";
 }
 
 let broke = false;
+
 try {
   const page = await connect(port);
   started.push(() => page.close());
@@ -415,15 +474,18 @@ try {
     await waitFor(async () => (await content()).width <= mini.width + 1, 10_000);
     await delay(1000);
   };
+
   // The episode lasts twelve seconds, and its end takes the place of the controls the output
   // button is in.
   const fromItsStart = async () => {
     await key(page, "ArrowLeft", 37);
     await waitFor(async () => {
       const at = await clock(page);
+
       return at > 0.2 && at < 3;
     }, 20_000);
   };
+
   await fromItsStart();
   await until("arrived", () => key(page, "f", 70));
   await shrinks();
@@ -448,20 +510,24 @@ try {
   await key(page, "p", 80);
   await delay(3000);
   const small = await content();
+
   const overtaken =
     sent("showPicker") === lists &&
     small.width <= mini.width + 1 &&
     (await page.evaluate<boolean>(`!!document.querySelector("[data-mini]")`)) &&
     !(await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`));
+
   const filled = await until("arrived", () => key(page, "p", 80)).then(
     () => true,
     () => false,
   );
+
   check(
     overtaken && filled,
     "P while O waits for the window leaves the mini player and no list, and P again fills the screen",
     `${sent("showPicker") - lists} lists asked for, the mini player at ${text(small)}`,
   );
+
   if (filled) await until("left", () => key(page, "f", 70));
   await delay(1000);
 
@@ -579,10 +645,12 @@ try {
   const had = await hasKeyboard();
   await key(page, "o", 79);
   const away = (await goesElsewhere()) && (await fullScreens()).arrived === arrived;
+
   const settled = await settles(arrived).then(
     () => true,
     () => false,
   );
+
   let lost = await tvLost(page, tv);
   check(
     had && away && settled && sent("showPicker") === lists && lost === null,
@@ -590,9 +658,11 @@ try {
     `${sent("showPicker") - lists} lists asked for, the window ${had ? "had" : "had not"} the keyboard when O came, Finder in front ${away ? "before" : "after"} the window arrived${settled ? "" : ", which it never did"}${lost ? `, ${lost}` : ""}`,
   );
   const back = await comesBack();
+
   if (await main.evaluate<boolean>(`${WINDOW}.isFullScreen()`)) {
     await until("left", () => key(page, "f", 70));
   }
+
   await delay(1000);
 
   // Back at the window, the next O is its own. Apple's list takes the keyboard from the window
@@ -661,4 +731,5 @@ try {
 } finally {
   await takeDown();
 }
+
 process.exit(broke || results.includes(false) ? 1 : 0);

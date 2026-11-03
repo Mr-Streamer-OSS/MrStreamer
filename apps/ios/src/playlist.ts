@@ -32,14 +32,18 @@ export interface PlaylistAccount {
 /** Reading the first line, to check the link answers with a playlist or for its guide. */
 const CHECK_TIMEOUT_MS = 15_000;
 const PLAYLIST_TIMEOUT_MS = 90_000;
+
 /** The whole guide download, as the desktop app allows it. */
 const GUIDE_TIMEOUT_MS = 15 * 60_000;
+
 /** Core's mapping limits, for every read on the phone. */
 const PLAYLIST_BYTES = 64 * 1024 * 1024;
 const PLAYLIST_ENTRIES = 100_000;
 const HEADER_CHARACTERS = 65_536;
+
 /** What a playlist host answers a link it no longer serves with. */
 const REFUSED: ReadonlySet<number> = new Set([401, 403, 404, 410]);
+
 /** Each line with its ending, and what is left of the last. */
 const LINES = /[^\r\n]*(?:\r\n|\r|\n|$)/g;
 
@@ -65,6 +69,7 @@ export function playlistProvider(
   async function open(url: string, timeoutMs: number, signal?: AbortSignal, from = url) {
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
+
     try {
       response = await get(
         url,
@@ -78,8 +83,10 @@ export function playlistProvider(
       if (signal?.aborted) throw cause;
       throw unreachable(cause);
     }
+
     if (!response.ok || !response.body) {
       void response.body?.cancel().catch(() => {});
+
       // The link refused or gone, as a revoked or expired token is: no later try helps.
       if (url === account.link && REFUSED.has(response.status))
         throw new AppFailure({
@@ -89,6 +96,7 @@ export function playlistProvider(
         });
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
+
     return { body: response.body, size: bodySize(response) };
   }
 
@@ -106,43 +114,57 @@ export function playlistProvider(
     reading ??= (async () => {
       try {
         const { body, size } = await open(account.link, PLAYLIST_TIMEOUT_MS);
+
         if (size !== null && size > PLAYLIST_BYTES) {
           void body.cancel().catch(() => {});
           throw tooLarge();
         }
+
         const pieces = body.getReader();
         const decoder = new TextDecoder();
         const reader = m3uReader();
         const entries: PlaylistEntry[] = [];
+
         const take = (found: readonly PlaylistEntry[]) => {
           entries.push(...found);
+
           if (entries.length > PLAYLIST_ENTRIES) throw tooMany();
         };
+
         let bytes = 0;
+
         try {
           for (;;) {
             const { done, value } = await pieces.read();
+
             if (done) break;
             bytes += value.byteLength;
+
             if (bytes > PLAYLIST_BYTES) throw tooLarge();
             take(reader.push(decoder.decode(value, { stream: true })));
+
             if (reader.playlist === false) throw notAPlaylist(origin);
           }
         } catch (cause) {
           void pieces.cancel().catch(() => {});
           throw cause;
         }
+
         take([...reader.push(decoder.decode()), ...reader.end()]);
+
         if (!reader.playlist) throw notAPlaylist(origin);
+
         const snapshot = account.mapping
           ? importPlaylist(entries, account.mapping)
           : importPlaylist(entries.map(unmappedEntry));
+
         last = {
           snapshot,
           entries: account.mapping ? null : entries,
           inspected: account.mapping ? snapshot : null,
         };
         titleAddresses = new Set([...snapshot.files.values()].map((file) => file.url));
+
         return last;
       } catch (cause) {
         throw unreachable(cause);
@@ -150,6 +172,7 @@ export function playlistProvider(
         reading = null;
       }
     })();
+
     return reading;
   }
 
@@ -162,20 +185,25 @@ export function playlistProvider(
     const decoder = new TextDecoder();
     const reader = m3uReader();
     let characters = 0;
+
     try {
       while (reader.playlist === null) {
         const { done, value } = await pieces.read();
+
         if (done) {
           reader.push(decoder.decode());
           reader.end();
           break;
         }
+
         // Line by line, up to the first that says: a piece can hold the whole playlist.
         for (const [line] of decoder.decode(value, { stream: true }).matchAll(LINES)) {
           characters += line.length;
+
           // A first line this long heads no playlist.
           if (characters > HEADER_CHARACTERS) return { playlist: false, guideUrl: null };
           reader.push(line);
+
           if (reader.playlist !== null) break;
         }
       }
@@ -185,15 +213,19 @@ export function playlistProvider(
     } finally {
       void pieces.cancel().catch(() => {});
     }
+
     return { playlist: reader.playlist === true, guideUrl: reader.guideUrl };
   }
 
   async function streamOf(channelId: string, signal?: AbortSignal): Promise<PlaylistStream> {
     const known = last?.snapshot.live.streams.get(channelId);
+
     if (known) return known;
     // Channels shown from the copy saved at launch, before this adapter read the playlist.
     const stream = (await abortable(fresh(), signal)).snapshot.live.streams.get(channelId);
+
     if (!stream) throw new AppFailure({ kind: "channel-not-found", channelId });
+
     return stream;
   }
 
@@ -204,9 +236,12 @@ export function playlistProvider(
    */
   async function guideRequest(signal?: AbortSignal): Promise<GuideRequest> {
     const { playlist, guideUrl } = await firstLine(signal);
+
     if (!playlist) throw notAPlaylist(origin);
+
     if (!guideUrl) return { kind: "none" };
     let url: string;
+
     try {
       url = nextProviderRedirect({
         original: account.link,
@@ -222,6 +257,7 @@ export function playlistProvider(
         detail: "The playlist names an unencrypted guide address with your login in it.",
       });
     }
+
     return {
       kind: "request",
       url,
@@ -238,11 +274,13 @@ export function playlistProvider(
           detail: "This address isn't a playlist. A server address needs a username and password.",
         });
       }
+
       return { state: "active", expiresAt: null, maxConnections: null, activeConnections: null };
     },
 
     async liveCatalogue(signal) {
       const { categories, channels } = (await abortable(fresh(), signal)).snapshot.live;
+
       return { categories, channels };
     },
 
@@ -251,7 +289,9 @@ export function playlistProvider(
     async archiveStream(channelId, window, signal) {
       const stream = await streamOf(channelId, signal);
       const recording = stream.catchup && archiveAddress(stream.catchup, window, Date.now());
+
       if (!recording) throw new AppFailure({ kind: "catch-up", reason: "none" });
+
       return {
         url: recording.url,
         start: recording.start,
@@ -271,7 +311,9 @@ export function playlistProvider(
 
     async liveGuide(signal) {
       const request = await guideRequest(signal);
+
       if (request.kind === "none") return request;
+
       return {
         kind: "document",
         ...(await open(request.url, GUIDE_TIMEOUT_MS, signal, request.from)),
@@ -286,33 +328,41 @@ export function playlistProvider(
     async playlistImport(signal, refresh) {
       const read = refresh ? await abortable(fresh(), signal) : await lastRead(signal);
       signal?.throwIfAborted();
+
       if (!read.inspected) {
         read.inspected = inspectPlaylist(read.entries ?? []);
         read.entries = null;
       }
+
       return read.inspected;
     },
 
     async movieDetails(id, signal) {
       const { snapshot } = await lastRead(signal);
       const details = snapshot.details.get(id);
+
       if (!details || !snapshot.catalogue.movies.some((each) => each.id === id))
         throw new AppFailure({ kind: "title-not-found", titleId: id });
+
       return details;
     },
 
     async seriesDetails(id, signal) {
       const { snapshot } = await lastRead(signal);
       const details = snapshot.details.get(id);
+
       if (!details || !snapshot.catalogue.series.some((each) => each.id === id))
         throw new AppFailure({ kind: "title-not-found", titleId: id });
+
       return details;
     },
 
     async titleFile(kind, id, _container, signal) {
       const file = (await lastRead(signal)).snapshot.files.get(id);
+
       if (!file || file.kind !== kind)
         throw new AppFailure({ kind: "title-not-found", titleId: id });
+
       return file;
     },
   };
@@ -332,6 +382,7 @@ const unmappedEntry = (entry: PlaylistEntry): PlaylistEntry => ({
     ...Object.fromEntries(
       (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
         const value = entry.attributes[name];
+
         return value === undefined ? [] : [[name, eachGroup(value)]];
       }),
     ),
@@ -365,12 +416,15 @@ const LOGIN_NAMES: ReadonlySet<string> = new Set([
 export function playlistLogin(...links: string[]): ProviderLogin {
   const secrets: string[] = [];
   const uncertain: string[] = [];
+
   for (const link of links) {
     const url = new URL(link);
     secrets.push(decoded(url.username), decoded(url.password));
+
     for (const [name, value] of url.searchParams)
       (LOGIN_NAMES.has(name.toLowerCase()) ? secrets : uncertain).push(value);
   }
+
   return { secrets: secrets.filter(Boolean), uncertain };
 }
 
@@ -385,6 +439,7 @@ const SETTING_NAMES: ReadonlySet<string> = new Set(["type", "output"]);
 export function playlistUncertain(link: string): readonly string[] {
   return [...new URL(link).searchParams].flatMap(([name, value]) => {
     const known = name.toLowerCase();
+
     return value !== "" && !LOGIN_NAMES.has(known) && !SETTING_NAMES.has(known) ? [value] : [];
   });
 }
@@ -404,6 +459,7 @@ const USER_NAMES: ReadonlySet<string> = new Set(["username", "user", "login"]);
  */
 export function playlistSecrets(link: string): readonly string[] {
   const url = new URL(link);
+
   const username =
     [
       decoded(url.username),
@@ -411,8 +467,10 @@ export function playlistSecrets(link: string): readonly string[] {
         USER_NAMES.has(name.toLowerCase()) ? [value] : [],
       ),
     ].find(Boolean) ?? "";
+
   const { secrets } = playlistLogin(link);
   const at = username.length < TOKEN_LENGTH ? secrets.indexOf(username) : -1;
+
   return [
     username,
     ...(at === -1 ? secrets : secrets.toSpliced(at, 1)),
@@ -451,6 +509,7 @@ const tooMany = () =>
 function abortable<A>(promise: Promise<A>, signal: AbortSignal | undefined): Promise<A> {
   if (!signal) return promise;
   signal.throwIfAborted();
+
   return new Promise((resolve, reject) => {
     const stop = () => reject(signal.reason);
     signal.addEventListener("abort", stop, { once: true });

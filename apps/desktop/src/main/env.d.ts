@@ -10,5 +10,6 @@ declare const __BUILD_COMMIT__: string;
 /** Explicit release configuration. Null until the production project/region is authorized. */
 declare const __ANALYTICS_CAPTURE__:
   import("./analytics/transport.ts").ProductionCaptureConfig | null;
+
 /** False for development, tests, verification and all currently unconfigured builds. */
 declare const __ANALYTICS_RELEASE_BUILD__: boolean;

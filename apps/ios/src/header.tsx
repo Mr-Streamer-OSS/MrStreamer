@@ -76,10 +76,13 @@ function nearestTabs(
 ): { readonly tabs: Navigated | undefined; readonly above: number } | null {
   if (!state) return null;
   const focus = state.index ?? state.routes.length - 1;
+
   for (let at = focus; at >= 0; at--) {
     const route = state.routes[at];
+
     if (route?.name === "(tabs)") return { tabs: route.state, above: focus - at };
   }
+
   return nearestTabs(state.routes[focus]?.state);
 }
 
@@ -90,8 +93,10 @@ function nearestTabs(
  */
 export function tabsAt(state: Navigated | undefined): TabsAt | null {
   const found = nearestTabs(state);
+
   if (!found) return null;
   const name = found.tabs?.routes[found.tabs.index ?? 0]?.name;
+
   return { tab: isTab(name) ? name : "(home)", above: found.above };
 }
 
@@ -126,7 +131,9 @@ export function selectTab(
 ) {
   const found = nearestTabs(state);
   const target = found?.tabs?.key;
+
   if (!found || !target) return;
+
   if (found.above > 0) router.dismiss(found.above);
   navigation.dispatch({ type: "JUMP_TO", payload: { name: tab }, target });
 }
@@ -206,6 +213,7 @@ export function tabScreenOptions(tab: Tab, { left, right } = { left: 0, right: 0
 export function useTabScreenOptions(tab: Tab) {
   const locale = useLocale();
   const sides = useStore(tabSides);
+
   return useMemo(() => tabScreenOptions(tab, sides), [tab, locale, sides]);
 }
 
@@ -225,12 +233,15 @@ export function useCloseOnTabChange() {
   useEffect(() => {
     const left = shown.current;
     shown.current = selected;
+
     if (!tabs || !left || left === selected) return;
     const stack = tabs.routes.find((route) => route.key === left)?.state;
+
     if (!stack?.key) return;
     const focus = stack.index ?? stack.routes.length - 1;
     const top = stack.routes[focus]?.key;
     const first = stack.routes.findIndex((route) => SHARED.includes(route.name));
+
     if (!top || first < 1 || first > focus) return;
     // From the stack's top screen down to the first shared one. The tabs' navigation names its
     // own route as the action's source, which the stack can't find among its screens and then

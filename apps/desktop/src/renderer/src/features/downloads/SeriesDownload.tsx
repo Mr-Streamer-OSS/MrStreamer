@@ -25,6 +25,7 @@ import { DownloadPill } from "./DownloadControls.tsx";
 /** In the queue, paused or not: already queued for the series' counts, and what Cancel the rest ends. */
 const queued = (download: Download) =>
   ["queued", "waiting", "paused", "transferring"].includes(download.status.kind);
+
 type Result = {
   readonly revision: number;
   readonly added: number;
@@ -52,44 +53,54 @@ export function SeriesDownload({
   disabled?: boolean;
 }) {
   const client = useQueryClient();
+
   const titles = useMemo(() => {
     const stateOf = episodeStates(progress, marks);
+
     return seriesEpisodeOrder(details).map((episode) => {
       const state = stateOf(episode);
+
       return episodeRef(
         episodeFileVersion(episode, state.kind === "partial" ? state.progress.title.id : undefined),
       );
     });
   }, [details, progress, marks]);
+
   const select = useCallback(
     (list: DownloadList) => titles.map((title) => downloadOf(list, title)),
     [titles],
   );
+
   const list = useQuery({ ...downloadsQuery(), select });
   const files = list.data ?? [];
   const complete = files.filter((file) => file?.status.kind === "complete").length;
   const active = files.filter((file) => file && queued(file)).length;
   const failed = files.filter((file) => file?.status.kind === "failed").length;
+
   const eligible = titles.filter(
     (_, index) =>
       !files[index] ||
       files[index]?.status.kind === "failed" ||
       files[index]?.status.kind === "missing",
   );
+
   const [busy, setBusy] = useState(false);
   const [queueResult, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selection = useMemo(() => JSON.stringify(titles), [titles]);
   const life = useRef({ mounted: true, busy: false, selection, disabled, revision: 0 });
+
   if (life.current.selection !== selection || life.current.disabled !== disabled) {
     life.current.revision++;
     life.current.selection = selection;
     life.current.disabled = disabled;
   }
+
   // Feedback and Retry describe only the files selected when that operation started.
   const result = queueResult?.revision === life.current.revision ? queueResult : null;
   useEffect(() => {
     life.current.mounted = true;
+
     return () => {
       life.current.mounted = false;
     };
@@ -106,27 +117,33 @@ export function SeriesDownload({
     let skippedQueued = 0;
     let attempted = 0;
     const failures: Result["failures"][number][] = [];
+
     // Read at confirmation and again between calls. Download events can change the queue while
     // a previous file is being resolved. A submitted call may finish after this view unmounts.
     for (const title of selected) {
       if (!life.current.mounted || life.current.disabled || life.current.revision !== selectedScope)
         break;
       const current = downloadOf(client.getQueryData(downloadsQuery().queryKey), title);
+
       if (current?.status.kind === "complete") {
         skippedComplete++;
         continue;
       }
+
       if (current && queued(current)) {
         skippedQueued++;
         continue;
       }
+
       attempted++;
+
       try {
         if (current?.status.kind === "failed") await call("downloads.retry", { id: current.id });
         else {
           // A missing copy has to be deleted before the existing Add can replace its record.
           if (current?.status.kind === "missing")
             await call("downloads.remove", { id: current.id });
+
           if (
             !life.current.mounted ||
             life.current.disabled ||
@@ -135,10 +152,12 @@ export function SeriesDownload({
             break;
           await call("downloads.add", { title });
         }
+
         added++;
       } catch (cause) {
         failures.push({ title, reason: describeError(appError(cause)) });
       }
+
       if (life.current.mounted && life.current.revision === selectedScope)
         setResult({
           revision: selectedScope,
@@ -149,7 +168,9 @@ export function SeriesDownload({
           failures: [...failures],
         });
     }
+
     life.current.busy = false;
+
     if (life.current.mounted) {
       if (life.current.revision === selectedScope)
         setResult({
@@ -165,28 +186,35 @@ export function SeriesDownload({
       void client.invalidateQueries({ queryKey: downloadsQuery().queryKey });
     }
   }
+
   async function cancel() {
     if (life.current.busy) return;
     life.current.busy = true;
     setBusy(true);
     setError(null);
     const errors: string[] = [];
+
     for (const title of titles) {
       if (!life.current.mounted) break;
       const current = downloadOf(client.getQueryData(downloadsQuery().queryKey), title);
+
       if (!current || !queued(current)) continue;
+
       try {
         await call("downloads.remove", { id: current.id });
       } catch (cause) {
         errors.push(describeError(appError(cause)));
       }
     }
+
     life.current.busy = false;
+
     if (life.current.mounted) {
       setBusy(false);
       setError(errors.join(" ") || null);
     }
   }
+
   const label =
     active > 0 || failed > 0
       ? failed > 0
@@ -201,13 +229,16 @@ export function SeriesDownload({
         : complete > 0 && eligible.length > 0
           ? t("Download {count} new", { count: eligible.length })
           : t("Download");
+
   const done =
     titles.length > 0
       ? (complete + files.reduce((sum, file) => sum + (file ? (transferred(file) ?? 0) : 0), 0)) /
         titles.length
       : 0;
+
   const scope = details.seasons.map((season) => season.name).join(", ");
   const itemClass = cn(menuItem, "px-2 py-2 data-disabled:opacity-40");
+
   return (
     <>
       <Menu.Root>

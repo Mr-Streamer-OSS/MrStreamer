@@ -39,9 +39,11 @@ const film: Title = {
 };
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -104,6 +106,7 @@ async function opened(
   const requested = ipc.argsOf("ondemand.details").at(-1);
   // Asked of the subscription that lists the film, and of no other.
   expect(requested?.version.subscriptionId ?? SUBSCRIPTION).toBe(SUBSCRIPTION);
+
   return requested?.version.id;
 }
 
@@ -137,6 +140,7 @@ describe("a film's details", () => {
         addedAt: 1,
       },
     ];
+
     expect(
       await opened("newer", defaultSubscriptionPreferences, {
         title: { ...film, id: "newer", tags: ["4K"], versions },
@@ -151,9 +155,11 @@ describe("a film's details", () => {
       document.querySelector<HTMLElement>('[role="menuitem"][aria-expanded]')?.click(),
     );
     await settled(20);
+
     const newer = [...document.querySelectorAll('[role="menuitemradio"]')].find((row) =>
       row.textContent?.includes("second release"),
     );
+
     expect(newer?.textContent).toContain("Version 2");
   });
 
@@ -167,6 +173,7 @@ describe("a film's details", () => {
 
   it("play the 4K version from the 4K tab when it is the one shown first, though HD has progress", async () => {
     const fourKFirst: Title = { ...film, id: "4k", versions: film.versions.toReversed() };
+
     const halfway: TitleProgress = {
       title: { kind: "movie", subscriptionId: SUBSCRIPTION, id: "hd" },
       position: 3000,

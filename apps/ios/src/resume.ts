@@ -24,8 +24,10 @@ import { seriesViewing, useViewing } from "./viewing.ts";
  */
 export function detailsHref(kind: TitleKind, version: OwnedId, asked = false) {
   const key = encodeURIComponent(ownedKey(version));
+
   const path =
     kind === "movie" ? (`/films/title/${key}` as const) : (`/series/title/${key}` as const);
+
   return asked ? (`${path}?asked=1` as const) : path;
 }
 
@@ -33,6 +35,7 @@ export function detailsHref(kind: TitleKind, version: OwnedId, asked = false) {
 export function versionOf(key: string): OwnedId | null {
   // A subscription's id holds no colon; a provider's id may.
   const at = key.indexOf(":");
+
   return at > 0 ? { subscriptionId: key.slice(0, at), id: key.slice(at + 1) } : null;
 }
 
@@ -46,14 +49,17 @@ export function useContinueWatching(kind?: TitleKind): readonly ContinueEntry[] 
   const viewing = useViewing();
   const lists = useTitleLists();
   const version = useMetadataVersion();
+
   return useMemo(() => {
     // Read again when TMDB's metadata renames titles.
     if (!viewing || lists.kind !== "ready" || version < 0) return [];
+
     const entries = continueEntries(
       viewing,
       (of, owned) => titleOf(lists.index, of, owned),
       CONTINUE_LIMIT,
     );
+
     return kind ? entries.filter((entry) => entry.title.kind === kind) : entries;
   }, [viewing, lists, version, kind]);
 }
@@ -69,17 +75,22 @@ export function resume({ title, version, progress }: ContinueEntry) {
   const opened = { ...title, ...version };
   // The version that goes on is asked for: it shows over the one picked before.
   const versions = () => openDetails(opened, true);
+
   if (progress) {
     resumeMovie(opened, version, progress, versions);
+
     return;
   }
+
   const asked = request();
   // The details load meanwhile; the record is read once its saves ended.
   void Promise.all([detailsOf(opened), progressSettled().then(() => seriesViewing(version))]).then(
     ([found, standing]) => {
       if (!asked.stands()) return;
+
       const goesOn =
         found.kind === "series" ? continuation(found, standing.progress, standing.marks) : null;
+
       if (found.kind !== "series" || !goesOn || goesOn.replay) return versions();
       playEpisode(found, goesOn.episode, resumePoint(goesOn.resume), versions);
     },

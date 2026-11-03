@@ -21,6 +21,7 @@ import { defined } from "../src/defined.ts";
 // `favourite` port, as iOS gives one, favourites go by its groups of stream ids, listed or not.
 
 const SUB = "xtream-a";
+
 const seasons: SeriesSeasons = [
   {
     number: 1,
@@ -57,12 +58,14 @@ function app(
       ),
     ),
   );
+
   const run = <A>(use: (record: ViewingRecord["Service"]) => Effect.Effect<A, Failed>) =>
     Effect.runPromise(
       Effect.gen(function* () {
         return yield* use(yield* ViewingRecord);
       }).pipe(Effect.provide(layer)),
     );
+
   return { run };
 }
 
@@ -74,6 +77,7 @@ const episode = (number: number) => ({
   season: 1,
   episode: number,
 });
+
 const series = { subscriptionId: SUB, id: "s1" };
 
 describe("the viewing record over the in-memory store", () => {
@@ -103,10 +107,12 @@ describe("the viewing record over the in-memory store", () => {
   it("changes nothing for a command sent again, or one whose save fails", async () => {
     let saved: ViewingSnapshot | null = null;
     let failing = false;
+
     const running = app(null, (next) => {
       if (failing) throw new Error("disk full");
       saved = next;
     });
+
     const movie = { kind: "movie" as const, subscriptionId: SUB, id: "m1" };
     await running.run((record) => record.recordProgress("p1", movie, 600, 5400, 1));
     await running.run((record) => record.recordProgress("p1", movie, 900, 5400, 1));
@@ -132,11 +138,13 @@ describe("the viewing record over the in-memory store", () => {
     const kept: { snapshot: ViewingSnapshot | null } = { snapshot: null };
     // Streams 7, 3 and 5 are one favourite, shown by 3; 9 is one of its own.
     const group: FavouriteGroup = { id: "3", streamIds: ["3", "5", "7"] };
+
     const running = app(
       null,
       (next) => (kept.snapshot = next),
       (id) => (group.streamIds.includes(id) ? group : undefined),
     );
+
     const own = (id: string) => ({ subscriptionId: SUB, id });
     await running.run((record) => record.setFavourite("f1", own("7"), true));
     const starred = await running.run((record) => record.setFavourite("f2", own("9"), true));
@@ -146,6 +154,7 @@ describe("the viewing record over the in-memory store", () => {
     const moved = await running.run((record) =>
       record.reorderFavourites("o1", { original: starred.favourites, order: [own("9"), own("3")] }),
     );
+
     expect(moved.favourites).toEqual([own("9"), own("3")]);
     expect(kept.snapshot?.accounts[SUB]?.state.favourites).toEqual(["9", "3", "5", "7"]);
 

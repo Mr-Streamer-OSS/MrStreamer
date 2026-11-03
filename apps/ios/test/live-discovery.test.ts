@@ -23,8 +23,11 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-secure-store", () => keychain(() => scenario.keychain));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () =>
     nativePlayer((source) => {
@@ -33,20 +36,26 @@ vi.mock("expo-video", () => ({
 }));
 
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   router: {
     push: (href: string) => void scenario.routes.push(href),
@@ -54,17 +63,21 @@ vi.mock("expo-router", () => ({
   },
   useIsFocused: () => true,
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (_tab: string, screen: string) => `/live/${screen}`,
 }));
 
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const url = new URL(input);
+
   // The provider's API and its streams; channel logos Live's rows show are pictures, not asked here.
   if (!url.pathname.startsWith("/logos/")) {
     scenario.requests.push(`${url.pathname}?${url.searchParams.get("action") ?? ""}`);
   }
+
   return passThrough(input, init);
 });
 
@@ -72,10 +85,12 @@ interface FakeChannel {
   readonly streamId: number;
   readonly categoryId: string;
 }
+
 interface FakeCategory {
   readonly id: string;
   readonly name: string;
 }
+
 interface FakeProvider {
   readonly url: string;
   serveChannels(select: (all: readonly FakeChannel[]) => readonly FakeChannel[]): void;
@@ -84,8 +99,10 @@ interface FakeProvider {
   hold(what: "channels"): { readonly arrived: Promise<void>; release(): void };
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider, QUALITY_STREAM_IDS } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -96,11 +113,13 @@ const { startFakeProvider, QUALITY_STREAM_IDS } = (await import(FAKE_PROVIDER)) 
   }): Promise<FakeProvider>;
   QUALITY_STREAM_IDS: number;
 };
+
 /** The streams of the one channel in three qualities: its category, Belgium's Kwaliteit, has no other. */
 const QUALITIES = [0, 1, 2].map((at) => QUALITY_STREAM_IDS + at);
 
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ username: "one", password: "one+Pw@1", channels: 400, titles: 4 }),
@@ -113,6 +132,7 @@ beforeAll(async () => {
     }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
@@ -130,13 +150,16 @@ const { DiscoverScreen } = await import("../src/live-discover.tsx");
 
 const libraryOf = () => {
   const now = account.currentCatalogue();
+
   return now.kind === "ready" ? now.library : null;
 };
 
 let a = "";
 let b = "";
+
 /** What discovery said while the first provider's channels were still to come. */
 let firstLoad = "";
+
 beforeAll(async () => {
   await account.restore();
   const held = one.hold("channels");
@@ -165,6 +188,7 @@ beforeAll(async () => {
 let stack: React.ReactElement[] = [];
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function draw() {
   React.act(() =>
     root!.render(
@@ -182,38 +206,48 @@ function draw() {
     ),
   );
 }
+
 const screenFor = (href: string): React.ReactElement => {
   if (href === "/live/discover") return React.createElement(DiscoverScreen);
   const category = /^\/live\/category\?region=([^&]*)&name=(.*)$/.exec(href);
+
   if (category) {
     return React.createElement(CategoryScreen, {
       region: decodeURIComponent(category[1] ?? ""),
       name: decodeURIComponent(category[2] ?? ""),
     });
   }
+
   throw new Error(`No screen for ${href}`);
 };
+
 /** Acts out the navigation the screens asked for since the last call. */
 function navigate() {
   for (const route of scenario.routes.splice(0)) {
     if (route === "back") stack = stack.slice(0, -1);
     else stack = [...stack, screenFor(route)];
   }
+
   draw();
 }
+
 const top = () => container.querySelector(`[data-screen="${stack.length - 1}"]`)!;
 const find = (testID: string) => top().querySelector(`[data-testid="${testID}"]`);
+
 function press(testID: string) {
   const button = find(testID) as { click(): void } | null;
+
   if (!button) throw new Error(`No ${testID} on screen`);
   React.act(() => button.click());
   navigate();
 }
+
 function type(text: string) {
   const field = find("discover-field") as {
     value: string;
     dispatchEvent(event: unknown): void;
   } | null;
+
   if (!field) throw new Error("No field on screen");
   React.act(() => {
     // React reads the new value through the field's own setter.
@@ -222,7 +256,9 @@ function type(text: string) {
     field.dispatchEvent(new window.Event("input", { bubbles: true }));
   });
 }
+
 const value = () => (find("discover-field") as { value: string } | null)?.value;
+
 /** Each result on the discovery screen: its name, kind and line, as VoiceOver reads it. */
 const results = () =>
   [
@@ -230,6 +266,7 @@ const results = () =>
       '[data-testid^="discover-country-"], [data-testid^="discover-category-"]',
     ),
   ].map((row) => row.getAttribute("aria-label") ?? "");
+
 /** The channel rows on the screen showing, by their keys. */
 const rows = () =>
   [...top().querySelectorAll('[data-testid^="channel-"]')].map(
@@ -247,6 +284,7 @@ beforeEach(() => {
   scenario.requests.length = 0;
   scenario.played.length = 0;
 });
+
 afterEach(() => {
   React.act(() => root!.unmount());
   root = null;
@@ -259,6 +297,7 @@ function back() {
   scenario.routes.push("back");
   navigate();
 }
+
 const shelvesCalled = (name: string) =>
   libraryOf()!.regions.flatMap((region) =>
     region.shelves.filter((shelf) => shelf.title === name).map((shelf) => ({ region, shelf })),
@@ -377,6 +416,7 @@ describe("as the providers' lists change", () => {
     for (const panel of [one, two]) {
       panel.serveChannels((all) => all.filter((each) => !QUALITIES.includes(each.streamId)));
     }
+
     const before = libraryOf();
     account.reloadChannels(a);
     account.reloadChannels(b);
@@ -423,6 +463,7 @@ describe("an Other channels region holding more than its category", () => {
     // Home's panel names a category Other channels; both panels list channels in no category.
     const unplaced = (all: readonly FakeChannel[]) =>
       all.map((each) => (each.categoryId === "4" ? { ...each, categoryId: "999" } : each));
+
     one.serveCategories((all) =>
       all.map((each) => (each.id === "2" ? { ...each, name: "Other channels" } : each)),
     );
@@ -482,6 +523,7 @@ describe("a provider whose channels haven't come", () => {
     await until(() => libraryOf()?.labels.size === 2, "two providers again");
   });
   const third = () => account.members().find((member) => member.entry.id === c);
+
   const add = () =>
     account
       .add({ server: three.url, username: "three", password: "three+Pw@3", name: "Annex" })
@@ -552,10 +594,12 @@ describe("a country found with one category", () => {
     one.serveCategories((all) => all);
     await relistBoth();
   });
+
   const tiles = () =>
     [...top().querySelectorAll('[data-testid^="live-category-"]')].map((tile) =>
       tile.getAttribute("data-testid"),
     );
+
   /** Finds Iceland and shows it in Live, as its result does. */
   function iceland() {
     press("live-discover");
@@ -566,6 +610,7 @@ describe("a country found with one category", () => {
     press("discover-country-Iceland");
     expect(stack).toHaveLength(1);
     expect(find("live-country")?.textContent).toBe("Iceland");
+
     return region!;
   }
 

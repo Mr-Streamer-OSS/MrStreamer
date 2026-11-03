@@ -95,6 +95,7 @@ export async function startFakeAirplayHelper(
     if (generation !== null) {
       emit({ type: "status", generation, state: "stopped", position: 0, duration: null });
     }
+
     generation = null;
   };
 
@@ -102,13 +103,18 @@ export async function startFakeAirplayHelper(
     commands.push(command);
     arrived.resolve();
     arrived = Promise.withResolvers();
+
     if (silent) return;
     from.write(`=${JSON.stringify({ type: "answer", id: command.id, ok: true })}\n`);
+
     if (command.cmd === "quit") from.write("!exit 0\n");
+
     if (from !== current) return;
+
     switch (command.cmd) {
       case "detect":
         detecting = command.on;
+
         if (detecting) emit({ type: "routes", available: seen });
         break;
       case "showPicker":
@@ -143,6 +149,7 @@ export async function startFakeAirplayHelper(
     socket.on("error", () => {});
     socket.on("close", () => {
       sockets.delete(socket);
+
       if (current === socket) current = null;
     });
     // A killed process resets the socket, and readline passes that on as an error of its own.
@@ -154,15 +161,18 @@ export async function startFakeAirplayHelper(
       detecting = false;
       list = null;
       generation = null;
+
       if (silent) {
         socket.write("!stay\n");
       } else {
         emit({ type: "hello", protocol: options.protocol ?? 1 });
         emit({ type: "volume", level: 1, muted: false });
       }
+
       lines.on("line", (line) => take(socket, JSON.parse(line) as SentCommand));
     });
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 
   return {
@@ -184,14 +194,17 @@ export async function startFakeAirplayHelper(
     async took(cmd) {
       const index = handed.get(cmd) ?? 0;
       handed.set(cmd, index + 1);
+
       for (;;) {
         const found = commands.filter((command) => command.cmd === cmd)[index];
+
         if (found) return found as Extract<SentCommand, { cmd: typeof cmd }>;
         await arrived.promise;
       }
     },
     routes(available) {
       seen = available;
+
       if (detecting) emit({ type: "routes", available });
     },
     choose() {

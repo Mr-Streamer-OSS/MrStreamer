@@ -85,20 +85,24 @@ const snapshot = (parts: {
 
 const film: TrackContext = { media: "file", titleLanguage: "nl", originalLanguage: "fr" };
 const channel: TrackContext = { media: "live", titleLanguage: "nl", originalLanguage: null };
+
 const policy = (
   audio: MediaPolicy["audio"],
   subtitles: MediaPolicy["subtitles"] = { kind: "forced-only" },
 ): MediaPolicy => ({ audio, subtitles });
+
 const followTitle = policy({ kind: "follow-title" });
 
 const selectsAudio = (track: ObservedAudioTrack) => ({
   kind: "select",
   selection: { kind: "audio", track },
 });
+
 const selectsSubtitles = (track: ObservedSubtitleTrack | null) => ({
   kind: "select",
   selection: { kind: "subtitles", track },
 });
+
 const KEEP = { kind: "keep" };
 const WAIT = { kind: "wait" };
 
@@ -364,9 +368,11 @@ describe("holds and readback", () => {
     const off: ObservedTrackSelection = { kind: "subtitles", track: null };
     expect(confirms(off, 3, snapshot({ revision: 3 }))).toBe(true);
     expect(confirms(off, 3, snapshot({ revision: 4, offAllowed: false }))).toBe(false);
+
     for (const subtitleState of ["absent", "loading", "unavailable"] as const) {
       expect(confirms(off, 3, snapshot({ revision: 3, subtitleState }))).toBe(false);
     }
+
     expect(
       confirms(
         off,
@@ -388,12 +394,14 @@ describe("remembering a manual pick", () => {
     expect(
       remembered({ kind: "audio", track: sound("0", "eng") }, "en", accepted, context),
     ).toEqual({ field: "audio", value: { kind: "language", language: "en" } });
+
     const dutch = remembered(
       { kind: "subtitles", track: text("2", "dut") },
       "en",
       accepted,
       context,
     );
+
     expect(dutch).toEqual({ field: "subtitles", value: { kind: "language", language: "nl" } });
     accepted = { ...accepted, subtitles: { kind: "language", language: "nl" } };
     expect(remembered({ kind: "subtitles", track: null }, "en", accepted, context)).toEqual({
@@ -434,6 +442,7 @@ describe("remembering a manual pick", () => {
       audio: { kind: "follow-title" },
       subtitles: { kind: "language", language: "de" },
     };
+
     const forcedEnglish = text("0", "en", { forced: true });
     expect(remembered({ kind: "subtitles", track: forcedEnglish }, "en", german, context)).toEqual({
       field: "subtitles",
@@ -460,6 +469,7 @@ describe("observed file tracks", () => {
       sound("2", "und"),
       sound("3", null),
     ];
+
     expect(observedFileTracks(snapshot({ audio, subtitleState: "absent" }))).toEqual({
       audio: ["en", null, null],
       subtitles: [],
@@ -475,11 +485,14 @@ describe("observed file tracks", () => {
     const audio = [sound("0", "en")];
     expect(observedFileTracks(snapshot({ audioState: "loading" }))).toBeNull();
     expect(observedFileTracks(snapshot({ audioState: "absent" }))).toBeNull();
+
     for (const subtitleState of ["loading", "unavailable"] as const) {
       expect(observedFileTracks(snapshot({ audio, subtitleState }))).toBeNull();
     }
+
     const many = (count: number) =>
       Array.from({ length: count }, (_, at) => sound(String(at), "en"));
+
     expect(observedFileTracks(snapshot({ audio: many(32) }))?.audio).toHaveLength(32);
     expect(observedFileTracks(snapshot({ audio: many(33) }))).toBeNull();
   });
@@ -488,10 +501,12 @@ describe("observed file tracks", () => {
 describe("Live recovery", () => {
   const watched = { live: true, attended: true, held: false, sourceStands: true };
   const network: PlaybackFailure = { kind: "native", failure: { kind: "network", evidence: null } };
+
   const native = (kind: "auth" | "missing" | "unknown" | "decode"): PlaybackFailure => ({
     kind: "native",
     failure: { kind, evidence: null },
   });
+
   const starting: Recovery = {
     candidates: 3,
     candidate: 0,
@@ -508,6 +523,7 @@ describe("Live recovery", () => {
 
   it("tries again only for a watched Live stream the viewer didn't pause, under its own login", () => {
     expect(nextStep(network, starting, watched)).toEqual({ kind: "candidate", candidate: 1 });
+
     for (const context of [
       { ...watched, live: false },
       { ...watched, attended: false },
@@ -528,7 +544,9 @@ describe("Live recovery", () => {
     ]) {
       expect(nextStep(failure, starting, watched)).toEqual({ kind: "candidate", candidate: 1 });
     }
+
     expect(nextStep(network, { ...starting, candidate: 2 }, watched)).toEqual({ kind: "fail" });
+
     for (const failure of [
       native("auth"),
       { kind: "format", failure: { kind: "refused", status: 403 } },
@@ -557,6 +575,7 @@ describe("Live recovery", () => {
     expect(
       nextStep(network, { ...played, reconnects: 4, playedMs: STABLE_PLAYBACK_MS }, watched),
     ).toMatchObject({ delayMs: 1000, reconnects: 1 });
+
     for (const failure of [
       native("unknown"),
       { kind: "deadline", stage: "stall" },
@@ -564,6 +583,7 @@ describe("Live recovery", () => {
     ] satisfies PlaybackFailure[]) {
       expect(nextStep(failure, played, watched)).toMatchObject({ kind: "reconnect" });
     }
+
     for (const failure of [native("missing"), native("decode"), native("auth")]) {
       expect(nextStep(failure, played, watched)).toEqual({ kind: "fail" });
     }
@@ -576,8 +596,10 @@ describe("Live recovery", () => {
       playedMs: 5000,
       qualities: ["fhd", "hd", "sd"],
     };
+
     const stall: PlaybackFailure = { kind: "deadline", stage: "stall" };
     const noStart: PlaybackFailure = { kind: "deadline", stage: "startup" };
+
     for (const failure of [network, stall, noStart]) {
       expect(nextStep(failure, automatic, watched)).toEqual({
         kind: "reconnect",
@@ -586,6 +608,7 @@ describe("Live recovery", () => {
         reconnects: 1,
       });
     }
+
     // A provider error isn't a weak connection, and an unknown quality stays.
     expect(nextStep(native("unknown"), automatic, watched)).toMatchObject({ candidate: 0 });
     const unknown: Recovery = { ...automatic, qualities: [null, "hd", "sd"] };
@@ -597,6 +620,7 @@ describe("Live recovery", () => {
     });
     // A lower stream failing before it plays, off air too, steps lower again, else goes back.
     const stepped: Recovery = { ...automatic, candidate: 1, reconnects: 1, playedMs: 0 };
+
     for (const failure of [native("missing"), native("unknown"), noStart]) {
       expect(nextStep(failure, stepped, watched)).toEqual({
         kind: "reconnect",
@@ -605,6 +629,7 @@ describe("Live recovery", () => {
         reconnects: 2,
       });
     }
+
     expect(nextStep(native("missing"), { ...stepped, candidate: 2 }, watched)).toMatchObject({
       candidate: 0,
     });
@@ -613,8 +638,10 @@ describe("Live recovery", () => {
   it("opens at most 3 + 4 streams until one plays 30 seconds, and 4 after", () => {
     let recovery = starting;
     let opens = 1;
+
     for (;;) {
       const step = nextStep(network, recovery, watched);
+
       if (step.kind === "fail") break;
       opens++;
       // The third candidate plays for a moment; every reconnect breaks off again at once.
@@ -623,15 +650,19 @@ describe("Live recovery", () => {
           ? { ...recovery, candidate: step.candidate, playedOn: step.candidate === 2 ? 2 : null }
           : { ...recovery, candidate: step.candidate, reconnects: step.reconnects, playedMs: 1000 };
     }
+
     expect(opens).toBe(7);
     recovery = { ...recovery, playedMs: STABLE_PLAYBACK_MS };
     let after = 0;
+
     for (;;) {
       const step = nextStep(network, recovery, watched);
+
       if (step.kind !== "reconnect") break;
       after++;
       recovery = { ...recovery, reconnects: step.reconnects, playedMs: 0 };
     }
+
     expect(after).toBe(4);
   });
 });

@@ -19,6 +19,7 @@ import { connect, key, login, silent, waitFor, type Page } from "./app.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 const variant = process.argv[2] ?? "h264-10bit";
+
 if (
   ![
     "h264-10bit",
@@ -29,6 +30,7 @@ if (
   ].includes(variant)
 )
   throw new Error("Unknown fixture");
+
 const executable = await electronExecutable();
 const desktop = resolve("apps/desktop");
 const evidence = await evidenceDirectory(resolve(".local/verification"), `title-${variant}-`);
@@ -36,6 +38,7 @@ const profile = await mkdtemp(join(tmpdir(), "mrstreamer-title-compatibility-"))
 const provider = await startFakeProvider({ channels: 60, titles: 30, live: true });
 const tmdb = await startFakeTmdb();
 const movie = provider.titles.movies.find((each) => each.name.includes("Two sound tracks"))!;
+
 const clip = Buffer.from(
   fixture(
     variant === "paused-buffer"
@@ -43,15 +46,20 @@ const clip = Buffer.from(
       : `title-${variant.startsWith("h264-") ? "h264-10bit" : variant}.mkv`,
   ),
 );
+
 if (variant === "h264-rejected-copy") {
   // Invalid AVC configuration profile, valid High 10 SPS/pictures. Copy preserves that invalid
   // MSE codec declaration, while ffmpeg can decode the SPS and produce a valid H.264 stream.
   const configuration = clip.indexOf(Buffer.from([1, 110, 0, 10, 255, 225]));
+
   if (configuration < 0) throw new Error("Fixture AVC configuration changed");
   clip[configuration + 1] = 255;
 }
+
 provider.replaceMovieFile(movie.id, clip);
+
 const port = await freePort();
+
 const args = [
   `--remote-debugging-port=${port}`,
   "--remote-debugging-address=127.0.0.1",
@@ -62,11 +70,13 @@ const args = [
   ...(process.platform === "linux" ? ["--no-sandbox"] : []),
   desktop,
 ];
+
 const env = Object.fromEntries(
   Object.entries(process.env).filter(
     ([name]) => !name.startsWith("MR_STREAMER_") && name !== "ELECTRON_RUN_AS_NODE",
   ),
 );
+
 const app = spawn(executable, args, {
   detached: process.platform !== "win32",
   stdio: ["ignore", "pipe", "pipe"],
@@ -80,22 +90,28 @@ const app = spawn(executable, args, {
     ...defined({ MR_STREAMER_FFMPEG: process.env["MR_STREAMER_FFMPEG"] || undefined }),
   },
 });
+
 const logs: string[] = [];
+
 for (const output of [app.stdout, app.stderr])
   output?.on("data", (data: Buffer) => logs.push(data.toString()));
+
 const observations: Record<string, unknown> = {};
 const deliveries: unknown[] = [];
 const actions: string[] = [];
 let page: Page | undefined;
 let failure: string | undefined;
 let cleaned = false;
+
 try {
   page = await connect(port, "page", { app });
   const live = page;
+
   const doctor = async () => {
     if (app.exitCode !== null || app.signalCode !== null) throw new Error("Owned app exited");
     const reply = await live.send("Browser.getBrowserCommandLine");
     const command = reply.result as { arguments?: string[] } | undefined;
+
     if (
       ![desktop, `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`].every((part) =>
         command?.arguments?.includes(part),
@@ -103,6 +119,7 @@ try {
     )
       throw new Error("Wrong app identity");
     const url = await live.evaluate<string>("location.href");
+
     if (!url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href))
       throw new Error("Wrong renderer");
     observations["identity"] = {
@@ -116,6 +133,7 @@ try {
         .digest("hex"),
     };
   };
+
   await doctor();
   await live.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await live.send("Media.enable");
@@ -129,7 +147,9 @@ try {
     const response = (
       event as { response: { url: string; status: number; headers: Record<string, string> } }
     ).response;
+
     const url = new URL(response.url);
+
     if (url.pathname.startsWith("/title/") && !url.searchParams.has("only"))
       deliveries.push({ query: url.search, status: response.status, headers: response.headers });
   });
@@ -163,11 +183,14 @@ try {
     };
   `);
   await login(live, provider);
+
   const click = async (description: string, expression: string) => {
     await waitFor(() => live.evaluate<boolean>(`!!(${expression})`), 30_000);
+
     const rect = await live.evaluate<{ x: number; y: number }>(
       `(() => { const r = (${expression}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
     );
+
     await live.send("Input.dispatchMouseEvent", {
       type: "mousePressed",
       ...rect,
@@ -182,9 +205,11 @@ try {
     });
     actions.push(description);
   };
+
   const shot = async (name: string) => {
     const result = await live.send("Page.captureScreenshot", { format: "png" });
     const png = (result.result as { data?: string } | undefined)?.data;
+
     if (!png) throw new Error("Missing screenshot");
     await writeFile(join(evidence, `${name}.png`), Buffer.from(png, "base64"));
     await writeFile(
@@ -192,6 +217,7 @@ try {
       JSON.stringify(await live.send("Accessibility.getFullAXTree"), null, 2),
     );
   };
+
   const video = () =>
     live.evaluate<{
       time: number;
@@ -230,13 +256,16 @@ try {
     }
     return { readyState: v?.readyState ?? 0, seeking: v?.seeking ?? false, time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, audioEnergy: energy, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0, paused: v?.paused ?? true, same: !window.__compatibility.node || window.__compatibility.node === v }; })()`,
     );
+
   const moving = () =>
     waitFor(async () => {
       const v = await video();
+
       return (
         !v.paused && v.time > 1 && v.width > 0 && (v.audio > 0 || v.audioEnergy > 0) && v.frames > 1
       );
     }, 30_000);
+
   await click(
     "Movies",
     `[...document.querySelectorAll('header button')].find(b => b.textContent.trim() === 'Movies')`,
@@ -260,6 +289,7 @@ try {
       ),
     30_000,
   );
+
   if (variant === "paused-buffer")
     await live.send("Network.emulateNetworkConditions", {
       offline: false,
@@ -275,10 +305,12 @@ try {
   observations["onlineDecoded"] = await video();
   await live.evaluate("window.__compatibility.node = document.querySelector('video')");
   await shot("online-recovered");
+
   if (variant === "h264-later-rejection") {
     await key(live, " ", 32);
     await waitFor(async () => (await video()).paused);
     const position = (await video()).time;
+
     for (const fallback of ["sound=convert", "picture=convert"]) {
       const before = deliveries.length;
       // This invokes the real MSE parser with an impossible ISO box size. No engine method or
@@ -291,16 +323,19 @@ try {
       );
       await waitFor(async () => {
         const v = await video();
+
         return v.paused && v.time >= position - 0.1 && v.frames > 1;
       });
       observations[`later-${fallback}`] = await video();
     }
+
     observations["actualLaterRejections"] = await live.evaluate("window.__compatibility.errors");
     await shot("later-recovered-paused");
     const held = await video();
     await key(live, " ", 32);
     await waitFor(async () => {
       const resumed = await video();
+
       return (
         !resumed.paused &&
         resumed.time > held.time + 0.25 &&
@@ -312,6 +347,7 @@ try {
 
   await key(live, " ", 32);
   await waitFor(async () => (await video()).paused);
+
   if (variant === "paused-buffer") {
     const sample = async () => ({
       video: await video(),
@@ -322,8 +358,10 @@ try {
       requests: provider.fileRequests(),
       active: provider.activeStreams(),
     });
+
     const attempts: unknown[] = [];
     observations["pausedBufferAttempts"] = attempts;
+
     const { before, after, picture } = await (async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         // Observe the reader and SourceBuffer directly: a throttled chunk may take over 8 seconds.
@@ -335,6 +373,7 @@ try {
       })()`),
         );
         const before = await sample();
+
         const picture = await live.evaluate<{ losses: number; ready: boolean }>(`
         new Promise(resolve => {
           const v = document.querySelector('video');
@@ -352,16 +391,21 @@ try {
           }, 5000);
         })
       `);
+
         const after = await sample();
         attempts.push({ before, after, picture });
+
         if (picture.losses === 0) return { before, after, picture };
         await waitFor(async () => {
           const recovered = await video();
+
           return recovered.paused && recovered.readyState >= 2 && !recovered.seeking;
         });
       }
+
       throw new Error("No uninterrupted held-picture interval after three attempts");
     })();
+
     observations["pausedBuffer"] = {
       before,
       after,
@@ -372,13 +416,16 @@ try {
       heldMs: 5000,
     };
     await shot("paused-buffer");
+
     if (after.appended !== before.appended)
       throw new Error("Title kept appending while paused with its picture available");
+
     if (after.runs !== before.runs) throw new Error("Paused interval replaced the held run");
     const runs = after.runs;
     await key(live, " ", 32);
     await waitFor(async () => {
       const resumed = await video();
+
       return (
         !resumed.paused &&
         resumed.time > after.video.time + 0.25 &&
@@ -397,6 +444,7 @@ try {
     await key(live, "ArrowLeft", 37);
     await waitFor(async () => {
       const sought = await video();
+
       return (
         sought.paused &&
         sought.time < 0.1 &&
@@ -406,6 +454,7 @@ try {
       );
     });
     observations["bufferedBackwardSeek"] = await video();
+
     if (deliveries.length !== runs) throw new Error("Buffered seek or Play replaced the held run");
 
     await live.send("Network.emulateNetworkConditions", {
@@ -415,9 +464,11 @@ try {
       uploadThroughput: -1,
     });
   }
+
   await key(live, "ArrowRight", 39);
   await waitFor(async () => {
     const v = await video();
+
     return (
       v.paused &&
       (variant === "paused-buffer" ? v.time >= 10 : v.time > 10) &&
@@ -427,6 +478,7 @@ try {
     );
   });
   observations["pausedSeek"] = await video();
+
   if (variant !== "paused-buffer") {
     await click("Sound", `document.querySelector('[aria-label=Sound]')`);
     await click(
@@ -435,18 +487,22 @@ try {
     );
     await waitFor(async () => {
       const v = await video();
+
       return v.paused && v.time > 10 && v.width > 0;
     });
     observations["pausedOtherTrack"] = await video();
   }
+
   await key(live, "p", 80);
   await waitFor(() => live.evaluate<boolean>("!!document.querySelector('[data-mini]')"));
+
   if (!(await video()).same) throw new Error("Mini player replaced media node");
   await shot("mini-paused");
   await key(live, "p", 80);
   await waitFor(() => live.evaluate<boolean>("!document.querySelector('[data-mini]')"));
   await key(live, "f", 70);
   await waitFor(() => live.evaluate<boolean>("!!document.fullscreenElement"));
+
   if (!(await video()).same) throw new Error("Fullscreen replaced media node");
   await shot("fullscreen-paused");
   await key(live, "f", 70);
@@ -455,6 +511,7 @@ try {
   await key(live, " ", 32);
   await waitFor(async () => {
     const resumed = await video();
+
     return (
       !resumed.paused &&
       resumed.time > held.time + 0.25 &&
@@ -470,7 +527,9 @@ try {
     most: provider.mostFilesAtOnce(),
     active: provider.activeStreams(),
   };
+
   if (provider.mostFilesAtOnce() > 1) throw new Error("Overlapping provider readers");
+
   // Leaving playback returns to details, and leaving details can return to its collection.
   for (let back = 0; back < 3; back++) {
     if (
@@ -482,6 +541,7 @@ try {
     await key(live, "Escape", 27);
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+
   const requests = provider.fileRequests();
   await provider.close();
   await tmdb.close();
@@ -496,18 +556,23 @@ try {
   await moving();
   observations["offlineDecoded"] = await video();
   observations["offlineProviderRequests"] = provider.fileRequests() - requests;
+
   if (provider.fileRequests() !== requests) throw new Error("Offline copy requested provider");
   await shot("offline-recovered");
+
   const checks = await live.evaluate<{
     checks: { type: string; supported: boolean }[];
     errors: unknown[];
   }>("({ checks: window.__compatibility.checks, errors: window.__compatibility.errors })");
+
   observations["actualMse"] = checks;
+
   if (
     variant === "h264-rejected-copy" &&
     !checks.checks.some((check) => !check.supported && check.type.toLowerCase().includes("avc1.ff"))
   )
     throw new Error("No actual invalid copied AVC configuration rejection observed");
+
   if (
     variant === "h264-rejected-copy" &&
     !deliveries.some((entry) => JSON.stringify(entry).includes('"x-title-video":"convert"'))
@@ -517,15 +582,18 @@ try {
   await shot("complete");
 } catch (error) {
   failure = String(error);
+
   if (page)
     observations["actualMseAtFailure"] = await page
       .evaluate(
         "({ checks: window.__compatibility?.checks, errors: window.__compatibility?.errors })",
       )
       .catch(() => null);
+
   if (page) {
     const shot = await page.send("Page.captureScreenshot", { format: "png" }).catch(() => null);
     const data = (shot?.result as { data?: string } | undefined)?.data;
+
     if (data) await writeFile(join(evidence, "failure.png"), Buffer.from(data, "base64"));
   }
 } finally {
@@ -539,6 +607,7 @@ try {
   } catch (error) {
     failure = `${failure ?? ""} cleanup: ${error}`;
   }
+
   await writeFile(join(evidence, "electron.log"), logs.join(""));
   await writeFile(
     join(evidence, "proof.json"),
@@ -563,4 +632,5 @@ try {
   );
   console.log(evidence);
 }
+
 if (failure) throw new Error(failure);

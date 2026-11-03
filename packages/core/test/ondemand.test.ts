@@ -83,11 +83,13 @@ describe("Continue watching", () => {
   it("shows each series once, as the episode watched last", () => {
     const episode = (id: string, season: number, number: number) =>
       ({ kind: "episode", id, seriesId: "s", season, episode: number }) as const;
+
     const shown = continueWatching([
       row({ title: episode("e1", 1, 1), at: 1, finished: true, position: 6000 }),
       row({ title: episode("e2", 1, 2), at: 3 }),
       row({ title: { kind: "movie", id: "m" }, at: 2 }),
     ]);
+
     expect(shown.map((entry) => entry.title.id)).toEqual(["e2", "m"]);
   });
 });
@@ -110,6 +112,7 @@ describe("one title per film", () => {
     container: "mkv",
     tmdbId,
   });
+
   const catalogue = {
     movieCategories: [{ id: "films", name: "Films" }],
     movies: [
@@ -121,6 +124,7 @@ describe("one title per film", () => {
     seriesCategories: [],
     series: [],
   };
+
   const listed = (language: string) =>
     indexOf(catalogue, language).movies.titles.map((title) => [
       title.id,
@@ -131,6 +135,7 @@ describe("one title per film", () => {
     const title = byIds(indexOf(catalogue, "en"), "movie", [
       { subscriptionId: SUBSCRIPTION, id: "1" },
     ])[0];
+
     expect(
       title?.versions.map(({ id, name, container, addedAt }) => ({ id, name, container, addedAt })),
     ).toEqual([
@@ -163,7 +168,9 @@ describe("one title per film", () => {
         movie("14", "Blow", "104", 1),
       ],
     };
+
     const madeIn: Record<string, string> = { "100": "en", "101": "en", "102": "nl", "103": "de" };
+
     const shown = (language: string) =>
       collections({
         kind: "movie",
@@ -184,6 +191,7 @@ describe("one title per film", () => {
       })
         .list("genre:Drama", "title")
         .map((title) => title.id);
+
     expect(shown("en")).toEqual(["14", "13", "11"]);
     expect(shown("nl")).toEqual(["14", "13", "12", "11"]);
   });
@@ -198,7 +206,9 @@ describe("one title per film", () => {
         movie("english", "Heat (EN)", "102", 1),
       ],
     };
+
     const titles = indexOf(films, "en").movies.titles;
+
     const shown = collections({
       kind: "movie",
       titles,
@@ -216,6 +226,7 @@ describe("one title per film", () => {
       services: [],
       now: 0,
     });
+
     expect(shown.list("popular", "title").map((title) => title.id)).toEqual([
       "vo",
       "english",
@@ -232,11 +243,13 @@ describe("one title per film", () => {
         { ...movie("21", "Wicked", "300", 2), adult: true },
       ],
     };
+
     const titles = indexOf(films, "en").movies.titles;
     expect(titles.map((title) => [title.id, title.adult])).toEqual([
       ["20", false],
       ["21", true],
     ]);
+
     // Only the collection for adults holds the adult row.
     const made = collections({
       kind: "movie",
@@ -247,6 +260,7 @@ describe("one title per film", () => {
       services: [],
       now: 0,
     });
+
     expect(made.list("all").map((title) => title.id)).toEqual(["20"]);
     expect(made.list("adult").map((title) => title.id)).toEqual(["21"]);
   });
@@ -264,6 +278,7 @@ describe("one title per film", () => {
         movie("42", "A Quiet Place (NL AUDIO)", "400", 10),
       ],
     };
+
     const [title] = indexOf(films, language).movies.titles;
     expect(title?.versions.map((version) => version.id)).toEqual(order);
   });
@@ -271,6 +286,7 @@ describe("one title per film", () => {
   it("counts a film as new or in 4K only by versions the viewer would watch", () => {
     const day = 86_400_000;
     const now = Date.UTC(2026, 9, 1);
+
     const films = {
       ...catalogue,
       movies: [
@@ -280,6 +296,7 @@ describe("one title per film", () => {
         movie("33", "Alien 4K (MULTI)", "601", now - 90 * day),
       ],
     };
+
     const made = collections({
       kind: "movie",
       titles: indexOf(films, "en").movies.titles,
@@ -289,6 +306,7 @@ describe("one title per film", () => {
       services: [],
       now,
     });
+
     expect(made.list("new-week")).toEqual([]);
     // Opening it opens the 4K version.
     expect(made.list("4k").map((title) => title.id)).toEqual(["33"]);
@@ -297,10 +315,12 @@ describe("one title per film", () => {
   it("keeps warm lists stable only until the next rolling, year or metadata cutoff", () => {
     const day = 86_400_000;
     const now = Date.UTC(2026, 11, 31, 12);
+
     const titles = indexOf(
       { ...catalogue, movies: [movie("1", "Film (MULTI)", "1", now - 6 * day)] },
       "en",
     ).movies.titles;
+
     const make = (at: number, expiry = Infinity) =>
       collections({
         kind: "movie",
@@ -312,6 +332,7 @@ describe("one title per film", () => {
         now: at,
         expiresAt: () => expiry,
       });
+
     const made = make(now);
     expect(made.validAt(now)).toBe(true);
     expect(made.validAt(now - 1)).toBe(false);
@@ -352,12 +373,14 @@ describe("one title per film across subscriptions", () => {
     container: "mkv",
     tmdbId,
   });
+
   const lists = (movies: readonly ReturnType<typeof row>[]): OnDemandCatalogue => ({
     movieCategories: [{ id: "films", name: "Films" }],
     movies,
     seriesCategories: [],
     series: movies,
   });
+
   // Two providers that number their films alike: every id is taken twice.
   const sources = [
     {
@@ -379,6 +402,7 @@ describe("one title per film across subscriptions", () => {
       ]),
     },
   ];
+
   const shown = (language = "en", kind: "movies" | "series" = "movies") =>
     indexCatalogue(sources, language)[kind].titles.map((title) => [
       title.key,
@@ -410,6 +434,7 @@ describe("one title per film across subscriptions", () => {
   it("names a title the same whichever version shows first, and whoever else lists it", () => {
     const keysOf = (from: typeof sources, language: string) =>
       indexCatalogue(from, language).movies.titles.map((title) => title.key);
+
     const alone = keysOf(sources.slice(0, 1), "en");
 
     // Another subscription's lists arriving changes no title's name, only which version shows.
@@ -419,6 +444,7 @@ describe("one title per film across subscriptions", () => {
 
   it("finds a title by a version of either subscription, and marks nothing with one alone", () => {
     const index = indexCatalogue(sources, "en");
+
     const found = (subscriptionId: string, id: string) =>
       byIds(index, "movie", [{ subscriptionId, id }]).map((title) => title.key);
 
@@ -437,6 +463,7 @@ describe("one title per film across subscriptions", () => {
 
 describe("subtitles a channel starts with", () => {
   const sound = (language: string) => ({ id: 1, language, label: language, default: true });
+
   const subtitles = (language: string, forced = false) => ({
     id: 2,
     page: 888,
@@ -484,6 +511,7 @@ describe("a file's tracks", () => {
         hearingImpaired: false,
       },
     ]);
+
     const sound = audioTracks([
       { id: 1, language: "ar", name: null, default: true, channels: 2, description: false },
     ]);
@@ -528,6 +556,7 @@ describe("an HLS stream's tracks", () => {
   it("tells subtitles from captions of the same name, and numbers those that still read the same", () => {
     const text = { page: null, format: "text" as const };
     const captions = (channel: number) => ({ page: channel, format: "captions" as const });
+
     const tracks = renditionSubtitles([
       { ...rendition(0, { name: "English", language: "en" }), ...text },
       { ...rendition(1, { name: "nld", forced: true }), ...text },
@@ -642,6 +671,7 @@ describe("details", () => {
     genres: [],
     versions: [{ subscriptionId: SUBSCRIPTION, id: "1", tags: ["NL AUDIO", "1080p"] }],
   };
+
   const provider = {
     originalName: null,
     plot: null,
@@ -656,6 +686,7 @@ describe("details", () => {
     episodes: [],
     container: null,
   };
+
   const about = {
     original: null,
     language: null,
@@ -667,6 +698,7 @@ describe("details", () => {
     cast: [],
     directors: [],
   };
+
   /** A season of one episode, which the provider says lasts `duration` seconds. */
   const season = (duration: number | null) => ({
     number: 1,
@@ -687,6 +719,7 @@ describe("details", () => {
       },
     ],
   });
+
   /** What TMDB says of that episode in one language, lasting `runtime` minutes. */
   const episodeAbout = (runtime: number | null) => ({
     number: 1,
@@ -828,6 +861,7 @@ function seriesOf(
 describe("a series' episodes", () => {
   it("keeps exact alternate file dates in the provider contract's milliseconds", () => {
     const addedAt = Date.UTC(2024, 2, 5);
+
     const series = seriesOf(
       [
         ["first", 1, 1, "Harbour S01E01 HD", addedAt],
@@ -836,6 +870,7 @@ describe("a series' episodes", () => {
       "en",
       true,
     );
+
     expect(series.seasons[0]?.episodes[0]?.versions?.map((file) => file.addedAt)).toEqual([
       addedAt,
       addedAt + 1000,
@@ -893,6 +928,7 @@ describe("a series' seasons", () => {
     ["es-ES", ["Temporada 1", "Temporada 12", "Especiales"]],
   ] as const)("are named in %s whatever the provider calls them", (locale, names) => {
     setLanguage({ locale, formats: locale });
+
     try {
       const series = seriesOf(
         [
@@ -908,6 +944,7 @@ describe("a series' seasons", () => {
           { number: 0, name: "Especiales", posterUrl: null },
         ],
       );
+
       expect(series.seasons.map((season) => season.name)).toEqual(names);
       // The provider's numbers, episodes and artwork stand.
       expect(

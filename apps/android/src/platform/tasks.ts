@@ -10,10 +10,13 @@ const TASK_MS = 8;
 export const inTasks: InTasks = async (steps, wanted) => {
   for (;;) {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
     if (!wanted()) return null;
     const started = Date.now();
+
     do {
       const next = steps.next();
+
       if (next.done) return next.value;
     } while (Date.now() - started < TASK_MS);
   }

@@ -14,6 +14,7 @@ function firstCategory(
   categories: ReadonlyMap<string, Category>,
 ): Category | undefined {
   const { subscriptionId } = channel;
+
   return channel.categoryIds
     .map((id) => categories.get(ownedKey({ subscriptionId, id })))
     .find(Boolean);
@@ -25,6 +26,7 @@ export function channelLine(
   categories: ReadonlyMap<string, Category>,
 ): string {
   const category = firstCategory(channel, categories);
+
   return [channel.number, category?.title].filter((part) => part != null).join(" · ");
 }
 
@@ -45,8 +47,11 @@ export function hostOf(server: string): string {
 export function techLine(info: StreamInfo | null): string {
   if (!info) return "";
   const parts: string[] = [];
+
   if (info.height) parts.push(`${info.height}p`);
+
   if (info.fps) parts.push(`${Math.round(info.fps)} fps`);
+
   if (info.audioChannels) {
     parts.push(
       info.audioChannels === 1
@@ -56,6 +61,7 @@ export function techLine(info: StreamInfo | null): string {
           : t("{channels} ch", { channels: info.audioChannels }),
     );
   }
+
   return parts.join(" · ");
 }
 
@@ -63,6 +69,7 @@ export function techLine(info: StreamInfo | null): string {
 export function clockTime(at: number, now: number): string {
   const dayOf = (moment: number) => new Date(moment).setHours(0, 0, 0, 0);
   const time = formatDate(at, "time");
+
   return dayOf(at) > dayOf(now) ? t("Tomorrow {time}", { time }) : time;
 }
 
@@ -71,6 +78,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** How many days `at` is after today, by the calendar: -1 for any time yesterday. */
 function daysFrom(now: number, at: number): number {
   const dayOf = (moment: number) => new Date(moment).setHours(0, 0, 0, 0);
+
   return Math.round((dayOf(at) - dayOf(now)) / DAY_MS);
 }
 
@@ -83,7 +91,9 @@ function shortDay(at: number): string {
 export function pastTime(at: number, now: number): string {
   const days = daysFrom(now, at);
   const time = formatDate(at, "time");
+
   if (days >= 0) return time;
+
   return days === -1
     ? t("yesterday {time}", { time })
     : t("{day} {time}", { day: shortDay(at), time });
@@ -93,8 +103,11 @@ export function pastTime(at: number, now: number): string {
 export function comingTime(at: number, now: number): string {
   const days = daysFrom(now, at);
   const time = formatDate(at, "time");
+
   if (days <= 0) return t("today {time}", { time });
+
   if (days === 1) return t("tomorrow {time}", { time });
+
   return t("{day} {time}", { day: days < 7 ? formatDate(at, "weekday") : shortDay(at), time });
 }
 
@@ -105,9 +118,13 @@ export function comingTime(at: number, now: number): string {
 export function dayTime(at: number, now: number): string {
   const days = daysFrom(now, at);
   const time = formatDate(at, "time");
+
   if (days === 0) return t("Today {time}", { time });
+
   if (days === 1) return t("Tomorrow {time}", { time });
+
   if (days === -1) return t("Yesterday {time}", { time });
+
   return t("{day} {time}", {
     day: days > 0 && days < 7 ? formatDate(at, "weekday") : shortDay(at),
     time,
@@ -127,6 +144,7 @@ export function timeLeft(programme: Pick<Programme, "start" | "stop">, now: numb
 /** How far a programme has run, from 0 to 1. */
 export function progressOf(programme: Pick<Programme, "start" | "stop">, now: number): number {
   const length = programme.stop - programme.start;
+
   return length > 0 ? Math.min(1, Math.max(0, (now - programme.start) / length)) : 0;
 }
 

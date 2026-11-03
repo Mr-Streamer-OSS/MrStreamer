@@ -101,6 +101,7 @@ interface AxNode {
 
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
 const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
@@ -112,6 +113,7 @@ export async function posterGridScenario(
   const steps: Record<string, unknown>[] = [];
   d.observed["posterGridSteps"] = steps;
   const state = () => d.evaluate<GridState>(STATE);
+
   /** Focus can arrive before the scrolled virtual rows; measure a page after both have settled. */
   const settledState = async () => {
     let previous = await state();
@@ -120,15 +122,21 @@ export async function posterGridScenario(
         "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
       );
       const now = await state();
+
       const stable =
         !!now.geometry && JSON.stringify(now.geometry) === JSON.stringify(previous.geometry);
+
       previous = now;
+
       return stable && now.inGrid && now.ringIndex === now.index && now.inView;
     }, 15_000);
+
     return previous;
   };
+
   const shiftTab = async () => {
     d.action("Press Shift+Tab");
+
     for (const type of ["rawKeyDown", "keyUp"])
       await d.send("Input.dispatchKeyEvent", {
         type,
@@ -138,17 +146,21 @@ export async function posterGridScenario(
         modifiers: 8,
       });
   };
+
   /** The focused accessibility node, with the roles above it that aren't ignored. */
   const focusedAx = async () => {
     const tree = (await d.send("Accessibility.getFullAXTree")) as { nodes: readonly AxNode[] };
     const byId = new Map(tree.nodes.map((node) => [node.nodeId, node]));
+
     // The document says it has the focus too; the element that holds it is below it.
     const focused = tree.nodes.findLast(
       (node) =>
         node.role?.value !== "RootWebArea" &&
         !!node.properties?.some((each) => each.name === "focused" && each.value.value === true),
     );
+
     const ancestors: string[] = [];
+
     for (
       let node = focused?.parentId ? byId.get(focused.parentId) : undefined;
       node && ancestors.length < 4;
@@ -156,8 +168,10 @@ export async function posterGridScenario(
     )
       if (!node.ignored && node.role?.value && node.role.value !== "generic")
         ancestors.push(node.role.value);
+
     return { role: focused?.role?.value ?? null, name: focused?.name?.value ?? null, ancestors };
   };
+
   /**
    * Waits until the focus and the ring are on tile `index` together, then checks what the tile
    * says about itself. A title's poster is named by its name and year; a saved one by its name
@@ -166,6 +180,7 @@ export async function posterGridScenario(
   const aligned = async (step: string, index: number, total: number, saved = false) => {
     await d.wait(async () => {
       const now = await state();
+
       return now.inGrid && now.index === index && now.ringIndex === index && !now.remove;
     }, 15_000);
     const now = await state();
@@ -174,12 +189,16 @@ export async function posterGridScenario(
     expect(now.tabStops === (saved ? 2 : 1), `${step}: ${now.tabStops} Tab stops in the grid`);
     expect(now.inView, `${step}: the focused poster is out of view`);
     const year = /^(\d{4})\b/.exec(now.caption ?? "")?.[1];
+
     const named = saved
       ? [now.name, ...(now.caption ?? "").split(" · ")].join(", ")
       : [now.name, year].filter(Boolean).join(", ");
+
     expect(now.label === named, `${step}: named "${now.label}", expected "${named}"`);
+
     return now;
   };
+
   const totalShown = async () =>
     Number(
       (
@@ -190,6 +209,7 @@ export async function posterGridScenario(
         .split(" ")[0]!
         .replace(/[^0-9]/g, ""),
     );
+
   /**
    * Matches the open details to the chosen poster while both names can still refresh. The
    * provider-name tooltip identifies the poster throughout; Escape must return to that poster.
@@ -209,6 +229,7 @@ export async function posterGridScenario(
     const title = await d.evaluate<string>(DIALOG_TITLE);
     await d.key("Escape", 27);
     await d.wait(() => d.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
+
     return (after: GridState) => {
       expect(after.title === before.title, `${step}: Escape returned to another poster`);
       steps.push({ step: `${step}: details`, title, before, after: after.name });
@@ -230,11 +251,13 @@ export async function posterGridScenario(
 
   // Tab enters on the selected poster, and the next Tab leaves the grid.
   const tabs: Record<string, unknown>[] = [];
+
   for (let press = 0; press < 40 && !(await state()).inGrid; press++) {
     await d.key("Tab", 9);
     const now = await state();
     tabs.push({ tag: now.tag, label: now.label, inGrid: now.inGrid, index: now.index });
   }
+
   d.observed["tabIntoGrid"] = tabs;
   await aligned("Tab enters the grid", 0, total);
   await d.key("Tab", 9);
@@ -271,17 +294,21 @@ export async function posterGridScenario(
   // Pages: Page Down across the first page's end, End to the last page, Home back.
   let previous = 1;
   const pages: number[] = [];
+
   while (previous < 130) {
     const beforePage = await settledState();
     steps.push({ step: `Before PageDown from ${previous}`, ...beforePage });
+
     const least = Math.min(
       total - 1,
       previous + beforePage.columns * Math.max(1, beforePage.fullRows),
     );
+
     const most = Math.min(total - 1, previous + beforePage.columns * beforePage.visibleRows);
     await d.key("PageDown", 34);
     await d.wait(async () => {
       const now = await state();
+
       return (
         now.inGrid && now.index !== null && now.index > previous && now.ringIndex === now.index
       );
@@ -294,6 +321,7 @@ export async function posterGridScenario(
     previous = now.index!;
     pages.push(previous);
   }
+
   d.observed["pageDownIndexes"] = pages;
   await d.key("End", 35);
   await aligned("End", total - 1, total);
@@ -315,10 +343,12 @@ export async function posterGridScenario(
   // The pointer only hovers; a click opens its poster, and closing returns the focus to it.
   const fourth = `(${GRID}).querySelector('[data-index="3"] button')`;
   await d.click("Open the fourth poster with the pointer", fourth);
+
   const clicked = await d.evaluate<Pick<GridState, "title" | "name">>(`({
     title: ${fourth}.title,
     name: ${fourth}.querySelector('span.truncate').textContent,
   })`);
+
   const pressed = await closeDetails("A click opens its poster", clicked);
   await d.wait(async () => (await state()).index === 3);
   const afterClick = await state();
@@ -331,6 +361,7 @@ export async function posterGridScenario(
   // A 960x600 window and larger text keep the selected title, in view and focused.
   for (let press = 0; press < 3; press++) await d.key("ArrowDown", 40);
   const before = await state();
+
   const resize = async (width: number, height: number) => {
     await d.send("Emulation.setDeviceMetricsOverride", {
       width,
@@ -340,15 +371,19 @@ export async function posterGridScenario(
     });
     await d.wait(() => d.evaluate<boolean>(`innerWidth === ${width} && innerHeight === ${height}`));
   };
+
   const kept = async (step: string) => {
     await d.wait(async () => {
       const now = await state();
+
       return now.inGrid && now.title === before.title && now.inView && now.ringIndex === now.index;
     }, 15_000);
     const now = await state();
     steps.push({ step, ...now });
+
     return now;
   };
+
   await resize(960, 600);
   const small = await kept("960x600 keeps the selected title");
   columns = small.columns;
@@ -396,9 +431,11 @@ export async function posterGridScenario(
   await d.send("Input.insertText", { text: " 1" });
   await d.wait(() => d.evaluate<boolean>(`${field}.value === "Story 1"`));
   await d.evaluate("new Promise(resolve => setTimeout(resolve, 1000))");
+
   const typing = await d.evaluate<{ field: boolean }>(
     `({ field: document.activeElement === ${field} })`,
   );
+
   steps.push({ step: "Results refresh while typing", ...typing });
   expect(typing.field, "Refreshed results took the focus from the field");
   await d.key("Escape", 27);
@@ -410,6 +447,7 @@ export async function posterGridScenario(
   );
   const saved: string[] = [];
   await d.key("Home", 36);
+
   for (let index = 0; index < 4; index++) {
     if (index > 0) await d.key("ArrowRight", 39);
     const now = await aligned(`Select title ${index + 1} to save`, index, total);
@@ -421,6 +459,7 @@ export async function posterGridScenario(
     await d.wait(() => d.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
     await d.wait(async () => (await state()).index === index);
   }
+
   d.observed["savedTitles"] = saved;
   await d.click("Open Watchlist", button("header button", "Watchlist"));
   await d.wait(() =>
@@ -428,6 +467,7 @@ export async function posterGridScenario(
       `document.querySelector('h1')?.textContent === 'Watchlist' && (${GRID})?.querySelectorAll('[role="listitem"]').length === 4`,
     ),
   );
+
   for (let press = 0; press < 40 && !(await state()).inGrid; press++) await d.key("Tab", 9);
   await aligned("Tab enters the Watchlist", 0, 4, true);
   await d.key("Tab", 9);
@@ -440,6 +480,7 @@ export async function posterGridScenario(
   await shiftTab();
   await d.wait(async () => {
     const now = await state();
+
     return now.remove && now.index === 0;
   });
   const crossAx = await focusedAx();
@@ -450,6 +491,7 @@ export async function posterGridScenario(
   await d.wait(async () => (await state()).tiles === 3);
   await d.wait(async () => {
     const now = await state();
+
     return now.remove && now.index === 0 && now.label !== first;
   });
   const replaced = await state();
@@ -465,12 +507,14 @@ export async function posterGridScenario(
   await d.key("Tab", 9);
   await d.wait(async () => {
     const now = await state();
+
     return now.remove && now.index === 2;
   });
   await d.key("Enter", 13);
   await d.wait(async () => (await state()).tiles === 2);
   await d.wait(async () => {
     const now = await state();
+
     return now.remove && now.index === 1;
   });
   steps.push({

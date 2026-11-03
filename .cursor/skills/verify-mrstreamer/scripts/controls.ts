@@ -9,10 +9,13 @@ import type { Driver } from "./language.ts";
 
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const query = (selector: string) => `document.querySelector(${JSON.stringify(selector)})`;
 const shown = (selector: string) => query(`main:not([hidden]) ${selector}`);
+
 const poster = (name: string) =>
   `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(name)}))`;
+
 const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
@@ -38,6 +41,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
   d.observed["shapes"] = shapes;
   d.observed["menus"] = menus;
   d.observed["highlights"] = highlights;
+
   const size = async (width: number, height: number) => {
     await d.send("Emulation.setDeviceMetricsOverride", {
       width,
@@ -47,6 +51,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
     });
     await d.wait(() => d.evaluate<boolean>(`innerWidth === ${width} && innerHeight === ${height}`));
   };
+
   /** Records how `element`, or the field around it, is drawn: an observation, never a check. */
   const shape = async (name: string, element: string, field = false) => {
     shapes[name] = await d.evaluate<Shape | null>(`(() => {
@@ -61,6 +66,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
       };
     })()`);
   };
+
   /** Waits until nothing under `element` still animates, as a popup does while it opens. */
   const settled = (element: string) =>
     d.wait(() =>
@@ -69,6 +75,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
         return !!e && e.getAnimations({ subtree: true }).every(a => a.playState !== 'running');
       })()`),
     );
+
   /** The row of `popup` Base UI marks highlighted or, in a menu of plain buttons, focus is on. */
   const highlight = (popup: string) =>
     d.evaluate<Highlight>(`(() => {
@@ -81,6 +88,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
         enabled: rows.filter(e => !e.matches(':disabled, [aria-disabled=true]')).length,
       };
     })()`);
+
   /**
    * Opens a menu from its trigger and presses Down, which highlights a row: another than before
    * where more than one is enabled, as a single row may keep it. Captures it and closes it with
@@ -99,6 +107,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
     await d.key("ArrowDown", 40);
     await d.wait(async () => {
       const { row } = await highlight(popup);
+
       return row >= 0 && (before.enabled < 2 || row !== before.row);
     });
     highlights[name] = { before, after: await highlight(popup) };
@@ -108,6 +117,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
     await d.capture(`menu-${name.replaceAll(" ", "-")}`);
     await d.key("Escape", 27);
     await d.wait(async () => !(await d.exists(popup)));
+
     if (within) expect(await d.exists(within), `Escape on the ${name} menu closed its view`);
     menus.push(name);
   };
@@ -218,6 +228,7 @@ export async function controlsScenario(d: Driver): Promise<void> {
   // Back returns to the details the title was opened from, which Escape closes in turn.
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(query("[data-view=title]"))));
+
   if (await d.exists(dialog)) await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists(dialog)));
 
@@ -276,10 +287,12 @@ export async function controlsScenario(d: Driver): Promise<void> {
   await d.wait(() => d.evaluate<boolean>(`${category}.value === ''`));
   const row = `[...document.querySelectorAll('[data-index]')].find(r => r.querySelector('button[aria-label="Later programmes"]'))`;
   await d.wait(() => d.exists(row));
+
   const point = await d.evaluate<{ x: number; y: number }>(`(() => {
     const box = (${row}).querySelector('[role=button]').getBoundingClientRect();
     return { x: box.x + box.width / 3, y: box.y + box.height / 2 };
   })()`);
+
   d.action("Point at a channel row");
   await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
   await shape("channel row pointed", `(${row}).querySelector('[role=button]')`);

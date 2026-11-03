@@ -4,6 +4,7 @@ import type { Driver } from "./language.ts";
 
 const named = (text: string, selector = "header button") =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
 const posters = "document.querySelectorAll('[role=listitem][data-index] button[title]')";
 
 /** A cold page must finish before the held provider, whose existing fetch must still land later. */
@@ -14,6 +15,7 @@ export async function slowCatalogueScenario(
   releaseSlow: () => void,
 ) {
   const held = healthy.hold("titles");
+
   try {
     await addBackup(d, healthy.url);
     await held.arrived;
@@ -25,6 +27,7 @@ export async function slowCatalogueScenario(
     await d.click("Open All movies", named("All movies", "nav button"));
     await d.wait(() => d.evaluate<boolean>(`${posters}.length > 0`));
     d.observed["moviesBeforeSlowRelease"] = true;
+
     for (const width of [1280, 960]) {
       await d.send("Emulation.setDeviceMetricsOverride", {
         width,
@@ -32,6 +35,7 @@ export async function slowCatalogueScenario(
         deviceScaleFactor: 1,
         mobile: false,
       });
+
       for (const tab of ["Movies", "Series"]) {
         await d.click(`Open ${tab} at ${width}`, named(tab));
         await d.click(
@@ -43,6 +47,7 @@ export async function slowCatalogueScenario(
           d.evaluate<boolean>(`${named(tab)}.getAttribute('aria-current') === 'page'`),
         );
         await d.capture(`held-${tab.toLowerCase()}-${width}`);
+
         if (tab === "Movies") {
           await d.click(
             "Search healthy titles while the other provider waits",
@@ -71,6 +76,7 @@ export async function slowCatalogueScenario(
           await d.key("Escape", 27);
         }
       }
+
       await d.click(`Open Home at ${width}`, named("Home"));
       await d.wait(() =>
         d.evaluate<boolean>("document.querySelectorAll('[data-home-row] button').length > 0"),
@@ -98,17 +104,21 @@ export async function slowCatalogueScenario(
       await d.capture(`held-global-search-${width}`);
       await d.key("Escape", 27);
     }
+
     d.observed["heldRequests"] = {
       slow: slow.titleListRequests(),
       healthy: healthy.titleListRequests(),
     };
     releaseSlow();
+
     const loaded = () =>
       d.evaluate<boolean>(`(async () => {
       const result = await window.mrStreamer.invoke('ondemand.status');
       return result.ok && result.value.lists.length === 2 && result.value.lists.every(row => row.fetchedAt !== null);
     })()`);
+
     await d.wait(loaded);
+
     if (slow.titleListRequests() !== 4 || healthy.titleListRequests() !== 4)
       throw new Error("A catalogue requested its lists more than once.");
     d.observed["lateProviderJoined"] = true;
@@ -125,6 +135,7 @@ export async function slowCatalogueScenario(
       slow: slow.titleListRequests(),
       healthy: healthy.titleListRequests(),
     };
+
     if (slow.titleListRequests() !== 4 || healthy.titleListRequests() !== 4)
       throw new Error("Warm catalogue unexpectedly fetched fresh lists.");
   } finally {

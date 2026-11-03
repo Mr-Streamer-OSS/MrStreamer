@@ -29,6 +29,7 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** Lists older than this are fetched again in the background when the app starts. */
 const LISTS_MAX_AGE: Duration.Input = "12 hours";
+
 /** How many subscriptions are brought up to date at a time. */
 const SUBSCRIPTIONS_AT_ONCE = 2;
 
@@ -112,14 +113,18 @@ function make() {
       Effect.gen(function* () {
         const source = yield* subscriptions.sourceOf(subscriptionId);
         const importer = source.provider.playlistImport;
+
         if (source.kind !== "m3u" || !importer)
           return yield* new Failed({
             error: { kind: "unexpected", detail: "This subscription is not a playlist." },
           });
+
         const read = yield* Effect.cached(
           Effect.tryPromise({ try: (signal) => importer(signal, true), catch: failedWith }),
         );
+
         const playlist = { source, read };
+
         const result = yield* Effect.all(
           {
             catalogue: library.refresh(subscriptionId, playlist),
@@ -127,10 +132,13 @@ function make() {
           },
           { concurrency: "unbounded", mode: "result" },
         );
+
         // Both owners record the shared failure before it returns. A busy semaphore still receives
         // the same parsed snapshot when its turn comes.
         if (Result.isFailure(result.catalogue)) return yield* result.catalogue.failure;
+
         if (Result.isFailure(result.titles)) return yield* result.titles.failure;
+
         return { catalogue: result.catalogue.success, titles: result.titles.success };
       });
 
@@ -142,7 +150,9 @@ function make() {
       Effect.forkIn(
         Effect.gen(function* () {
           const source = (yield* subscriptions.sources).find((each) => each.id === subscriptionId);
+
           if (!source) return;
+
           if (source.kind === "m3u") {
             yield* refreshPlaylist(source.id).pipe(warned("[roster] playlist refresh failed"));
             yield* guide.refresh(source.id).pipe(warned("[guide] refresh failed"));
@@ -185,6 +195,7 @@ function make() {
           const subscription = (yield* subscriptions.saved).find(
             (each) => each.id === subscriptionId,
           );
+
           if (!subscription) return;
           yield* output.subscriptionGone(subscriptionId);
           yield* playback.closeOf(subscriptionId);
@@ -221,6 +232,7 @@ function make() {
             Effect.gen(function* () {
               yield* Effect.gen(function* () {
                 yield* subscriptions.recheck(source.id);
+
                 if (source.kind === "m3u") {
                   if (
                     (yield* library.isStale(source.id, LISTS_MAX_AGE)) ||

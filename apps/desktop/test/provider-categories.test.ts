@@ -14,17 +14,20 @@ describe("Xtream category memberships", () => {
       { category_id: null, category_ids: null },
       {},
     ];
+
     const categories = [
       { category_id: "001", category_name: "News" },
       { category_id: 2, category_name: "News" },
       { category_id: 3, category_name: "" },
     ];
+
     const provider = xtreamProvider(
       { server: "https://panel.test", username: "fixture", password: "fixture" },
       {
         userAgent: "fixture",
         fetch: async (input) => {
           const action = new URL(String(input)).searchParams.get("action") ?? "";
+
           return Response.json(
             action.endsWith("categories")
               ? categories
@@ -38,6 +41,7 @@ describe("Xtream category memberships", () => {
         },
       },
     );
+
     const live = await provider.liveCatalogue();
     const titles = await provider.onDemandCatalogue();
     const expected = [["001"], ["2"], ["2", "001", "99"], ["001"], [], [], []];

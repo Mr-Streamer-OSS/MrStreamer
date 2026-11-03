@@ -88,10 +88,12 @@ import {
 
 /** The three starts: stable, the candidate installed over it, then that candidate again. */
 type Stage = Package["stage"] | "candidate-restart";
+
 type RunPackage = Omit<Package, "stage"> & { readonly stage: Stage };
 
 /** A public address the window reaches before the block and not after it. Its CSP allows it. */
 const OUTSIDE = "https://example.com/";
+
 /** The same for the bundled ffmpeg and ffprobe, which read plain http and have no TLS. */
 const TOOLS_OUTSIDE = "http://example.com/";
 
@@ -108,6 +110,7 @@ export async function startServices() {
   const provider = await startFakeProvider({ channels: 20, titles: 10 });
   const tmdb = await startFakeTmdb();
   const picture = greyPicture(60, 90);
+
   const catalogueRequests: {
     action: string;
     startedAt: string;
@@ -115,15 +118,20 @@ export async function startServices() {
     status?: number;
     rows?: number;
   }[] = [];
+
   let origin = "";
+
   const front: Server = createServer((request, response) => {
     void (async () => {
       if (request.url?.startsWith("/picture/")) {
         response.writeHead(200, { "Content-Type": "image/png" }).end(picture);
+
         return;
       }
+
       const toTmdb = request.url?.startsWith("/3/") ?? false;
       const action = new URL(request.url ?? "/", "http://fixture.local").searchParams.get("action");
+
       const catalogue: (typeof catalogueRequests)[number] | undefined =
         !toTmdb &&
         action &&
@@ -132,33 +140,44 @@ export async function startServices() {
         )
           ? { action, startedAt: new Date().toISOString() }
           : undefined;
+
       if (catalogue) catalogueRequests.push(catalogue);
       const headers = new Headers();
+
       for (const name of ["range", "if-range", "if-none-match", "if-modified-since"]) {
         const value = request.headers[name];
+
         if (typeof value === "string") headers.set(name, value);
       }
+
       const upstream = await fetch(
         `${toTmdb ? new URL(tmdb.url).origin : provider.url}${request.url ?? "/"}`,
         { method: request.method ?? "GET", headers, redirect: "manual" },
       );
+
       let body = Buffer.from(await upstream.arrayBuffer());
+
       if (catalogue) {
         const rows: unknown = upstream.headers.get("content-type")?.includes("json")
           ? JSON.parse(body.toString())
           : null;
+
         catalogue.finishedAt = new Date().toISOString();
         catalogue.status = upstream.status;
+
         if (Array.isArray(rows)) catalogue.rows = rows.length;
       }
+
       if (upstream.headers.get("content-type")?.includes("json")) {
         const text = JSON.stringify(
           JSON.parse(body.toString(), (key: string, value: unknown) =>
             toTmdb && key.endsWith("_path") ? null : value,
           ),
         ).replaceAll("https://image.example", `${origin}/picture`);
+
         body = Buffer.from(text);
       }
+
       for (const [name, value] of upstream.headers)
         if (
           !["content-length", "transfer-encoding", "content-encoding", "connection"].includes(name)
@@ -170,11 +189,13 @@ export async function startServices() {
       response.end();
     });
   });
+
   front.listen(0, "127.0.0.1");
   await once(front, "listening");
   origin = `http://127.0.0.1:${(front.address() as AddressInfo).port}`;
   const ports = [origin, provider.url, tmdb.url].map((url) => Number(new URL(url).port));
   let stopped = false;
+
   return {
     url: origin,
     tmdbApi: `${origin}/3`,
@@ -189,6 +210,7 @@ export async function startServices() {
       await new Promise<void>((resolve) => front.close(() => resolve()));
       await provider.close();
       await tmdb.close();
+
       const answered = await Promise.all(
         ports.map((port) =>
           fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000) }).then(
@@ -197,12 +219,16 @@ export async function startServices() {
           ),
         ),
       );
+
       const open = answered.filter((port) => port !== null);
+
       if (open.length > 0) throw new Error(`Fake services still answer on ${open.join(", ")}.`);
+
       return { ports, refused: true };
     },
   };
 }
+
 export type Services = Awaited<ReturnType<typeof startServices>>;
 
 /** A plain grey PNG, which shows on the black page where a copy's artwork is. */
@@ -212,13 +238,16 @@ function greyPicture(width: number, height: number): Buffer {
     const framing = Buffer.alloc(8);
     framing.writeUInt32BE(data.length, 0);
     framing.writeUInt32BE(crc32(body), 4);
+
     return Buffer.concat([framing.subarray(0, 4), body, framing.subarray(4)]);
   };
+
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header.set([8, 0, 0, 0, 0], 8);
   const line = Buffer.concat([Buffer.from([0]), Buffer.alloc(width, 0x80)]);
+
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -231,9 +260,12 @@ function greyPicture(width: number, height: number): Buffer {
 export function fixtures(titles: FakeProvider["titles"]) {
   const movie = (prefix: string) => {
     const found = titles.movies.find((each) => each.name.startsWith(prefix));
+
     if (!found) throw new Error(`The fake provider lists no ${prefix}.`);
+
     return String(found.id);
   };
+
   return {
     long: movie("TEST | Long subtitles"),
     formats: titles.series
@@ -241,6 +273,7 @@ export function fixtures(titles: FakeProvider["titles"]) {
       .map((each) => String(each.id)),
   };
 }
+
 type Fixtures = ReturnType<typeof fixtures>;
 
 // ---------------------------------------------------------------------------------------------
@@ -271,22 +304,29 @@ export function driver(page: Page, evidence: string, stage: Stage) {
   page.on("Network.requestWillBeSent", (params) => {
     const url = (params as { request?: { url?: string } }).request?.url ?? "";
     const parsed = URL.canParse(url) ? new URL(url) : null;
+
     const shown =
       parsed && /^https?:$/.test(parsed.protocol)
         ? `${parsed.origin}${parsed.pathname}`
         : url.slice(0, 40);
+
     requests.push({ at: Date.now(), url: shown });
   });
   const exists = (expression: string) => page.evaluate<boolean>(`!!(${expression})`);
+
   const wait = async (check: () => Promise<boolean>, timeout = 30_000, what = check.toString()) => {
     const until = Date.now() + timeout;
+
     while (Date.now() < until) {
       if (await check().catch(() => false)) return;
       await delay(200);
     }
+
     throw new Error(`Timed out waiting for ${what}`);
   };
+
   const did = (action: string) => actions.push({ at: new Date().toISOString(), action });
+
   const d = {
     page,
     actions,
@@ -295,12 +335,15 @@ export function driver(page: Page, evidence: string, stage: Stage) {
     wait,
     async click(action: string, element: string) {
       await wait(() => exists(element), 30_000, action);
+
       const point = await page.evaluate<{ x: number; y: number } | null>(`(() => {
         const e = (${element}); if (!e || e.disabled) return null;
         e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect();
         return r.width && r.height ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()`);
+
       if (!point) throw new Error(`Nothing to click for: ${action}`);
       did(action);
+
       for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
         await page.send("Input.dispatchMouseEvent", {
           type,
@@ -311,6 +354,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
     },
     async key(name: string, code: number) {
       did(`Press ${name}`);
+
       for (const type of ["rawKeyDown", "keyUp"])
         await page.send("Input.dispatchKeyEvent", {
           type,
@@ -329,6 +373,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
     /** Uses the closed select's type-ahead instead of a platform-specific native popup. */
     async select(action: string, element: string, value: string): Promise<void> {
       await wait(() => exists(element), 30_000, action);
+
       const label = await page.evaluate<string | null>(`(() => {
         const select = (${element});
         const options = [...(select?.options ?? [])].filter(o => o.value === ${JSON.stringify(value)} && !o.disabled);
@@ -336,6 +381,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
         const label = options[0].label.trim();
         return [...select.options].filter(o => !o.disabled && o.label.trim() === label).length === 1 ? label : null;
       })()`);
+
       if (!label) throw new Error(`${action} offers no unique enabled ${value}.`);
       did(`Focus ${action}`);
       // Focusing changes no value and leaves the OS menu closed, as in the language verifier.
@@ -345,6 +391,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
         10_000,
         `${action} focus`,
       );
+
       for (const character of label) {
         did(`Type ${action}: ${character}`);
         await page.send("Input.dispatchKeyEvent", {
@@ -354,6 +401,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
         });
         await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: character });
       }
+
       await d.key("Tab", 9);
       await wait(
         () => page.evaluate<boolean>(`(${element})?.value === ${JSON.stringify(value)}`),
@@ -369,6 +417,7 @@ export function driver(page: Page, evidence: string, stage: Stage) {
     async capture(name: string) {
       const shot = await page.send("Page.captureScreenshot", { format: "png" });
       const data = (shot.result as { data?: string } | undefined)?.data;
+
       if (!data) throw new Error("No screenshot returned.");
       await writeFile(join(evidence, `${stage}-${name}.png`), Buffer.from(data, "base64"));
       await writeFile(
@@ -379,10 +428,13 @@ export function driver(page: Page, evidence: string, stage: Stage) {
     /** One of the app's read-only calls, as the window makes it. */
     async read<M extends Read & IpcMethod>(method: M, ...args: IpcArgs<M>): Promise<IpcOutput<M>> {
       const input = args.length > 0 ? `, ${JSON.stringify(args[0])}` : "";
+
       const result = await page.evaluate<Result<IpcOutput<M>>>(
         `window.mrStreamer.invoke(${JSON.stringify(method)}${input})`,
       );
+
       if (!result.ok) throw new Error(`${method} failed: ${JSON.stringify(result.error)}`);
+
       return result.value;
     },
     video: () =>
@@ -397,18 +449,24 @@ export function driver(page: Page, evidence: string, stage: Stage) {
         return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0,
           paused: v?.paused ?? true, title: !!document.querySelector("[data-view=title]") }; })()`),
   };
+
   return d;
 }
+
 export type Driver = ReturnType<typeof driver>;
 
 const button = (selector: string, words: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
 const labelled = (label: string) =>
   `document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})`;
+
 const poster = (words: string) =>
   `[...document.querySelectorAll("button[title]")].find(b => b.title.includes(${JSON.stringify(words)}))`;
+
 const listEntry = (words: string) =>
   `[...document.querySelectorAll("button[data-entry]")].find(b => b.querySelector("span")?.textContent.trim() === ${JSON.stringify(words)})`;
+
 const copyRow = (id: string) => `document.querySelector('[data-download="${id}"]')`;
 
 /** Moving picture with decoded sound, past its first second. */
@@ -416,20 +474,24 @@ const playing = (d: Driver) =>
   d.wait(
     async () => {
       const v = await d.video();
+
       return v.title && !v.paused && v.width > 0 && v.audio > 0 && v.time > 1;
     },
     45_000,
     "a moving picture with sound",
   );
+
 const leaveTitle = async (d: Driver) => {
   await d.key("Escape", 27);
   await d.wait(async () => !(await d.video()).title, 10_000, "leaving the title");
 };
+
 const openMovie = async (d: Driver, name: string) => {
   await d.click("Open Movies", button("header button", "Movies"));
   await d.click("Open All movies", button("nav button", "All movies"));
   await d.click(`Open ${name}`, poster(name));
 };
+
 const openSeries = async (d: Driver) => {
   await d.click("Open Series", button("header button", "Series"));
   await d.click("Open All series", button("nav button", "All series"));
@@ -460,21 +522,26 @@ export async function about(d: Driver) {
     10_000,
     "About's source link",
   );
+
   const shown = await d.page.evaluate<{ text: string; source: string }>(
     `({ text: document.body.innerText, source: document.querySelector('a[href*="/tree/"]').href.split("/tree/")[1] })`,
   );
+
   await d.capture("about");
   await d.key("Escape", 27);
+
   return shown;
 }
 
 /** What the upgrades must keep, read through the app's public calls. */
 async function state(d: Driver, titles: Fixtures) {
   const subscriptions = await d.read("subscription.list");
+
   if (subscriptions.length !== 1)
     throw new Error(`Expected one subscription, found ${subscriptions.length}.`);
   const subscriptionId = subscriptions[0]!.id;
   const watchlist = await d.read("watchlist.list", { sort: "saved", offset: 0, limit: 100 });
+
   return {
     preferences: preferenceValues(await d.read("preferences.get")),
     favourites: (await d.read("viewing.get")).favourites,
@@ -495,7 +562,9 @@ async function state(d: Driver, titles: Fixtures) {
     ).map(({ title, position, duration, finished }) => ({ title, position, duration, finished })),
   };
 }
+
 type State = Awaited<ReturnType<typeof state>>;
+
 type Copies = IpcOutput<"downloads.list">["items"];
 
 /**
@@ -505,11 +574,14 @@ type Copies = IpcOutput<"downloads.list">["items"];
  */
 function retained(before: State, now: State, what: string) {
   const after = new Map(Object.entries(now.preferences));
+
   const changed = Object.entries(before.preferences)
     .filter(([name, value]) => JSON.stringify(after.get(name)) !== JSON.stringify(value))
     .map(([name]) => name);
+
   const ids = (entries: State["watchlist"]["entries"]) =>
     JSON.stringify(entries.map(({ subscriptionId, id, kind }) => [subscriptionId, id, kind]));
+
   const lost = before.progress.filter(
     (prior) =>
       !now.progress.some(
@@ -519,6 +591,7 @@ function retained(before: State, now: State, what: string) {
           each.finished === prior.finished,
       ),
   );
+
   const problems = [
     changed.length > 0 && `preferences ${changed.join(", ")}`,
     JSON.stringify(now.favourites) !== JSON.stringify(before.favourites) &&
@@ -529,7 +602,9 @@ function retained(before: State, now: State, what: string) {
     lost.length > 0 &&
       `progress of ${lost.map((each) => `${each.title.kind} ${each.title.id}`).join(", ")}`,
   ].filter(Boolean);
+
   if (problems.length > 0) throw new Error(`${what} lost or changed: ${problems.join("; ")}.`);
+
   return {
     kept: true,
     addedPreferences: Object.keys(now.preferences).filter((name) => !(name in before.preferences)),
@@ -545,18 +620,22 @@ function retainedCopies(before: Copies, now: Copies, what: string) {
     new Set(now.map((each) => each.id)).size !== now.length
   )
     throw new Error(`${what} lost or changed the three unique copies.`);
+
   for (const prior of before) {
     const current = now.find((each) => each.id === prior.id);
+
     if (!current) throw new Error(`${what} lost the copy ${prior.id}.`);
     // Older stable replies omitted series for standalone copies.
     const { progress: priorProgress, series: priorSeries = null, ...priorDetails } = prior;
     const { progress, series = null, ...details } = current;
+
     const keptProgress =
       priorProgress === null
         ? progress === null
         : progress !== null &&
           progress.duration === priorProgress.duration &&
           Math.abs(progress.position - priorProgress.position) < 2;
+
     if (
       prior.status.kind !== "complete" ||
       current.status.kind !== "complete" ||
@@ -567,6 +646,7 @@ function retainedCopies(before: Copies, now: Copies, what: string) {
     )
       throw new Error(`${what} changed the copy ${prior.id}: ${JSON.stringify(current)}`);
   }
+
   return { kept: true };
 }
 
@@ -575,12 +655,14 @@ function longCopyProgress(copies: Copies, titles: Fixtures, what: string) {
   const progress = copies.find(
     (each) => each.title.kind === "movie" && each.title.id === titles.long,
   )?.progress;
+
   if (
     !progress ||
     !Number.isFinite(progress.duration) ||
     !(progress.position > 0 && progress.position < progress.duration - 30)
   )
     throw new Error(`${what} left no nonzero unfinished progress on the long movie's copy.`);
+
   return progress;
 }
 
@@ -593,6 +675,7 @@ function longCopyProgress(copies: Copies, titles: Fixtures, what: string) {
  */
 export async function seedStable(d: Driver, services: Services, titles: Fixtures) {
   await d.wait(() => d.exists("document.querySelector('form input')"), 30_000, "the Connect form");
+
   for (const [index, text] of [services.url, "demo", "demo"].entries()) {
     await d.click(
       `Fill Connect field ${index + 1}`,
@@ -600,6 +683,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
     );
     await d.type(`Type Connect field ${index + 1}`, text);
   }
+
   await d.click("Connect", "document.querySelector('form button[type=submit]')");
   await d.wait(
     () => d.exists("document.querySelector('header')"),
@@ -624,6 +708,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
   );
   await d.click("Open Live TV", button("header button", "Live TV"));
   await d.click("Open All channels", listEntry("All channels"));
+
   for (let i = 1; i <= 2; i++) {
     await d.click(`Star channel ${i}`, labelled("Add to favourites"));
     await d.wait(
@@ -639,6 +724,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
       10_000,
     );
   }
+
   await d.click("Open Favourites", listEntry("Favourites"));
   await d.capture("favourites");
   await openMovie(d, "Long subtitles");
@@ -669,6 +755,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
   const seeded = await state(d, titles);
   const { liveQuality, audioLanguage, subtitleLanguage } = seeded.preferences;
   const movie = seeded.progress.find((each) => each.title.kind === "movie");
+
   if (
     liveQuality !== "hd" ||
     audioLanguage !== "nl" ||
@@ -692,6 +779,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
   const after = await state(d, titles);
   retained(seeded, after, "Playing copies on stable");
   const copies = (await d.read("downloads.list")).items;
+
   if (
     copies.length !== 3 ||
     new Set(copies.map((each) => each.id)).size !== 3 ||
@@ -700,6 +788,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
     throw new Error("Stable didn't keep the three completed copies after playing them.");
   longCopyProgress(copies, titles, "Stable");
   await d.capture("copies-before-upgrade");
+
   return { ...seeded, savedSubtitle, played, copies, after };
 }
 
@@ -710,6 +799,7 @@ export async function seedStable(d: Driver, services: Services, titles: Fixtures
  */
 function resumedNear(what: string, started: number, kept: number) {
   const back = Math.max(0, kept - 5);
+
   if (Math.abs(started - back) > 3)
     throw new Error(`${what} started at ${started} s, not near ${back} s, 5 s before ${kept} s.`);
 }
@@ -725,19 +815,23 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   const long = copies.find((each) => each.title.kind === "movie" && each.title.id === titles.long);
   const sound = copies.find((each) => each.title.kind === "movie" && each.title.id !== titles.long);
   const episode = copies.find((each) => each.title.kind === "episode");
+
   if (!long || !sound || !episode)
     throw new Error("The movie and episode copies aren't all listed.");
+
   const watch = async (id: string, what: string) => {
     await d.click(`Watch ${what} offline`, `(${copyRow(id)})?.querySelector('button')`);
     await d.wait(
       async () => {
         const v = await d.video();
+
         return v.title && !v.paused && v.width > 0 && v.time > 0.5;
       },
       45_000,
       `${what} playing`,
     );
   };
+
   const seen: Record<string, unknown> = {};
   await watch(sound.id, "the two-sound-track movie");
   const before = (await d.video()).time;
@@ -755,6 +849,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   await d.wait(
     async () => {
       const v = await d.video();
+
       return !v.paused && v.audio > 0 && v.time > 1;
     },
     45_000,
@@ -767,7 +862,9 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   await watch(long.id, "the long-subtitles movie");
   const started = (await d.video()).time;
   seen["longStartedAt"] = { started, keptBefore: kept ?? null };
+
   if (kept !== undefined) resumedNear("The copy", started, kept);
+
   // Its French lines run from 40 s. The last 30 of its 150 seconds are credits, which would
   // finish it, so the skips stop short of them.
   for (let i = 0; i < 6 && (await d.video()).time < 38; i++) await d.key("ArrowRight", 39);
@@ -780,6 +877,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   await d.wait(
     async () => {
       const v = await d.video();
+
       return !v.paused && v.time >= 40;
     },
     45_000,
@@ -808,16 +906,21 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   seen["savedSubtitle"] = await observeSavedSubtitle(d, "copy");
   const left = (await d.video()).time;
   await leaveTitle(d);
+
   // Main keeps where it was left, and the page shows it too: Watch offline goes from there.
   const progress = async () =>
     (await d.read("downloads.list")).items.find((each) => each.id === long.id)?.progress;
+
   await d.wait(
     async () => {
       const now = await progress();
+
       if (!now || now.position < left - 2) return false;
+
       const shown = await d.page.evaluate<string | null>(
         `(${copyRow(long.id)})?.querySelector('span > span[style*="width"]')?.style.width ?? null`,
       );
+
       return shown === `${Math.round((now.position / now.duration) * 100)}%`;
     },
     15_000,
@@ -825,6 +928,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   );
   // Within two seconds of the time read just before leaving, either way.
   const keptNow = (await progress())?.position ?? 0;
+
   if (Math.abs(keptNow - left) > 2)
     throw new Error(`The copy was left at ${left} s, but kept ${keptNow} s.`);
   await watch(long.id, "the long-subtitles movie again");
@@ -836,6 +940,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
   await watch(episode.id, "the episode");
   await d.capture("copy-episode");
   await leaveTitle(d);
+
   return seen;
 }
 
@@ -866,6 +971,7 @@ async function downloadCopies(d: Driver) {
     );
     await d.key("Escape", 27);
   }
+
   await openSeries(d);
   await d.click("Download S1 E2", labelled("Download S1 E2"));
   await d.wait(() => d.exists(labelled("Watch S1 E2 offline")), 90_000, "S1 E2 downloaded");
@@ -923,6 +1029,7 @@ export async function upgradeToCandidate(
   await d.key("Escape", 27);
   await d.click("Open Downloads", button("header button", "Downloads"));
   const played = await playCopies(d, titles, stableLongProgress.position);
+
   return {
     kept,
     inherited: { ...copiesKept, copies: inherited },
@@ -932,6 +1039,7 @@ export async function upgradeToCandidate(
     after: await state(d, titles),
   };
 }
+
 export type AfterCandidate = Awaited<ReturnType<typeof upgradeToCandidate>>;
 
 /** What the offline part needs of the machine: the block, and what it refused. */
@@ -965,20 +1073,25 @@ export async function restartCandidate(
   await d.click("Open Settings", labelled("Settings"));
   await d.click("Open Subscriptions", button("nav button", "Subscriptions"));
   const row = `[...document.querySelectorAll('li')].find(r => r.querySelector('button')?.textContent.includes(' · '))`;
+
   for (let attempt = 1; ; attempt++) {
     await d.click(
       `Open the subscription (attempt ${attempt})`,
       `(${row})?.querySelector('button')`,
     );
+
     const opened = await d
       .wait(() => d.exists(`(${row})?.querySelector('[role=region]')`), 3000)
       .then(
         () => true,
         () => false,
       );
+
     if (opened) break;
+
     if (attempt === 3) throw new Error("The subscription's row didn't open.");
   }
+
   await d.click(
     "Ask to remove it",
     `[...(${row})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim().startsWith("Remove "))`,
@@ -996,6 +1109,7 @@ export async function restartCandidate(
   );
   await d.wait(() => d.exists("document.querySelector('form input')"), 30_000, "the Connect form");
   await d.wait(() => d.exists(button("button", "Downloads")), 10_000, "Downloads on Connect");
+
   if ((await d.read("subscription.list")).length !== 0)
     throw new Error("The subscription is still saved.");
 
@@ -1020,16 +1134,19 @@ export async function restartCandidate(
   const from = new Date();
   const requestsFrom = d.requests.length;
   const played = await playCopies(d, titles, left.position);
+
   const outside = d.requests
     .slice(requestsFrom)
     .filter(
       (request) =>
         !/^(mrstreamer:|data:|blob:|file:|http:\/\/127\.0\.0\.1:\d+\/)/.test(request.url),
     );
+
   if (outside.length > 0)
     throw new Error(
       `The window asked beyond this computer while offline: ${JSON.stringify(outside)}`,
     );
+
   return {
     kept,
     copies: standalone,
@@ -1064,8 +1181,11 @@ async function resolveCommand(args: string[]) {
       "private-input": { type: "string" },
     },
   });
+
   const [token, repository] = [process.env["GH_TOKEN"], process.env["GITHUB_REPOSITORY"]];
+
   if (!token || !repository) throw new Error("Set GH_TOKEN and GITHUB_REPOSITORY.");
+
   if (
     (!values.candidate && !values["private-input"]) ||
     (values.candidate && values["private-input"]) ||
@@ -1075,9 +1195,11 @@ async function resolveCommand(args: string[]) {
     throw new Error(usage);
   const github = restGitHub(repository, token);
   const archives = new Map<string, Uint8Array>();
+
   const privateInput: unknown = values["private-input"]
     ? JSON.parse(await readFile(values["private-input"], "utf8"))
     : undefined;
+
   const privateCandidate = values["private-input"]
     ? await verifyPrivateCandidate(
         {
@@ -1085,6 +1207,7 @@ async function resolveCommand(args: string[]) {
           bytes: async (path) => {
             const bytes = await github.bytes(path);
             archives.set(path, bytes);
+
             return bytes;
           },
         },
@@ -1092,22 +1215,28 @@ async function resolveCommand(args: string[]) {
         true,
       )
     : undefined;
+
   const { receipt, files } = await resolvePackages(github, {
     tag: values.candidate ?? `v${privateCandidate!.receipt.appVersion}`,
     private: privateCandidate,
     sha: values.sha || undefined,
   });
+
   await mkdir(values.out);
+
   if (privateCandidate) {
     await writeFile(join(values.out, "private-input.json"), JSON.stringify(privateInput, null, 2));
+
     for (const [path, bytes] of archives) {
       const id = /^\/actions\/artifacts\/(\d+)\/zip$/.exec(path)?.[1];
       check(id, "Unexpected private download path.");
       await writeFile(join(values.out, `artifact-${id}.zip`), bytes);
     }
   }
+
   for (const [name, bytes] of files) await writeFile(join(values.out, name), bytes);
   await writeFile(join(values.out, "receipt.json"), JSON.stringify(receipt, null, 2));
+
   for (const each of receipt.packages)
     console.log(
       `${each.stage}: ${each.version} from ${each.source}, ${each.file} SHA-256 ${each.sha256}`,
@@ -1130,6 +1259,7 @@ async function start(
   const port = 20000 + Math.floor(Math.random() * 20000);
   const inspectPort = port + 20000;
   process.env["MR_STREAMER_TMDB_API"] = tmdbApi;
+
   const beforeLaunch = {
     executable: await fileSha256(runner.executable),
     appAsar: await fileSha256(join(runner.installRoot, "resources", "app.asar")),
@@ -1137,6 +1267,7 @@ async function start(
       await Promise.all(runner.tools.map(async (tool) => [tool, await fileSha256(tool)])),
     ),
   };
+
   const app = launch(
     runner.executable,
     [
@@ -1147,6 +1278,7 @@ async function start(
     ],
     { port, profile },
   );
+
   if (app.pid === undefined) throw new Error(`${runner.executable} didn't start.`);
   const tree = ownedTree(runner, app);
   let page: Page | undefined;
@@ -1154,30 +1286,39 @@ async function start(
   let main: Page | undefined;
   let bootstrap: Awaited<ReturnType<typeof bootstrapSubtitles>> | undefined;
   let workers: ReturnType<typeof installCatalogueWorkerProbe> | undefined;
+
   let workerControl:
     ReturnType<ReturnType<typeof installCatalogueWorkerProbe>["start"]> | undefined;
+
   const workerDiagnostics: {
     provenance?: Awaited<ReturnType<typeof catalogueWorkerScripts>>;
     events: Evidence[];
     startup?: Awaited<NonNullable<typeof workerControl>>;
     cleanup?: Awaited<ReturnType<ReturnType<typeof installCatalogueWorkerProbe>["close"]>>;
   } = { events: [] };
+
   const closeWorkers = async () => {
     if (!workers) return;
     workerDiagnostics.cleanup = await workers.close();
+
     if (workerControl) workerDiagnostics.startup = await workerControl;
+
     if (workerDiagnostics.cleanup.errors.length)
       throw new Error(`Catalogue worker cleanup: ${workerDiagnostics.cleanup.errors.join("; ")}`);
   };
+
   const stop = async () => {
     let workerError: unknown;
+
     try {
       await closeWorkers();
     } catch (error) {
       workerError = error;
     }
+
     const exitedBeforeClose = app.exitCode !== null || app.signalCode !== null;
     main?.close();
+
     const ended = await tree
       .stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve())
       .catch((error: unknown) => {
@@ -1188,7 +1329,9 @@ async function start(
           );
         throw error;
       });
+
     const exit = { code: app.exitCode, signal: app.signalCode };
+
     if (
       exitedBeforeClose ||
       (exit.code !== null && exit.code !== 0) ||
@@ -1200,7 +1343,9 @@ async function start(
         ? new AggregateError([workerError, error], "Worker cleanup and installed exit failed")
         : error;
     }
+
     if (workerError) throw workerError;
+
     return {
       ...ended,
       exit,
@@ -1208,12 +1353,15 @@ async function start(
       gate: ended.forced.length === 0 ? "graceful" : "forced-terminated",
     };
   };
+
   try {
     main = await connect(inspectPort, "node");
     const owner = await inspectorOwner(inspectPort, [app.pid]);
+
     if (owner !== app.pid || app.exitCode !== null || app.signalCode !== null)
       throw new Error("Inspector owner exited before initial pause");
     const paused = await pauseMain(main);
+
     const identity = await paused.evaluate<{
       pid: number;
       executable: string;
@@ -1222,7 +1370,9 @@ async function start(
     }>(
       `({pid:process.pid,executable:process.execPath,resources:process.resourcesPath,argv:process.argv})`,
     );
+
     tree.sample();
+
     if (
       identity.pid !== app.pid ||
       identity.executable.toLowerCase() !== runner.executable.toLowerCase() ||
@@ -1230,6 +1380,7 @@ async function start(
       !identity.argv.includes(`--user-data-dir=${profile}`)
     )
       throw new Error("Paused main is not the owned installed app");
+
     if (
       (await fileSha256(identity.executable)) !== beforeLaunch.executable ||
       (await fileSha256(join(identity.resources, "app.asar"))) !== beforeLaunch.appAsar ||
@@ -1241,6 +1392,7 @@ async function start(
     )
       throw new Error("Paused installed executable changed");
     bootstrap = await bootstrapSubtitles(paused, subtitleOrigin);
+
     if (bootstrap.pid !== app.pid) throw new Error("Subtitle bootstrap PID changed");
     const provenance = await catalogueWorkerScripts(identity.resources, beforeLaunch.appAsar);
     workerDiagnostics.provenance = provenance;
@@ -1251,10 +1403,12 @@ async function start(
       verifiedMainPID: identity.pid,
       evidence: (event) => {
         workerDiagnostics.events.push(event);
+
         return undefined;
       },
     });
     const enabled = await workers.ready;
+
     if (!enabled.ok) throw new Error(enabled.error);
     // Join this control task after the UI stage, including Connect which creates the worker.
     workerControl = workers.start(120_000);
@@ -1263,6 +1417,7 @@ async function start(
     const d = driver(page, evidence, pkg.stage);
     const command = await page.send("Browser.getBrowserCommandLine");
     const args = (command.result as { arguments?: string[] } | undefined)?.arguments ?? [];
+
     if (
       !args.includes(`--user-data-dir=${profile}`) ||
       !args.includes(`--remote-debugging-port=${port}`)
@@ -1270,6 +1425,7 @@ async function start(
       throw new Error("The debugging port belongs to another app.");
     const renderer = await page.evaluate<string>("location.href");
     const asar = join(runner.installRoot, "resources", "app.asar", "out", "renderer", "index.html");
+
     if (
       !renderer.startsWith("file:") ||
       fileURLToPath(renderer).toLowerCase() !== asar.toLowerCase()
@@ -1277,20 +1433,24 @@ async function start(
       throw new Error(`The window shows ${renderer}, not the installed app.asar.`);
     await d.wait(() => d.page.evaluate<boolean>("!!window.mrStreamer"), 30_000, "the app's bridge");
     const status = await d.read("updates.status");
+
     if (status.version !== pkg.version || status.distribution !== "direct")
       throw new Error(
         `The app says ${status.version} (${status.distribution}), not ${pkg.version} direct.`,
       );
     const rendererOwnerPid = await inspectorOwner(port, [app.pid]);
+
     if (rendererOwnerPid !== app.pid || app.exitCode !== null || app.signalCode !== null)
       throw new Error("Renderer listener is not the active owned app");
     tree.sample();
     verifiedPage = page;
     const language = await d.read("language.get");
+
     if (language.locale !== "en-US")
       throw new Error(`The check requires English: ${JSON.stringify(language)}.`);
     await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
     await page.send("Network.enable");
+
     return {
       d,
       tree,
@@ -1298,6 +1458,7 @@ async function start(
         if (!workers || !workerControl) return;
         workerDiagnostics.startup = await workerControl;
         await closeWorkers();
+
         if (!workerDiagnostics.startup?.ok)
           throw new Error(workerDiagnostics.startup?.error ?? "Worker startup was not verified");
       },
@@ -1333,6 +1494,7 @@ async function start(
     } finally {
       page?.close();
     }
+
     throw error;
   }
 }
@@ -1350,6 +1512,7 @@ export async function installPublished(
   // install has spawned its child before yielding. Snapshot only; no process is stopped by id.
   let observed: ReturnType<typeof processes> = [];
   let observationError: unknown;
+
   try {
     observed = processes().filter(
       (each) =>
@@ -1360,6 +1523,7 @@ export async function installPublished(
   } catch (error) {
     observationError = error;
   }
+
   const result = await pending;
   check(
     !observationError && observed.length === 1,
@@ -1371,6 +1535,7 @@ export async function installPublished(
     "The owned installer is still running after setup completed.",
   );
   check((await fileSha256(setup)) === setupSha256, "The setup changed while the installer ran.");
+
   return {
     ...result,
     installer: {
@@ -1404,6 +1569,7 @@ export interface Leftovers {
 export async function cleanUp(failure: unknown, left: Leftovers) {
   let failed = failure;
   const steps: Record<string, unknown> = {};
+
   const attempt = async (what: string, action: () => unknown) => {
     try {
       steps[what] = (await action()) ?? true;
@@ -1412,20 +1578,27 @@ export async function cleanUp(failure: unknown, left: Leftovers) {
       failed ??= error;
     }
   };
+
   if (left.network) await attempt("network", left.network);
   await attempt("services", left.services);
+
   if (!failed) await attempt("uninstall", left.uninstall);
+
   if (!failed)
     await attempt("profile", () =>
       rm(left.profile, { recursive: true, force: true, maxRetries: 5 }),
     );
+
   if (!failed) await attempt("lock", () => rm(left.lock));
+
   const paths = {
     installation: left.installRoot,
     profile: left.profile,
     "profile.lock": left.lock,
   };
+
   const kept = Object.entries(paths).flatMap(([name, path]) => (existsSync(path) ? [name] : []));
+
   return { failed, steps, kept };
 }
 
@@ -1435,11 +1608,14 @@ export function verifyCheckoutSource(
   checkout = fileURLToPath(new URL("../../../../", import.meta.url)),
 ) {
   check(/^[0-9a-f]{40}$/.test(expected), "Pin the verification checkout source separately.");
+
   const source = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: checkout,
     encoding: "utf8",
   }).trim();
+
   check(source === expected, "Verification source differs from the actual checkout.");
+
   try {
     execFileSync("git", ["diff", "--quiet", "HEAD"], { cwd: checkout, stdio: "pipe" });
   } catch (error) {
@@ -1448,6 +1624,7 @@ export function verifyCheckoutSource(
       "Refused: verification checkout has local tracked changes; copy a clean checkout before running.",
     );
   }
+
   return source;
 }
 
@@ -1468,16 +1645,20 @@ export async function runCommand(args: string[]) {
       "verification-source": { type: "string" },
     },
   });
+
   const fleet = values["fleet-owner"];
   check(
     fleet || (!values.repository && !values["verification-source"]),
     "Fleet repository/source options require --fleet-owner.",
   );
+
   const runner = fleet
     ? fleetRunner(JSON.parse(await readFile(fleet, "utf8")))
     : disposableRunner();
+
   const root = values.root ?? "";
   const under = relative(runner.temp, root);
+
   if (
     !values.packages ||
     !isAbsolute(root) ||
@@ -1492,6 +1673,7 @@ export async function runCommand(args: string[]) {
   const raw: unknown = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
   check(repository, "A repository is required.");
+
   const privateCandidate = fleet
     ? await verifyPrivateCandidate(
         {
@@ -1502,17 +1684,21 @@ export async function runCommand(args: string[]) {
           bytes: async (path) => {
             const id = /^\/actions\/artifacts\/(\d+)\/zip$/.exec(path)?.[1];
             check(id, "Unexpected private archive path.");
+
             return readFile(join(values.packages!, `artifact-${id}.zip`));
           },
         },
         JSON.parse(await readFile(join(values.packages, "private-input.json"), "utf8")),
       )
     : undefined;
+
   const receipt = readReceipt(raw, privateCandidate);
   check(receipt.repository === repository, "The receipt belongs to another repository.");
+
   const checkoutSource = fleet
     ? verifyCheckoutSource(values["verification-source"] ?? "")
     : process.env["GITHUB_SHA"];
+
   if (fleet) {
     check(
       receipt.packages[1].provenance.releaseKind === "private",
@@ -1528,6 +1714,7 @@ export async function runCommand(args: string[]) {
       "The installed upgrade check runs only from main.",
     );
   }
+
   // Both packages must still match before the first setup starts.
   for (const pkg of receipt.packages) {
     const bytes = await readFile(join(values.packages, pkg.file));
@@ -1542,6 +1729,7 @@ export async function runCommand(args: string[]) {
       `${pkg.file} no longer matches its resolved published metadata.`,
     );
   }
+
   const block = outboundBlock(runner);
   block.preflight();
   const profile = join(root, "profile");
@@ -1560,6 +1748,7 @@ export async function runCommand(args: string[]) {
       startedAt: new Date().toISOString(),
     }),
   );
+
   // The synthetic TMDB key keeps the built-in key out of fixture requests.
   for (const name of Object.keys(process.env))
     if (
@@ -1572,6 +1761,7 @@ export async function runCommand(args: string[]) {
 
   /** What each stage did, by stage, for proof.json. */
   type ByStage = Partial<Record<Stage, unknown>>;
+
   const proof = {
     runner: runner.id,
     verification: {
@@ -1614,32 +1804,41 @@ export async function runCommand(args: string[]) {
     cleanup: {} as Record<string, unknown>,
     limits: [] as string[],
   };
+
   const record = (part: ByStage, stage: Stage, value: unknown) => (part[stage] = value);
   const services = await startServices();
   const titles = fixtures(services.titles);
+
   const subtitles = await startSubtitleFixture().catch(async (error) => {
     try {
       await services.stop();
     } catch (cleanup) {
       throw new AggregateError([error, cleanup], "Subtitle startup and provider cleanup failed");
     }
+
     throw error;
   });
+
   let blocking = false;
   let failed: unknown;
   let seeded: Awaited<ReturnType<typeof seedStable>> | undefined;
   let upgraded: AfterCandidate | undefined;
+
   try {
     let previous: string | null = null;
     let previousBinary: Awaited<ReturnType<typeof start>>["identity"]["binary"] | undefined;
+
     const packages: readonly RunPackage[] = [
       ...receipt.packages,
       { ...receipt.packages[1], stage: "candidate-restart" },
     ];
+
     for (const pkg of packages) {
       const setup = join(values.packages, pkg.file);
+
       if (sha256(await readFile(setup)) !== pkg.sha256)
         throw new Error(`${pkg.file} changed since it was checked.`);
+
       if (pkg.stage !== "candidate-restart")
         record(
           proof.installs,
@@ -1647,6 +1846,7 @@ export async function runCommand(args: string[]) {
           await installPublished(runner, setup, pkg.version, previous),
         );
       previous = pkg.version;
+
       const session = await start(
         runner,
         profile,
@@ -1655,8 +1855,10 @@ export async function runCommand(args: string[]) {
         services.tmdbApi,
         subtitles.origin,
       );
+
       try {
         record(proof.starts, pkg.stage, session.identity);
+
         if (
           pkg.stage === "candidate-restart" &&
           JSON.stringify(session.identity.binary) !== JSON.stringify(previousBinary)
@@ -1665,16 +1867,20 @@ export async function runCommand(args: string[]) {
             "The candidate executable, app.asar or bundled tools changed before its restart.",
           );
         previousBinary = session.identity.binary;
+
         // Settings opens once a subscription is saved: after connecting on the stable release,
         // before anything else on the subsequent starts.
         const checkAbout = async () => {
           const shown = await about(session.d);
+
           if (!shown.text.includes(pkg.version) || shown.source !== pkg.source)
             throw new Error(`About shows ${shown.source}, not ${pkg.version} from ${pkg.source}.`);
           record(proof.about, pkg.stage, shown.source);
         };
+
         if (pkg.stage !== "stable") await checkAbout();
         let requestsAtCutoff: number | undefined;
+
         const offline: Offline = {
           async cutOff(d) {
             const probeTools = () =>
@@ -1684,6 +1890,7 @@ export async function runCommand(args: string[]) {
                   ...(await toolProbe(tool, TOOLS_OUTSIDE)),
                 })),
               );
+
             const reachedBefore = await d.page.evaluate<string>(probe);
             const toolsBefore = await probeTools();
             const stopped = await services.stop();
@@ -1696,8 +1903,10 @@ export async function runCommand(args: string[]) {
             const tools = await probeTools();
             const checkReaches = await Promise.all([OUTSIDE, TOOLS_OUTSIDE].map(reaches));
             let refused: ReturnType<typeof block.blocked> = [];
+
             for (let i = 0; i < 30; i++) {
               refused = block.blocked(since);
+
               if (
                 block.programs.every((program) =>
                   refused.some((each) => each.application === program),
@@ -1706,6 +1915,7 @@ export async function runCommand(args: string[]) {
                 break;
               await delay(1000);
             }
+
             const proven = {
               endpoints: { window: OUTSIDE, tools: TOOLS_OUTSIDE },
               servicesStopped: stopped,
@@ -1718,9 +1928,11 @@ export async function runCommand(args: string[]) {
               checkStillReaches: checkReaches,
               refused,
             };
+
             const unrefused = block.programs.filter(
               (program) => !refused.some((each) => each.application === program),
             );
+
             if (
               reachedBefore !== "reached" ||
               toolsBefore.some((each) => !each.connected) ||
@@ -1732,11 +1944,14 @@ export async function runCommand(args: string[]) {
               throw new Error(
                 `The outbound block can't be shown to work: ${JSON.stringify(proven)}`,
               );
+
             return proven;
           },
           refused: (since) => block.blocked(since),
         };
+
         session.tree.sample();
+
         if (pkg.stage === "stable") seeded = await seedStable(session.d, services, titles);
         else if (pkg.stage === "candidate")
           upgraded = await upgradeToCandidate(session.d, titles, seeded!);
@@ -1746,17 +1961,22 @@ export async function runCommand(args: string[]) {
             pkg.stage,
             await restartCandidate(session.d, titles, upgraded!, offline),
           );
+
         if (pkg.stage === "candidate" && (await session.subtitleRequests()).length !== 0)
           throw new Error(
             "Candidate migration fetched a new online subtitle instead of retaining stable's saved file",
           );
+
         if (
           requestsAtCutoff !== undefined &&
           (await session.subtitleRequests()).length !== requestsAtCutoff
         )
           throw new Error("Offline copies attempted new subtitle service requests");
+
         if (pkg.stage === "stable") await checkAbout();
+
         if (pkg.stage === "stable") record(proof.stages, "stable", seeded);
+
         if (pkg.stage === "candidate")
           record(proof.stages, pkg.stage, {
             kept: upgraded!.kept,
@@ -1772,12 +1992,15 @@ export async function runCommand(args: string[]) {
         await session.d.capture("failure").catch(() => undefined);
         failed = error;
       }
+
       // Every process of this start ends before the next setup, or the chain stops here. A stage
       // that failed keeps its own error; a stop that fails after a passing stage is the failure.
       record(proof.actions, pkg.stage, session.d.actions);
+
       try {
         const ended = await session.stop();
         record(proof.ends, pkg.stage, ended);
+
         // Each start must close cleanly before the next setup or restart.
         if (!ended.graceful) failed ??= new Error("The installed app required forced termination.");
       } catch (error) {
@@ -1786,7 +2009,9 @@ export async function runCommand(args: string[]) {
           ? new AggregateError([failed, error], "Installed stage and cleanup failed")
           : error;
       }
+
       session.d.page.close();
+
       if (failed) break;
     }
   } catch (error) {
@@ -1797,11 +2022,13 @@ export async function runCommand(args: string[]) {
       services: async () => {
         const outcomes = await Promise.allSettled([services.stop(), subtitles.stop()]);
         const failures = outcomes.filter((result) => result.status === "rejected");
+
         if (failures.length)
           throw new AggregateError(
             failures.map((result) => result.reason),
             "Fixture cleanup failed",
           );
+
         return outcomes;
       },
       uninstall: () => uninstall(runner),
@@ -1809,6 +2036,7 @@ export async function runCommand(args: string[]) {
       profile,
       lock,
     });
+
     failed = left.failed;
     proof.status = failed ? "failed" : "passed";
     proof.error =
@@ -1839,6 +2067,7 @@ export async function runCommand(args: string[]) {
     await writeFile(join(evidence, "proof.json"), JSON.stringify(proof, null, 2));
     console.log(`${failed ? "FAIL" : "PASS"} installed upgrade: ${evidence}`);
   }
+
   if (failed) throw failed;
 }
 
@@ -1863,6 +2092,7 @@ export async function telemetryCommand(args: string[]) {
       sha: { type: "string" },
     },
   });
+
   check(
     values["native-case"] === "all" || values["native-case"] === "compatibility",
     "Installed telemetry accepts --native-case all or compatibility",
@@ -1875,6 +2105,7 @@ export async function telemetryCommand(args: string[]) {
   const runner = disposableRunner();
   const root = values.root ?? "";
   const under = relative(runner.temp, root);
+
   if (
     !values.packages ||
     !isAbsolute(root) ||
@@ -1884,9 +2115,11 @@ export async function telemetryCommand(args: string[]) {
   )
     throw new Error("Telemetry requires --packages and a new --root under RUNNER_TEMP");
   check(process.env["GITHUB_REF"] === "refs/heads/main", "Installed telemetry runs from main only");
+
   const receipt = readReceipt(
     JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8")),
   );
+
   check(
     receipt.resolved.stableTag === "v0.0.15",
     "Frozen telemetry acceptance requires published v0.0.15",
@@ -1907,6 +2140,7 @@ export async function telemetryCommand(args: string[]) {
   const profiles = join(root, "profiles");
   await mkdir(profiles);
   const pkg = receipt.packages[1];
+
   const child = spawn(
     process.execPath,
     [
@@ -1930,12 +2164,15 @@ export async function telemetryCommand(args: string[]) {
       },
     },
   );
+
   const [code, signal] = (await once(child, "exit")) as [number | null, NodeJS.Signals | null];
+
   if (code !== 0 || signal !== null) throw new Error(`Native telemetry failed: ${code ?? signal}`);
 }
 
 if (import.meta.main) {
   const [command, ...args] = process.argv.slice(2);
+
   if (command === "resolve") await resolveCommand(args);
   else if (command === "run") await runCommand(args);
   else if (command === "telemetry") await telemetryCommand(args);

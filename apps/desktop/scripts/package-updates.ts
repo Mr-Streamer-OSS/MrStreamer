@@ -24,11 +24,13 @@ const Id = type("number.integer > 0").narrow(Number.isSafeInteger);
 const VerifiedAsset = type({ name: "string", id: Id, bytes: Id, sha256: Hash, url: "string" });
 const ArtifactProof = type({ id: Id, name: "string", sha256: Hash, expiresAt: "string" });
 const ReceiptProof = type({ attempt: Id, receipt: ArtifactProof, package: ArtifactProof });
+
 const Native = type({
   makepkg: "string",
   srcinfo: Hash,
   vercmp: type({ candidate: "string", stable: "string", result: "-1" }).or("null"),
 });
+
 const Preparation = type({
   schema: "1",
   mode: "'stable' | 'candidate'",
@@ -46,7 +48,9 @@ const Preparation = type({
     receipts: { "mac-arm64": ReceiptProof, "linux-x64": ReceiptProof },
   }).or("null"),
 });
+
 type Preparation = typeof Preparation.infer;
+
 const PreparationFile = Preparation.and({
   notice: type.enumerated("Verified stable release", CANDIDATE_NOTICE),
   arch: {
@@ -77,11 +81,13 @@ function requestVersion(request: PreparationRequest) {
     !!version.nightly === (request.mode === "candidate"),
     "Version channel does not match mode.",
   );
+
   if (request.mode === "candidate") {
     check(formatVersion(stable) === MINIMUM_VERSION, "Candidate tests require a 0.0.18 nightly.");
     Id.assert(request.run);
     Id.assert(version.nightly!.run);
   }
+
   return version;
 }
 
@@ -98,6 +104,7 @@ export async function preparePackages(
   const version = requestVersion(request);
   check(github.repository === REPOSITORY, "Unexpected repository.");
   const tag = `v${request.version}`;
+
   const release = type({
     tag_name: "string",
     target_commitish: "string",
@@ -113,6 +120,7 @@ export async function preparePackages(
       browser_download_url: "string",
     }).array(),
   }).assert(await github.json(`/releases/tags/${encodeURIComponent(tag)}`));
+
   check(
     release.tag_name === tag &&
       !release.draft &&
@@ -121,23 +129,30 @@ export async function preparePackages(
       Number.isFinite(Date.parse(release.published_at)),
     "Release tag/channel is not published as requested.",
   );
+
   const source = type({ sha: Sha }).assert(
     await github.json(`/commits/${encodeURIComponent(tag)}`),
   ).sha;
+
   check(release.target_commitish === source, "Release target does not match the tag source.");
+
   for (const comparison of [`${source}...main`, `${MANAGED_UPDATES_COMMIT}...${source}`]) {
     const ancestry = type({ status: "string", behind_by: "number.integer" }).assert(
       await github.json(`/compare/${comparison}?per_page=1`),
     );
+
     check(
       (ancestry.status === "ahead" || ancestry.status === "identical") && ancestry.behind_by === 0,
       `Required ancestry is missing: ${comparison}.`,
     );
   }
+
   const content = (path: string) =>
     github.bytes(`/contents/${path}?ref=${source}`, "application/vnd.github.raw+json");
+
   const root = await mkdtemp(join(tmpdir(), "mrstreamer-release-sources-"));
   let sources: Awaited<ReturnType<typeof releaseSources>>;
+
   try {
     await mkdir(join(root, "scripts"));
     await writeFile(
@@ -154,10 +169,12 @@ export async function preparePackages(
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+
   const expected = new Set([
     ...releaseFiles(request.version),
     ...sources.map((source) => source.file),
   ]);
+
   const names = release.assets.map((asset) => asset.name);
   check(
     names.length === expected.size + 1 &&
@@ -166,6 +183,7 @@ export async function preparePackages(
       [...expected].every((name) => names.includes(name)),
     "Release must contain exactly the expected binaries, metadata, source archives and SHA256SUMS.txt.",
   );
+
   for (const asset of release.assets) {
     check(
       asset.state === "uploaded" &&
@@ -175,6 +193,7 @@ export async function preparePackages(
     );
     check(/^sha256:[0-9a-f]{64}$/.test(asset.digest ?? ""), `${asset.name} has no SHA-256 digest.`);
   }
+
   const download = async (name: string) => {
     const asset = release.assets.find((asset) => asset.name === name)!;
     const bytes = await github.bytes(`/releases/assets/${asset.id}`, "application/octet-stream");
@@ -183,14 +202,17 @@ export async function preparePackages(
       bytes.length === asset.size && asset.digest === `sha256:${sha256}`,
       `${name} bytes do not match size/digest.`,
     );
+
     return {
       bytes,
       facts: { name, id: asset.id, bytes: bytes.length, sha256, url: asset.browser_download_url },
     };
   };
+
   const checksums = await (async () => {
     const sums = await download("SHA256SUMS.txt");
     const entries = new Map<string, string>();
+
     for (const line of new TextDecoder().decode(sums.bytes).replace(/\n$/, "").split("\n")) {
       const match = /^([0-9a-f]{64})[ \t]+\*?([^\r\n]+)$/.exec(line);
       check(
@@ -199,7 +221,9 @@ export async function preparePackages(
       );
       entries.set(match[2]!, match[1]!);
     }
+
     check(entries.size === expected.size, "SHA256SUMS.txt has missing entries.");
+
     for (const asset of release.assets) {
       if (asset.name !== "SHA256SUMS.txt")
         check(
@@ -207,19 +231,24 @@ export async function preparePackages(
           `${asset.name} checksum does not match GitHub's digest.`,
         );
     }
+
     return { sha256: sums.facts.sha256, entries: entries.size };
   })();
+
   const dmgName = platformFiles(request.version, "mac-arm64").find((name) =>
     name.endsWith(".dmg"),
   )!;
+
   const debName = platformFiles(request.version, "linux-x64").find((name) =>
     name.endsWith(".deb"),
   )!;
+
   const dmg = (await download(dmgName)).facts;
   const deb = (await download(debName)).facts;
   const license = await content("LICENSE");
   check(license.length > 0, "Upstream LICENSE is empty.");
   let candidate: Preparation["candidate"] = null;
+
   if (request.mode === "candidate") {
     const run = type({
       id: Id,
@@ -232,6 +261,7 @@ export async function preparePackages(
       conclusion: "string | null",
       head_sha: Sha,
     }).assert(await github.json(`/actions/runs/${request.run}`));
+
     check(
       run.id === request.run &&
         run.path === ".github/workflows/release.yml" &&
@@ -244,14 +274,18 @@ export async function preparePackages(
       "Candidate run does not match the successful published nightly source/workflow.",
     );
     const artifacts = await packageArtifacts(github, request.run);
+
     const proof = async (platform: "mac-arm64" | "linux-x64", asset: typeof dmg) => {
       const prefix = `package-receipt-${platform}-direct-${request.version}-attempt-`;
+
       const matches = artifacts.filter(
         (artifact) =>
           artifact.name.startsWith(prefix) && /^[1-9]\d*$/.test(artifact.name.slice(prefix.length)),
       );
+
       check(matches.length === 1, `Expected one unambiguous ${platform} receipt attempt.`);
       const attempt = Id.assert(Number(matches[0]!.name.slice(prefix.length)));
+
       const receiptRequest: PackageRequest = {
         sourceCommit: source,
         workflowCommit: source,
@@ -261,12 +295,14 @@ export async function preparePackages(
         distribution: "direct",
         run: { id: request.run, attempt, headCommit: source },
       };
+
       const resolved = await resolvePackageReceipt(github, receiptRequest, artifacts, now);
       const file = resolved.receipt.files.find((file) => file.name === asset.name);
       check(
         file && file.sha256 === asset.sha256 && file.bytes === asset.bytes,
         `${platform} published bytes do not match the package receipt.`,
       );
+
       return {
         attempt,
         receipt: {
@@ -283,6 +319,7 @@ export async function preparePackages(
         },
       };
     };
+
     candidate = {
       run: { id: run.id, number: run.run_number, event: run.event, headCommit: source },
       receipts: {
@@ -291,6 +328,7 @@ export async function preparePackages(
       },
     };
   }
+
   return Preparation.assert({
     schema: 1,
     mode: request.mode,
@@ -333,6 +371,7 @@ export function renderRecipes(
   );
   Id.assert(pkgrel);
   const notice = preparation.mode === "candidate" ? CANDIDATE_NOTICE : "Verified stable release";
+
   const substitute = (input: string, values: Record<string, string>) => {
     const markers = input.match(/@[A-Za-z_][A-Za-z0-9_]*@|\{\{[^{}\r\n]*\}\}/g) ?? [];
     check(
@@ -340,11 +379,13 @@ export function renderRecipes(
         Object.keys(values).every((key) => markers.filter((marker) => marker === key).length === 1),
       "Unknown, missing or repeated template marker.",
     );
+
     return input.replace(
       /@[A-Za-z_][A-Za-z0-9_]*@|\{\{[^{}\r\n]*\}\}/g,
       (marker) => values[marker]!,
     );
   };
+
   return {
     notice,
     arch: { pkgname: "mrstreamer-bin" as const, pkgver: archPkgver(preparation.version), pkgrel },
@@ -379,6 +420,7 @@ export async function writePreparation(
     "mr-streamer.rb": recipes.cask,
     LICENSE: templates.license,
   };
+
   const receipt = PreparationFile.assert({
     ...preparation,
     notice: recipes.notice,
@@ -391,13 +433,16 @@ export async function writePreparation(
     },
     native: null,
   });
+
   await mkdir(dirname(resolve(dir)), { recursive: true });
   await mkdir(dir);
+
   for (const [name, text] of Object.entries(outputs))
     await writeFile(join(dir, name), text, { flag: "wx" });
   await writeFile(join(dir, "preparation.json"), `${JSON.stringify(receipt, null, 2)}\n`, {
     flag: "wx",
   });
+
   return receipt;
 }
 
@@ -406,15 +451,18 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
   const receipt = PreparationFile.assert(
     JSON.parse(await readFile(join(dir, "preparation.json"), "utf8")),
   );
+
   check(
     (receipt.mode === "candidate") === (receipt.candidate !== null),
     "Candidate proof does not match preparation mode.",
   );
+
   const version = requestVersion(
     receipt.mode === "candidate"
       ? { mode: "candidate", version: receipt.version, run: receipt.candidate!.run.id }
       : { mode: "stable", version: receipt.version },
   );
+
   check(
     receipt.arch.pkgver === archPkgver(receipt.version),
     "Recorded pkgver does not match upstream version.",
@@ -423,6 +471,7 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
     hash(await readFile(join(dir, "PKGBUILD"))) === receipt.outputs.PKGBUILD,
     "PKGBUILD digest differs from preparation.json.",
   );
+
   const native = (file: string, args: string[]) => {
     try {
       return execFileSync(file, args, { cwd: dir, env, encoding: "utf8" });
@@ -433,15 +482,18 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
       );
     }
   };
+
   const makepkg = native("makepkg", ["--version"]).split("\n")[0]!;
   const srcinfo = native("makepkg", ["--printsrcinfo"]);
   check(srcinfo === native("makepkg", ["--printsrcinfo"]), "Native .SRCINFO regeneration differs.");
+
   const first = (key: string) =>
     srcinfo
       .split("\n")
       .map((line) => line.trim())
       .find((line) => line.startsWith(`${key} = `))
       ?.slice(key.length + 3);
+
   check(
     first("pkgver") === receipt.arch.pkgver &&
       first("pkgrel") === String(receipt.arch.pkgrel) &&
@@ -450,6 +502,7 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
     "Native .SRCINFO does not match the verified version/revision/deb URL/hash.",
   );
   let vercmp: (typeof Native.infer)["vercmp"] = null;
+
   if (version.nightly) {
     const stable = formatVersion({ ...version, nightly: null });
     check(
@@ -458,6 +511,7 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
     );
     vercmp = { candidate: receipt.arch.pkgver, stable, result: -1 };
   }
+
   try {
     await writeFile(join(dir, ".SRCINFO"), srcinfo, { flag: "wx" });
   } catch (error) {
@@ -467,8 +521,10 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
       "Existing .SRCINFO differs.",
     );
   }
+
   receipt.native = { makepkg, srcinfo: hash(srcinfo), vercmp };
   const temporary = await mkdtemp(join(dir, ".preparation-"));
+
   try {
     const staged = join(temporary, "preparation.json");
     await writeFile(staged, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
@@ -476,6 +532,7 @@ export async function generateSrcinfo(dir: string, env: NodeJS.ProcessEnv = proc
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+
   return receipt.native;
 }
 
@@ -491,7 +548,9 @@ async function main() {
       dir: { type: "string" },
     },
   });
+
   check(positionals.length === 1, 'Use "render" or "srcinfo".');
+
   if (positionals[0] === "srcinfo") {
     check(
       values.dir && Object.keys(values).length === 1,
@@ -499,8 +558,10 @@ async function main() {
     );
     const result = await generateSrcinfo(values.dir);
     console.log(`.SRCINFO ${result.srcinfo} from ${result.makepkg}.`);
+
     return;
   }
+
   check(
     positionals[0] === "render" && values.out && !values.dir,
     "Use render --version <stable> --out <new-directory>, or --candidate <nightly> --run <id>.",
@@ -513,34 +574,42 @@ async function main() {
     values.candidate !== undefined || values.run === undefined,
     "--run is only valid with --candidate.",
   );
+
   const positive = (value: string | undefined, name: string) => {
     check(value && /^[1-9]\d*$/.test(value), `${name} must be a positive integer.`);
+
     return Id.assert(Number(value));
   };
+
   const request: PreparationRequest =
     values.candidate !== undefined
       ? { mode: "candidate", version: values.candidate, run: positive(values.run, "--run") }
       : { mode: "stable", version: values.version! };
+
   requestVersion(request);
   const pkgrel = positive(values.pkgrel ?? "1", "--pkgrel");
   check(
     !lstatSync(values.out, { throwIfNoEntry: false }),
     "Output directory already exists. Use a new --out directory.",
   );
+
   const token =
     process.env["GH_TOKEN"] ??
     execFileSync("gh", ["auth", "token"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
+
   const preparation = await preparePackages(restGitHub(REPOSITORY, token), request);
   const templates = await readTemplates();
+
   const receipt = await writePreparation(
     values.out,
     preparation,
     renderRecipes(preparation, pkgrel, templates),
     templates,
   );
+
   console.log(
     `${receipt.notice} ${receipt.tag} from ${receipt.sourceCommit}. Native checks pending; see packaging/aur/README.md and packaging/homebrew/README.md.`,
   );

@@ -52,6 +52,7 @@ export interface ViewingSnapshot {
 
 /** Commands remembered as done. */
 const RECEIPTS = 500;
+
 /** Title rows read for Continue watching, most recent first, as the desktop's store reads them. */
 const CONTINUE_WINDOW = 2000;
 
@@ -99,16 +100,19 @@ export function memoryViewingStore(deps: {
     imported: false,
     accounts: {},
   };
+
   let accounts = new Map<string, Account>();
   let receipts = new Set<string>();
   let sequence = 0;
   let imported = false;
+
   const load = (from: ViewingSnapshot) => {
     accounts = new Map(Object.entries(from.accounts).map(([key, each]) => [key, accountOf(each)]));
     receipts = new Set(from.receipts);
     sequence = from.sequence;
     imported = from.imported;
   };
+
   load(saved);
 
   const snapshot = (): ViewingSnapshot => ({
@@ -142,6 +146,7 @@ export function memoryViewingStore(deps: {
       deps.save(next);
       saved = next;
       receipts = new Set(next.receipts);
+
       return result;
     } catch (cause) {
       load(saved);
@@ -154,8 +159,10 @@ export function memoryViewingStore(deps: {
 
   const titlesOf = (account: string, filter: RawTitleFilter): RawProgress[] => {
     const held = accounts.get(account);
+
     if (!held) return [];
     const series = new Set(filter.seriesIds ?? []);
+
     return [
       ...[...held.rows.values()].filter(
         ({ title }) => title.kind === "episode" && series.has(title.seriesId),
@@ -166,6 +173,7 @@ export function memoryViewingStore(deps: {
 
   const marksOf = (account: string, keys: readonly string[]): SeriesMarks[] => {
     const held = accounts.get(account);
+
     return held ? keys.flatMap((key) => held.series.get(key) ?? []) : [];
   };
 
@@ -174,37 +182,46 @@ export function memoryViewingStore(deps: {
     marks: marksOf,
     marksIn: (account, seriesIds) => {
       const held = accounts.get(account);
+
       if (!held) return [];
+
       const keys = [...held.series].flatMap(([key, state]) =>
         state.versions.some((id) => seriesIds.includes(id)) ? [key] : [],
       );
+
       return marksOf(account, keys).flatMap(({ marks }) => marks);
     },
   };
 
   const readOne = (account: string) => {
     const held = accounts.get(account) ?? fresh();
+
     // The latest first; of two saved at the same moment, the one written last.
     const rows = [...held.rows.values()]
       .toReversed()
       .sort((a, b) => b.at - a.at)
       .slice(0, CONTINUE_WINDOW);
+
     const marked = [...held.series]
       .flatMap(([key, state]) => {
         const mark = leading(state);
+
         return !state.hidden && mark && mark.at > 0 ? [{ key, state, mark }] : [];
       })
       .sort((a, b) => b.mark.at - a.mark.at)
       .slice(0, CONTINUE_OFFERED)
       .map(({ key, state, mark }) => {
         const keys = [...new Set([key, ...state.versions.map((id) => `id:${id}`)])];
+
         const next = goesOn(
           state.listing,
           titlesOf(account, { seriesIds: state.versions }),
           standing(marksOf(account, keys)),
         );
+
         return { mark, next };
       });
+
     return {
       account,
       held,
@@ -220,6 +237,7 @@ export function memoryViewingStore(deps: {
   const read = (wanted: readonly string[]): StoredViewing => {
     const records = wanted.map(readOne);
     const several = records.length > 1;
+
     const list = (of: "favourites" | "recent"): StoredChannel[] =>
       several
         ? merged(
@@ -231,12 +249,15 @@ export function memoryViewingStore(deps: {
             of === "favourites" ? 1 : -1,
           )
         : records.flatMap(({ account, held }) => held.state[of].map((id) => ({ account, id })));
+
     const continuing = records.flatMap(({ account, continueWatching }) =>
       continueWatching.map((progress) => ({ account, progress })),
     );
+
     const marks = records.flatMap(({ account, marked }) =>
       marked.map((each) => ({ account, ...each })),
     );
+
     return {
       favourites: list("favourites"),
       recent: list("recent"),
@@ -259,10 +280,13 @@ export function memoryViewingStore(deps: {
   /** Appends `events`, each to its account's record in the order given, as the tables would. */
   const append = (at: number, events: readonly AccountEvent[]) => {
     const channels = new Map<string, ChannelEvent[]>();
+
     for (const { account, event } of events) {
       let held = accounts.get(account);
+
       if (!held) accounts.set(account, (held = fresh()));
       held.sequence = ++sequence;
+
       if (!isTitleEvent(event) && !isMarkEvent(event)) {
         place(held.placed, event.type, event.channelId, sequence);
         channels.set(account, [...(channels.get(account) ?? []), event]);
@@ -270,8 +294,10 @@ export function memoryViewingStore(deps: {
         project(remembered(held).view, event, at, sequence);
       }
     }
+
     for (const [account, own] of channels) {
       const held = accounts.get(account);
+
       if (held) held.state = apply(held.state, own);
     }
   };
@@ -291,12 +317,14 @@ export function memoryViewingStore(deps: {
       attempt(() => {
         if (receipts.has(commandId)) return read(wanted);
         const events = decide(read(wanted), look);
+
         // Thrown, so the transaction stores nothing, the command's id neither.
         if (events instanceof Failed) throw events;
         transaction(() => {
           receipts.add(commandId);
           append(at, events);
         });
+
         return read(wanted);
       }),
     importOnce: ({ account, at, events }) =>
@@ -304,12 +332,14 @@ export function memoryViewingStore(deps: {
         if (imported) return false;
         transaction(() => {
           imported = true;
+
           if (account)
             append(
               at,
               events.map((event) => ({ account, event })),
             );
         });
+
         return true;
       }),
     erase: (account) =>

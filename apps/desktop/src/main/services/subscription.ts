@@ -95,6 +95,7 @@ const StoredSubscription = lazy(() =>
     account: AccountRecord(),
   }),
 );
+
 type StoredSubscription = Infer<typeof StoredSubscription>;
 
 /** What an added subscription's folder is named by, and so the only ids one may have. */
@@ -299,11 +300,13 @@ function make(deps: SubscriptionDeps) {
     let current: Promise<readonly Saved[]> | null = null;
     /** What `current` holds once read, changed with it: the roster `standsNow` answers from. */
     let latest: readonly Saved[] = [];
+
     /** Makes `roster` the subscriptions services see, from now on. */
     const use = (roster: readonly Saved[]) => {
       latest = roster;
       current = Promise.resolve(roster);
     };
+
     /**
      * The added folders `settle` found holding an account another subscription holds too, by
      * that account: kept as they are and not shown, and removed with the one that is.
@@ -319,6 +322,7 @@ function make(deps: SubscriptionDeps) {
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
     const folderOf = (id: string) => join(addedDir, id);
+
     const loginPath = ({ id, original }: Pick<Saved, "id" | "original">) =>
       original ? path : join(folderOf(id), "subscription.json");
 
@@ -328,6 +332,7 @@ function make(deps: SubscriptionDeps) {
         stored.kind === "xtream"
           ? { kind: "xtream", server: stored.server, username: stored.username, password: secret }
           : { kind: "m3u", link: secret, ...defined({ mapping: stored.mapping }) };
+
       return { provider: providerFor(account, deps.providerOptions), account };
     }
 
@@ -339,8 +344,10 @@ function make(deps: SubscriptionDeps) {
       stored: StoredSubscription,
     ): Saved => {
       const revision = ++revisions;
+
       try {
         const provider = connected(stored, deps.secrets.open(sealedOf(stored)));
+
         return { id, original, name: name ?? null, revision, stored, provider };
       } catch {
         // A new signature, a reset keychain or a denied prompt all end here.
@@ -355,7 +362,9 @@ function make(deps: SubscriptionDeps) {
     const addedLogin = async (id: string) => {
       const file = join(folderOf(id), "subscription.json");
       const stored = await readJsonFile(file, StoredSubscription());
+
       if (stored) return stored;
+
       return (await stat(file).catch(() => null)) ? ("unreadable" as const) : ("missing" as const);
     };
 
@@ -380,21 +389,25 @@ function make(deps: SubscriptionDeps) {
           () => [],
         ),
       ]);
+
       const roster: Saved[] = [];
       const entries: object[] = [];
       const accounts = new Set(stored ? [keyOf(stored)] : []);
       /** The folders an entry names, read or not: none of those is a leftover. */
       const named = new Set<string>();
+
       const original = !stored
         ? null
         : registry.original?.key === keyOf(stored)
           ? registry.original
           : { id: randomUUID(), original: true as const, key: keyOf(stored) };
+
       const keepOriginal = () => {
         if (!stored || !original) return;
         entries.push(original);
         roster.push(loaded(original.id, true, original.name, stored));
       };
+
       /**
        * Takes up an added subscription whose folder holds `login`. One whose account is saved
        * already is left as it is, with the entry `listed` it has.
@@ -405,48 +418,61 @@ function make(deps: SubscriptionDeps) {
         listed: object | null,
       ) => {
         const key = keyOf(login);
+
         if (accounts.has(key)) {
           if (listed) entries.push(listed);
           spare.set(key, [...(spare.get(key) ?? []), entry.id]);
+
           return;
         }
+
         accounts.add(key);
         await removeUnfinishedWrites(folderOf(entry.id));
         entries.push(key === entry.key ? entry : { ...entry, key });
         roster.push(loaded(entry.id, false, entry.name, login));
       };
+
       for (const [at, raw] of registry.entries.entries()) {
         if (at === registry.at) {
           keepOriginal();
           continue;
         }
+
         if ("id" in raw && typeof raw.id === "string") named.add(raw.id);
         const entry = "original" in raw ? null : AddedEntry()(raw);
+
         if (!entry || entry instanceof type.errors) {
           entries.push(raw);
           continue;
         }
+
         const login = await addedLogin(entry.id);
+
         if (login === "unreadable") entries.push(raw);
         // A removal cut short: the entry goes, with what is left of the lists.
         else if (login === "missing")
           await rm(folderOf(entry.id), { recursive: true, force: true });
         else await keepAdded(entry, login, raw);
       }
+
       if (registry.at === -1) keepOriginal();
+
       for (const id of folders) {
         if (named.has(id)) continue;
         const login = await addedLogin(id);
+
         // What a removal cut short left of the lists, with nothing to list them for.
         if (login === "missing") await rm(folderOf(id), { recursive: true, force: true });
         else if (login !== "unreadable") await keepAdded({ id, key: keyOf(login) }, login, null);
       }
+
       if (JSON.stringify(entries) !== JSON.stringify(registry.entries)) {
         // The ids hold for this run either way; a registry that can't be written is settled again.
         await writeJsonFile(registryPath, { version: 1, subscriptions: entries }).catch(
           (cause: unknown) => console.warn(`[storage] can't write ${registryPath}`, cause),
         );
       }
+
       return roster;
     };
 
@@ -458,10 +484,13 @@ function make(deps: SubscriptionDeps) {
      */
     const writeEntry = async (of: Pick<Saved, "id" | "original">, saved: Saved | null) => {
       const { entries, at } = await readRegistry(registryPath);
+
       const index = of.original
         ? at
         : entries.findIndex((raw, each) => each !== at && "id" in raw && raw.id === of.id);
+
       const { name: _name, ...kept }: { name?: unknown } = entries[index] ?? {};
+
       const entry = saved && {
         ...kept,
         id: saved.id,
@@ -469,12 +498,15 @@ function make(deps: SubscriptionDeps) {
         key: keyOf(saved.stored),
         ...defined({ name: saved.name ?? undefined }),
       };
+
       const rest = entries.filter((_, each) => each !== index);
+
       const subscriptions = !entry
         ? rest
         : index === -1
           ? [...rest, entry]
           : entries.with(index, entry);
+
       await writeJsonFile(registryPath, { version: 1, subscriptions });
     };
 
@@ -485,9 +517,11 @@ function make(deps: SubscriptionDeps) {
     const save = (next: Saved, previous: Saved | null) =>
       Effect.promise(async () => {
         if (next.stored !== previous?.stored) await writeJsonFile(loginPath(next), next.stored);
+
         if (!previous || previous.name !== next.name) await writeEntry(next, next);
         const roster = await (current ?? []);
         use(previous ? roster.map((each) => (each === previous ? next : each)) : [...roster, next]);
+
         return summary(next);
       });
 
@@ -499,6 +533,7 @@ function make(deps: SubscriptionDeps) {
      */
     const httpsOrAsk = (authenticated: Effect.Effect<AccountStatus, Failed>, server: string) => {
       const ask = new Failed({ error: { kind: "unencrypted-only", server } });
+
       return authenticated.pipe(
         Effect.mapError((failed) => (httpsUnavailable(failed.error) ? ask : failed)),
         Effect.raceFirst(
@@ -519,6 +554,7 @@ function make(deps: SubscriptionDeps) {
 
     const publicOf = (subscription: Saved): SavedSubscription => {
       const playlist = subscription.stored.kind === "m3u" ? subscription.stored : null;
+
       return {
         id: subscription.id,
         revision: subscription.revision,
@@ -545,6 +581,7 @@ function make(deps: SubscriptionDeps) {
     const find = (subscriptionId: string) =>
       Effect.flatMap(load, (roster) => {
         const found = roster.find((each) => each.id === subscriptionId);
+
         return found ? Effect.succeed(found) : Effect.fail(noSubscription);
       });
 
@@ -563,20 +600,25 @@ function make(deps: SubscriptionDeps) {
       add: (login: LoginInput) =>
         Effect.gen(function* () {
           const added = deps.usage?.action("playlist_added");
+
           const { account, schemeless } = yield* Effect.try({
             try: () => parseLogin(login),
             catch: failedWith,
           });
+
           const provider = providerFor(account, deps.providerOptions);
           const key = keyFor(account);
           // The subscription this login is entered again for, when its account is saved already.
           const before = (yield* load).find((each) => keyOf(each.stored) === key) ?? null;
+
           // An address typed without a scheme goes to http only once the viewer agrees: the
           // login would travel unencrypted. A playlist without a login keeps the https answer.
           const status = yield* account.kind === "xtream" && schemeless
             ? httpsOrAsk(authenticate(provider), account.server)
             : authenticate(provider);
+
           const sealed = yield* seal(account.kind === "xtream" ? account.password : account.link);
+
           const stored: StoredSubscription =
             account.kind === "xtream"
               ? {
@@ -595,17 +637,22 @@ function make(deps: SubscriptionDeps) {
                   sealedLink: sealed,
                   account: status,
                 };
+
           const name = named(login.name);
+
           return yield* writeOne(
             Effect.gen(function* () {
               const roster = yield* load;
               // The same account keeps its id: what the app names by it still means it.
               const previous = roster.find((each) => keyOf(each.stored) === key) ?? null;
+
               if (before) {
                 // It went while the provider was asked, or its login was stored anew: that stays.
                 if (!previous) return yield* noSubscription;
+
                 if (previous.revision !== before.revision) return summary(previous);
               }
+
               const kept: StoredSubscription =
                 stored.kind === "m3u" && previous?.stored.kind === "m3u"
                   ? {
@@ -613,6 +660,7 @@ function make(deps: SubscriptionDeps) {
                       ...defined({ mapping: previous.stored.mapping }),
                     }
                   : stored;
+
               const result = yield* save(
                 {
                   id: previous?.id ?? randomUUID(),
@@ -628,7 +676,9 @@ function make(deps: SubscriptionDeps) {
                 },
                 previous,
               );
+
               if (!previous) added?.();
+
               return result;
             }),
           );
@@ -640,30 +690,39 @@ function make(deps: SubscriptionDeps) {
       ) =>
         Effect.gen(function* () {
           const subscription = yield* find(subscriptionId);
+
           const renamed = (latest: Saved) =>
             asked.name === undefined ? latest.name : named(asked.name);
+
           if (asked.secret === undefined) {
             return yield* change(subscriptionId, (latest) =>
               save({ ...latest, name: renamed(latest) }, latest),
             );
           }
+
           const { stored } = subscription;
+
           // A password is taken as typed, and a playlist's link made whole as a typed address is.
           const secret =
             stored.kind === "xtream" ? asked.secret : yield* playlistLink(asked.secret);
+
           const provider = connected(stored, secret);
           const account = yield* authenticate(provider.provider);
           const sealed = yield* seal(secret);
+
           return yield* change(subscriptionId, (latest) => {
             // A login stored while the provider was asked is the later one: it stays as it is.
             if (latest.revision !== subscription.revision) return Effect.succeed(summary(latest));
+
             // The playlist stays the account it was, under the key it has: only its link is new.
             const next: StoredSubscription =
               latest.stored.kind === "xtream"
                 ? { ...latest.stored, sealedPassword: sealed, account }
                 : { ...latest.stored, server: new URL(secret).origin, sealedLink: sealed, account };
+
             // A name given while the provider was asked stays too.
             const name = latest.name === subscription.name ? renamed(latest) : latest.name;
+
             return save({ ...latest, name, revision: ++revisions, stored: next, provider }, latest);
           });
         }),
@@ -671,8 +730,10 @@ function make(deps: SubscriptionDeps) {
       recheck: (subscriptionId: string) =>
         Effect.gen(function* () {
           const subscription = yield* find(subscriptionId);
+
           if (!subscription.provider) return summary(subscription);
           const account = yield* authenticate(subscription.provider.provider);
+
           return yield* change(subscriptionId, (latest) =>
             // What the provider said under a login that changed since says nothing of this one.
             latest.revision === subscription.revision
@@ -688,7 +749,9 @@ function make(deps: SubscriptionDeps) {
             const removed = deps.usage?.action("playlist_removed");
             const roster = yield* load;
             const subscription = roster.find((each) => each.id === subscriptionId);
+
             if (!subscription) return;
+
             return yield* Effect.uninterruptibleMask((restore) =>
               Effect.gen(function* () {
                 const key = keyOf(subscription.stored);
@@ -719,6 +782,7 @@ function make(deps: SubscriptionDeps) {
                   concurrency: "unbounded",
                   discard: true,
                 });
+
                 for (const entry of [
                   subscription,
                   ...spares.map((id) => ({ id, original: false })),
@@ -731,6 +795,7 @@ function make(deps: SubscriptionDeps) {
                     );
                   yield* logged(Effect.promise(() => writeEntry(entry, null)));
                 }
+
                 removed?.();
               }),
             );
@@ -741,22 +806,28 @@ function make(deps: SubscriptionDeps) {
         Effect.gen(function* () {
           const source = yield* find(subscriptionId);
           const importer = source.provider?.provider.playlistImport;
+
           if (!importer) return yield* noSubscription;
+
           const imported = yield* Effect.tryPromise({
             try: (signal) => importer(signal),
             catch: failedWith,
           });
+
           const modes = new Map(
             source.stored.kind === "m3u"
               ? source.stored.mapping?.groups.map((each) => [each.group, each.mode])
               : [],
           );
+
           const wanted = query.toLocaleLowerCase();
+
           const all = [...imported.groups].filter(([group]) =>
             safeName(group || "Ungrouped")
               .toLocaleLowerCase()
               .includes(wanted),
           );
+
           return {
             status: imported.status,
             total: all.length,
@@ -776,11 +847,14 @@ function make(deps: SubscriptionDeps) {
         Effect.gen(function* () {
           const source = yield* find(subscriptionId);
           const importer = source.provider?.provider.playlistImport;
+
           if (!importer) return yield* noSubscription;
+
           const imported = yield* Effect.tryPromise({
             try: (signal) => importer(signal),
             catch: failedWith,
           });
+
           return {
             total: imported.omissions.length,
             entries: imported.omissions.slice(offset, offset + Math.min(100, limit)),
@@ -791,15 +865,19 @@ function make(deps: SubscriptionDeps) {
         Effect.gen(function* () {
           const before = yield* find(subscriptionId);
           const importer = before.provider?.provider.playlistImport;
+
           if (!importer || before.stored.kind !== "m3u") return yield* noSubscription;
+
           const imported = yield* Effect.tryPromise({
             try: (signal) => importer(signal),
             catch: failedWith,
           });
+
           if (![...imported.groups.keys()].some((each) => playlistGroupId(each) === group))
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This playlist group no longer exists.") },
             });
+
           return yield* change(subscriptionId, (latest) => {
             if (
               latest.revision !== before.revision ||
@@ -815,12 +893,14 @@ function make(deps: SubscriptionDeps) {
                   },
                 }),
               );
+
             const mapping = mapPlaylistGroup(
               latest.stored.mapping,
               [...imported.groups.keys()].map(playlistGroupId),
               group,
               mode,
             );
+
             if (mapping.groups.length > 10_000)
               return Effect.fail(
                 new Failed({
@@ -832,6 +912,7 @@ function make(deps: SubscriptionDeps) {
               );
             const stored = { ...latest.stored, mapping };
             const provider = connected(stored, latest.provider.account.link);
+
             return save({ ...latest, stored, provider, revision: ++revisions }, latest);
           });
         }),
@@ -843,6 +924,7 @@ function make(deps: SubscriptionDeps) {
       sourceOf: (subscriptionId: string) =>
         Effect.flatMap(find(subscriptionId), (subscription) => {
           const source = sourceOf(subscription);
+
           return source
             ? Effect.succeed(source)
             : Effect.fail(new Failed({ error: { kind: "needs-secret", subscriptionId } }));
@@ -937,9 +1019,12 @@ async function readRegistry(path: string): Promise<{
   readonly original: Infer<typeof OriginalEntry> | null;
 }> {
   const entries = (await readJsonFile(path, Registry()))?.subscriptions ?? [];
+
   for (const [at, entry] of entries.entries()) {
     const original = OriginalEntry()(entry);
+
     if (!(original instanceof type.errors)) return { entries, at, original };
   }
+
   return { entries, at: -1, original: null };
 }

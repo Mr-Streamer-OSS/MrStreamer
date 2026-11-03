@@ -19,6 +19,7 @@ export function ReminderButton({
   className?: string;
 }) {
   const reminder = useReminderToggle(channel, start);
+
   return (
     <span className={cn("flex flex-wrap items-center gap-x-3 gap-y-1", className)}>
       <Button

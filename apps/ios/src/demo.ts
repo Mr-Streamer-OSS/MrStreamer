@@ -43,6 +43,7 @@ export const demoEntry = {
   server: new URL(MEDIA).origin,
   username: "",
 } as const;
+
 export type DemoEntry = typeof demoEntry;
 
 /** What the demo's Live lists: nothing, or the certification playlist. */
@@ -53,6 +54,7 @@ const LIVE: DemoLive = { kind: "none" };
 
 const PLAYLIST =
   "https://raw.githubusercontent.com/Mr-Streamer-OSS/certification-playlist/main/reviewer.m3u";
+
 const PLAYLIST_BYTES = 64 * 1024;
 const PLAYLIST_CHANNELS = 32;
 const PLAYLIST_TIMEOUT_MS = 20_000;
@@ -185,14 +187,18 @@ export function demoProvider(
     const mine = ++started;
     const entries = await playlistEntries(get, signal);
     const parsed = playlistCatalogue(entries.filter(isHttpsHls).slice(0, PLAYLIST_CHANNELS));
+
     if (signal?.aborted) throw stopped(signal);
+
     // An older read that ends after a newer one, or an aborted one, keeps the newer streams.
     if (mine > installed) {
       installed = mine;
       const next = new Map<string, Stream>();
+
       for (const [id, { url, headers }] of parsed.streams) next.set(id, { url, headers });
       streams = next;
     }
+
     return {
       categories: parsed.categories,
       channels: parsed.channels.map((channel) => ({
@@ -208,10 +214,13 @@ export function demoProvider(
     liveCatalogue: channels,
     async liveStream(channelId, signal) {
       if (live.kind === "none") throw new AppFailure({ kind: "channel-not-found", channelId });
+
       // After a launch that showed the saved list, this adapter hasn't read the playlist yet.
       if (!streams?.has(channelId)) await channels(signal);
       const stream = streams?.get(channelId);
+
       if (!stream) throw new AppFailure({ kind: "channel-not-found", channelId });
+
       return Object.keys(stream.headers).length > 0
         ? { url: stream.url, format: "hls", headers: stream.headers }
         : { url: stream.url, format: "hls" };
@@ -225,15 +234,19 @@ export function demoProvider(
     onDemandCatalogue: async () => CATALOGUE,
     async movieDetails(id) {
       if (id !== MOVIE_ID) throw notFound(id);
+
       return MOVIE;
     },
     async seriesDetails(id) {
       if (id !== SERIES_ID) throw notFound(id);
+
       return SERIES;
     },
     async titleFile(kind, id) {
       const file = FILES[kind].get(id);
+
       if (!file) throw notFound(id);
+
       return { url: `${MEDIA}${file}`, container: "mp4" };
     },
   };
@@ -280,39 +293,50 @@ async function playlistEntries(
 ): Promise<PlaylistEntry[]> {
   const timeout = AbortSignal.timeout(PLAYLIST_TIMEOUT_MS);
   const origin = new URL(PLAYLIST).origin;
+
   try {
     const response = await get(PLAYLIST, {
       headers: { "Cache-Control": "no-store" },
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
+
     const declared = bodySize(response);
+
     if (!response.ok || (declared !== null && declared > PLAYLIST_BYTES)) {
       void response.body?.cancel().catch(() => {});
       throw response.ok
         ? tooLarge()
         : new AppFailure({ kind: "provider-error", status: response.status });
     }
+
     if (!response.body) throw unbounded();
     const reader = m3uReader();
     const entries: PlaylistEntry[] = [];
     const decoder = new TextDecoder();
     const pieces = response.body.getReader();
     let bytes = 0;
+
     try {
       for (;;) {
         const { done, value } = await pieces.read();
+
         if (done) break;
         bytes += value.byteLength;
+
         if (bytes > PLAYLIST_BYTES) throw tooLarge();
         entries.push(...reader.push(decoder.decode(value, { stream: true })));
+
         if (reader.playlist === false) throw notAPlaylist();
       }
     } catch (cause) {
       void pieces.cancel().catch(() => {});
       throw cause;
     }
+
     entries.push(...reader.push(decoder.decode()), ...reader.end());
+
     if (reader.playlist !== true) throw notAPlaylist();
+
     return entries;
   } catch (cause) {
     if (cause instanceof AppFailure || signal?.aborted) throw cause;

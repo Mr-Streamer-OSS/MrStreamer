@@ -73,6 +73,7 @@ const canyon = entry(
   2024,
   title("series", "s1", "Canyon Hours", 2024),
 );
+
 const meridian = entry("e2", "movie", "Meridian Dawn", 2023, null);
 const harbour = entry("e3", "movie", "Night Harbour", 2024, film);
 
@@ -96,6 +97,7 @@ const status = (...of: readonly Lists[]): OnDemandStatus => ({
 
 /** A second subscription beside the tests' own, as the main process lists it. */
 const OTHER = "9d2b7c41-6e0a-4f3b-8a15-c4e7f1d09b62";
+
 const BOTH: readonly SubscriptionSummary[] = [
   { ...SAVED, name: "Nova TV" },
   { ...SAVED, id: OTHER, name: "Skyline", server: "https://skyline.example.tv" },
@@ -111,27 +113,34 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
 
 const buttons = () => [...document.body.querySelectorAll("button")];
+
 const button = (label: string) =>
   buttons().find(
     (each) => each.textContent?.trim() === label || each.getAttribute("aria-label") === label,
   );
+
 const press = (label: string) => act(async () => button(label)?.click());
+
 /** Presses twice in one turn: the second press lands before the window has heard of the first. */
 const pressTwice = (label: string) =>
   act(async () => {
     button(label)?.click();
     button(label)?.click();
   });
+
 const key = (name: string, modifiers: KeyboardEventInit = {}) =>
   act(async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, ...modifiers }));
   });
+
 const sheet = () => document.body.querySelector('[role="dialog"]');
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -170,6 +179,7 @@ describe("Save in a title's details", () => {
     await act(async () => progress.resolve([]));
     await act(async () => membership.resolve(saved && own(saved.id)));
     await settle();
+
     return opened;
   }
 
@@ -437,13 +447,16 @@ describe("the Watchlist page", () => {
       ...film,
       versions: [...film.versions, { subscriptionId: OTHER, id: "hd-there", tags: ["EN"] }],
     };
+
     const twin = title("movie", "t1", "Paper Moons", 2025);
+
     const theirs = entry("e6", "movie", "Paper Moons", 2025, {
       ...twin,
       subscriptionId: OTHER,
       versions: [{ subscriptionId: OTHER, id: "t1", tags: ["EN"] }],
       ambiguous: true,
     });
+
     await watchlist(
       page([
         { ...harbour, title: both, sources: [SUBSCRIPTION, OTHER] },
@@ -606,6 +619,7 @@ describe("a saved title the provider no longer lists", () => {
     // Stored, the main process lists the watchlist without it, as often as it is asked.
     ipc.prefer({ adultTitles: false });
     ipc.hold("ondemand.status").resolve(status());
+
     for (let asked = 0; asked < 3; asked++)
       ipc.hold("watchlist.list", (query) => query.limit === 120).resolve(page([harbour]));
     await act(async () =>
@@ -688,8 +702,10 @@ it.each(["adult setting", "adult catalogue"] as const)(
       stopPreferences();
       mounted.unmount();
     };
+
     const bar = (key: string) =>
       createElement(TooltipProvider, null, createElement(WindowBar, { key }));
+
     const nav = () => document.querySelector("header nav")?.textContent ?? "";
     await mounted.render(bar("home"));
     await settle();

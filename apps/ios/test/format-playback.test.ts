@@ -7,20 +7,24 @@ import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 // says. The native player and the native module are stand-ins.
 
 const given: Array<{ uri: string; contentType?: string } | null> = [];
+
 const fakePlayer = nativePlayer((source) => {
   given.push(source);
 });
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
+
   return { promise, resolve };
 }
 
 type Unshown = { language: string | null; format: string | null; forced: boolean };
+
 type Opened =
   | { kind: "session"; playlist: string; unshown?: { named: Unshown[]; more: number } }
   | { kind: "direct" }
@@ -37,13 +41,18 @@ const sessions: Array<{
   closeAsked: boolean;
   failure: { kind: "status"; status: number } | null;
 }> = [];
+
 const session = (id: string) => sessions.find((each) => each.id === id)!;
+
 type NativeFailure = { kind: "unsupported"; detail: string } | { kind: "status"; status: number };
+
 const stoppedServing = new Set<(event: { id: string; failure: NativeFailure }) => void>();
+
 /** The native module saying session `id` stopped serving, as only it knows. */
 const sessionFails = (id: string, failure: NativeFailure) => {
   for (const listener of stoppedServing) listener({ id, failure });
 };
+
 Object.assign(globalThis, {
   expo: {
     modules: {
@@ -70,6 +79,7 @@ Object.assign(globalThis, {
           listener: (event: { id: string; failure: NativeFailure }) => void,
         ) => {
           stoppedServing.add(listener);
+
           return { remove: () => stoppedServing.delete(listener) };
         },
       },
@@ -89,15 +99,18 @@ const movie = (id: string, subscriptionId: string | null = "sub") => ({
   next: false,
   versions: false,
 });
+
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const options = { watch: true, login: ["user", "pass"] };
 
 beforeEach(async () => {
   stop();
+
   for (const each of sessions) {
     each.opened.resolve({ kind: "closed" });
     each.closed.resolve();
   }
+
   await settle();
   sessions.length = 0;
   given.length = 0;
@@ -127,10 +140,12 @@ describe("a file AVPlayer can't open", () => {
       await settle();
       expect(sessions).toHaveLength(1);
       permitted = false;
+
       if (trigger === "catalogue change") {
         recheckPlayback();
         expect(playbackState.get().phase.kind).toBe("failed");
       }
+
       sessions[0]!.opened.resolve({
         kind: "session",
         playlist: "http://127.0.0.1:1/restricted/main.m3u8",
@@ -174,6 +189,7 @@ describe("a file AVPlayer can't open", () => {
       ],
       more: 0,
     };
+
     void play(
       movie("a"),
       {
@@ -321,6 +337,7 @@ describe("a file AVPlayer can't open", () => {
 
   describe("when the session stops serving while the player only waits", () => {
     const gap = "The chosen sound has a gap here that can't be played.";
+
     const opening = async () => {
       void play(
         movie("a"),
@@ -521,6 +538,7 @@ it.each(["session", "direct"] as const)(
   "uses the actual %s format outcome to gate original-file facts",
   async (kind) => {
     const observed = vi.fn();
+
     const opening = play(
       movie("provider"),
       {
@@ -530,8 +548,10 @@ it.each(["session", "direct"] as const)(
       },
       options,
     );
+
     await settle();
     const reader = sessions.at(-1);
+
     if (!reader) throw new Error("No format reader");
     reader.opened.resolve(
       kind === "session"
@@ -539,12 +559,15 @@ it.each(["session", "direct"] as const)(
         : { kind: "direct" },
     );
     await settle();
+
     if (kind === "direct") {
       expect(observed).not.toHaveBeenCalled();
       reader.closed.resolve();
     }
+
     await opening;
     const identity = fakePlayer.identity();
+
     const tracks = {
       ...identity,
       revision: 1,
@@ -568,15 +591,19 @@ it.each(["session", "direct"] as const)(
       selectedSubtitleId: null,
       subtitleOffAllowed: false,
     };
+
     fakePlayer.tracks = tracks;
     fakePlayer.observation({ kind: "tracks", tracks });
     await settle();
+
     if (kind === "session") expect(observed).not.toHaveBeenCalled();
     else {
       expect(observed).toHaveBeenCalledOnce();
       expect(observed).toHaveBeenCalledWith({ audio: ["en"], subtitles: [] });
     }
+
     reader.closed.resolve();
+
     if (kind === "session") {
       const later = {
         ...tracks,
@@ -586,11 +613,13 @@ it.each(["session", "direct"] as const)(
           options: tracks.audio.options.map((track) => ({ ...track, revision: 2 })),
         },
       };
+
       fakePlayer.tracks = later;
       fakePlayer.observation({ kind: "tracks", tracks: later });
       await settle();
       expect(observed).not.toHaveBeenCalled();
     }
+
     await stop();
   },
 );
@@ -621,6 +650,7 @@ it("waits for both format closure and native detach before the first Live candid
   await settle();
   const stamp = fakePlayer.identity();
   const drain = deferred<Awaited<ReturnType<typeof fakePlayer.detachObservedAsync>>>();
+
   const receipt: Awaited<ReturnType<typeof fakePlayer.detachObservedAsync>> = {
     kind: "detached",
     ...stamp,
@@ -628,6 +658,7 @@ it("waits for both format closure and native detach before the first Live candid
     appWorkDrained: true,
     providerDisconnect: "unobservable",
   };
+
   onTestFinished(async () => {
     drain.resolve(receipt);
     format.closed.resolve();
@@ -635,13 +666,16 @@ it("waits for both format closure and native detach before the first Live candid
     onAdmission(null);
   });
   fakePlayer.detachObservedAsync.mockReturnValueOnce(drain.promise);
+
   const candidate = (id: string) => ({
     variantId: id,
     open: async () => {
       order.push(`lookup:${id}`);
+
       return { url: `http://panel/${id}.m3u8`, container: "m3u8" };
     },
   });
+
   const live = play(
     { ...movie("live"), live: true },
     {
@@ -651,6 +685,7 @@ it("waits for both format closure and native detach before the first Live candid
     },
     options,
   );
+
   await settle();
   expect(order).toEqual(["acquire"]);
   format.closed.resolve();

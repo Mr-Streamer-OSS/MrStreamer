@@ -6,6 +6,7 @@ export const cases: readonly ProofCase[] = [
     compare: "record",
     run: () => {
       const has = (value: unknown) => typeof value !== "undefined";
+
       const zone = (() => {
         try {
           return new Intl.DateTimeFormat("en-GB", {
@@ -17,8 +18,10 @@ export const cases: readonly ProofCase[] = [
           return error instanceof Error ? error.name : "failed";
         }
       })();
+
       const scope = globalThis as Record<string, unknown>;
       const crypto = scope["crypto"] as { randomUUID?: unknown; subtle?: unknown } | undefined;
+
       return {
         Buffer: has(scope["Buffer"]),
         TextEncoder: has(scope["TextEncoder"]),
@@ -50,11 +53,13 @@ export const cases: readonly ProofCase[] = [
       const attempt = (make: () => URL): Observed => {
         try {
           const url = make();
+
           return [url.href, url.origin, url.pathname, url.search, url.username, url.password];
         } catch (error) {
           return error instanceof Error ? error.name : "failed";
         }
       };
+
       return {
         canParse: typeof URL.canParse === "function",
         parse: typeof URL.parse === "function",
@@ -67,6 +72,7 @@ export const cases: readonly ProofCase[] = [
         rtmp: attempt(() => new URL("rtmp://echo.test/live")),
         params: (() => {
           const url = new URL("http://line.test/get.php?username=a%20b&password=x%26y");
+
           return [url.searchParams.get("username"), url.searchParams.get("password")];
         })(),
       };

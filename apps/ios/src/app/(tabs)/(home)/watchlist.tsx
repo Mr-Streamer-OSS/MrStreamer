@@ -5,5 +5,6 @@ import { WatchlistScreen } from "../../../watchlist-screen.tsx";
 export default function Watchlist() {
   // A virtualised list: iOS can't shrink the tab bar as it scrolls.
   useFixedTabBar(true);
+
   return <WatchlistScreen />;
 }

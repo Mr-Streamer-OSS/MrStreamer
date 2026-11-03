@@ -77,6 +77,7 @@ export interface LiveSearchIdentity {
 
 /** How sharp a stream's picture is, best first: 4K, Full HD, HD and SD. */
 export const QUALITIES = ["uhd", "fhd", "hd", "sd"] as const;
+
 export type Quality = (typeof QUALITIES)[number];
 
 /** One of a channel's streams. */

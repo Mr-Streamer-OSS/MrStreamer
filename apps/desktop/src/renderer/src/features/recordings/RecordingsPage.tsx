@@ -59,6 +59,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   const scheduled = standalone ? [] : (schedules.data ?? []);
   const now = recordings.filter(isLive);
   const recorded = recordings.filter((each) => !isLive(each));
+
   // Logos, from the channels as the lists have them now; a channel gone leaves its slot empty.
   const channels =
     useQuery(
@@ -67,9 +68,11 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
         ...scheduled.map((each) => each.plan.channel),
       ]),
     ).data ?? [];
+
   const logoOf = (owned: OwnedId) => channels.find((channel) => sameOwned(channel, owned)) ?? null;
   const count = recordings.length + scheduled.length;
   const error = list.error ?? (standalone ? null : schedules.error);
+
   return (
     <div className="flex h-full flex-col">
       {standalone ? <OfflineBar /> : <WindowBar className="bg-black" />}
@@ -90,6 +93,7 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
               size="sm"
               onClick={() => {
                 if (list.error) void list.refetch();
+
                 if (schedules.error && !standalone) void schedules.refetch();
               }}
             >
@@ -144,6 +148,7 @@ function StorageLine({ storage, settings }: { storage: RecordingStorage; setting
           size: formatBytes(storage.used),
           limit: formatLimit(storage.space),
         });
+
   return (
     <span className="ml-auto flex items-baseline gap-4 text-[0.8125rem] text-muted-foreground tabular-nums">
       <span>
@@ -180,6 +185,7 @@ function Section({
   children: ReactNode;
 }) {
   if (count === 0) return null;
+
   return (
     <section aria-label={label}>
       <h2
@@ -211,24 +217,30 @@ function Row({ recording, channel }: { recording: Recording; channel: LiveChanne
   // Kept by the recording, not the row: a Stop moves it from Now to Recorded, into a new row, before
   // a failure to write that down answers.
   const mutationKey = ["recordings", "action", recording.id];
+
   const action = useMutation({
     mutationKey,
     mutationFn: (kind: "stop" | "remove") =>
       call(kind === "stop" ? "recordings.stop" : "recordings.remove", { id: recording.id }),
   });
+
   const last = useMutationState({ filters: { mutationKey }, select: (each) => each.state }).at(-1);
+
   // A Stop that failed only to write down its end was still taken: once the recording is no longer
   // live, its outcome says so, and that its end isn't saved yet, until the retry saves it.
   const failure =
     last?.status === "error" && (active || last.variables !== "stop")
       ? describeError(appError(last.error))
       : null;
+
   const size = missing ? null : formatBytes(recording.bytes);
+
   const when = t("{start} to {end}", {
     // From where its coverage bar starts.
     start: dayTime(coverageStart(recording), now),
     end: formatDate(recording.stop, "time"),
   });
+
   return (
     <li className="flex min-h-[3.875rem] items-center gap-3.5 border-b border-border py-2 xl:min-h-[3.75rem] xl:gap-4">
       <span className="flex h-8 w-12 flex-none xl:w-[3.3rem]">
@@ -370,13 +382,17 @@ function Coverage({
   const spans: { hatched: boolean; gap?: boolean; width: number }[] = [
     { hatched: true, width: bar.late },
   ];
+
   let at = bar.late;
+
   for (const gap of bar.gaps) {
     spans.push({ hatched: false, width: gap.from - at });
     spans.push({ hatched: true, gap: true, width: gap.to - Math.max(at, gap.from) });
     at = Math.max(at, gap.to);
   }
+
   spans.push({ hatched: false, width: bar.reached - at });
+
   return (
     <span
       role="meter"
@@ -416,21 +432,26 @@ function ScheduleRow({
   const now = useNow();
   const { plan, next, status } = schedule;
   const [editing, setEditing] = useState(false);
+
   const cancel = useMutation({
     mutationKey: ["schedules", "cancel", schedule.id],
     mutationFn: () => call("recordings.cancel", { id: schedule.id }),
   });
+
   const failure = cancel.error ? describeError(appError(cancel.error)) : null;
   const padded = plan.padding.before > 0 || plan.padding.after > 0;
+
   const times =
     next &&
     t(padded ? "{start} to {end}, with padding" : "{start} to {end}", {
       start: formatDate(next.start, "time"),
       end: formatDate(next.stop, "time"),
     });
+
   const repeat = repeatText(plan);
   const { word, reason } = standing(schedule, now);
   const recording = status.kind === "recording";
+
   const line = (
     <>
       <span
@@ -449,6 +470,7 @@ function ScheduleRow({
       </span>
     </>
   );
+
   return (
     <li className="flex h-[3.875rem] items-center gap-3.5 border-b border-border xl:h-[3.75rem] xl:gap-4">
       <span className="flex h-8 w-12 flex-none xl:w-[3.3rem]">
@@ -550,6 +572,7 @@ function standing(
 ): { word: string; reason: string } {
   if (!next) return { word: "", reason: t("It has no time to come.") };
   const when = dayTime(next.start, now);
+
   switch (status.kind) {
     case "planned":
       return { word: when, reason: t("A connection is free then.") };

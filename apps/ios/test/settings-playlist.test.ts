@@ -21,7 +21,9 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   ActionSheetIOS: {
@@ -33,29 +35,39 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.0.0" } } }));
+
 vi.mock("expo-router", () => ({
   router: { push: (to: unknown) => scenario.pushed.push(to) },
   useRootNavigationState: () => ({ index: 0, routes: [{ name: "(tabs)" }] }),
   useNavigation: () => ({ setOptions: () => undefined }),
 }));
+
 vi.mock("expo-video", () => ({ isPictureInPictureSupported: () => true }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("../src/downloads-screen.tsx", () => ({ DownloadsLink: () => null }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/ui.tsx", () => ({
   colors: { text: "#FFFFFF", dim: "#8E8E93", line: "#38383A" },
   ChannelLogo: () => null,
   TextButton: () => null,
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useMetadataStanding: () => ({ kind: "no-key" }),
   useTitleTimings: () => null,
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({
   useStatistics: () => ({ enabled: false, transport: "production" }),
   setStatistics: async () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   useRoster: () => ({ kind: "ready", members: scenario.members }),
   members: () => scenario.members,
@@ -63,6 +75,7 @@ vi.mock("../src/account.ts", () => ({
   reloadTitles: (id: string) => scenario.reloaded.push(`titles ${id}`),
   playlistReport: async (): Promise<Partial<PlaylistReport>> => {
     scenario.reported++;
+
     return {
       groups: [
         { group: "a", name: "Kids", mode: null, entries: 2, samples: [] },
@@ -99,6 +112,7 @@ const livingRoom: Member = {
 };
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   scenario.sheet = null;
@@ -114,6 +128,7 @@ async function open(member = livingRoom) {
   await React.act(async () => root.render(React.createElement(Settings)));
   unmount = () => React.act(() => root.unmount());
   const row = container.querySelector('[data-testid="settings-provider-m3u-a"]')!;
+
   return {
     line: () => row.getAttribute("aria-label"),
     press: () => React.act(() => row.dispatchEvent(new Event("click", { bubbles: true }))),

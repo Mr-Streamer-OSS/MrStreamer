@@ -11,14 +11,18 @@ import { streams } from "./hls-stand-in.ts";
 vi.mock("hls.js", async (original) => {
   const real = await original<typeof import("hls.js")>();
   const { standIn } = await import("./hls-stand-in.ts");
+
   return { default: standIn(real.default) };
 });
+
 let engine: Engine | null = null;
+
 afterEach(() => {
   engine?.destroy();
   engine = null;
   vi.useRealTimers();
 });
+
 it.each(["subtitle-playlist", "subtitle-segment"] as const)(
   "%s errors preserve playback but a subsequent video error still fails the engine",
   async (target) => {
@@ -48,6 +52,7 @@ it.each(["subtitle-playlist", "subtitle-segment"] as const)(
     ]);
   },
 );
+
 it("still rejects genuine audio failures before the first picture", async () => {
   const video = document.createElement("video");
   const opened = streams.count();

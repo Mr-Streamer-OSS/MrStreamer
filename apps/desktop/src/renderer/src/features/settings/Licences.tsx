@@ -17,12 +17,15 @@ export function Licences() {
   const list = useQuery(queries.licences());
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<string | null>(null);
+
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+
     return (list.data ?? []).filter((notice) =>
       words.every((word) => `${notice.name} ${notice.licence}`.toLowerCase().includes(word)),
     );
   }, [list.data, query]);
+
   const selected = shown.find((notice) => notice.id === chosen) ?? shown[0] ?? null;
 
   return (
@@ -71,6 +74,7 @@ export function Licences() {
 function Notice({ notice }: { notice: ThirdPartyNotice }) {
   const text = useQuery(queries.licenceText(notice.id));
   const lines = useMemo(() => text.data?.split("\n") ?? [], [text.data]);
+
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-border pl-6">
       <div className="text-lg font-semibold">
@@ -110,12 +114,14 @@ function Lines({ lines }: { lines: readonly string[] }) {
   const box = useRef<HTMLDivElement>(null);
   const rem = useRem();
   const lineHeight = Math.round(rem * 1.3);
+
   const rows = useVirtualizer({
     count: lines.length,
     getScrollElement: () => box.current,
     estimateSize: () => lineHeight,
     overscan: 30,
   });
+
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-auto pb-6 select-text">
       <div className="relative" style={{ height: rows.getTotalSize() }}>

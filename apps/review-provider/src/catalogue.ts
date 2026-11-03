@@ -1,12 +1,14 @@
 // One sample definition. The preparation driver reads these same source identities;
 // protocol lists, details and the linear programme cycle all derive from them.
 export const SOURCE_COMMIT = "9791b09908e03742cee981c97e37d47829fc7a18";
+
 export const CHANNEL = {
   id: "original-live",
   guideId: "original-sample-channel",
   name: "Original sample channel",
   category: "sample-live",
 } as const;
+
 export const ORIGINALS = [
   {
     id: "movie",
@@ -30,6 +32,7 @@ export const ORIGINALS = [
     sha256: "4b71b161bae0b4dc37bdbed8b2b1dd4d1d42cafa36a2ebbff0d775fa706cf2f5",
   },
 ] as const;
+
 export const ARTWORK = [
   { id: "movie-cover", sha256: "b7bc8185167fb1c91663331a32f956125076427565a209377887b7fb84a985f3" },
   {
@@ -45,8 +48,11 @@ export const ARTWORK = [
     sha256: "5c3a56338d0ee35983112b8cfb334c8f78a8f512b4a4e88078f5b571597e9c24",
   },
 ] as const;
+
 export type MediaId = (typeof ORIGINALS)[number]["id"];
+
 type ArtworkId = (typeof ARTWORK)[number]["id"];
+
 export type RenditionId = "540p" | "180p";
 
 export interface ObjectFact {
@@ -55,6 +61,7 @@ export interface ObjectFact {
   readonly sha256: string;
   readonly mime: "video/mp4" | "video/mp2t" | "image/png";
 }
+
 interface Rendition {
   readonly id: RenditionId;
   readonly width: number;
@@ -64,6 +71,7 @@ interface Rendition {
   readonly bandwidth: number;
   readonly averageBandwidth: number;
 }
+
 export interface ProgrammeMedia {
   readonly id: MediaId;
   readonly videoFrames: number;
@@ -74,12 +82,14 @@ export interface ProgrammeMedia {
     readonly continuous: boolean;
   };
 }
+
 export interface Segment {
   readonly programme: MediaId;
   readonly frames: number;
   readonly videoDurationTicks: number;
   readonly files: Readonly<Record<RenditionId, ObjectFact>>;
 }
+
 export interface MediaIndex {
   readonly version: 1;
   readonly sourceCommit: string;
@@ -94,42 +104,58 @@ export interface MediaIndex {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
 function record(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("Invalid media index object");
+
   return value;
 }
+
 function string(value: unknown): string {
   if (typeof value !== "string") throw new Error("Invalid media index text");
+
   return value;
 }
+
 function number(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value))
     throw new Error("Invalid media index number");
+
   return value;
 }
+
 function array(value: unknown): unknown[] {
   if (!Array.isArray(value)) throw new Error("Invalid media index list");
+
   return value;
 }
+
 function mediaId(value: unknown): MediaId {
   const original = ORIGINALS.find((item) => item.id === value);
+
   if (!original) throw new Error("Invalid media identity");
+
   return original.id;
 }
+
 function objectFact(value: unknown): ObjectFact {
   const item = record(value);
   const mime = item.mime;
+
   if (mime !== "video/mp4" && mime !== "video/mp2t" && mime !== "image/png")
     throw new Error("Invalid media MIME");
+
   return { key: string(item.key), sha256: string(item.sha256), bytes: number(item.bytes), mime };
 }
 
 /** Parse generated JSON at the product boundary; tests may supply explicitly synthetic facts. */
 export function readMediaIndex(raw: unknown): MediaIndex {
   const value = record(raw);
+
   if (value.version !== 1) throw new Error("Unknown media index version");
   const originals = record(value.originals);
   const artwork = record(value.artwork);
+
   const index: MediaIndex = {
     version: 1,
     sourceCommit: string(value.sourceCommit),
@@ -148,7 +174,9 @@ export function readMediaIndex(raw: unknown): MediaIndex {
     programmes: array(value.programmes).map((rawProgramme) => {
       const p = record(rawProgramme);
       const audio = record(p.audio);
+
       if (typeof audio.continuous !== "boolean") throw new Error("Invalid audio continuity fact");
+
       return {
         id: mediaId(p.id),
         videoFrames: number(p.videoFrames),
@@ -163,7 +191,9 @@ export function readMediaIndex(raw: unknown): MediaIndex {
     renditions: array(value.renditions).map((rawRendition) => {
       const r = record(rawRendition);
       const id = r.id;
+
       if (id !== "540p" && id !== "180p") throw new Error("Invalid rendition identity");
+
       return {
         id,
         width: number(r.width),
@@ -177,6 +207,7 @@ export function readMediaIndex(raw: unknown): MediaIndex {
     segments: array(value.segments).map((rawSegment) => {
       const s = record(rawSegment);
       const files = record(s.files);
+
       return {
         programme: mediaId(s.programme),
         frames: number(s.frames),
@@ -185,7 +216,9 @@ export function readMediaIndex(raw: unknown): MediaIndex {
       };
     }),
   };
+
   validateMedia(index);
+
   return index;
 }
 
@@ -194,11 +227,13 @@ export function validateMedia(index: MediaIndex): void {
   if (index.version !== 1 || !/^[a-z0-9-]{1,80}$/.test(index.release)) {
     throw new Error("Invalid media release");
   }
+
   const objects = [
     ...Object.values(index.originals),
     ...Object.values(index.artwork),
     ...index.segments.flatMap((segment) => Object.values(segment.files)),
   ];
+
   for (const fact of objects) {
     if (
       !/^[a-z0-9/-]+(?:\.[a-z0-9]+)?$/.test(fact.key) ||
@@ -210,6 +245,7 @@ export function validateMedia(index: MediaIndex): void {
       throw new Error("Invalid immutable object fact");
     }
   }
+
   if (
     index.programmes.length !== 3 ||
     index.renditions.length !== 2 ||
@@ -217,10 +253,13 @@ export function validateMedia(index: MediaIndex): void {
   ) {
     throw new Error("Incomplete media cycle");
   }
+
   let start = 0;
+
   for (const [at, original] of ORIGINALS.entries()) {
     const programme = index.programmes[at];
     const count = original.frames / 144;
+
     if (
       !programme ||
       programme.id !== original.id ||
@@ -234,7 +273,9 @@ export function validateMedia(index: MediaIndex): void {
     ) {
       throw new Error("Uncertified programme timeline");
     }
+
     if (index.originals[original.id]?.mime !== "video/mp4") throw new Error("Missing original MP4");
+
     for (const segment of index.segments.slice(start, start + count)) {
       if (
         segment.programme !== original.id ||
@@ -246,17 +287,21 @@ export function validateMedia(index: MediaIndex): void {
         throw new Error("Uncertified video segment");
       }
     }
+
     start += count;
   }
+
   for (const art of ARTWORK) {
     if (index.artwork[art.id]?.mime !== "image/png") throw new Error("Missing original artwork");
   }
+
   for (const id of ["540p", "180p"] as const) {
     const rendition = index.renditions.find((row) => row.id === id);
     const expected = id === "540p" ? [960, 540] : [320, 180];
     const sizes = index.segments.map((segment) => segment.files[id].bytes);
     const peak = Math.ceil((Math.max(...sizes) * 8) / 6);
     const average = Math.ceil((sizes.reduce((sum, size) => sum + size, 0) * 8) / 330);
+
     if (
       !rendition ||
       rendition.width !== expected[0] ||
@@ -275,6 +320,7 @@ export function validateMedia(index: MediaIndex): void {
 /** The exact Xtream actions the existing core Provider consumes. Unknown IDs stay failures. */
 export function apiAnswer(action: string, id: string | null, origin: string) {
   const art = (name: ArtworkId) => `${origin}/art/${name}.png`;
+
   const episodes = ORIGINALS.slice(1).map((original, index) => ({
     id: original.id,
     season: 1,
@@ -283,6 +329,7 @@ export function apiAnswer(action: string, id: string | null, origin: string) {
     container_extension: "mp4",
     info: { duration_secs: original.frames / 24 },
   }));
+
   switch (action) {
     case "":
       return {

@@ -33,6 +33,7 @@ Object.assign(globalThis, {
         disconnect: () => undefined,
         addListener: (event: string, listener: (event: never) => void) => {
           native.listeners.set(event, listener);
+
           return { remove: () => native.listeners.delete(event) };
         },
       },
@@ -43,43 +44,56 @@ Object.assign(globalThis, {
 vi.mock("../src/downloads.ts", () => ({
   useDownloads: () => ({ items: [], series: {}, bytes: 0, free: null, ended: 0 }),
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-video", () => ({
   VideoView: () => null,
   VideoAirPlayButton: () => null,
   isPictureInPictureSupported: () => false,
   createVideoPlayer: () => nativePlayer(),
 }));
+
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Alert: { alert: (title: string) => void native.alerts.push(title) },
   Linking: { openSettings: async () => void native.settings++ },
 }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-screen-orientation", () => ({
   OrientationLock: { LANDSCAPE: 1 },
   lockAsync: async () => undefined,
   unlockAsync: async () => undefined,
 }));
+
 vi.mock("expo-router", () => ({
   router: { push: () => undefined },
   useRootNavigationState: () => ({ index: 0, routes: [] }),
   usePathname: () => "/films",
 }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   type Props = { testID?: string; label: string; onPress: () => void };
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
     IconButton: ({ testID, label, onPress }: Props) =>
       createElement("button", { "data-testid": testID, "aria-label": label, onClick: onPress }),
   };
 });
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF", dim: "#A1A1A6" } }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-secure-store", () => keychain(() => new Map()));
+
 vi.mock("../src/account.ts", () => ({
   useCatalogue: () => ({ kind: "loading" }),
   currentCatalogue: () => ({ kind: "loading" }),
@@ -100,17 +114,20 @@ const movie: Playing = {
   next: false,
   versions: false,
 };
+
 const livingRoom = { id: "tv1", name: "Living Room TV", model: "Sony TV" };
 const browse = (event: object) => act(() => native.listeners.get("onBrowse")?.(event as never));
 
 let container = window.document.createElement("div");
 let unmount = () => {};
+
 /** The element drawn with `testID`, as the tests press and read it. */
 const find = (testID: string) =>
   container.querySelector(`[data-testid="${testID}"]`) as {
     click(): void;
     getAttribute(name: string): string | null;
   } | null;
+
 const press = (testID: string) => act(() => find(testID)?.click());
 
 beforeEach(async () => {
@@ -132,6 +149,7 @@ beforeEach(async () => {
     ),
   );
 });
+
 afterEach(() => unmount());
 
 describe("Play on TV in Watch", () => {

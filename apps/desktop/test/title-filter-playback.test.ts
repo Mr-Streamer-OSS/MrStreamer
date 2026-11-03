@@ -21,8 +21,10 @@ import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
+
 const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
+
 const decoders = ["h264", "aac", "mp3", "opus", "flac"] as const;
 
 afterEach(() => vi.restoreAllMocks());
@@ -34,17 +36,21 @@ function fileResponses(origin: string) {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     const held = url.origin === origin && url.pathname.startsWith("/files/") ? next : null;
+
     if (held) next = null;
     const response = await request(input, init);
     held?.arrived();
     await held?.released;
+
     return response;
   });
+
   return {
     hold() {
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
       next = { arrived: arrived.resolve, released: released.promise };
+
       return { arrived: arrived.promise, release: released.resolve };
     },
   };
@@ -52,6 +58,7 @@ function fileResponses(origin: string) {
 
 async function start(dir: string) {
   const runtime = runtimeFor(mainLayer({ ...testConfig(dir), ffmpeg: FFMPEG, ffprobe: FFPROBE }));
+
   return {
     runtime,
     subscriptions: await promised(runtime, Subscriptions),
@@ -68,27 +75,35 @@ async function connected() {
   const app = await start(dir);
   const saved = await app.subscriptions.add(demoLogin(provider));
   await app.titles.refresh(saved.id);
+
   const movie = provider.titles.movies.find((title) =>
     title.name.startsWith("TEST | Long subtitles"),
   );
+
   if (!movie) throw new Error("Expected fixture movie");
   const ref = { kind: "movie" as const, subscriptionId: saved.id, id: String(movie.id) };
+
   const open = async (playback = app.playback, turn?: number) => {
     const file = await app.titles.file(ref);
+
     return playback.openTitle(ref, file.url, decoders, {
       ...file,
       ...defined({ turn }),
     });
   };
+
   const [source] = await app.subscriptions.saved();
+
   if (!source) throw new Error("Expected saved subscription");
   const facts = () => app.files.read(source.key, source.fileRevision);
+
   /** What the provider was asked so far: its lists, title details and files. */
   const asked = () => [
     provider.titleListRequests(),
     provider.detailRequests(),
     provider.fileRequests(),
   ];
+
   return { ...app, app, dir, provider, movie, gates, ref, open, source, facts, asked };
 }
 
@@ -168,12 +183,15 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
       const turn = await app.playback.begin();
       const held = app.gates.hold();
       const opening = app.open(app.playback, turn);
+
       // Attach rejection handling before changing the source.
       const settled = opening.then(
         () => null,
         (error: unknown) => error,
       );
+
       await held.arrived;
+
       if (change === "new turn") await app.playback.begin();
       else await app.subscriptions.update(app.source.id, { secret: "demo" });
       held.release();
@@ -214,6 +232,7 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
     const held = app.gates.hold();
     const reading = play(old.url);
     await held.arrived;
+
     // A separate public Playback service models another still-running consumer of the same store.
     const newerRuntime = runtimeFor(
       Playback.layer({ userAgent, ffmpeg: FFMPEG, ffprobe: FFPROBE }).pipe(
@@ -226,6 +245,7 @@ describe.skipIf(!hasTools)("playback produces verified filter facts", { timeout:
         ),
       ),
     );
+
     const newer = await app.open(await promised(newerRuntime, Playback));
     const written = await app.facts();
     held.release();

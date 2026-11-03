@@ -61,6 +61,7 @@ import { Subscriptions } from "./subscription.ts";
  * slept, catches up within it. With none kept, nothing comes due until one is set.
  */
 const RESCAN_MS = 60_000;
+
 /** How long the guide stays still before its change is checked: a download tells each step. */
 const GUIDE_SETTLE = "2 seconds";
 
@@ -152,6 +153,7 @@ function make(deps: RemindersDeps) {
     let store: { readonly kind: "unread" } | Awaited<ReturnType<typeof readReminders>> = {
       kind: "unread",
     };
+
     /** Whether the file's refusal was logged, once a run. */
     let warned = false;
     /** The reminders that told this run, and whether the window shows its notice of each. */
@@ -166,14 +168,17 @@ function make(deps: RemindersDeps) {
     const publish = Effect.suspend(() => {
       if (!dirty) return Effect.void;
       dirty = false;
+
       return Effect.asVoid(PubSub.publish(updates, undefined));
     });
+
     const wake = Effect.asVoid(Queue.offer(wakes, undefined));
 
     const savedIds = Effect.map(
       subscriptions.saved,
       (saved) => new Set(saved.map((each) => each.id)),
     );
+
     const adultsShown = Effect.map(settings.get, (preferences) => preferences.adultTitles ?? false);
 
     /** Writes `file` whole, or fails changing nothing. Once begun, it finishes. */
@@ -195,21 +200,27 @@ function make(deps: RemindersDeps) {
       if (store.kind === "read") return store.file;
       const recovered = store.kind === "refused";
       const read = yield* Effect.promise(() => readReminders(path));
+
       if (read.kind === "refused") {
         if (!warned) yield* Effect.logWarning(`[reminders] reminders.json is ${read.reason}`);
         warned = true;
         store = read;
+
         return null;
       }
+
       const saved = yield* savedIds;
       const now = yield* Clock.currentTimeMillis;
+
       const file: RemindersFile = {
         reminders: read.file.reminders.filter(
           (each) => saved.has(each.subscriptionId) && !expired(each, now),
         ),
         unread: new Map([...read.file.unread].filter(([id]) => saved.has(id))),
       };
+
       store = { kind: "read", file };
+
       if (
         file.reminders.length !== read.file.reminders.length ||
         file.unread.size !== read.file.unread.size
@@ -219,7 +230,9 @@ function make(deps: RemindersDeps) {
             Effect.logWarning("[reminders] couldn't drop reminders that went"),
           ),
         );
+
       if (recovered) yield* wake;
+
       return file;
     });
 
@@ -259,11 +272,13 @@ function make(deps: RemindersDeps) {
     const tell = (reminder: KeptReminder, now: number) => {
       banners.set(reminder.id, true);
       dirty = true;
+
       if (reminder.adult || !notifier?.supported) return;
       const late = lateMinutes(reminder.start, now);
       const channel = reminder.channelName;
       const { id } = reminder;
       notices.add(id);
+
       try {
         notifier.show(
           {
@@ -325,11 +340,14 @@ function make(deps: RemindersDeps) {
       Effect.gen(function* () {
         const { subscriptionId } = reminder;
         let find = finders.get(subscriptionId);
+
         if (!find) {
           find = yield* library.lookup(subscriptionId);
           finders.set(subscriptionId, find);
         }
+
         const listed = reminder.streams.map(find).find((each) => each !== undefined);
+
         return listed && foundAs(listed);
       });
 
@@ -340,10 +358,13 @@ function make(deps: RemindersDeps) {
     const reread = (reminder: KeptReminder, channel: FoundChannel | undefined, adults: boolean) =>
       Effect.gen(function* () {
         const { subscriptionId } = reminder;
+
         if (!channel)
           return seen(reminder, (yield* catalogued(subscriptionId)) ? null : undefined, undefined);
+
         if (!visible(channel, adults)) return seen(reminder, channel, undefined);
         const answer = yield* guide.startingAt({ subscriptionId, id: channel.id }, reminder.start);
+
         return seen(
           reminder,
           channel,
@@ -360,14 +381,17 @@ function make(deps: RemindersDeps) {
      */
     const checkNow = Effect.gen(function* () {
       const file = yield* loaded;
+
       if (!file) return null;
       const now = yield* Clock.currentTimeMillis;
       const saved = yield* savedIds;
       const adults = yield* adultsShown;
+
       // What went, and what is past keeping, goes whether or not the file can be written.
       const kept = file.reminders.filter(
         (each) => saved.has(each.subscriptionId) && !expired(each, now),
       );
+
       const unread = new Map([...file.unread].filter(([id]) => saved.has(id)));
       const finders = new Map<string, (channelId: string) => LiveChannel | undefined>();
       // Every reminder kept follows its channel, told or not; only those still to tell follow
@@ -375,27 +399,35 @@ function make(deps: RemindersDeps) {
       const known: KeptReminder[] = [];
       const next: KeptReminder[] = [];
       const due: KeptReminder[] = [];
+
       for (const each of kept) {
         const channel = yield* channelNow(each, finders);
         const listed = channel ? relisted(each, channel) : each;
         known.push(listed);
+
         const current =
           each.state.kind === "pending" || each.state.kind === "gone"
             ? yield* reread(listed, channel, adults)
             : listed;
+
         const { reminder, tells } = atTime(current, now, visible(current, adults));
         next.push(reminder);
+
         if (tells) due.push(reminder);
       }
+
       const differs = (reminders: readonly KeptReminder[]) =>
         reminders.length !== file.reminders.length ||
         unread.size !== file.unread.size ||
         reminders.some((each, at) => !isDeepStrictEqual(each, file.reminders[at]));
+
       if (differs(next)) {
         const changed = { reminders: next, unread };
         const written = yield* Effect.result(save(changed));
+
         if (written._tag === "Success") {
           commit(changed);
+
           for (const reminder of due) tell(reminder, now);
         } else {
           // What went goes, and what the lists say of each channel holds, written or not: one
@@ -404,18 +436,24 @@ function make(deps: RemindersDeps) {
           yield* Effect.logWarning("[reminders] couldn't save a check; it is tried again");
         }
       }
+
       const current = store.kind === "read" ? store.file.reminders : [];
       const byId = new Map(current.map((each) => [each.id, each]));
+
       // A notice goes with its programme and its subscription. A channel for adults keeps no
       // system notice, even while adults show, and the window's goes while they're hidden.
       for (const id of notices) {
         const reminder = byId.get(id);
+
         if (!reminder || now >= reminder.stop || reminder.adult) closeNotice(id);
       }
+
       for (const id of banners.keys()) {
         const reminder = byId.get(id);
+
         if (!reminder || now >= reminder.stop || !visible(reminder, adults)) quiet(id);
       }
+
       return current.length === 0
         ? null
         : Math.min(nextAt(current, now) ?? Infinity, now + RESCAN_MS);
@@ -428,12 +466,15 @@ function make(deps: RemindersDeps) {
     const reopen = (id: string) =>
       Effect.gen(function* () {
         if (notices.delete(id)) notifier?.close(id);
+
         if (store.kind !== "read") return;
         const kept = store.file.reminders.find((each) => each.id === id);
+
         if (kept?.state.kind !== "told") return;
         const channel = yield* channelNow(kept, new Map());
         const reminder = channel ? relisted(kept, channel) : kept;
         const now = yield* Clock.currentTimeMillis;
+
         if (
           now < reminder.stop &&
           (yield* savedIds).has(reminder.subscriptionId) &&
@@ -463,6 +504,7 @@ function make(deps: RemindersDeps) {
               Effect.as(Effect.logWarning("[reminders] checking failed", defect), null),
             ),
           );
+
           const now = yield* Clock.currentTimeMillis;
           yield* next === null
             ? Queue.take(wakes)
@@ -491,6 +533,7 @@ function make(deps: RemindersDeps) {
                 dirty ||= failedNotice;
                 failedNotice = false;
               }
+
               yield* publish;
             }),
           ),
@@ -505,10 +548,12 @@ function make(deps: RemindersDeps) {
           const now = yield* Clock.currentTimeMillis;
           const saved = yield* savedIds;
           const adults = yield* adultsShown;
+
           // Hiding adults takes their notices down for good: showing them again brings none back.
           // They never had a system notice, and the window no longer lists them.
           for (const reminder of file.reminders)
             if (!visible(reminder, adults)) banners.delete(reminder.id);
+
           return {
             reminders: file.reminders
               .filter(
@@ -527,25 +572,33 @@ function make(deps: RemindersDeps) {
           Effect.gen(function* () {
             const file = yield* usable;
             const { subscriptionId } = channel;
+
             if (!(yield* savedIds).has(subscriptionId))
               return yield* new Failed({ error: { kind: "no-subscription" } });
             const listed = (yield* library.lookup(subscriptionId))(channel.id);
+
             if (!listed)
               return yield* new Failed({
                 error: { kind: "channel-not-found", channelId: channel.id },
               });
             const found = foundAs(listed);
             const now = yield* Clock.currentTimeMillis;
+
             const refused = (reason: "started" | "not-in-guide") =>
               new Failed({ error: { kind: "reminder", reason } });
+
             if (start <= now) return yield* refused("started");
+
             if (!visible(found, yield* adultsShown)) return yield* refused("not-in-guide");
             const answer = yield* guide.startingAt({ subscriptionId, id: found.id }, start);
+
             if (answer.kind !== "found") return yield* refused("not-in-guide");
             const { programme } = answer;
+
             const before = file.reminders.find((each) =>
               sameReminder(each, { subscriptionId, streams: found.streams, start }),
             );
+
             const reminder: KeptReminder = before
               ? seen(before, found, programme)
               : {
@@ -561,6 +614,7 @@ function make(deps: RemindersDeps) {
                   title: programme.title,
                   state: { kind: "pending" },
                 };
+
             if (!isDeepStrictEqual(reminder, before)) {
               const next = {
                 ...file,
@@ -568,11 +622,13 @@ function make(deps: RemindersDeps) {
                   ? file.reminders.map((each) => (each === before ? reminder : each))
                   : [...file.reminders, reminder],
               };
+
               yield* save(next);
               commit(next);
               yield* publish;
               yield* wake;
             }
+
             return shownAs(reminder, now);
           }),
         ),
@@ -581,6 +637,7 @@ function make(deps: RemindersDeps) {
         turn(
           Effect.gen(function* () {
             const file = yield* usable;
+
             if (!file.reminders.some((each) => each.id === id)) return;
             const next = { ...file, reminders: file.reminders.filter((each) => each.id !== id) };
             yield* save(next);
@@ -612,12 +669,16 @@ function make(deps: RemindersDeps) {
             if (store.kind !== "read") return;
             const { file } = store;
             const going = file.reminders.filter((each) => each.subscriptionId === subscriptionId);
+
             if (going.length === 0 && !file.unread.has(subscriptionId)) return;
+
             const next = {
               reminders: file.reminders.filter((each) => each.subscriptionId !== subscriptionId),
               unread: new Map([...file.unread].filter(([id]) => id !== subscriptionId)),
             };
+
             commit(next);
+
             for (const reminder of going) quiet(reminder.id);
             yield* save(next).pipe(
               Effect.catchTag("Failed", () =>

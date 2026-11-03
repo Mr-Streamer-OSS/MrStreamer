@@ -56,6 +56,7 @@ export const plain = (value: unknown): Observed =>
 export async function outcome(request: () => Promise<Response>): Promise<Observed> {
   try {
     const response = await request();
+
     return {
       status: response.status,
       redirected: response.redirected,
@@ -74,8 +75,10 @@ export async function perFetch(
   observe: (fetchImpl: typeof fetch) => Promise<Observed>,
 ): Promise<Observed> {
   const results: Record<string, Observed> = {};
+
   for (const [name, fetchImpl] of Object.entries(context.fetches)) {
     results[name] = await observe(fetchImpl);
   }
+
   return results;
 }

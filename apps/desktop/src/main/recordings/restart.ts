@@ -23,6 +23,7 @@ export function installingOnceStopsKept(
           ),
         );
       confirm(true);
+
       try {
         return await installer.install();
       } catch (cause) {

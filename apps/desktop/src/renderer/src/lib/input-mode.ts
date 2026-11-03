@@ -19,6 +19,7 @@ const useMode = create<{ keyboard: boolean }>(() => ({ keyboard: false }));
 window.addEventListener("keydown", (event) => {
   if (KEYS.has(event.key) && !useMode.getState().keyboard) useMode.setState({ keyboard: true });
 });
+
 // Real movement only: Chromium also sends mouse moves when content scrolls under a still pointer.
 window.addEventListener("mousemove", (event) => {
   if ((event.movementX !== 0 || event.movementY !== 0) && useMode.getState().keyboard) {

@@ -2,6 +2,7 @@ import { airedProgramme } from "./catchup.ts";
 import type { Driver } from "./language.ts";
 
 const video = `(() => { const v = document.querySelector('video'); return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, frames: v?.webkitDecodedFrameCount ?? 0, dropped: v?.webkitDroppedFrameCount ?? 0, paused: v?.paused ?? true, text: document.querySelector('[data-view=watch]')?.innerText ?? '' }; })()`;
+
 interface Playing {
   time: number;
   width: number;
@@ -29,6 +30,7 @@ export async function hlsCompatibilityScenario(
     "Play the searched HLS channel",
     `document.querySelector('[aria-label="Search results"] [aria-selected=true] button[data-group-row]')`,
   );
+
   if (baseline) {
     await d.wait(
       async () =>
@@ -40,13 +42,17 @@ export async function hlsCompatibilityScenario(
     await new Promise((resolve) => setTimeout(resolve, 8000));
     const state = await d.evaluate<Playing>(video);
     d.observed["incompatibleBaseline"] = state;
+
     if (state.width || state.audio)
       throw new Error("The incompatible baseline decoded unexpectedly.");
     await d.capture("hls-incompatible-baseline");
+
     return;
   }
+
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
+
     return v.time > 1 && v.width > 0 && v.audio > 0 && !/Tuning|Reconnecting/.test(v.text);
   });
   d.observed["firstEpoch"] = await d.evaluate<Playing>(video);
@@ -60,6 +66,7 @@ export async function hlsCompatibilityScenario(
   const caption = "document.querySelector('[data-subtitle-text]')?.innerText?.trim() ?? ''";
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
+
     return v.time < 6 && (await d.evaluate<string>(caption)) === "HELLO CAPTIONS";
   });
   d.observed["captionBeforeEpoch"] = {
@@ -72,6 +79,7 @@ export async function hlsCompatibilityScenario(
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
     samples.push(v);
+
     return (
       v.time > 8 &&
       v.frames > 175 &&
@@ -95,6 +103,7 @@ export async function hlsCompatibilityScenario(
   );
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
+
     return (
       v.time > 1 && v.time < 7 && v.width > 0 && v.audio > 0 && !/Tuning|Reconnecting/.test(v.text)
     );
@@ -103,10 +112,13 @@ export async function hlsCompatibilityScenario(
   await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 800, y: 700 });
   await d.click("Inspect the selected sound", "document.querySelector('[aria-label=More]')");
   await d.click("Inspect Sound", "document.querySelector('[role=dialog] [aria-label=Sound]')");
+
   const selectedSound = await d.evaluate<string>(
     "document.querySelector('[role=dialog] [data-item][aria-pressed=true]')?.textContent ?? ''",
   );
+
   d.observed["selectedSound"] = selectedSound;
+
   if (!selectedSound.includes("Nederlands")) throw new Error("Dutch sound was not selected.");
   await d.capture("hls-switched-sound");
   await d.key("Escape", 27);
@@ -116,6 +128,7 @@ export async function hlsCompatibilityScenario(
   await d.click("Watch the channel again", "document.querySelector('[aria-label=Watch]')");
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
+
     return (
       v.time > 1 && v.width > 0 && v.audio > 0 && !v.paused && !/Tuning|Reconnecting/.test(v.text)
     );
@@ -130,16 +143,19 @@ export async function hlsCompatibilityCatchupScenario(d: Driver) {
   await aired.play();
   await d.wait(async () => {
     const v = await d.evaluate<Playing>(video);
+
     return v.time > 6.5 && v.frames > 175 && v.audio > 0;
   });
   d.observed["archiveAfterEpoch"] = await d.evaluate<Playing>(video);
   await aired.wake();
   await d.capture("hls-catchup-after-epoch");
+
   // Programmes are at least a minute in the guide. Observe ordinary progress through that
   // minute, using the same per-observation deadline as the other real-clock checks.
   for (const until of [15, 30, 45, 58]) {
     await d.wait(async () => (await d.evaluate<Playing>(video)).time >= until);
   }
+
   await d.wait(() => d.exists("document.querySelector('[data-view=watch] [aria-label=Watch]')"));
   d.observed["archiveStopped"] = await d.evaluate<Playing>(video);
   await aired.wake();

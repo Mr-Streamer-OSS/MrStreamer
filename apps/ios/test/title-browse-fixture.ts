@@ -18,6 +18,7 @@ export function browseFixture(kind: TitleKind) {
     categoryIds: [],
     container: kind === "movie" ? "mp4" : null,
   });
+
   const rows = [
     row("en-hd", "Alpha HD (EN)", "1", 4),
     row("nl-4k", "Alpha 4K (NL)", "1", 3),
@@ -25,13 +26,16 @@ export function browseFixture(kind: TitleKind) {
     row("unknown", "Zulu", "3", 1),
     row("tie", "Charlie", "4", 1),
   ];
+
   const catalogue = {
     movieCategories: [],
     seriesCategories: [],
     movies: kind === "movie" ? rows : [],
     series: kind === "series" ? rows : [],
   };
+
   const index = indexCatalogue([{ subscriptionId: "a", catalogue }], "en");
+
   return {
     catalogue,
     index,

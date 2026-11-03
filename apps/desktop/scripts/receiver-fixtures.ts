@@ -25,6 +25,7 @@ const work = mkdtempSync(join(tmpdir(), "mr-streamer-receiver-"));
 
 /** Where the picture has keyframes, in seconds from its start. */
 const KEYFRAMES = [0, 0.7, 5.1, 5.6, 13.3, 13.5, 21.9, 30, 30.4, 44.8, 52.2, 61];
+
 /** Where the Matroska clip's clock starts, in seconds. */
 const START = 7.5;
 const LENGTH = 64;
@@ -53,8 +54,11 @@ function ffmpeg(...args: string[]): void {
 }
 
 const subtitles = join(work, "english.srt");
+
 writeFileSync(subtitles, SUBTITLES);
+
 const matroska = join(fixtures, "title-receiver.mkv");
+
 ffmpeg(
   ...["-f", "lavfi", "-i", "testsrc2=size=128x72:rate=10"],
   ...["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=22050"],
@@ -70,8 +74,10 @@ ffmpeg(
   ...["-metadata:s:s:0", "language=eng", "-disposition:a:0", "default", "-disposition:a:1", "0"],
   ...["-output_ts_offset", String(START), matroska],
 );
+
 ffmpeg(
   ...["-i", matroska, "-map", "0:v", "-map", "0:a", "-map", "0:s", "-c:v", "copy", "-c:a", "copy"],
   ...["-c:s", "mov_text", join(fixtures, "title-receiver.mp4")],
 );
+
 rmSync(work, { recursive: true, force: true });

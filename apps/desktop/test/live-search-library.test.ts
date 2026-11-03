@@ -37,6 +37,7 @@ async function started(dataDir: string) {
       ),
     ),
   );
+
   return {
     library: await promised(runtime, Library),
     subscriptions: await promised(runtime, Subscriptions),
@@ -45,10 +46,12 @@ async function started(dataDir: string) {
 
 it("search keeps every provider/category/quality copy and reconstructs safe metadata from unchanged raw caches", async () => {
   const providers = [await fakeProvider(), await fakeProvider()];
+
   for (const provider of providers) {
     const categories = provider.catalogue.categories.filter((category) =>
       category.name.startsWith("BE |"),
     );
+
     provider.serveChannels((channels) =>
       channels.slice(0, 5).map((channel, index) => ({
         ...channel,
@@ -65,14 +68,17 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
       })),
     );
   }
+
   const dataDir = await tempDir();
   const { library, subscriptions } = await started(dataDir);
   const ids = [];
+
   for (const provider of providers) {
     const subscription = await subscriptions.add(demoLogin(provider));
     ids.push(subscription.id);
     await library.refresh(subscription.id);
   }
+
   const ordinary = await library.channels({});
   expect(ordinary).toHaveLength(8);
   const decisions = await library.searchGroups();
@@ -81,10 +87,12 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   expect(
     Object.values(stamps).every((stamp) => Object.keys(stamp).toSorted().join() === "key,order"),
   ).toBe(true);
+
   const stamped = ordinary.map((channel) => ({
     ...channel,
     searchGroup: stamps[ownedKey(channel)]!,
   }));
+
   expect(searchResultGroups(stamped).map((group) => [group.copies.length, group.streams])).toEqual([
     [4, 6],
     [4, 4],
@@ -100,46 +108,58 @@ it("search keeps every provider/category/quality copy and reconstructs safe meta
   const savedOrder = ids.map((id) => ({ id }));
   const sdMatches = await library.channels({ query: "VRT 1 SD" });
   expect(searchResultGroups(sdMatches)).toHaveLength(1);
+
   const qualityGroup = searchResultGroups(sdMatches).find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
+
   const grouped = stamped;
+
   const ordinaryGroup = indexLiveSearch(grouped).groups.find(
     (group) => group.copies[0]?.title === "VRT 1",
   )!;
+
   expect(automaticSearchCopy(qualityGroup, new Set(), savedOrder)).toEqual(
     automaticSearchCopy(ordinaryGroup, new Set(), savedOrder),
   );
+
   const programmeMatches = await library.channels({
     query: "evening news",
     channels: [{ subscriptionId: ids[1]!, id: "1002" }],
   });
+
   expect(
     searchResultGroups(programmeMatches).map((group) => [group.copies.length, group.streams]),
   ).toEqual([[4, 6]]);
+
   for (const copy of ordinary) {
     expect(copy).not.toHaveProperty("searchGroup");
     expect(copy).not.toHaveProperty("searchIdentity");
   }
+
   expect(grouped.map(({ searchGroup: _group, ...copy }) => copy)).toEqual(ordinary);
   expect(grouped.map((channel) => channel.searchGroup)).toEqual(
     ordinary.map((channel) => stamps[ownedKey(channel)]),
   );
+
   for (const response of [grouped, results, qualityMatches, sdMatches, programmeMatches]) {
     for (const copy of response) {
       expect(copy.searchGroup).toEqual({ key: expect.any(String), order: expect.any(Number) });
       expect(copy).not.toHaveProperty("searchIdentity");
     }
   }
+
   for (const { searchGroup: _group, ...channel } of results) {
     const { searchIdentity, ...canonical } = await library.channel(channel);
     expect(searchIdentity).toBeDefined();
     expect(canonical).toEqual(channel);
   }
+
   const cached = type({
     version: "4",
     channels: type({ "searchIdentity?": "undefined", "searchGroup?": "undefined" }).array(),
   })(JSON.parse(await readFile(join(dataDir, "catalogue.json"), "utf8")));
+
   expect(cached).not.toBeInstanceOf(type.errors);
   await Promise.all(providers.map((provider) => provider.close()));
   const restart = await started(dataDir);
@@ -153,10 +173,12 @@ it("catalogue stamps change after a hidden guide conflict without fetching on re
   const providers = [await fakeProvider(), await fakeProvider(), await fakeProvider()];
   let conflict = false;
   const fetched = [0, 0, 0];
+
   for (const [index, provider] of providers.entries()) {
     const category = provider.catalogue.categories.find((each) => each.name.startsWith("BE |"))!;
     provider.serveChannels((channels) => {
       fetched[index]!++;
+
       return [
         {
           ...channels[0]!,
@@ -168,16 +190,20 @@ it("catalogue stamps change after a hidden guide conflict without fetching on re
       ];
     });
   }
+
   const { library, subscriptions } = await started(await tempDir());
   const ids: string[] = [];
+
   for (const provider of providers) {
     const saved = await subscriptions.add(demoLogin(provider));
     ids.push(saved.id);
     await library.refresh(saved.id);
   }
+
   const subset = await library.channels({
     channels: ids.slice(0, 2).map((subscriptionId) => ({ subscriptionId, id: "1000" })),
   });
+
   expect(subset).toHaveLength(2);
   const before = stampsOf(await library.searchGroups());
   expect(new Set(subset.map((copy) => before[ownedKey(copy)]?.key)).size).toBe(1);
@@ -194,6 +220,7 @@ it("catalogue stamps change after a hidden guide conflict without fetching on re
 
 it("palette responses retain full-catalogue ambiguity when the query excludes a conflicting copy", async () => {
   const providers = [await fakeProvider(), await fakeProvider(), await fakeProvider()];
+
   for (const [index, provider] of providers.entries()) {
     const category = provider.catalogue.categories.find((each) => each.name.startsWith("BE |"))!;
     provider.serveChannels((channels) => [
@@ -206,25 +233,32 @@ it("palette responses retain full-catalogue ambiguity when the query excludes a 
       },
     ]);
   }
+
   const { library, subscriptions } = await started(await tempDir());
+
   for (const provider of providers) {
     const saved = await subscriptions.add(demoLogin(provider));
     await library.refresh(saved.id);
   }
+
   const whole = await library.channels({ query: "vrt 1" });
   expect(searchResultGroups(whole)).toHaveLength(3);
   const partial = await library.channels({ query: "vrt 1 fhd" });
   expect(partial).toHaveLength(2);
   expect(searchResultGroups(partial)).toHaveLength(2);
   expect(new Set(partial.map((copy) => copy.searchGroup?.key)).size).toBe(2);
+
   const list = await library.channels({
     channels: partial.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
   });
+
   const stamps = stampsOf(await library.searchGroups());
+
   const grouped = list.map((copy) => ({
     ...copy,
     searchGroup: stamps[ownedKey(copy)] ?? { key: ownedKey(copy), order: 0 },
   }));
+
   // A list can hide the conflicting guide, but it cannot turn that absence into identity.
   expect(indexLiveSearch(grouped).groups).toHaveLength(2);
   expect(grouped.map((copy) => copy.searchGroup)).toEqual(partial.map((copy) => copy.searchGroup));

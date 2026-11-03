@@ -18,6 +18,7 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
   const timings = { ...CAST_TIMINGS, ...options.timings };
   const discovery = options.discovery ?? castDiscovery();
   let listener: (event: AdapterEvent) => void = () => {};
+
   /** The connect under way: the next one, and closing, give it up. */
   let connecting = new AbortController();
   let session: Session | null = null;
@@ -31,6 +32,7 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
   const emit = (event: AdapterEvent) => {
     if (!closed) listener(event);
   };
+
   discovery.listen((receivers) => emit({ type: "receivers", receivers }));
 
   return {
@@ -46,13 +48,16 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
       if (request.kind === "picker") {
         throw new ReceiverFailed({ kind: "unavailable", detail: "Cast has no system picker" });
       }
+
       const endpoint = discovery.locate(request.id);
+
       if (!endpoint || closed) throw new ReceiverFailed({ kind: "unreachable" });
       connecting.abort();
       const mine = (connecting = new AbortController());
       // One receiver at a time: the one before is let go of first.
       await session?.disconnect();
       await leaving;
+
       const opened = await openSession(
         endpoint,
         timings,
@@ -60,11 +65,14 @@ export function castAdapter(options: CastOptions = {}): ReceiverAdapter {
         AbortSignal.any([signal, mine.signal]),
         (stopped) => (leaving = stopped),
       );
+
       session = opened;
+
       if (closed) {
         await opened.disconnect();
         throw new ReceiverFailed({ kind: "unreachable" });
       }
+
       return opened.connection;
     },
     async close() {

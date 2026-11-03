@@ -19,7 +19,9 @@ export function longNamed<C extends { readonly name: string }>(channel: C): C {
 const check = (value: boolean, message: string, seen?: unknown) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
+
 const ROWS = "[...document.querySelectorAll('main [data-index]')]";
+
 /** Each drawn row: its names, metadata, height in rem and which lines are cut. */
 const ROW_STATE = `${ROWS}.sort((a, b) => a.dataset.index - b.dataset.index).map(r => {
   const name = r.querySelector('[data-name]');
@@ -30,9 +32,11 @@ const ROW_STATE = `${ROWS}.sort((a, b) => a.dataset.index - b.dataset.index).map
       / parseFloat(getComputedStyle(document.documentElement).fontSize),
     nameClipped: cut(name), clipped: cut(name) || cut(line), selected: !!r.querySelector('.ring-2') };
 })`;
+
 /** The label under a row's name that holds `text`. */
 const label = (text: string) =>
   `[...document.querySelectorAll('[data-side=bottom]')].find(e => e.textContent.includes(${JSON.stringify(text)}))`;
+
 const nameOf = (title: string) =>
   `[...document.querySelectorAll('main [data-name]')].find(e => e.textContent === ${JSON.stringify(title)})`;
 
@@ -95,9 +99,11 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
     const box = await d.evaluate<{ x: number; y: number }>(
       `(() => { const b = ${nameOf(title)}.getBoundingClientRect(); return { x: b.x + 20, y: b.y + b.height / 2 }; })()`,
     );
+
     d.action(`Point at ${title}`);
     await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...box });
   };
+
   await pointAt(LONG_TITLE);
   await d.wait(() => d.exists(label(LONG_TITLE)), 5_000);
   d.observed["hoverLabel"] = await d.evaluate<string>(`${label(LONG_TITLE)}.innerText`);
@@ -122,12 +128,14 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   for (let step = 0; step < 30; step++) {
     const drawn = await rows();
     const at = drawn.findIndex((row) => row.selected);
+
     if (drawn[at]?.name === LONG_NAME) break;
     // The first key only shows the selection; then toward the long rows.
     const up = at > drawn.findIndex((row) => row.name === LONG_NAME);
     await (up ? d.key("ArrowUp", 38) : d.key("ArrowDown", 40));
     await d.evaluate("new Promise(resolve => requestAnimationFrame(() => resolve(true)))");
   }
+
   const selected = (await rows()).find((row) => row.selected);
   d.observed["keyboardSelected"] = selected;
   check(selected?.name === LONG_NAME, "Down didn't reach the long row", selected);
@@ -174,6 +182,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
     "The narrow long rows lost their clipped names or distinct metadata",
     narrowLong,
   );
+
   const narrowLayout = await d.evaluate<
     {
       name: Bounds;
@@ -194,6 +203,7 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
           contained: ['hidden', 'clip'].includes(style.overflowX) && style.whiteSpace === 'nowrap'
             && style.textOverflow === 'ellipsis' } };
     })`);
+
   d.observed["narrowLayout"] = narrowLayout;
   check(
     narrowLayout.length === 2 &&
@@ -226,12 +236,14 @@ export async function liveNamesScenario(d: Driver, fixture: { otherUrl: string }
   );
   const dot = `${nameOf(LONG_TITLE)}?.nextElementSibling`;
   await d.wait(() => d.exists(dot));
+
   const playing = await d.evaluate<{ name: Bounds; dot: Bounds; cell: Bounds; gap: number }>(
     `(() => { const n = ${nameOf(LONG_TITLE)};
       return { name: n.getBoundingClientRect().toJSON(), dot: ${dot}.getBoundingClientRect().toJSON(),
         cell: n.parentElement.parentElement.getBoundingClientRect().toJSON(),
         gap: parseFloat(getComputedStyle(n.parentElement).columnGap) }; })()`,
   );
+
   d.observed["playingDot"] = playing;
   check(playing.dot.right <= playing.cell.right, "The playing dot left the name's cell", playing);
   check(

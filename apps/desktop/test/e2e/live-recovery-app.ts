@@ -27,6 +27,7 @@ import { fixture, startFakeProvider, type FakeProviderOptions } from "../fake-pr
 import { connect, delay, key, launch, login, says, waitFor, type Page } from "./app.ts";
 
 const [executable, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!executable) {
   throw new Error("Usage: node test/e2e/live-recovery-app.ts <app executable> [-- args]");
 }
@@ -42,9 +43,11 @@ const BLOCK = "[data-playback-state]";
 let after: "hold" | "end" | "nothing" = "hold";
 let open = 0;
 let mostOpen = 0;
+
 /** How many streams the provider began to send. A request it refused or answered 404 isn't one. */
 let sent = 0;
 const clip = fixture("h264-aac.mpegts");
+
 const streams: NonNullable<FakeProviderOptions["streams"]> = (_channel, out, signal) => {
   if (after === "nothing") return void out.destroy();
   const ending = after;
@@ -53,13 +56,17 @@ const streams: NonNullable<FakeProviderOptions["streams"]> = (_channel, out, sig
   const step = Math.ceil(clip.length / 30);
   let offset = 0;
   let closing: ReturnType<typeof setTimeout> | undefined;
+
   const timer = setInterval(() => {
     out.write(clip.subarray(offset, offset + step));
     offset += step;
+
     if (offset < clip.length) return;
     clearInterval(timer);
+
     if (ending === "end") closing = setTimeout(() => out.end(), 3000);
   }, 100);
+
   signal.addEventListener(
     "abort",
     () => {
@@ -77,6 +84,7 @@ const provider = await startFakeProvider({ channels: 60, maxConnections: 1, stre
 const app = launch(executable, rest, { port, profile });
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, result: { ok: boolean; detail: string }): void {
   console.log(`${result.ok ? "PASS" : "FAIL"} ${name}: ${result.detail}`);
@@ -102,6 +110,7 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);
 
 /** Picks a channel through search, which opens Watch on it. */
@@ -116,6 +125,7 @@ async function choose(page: Page, channel: string): Promise<void> {
 /** What Watch says in the middle of the picture, on one line. */
 async function said(page: Page): Promise<string> {
   const text = await page.evaluate<string>(`document.querySelector("${BLOCK}")?.innerText ?? ""`);
+
   return text.replace(/\s+/g, " ");
 }
 
@@ -139,12 +149,15 @@ async function fallsBack(page: Page): Promise<{ ok: boolean; detail: string }> {
   await waitFor(says(page, "Full HD didn't start, playing HD"), 10_000);
   await key(page, "q", 81);
   await waitFor(() => page.evaluate<boolean>(`!!document.querySelector("[data-item]")`), 10_000);
+
   const rows = await page.evaluate<string[]>(
     `[...document.querySelectorAll("[data-item]")].map((b) => b.innerText.replace(/\\s+/g, " "))`,
   );
+
   await key(page, "Escape", 27);
   const asked = provider.streamRequests() - before;
   const ok = rows.includes("Full HD No stream · 404") && rows.includes("HD Playing") && asked === 2;
+
   return { ok, detail: `${rows.join(" | ")}; ${asked} stream requests` };
 }
 
@@ -160,11 +173,13 @@ async function noStream(page: Page): Promise<{ ok: boolean; detail: string }> {
   // Nothing asks again by itself.
   await delay(4000);
   const asked = provider.streamRequests() - before;
+
   const ok =
     text.includes("HTTP 404") &&
     actions.join() === "Retry,Next channel,Channels" &&
     first === 1 &&
     asked === 2;
+
   return { ok, detail: `"${text}"; ${first} request, ${asked} after R and four seconds` };
 }
 
@@ -172,9 +187,11 @@ async function refusal(page: Page): Promise<{ ok: boolean; detail: string }> {
   // Another device takes the subscription's one connection.
   await waitFor(async () => provider.activeStreams() === 0, 10_000);
   const elsewhere = new AbortController();
+
   const held = await fetch(`${provider.url}/live/demo/demo/1000.ts`, {
     signal: elsewhere.signal,
   });
+
   const before = provider.streamRequests();
   await choose(page, "KWALITEIT 1");
   await waitFor(says(page, "Refused by the provider", BLOCK), 20_000);
@@ -188,11 +205,13 @@ async function refusal(page: Page): Promise<{ ok: boolean; detail: string }> {
   await waitFor(async () => provider.activeStreams() === 0, 10_000);
   await key(page, "r", 82);
   await waitFor(moves(page), 30_000);
+
   const ok =
     text.includes("HTTP 403") &&
     actions.join() === "Retry,Channels" &&
     // The stream asked for, and the two retries that give a slot time to clear.
     asked === 3;
+
   return {
     ok,
     detail: `"${text}", offering ${actions.join(", ")}; ${asked} requests in five seconds, then R played it`,
@@ -208,7 +227,9 @@ async function keepsDropping(page: Page): Promise<{ ok: boolean; detail: string 
   await waitFor(async () => {
     const text = await said(page);
     const attempt = /attempt \d of \d/.exec(text)?.[0];
+
     if (attempt) attempts.add(attempt);
+
     return text.includes("Keeps dropping");
   }, 120_000);
   const text = await said(page);
@@ -220,6 +241,7 @@ async function keepsDropping(page: Page): Promise<{ ok: boolean; detail: string 
   // is refused and asks again, which is a request and no stream. So streams count, not requests.
   const requests = provider.streamRequests() - before.requests;
   after = "hold";
+
   const ok =
     streams === 5 &&
     later === 5 &&
@@ -227,6 +249,7 @@ async function keepsDropping(page: Page): Promise<{ ok: boolean; detail: string 
     provider.activeStreams() === 0 &&
     text.includes("4 reconnects") &&
     attempts.has("attempt 4 of 4");
+
   return {
     ok,
     detail: `"${text}"; ${streams} streams sent, ${later} twelve seconds on, ${mostOpen} at once, in ${requests} requests, saw ${[...attempts].join(", ")}`,
@@ -252,12 +275,14 @@ async function stallAndStop(page: Page): Promise<{ ok: boolean; detail: string }
   const later = provider.streamRequests() - before;
   const text = await said(page);
   after = "hold";
+
   const ok =
     playing &&
     actions.join() === "Stop,Channels" &&
     later === asked &&
     provider.activeStreams() === 0 &&
     !text.includes("Reconnecting");
+
   return {
     ok,
     detail: `waited with the picture up: ${playing}; ${asked} streams asked for by the third wait, ${later} twelve seconds after Stop; now "${text}"`,

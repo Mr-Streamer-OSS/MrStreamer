@@ -30,8 +30,10 @@ export async function showReceiverPlayback(
 ): Promise<void> {
   const { account } = useUi.getState();
   const { output } = await call("output.status");
+
   if (output.kind !== "receiver" || !output.media) return;
   const { receiver, media: began } = output;
+
   /**
    * The receiver's latest word on the load it played then, or null once that isn't the window's
    * to take up: the pages went, the account changed, the viewer played something here, or the
@@ -40,32 +42,42 @@ export async function showReceiverPlayback(
    */
   const latest = (): RemoteMedia | null => {
     if (signal.aborted || useUi.getState().account !== account) return null;
+
     if (titlePlayer.state().now || player.state().phase.kind !== "idle") return null;
     const now = outputs.status().output;
+
     if (now.kind !== "receiver" || now.receiver.id !== receiver.id) return null;
     const media = now.media;
+
     return media?.generation === began.generation && media.sessionId === began.sessionId
       ? media
       : null;
   };
+
   if (began.item.kind === "channel") {
     const [channel] = await client.fetchQuery(queries.channelsOf([began.item.channel]));
     const media = latest();
+
     if (!channel || !media) return;
     player.adopt(channel, media);
     openWatch();
+
     return;
   }
+
   const playing = await call("output.playingTitle");
+
   // What its file holds is this load's only while the session is the same.
   if (playing?.title.sessionId !== began.sessionId || !latest()) return;
   const ref = playing.title.title;
   let now: ProviderNow | null = null;
+
   if (ref.kind === "movie") {
     const [title] = await client.fetchQuery(queries.titles("movie", [ref]));
     now = title ? movieNow({ ...title, ...ownedId(ref) }, title.backdropUrl) : null;
   } else {
     const series = await client.fetchQuery(queries.details("series", seriesOf(ref)));
+
     const episode =
       series.kind === "series"
         ? series.seasons
@@ -79,12 +91,15 @@ export async function showReceiverPlayback(
                   each.versions?.some((version) => version.id === ref.id)),
             )
         : undefined;
+
     now =
       series.kind === "series" && episode
         ? episodeNow(series, episodeFileVersion(episode, ref.id))
         : null;
   }
+
   const media = latest();
+
   if (!now || !media) return;
   titlePlayer.adopt(
     now,

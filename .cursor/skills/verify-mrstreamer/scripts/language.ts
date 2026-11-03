@@ -30,26 +30,31 @@ export interface Driver {
 }
 
 const SETTINGS = "document.querySelector('header button[aria-pressed]')";
+
 /** Interface language has locale-valued options; other selects can appear before it loads. */
 const LANGUAGE = `document.querySelector('main section select:has(option[value="en-US"])')`;
 const NAV = "[...document.querySelectorAll('header button')]";
 
 export async function languageScenario(d: Driver): Promise<void> {
   const prefsPath = join(d.profile, "preferences.json");
+
   const savedPreferences = async () =>
     JSON.parse(await readFile(prefsPath, "utf8")) as Record<string, unknown>;
 
   await smallestWindow(d);
+
   const contentLanguages = async () =>
     d.evaluate<{ titles?: string; audio?: string; subtitles?: string }>(`(async () => {
       const read = await window.mrStreamer.invoke('preferences.get');
       return read.ok ? { titles: read.value.preferences.titleLanguage, audio: read.value.preferences.audioLanguage,
         subtitles: read.value.preferences.subtitleLanguage } : {};
     })()`);
+
   const openSettings = async () => {
     await d.click("Open Settings", SETTINGS);
     await d.wait(() => d.exists(LANGUAGE));
   };
+
   const shown = () =>
     d.evaluate<{
       lang: string;
@@ -68,6 +73,7 @@ export async function languageScenario(d: Driver): Promise<void> {
         sections: [...document.querySelectorAll('main h2')].map(h => h.textContent),
       };
     })()`);
+
   const header = () =>
     d.evaluate<{ nav: string[]; labels: string[] }>(`(() => ({
       nav: ${NAV}.map(b => b.textContent.trim()).filter(Boolean),
@@ -80,7 +86,9 @@ export async function languageScenario(d: Driver): Promise<void> {
     if (!read.ok) throw new Error('Cannot read interface language');
     return read.value;
   })()`);
+
   const initial = await language();
+
   if (process.platform === "linux") expect(initial.system === "en-US", "English fixture system");
   await homeControls(d, initial.system);
   await d.capture("home-en-US");
@@ -111,6 +119,7 @@ export async function languageScenario(d: Driver): Promise<void> {
     // A closed select takes a typed name as a choice: "De" is Deutsch, "Es" Español, and
     // System default goes by its own name in the language shown.
     const typed = name ?? (await d.evaluate<string>(`${LANGUAGE}.options[0].textContent`));
+
     for (const char of typed.slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
@@ -118,6 +127,7 @@ export async function languageScenario(d: Driver): Promise<void> {
   };
 
   const visits: Record<string, unknown> = {};
+
   for (const locale of ["fr-FR", "nl-NL", "es-ES", "de-DE"] as const) {
     await pick(locale);
     await d.wait(async () => (await shown()).lang === locale);
@@ -161,6 +171,7 @@ export async function languageScenario(d: Driver): Promise<void> {
     visits[locale] = { settings, bar };
     await openSettings();
   }
+
   d.observed["languages"] = visits;
   const after = await contentLanguages();
   d.observed["contentAfterSwitching"] = after;
@@ -199,6 +210,7 @@ export async function languageScenario(d: Driver): Promise<void> {
   await pick("system");
   await d.wait(async () => {
     const active = await language();
+
     return (
       active.choice === "system" &&
       active.locale === active.system &&
@@ -232,6 +244,7 @@ export async function languageScenario(d: Driver): Promise<void> {
         }),
     "System default follows and names the system after restart",
   );
+
   if (process.platform !== "linux")
     d.observed["systemSimulationLimit"] =
       "Native system language retained; LANGUAGE/LANG do not simulate a Dutch host. No host settings changed.";
@@ -264,8 +277,10 @@ export async function languageScenario(d: Driver): Promise<void> {
 /** The text of every element `selector` finds, trimmed. */
 const texts = (selector: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => e.textContent.trim())`;
+
 const labels = (selector: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => e.getAttribute('aria-label'))`;
+
 const byText = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
 
@@ -302,6 +317,7 @@ async function liveTv(d: Driver, locale: Locale) {
   );
   const controls = await d.evaluate<string[]>(labels("[data-view=watch] button[aria-label]"));
   d.observed[`player-${locale}`] = controls;
+
   for (const key of ["Channels", "Stop", "Full screen", "More", "Mute"] as const) {
     expect(
       controls.includes(translate(locale, key)),
@@ -309,6 +325,7 @@ async function liveTv(d: Driver, locale: Locale) {
       controls,
     );
   }
+
   await d.capture(`player-${locale}`);
 
   // More opens from the keyboard, Space on its focused button, and Down walks its rows.
@@ -359,6 +376,7 @@ async function liveTv(d: Driver, locale: Locale) {
 
   // A channel with no stream says why in the app's words.
   await watchFromSearch(d, locale, "TEST | Offline");
+
   const titles = (
     [
       "No stream right now",
@@ -367,6 +385,7 @@ async function liveTv(d: Driver, locale: Locale) {
       "Lost the stream",
     ] as const
   ).map((key) => translate(locale, key));
+
   await d.wait(() =>
     d.evaluate<boolean>(
       `(() => { const t = document.querySelector('[data-view=watch]')?.innerText ?? ''; return ${JSON.stringify(titles)}.some(x => t.includes(x)); })()`,
@@ -380,17 +399,21 @@ async function liveTv(d: Driver, locale: Locale) {
   // Its cross is named in the language and is reached with Tab. Enter on it closes the message
   // and hands focus to Watch, and opens no channel list.
   const cross = translate(locale, "Close message");
+
   const focused = () =>
     d.evaluate<string | null>(
       "document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? null",
     );
+
   for (let i = 0; i < 25 && (await focused()) !== cross; i++) await d.key("Tab", 9);
   expect((await focused()) === cross, `Tab reaches the message's cross in ${locale}`, cross);
+
   // The message, with its cross; the window keeps its spoken status line.
   const message = () =>
     d.evaluate<string>(
       "[...document.querySelectorAll('[data-playback-state]')].map(e => e.innerText).join(' ').trim()",
     );
+
   const open = await message();
   expect(
     titles.some((title) => open.includes(title)),
@@ -411,6 +434,7 @@ async function liveTv(d: Driver, locale: Locale) {
     code: "Enter",
     windowsVirtualKeyCode: 13,
   });
+
   const closedState = {
     message: await message(),
     focus: await focused(),
@@ -418,6 +442,7 @@ async function liveTv(d: Driver, locale: Locale) {
       `document.querySelector('[data-view=watch] header button[aria-label=${JSON.stringify(translate(locale, "Close"))}]')`,
     ),
   };
+
   d.observed[`errorClosed-${locale}`] = closedState;
   expect(
     closedState.message === "" &&
@@ -437,17 +462,20 @@ async function liveTv(d: Driver, locale: Locale) {
  */
 async function pages(d: Driver, locale: Locale) {
   const fits: Record<string, unknown> = {};
+
   for (const page of ["Live TV", "Movies", "Series", "Watchlist", "Home"] as const) {
     if (page === "Watchlist") {
       if (!(await d.exists(byText("header button", translate(locale, page))))) {
         fits[page] = { hiddenWhileEmpty: true };
         continue;
       }
+
       await d.click(
         "Return Home for Watchlist",
         byText("header button", translate(locale, "Home")),
       );
     }
+
     await d.click(
       `Open ${page}`,
       byText(page === "Watchlist" ? "button" : "header button", translate(locale, page)),
@@ -460,16 +488,19 @@ async function pages(d: Driver, locale: Locale) {
       ),
     );
     await new Promise((resolve) => setTimeout(resolve, 500));
+
     const fit = await d.evaluate<{ overflow: boolean; clipped: string[] }>(`(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       clipped: [...document.querySelectorAll('header button, nav button, main button, h1, h2')]
         .filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).textOverflow !== 'ellipsis')
         .map(e => e.textContent.trim()).filter(Boolean),
     }))()`);
+
     fits[page] = fit;
     expect(!fit.overflow && fit.clipped.length === 0, `${page} fits in ${locale}`, fit);
     await d.capture(`page-${page.toLowerCase().replace(" ", "-")}-${locale}`);
   }
+
   d.observed[`pages-${locale}`] = fits;
 }
 
@@ -499,6 +530,7 @@ async function titles(d: Driver, locale: Locale) {
   );
   const controls = await d.evaluate<string[]>(labels("[data-view=title] button[aria-label]"));
   d.observed[`title-player-${locale}`] = controls;
+
   for (const key of ["Back 10 seconds", "Forward 10 seconds", "Pause", "Full screen"] as const) {
     expect(
       controls.includes(translate(locale, key)),
@@ -506,6 +538,7 @@ async function titles(d: Driver, locale: Locale) {
       controls,
     );
   }
+
   await d.capture(`title-player-${locale}`);
   await d.click(
     "Open the subtitle panel",
@@ -553,10 +586,12 @@ async function titleError(d: Driver, locale: Locale) {
   await d.click("Play it", byText('[role="dialog"] button', translate(locale, "Play")));
   const cross = "document.querySelector('[data-view=title] [data-close-message]')";
   await d.wait(() => d.exists(cross));
+
   const failed = await d.evaluate<{ message: string; cross: string | null }>(`({
     message: document.querySelector('[data-view=title]')?.innerText ?? '',
     cross: ${cross}?.getAttribute('aria-label') ?? null,
   })`);
+
   d.observed[`titleError-${locale}`] = failed;
   expect(
     failed.cross === translate(locale, "Close message"),
@@ -566,10 +601,12 @@ async function titleError(d: Driver, locale: Locale) {
   await d.capture(`title-error-${locale}`);
   await d.click("Close the message with its cross", cross);
   await d.wait(async () => !(await d.exists(cross)));
+
   const closed = await d.evaluate<{ crosses: number; retry: string | null }>(`({
     crosses: document.querySelectorAll('[data-view=title] [data-close-message]').length,
     retry: document.querySelector('[data-view=title] [data-retry]')?.getAttribute('aria-label') ?? null,
   })`);
+
   d.observed[`titleErrorClosed-${locale}`] = closed;
   expect(
     closed.retry === translate(locale, "Play"),
@@ -610,11 +647,13 @@ async function downloads(d: Driver, locale: Locale) {
   await d.wait(() =>
     d.evaluate<boolean>(`document.querySelector('h1')?.textContent === ${JSON.stringify(name)}`),
   );
+
   const page = await d.evaluate<{ headings: string[]; buttons: string[]; overflow: boolean }>(`({
     headings: ${texts("h1, h2")},
     buttons: ${texts("main button, [data-download] button")},
     overflow: document.documentElement.scrollWidth > innerWidth,
   })`);
+
   d.observed[`downloads-${locale}`] = page;
   expect(
     page.headings.includes(translate(locale, "On this computer")) &&
@@ -654,9 +693,11 @@ async function homeControls(d: Driver, locale: Locale) {
   await d.click("Open Home settings", byText("nav button", translate(locale, "Home")));
   const section = `document.querySelector('section[aria-label="${translate(locale, "Customize Home")}"]')`;
   await d.wait(() => d.exists(section));
+
   const rows = await d.evaluate<string[]>(
     `[...${section}.querySelectorAll('li label')].map(e => e.textContent.trim())`,
   );
+
   expect(
     rows.length === 8 &&
       rows.includes(translate(locale, "Recommendations")) &&

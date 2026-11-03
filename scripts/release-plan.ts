@@ -161,6 +161,7 @@ export interface RunPlan {
  */
 export async function planRun(repo: Repository, request: RunRequest): Promise<RunPlan> {
   const nightly = { ...request, scheduled: false, dryRun: false };
+
   switch (request.event) {
     case "pull_request":
       return dryRun(await planNightly(repo, { ...nightly, dryRun: true }));
@@ -173,12 +174,16 @@ export async function planRun(repo: Repository, request: RunRequest): Promise<Ru
             "A dry run builds the branch as a nightly. Leave the channel at nightly.",
           );
         }
+
         return dryRun(await planNightly(repo, { ...nightly, dryRun: true }));
       }
+
       if (request.channel === "stable") {
         const plan = await planStable(repo, { ...request, nightly: request.nightly ?? "" });
+
         return { dryRun: false, plan, promoted: tagOf(parseVersion(request.nightly ?? "")!) };
       }
+
       return published(await planNightly(repo, nightly));
     default:
       throw new Error(`A release run doesn't start on ${request.event}.`);
@@ -190,10 +195,13 @@ const published = (plan: Plan | Skip): RunPlan => ({ dryRun: false, plan, promot
 
 export async function planNightly(repo: Repository, request: NightlyRequest): Promise<Plan | Skip> {
   if (!request.dryRun) assertDefaultBranch(repo, request.ref, "nightly");
+
   if (request.scheduled) {
     const skip = await nightlySkip(repo, request.sha, request.now);
+
     if (skip) return skip;
   }
+
   return nextNightly(repo, request);
 }
 
@@ -204,20 +212,25 @@ function nextNightly(
 ): Plan {
   const known = releasedVersions(repo);
   const recorded = parseVersion(request.recorded);
+
   if (!recorded || recorded.nightly) {
     throw new Error(
       `package.json holds "${request.recorded}", not a stable version such as 0.1.0.`,
     );
   }
+
   const base = [recorded, ...known.filter((version) => !version.nightly)]
     .sort(compareVersions)
     .at(-1)!;
+
   const version: Version = {
     ...base,
     patch: base.patch + 1,
     nightly: { date: utcDate(request.now), run: request.run },
   };
+
   assertUnreleased(known, version);
+
   return {
     channel: "nightly",
     version: formatVersion(version),
@@ -229,15 +242,18 @@ function nextNightly(
 
 export async function planStable(repo: Repository, request: StableRequest): Promise<Plan> {
   assertDefaultBranch(repo, request.ref, "stable");
+
   if (!request.nightly) {
     throw new Error(
       "Enter the nightly you tested, such as 0.0.2-nightly.20260930.30. A stable release promotes only a tested nightly.",
     );
   }
+
   const nightly = pinnedNightly(repo.releases, request.nightly);
   const previewed = parseVersion(nightly.tag)!;
   const sha = await repo.commitOf(nightly.tag);
   const history = await repo.compare(sha, repo.defaultBranch);
+
   if (history !== "ahead" && history !== "identical") {
     throw new Error(
       `${nightly.tag} was built from ${sha}, which ${repo.defaultBranch} does not contain (${history}).`,
@@ -248,32 +264,40 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
     .filter((release) => !release.draft && !release.prerelease)
     .flatMap((release) => {
       const parsed = parseVersion(release.tag);
+
       return parsed && !parsed.nightly ? [parsed] : [];
     })
     .sort(compareVersions)
     .at(-1);
+
   // The upgrade check installs the newest stable release and upgrades it to this nightly, so the
   // plan holds the nightly to the same rule before any release work starts.
   if (previousStable) {
     const stableTag = tagOf(previousStable);
+
     const problem = promotionProblem(
       { tag: nightly.tag, version: previewed },
       { tag: stableTag, version: previousStable },
       await repo.compare(stableTag, nightly.tag),
     );
+
     if (problem) throw new Error(problem);
   }
 
   const version = request.version ? parseVersion(request.version) : { ...previewed, nightly: null };
+
   if (!version || version.nightly) {
     throw new Error(`"${request.version}" is not a stable version such as 0.1.0.`);
   }
+
   if (compareVersions(version, previewed) <= 0) {
     throw new Error(
       `${formatVersion(version)} would sort before ${nightly.tag}, the nightly it promotes.`,
     );
   }
+
   assertUnreleased(releasedVersions(repo), version);
+
   return {
     channel: "stable",
     version: formatVersion(version),
@@ -291,6 +315,7 @@ export async function planStable(repo: Repository, request: StableRequest): Prom
  */
 export function checkUnreleased(repo: Repository, version: string): void {
   const parsed = parseVersion(version);
+
   if (!parsed) throw new Error(`"${version}" is not a release version.`);
   assertUnreleased(releasedVersions(repo), parsed);
 }
@@ -307,6 +332,7 @@ export function checkFiles(
 ): void {
   if (sources.length === 0) throw new Error("The sources job named no source archives.");
   const missing = [...releaseFiles(version), ...sources].filter((name) => !present.includes(name));
+
   if (missing.length > 0) throw new Error(`The release of ${version} lacks ${missing.join(", ")}.`);
 }
 
@@ -322,12 +348,15 @@ export async function releaseNotes(
   const commits = await repo.commits(plan.previousTag, plan.sha);
   const pulls = (await Promise.all(commits.map((commit) => repo.pullRequestsOf(commit)))).flat();
   const listed = new Map(pulls.map((pull) => [pull.number, pull]));
+
   const changes = [...listed.values()].map(
     (pull) => `* ${pull.title} by @${pull.author} in ${pull.url}`,
   );
+
   const changelog = plan.previousTag
     ? `${repo.url}/compare/${plan.previousTag}...${plan.tag}`
     : `${repo.url}/commits/${plan.tag}`;
+
   return [
     ...(changes.length > 0 ? ["## What's Changed", ...changes, ""] : []),
     `**Full Changelog**: ${changelog}`,
@@ -338,7 +367,9 @@ export async function releaseNotes(
 export function recordedVersion(current: string, released: string): string | null {
   const now = parseVersion(current);
   const next = parseVersion(released);
+
   if (!next || next.nightly) throw new Error(`"${released}" is not a stable version.`);
+
   return now && compareVersions(now, next) >= 0 ? null : formatVersion(next);
 }
 
@@ -362,12 +393,15 @@ function latestNightly(releases: readonly GitHubRelease[]): GitHubRelease | unde
 /** The published nightly `text` names, by version or tag, such as 0.0.2-nightly.20260930.30. */
 function pinnedNightly(releases: readonly GitHubRelease[], text: string): GitHubRelease {
   const version = parseVersion(text);
+
   if (!version?.nightly) {
     throw new Error(`"${text}" is not a nightly version, such as 0.0.2-nightly.20260930.30.`);
   }
+
   const tag = tagOf(version);
   const named = releases.filter((release) => release.tag === tag);
   const nightly = named.find(isPublishedNightly);
+
   if (nightly) return nightly;
   throw new Error(
     named.length === 0
@@ -379,17 +413,22 @@ function pinnedNightly(releases: readonly GitHubRelease[], text: string): GitHub
 /** Why a scheduled nightly should not build `sha` now, or null when it should. */
 async function nightlySkip(repo: Repository, sha: string, now: number): Promise<Skip | null> {
   const last = latestNightly(repo.releases);
+
   if (!last) return null;
+
   if (utcDate(now) <= utcDate(Date.parse(last.publishedAt!))) {
     return { skip: `${last.tag} was already published today (UTC).`, warning: false };
   }
+
   switch (await repo.compare(last.tag, sha)) {
     case "ahead": {
       const paths = await repo.releasePaths(last.tag, sha);
+
       return desktopReleaseChanged(paths)
         ? null
         : { skip: `No desktop release inputs changed since ${last.tag}.`, warning: false };
     }
+
     case "identical":
       return { skip: `Nothing new since ${last.tag}.`, warning: false };
     case "behind":
@@ -405,7 +444,9 @@ async function nightlySkip(repo: Repository, sha: string, now: number): Promise<
 /** Release inputs differ from Checks selection: marketing tests run in Checks but do not ship in desktop. */
 export function desktopReleaseChanged(paths: readonly string[] | null): boolean {
   if (paths === null) return true;
+
   if (paths.length === 0) return false;
+
   return paths.some(
     (path) =>
       !(
@@ -433,8 +474,10 @@ function assertDefaultBranch(repo: Repository, ref: string, channel: Channel): v
 /** Versions of every tag and published release. */
 function releasedVersions(repo: Repository): Version[] {
   const published = repo.releases.filter((release) => !release.draft).map((release) => release.tag);
+
   return [...new Set([...repo.tags, ...published])].flatMap((tag) => {
     const parsed = parseVersion(tag);
+
     return parsed ? [parsed] : [];
   });
 }
@@ -443,8 +486,10 @@ function assertUnreleased(known: readonly Version[], version: Version): void {
   if (known.some((other) => compareVersions(other, version) === 0)) {
     throw new Error(`${tagOf(version)} already exists.`);
   }
+
   const rivals = version.nightly ? known : known.filter((other) => channelOf(other) === "stable");
   const newest = rivals.toSorted(compareVersions).at(-1);
+
   if (newest && compareVersions(version, newest) < 0) {
     throw new Error(
       `${formatVersion(version)} would sort before ${formatVersion(newest)}, which is already released.`,
@@ -463,12 +508,14 @@ function utcDate(time: number): number {
 /** The repository the workflow runs in, read through gh. */
 function githubRepository(): Repository {
   const name = process.env["GITHUB_REPOSITORY"] ?? "{owner}/{repo}";
+
   const api = (path: string, jq: string, paginate = false) =>
     execFileSync(
       "gh",
       ["api", ...(paginate ? ["--paginate"] : []), `repos/${name}${path}`, "--jq", jq],
       { encoding: "utf8" },
     ).trim();
+
   const lines = (text: string) => text.split("\n").filter(Boolean);
 
   // One release a line, as JSON: notes span lines.
@@ -479,7 +526,9 @@ function githubRepository(): Repository {
       true,
     ),
   ).map((line): GitHubRelease => JSON.parse(line));
+
   const [defaultBranch = "", url = ""] = api("", "[.default_branch, .html_url] | @tsv").split("\t");
+
   return {
     url,
     defaultBranch,
@@ -490,8 +539,11 @@ function githubRepository(): Repository {
         `/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=1`,
         ".status",
       );
+
       const history = HISTORIES.find((known) => known === status);
+
       if (!history) throw new Error(`GitHub compared ${base} and ${head} as "${status}".`);
+
       return history;
     },
     async releasePaths(base, head) {
@@ -515,6 +567,7 @@ function githubRepository(): Repository {
           api(`/commits?sha=${encodeURIComponent(head)}&per_page=100`, ".[].sha", true),
         ).reverse();
       }
+
       return lines(
         api(
           `/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=100`,
@@ -525,8 +578,10 @@ function githubRepository(): Repository {
     },
     async pullRequestsOf(commit) {
       const merged = `.[] | select(.merged_at != null and .base.ref == "${defaultBranch}") | [.number, .user.login, .html_url, .title] | @tsv`;
+
       return lines(api(`/commits/${commit}/pulls`, merged)).map((line): PullRequest => {
         const [number = "", author = "", url = "", title = ""] = line.split("\t");
+
         return { number: Number(number), title, author, url };
       });
     },
@@ -537,11 +592,13 @@ function output(values: Record<string, string>): void {
   const lines = Object.entries(values).map(([key, value]) => `${key}=${value}`);
   console.log(lines.join("\n"));
   const file = process.env["GITHUB_OUTPUT"];
+
   if (file) appendFileSync(file, `${lines.join("\n")}\n`);
 }
 
 function summary(markdown: string): void {
   const file = process.env["GITHUB_STEP_SUMMARY"];
+
   if (file) appendFileSync(file, `${markdown}\n`);
 }
 
@@ -553,8 +610,10 @@ function outputPlan({ dryRun, plan, promoted }: RunPlan): void {
     console.log(`${plan.warning ? "::warning::" : ""}${plan.skip}`);
     summary(`No nightly: ${plan.skip}`);
     output({ skip: "true", "dry-run": String(dryRun) });
+
     return;
   }
+
   summary(
     `${dryRun ? "Dry run, publishing nothing: " : ""}${plan.channel === "stable" ? "Stable" : "Nightly"} ${plan.version} from \`${plan.sha}\``,
   );
@@ -579,13 +638,18 @@ async function reportChannels(
   request: Omit<NightlyRequest, "scheduled" | "dryRun">,
 ): Promise<void> {
   const ref = `refs/heads/${repo.defaultBranch}`;
+
   const describe = (plan: Plan | Skip) => {
     if ("skip" in plan) return `skips. ${plan.skip}`;
+
     return `builds ${plan.version} from ${plan.sha}.`;
   };
+
   const refused = (error: unknown) =>
     `is refused. ${error instanceof Error ? error.message : String(error)}`;
+
   const sha = await repo.commitOf(repo.defaultBranch);
+
   const nightly = await planNightly(repo, {
     ...request,
     ref,
@@ -593,12 +657,14 @@ async function reportChannels(
     scheduled: true,
     dryRun: false,
   }).then(describe, refused);
+
   const stable = await planStable(repo, {
     ...request,
     ref,
     sha,
     nightly: latestNightly(repo.releases)?.tag ?? "",
   }).then(describe, refused);
+
   console.log(
     `A scheduled nightly now ${nightly}\nA stable release of the latest nightly now ${stable}`,
   );
@@ -612,11 +678,14 @@ async function reportChannels(
 export async function deployedFeed(url: string | undefined): Promise<UpdateFeed | null> {
   if (!url) {
     console.log("No deployed feed given: the releases alone decide.");
+
     return null;
   }
+
   // Pages' cache can serve a copy up to ten minutes old; a query it hasn't seen reads the latest.
   const latest = new URL(url);
   latest.searchParams.set("at", String(Date.now()));
+
   const response = await fetch(latest, { signal: AbortSignal.timeout(20_000) }).catch(
     (error: unknown) => {
       throw new Error(
@@ -624,11 +693,15 @@ export async function deployedFeed(url: string | undefined): Promise<UpdateFeed 
       );
     },
   );
+
   if (response.status === 404) {
     console.log(`Nothing is deployed at ${url} yet: the releases alone decide.`);
+
     return null;
   }
+
   if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}.`);
+
   try {
     return readFeed(await response.json());
   } catch (error) {
@@ -645,9 +718,11 @@ function describeFeed(current: UpdateFeed | null, listed: UpdateFeed, feed: Upda
     const named = feed[channel]?.version ?? "none";
     const released = listed[channel]?.version ?? "none";
     const was = current && (current[channel]?.version ?? "none");
+
     if (named !== released) {
       return `${label}: ${named}, kept from the deployed feed over ${released} from the releases`;
     }
+
     return was && was !== named ? `${label}: ${named}, was ${was}` : `${label}: ${named}`;
   });
 }
@@ -673,8 +748,10 @@ async function main(): Promise<void> {
       "allow-regress": { type: "boolean", default: false },
     },
   });
+
   const [command] = positionals;
   const ref = values.ref ?? "";
+
   // Planning inputs; Stable resolves its source from the selected nightly.
   const nightlyOf = () => ({
     ref,
@@ -687,6 +764,7 @@ async function main(): Promise<void> {
   switch (command) {
     case "plan": {
       const repo = githubRepository();
+
       const request: RunRequest = {
         ...nightlyOf(),
         event: values.event ?? "",
@@ -695,11 +773,15 @@ async function main(): Promise<void> {
         nightly: values.nightly || undefined,
         dryRun: values["dry-run"],
       };
+
       const planned = await planRun(repo, request);
       outputPlan(planned);
+
       if (planned.dryRun) await reportChannels(repo, request);
+
       return;
     }
+
     case "check": {
       if (!values.dir) throw new Error("Name the folder of the release's files with --dir.");
       const version = values.version ?? "";
@@ -709,8 +791,10 @@ async function main(): Promise<void> {
       console.log(
         `${version} is still new, and the release has every platform's files and source.`,
       );
+
       return;
     }
+
     case "notes":
       console.log(
         await releaseNotes(githubRepository(), {
@@ -719,20 +803,25 @@ async function main(): Promise<void> {
           previousTag: values["previous-tag"] || null,
         }),
       );
+
       return;
     case "record": {
       const manifest: Record<string, unknown> = JSON.parse(readFileSync(MANIFEST, "utf8"));
       const next = recordedVersion(String(manifest.version), values.version ?? "");
+
       if (next) {
         writeFileSync(MANIFEST, `${JSON.stringify({ ...manifest, version: next }, null, 2)}\n`);
       }
+
       console.log(
         next
           ? `${MANIFEST} now records ${next}.`
           : `${MANIFEST} already records ${manifest.version}.`,
       );
+
       return;
     }
+
     case "feed": {
       if (!values.out) throw new Error("Name the file to write with --out.");
       const repo = githubRepository();
@@ -743,8 +832,10 @@ async function main(): Promise<void> {
       const lines = describeFeed(current, listed, feed);
       console.log(lines.join("\n"));
       summary(lines.map((line) => `- ${line}`).join("\n"));
+
       return;
     }
+
     default:
       throw new Error(`Unknown command "${command}". Use plan, check, notes, record or feed.`);
   }

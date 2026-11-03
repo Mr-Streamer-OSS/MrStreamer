@@ -14,9 +14,11 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 export function TmdbProgress() {
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
+
   if (!metadata?.fetching || metadata.refused || metadata.known >= metadata.wanted) return null;
   const done = metadata.known / metadata.wanted;
   const label = `TMDB · ${Math.floor(done * 100)} %`;
+
   return (
     <Tooltip label={label} side="bottom">
       <Button

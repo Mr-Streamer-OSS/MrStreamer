@@ -12,6 +12,7 @@ import {
 } from "../../src/renderer/src/features/settings/PlaylistMap.tsx";
 
 const subscription = { ...SAVED, kind: "m3u" as const, username: "" };
+
 const groups: PlaylistGroupPage = {
   status: { explicit: true, groups: 2, live: 1, movies: 2, series: 0, episodes: 0, omitted: 60 },
   total: 2,
@@ -32,19 +33,24 @@ const groups: PlaylistGroupPage = {
     },
   ],
 };
+
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
   vi.useRealTimers();
 });
+
 async function render(element: ReturnType<typeof createElement>) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+
   client.setQueryData(["subscriptions"], [subscription]);
   const mounted = queryView(client);
   const { container } = mounted;
@@ -53,12 +59,15 @@ async function render(element: ReturnType<typeof createElement>) {
   const settle = () => act(() => vi.advanceTimersByTimeAsync(30));
   await settle();
   cleanup = mounted.unmount;
+
   const button = (label: string) =>
     [...document.querySelectorAll("button")].find((each) => each.textContent?.trim() === label);
+
   const click = async (label: string) => {
     await act(async () => button(label)?.click());
     await settle();
   };
+
   return { client, button, click, settle, container };
 }
 
@@ -68,6 +77,7 @@ describe("playlist mapping in Settings", () => {
     const app = await render(createElement(PlaylistMap, { subscription, onClose: () => {} }));
     const stopTitles = syncOnDemand(app.client);
     const stopLive = syncLibraryUpdates(app.client);
+
     try {
       expect(ipc.argsOf("playlist.groups")).toHaveLength(1);
       await act(async () => {

@@ -27,6 +27,7 @@ export const CODECS = [
   "opus",
   "flac",
 ] as const;
+
 export type Codec = (typeof CODECS)[number];
 
 export interface StreamSession {

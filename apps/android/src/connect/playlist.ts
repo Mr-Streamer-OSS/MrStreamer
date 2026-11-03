@@ -15,8 +15,10 @@ const CHECK_TIMEOUT_MS = 15_000;
 const PLAYLIST_TIMEOUT_MS = 90_000;
 const PLAYLIST_BYTES = 64 * 1024 * 1024;
 const PLAYLIST_ENTRIES = 100_000;
+
 /** A first line this long heads no playlist. */
 const HEADER_BYTES = 65_536;
+
 /** What a playlist host answers a link it no longer serves with. */
 const REFUSED: ReadonlySet<number> = new Set([401, 403, 404, 410]);
 
@@ -50,8 +52,10 @@ function playlistLogin(link: string): ProviderLogin {
   const url = new URL(link);
   const secrets = [decoded(url.username), decoded(url.password)];
   const uncertain: string[] = [];
+
   for (const [name, value] of url.searchParams)
     (LOGIN_NAMES.has(name.toLowerCase()) ? secrets : uncertain).push(value);
+
   return { secrets: secrets.filter(Boolean), uncertain };
 }
 
@@ -61,6 +65,7 @@ export function playlistReader(
 ): CatalogueReader {
   const get = providerFetch(options.fetch, playlistLogin(link));
   const origin = new URL(link).origin;
+
   const unreachable = (detail: string) =>
     new AppFailure({ kind: "unreachable", server: origin, detail });
 
@@ -68,6 +73,7 @@ export function playlistReader(
   async function open(timeoutMs: number, signal?: AbortSignal) {
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
+
     try {
       response = await get(link, {
         headers: { "User-Agent": options.userAgent },
@@ -77,8 +83,10 @@ export function playlistReader(
       if (signal?.aborted) throw cause;
       throw cause instanceof AppFailure ? cause : unreachable(describeNetworkError(cause));
     }
+
     if (!response.ok || !response.body) {
       void response.body?.cancel().catch(() => {});
+
       if (REFUSED.has(response.status))
         throw new AppFailure({
           kind: "incomplete-login",
@@ -87,15 +95,18 @@ export function playlistReader(
         });
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
+
     return { body: response.body, size: bodySize(response) };
   }
 
   const notAPlaylist = () => unreachable("The address answered, but not with a playlist.");
+
   const tooLarge = () =>
     new AppFailure({
       kind: "unexpected",
       detail: "This playlist is larger than 64 MB, more than the phone reads.",
     });
+
   const tooMany = () =>
     new AppFailure({
       kind: "unexpected",
@@ -113,15 +124,19 @@ export function playlistReader(
     const decoder = new TextDecoder();
     const reader = m3uReader();
     let bytes = 0;
+
     try {
       for (;;) {
         const { done, value } = await pieces.read();
+
         if (done) {
           take([...reader.push(decoder.decode()), ...reader.end()]);
           break;
         }
+
         bytes += value.byteLength;
         take(reader.push(decoder.decode(value, { stream: true })));
+
         if (reader.playlist === false || enough(reader, bytes)) break;
       }
     } catch (cause) {
@@ -130,18 +145,21 @@ export function playlistReader(
     } finally {
       void pieces.cancel().catch(() => {});
     }
+
     return reader.playlist === true;
   }
 
   return {
     async authenticate(signal) {
       const { body } = await open(CHECK_TIMEOUT_MS, signal);
+
       const playlist = await read(
         body,
         (reader, bytes) => reader.playlist !== null || bytes > HEADER_BYTES,
         () => {},
         signal,
       );
+
       if (!playlist)
         throw new AppFailure({
           kind: "incomplete-login",
@@ -151,25 +169,32 @@ export function playlistReader(
 
     async liveCatalogue(signal): Promise<LiveCatalogue> {
       const { body, size } = await open(PLAYLIST_TIMEOUT_MS, signal);
+
       if (size !== null && size > PLAYLIST_BYTES) {
         void body.cancel().catch(() => {});
         throw tooLarge();
       }
+
       const entries: PlaylistEntry[] = [];
+
       const playlist = await read(
         body,
         (_reader, bytes) => {
           if (bytes > PLAYLIST_BYTES) throw tooLarge();
+
           return false;
         },
         (found) => {
           entries.push(...found);
+
           if (entries.length > PLAYLIST_ENTRIES) throw tooMany();
         },
         signal,
       );
+
       if (!playlist) throw notAPlaylist();
       const { categories, channels } = importPlaylist(entries.map(unmappedEntry)).live;
+
       return { categories, channels };
     },
   };
@@ -185,6 +210,7 @@ const unmappedEntry = (entry: PlaylistEntry): PlaylistEntry => ({
     ...Object.fromEntries(
       (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
         const value = entry.attributes[name];
+
         return value === undefined ? [] : [[name, eachGroup(value)]];
       }),
     ),

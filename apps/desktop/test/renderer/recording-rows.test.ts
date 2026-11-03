@@ -41,12 +41,17 @@ async function rowOf(scheduled: Recording["scheduled"], over: Partial<Recording>
   const view = queryView(new QueryClient());
   onTestFinished(() => view.unmount());
   await view.render(createElement(RecordingsPage));
+
   const row = await vi.waitFor(() => {
     const found = document.querySelector("section[aria-label=Recorded] li");
+
     if (!found) throw new Error("No row");
+
     return found;
   });
+
   const meter = row.querySelector("[role=meter]");
+
   return {
     text: row.textContent ?? "",
     captured: meter?.getAttribute("aria-valuenow"),
@@ -72,6 +77,7 @@ it("misses a schedule saved partway through its programme from when it was saved
     { schedule: "s1", from: at("12:00"), owed: at("12:20"), late: "busy" },
     { start: at("12:00"), ended: null, bytes: 0, status: { kind: "missed", why: "busy" } },
   );
+
   expect(row.text).toContain("12:20");
   expect(row).toMatchObject({ captured: "0", planned: "40" });
 });
@@ -92,6 +98,7 @@ it("counts a late recording's minutes in whole minutes from when it was owed", a
     ended: at("12:07") + 50_000,
     status: { kind: "partial", cut: "stream" },
   });
+
   expect(row).toMatchObject({ captured: "5", planned: "10" });
   expect(row.text).toContain("5 of 10 min");
 });
@@ -108,6 +115,7 @@ it("rounds a complete late recording's captured time down, not its planned minut
     stop: at("12:10") + 10_000,
     ended: at("12:10") + 10_000,
   });
+
   expect(short).toMatchObject({ captured: "7", planned: "10" });
 });
 
@@ -117,6 +125,7 @@ it("counts the minutes a gap missed out of what was captured, and says when and 
     status: { kind: "partial", cut: "stream" },
     gaps: [{ from: at("12:20"), to: at("12:35"), why: "stream" }],
   });
+
   expect(row.text).toMatch(/12:20\D* to 12:35\D* missed\. The stream stopped\./);
   expect(row).toMatchObject({ captured: "45", planned: "60" });
 });
@@ -135,6 +144,7 @@ it("adds up captured time and short gaps before rounding them to whole minutes",
       { from: seconds("12:02", 50), to: seconds("12:03", 17.438), why: "stream" },
     ],
   });
+
   expect(row.text).toContain("1 min missed in between. The stream stopped.");
   expect(row).toMatchObject({ captured: "2", planned: "26" });
 });
@@ -148,6 +158,7 @@ it.each([
     status: { kind: "partial", cut: "stream" },
     gaps: [{ from, to, why: "stream" }],
   });
+
   expect(row.text).toMatch(/Less than a minute missed at 12:20\D*\. The stream stopped\./);
   expect(row.text).not.toMatch(/12:2\d\D* to 12:2\d/);
   expect(row).toMatchObject({ captured: "59", planned: "60" });
@@ -163,6 +174,7 @@ it("leaves out gaps an older version saved that missed no time", async () => {
       { from: at("12:50"), to: seconds("12:48", 30), why: "away" },
     ],
   });
+
   expect(row.text).toMatch(/12:20\D* to 12:22\D* missed\. The stream stopped\./);
   expect(row).toMatchObject({ captured: "58", planned: "60" });
 });
@@ -176,6 +188,7 @@ it("says gaps that missed less than a minute together did so", async () => {
       { from: seconds("12:30", 50), to: seconds("12:31", 15), why: "away" },
     ],
   });
+
   expect(row.text).toContain(
     "Less than a minute missed in between. Mr. Streamer wasn't open, or the computer slept.",
   );
@@ -202,11 +215,15 @@ it("keeps a paused recording in Now with Stop, its bar missing the time it waits
   const view = queryView(new QueryClient());
   onTestFinished(() => view.unmount());
   await view.render(createElement(RecordingsPage));
+
   const row = await vi.waitFor(() => {
     const found = document.querySelector("section[aria-label=Now] li");
+
     if (!found) throw new Error("No row");
+
     return found;
   });
+
   expect(row.textContent).toMatch(/Paused.*Paused at [^.]+\. The stream stopped\. Trying again\./);
   expect(row.querySelector("[aria-label='Stop recording Noon News']")).not.toBeNull();
   const meter = row.querySelector("[role=meter]");
@@ -252,6 +269,7 @@ const live: Recording = {
   bytes: 188_000,
   status: { kind: "recording" },
 };
+
 const refused = { kind: "unexpected", detail: "Recordings could not be saved." } as const;
 
 it("says a Stop it couldn't write down yet is stopped and retried, until it is saved", async () => {
@@ -276,12 +294,14 @@ it("drops a Stop's save error once the list shows the Stop taken, if the error c
   ipc.refuse("recordings.stop", refused);
   await click("Stop recording Noon News");
   await vi.waitFor(() => expect(rowText("Now")).toContain("Recordings could not be saved."));
+
   const stopped = {
     ...live,
     ended: Date.now(),
     status: { kind: "stopped" },
     unsaved: true,
   } as const;
+
   await act(async () => ipc.emit("recordings.changed", [stopped]));
   await vi.waitFor(() => expect(rowText("Recorded")).toContain("Not saved yet. Trying again."));
   expect(rowText("Recorded")).not.toContain("could not be saved");
@@ -298,13 +318,17 @@ it("keeps saying why a Delete was refused", async () => {
   await pageOf([{ ...live, ended: Date.now(), status: { kind: "complete" } }]);
   ipc.refuse("recordings.remove", refused);
   await click("More for Noon News");
+
   const remove = await vi.waitFor(() => {
     const found = [...document.querySelectorAll<HTMLElement>("[role=menuitem]")].find(
       (item) => item.textContent === "Delete",
     );
+
     if (!found) throw new Error("No Delete");
+
     return found;
   });
+
   await act(async () => remove.click());
   await vi.waitFor(() => expect(rowText("Recorded")).toContain("Recordings could not be saved."));
 });

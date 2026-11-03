@@ -144,17 +144,22 @@ import {
 
 /** A guide older than this is downloaded again. Providers cover about a day ahead. */
 const MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
 /** How often the service checks whether the guides are due. */
 const CHECK_EVERY = "15 minutes";
+
 /** How many guides download and index at a time. */
 const DOWNLOADS_AT_ONCE = 2;
+
 /** How often the time is checked against the guides: a grid follows a handover within it. */
 const CHECK_TIME_EVERY_MS = 60_000;
+
 /** A move of the clock between two checks that counts as a jump: a sleep, or a time set. */
 const CLOCK_JUMP_MS = 2 * CHECK_TIME_EVERY_MS;
 
 /** How often, at most, progress alone is told: each step of it is told at once. */
 const PROGRESS_EVERY_MS = 250;
+
 /** The turn of the sources' list, among the subscriptions' by their ids. */
 const SOURCES = "sources";
 
@@ -666,11 +671,13 @@ function make() {
       path: (folder, file) => store.path({ store: folder }, file),
       remove: (folder, file) => Effect.runPromise(store.discard({ store: folder }, file)),
     });
+
     // Shutting down closes every index. What is kept stays on disk for the next start.
     yield* Effect.addFinalizer(() => Effect.sync(() => files.closeAll()));
 
     /** Each subscription's turn at what decides its guide, by its id, and the sources' turn. */
     const turns = new Map<string, Semaphore.Semaphore>();
+
     /**
      * Runs `change` in a turn, a subscription's by its id or the sources' (`SOURCES`): one at a
      * time per turn, and once begun, to its end, also when what asked for it is stopped. Whatever
@@ -681,7 +688,9 @@ function make() {
     const turn = <A, E>(id: string, change: Effect.Effect<A, E>) =>
       Effect.suspend(() => {
         let one = turns.get(id);
+
         if (!one) turns.set(id, (one = Semaphore.makeUnsafe(1)));
+
         return one.withPermits(1)(Effect.uninterruptible(change));
       });
 
@@ -704,6 +713,7 @@ function make() {
     const failures = new Map<string, GuideFailureNote>();
     /** What each work under way is doing, while it runs, by the job's key. */
     const progress = new Map<string, Progress>();
+
     /** A subscription's channels with its mappings over them, while both are the same. */
     const overlays = new Map<
       string,
@@ -713,6 +723,7 @@ function make() {
         readonly channels: MappedChannels;
       }
     >();
+
     /**
      * Rises, per subscription, whenever `forget` drops its guide. Work that started before
      * doesn't apply its result, and a download asked for before doesn't start.
@@ -726,14 +737,18 @@ function make() {
     const jobs = new Map<string, Job>();
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
     const failed = (failure: GuideFailure) => new Failed({ error: { kind: "guide", failure } });
+
     /** A source's name as `renameSource` keeps it, or `label` refused. */
     const labelOf = (typed: string | null | undefined) =>
       Effect.suspend(() => {
         const whole = (typed ?? "").replace(/\s+/g, " ").trim();
+
         if (whole.includes("://")) return Effect.fail(failed({ kind: "label" }));
         const label = Array.from(whole).slice(0, GUIDE_LABEL_MAX).join("").trim();
+
         return Effect.succeed(label === "" ? null : label);
       });
+
     const changed = failed({ kind: "changed" });
     const published = PubSub.publish(updates, undefined);
     let toldAt = Number.NEGATIVE_INFINITY;
@@ -742,14 +757,17 @@ function make() {
      * is swept or let go of until the next start, which reads them again.
      */
     let keepAll = false;
+
     const keepEverything = (what: string, error: AppError) =>
       Effect.suspend(() => {
         keepAll = true;
+
         return Effect.logWarning(
           `[guide] can't read ${what}; keeping every file until the next start`,
           error,
         );
       });
+
     /** Whether this run's sweep has begun: once, after every record was read. */
     let swept = false;
 
@@ -772,8 +790,10 @@ function make() {
     /** Makes `next` a subscription's own guide, or none, and lets go of the one before. */
     const setLoaded = (id: string, next: Loaded | null) => {
       const before = loaded.get(id);
+
       if (next) loaded.set(id, next);
       else loaded.delete(id);
+
       if (before && before !== next) before.release();
     };
 
@@ -787,9 +807,11 @@ function make() {
         held.delete(file);
         release();
       }
+
       for (const file of named) {
         if (held.has(file)) continue;
         const release = files.claim(folder, file);
+
         if (release) held.set(file, release);
       }
     };
@@ -813,6 +835,7 @@ function make() {
     const settingsOf = (subscription: GuideSubscription) =>
       Effect.suspend(() => {
         const read = settings.get(subscription.id);
+
         return read?.key === subscription.key
           ? Effect.succeed(read)
           : turn(subscription.id, readSettings(subscription));
@@ -829,11 +852,15 @@ function make() {
       Effect.gen(function* () {
         const { id, key } = subscription;
         const known = settings.get(id);
+
         if (known?.key === key) return known;
+
         if (forgotten.has(id)) {
           return { key, mappings: {}, own: null, legacy: null, readable: true } satisfies Settings;
         }
+
         const unreadable = Symbol("unreadable");
+
         const stored = yield* store
           .config(subscription)
           .pipe(
@@ -841,6 +868,7 @@ function make() {
               Effect.as(keepEverything("what is set for a guide", failure.error), unreadable),
             ),
           );
+
         const own = yield* store
           .own(subscription)
           .pipe(
@@ -848,6 +876,7 @@ function make() {
               Effect.as(keepEverything("a guide on disk", failure.error), unreadable),
             ),
           );
+
         if (stored === unreadable || own === unreadable) {
           const read: Settings = {
             key,
@@ -856,14 +885,20 @@ function make() {
             legacy: null,
             readable: false,
           };
+
           keep(subscription, read);
+
           return read;
         }
+
         const kept = stored?.external ?? null;
+
         const listed =
           kept?.source != null && (yield* sourcesNow).some((each) => each.id === kept.source);
+
         const legacy: LegacyExternal | null =
           kept && !listed ? { ...kept, source: yield* adoptLegacy(subscription, kept) } : kept;
+
         const mappings = Object.fromEntries(
           Object.entries(stored?.mappings ?? {}).map(([channelId, mapping]) => [
             channelId,
@@ -873,11 +908,13 @@ function make() {
             },
           ]),
         );
+
         const read: Settings = { key, mappings, own, legacy, readable: true };
         // Noted where it moved to, and what the mappings made before name: added to what is
         // kept, never taken from it.
         const older = Object.values(stored?.mappings ?? {}).some((each) => !each.source);
         const moved = legacy?.source != null && legacy.source !== kept?.source;
+
         if (moved || (!legacy && older)) {
           yield* store
             .setConfig(subscription, storedConfig(read))
@@ -887,18 +924,24 @@ function make() {
               ),
             );
         }
+
         keep(subscription, read);
+
         if (legacy && legacy.source === null) yield* readPending(subscription, legacy);
         settings.set(id, read);
+
         return read;
       });
 
     /** Each subscription's guide of an address that couldn't move this run, read where it is. */
     const pending = new Map<string, Loaded>();
+
     const setPending = (id: string, next: Loaded | null) => {
       const before = pending.get(id);
+
       if (next) pending.set(id, next);
       else pending.delete(id);
+
       if (before && before !== next) before.release();
     };
 
@@ -912,20 +955,25 @@ function make() {
       Effect.gen(function* () {
         const { id } = subscription;
         const { document } = legacy;
+
         if (document.kind === "index") {
           const reader = yield* Effect.promise(() => files.open(subscription.store, document.file));
+
           if (reader) {
             const { index, release } = reader;
             setPending(id, { fetchedAt: document.fetchedAt, file: document.file, index, release });
           }
+
           return;
         }
+
         if (jobs.has(legacyKey(id))) return;
         yield* startJob(legacyKey(id), "reindex", versionOf(subscription), (report) =>
           reindexInto(subscription, document, report, (_index, adopt) =>
             Effect.sync(() => {
               if (settings.get(id)?.legacy?.source !== null) return null;
               setPending(id, adopt());
+
               return true;
             }),
           ).pipe(
@@ -956,23 +1004,30 @@ function make() {
         subscription.id,
         Effect.gen(function* () {
           const { id } = subscription;
+
           if (generationOf(id) !== started || !same(subscription, yield* savedAs(id))) return null;
           const now = yield* readSettings(subscription);
           const then = yield* next(now);
+
           if (!then) return null;
+
           if (then.mappings !== now.mappings && !now.readable) {
             // What is set couldn't be read: a write would lose it.
             return yield* Effect.fail(
               failedWith(new Error("What is set for the guide can't be read.")),
             );
           }
+
           if (then.own !== now.own) yield* store.setOwn(subscription, then.own);
+
           if (then.mappings !== now.mappings)
             yield* store.setConfig(subscription, storedConfig(then));
+
           // What couldn't be read is read again next time, not kept as it was taken.
           if (then.readable) settings.set(id, then);
           keep(subscription, then);
           applied();
+
           return now;
         }),
       );
@@ -1003,10 +1058,12 @@ function make() {
         Effect.promise(() => files.open(owner.store, document.file)),
         (reader): Effect.Effect<A, E | Failed> => {
           if (!reader) return Effect.fail(failedWith(new Error("The guide can't be read.")));
+
           return use({
             index: reader.index,
             adopt: () => {
               adopted.add(reader);
+
               return {
                 fetchedAt: document.fetchedAt,
                 file: document.file,
@@ -1030,6 +1087,7 @@ function make() {
       Effect.suspend(() => {
         const { id } = subscription;
         const guide = loaded.get(id);
+
         // Nothing is kept for a subscription without a guide, so there is nothing to read.
         if (
           guide ||
@@ -1040,6 +1098,7 @@ function make() {
         ) {
           return Effect.succeed(guide ?? null);
         }
+
         return turn(id, readStored(subscription));
       });
 
@@ -1048,8 +1107,10 @@ function make() {
       Effect.gen(function* () {
         const guide = yield* current(subscription);
         const job = jobs.get(subscription.id);
+
         if (guide || job?.kind !== "reindex") return guide;
         yield* Fiber.await(job.fiber);
+
         return loaded.get(subscription.id) ?? null;
       });
 
@@ -1058,9 +1119,12 @@ function make() {
       Effect.gen(function* () {
         const { id } = subscription;
         const known = loaded.get(id);
+
         if (known) return known;
+
         if (absent.has(id) || unread.has(id)) return null;
         const document = (yield* readSettings(subscription)).own;
+
         if (document?.kind === "xmltv") {
           // Indexed in the background, unless a download already brings a new one.
           if (!jobs.has(id)) {
@@ -1069,23 +1133,30 @@ function make() {
               reindex(subscription, document, started, report),
             );
           }
+
           return null;
         }
+
         const reader = document
           ? yield* Effect.promise(() => files.open(subscription.store, document.file))
           : null;
+
         if (!document || !reader) {
           if (document) yield* Effect.logWarning("[guide] ignoring the guide on disk");
           unread.add(id);
+
           return null;
         }
+
         const guide: Loaded = {
           fetchedAt: document.fetchedAt,
           file: document.file,
           index: reader.index,
           release: reader.release,
         };
+
         loaded.set(id, guide);
+
         return guide;
       });
 
@@ -1096,6 +1167,7 @@ function make() {
     const noteFailure = (subscription: GuideSubscription, started: number, error: AppError) =>
       Effect.gen(function* () {
         const { id } = subscription;
+
         if (generationOf(id) !== started) return;
         failures.set(id, { at: failures.get(id)?.at ?? (yield* Clock.currentTimeMillis), error });
         yield* published;
@@ -1139,6 +1211,7 @@ function make() {
         const fetchedAt = yield* Clock.currentTimeMillis;
         const name = store.newDownload();
         const file = store.newIndex();
+
         return yield* Effect.acquireUseRelease(
           Effect.sync(() => [claimNew(owner, name), claimNew(owner, file)]),
           () =>
@@ -1149,11 +1222,14 @@ function make() {
                   const got = yield* Effect.tryPromise({
                     try: async (signal) => {
                       const answer = await fetch(signal);
+
                       if (!answer) return false;
                       let bytes = 0;
                       report({ state: "downloading", bytes, total: answer.size });
+
                       for await (const chunk of answer.body) {
                         bytes += chunk.byteLength;
+
                         // Packed or not, nothing larger than the guide may unpack to is kept.
                         if (bytes > GUIDE_LIMITS.bytes) {
                           throw new AppFailure({
@@ -1161,15 +1237,20 @@ function make() {
                             failure: { kind: "too-large", limit: "bytes" },
                           });
                         }
+
                         await download.write(chunk);
                         report({ state: "downloading", bytes, total: answer.size });
                       }
+
                       await download.close();
+
                       return true;
                     },
                     catch: failedWith,
                   });
+
                   if (!got) return { none: true } as const;
+
                   const summary = yield* indexed(owner, {
                     document: download.file,
                     file,
@@ -1178,6 +1259,7 @@ function make() {
                     strict,
                     report,
                   });
+
                   return { none: false, used: yield* use({ file, fetchedAt, summary }) } as const;
                 }),
               (download) => Effect.promise(() => download.discard()),
@@ -1213,6 +1295,7 @@ function make() {
         const began = yield* Clock.currentTimeMillis;
         report({ state: "reading", programmes: 0, since: began });
         const stop = new AbortController();
+
         const built = indexer.build(
           {
             document: store.path(owner, document),
@@ -1225,10 +1308,12 @@ function make() {
           (programmes) => report({ state: "reading", programmes, since: began }),
           stop.signal,
         );
+
         return yield* Effect.tryPromise({ try: () => built, catch: failedWith }).pipe(
           Effect.onInterrupt(() =>
             Effect.promise(() => {
               stop.abort();
+
               return built.then(
                 () => {},
                 () => {},
@@ -1252,6 +1337,7 @@ function make() {
     ) =>
       Effect.gen(function* () {
         const file = store.newIndex();
+
         return yield* Effect.acquireUseRelease(
           Effect.sync(() => [claimNew(owner, file), files.claim(owner.store, document.file)]),
           ([, input]) =>
@@ -1267,6 +1353,7 @@ function make() {
               });
               const index: GuideDocument = { file, fetchedAt: document.fetchedAt, kind: "index" };
               const kept = yield* opening(owner, index, ({ adopt }) => keepIndex(index, adopt));
+
               return kept !== null;
             }),
           (claims) => Effect.sync(() => claims.forEach((release) => release?.())),
@@ -1287,6 +1374,7 @@ function make() {
       Effect.gen(function* () {
         const { id } = subscription;
         const before = (yield* settingsOf(subscription)).own;
+
         const answer = yield* pinning(
           subscription,
           before?.kind === "index" ? before.file : null,
@@ -1295,6 +1383,7 @@ function make() {
               subscription,
               async (signal) => {
                 const guide = await ask(signal);
+
                 return guide.kind === "none" ? null : { body: guide.body, size: guide.size };
               },
               { strict: false, previous },
@@ -1316,6 +1405,7 @@ function make() {
                 ),
             ),
         );
+
         if (answer.none) {
           // It answered that it has none. Asked again and still none: nothing is told.
           let told = false;
@@ -1331,9 +1421,12 @@ function make() {
               setLoaded(id, null);
             },
           );
+
           if (told) yield* published;
+
           return;
         }
+
         if (answer.used) yield* published;
       });
 
@@ -1364,6 +1457,7 @@ function make() {
         Effect.catchTag("Failed", (failure) =>
           Effect.gen(function* () {
             yield* Effect.logWarning("[guide] ignoring the guide on disk", failure.error);
+
             if (generationOf(subscription.id) === started) unread.add(subscription.id);
           }),
         ),
@@ -1373,9 +1467,11 @@ function make() {
     const download = (subscription: GuideSubscription, report: (progress: Progress) => void) =>
       Effect.gen(function* () {
         const started = generationOf(subscription.id);
+
         const run = subscription.download
           ? downloadOwn(subscription, subscription.download, started, report)
           : Effect.fail(needsSecret(subscription));
+
         yield* run.pipe(
           Effect.tapError((failure) => noteFailure(subscription, started, failure.error)),
         );
@@ -1400,18 +1496,23 @@ function make() {
     ) =>
       Effect.gen(function* () {
         const token = {};
+
         const report = (step: Progress) => {
           if (jobs.get(key)?.token !== token) return;
           const before = progress.get(key);
           progress.set(key, step);
           const now = performance.now();
+
           // A new step is told at once; how far one got, a few times a second.
           if (before?.state === step.state && now - toldAt < PROGRESS_EVERY_MS) return;
           toldAt = now;
           PubSub.publishUnsafe(updates, undefined);
         };
+
         const replaced = jobs.get(key);
+
         if (replaced) yield* Effect.forkIn(Fiber.interrupt(replaced.fiber), scope);
+
         const fiber = yield* Effect.forkIn(
           work(report).pipe(
             Effect.ensuring(
@@ -1419,15 +1520,19 @@ function make() {
                 if (jobs.get(key)?.token !== token) return Effect.void;
                 jobs.delete(key);
                 progress.delete(key);
+
                 return published;
               }),
             ),
           ),
           scope,
         );
+
         jobs.set(key, { kind, version, token, fiber });
+
         if (kind === "download" && !progress.has(key))
           report({ state: "downloading", bytes: 0, total: null });
+
         return fiber;
       });
 
@@ -1454,13 +1559,17 @@ function make() {
     ) =>
       Effect.gen(function* () {
         const indexing = jobs.get(key);
+
         if (indexing?.kind === "reindex") yield* Fiber.await(indexing.fiber);
+
         if (!stands()) return yield* changed;
         const under = jobs.get(key);
+
         const running =
           under?.kind === "download" && under.version === version
             ? under.fiber
             : yield* startJob(key, "download", version, work);
+
         yield* joined(running, { kind: "changed" });
       });
 
@@ -1477,6 +1586,7 @@ function make() {
         const { id } = subscription;
         // What an older release kept is read first, so it is indexed before the download.
         yield* current(subscription);
+
         if (subscription.download === null) return yield* needsSecret(subscription);
         yield* downloading(
           id,
@@ -1492,6 +1602,7 @@ function make() {
         if (absent.has(subscription.id)) return;
         const guide = yield* keptGuide(subscription);
         const now = yield* Clock.currentTimeMillis;
+
         if (guide && now - guide.fetchedAt < MAX_AGE_MS) return;
         yield* refreshOf(subscription, started);
       });
@@ -1505,6 +1616,7 @@ function make() {
         const running = jobs.get(key);
         jobs.delete(key);
         progress.delete(key);
+
         return running ? Fiber.interrupt(running.fiber) : Effect.void;
       });
 
@@ -1539,11 +1651,13 @@ function make() {
       sourceList = list;
       sourceOrigins = new Map(list.map(({ id, origin }) => [id, origin]));
       const named = new Set(list.flatMap(({ document }) => (document ? [document.file] : [])));
+
       for (const [file, guide] of cacheLoaded) {
         if (named.has(file)) continue;
         cacheLoaded.delete(file);
         guide.release();
       }
+
       hold(sourcesOwner.store, sourceKept, named);
     };
 
@@ -1551,6 +1665,7 @@ function make() {
     const setCacheLoaded = (next: Loaded) => {
       const before = cacheLoaded.get(next.file);
       cacheLoaded.set(next.file, next);
+
       if (before && before !== next) before.release();
     };
 
@@ -1561,13 +1676,17 @@ function make() {
      */
     const readSources = Effect.gen(function* () {
       if (sourceList) return sourceList;
+
       const stored = yield* store
         .sources(sourcesOwner)
         .pipe(Effect.tapError((failure) => keepEverything("the guide sources", failure.error)));
+
       const list = yield* Effect.forEach(stored, (kept) =>
         Effect.map(addresses.open(kept.sealedAddress), (address): Source => ({ ...kept, address })),
       );
+
       setSources(list);
+
       return list;
     });
 
@@ -1595,10 +1714,12 @@ function make() {
         Effect.gen(function* () {
           const now = yield* readSources;
           const then = yield* next(now);
+
           if (!then) return null;
           yield* store.setSources(sourcesOwner, then.map(storedOf));
           setSources(then);
           applied();
+
           return now;
         }),
       );
@@ -1611,6 +1732,7 @@ function make() {
     ): readonly Source[] | null => {
       const was = list.find((each) => each.id === id);
       const then = was && update(was);
+
       return then ? list.map((each) => (each === was ? then : each)) : null;
     };
 
@@ -1643,9 +1765,11 @@ function make() {
           const list = yield* readSources;
           const same = list.find((each) => each.identity === legacy.identity);
           const { file, fetchedAt } = legacy.document;
+
           // Copied before, by a run that couldn't note where.
           if (same?.movedFrom?.file === file) return same.id;
           const unreadable = Symbol("unreadable");
+
           const bytes = yield* store
             .bytesOf(subscription, file)
             .pipe(
@@ -1653,30 +1777,38 @@ function make() {
                 Effect.as(keepEverything("a guide address's download", failure.error), unreadable),
               ),
             );
+
           if (bytes === unreadable) return null;
           const candidate: MovedFrom | null = bytes === null ? null : { file, fetchedAt, bytes };
+
           const read =
             candidate !== null &&
             (!same?.document ||
               (same.movedFrom
                 ? preferred(candidate, same.movedFrom)
                 : candidate.fetchedAt > same.document.fetchedAt));
+
           // Another download stays the source's: this one stays where it is, unread.
           if (same && !read) return same.id;
           const claim = read ? claimNew(sourcesOwner, file) : () => {};
+
           return yield* Effect.gen(function* () {
             const copied = read ? yield* store.copy(subscription, sourcesOwner, file) : "missing";
+
             if (copied === "failed") {
               yield* keepEverything("a guide address's download", {
                 kind: "unexpected",
                 detail: "It couldn't be copied to the sources.",
               });
+
               return null;
             }
+
             if (copied === "missing" && same) return same.id;
             const document = copied === "copied" ? legacy.document : null;
             const movedFrom = copied === "copied" ? candidate : null;
             const address = yield* addresses.open(legacy.sealedAddress);
+
             const adopted: Source = same
               ? { ...same, document, movedFrom }
               : {
@@ -1690,11 +1822,14 @@ function make() {
                   movedFrom,
                   address,
                 };
+
             const then = same
               ? list.map((each) => (each === same ? adopted : each))
               : [...list, adopted];
+
             yield* store.setSources(sourcesOwner, then.map(storedOf));
             setSources(then);
+
             return adopted.id;
           }).pipe(Effect.ensuring(Effect.sync(claim)));
         }).pipe(
@@ -1723,10 +1858,13 @@ function make() {
         Effect.gen(function* () {
           const now = settings.get(subscription.id);
           const moved = now?.legacy?.source;
+
           if (keepAll || !now || !moved) return;
           const at = (sourceList ?? []).find((each) => each.id === moved);
+
           if (moved !== removed && !ownDownload(at)) return;
           const then: Settings = { ...now, legacy: null };
+
           const written = yield* store.setConfig(subscription, storedConfig(then)).pipe(
             Effect.as(true),
             Effect.catchTag("Failed", (failure) =>
@@ -1735,6 +1873,7 @@ function make() {
               ),
             ),
           );
+
           if (!written) return;
           settings.set(subscription.id, then);
           keep(subscription, then);
@@ -1778,12 +1917,14 @@ function make() {
             ),
           );
         }
+
         yield* turn(
           SOURCES,
           Effect.suspend(() =>
             keepAll ? Effect.void : store.sweep(sourcesOwner, held(sourcesOwner.store)),
           ),
         );
+
         for (const subscription of saved) yield* retireLegacy(subscription);
       });
 
@@ -1798,18 +1939,22 @@ function make() {
       const saved = yield* source.saved;
       yield* Effect.forEach(saved, settingsOf, { discard: true });
       const list = yield* sourcesNow;
+
       const unopened = ({ id, document }: Source) =>
         document !== null &&
         !cacheLoaded.has(document.file) &&
         !cacheUnread.has(document.file) &&
         jobs.get(sourceKey(id))?.kind !== "reindex";
+
       if (list.some(unopened)) yield* turn(SOURCES, readStoredSources);
+
       if (!swept && !keepAll && sourceList) {
         swept = true;
         // In the background: it takes each folder's turn, which a change under way may hold,
         // and nothing waits for it, every file in use being held.
         yield* Effect.forkIn(sweepAll(saved), scope);
       }
+
       return sourceList ?? list;
     });
 
@@ -1818,8 +1963,11 @@ function make() {
       for (const each of sourceList ?? []) {
         const { id, document } = each;
         const key = sourceKey(id);
+
         if (!document || cacheLoaded.has(document.file) || cacheUnread.has(document.file)) continue;
+
         if (jobs.get(key)?.kind === "reindex") continue;
+
         if (document.kind === "xmltv") {
           // A download under way brings an index in its place.
           if (jobs.has(key)) continue;
@@ -1828,12 +1976,15 @@ function make() {
           );
           continue;
         }
+
         const reader = yield* Effect.promise(() => files.open(sourcesOwner.store, document.file));
+
         if (!reader) {
           yield* Effect.logWarning("[guide] ignoring a guide source on disk");
           cacheUnread.add(document.file);
           continue;
         }
+
         setCacheLoaded({
           fetchedAt: document.fetchedAt,
           file: document.file,
@@ -1874,23 +2025,28 @@ function make() {
     const noteSourceFailure = (each: Source, error: AppError) =>
       Effect.gen(function* () {
         const at = yield* Clock.currentTimeMillis;
+
         const failing = (now: readonly Source[]) =>
           updated(now, each.id, (was) => ({
             ...was,
             failure: { at: was.failure?.at ?? at, error },
           }));
+
         const stands = yield* changeSources((now) => Effect.succeed(failing(now))).pipe(
           Effect.catchTag("Failed", () =>
             turn(
               SOURCES,
               Effect.sync(() => {
                 const then = sourceList && failing(sourceList);
+
                 if (then) setSources(then);
+
                 return then;
               }),
             ),
           ),
         );
+
         if (stands) yield* published;
       });
 
@@ -1902,7 +2058,9 @@ function make() {
     const downloadSource = (each: Source, report: (progress: Progress) => void) =>
       Effect.gen(function* () {
         const { id, identity, address, document } = each;
+
         if (address === null) return yield* failed({ kind: "locked" });
+
         const before = yield* pinning(
           sourcesOwner,
           document?.kind === "index" ? document.file : null,
@@ -1922,9 +2080,12 @@ function make() {
                           // In a run that keeps everything the one it replaces stays until the
                           // run ends; the next start that reads everything sweeps it.
                           const replaced = was.document?.file;
+
                           const claim =
                             keepAll && replaced ? files.claim(sourcesOwner.store, replaced) : null;
+
                           if (claim) pinned.push(claim);
+
                           return {
                             ...was,
                             document: { file, fetchedAt, kind: "index" },
@@ -1938,6 +2099,7 @@ function make() {
                 ),
             ),
         );
+
         if (!before.none && before.used) {
           yield* published;
           // The addresses releases before set that moved to it go, with their files, in the
@@ -1961,9 +2123,11 @@ function make() {
         if (each.address === null) return yield* failed({ kind: "locked" });
         const key = sourceKey(each.id);
         const indexing = jobs.get(key);
+
         if (indexing?.kind === "reindex") yield* Fiber.await(indexing.fiber);
         // As it is now: the indexing replaced the document it had, which the download builds on.
         const kept = sourceList?.find((one) => one.id === each.id);
+
         if (!kept) return yield* changed;
         yield* downloading(key, kept.identity, (report) => downloadSource(kept, report));
       });
@@ -1975,13 +2139,17 @@ function make() {
      */
     const staleSources = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
+
       for (const each of yield* currentSources) {
         const key = sourceKey(each.id);
         const job = jobs.get(key);
+
         if (each.address === null || job?.kind === "download") continue;
         // One a move brought downloads straight away: until then it reads one download only.
         const fresh = each.document && each.movedFrom === null;
+
         if (fresh && now - (each.document?.fetchedAt ?? 0) < MAX_AGE_MS) continue;
+
         if (job) {
           // How it ends shows in the status.
           yield* Effect.forkIn(
@@ -2019,15 +2187,19 @@ function make() {
     const channelsOf = (subscription: GuideSubscription) =>
       Effect.gen(function* () {
         const { id } = subscription;
+
         const base = yield* catalogue
           .channels(id)
           .pipe(Effect.catchTag("Failed", () => Effect.succeed(null)));
+
         if (!base) return null;
         const { mappings } = yield* settingsOf(subscription);
         const overlay = overlays.get(id);
+
         if (overlay?.base === base && overlay.mappings === mappings) return overlay.channels;
         const channels = mappedChannels(base, mappings);
         overlays.set(id, { base, mappings, channels });
+
         return channels;
       });
 
@@ -2039,29 +2211,36 @@ function make() {
       string,
       { base: ReadonlyMap<string, string>; origin: string; named: ReadonlyMap<string, string> }
     >();
+
     const namedFor = (id: string, legacyOrigin: string | null) => {
       if (legacyOrigin === null) return sourceOrigins;
       const before = namedSets.get(id);
+
       if (before?.base === sourceOrigins && before.origin === legacyOrigin) return before.named;
       const named = new Map([...sourceOrigins, [LEGACY, legacyOrigin]]);
       namedSets.set(id, { base: sourceOrigins, origin: legacyOrigin, named });
+
       return named;
     };
 
     /** Each subscription's guides, the same object while its parts and the sources are. */
     const guideSets = new Map<string, Guides>();
+
     const guidesFor = (id: string, parts: readonly GuidePart[], legacyOrigin: string | null) => {
       const named = namedFor(id, legacyOrigin);
       const before = guideSets.get(id);
+
       const still =
         before?.sources === named &&
         before.parts.length === parts.length &&
         before.parts.every(
           (part, at) => part.index === parts[at]?.index && part.source === parts[at]?.source,
         );
+
       if (before && still) return before;
       const guides = guidesOf(parts, named);
       guideSets.set(id, guides);
+
       return guides;
     };
 
@@ -2080,13 +2259,16 @@ function make() {
           checkedAt = yield* Clock.currentTimeMillis;
           asked.resolve();
         }
+
         // The guides current when the claims are taken: one replaced just before has closed.
         let held: { readonly parts: GuidePart[]; readonly readers: Reader[] } | null = null;
+
         for (let tries = 0; tries < 3 && !held; tries++) {
           const own = yield* current(subscription);
           const list = yield* currentSources;
           const { legacy } = yield* settingsOf(subscription);
           const waiting = legacy?.source === null ? pending.get(subscription.id) : undefined;
+
           const wanted = [
             ...(own
               ? [{ owner: subscription.store, source: OWN_GUIDE, origin: null, guide: own }]
@@ -2103,21 +2285,27 @@ function make() {
               : []),
             ...list.flatMap((each) => {
               const guide = openOf(each);
+
               return guide
                 ? [{ owner: sourcesOwner.store, source: each.id, origin: each.origin, guide }]
                 : [];
             }),
           ];
+
           const readers: Reader[] = [];
+
           for (const { owner, guide } of wanted) {
             const reader = files.share(owner, guide.file);
+
             if (!reader) break;
             readers.push(reader);
           }
+
           if (readers.length < wanted.length) {
             for (const reader of readers) reader.release();
             continue;
           }
+
           held = {
             readers,
             parts: wanted.map(({ owner, source, origin, guide }) => ({
@@ -2128,13 +2316,17 @@ function make() {
             })),
           };
         }
+
         if (!held) return null;
         const { parts, readers } = held;
+
         return yield* Effect.gen(function* () {
           if (parts.length === 0) return null;
           const channels = yield* channelsOf(subscription);
+
           if (!channels) return null;
           const { legacy } = yield* settingsOf(subscription);
+
           return yield* read({
             guides: guidesFor(
               subscription.id,
@@ -2160,21 +2352,25 @@ function make() {
         const stop = new AbortController();
         const under = searches.get(subscriptionId) ?? new Set<AbortController>();
         searches.set(subscriptionId, under.add(stop));
+
         const answer = search(stop.signal)
           .catch((cause: unknown) => {
             if (stop.signal.aborted) return fallback;
             throw cause;
           })
           .finally(() => under.delete(stop));
+
         return Effect.tryPromise({ try: () => answer, catch: failedWith }).pipe(
           Effect.onInterrupt(() =>
             Effect.promise(() => {
               stop.abort();
+
               return answer.catch(() => {});
             }),
           ),
         );
       });
+
     /** Each subscription's searches under way, which `forget` stops. */
     const searches = new Map<string, Set<AbortController>>();
 
@@ -2194,39 +2390,54 @@ function make() {
       Effect.gen(function* () {
         // A list may hold tens of thousands of channels: other work gets its turn between slices.
         const slice = slicer();
+
         const rest = (wait: Promise<void> | undefined) =>
           wait ? Effect.promise(() => wait) : Effect.void;
+
         const asked = new Map<string, string[]>();
+
         for (const { subscriptionId, id } of channels) {
           const ids = asked.get(subscriptionId);
+
           if (ids) ids.push(id);
           else asked.set(subscriptionId, [id]);
           yield* rest(slice());
         }
+
         const answers: Record<string, A> = {};
         let failure: E | undefined;
         let succeeded = false;
+
         for (const subscription of yield* source.saved) {
           const ids = asked.get(subscription.id);
+
           if (!ids) continue;
+
           const result = yield* Effect.result(
             withContext(subscription, (context) => lookup(context, subscription.id, ids)),
           );
+
           if (result._tag === "Failure") {
             failure ??= result.failure;
             continue;
           }
+
           const found = result.success;
+
           if (found === null) continue;
           succeeded = true;
+
           for (const id in found) {
             const answer = found[id];
+
             if (answer !== undefined)
               answers[ownedKey({ subscriptionId: subscription.id, id })] = answer;
             yield* rest(slice());
           }
         }
+
         if (!succeeded && failure !== undefined) return yield* Effect.fail(failure);
+
         return answers;
       });
 
@@ -2272,12 +2483,15 @@ function make() {
         const found = yield* coverageOf(subscription);
         const channels = found?.channels ?? (yield* channelsOf(subscription));
         const bySource = found?.covered.bySource;
+
         return {
           subscriptionId: id,
           channels: found?.covered.covered ?? 0,
           supplied: (found?.guides.parts ?? []).flatMap(({ source: each, origin }) => {
             const count = bySource?.get(each) ?? 0;
+
             if (count === 0) return [];
+
             return [
               {
                 source:
@@ -2316,12 +2530,15 @@ function make() {
     /** The channels each source supplies, summed over every subscription, by the source's id. */
     const matched = Effect.gen(function* () {
       const total = new Map<string, number>();
+
       for (const subscription of yield* source.saved) {
         const found = yield* coverageOf(subscription);
+
         for (const [each, count] of found?.covered.bySource ?? []) {
           total.set(each, (total.get(each) ?? 0) + count);
         }
       }
+
       return total;
     });
 
@@ -2341,13 +2558,17 @@ function make() {
         // loop between them: a slice ends with the work it holds.
         const slice = slicer();
         let next: number | null = null;
+
         for (const subscription of yield* source.saved) {
           yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
           const changes = yield* withContext(subscription, ({ guides, channels }) =>
             Effect.promise(() => nextChangeOf(subscription.id, guides, channels, at, slice)),
           );
+
           if (changes != null && changes > at && (next === null || changes < next)) next = changes;
         }
+
         return next;
       });
 
@@ -2360,6 +2581,7 @@ function make() {
       string,
       { guides: Guides; channels: MappedChannels; at: number; next: number | null }
     >();
+
     const nextChangeOf = async (
       id: string,
       guides: Guides,
@@ -2368,6 +2590,7 @@ function make() {
       slice: Slice,
     ) => {
       const kept = nextChanges.get(id);
+
       if (
         kept?.guides === guides &&
         kept.channels === channels &&
@@ -2376,12 +2599,15 @@ function make() {
       ) {
         return kept.next;
       }
+
       const { changes } = await coverage(guides, channels, at, slice);
       nextChanges.set(id, { guides, channels, at, next: changes });
+
       return changes;
     };
 
     const checking = Semaphore.makeUnsafe(1);
+
     /**
      * Whether the guide that supplies a channel changed since the last check, with time alone:
      * a guide's last programme on it ended, or the clock went back, or forward by more than
@@ -2397,6 +2623,7 @@ function make() {
         const now = yield* Clock.currentTimeMillis;
         checkedAt = now;
         const jumped = now < since || now - since > CLOCK_JUMP_MS;
+
         if (jumped || (next !== null && next <= now)) yield* published;
       }),
     );
@@ -2405,6 +2632,7 @@ function make() {
     yield* Effect.forkScoped(
       Effect.gen(function* () {
         yield* Effect.promise(() => asked.promise);
+
         for (;;) {
           yield* checkTime.pipe(
             Effect.catchDefect((defect) =>
@@ -2428,7 +2656,9 @@ function make() {
     const sourceStatus = (id: string) =>
       Effect.gen(function* () {
         const each = (yield* currentSources).find((one) => one.id === id);
+
         if (!each) return yield* changed;
+
         return sourceStatusOf(each, (yield* matched).get(id) ?? 0);
       });
 
@@ -2443,6 +2673,7 @@ function make() {
           : source === LEGACY
             ? [now.legacy?.source === null ? pending.get(id) : undefined]
             : [openOf((sourceList ?? []).find((each) => each.id === source))];
+
       return found.filter((each) => each !== undefined);
     };
 
@@ -2450,6 +2681,7 @@ function make() {
     const sourceOr = (id: string) =>
       Effect.flatMap(currentSources, (list) => {
         const each = list.find((one) => one.id === id);
+
         return each ? Effect.succeed(each) : Effect.fail(changed);
       });
 
@@ -2461,6 +2693,7 @@ function make() {
       schedule: (channel: OwnedId, from: number, until: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
+
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
@@ -2468,6 +2701,7 @@ function make() {
                 scheduleAt(context.guides, context.channels, channel.id, context.at, from, until),
               ),
             ));
+
           return found ?? [];
         }),
       range: (channels: readonly OwnedId[], from: number, to: number) =>
@@ -2477,6 +2711,7 @@ function make() {
       programme: (channel: OwnedId, ref: string, start: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
+
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
@@ -2484,11 +2719,13 @@ function make() {
                 programmeAt(context.guides, context.channels, channel.id, ref, start, context.at),
               ),
             ));
+
           return found ?? null;
         }),
       startingAt: (channel: OwnedId, start: number) =>
         Effect.gen(function* () {
           const subscription = yield* savedAs(channel.subscriptionId);
+
           const found =
             subscription &&
             (yield* withContext(subscription, (context) =>
@@ -2496,6 +2733,7 @@ function make() {
                 startingAt(context.guides, context.channels, channel.id, start, context.at),
               ),
             ));
+
           return found ?? ({ kind: "unknown" } as const);
         }),
       search: (query: string) =>
@@ -2504,6 +2742,7 @@ function make() {
           let at = 0;
           let failure: Failed | undefined;
           let succeeded = false;
+
           for (const subscription of yield* source.saved) {
             // Each subscription's own first fifty hold every one of the first fifty of them all.
             const result = yield* Effect.result(
@@ -2526,18 +2765,23 @@ function make() {
                 ),
               ),
             );
+
             if (result._tag === "Failure") {
               failure ??= result.failure;
               continue;
             }
+
             const found = result.success;
+
             if (!found) continue;
             succeeded = true;
             at = found.at;
             matches.push(...found.programmes);
           }
+
           if (!succeeded && failure !== undefined) return yield* failure;
           const onNow = (match: ProgrammeMatch) => (match.programme.start <= at ? 0 : 1);
+
           return matches
             .sort((a, b) => onNow(a) - onNow(b) || a.programme.start - b.programme.start)
             .slice(0, SEARCH_LIMIT);
@@ -2576,19 +2820,23 @@ function make() {
       sources: Effect.gen(function* () {
         const list = yield* currentSources;
         const counts = yield* matched;
+
         return list.map((each) => sourceStatusOf(each, counts.get(each.id) ?? 0));
       }),
 
       addSource: (typed: string, named?: string | null) =>
         Effect.gen(function* () {
           const address = guideAddress(typed);
+
           if (!address) return yield* failed({ kind: "address" });
           const label = yield* labelOf(named);
           const known = (yield* currentSources).find((each) => each.identity === address.identity);
+
           // The same address again is the same source. Typed again where the keychain no longer
           // opens it, it is sealed anew and downloads again.
           if (known && known.address === null) {
             const sealedAddress = yield* addresses.seal(address.href);
+
             const before = yield* changeSources((now) =>
               Effect.succeed(
                 updated(now, known.id, (was) =>
@@ -2596,7 +2844,9 @@ function make() {
                 ),
               ),
             );
+
             const unlocked = (sourceList ?? []).find((each) => each.id === known.id);
+
             if (before && unlocked) {
               yield* startJob(sourceKey(unlocked.id), "download", unlocked.identity, (report) =>
                 downloadSource(unlocked, report),
@@ -2604,7 +2854,9 @@ function make() {
               yield* published;
             }
           }
+
           if (known) return yield* sourceStatus(known.id);
+
           const added: Source = {
             id: randomUUID(),
             origin: address.origin,
@@ -2616,20 +2868,25 @@ function make() {
             movedFrom: null,
             address: address.href,
           };
+
           const before = yield* changeSources((now) =>
             Effect.succeed(
               now.some((each) => each.identity === added.identity) ? null : [...now, added],
             ),
           );
+
           if (before) {
             yield* startJob(sourceKey(added.id), "download", added.identity, (report) =>
               downloadSource(added, report),
             );
             yield* published;
+
             return sourceStatusOf(added, 0);
           }
+
           // The same address was added meanwhile.
           const same = (sourceList ?? []).find((each) => each.identity === added.identity);
+
           return yield* same ? sourceStatus(same.id) : changed;
         }),
 
@@ -2640,6 +2897,7 @@ function make() {
               now.some((each) => each.id === id) ? now.filter((each) => each.id !== id) : null,
             ),
           );
+
           if (!before) return yield* changed;
           yield* stopJob(sourceKey(id));
           // An address a release before set that moved to it goes with it.
@@ -2652,15 +2910,20 @@ function make() {
           const before = yield* changeSources((now) =>
             Effect.gen(function* () {
               const from = now.findIndex((each) => each.id === id);
+
               if (from < 0) return yield* changed;
               const to = from + by;
+
               if (to < 0 || to >= now.length) return null;
               const then = [...now];
               const [moved] = then.splice(from, 1);
+
               if (moved) then.splice(to, 0, moved);
+
               return then;
             }),
           );
+
           if (before) yield* published;
         }),
 
@@ -2674,19 +2937,24 @@ function make() {
                 : Effect.void,
             ),
           );
+
           return yield* sourceStatus(id);
         }),
 
       renameSource: (id: string, typed: string | null) =>
         Effect.gen(function* () {
           const label = yield* labelOf(typed);
+
           const before = yield* changeSources((now) =>
             Effect.gen(function* () {
               if (!now.some((each) => each.id === id)) return yield* changed;
+
               return updated(now, id, (was) => (was.label === label ? null : { ...was, label }));
             }),
           );
+
           if (before) yield* published;
+
           return yield* sourceStatus(id);
         }),
 
@@ -2696,12 +2964,15 @@ function make() {
           const { id } = subscription;
           const started = generationOf(id);
           const named = ref === null ? null : parseGuideRef(ref);
+
           if (revision !== revisionOf(subscription) || (ref !== null && !named)) {
             return yield* changed;
           }
+
           // Loads the guides where this run hasn't yet: the change reads them from memory.
           yield* keptGuide(subscription);
           yield* currentSources;
+
           const before = yield* change(subscription, started, (was) =>
             Effect.gen(function* () {
               // The channels and the guides as they are now, in the change's turn: a channel
@@ -2709,27 +2980,34 @@ function make() {
               const channels = yield* catalogue
                 .channels(id)
                 .pipe(Effect.catchTag("Failed", () => Effect.succeed(null)));
+
               if (!channels) return yield* changed;
               const channel = channels.channel(channelId);
+
               if (named) {
                 if (!channel) {
                   return yield* new Failed({ error: { kind: "channel-not-found", channelId } });
                 }
+
                 // Only a channel a guide of the subscription lists, by its exact id.
                 const lists = guidesOfSource(id, was, named.source).some((guide) =>
                   guide.index.channels.has(named.guideId),
                 );
+
                 if (!lists) {
                   return yield* changed;
                 }
               }
+
               /** Whether a mapping is this channel's, under whichever of its streams' ids it was made. */
               const names = (key: string) =>
                 key === channelId ||
                 (channel !== undefined && channels.channel(key)?.id === channel.id);
+
               const others = Object.fromEntries(
                 Object.entries(was.mappings).filter(([key]) => !names(key)),
               );
+
               const mappings =
                 !named || !channel
                   ? others
@@ -2741,14 +3019,18 @@ function make() {
                         name: channel.title,
                       },
                     };
+
               return { ...was, mappings };
             }),
           );
+
           if (!before) return yield* changed;
           yield* published;
+
           return yield* withContext(subscription, ({ guides, channels, at }) =>
             Effect.sync(() => {
               const listed = channels.channel(channelId);
+
               return listed ? mapChannel(guides, channels, listed, at) : null;
             }),
           );
@@ -2771,9 +3053,11 @@ function make() {
           // Named before the page is read: one read while the subscription's guide goes names
           // the guides before, whichever it read, so a choice made from it is refused.
           const revision = revisionOf(subscription);
+
           const page = yield* withContext(subscription, ({ guides, channels, at }) =>
             Effect.sync(() => mapChannelsAt(guides, channels, list, offset, limit, at)),
           );
+
           return { ...(page ?? { total: 0, channels: [] }), revision };
         }),
 
@@ -2792,6 +3076,7 @@ function make() {
           const page = yield* withContext(yield* savedOr(subscriptionId), ({ guides, at }) =>
             Effect.sync(() => guideChannelsAt(guides, query, offset, limit, at)),
           );
+
           return page ?? { total: 0, listed: 0, channels: [] };
         }),
 
@@ -2815,6 +3100,7 @@ function make() {
           yield* stopJob(legacyKey(id));
           setPending(id, null);
           nextChanges.delete(id);
+
           // Its searches stop, their worker with them.
           for (const search of searches.get(id) ?? []) search.abort();
           // Once no file of it is held or going, nothing of it is left to write or read.

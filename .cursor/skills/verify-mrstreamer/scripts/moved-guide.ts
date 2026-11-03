@@ -18,6 +18,7 @@ import type { Driver } from "./language.ts";
 
 /** How long after the start the address may take to be asked for. */
 const ASKED_WITHIN_MS = 20_000;
+
 /** The guide channel the address lists, mapped by hand to a channel of the provider. */
 const MAPPED = "ext.mapped";
 
@@ -34,15 +35,19 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
       const own = read.ok ? read.value[0] : undefined;
       return { state: own?.processing?.state ?? null, availability: own?.availability ?? null };
     })()`);
+
   // Read-only: what the rows of Settings > Guides are drawn from.
   const sources = () =>
     d.evaluate<Source[]>(`(async () => {
       const read = await window.mrStreamer.invoke('guide.sources');
       return read.ok ? read.value : [];
     })()`);
+
   const byText = (selector: string, text: string) =>
     `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
   const field = `document.querySelector('input[aria-label="Address of an XMLTV guide"]')`;
+
   const openGuides = async () => {
     await d.click("Open Settings", "document.querySelector('button[aria-label=Settings]')");
     await d.click("Open Guides", byText("nav button", "Guides"));
@@ -51,6 +56,7 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
 
   host.serve("/guide.xml", guide("After", MAPPED, 1));
   await d.wait(async () => (await status()).availability === "available");
+
   // A channel of the provider without a guide id, to map by hand as the viewer did on 0.0.12.
   const loose = await d.evaluate<string | null>(`(async () => {
     const read = await window.mrStreamer.invoke('guide.mapChannels',
@@ -58,6 +64,7 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
         filter: 'without', query: '', offset: 0, limit: 1 });
     return read.ok ? read.value.channels[0]?.id ?? null : null;
   })()`);
+
   if (!loose) throw new Error("No channel without programmes to map.");
 
   await openGuides();
@@ -70,17 +77,22 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
 
   // As 0.0.12 kept the profile: no sources, and the documents themselves.
   const guides = join(d.profile, "guides");
+
   const list = JSON.parse(await readFile(join(guides, "sources.json"), "utf8")) as {
     sources: { origin: string; identity: string; sealedAddress: string }[];
   };
+
   const [added] = list.sources;
+
   if (!added) throw new Error("The guide wasn't kept.");
   await rm(guides, { recursive: true });
   const meta = join(d.profile, "guide.json");
+
   const { key, fetchedAt: ownFetchedAt } = JSON.parse(await readFile(meta, "utf8")) as {
     key: string;
     fetchedAt: number;
   };
+
   for (const name of await readdir(d.profile))
     if (name.startsWith("guide-index.")) await rm(join(d.profile, name));
   await writeFile(meta, JSON.stringify({ key, fetchedAt: ownFetchedAt }));
@@ -119,6 +131,7 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
 
   await d.wait(async () => {
     const [moved] = await sources();
+
     return (
       moved?.processing.state === "ready" &&
       moved.processing.fetchedAt !== undefined &&
@@ -128,6 +141,7 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
   const [moved] = await sources();
   d.observed["movedSource"] = moved;
   d.observed["addressRequests"] = host.requests().length - asked;
+
   if (host.requests().length - asked !== 1)
     throw new Error(`The address was asked for ${host.requests().length - asked} times.`);
   await openGuides();
@@ -140,12 +154,15 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
   // The source's own download lets go of what 0.0.12 kept for the address.
   await d.wait(async () => !(await readdir(d.profile)).includes(document));
   d.observed["keptDownloadLetGo"] = true;
+
   const mapping = await d.evaluate<{ mapped: number; unresolved: number } | null>(`(async () => {
     const read = await window.mrStreamer.invoke('guide.status');
     const own = read.ok ? read.value[0] : undefined;
     return own ? { mapped: own.mapped, unresolved: own.unresolved } : null;
   })()`);
+
   d.observed["mapping"] = mapping;
+
   if (mapping?.mapped !== 1 || mapping.unresolved !== 0)
     throw new Error(`The mapping didn't come over: ${JSON.stringify(mapping)}`);
 }
@@ -158,11 +175,14 @@ export async function movedGuideScenario(d: Driver, host: GuideHost): Promise<vo
 function guide(label: string, id: string, channels: number): string {
   const stamp = (at: number) =>
     `${new Date(at).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0000`;
+
   const first = Math.floor(Date.now() / 60_000) * 60_000 - 60 * 60_000;
   const parts = ['<?xml version="1.0" encoding="utf-8"?><tv>'];
+
   for (let channel = 0; channel < channels; channel++) {
     const named = channel === 0 ? id : `${label.toLowerCase()}-${channel}.filler`;
     parts.push(`<channel id="${named}"><display-name>${named}</display-name></channel>`);
+
     for (let minute = 0; minute < 10_000; minute++) {
       const start = first + minute * 60_000;
       parts.push(
@@ -170,6 +190,8 @@ function guide(label: string, id: string, channels: number): string {
       );
     }
   }
+
   parts.push("</tv>");
+
   return parts.join("\n");
 }

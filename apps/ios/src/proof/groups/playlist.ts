@@ -23,10 +23,13 @@ const PLAYLIST = [
 function readPlaylist(size: number): PlaylistEntry[] {
   const reader = m3uReader();
   const entries: PlaylistEntry[] = [];
+
   for (let at = 0; at < PLAYLIST.length; at += size) {
     entries.push(...reader.push(PLAYLIST.slice(at, at + size)));
   }
+
   entries.push(...reader.end());
+
   return entries;
 }
 
@@ -37,6 +40,7 @@ export const cases: readonly ProofCase[] = [
     run: async () => {
       const whole = readPlaylist(PLAYLIST.length);
       const chunked = readPlaylist(7);
+
       return {
         sameInChunks: JSON.stringify(whole) === JSON.stringify(chunked),
         entries: plain(whole),
@@ -48,6 +52,7 @@ export const cases: readonly ProofCase[] = [
     compare: "same",
     run: () => {
       const { categories, channels } = playlistCatalogue(readPlaylist(64));
+
       return plain({ categories, channels });
     },
   },
@@ -58,13 +63,16 @@ export const cases: readonly ProofCase[] = [
     run: () => {
       const entries = readPlaylist(64);
       const groups = ["NL | NEWS", "BE | VLAANDEREN", ""].map(playlistGroupId);
+
       const mapping = mapPlaylistGroup(
         undefined,
         groups,
         playlistGroupId("BE | VLAANDEREN"),
         "movie",
       );
+
       const { catalogue, status } = importPlaylist(entries, mapping);
+
       return plain({ groups, movies: catalogue.movies.map(({ id }) => id), status });
     },
   },

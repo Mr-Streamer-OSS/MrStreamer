@@ -83,6 +83,7 @@ export interface SourcesPlatform {
 }
 
 const REGISTRY = "sources.json";
+
 const Registry = type({
   version: "1",
   sources: type({ id: "string", kind: "'xtream' | 'm3u'", label: "string" }).array(),
@@ -95,6 +96,7 @@ const hostOf = (address: string) => URL.parse(address)?.host ?? address;
 function idOf(authority: Authority): string {
   const identity =
     authority.kind === "xtream" ? `${authority.server}\n${authority.username}` : authority.link;
+
   return `${authority.kind}:${sha256Hex(identity).slice(0, 16)}`;
 }
 
@@ -124,15 +126,19 @@ async function rowsOf(
   const adultCategories = new Set(
     catalogue.categories.filter((each) => isAdultCategory(each.name)).map((each) => each.id),
   );
+
   const adult = new Set(
     catalogue.channels
       .filter((each) => each.adult || each.categoryIds.some((id) => adultCategories.has(id)))
       .map((each) => each.id),
   );
+
   const normalized = await inTasks(normalizeSteps(catalogue), wanted);
+
   if (!normalized) return null;
   const { categories, streams } = normalized;
   const names = new Map(categories.map((category) => [category.id, category.name]));
+
   return streams
     .filter((stream) => !adult.has(stream.id))
     .map((stream) => ({
@@ -167,11 +173,13 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
 
   const listed = () => {
     const now = state.get();
+
     return now.kind === "ready" ? now.sources : [];
   };
 
   function readerOf(authority: Authority): CatalogueReader {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
+
     return authority.kind === "xtream"
       ? xtreamProvider(authority, { ...options, inTasks })
       : playlistReader(authority.link, options);
@@ -196,6 +204,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
    */
   function load(id: string, checked = false) {
     const reader = readers.get(id);
+
     if (!reader) return;
     reads.get(id)?.abort();
     const controller = new AbortController();
@@ -231,10 +240,12 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       const saved = parsed instanceof type.errors ? [] : parsed.sources;
       // Best effort: what this misses, the next launch erases.
       await platform.credentials.retain(saved.map((source) => source.id)).catch(() => {});
+
       const restoredSources = await Promise.all(
         saved.map(async (source): Promise<ConnectedSource> => {
           // A missing, unknown or unreadable authority all ask for the login again.
           const authority = await platform.credentials.read(source.id).catch(() => null);
+
           if (!authority)
             return {
               ...source,
@@ -244,69 +255,88 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
               },
             };
           readers.set(source.id, readerOf(authority));
+
           return { ...source, channels: { kind: "loading" } };
         }),
       );
+
       state.set({ kind: "ready", sources: restoredSources });
       restored();
+
       for (const source of restoredSources) load(source.id);
     },
 
     async connect(input, signal) {
       let parsed: ParsedLogin;
+
       try {
         parsed = parseLogin(input);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
       }
+
       const { account: authority, schemeless } = parsed;
       const reader = readerOf(authority);
+
       try {
         await reader.authenticate(signal);
       } catch (cause) {
         if (signal?.aborted) return { kind: "cancelled" };
         const error = failureOf(cause);
+
         const http =
           schemeless && httpsUnavailable(error)
             ? { ...input, server: `http://${input.server.trim()}` }
             : null;
+
         return { kind: "failed", error, http };
       }
+
       const saved = savedOf(authority);
       await ready;
+
       if (signal?.aborted) return { kind: "cancelled" };
       const known = listed().some((source) => source.id === saved.id);
       // What a cancel or a refused list puts back: the login this source had, or none. A new
       // login left behind no list names, and the next launch erases it.
       const previous = known ? await platform.credentials.read(saved.id).catch(() => null) : null;
+
       const undo = () =>
         (previous
           ? platform.credentials.write(saved.id, previous)
           : platform.credentials.remove(saved.id)
         ).catch(() => {});
+
       try {
         await platform.credentials.write(saved.id, authority);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
       }
+
       if (signal?.aborted) {
         await undo();
+
         return { kind: "cancelled" };
       }
+
       // Read after the write: a source removed meanwhile stays removed.
       const others = listed().filter((source) => source.id !== saved.id);
+
       try {
         writeRegistry([...others, saved]);
       } catch (cause) {
         await undo();
+
         return { kind: "failed", error: failureOf(cause), http: null };
       }
+
       readers.set(saved.id, reader);
       state.set({
         kind: "ready",
         sources: [...others, { ...saved, channels: { kind: "loading" } }],
       });
       load(saved.id, true);
+
       return { kind: "connected", id: saved.id };
     },
 
@@ -318,6 +348,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       reads.delete(id);
       readers.delete(id);
       const others = listed().filter((source) => source.id !== id);
+
       try {
         writeRegistry(others);
       } catch (cause) {
@@ -325,6 +356,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
         setChannels(id, { kind: "failed", error: { kind: "needs-secret", subscriptionId: id } });
         throw cause;
       }
+
       state.set({ kind: "ready", sources: others });
     },
   };

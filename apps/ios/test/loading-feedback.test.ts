@@ -44,30 +44,38 @@ const scenario = vi.hoisted(() => ({
 
 // ui.tsx keeps its pictures with artwork-cache.ts: over the files stand-in here.
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => {
   const { createElement, useEffect } = await import("react");
   const { reactNative } = await import("./react-native.ts");
+
   type Props = {
     children?: React.ReactNode;
     testID?: string;
     style?: Style;
     onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
   };
+
   /** A view, which lays out once, 100 points wide and as tall as the scenario has it. */
   const View = ({ children, testID, onLayout, style }: Props) => {
     useEffect(() => {
       onLayout?.({ nativeEvent: { layout: { width: 100, height: scenario.height } } });
     }, []);
+
     return createElement(
       "div",
       { "data-testid": testID, "data-width": flat(style).width },
       children,
     );
   };
+
   type Bounds = { maxHeight?: number; width?: string | number };
+
   type Style = Bounds | readonly Style[] | undefined | false | null;
+
   const flat = (style: Style): Bounds =>
     !style ? {} : "length" in style ? Object.assign({}, ...style.map(flat)) : style;
+
   /** A scroll view, which shows the most height it may take. */
   const ScrollView = ({
     children,
@@ -84,12 +92,14 @@ vi.mock("react-native", async () => {
       },
       children,
     );
+
   class Value {
     setValue() {}
     interpolate() {
       return this;
     }
   }
+
   return {
     ...reactNative,
     View,
@@ -125,34 +135,42 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-glass-effect", () => ({
   GlassView: () => null,
   isGlassEffectAPIAvailable: () => false,
   isLiquidGlassAvailable: () => false,
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => scenario.did.push(`push ${href}`) },
   useIsFocused: () => scenario.focused,
   useNavigation: () => ({ dispatch: () => {} }),
   useRootNavigationState: () => undefined,
 }));
+
 vi.mock("../src/header.tsx", () => ({
   tabHref: (tab: string, screen: string) => `${tab === "films" ? "/films" : "/live"}/${screen}`,
   tabStack: () => undefined,
 }));
+
 vi.mock("../src/account.ts", () => ({
   onCatalogue: () => () => {},
   currentRoster: () => ({ kind: "ready", members: scenario.members }),
   onRoster: (listener: () => void) => {
     scenario.rosterChanged = listener;
+
     return () => {};
   },
   useRoster: () => ({ kind: "ready", members: scenario.members }),
@@ -165,11 +183,14 @@ vi.mock("../src/account.ts", () => ({
   reloadTitles: (id: string) => scenario.did.push(`reload titles ${id}`),
   retryTitles: () => scenario.did.push("retry titles"),
 }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({ phase: { kind: "idle" }, watch: scenario.watch }),
   channelStatus: () => null,
 }));
+
 vi.mock("../src/storage.ts", () => ({ useSavedState: () => ({}), writeState: () => undefined }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
   useCollections: () => scenario.made,
@@ -178,27 +199,33 @@ vi.mock("../src/titles.ts", () => ({
   useHolding: () => undefined,
   tilesOf: () => [],
 }));
+
 // Collections with no rows: what Movies shows when the provider lists no new or popular movie.
 vi.mock("@mrstreamer/core/ondemand/collections", () => ({
   collectionRows: () => [],
   rowIds: () => [],
 }));
+
 vi.mock("../src/resume.ts", () => ({
   detailsHref: () => "/",
   openDetails: () => undefined,
   resume: () => undefined,
   useContinueWatching: () => [],
 }));
+
 vi.mock("../src/viewing.ts", () => ({ useViewing: () => null }));
+
 vi.mock("../src/tab-bar.ts", () => ({ useFixedTabBar: () => undefined }));
 
 const { default: Live } = await import("../src/app/(tabs)/live/index.tsx");
 const { DiscoverScreen } = await import("../src/live-discover.tsx");
 const { TitlesHome } = await import("../src/titles-screen.tsx");
+
 const { Placeholders, Shape, StatusLine, libraryStatus, useProviderStatus } =
   await import("../src/loading.tsx");
 
 const failure = { kind: "unexpected", detail: "" } as const;
+
 const catalogueOf = {
   categories: [],
   channels: [{}],
@@ -207,6 +234,7 @@ const catalogueOf = {
   seriesCategories: [],
   series: [],
 } as never;
+
 const emptyCatalogue = {
   categories: [],
   channels: [],
@@ -231,7 +259,9 @@ const channelsFields: Partial<Channel>[] = [
   { key: "a:1", title: "NPO 1", tags: [], logoUrl: null },
   { key: "a:2", title: "BBC One", tags: [], logoUrl: null },
 ];
+
 const channels = channelsFields as Channel[];
+
 const libraryFields: Partial<Library> = {
   regions: [{ name: "Netherlands", channels, shelves: [] }],
   channels,
@@ -239,7 +269,9 @@ const libraryFields: Partial<Library> = {
   placeOf: new Map(),
   labels: new Map(),
 };
+
 const library = libraryFields as Library;
+
 const emptyLibraryFields: Partial<Library> = {
   regions: [],
   channels: [],
@@ -247,6 +279,7 @@ const emptyLibraryFields: Partial<Library> = {
   placeOf: new Map(),
   labels: new Map(),
 };
+
 const emptyLibrary = emptyLibraryFields as Library;
 
 /** Collections Movies can browse, with nothing in any row. */
@@ -262,26 +295,31 @@ const usableMade = { ...nothingMade, size: () => 1 };
 let container: ReturnType<typeof document.createElement>;
 let root: Root;
 let unmount = () => {};
+
 function draw(node: React.ReactNode) {
   React.act(() => {
     scenario.rosterChanged();
     root.render(node);
   });
 }
+
 function open(node: React.ReactNode) {
   container = document.createElement("div");
   root = createRoot(container);
   draw(node);
   unmount = () => React.act(() => root.unmount());
 }
+
 const has = (testID: string) => container.querySelector(`[data-testid="${testID}"]`) !== null;
 const count = (testID: string) => container.querySelectorAll(`[data-testid="${testID}"]`).length;
 const line = () => container.querySelector('[data-testid="status-line"]')?.textContent ?? null;
 const text = () => container.textContent ?? "";
+
 function press(label: string) {
   const button = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!button) throw new Error(`No ${label} on screen`);
   React.act(() => button.click());
 }
@@ -303,6 +341,7 @@ beforeEach(() => {
     loops: [],
   });
 });
+
 afterEach(() => unmount());
 
 describe("Live while its channels load", () => {
@@ -358,6 +397,7 @@ describe("Live while its channels load", () => {
     const harbor = member("b", "Harbor", {
       live: { kind: "failed", error: failure, last: catalogueOf, since: 0 },
     });
+
     scenario.members = [member("a", "Northwind"), harbor];
     scenario.catalogue = { kind: "ready", library, failing: [harbor] };
     open(React.createElement(Live));
@@ -415,6 +455,7 @@ describe("the status line", () => {
     const northwind = member("a", "Northwind", {
       live: { kind: "failed", error: failure, last: catalogueOf, since: 0 },
     });
+
     const harbor = member("b", "Harbor", { needsSecret: true });
     scenario.members = [northwind, harbor];
     scenario.catalogue = { kind: "ready", library, failing: [northwind, harbor] };
@@ -451,6 +492,7 @@ describe("Movies while its lists load", () => {
     scenario.members = [member("a", "Northwind", { titles: { kind: "loading", last: null } })];
     open(React.createElement(TitlesHome, { kind: "movie" }));
     expect(line()).toBe("Loading movies and series from Northwind.");
+
     try {
       React.act(() => setLanguage({ locale: "de-DE", formats: "de-DE" }));
       expect(line()).toBe("Filme und Serien von Northwind werden geladen.");
@@ -488,6 +530,7 @@ describe("Movies while its lists load", () => {
 describe("provider notice incidents", () => {
   const failed = (since = 0, last = catalogueOf) =>
     ({ kind: "failed", error: failure, last, since }) as const;
+
   const show = (members: Member[]) => {
     scenario.members = members;
     scenario.catalogue = { kind: "ready", library, failing: members };
@@ -541,6 +584,7 @@ describe("provider notice incidents", () => {
     show([member("a", "Northwind", { live: failed() })]);
     open(React.createElement(Live));
     press("Dismiss provider notice");
+
     const cached = {
       kind: "ready",
       value: catalogueOf,
@@ -548,6 +592,7 @@ describe("provider notice incidents", () => {
       fetchedAt: 0,
       took: null,
     } as const;
+
     show([member("a", "Northwind", { live: cached })]);
     draw(React.createElement(Live));
     show([member("a", "Northwind", { live: { kind: "loading", last: catalogueOf } })]);
@@ -623,6 +668,7 @@ describe("provider notice incidents", () => {
         retry: () => {},
         settings: () => scenario.did.push("settings"),
       });
+
       const status = useProviderStatus(
         provider && {
           ...provider,
@@ -631,8 +677,10 @@ describe("provider notice incidents", () => {
           actions: [{ label: "Stop search", onPress: () => scenario.did.push("stop") }],
         },
       );
+
       return status ? React.createElement(StatusLine, { status, space: 200 }) : null;
     }
+
     show([member("a", "Northwind", { live: failed() })]);
     scenario.fontScale = 3;
     open(React.createElement(SearchStatus));
@@ -661,6 +709,7 @@ describe("usable content reported by the existing catalogue owners", () => {
     last,
     since: 0,
   });
+
   const restricted = (mode: "flag" | "category"): LiveCatalogue => ({
     categories: [{ id: "restricted", name: "Adult" }],
     channels: [
@@ -676,10 +725,12 @@ describe("usable content reported by the existing catalogue owners", () => {
       },
     ],
   });
+
   const publish = (raw: LiveCatalogue) => {
     scenario.members = [member("a", "Northwind", { live: failureState(raw) })];
     const library = buildLibrary([{ subscriptionId: "a", label: "Northwind", catalogue: raw }]);
     scenario.catalogue = { kind: "ready", library, failing: scenario.members };
+
     return library;
   };
 
@@ -687,6 +738,7 @@ describe("usable content reported by the existing catalogue owners", () => {
     "keeps recovery for %s-filtered retained channels, including after acknowledgement",
     (mode) => {
       const raw = restricted(mode);
+
       const mixed = {
         ...raw,
         channels: [
@@ -694,6 +746,7 @@ describe("usable content reported by the existing catalogue owners", () => {
           { ...raw.channels[0]!, id: "visible", name: "News", categoryIds: [], adult: false },
         ],
       };
+
       expect(publish(mixed).channels).toHaveLength(1);
       open(React.createElement(Live));
       expect(line()).toBe("Northwind unavailableDetails");
@@ -731,6 +784,7 @@ describe("usable content reported by the existing catalogue owners", () => {
       const { collections } = await vi.importActual<
         typeof import("@mrstreamer/core/ondemand/collections")
       >("@mrstreamer/core/ondemand/collections");
+
       const providerTitle: ProviderTitle = {
         id: "hidden",
         name: "Restricted",
@@ -743,12 +797,14 @@ describe("usable content reported by the existing catalogue owners", () => {
         categoryIds: [],
         container: null,
       };
+
       const raw: OnDemandCatalogue = {
         movieCategories: [],
         movies: [providerTitle],
         seriesCategories: [],
         series: [providerTitle],
       };
+
       const index = indexCatalogue([{ subscriptionId: "a", catalogue: raw }], "en");
       scenario.made = collections({
         kind,
@@ -791,6 +847,7 @@ describe("the shapes' highlight", () => {
         React.createElement(Shape),
         React.createElement(Shape),
       );
+
     open(group());
     // Before iOS says, nothing moves.
     expect(scenario.loops).toEqual([]);

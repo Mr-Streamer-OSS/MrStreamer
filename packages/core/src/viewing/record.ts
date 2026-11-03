@@ -10,6 +10,7 @@ import { RECENT_LIMIT, type EpisodeMark } from "@mrstreamer/contracts/viewing";
 
 /** The version events are written with. Readers skip events from a newer version. */
 export const EVENT_VERSION = 1;
+
 /** Rises when `apply` or the rules in ./titles.ts change, so stored state is rebuilt from the events. */
 export const STATE_VERSION = 1;
 
@@ -94,7 +95,9 @@ export type SeriesListing = readonly {
 }[];
 
 export type ChannelEvent = Extract<ViewingEvent, { readonly channelId: string }>;
+
 export type MarkEvent = Extract<ViewingEvent, { readonly series: string }>;
+
 export type TitleEvent = Exclude<ViewingEvent, ChannelEvent | MarkEvent>;
 
 /** An episode's mark as an account's record keeps it: with the episode it was made on. */
@@ -159,12 +162,16 @@ export function decide(state: ViewingState, command: ViewingCommand): ViewingEve
   switch (command.kind) {
     case "set-favourite": {
       const listed = state.favourites.filter((id) => command.channelIds.includes(id));
+
       if (!command.favourite) {
         return listed.map((channelId) => ({ type: "favourite-removed", channelId }));
       }
+
       if (listed.length > 0) return [];
+
       return command.channelIds.map((channelId) => ({ type: "favourite-added", channelId }));
     }
+
     case "record-watch":
       return [{ type: "watched", channelId: command.channelId }];
     case "record-progress":
@@ -197,13 +204,18 @@ export function reordered(
   wanted: readonly StoredChannel[],
 ): AccountEvent[] {
   let kept = 0;
+
   for (const { account, id } of current) {
     const next = wanted[kept];
+
     if (next?.account === account && next.id === id) kept++;
   }
+
   const moved = wanted.slice(kept);
+
   const as = (type: "favourite-removed" | "favourite-added") =>
     moved.map(({ account, id }): AccountEvent => ({ account, event: { type, channelId: id } }));
+
   return [...as("favourite-removed"), ...as("favourite-added")];
 }
 
@@ -226,6 +238,7 @@ export function apply(state: ViewingState, events: readonly ChannelEvent[]): Vie
   // A set keeps its ids in the order added, and adding one it holds changes nothing.
   const favourites = new Set(state.favourites);
   let recent = state.recent;
+
   for (const event of events) {
     switch (event.type) {
       case "favourite-added":
@@ -241,6 +254,7 @@ export function apply(state: ViewingState, events: readonly ChannelEvent[]): Vie
         );
     }
   }
+
   return { favourites: [...favourites], recent };
 }
 

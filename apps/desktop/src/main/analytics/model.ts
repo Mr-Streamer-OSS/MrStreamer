@@ -10,6 +10,7 @@ import { BuildProperties } from "./properties.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 
 export const ProfileOrigin = lazy(() => type("'fresh' | 'upgrading' | 'unknown'"));
+
 export type ProfileOrigin = Infer<typeof ProfileOrigin>;
 
 export { BuildProperties } from "./properties.ts";
@@ -26,10 +27,12 @@ const Common = lazy(() =>
     })
     .onUndeclaredKey("delete"),
 );
+
 type CommonProperties = Infer<typeof Common>;
 
 const StreamType = lazy(() => type("'live' | 'vod'"));
 const ErrorType = lazy(() => type.enumerated(...analyticsFailures));
+
 /** A failed outcome alone carries an error type. */
 const Outcome = lazy(() =>
   Common()
@@ -116,6 +119,7 @@ const QueuedLegacyEvent = lazy(() =>
       ),
     ),
 );
+
 type QueuedLegacyEvent = Infer<typeof QueuedLegacyEvent>;
 
 /** Sparse, fixed keys. The renderer never provides a counter map. */
@@ -124,10 +128,13 @@ export const usageKeys = [
   ...analyticsFeatures.map((key) => `feature_${key}` as const),
   ...analyticsSettings.map((key) => `setting_${key}` as const),
 ];
+
 export type UsageKey = (typeof usageKeys)[number];
+
 export const WINDOW_MS = 5 * 60_000;
 export const SUMMARY_TTL_MS = 7 * 86_400_000;
 export const OUTBOX_BYTES = 128 * 1024;
+
 const Counters = lazy(() =>
   type({
     "[string]": "number.integer >= 1",
@@ -150,6 +157,7 @@ const UsageEvent = lazy(() =>
       .onUndeclaredKey("delete"),
   ),
 );
+
 const StreamSummary = lazy(() =>
   event(
     type.unit("stream_summary"),
@@ -164,8 +172,11 @@ const StreamSummary = lazy(() =>
       .onUndeclaredKey("delete"),
   ),
 );
+
 export type StreamSummary = Infer<typeof StreamSummary>;
+
 export const SummaryEvent = lazy(() => UsageEvent().or(StreamSummary()));
+
 export type SummaryEvent = Infer<typeof SummaryEvent>;
 
 export const SummaryBlock = lazy(() =>
@@ -190,10 +201,12 @@ export const SummaryBlock = lazy(() =>
       .or("null"),
   }).onUndeclaredKey("delete"),
 );
+
 export type SummaryBlock = Infer<typeof SummaryBlock>;
 
 /** Foreground observations, independent of the once-per-day activity ledger. */
 const VersionIdentity = lazy(() => BuildProperties().pick("app_version", "build_channel"));
+
 const VersionObservation = lazy(() =>
   event(
     type.unit("app_version_observed"),
@@ -213,6 +226,7 @@ const VersionObservation = lazy(() =>
       ),
   ),
 );
+
 export type VersionObservation = Infer<typeof VersionObservation>;
 
 /** Additive state. Legacy pending keeps only names understood by the .15 loader. */
@@ -240,13 +254,16 @@ export const LifecycleBlock = lazy(() =>
       .atMostLength(OUTBOX_LIMIT),
   }).onUndeclaredKey("delete"),
 );
+
 export type LifecycleBlock = Infer<typeof LifecycleBlock>;
 
 /** Complete load/send union, including retired .15 producers. */
 export const CaptureEvent = lazy(() =>
   QueuedLegacyEvent().or(SummaryEvent()).or(VersionObservation()),
 );
+
 export type CaptureEvent = Infer<typeof CaptureEvent>;
+
 export type CaptureName = CaptureEvent["event"];
 
 /** The capture a name selects. One schema can serve several names, so this isn't `Extract`. */
@@ -277,10 +294,13 @@ export const LegacyRecord = lazy(() =>
       .atMostLength(OUTBOX_LIMIT),
   }).onUndeclaredKey("delete"),
 );
+
 export const AnalyticsRecord = lazy(() =>
   LegacyRecord().merge({ "summaries?": SummaryBlock(), "lifecycle?": LifecycleBlock() }),
 );
+
 export type AnalyticsRecord = Infer<typeof AnalyticsRecord>;
+
 export type DirectName = Exclude<
   QueuedLegacyEvent["event"],
   | (typeof analyticsActions)[number]

@@ -28,12 +28,16 @@ export function sha256Hex(text: string): string {
   const bits = bytes.length * 8;
   view.setUint32(length - 8, Math.floor(bits / 0x1_0000_0000));
   view.setUint32(length - 4, bits >>> 0);
+
   let hash: Words = [
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ];
+
   const w = new Uint32Array(64);
+
   for (let block = 0; block < length; block += 64) {
     for (let i = 0; i < 16; i++) w[i] = view.getUint32(block + i * 4);
+
     for (let i = 16; i < 64; i++) {
       const a = w[i - 15]!;
       const b = w[i - 2]!;
@@ -41,10 +45,13 @@ export function sha256Hex(text: string): string {
       const s1 = rotate(b, 17) ^ rotate(b, 19) ^ (b >>> 10);
       w[i] = w[i - 16]! + s0 + w[i - 7]! + s1;
     }
+
     let [a, b, c, d, e, f, g, h] = hash;
+
     for (let i = 0; i < 64; i++) {
       const t1 =
         h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)) + ((e & f) ^ (~e & g)) + K[i]! + w[i]!;
+
       const t2 = (rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
       h = g;
       g = f;
@@ -55,6 +62,7 @@ export function sha256Hex(text: string): string {
       b = a;
       a = (t1 + t2) >>> 0;
     }
+
     hash = [
       (hash[0] + a) >>> 0,
       (hash[1] + b) >>> 0,
@@ -66,6 +74,7 @@ export function sha256Hex(text: string): string {
       (hash[7] + h) >>> 0,
     ];
   }
+
   return hash.map((word) => word.toString(16).padStart(8, "0")).join("");
 }
 

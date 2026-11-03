@@ -87,6 +87,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     kind,
     filters: {},
   });
+
   if (filterState.kind !== kind) setFilterState({ kind, filters: {} });
   const filters = filterState.kind === kind ? filterState.filters : {};
   const onFilters = (next: TitleFilters) => setFilterState({ kind, filters: next });
@@ -105,22 +106,28 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
     });
   }, [active, kind, client]);
   const place = usePlace((state) => state[kind]);
+
   const go = (next: Partial<Place>) =>
     usePlace.setState((state) => ({ [kind]: { ...state[kind], ...next } }));
+
   const subscriptions = useSubscriptions();
+
   const playlistOnly =
     subscriptions.some((each) => each.playlistMapped) &&
     !subscriptions.some((each) => each.kind === "xtream");
+
   const status = useQuery(queries.onDemandStatus());
   const fourK = useQuery(queries.collection(kind, "4k", undefined, 0, 1));
   // Empty unless Settings shows titles for adults. Until it does again, Adults is gone as soon as
   // the setting is, whatever was read before.
   const adults = useQuery(queries.preferences()).data?.adultTitles ?? false;
   const adult = useQuery(queries.collection(kind, "adult", undefined, 0, 1));
+
   // 4K and Adults go when nothing is left in them, as after changing the language or the setting.
   const emptied =
     (place.tab === "4k" && fourK.data?.total === 0) ||
     (place.tab === "adult" && (!adults || adult.data?.total === 0));
+
   // Playlists have no added dates or eager metadata. Open their complete catalogue immediately.
   const tab =
     emptied || (playlistOnly && (place.tab === "for-you" || place.tab === "new"))
@@ -128,6 +135,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
         ? "all"
         : "for-you"
       : place.tab;
+
   const tabs: readonly { value: Tab; label: string }[] = [
     ...(playlistOnly
       ? []
@@ -151,9 +159,11 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   // Escape leaves an open collection, or the search, for the tab, one layer at a time.
   useEffect(() => {
     if (!active || (!place.collection && !searching)) return;
+
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape" || event.defaultPrevented || isTyping(event)) return;
       const ui = useUi.getState();
+
       if (ui.searchOpen || ui.settings || ui.updateDialog || ui.details || ui.playingTitle) return;
       usePlace.setState((state) => ({
         [kind]: state[kind].collection
@@ -162,7 +172,9 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
       }));
       event.preventDefault();
     }
+
     window.addEventListener("keydown", onKey);
+
     return () => window.removeEventListener("keydown", onKey);
   }, [active, place.collection, searching, kind]);
 
@@ -170,6 +182,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   useEffect(() => {
     if (!active) return;
     useUi.setState({ searchFrom: place.query.trim() });
+
     return () => useUi.setState({ searchFrom: "" });
   }, [active, place.query]);
 
@@ -180,6 +193,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
   // No first fetch worked: nothing to show but why.
   const failed = loading ? lists.filter((each) => each.failure !== null) : [];
   const failure = failed[0]?.failure ?? null;
+
   return (
     <div className="flex h-full flex-col">
       <WindowBar
@@ -201,6 +215,7 @@ export function TitlesPage({ kind, active }: { kind: TitleKind; active: boolean 
           <nav className="flex flex-none items-center gap-6 px-10 pt-2 pb-4 text-[0.9375rem]">
             {tabs.map((each) => {
               const shown = !searching && each.value === tab;
+
               return (
                 <button
                   key={each.value}
@@ -341,11 +356,14 @@ function SearchResults({
   onFocusTaken: () => void;
 } & TitleFilterControls) {
   const debounced = useDebounced(query, 120);
+
   const found = useQuery({
     ...queries.titleSearchIn(kind, debounced, filters),
   });
+
   const titles = found.data?.titles ?? [];
   const total = found.data?.total ?? 0;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col pl-10">
       <TitleFilterBar
@@ -464,6 +482,7 @@ function Collection({
   active: boolean;
 } & TitleFilterControls) {
   const listed = useCollection(kind, id, sort ?? undefined, filters);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col pt-2 pl-10">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 pr-8">
@@ -508,14 +527,18 @@ function Rows({
   // Titles like the one watched last, by the version that was watched.
   const like = mine[0]?.version ?? null;
   const rows = useQuery(queries.rows(kind, tab, tab === "for-you" ? like : null));
+
   if (rows.error) {
     return <p className="px-10 text-sm text-destructive">{describeError(appError(rows.error))}</p>;
   }
+
   const featured = tab === "for-you" ? featuredOf(kind, rows.data ?? []) : null;
+
   // A featured movie the viewer is part way through resumes.
   const resume =
     featured &&
     mine.find((entry) => entry.title.versions.some((version) => sameOwned(version, featured)));
+
   return (
     <div ref={box} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pb-16">
       {featured && <Featured title={featured} resume={resume ?? null} />}
@@ -574,16 +597,21 @@ const featuredPicks = new Map<TitleKind, { readonly day: number; readonly title:
 function featuredOf(kind: TitleKind, rows: readonly CollectionRow[]): Title | null {
   const day = Math.floor(Date.now() / 86_400_000);
   const picked = featuredPicks.get(kind);
+
   if (picked?.day === day) {
     const kept = rows
       .flatMap((row) => row.titles)
       .find((title) => sameOwned(title, picked.title) && title.backdropUrl);
+
     if (kept) return kept;
   }
+
   const popular = rows.find((row) => row.id === "popular")?.titles ?? rows[0]?.titles ?? [];
   const pictured = popular.filter((title) => title.backdropUrl).slice(0, 10);
   const title = pictured[day % Math.max(pictured.length, 1)] ?? null;
+
   if (title) featuredPicks.set(kind, { day, title: ownedId(title) });
+
   return title;
 }
 
@@ -595,8 +623,10 @@ function Featured({ title, resume }: { title: Title; resume: ContinueEntry | nul
   ]
     .filter(Boolean)
     .join(" · ");
+
   const resumeEntry = useResume();
   const picked = pickedVersion(title, useSubscriptionPreferences());
+
   return (
     <section className="relative mb-9 aspect-[21/8] max-h-[26rem] w-full overflow-hidden rounded-2xl">
       <Artwork url={title.backdropUrl} name={title.title} size="full" plain />
@@ -645,10 +675,13 @@ function Tiles({
   const tiles = useQuery(queries.tiles(kind, of));
   const status = useQuery(queries.onDemandStatus());
   const metadata = status.data?.metadata;
+
   if (tiles.error) {
     return <p className="px-10 text-sm text-destructive">{describeError(appError(tiles.error))}</p>;
   }
+
   const empty = tiles.data?.length === 0;
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-10 pt-1 pb-16">
       {empty ? (

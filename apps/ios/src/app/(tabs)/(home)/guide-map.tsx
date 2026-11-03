@@ -14,5 +14,6 @@ export default function GuideMap() {
     // A channel's mapping carries its own large title.
     navigation.setOptions({ title: channel ? "" : "Map channels" });
   }, [navigation, channel]);
+
   return channel ? <GuideMapEditor key={channel} channelKey={channel} /> : <GuideMapScreen />;
 }

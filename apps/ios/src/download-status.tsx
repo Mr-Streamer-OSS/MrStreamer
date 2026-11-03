@@ -18,21 +18,26 @@ function downloadStatus({
   items,
 }: DownloadList): { short: string; text: string; mark: number | "unknown" | "failed" } | null {
   const transferring = items.find((item) => item.status.kind === "transferring");
+
   if (transferring?.status.kind === "transferring") {
     const { received, size } = transferring.status;
+
     const progress =
       size !== null && size > 0
         ? formatPercent(Math.min(1, Math.max(0, Math.floor((received / size) * 100) / 100)))
         : received < 1000
           ? `${received} B`
           : formatBytes(received);
+
     return {
       short: progress,
       text: t("{name}, {progress} downloaded", { name: transferring.name, progress }),
       mark: transferred(transferring) ?? "unknown",
     };
   }
+
   const waiting = items.find((item) => item.status.kind === "waiting");
+
   if (waiting)
     return {
       short: t("Wait"),
@@ -42,11 +47,14 @@ function downloadStatus({
       mark: 0,
     };
   const queued = items.filter((item) => item.status.kind === "queued").length;
+
   if (queued)
     return { short: formatNumber(queued), text: t("{count} queued", { count: queued }), mark: 0 };
   const paused = items.filter((item) => item.status.kind === "paused").length;
+
   if (paused) return { short: t("Paused"), text: t("{count} paused", { count: paused }), mark: 0 };
   const failed = items.filter((item) => item.status.kind === "failed" && item.subscription).length;
+
   return failed
     ? {
         short: "!",
@@ -66,6 +74,7 @@ function downloadStatus({
 function HeaderGlyph({ status }: { status: ReturnType<typeof downloadStatus> }) {
   const mark = status?.mark;
   const ring = typeof mark === "number";
+
   return (
     <>
       {ring ? (
@@ -113,7 +122,9 @@ export function DownloadStatusButton({
 }) {
   useLocale();
   const status = downloadStatus(useDownloads());
+
   if (onlyActive && !status) return null;
+
   return (
     <Pressable
       accessibilityRole="button"

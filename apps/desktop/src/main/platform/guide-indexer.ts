@@ -37,6 +37,7 @@ export function guideIndexerLayer(
     build: (build, progress, signal) =>
       new Promise<GuideIndexSummary>((resolve, reject) => {
         if (signal.aborted) return reject(signal.reason);
+
         // Its own output, not piped to the main process's: starting it never sets that up, and
         // what it has to say comes as a message.
         const worker = start({
@@ -45,7 +46,9 @@ export function guideIndexerLayer(
           stdout: true,
           stderr: true,
         });
+
         let ended = false;
+
         /**
          * Ends the worker once, and then settles once: a worker stopped half way leaves no file,
          * or one the store's next sweep takes.
@@ -57,6 +60,7 @@ export function guideIndexerLayer(
           const leftovers = unfinished ? [`${build.target}.part`, build.target] : [];
           void cleanUp(worker, leftovers).then(settle);
         };
+
         const stop = () => end(() => reject(signal.reason), true);
         signal.addEventListener("abort", stop, { once: true });
         worker.on("message", (message: GuideIndexMessage) => {
@@ -79,9 +83,11 @@ export function guideIndexerLayer(
 async function cleanUp(worker: Worker, leftovers: readonly string[]): Promise<void> {
   const problems: unknown[] = [];
   await worker.terminate().catch((cause: unknown) => problems.push(cause));
+
   for (const path of leftovers) {
     await rm(path, { force: true }).catch((cause: unknown) => problems.push(cause));
   }
+
   if (problems.length > 0) {
     console.warn("[guide] an indexing worker left what the next sweep takes", problems);
   }

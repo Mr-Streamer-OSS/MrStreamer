@@ -83,6 +83,7 @@ const SubDLReply = lazy(() =>
       .atMostLength(100),
   }),
 );
+
 const OpenReply = lazy(() =>
   type({
     data: type({
@@ -106,12 +107,14 @@ const OpenReply = lazy(() =>
       .atMostLength(1000),
   }),
 );
+
 const OpenLogin = lazy(() =>
   type({
     token: "0 < string <= 16384",
     base_url: "'api.opensubtitles.com' | 'vip-api.opensubtitles.com'",
   }),
 );
+
 const OpenDownload = lazy(() =>
   type({
     link: "0 < string <= 8192",
@@ -119,6 +122,7 @@ const OpenDownload = lazy(() =>
     reset_time_utc: "string <= 128",
   }),
 );
+
 const Query = lazy(() =>
   type({
     "tmdbId?": "number.integer > 0",
@@ -136,6 +140,7 @@ const Query = lazy(() =>
     episode: "number.integer > 0",
   }),
 );
+
 const JSON_LIMIT = 2 * 1024 * 1024;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
@@ -143,6 +148,7 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 export function subtitleServiceClient(options: { userAgent: string; fetch?: typeof fetch }) {
   const request = options.fetch ?? fetch;
   const userAgent = options.userAgent;
+
   const api = async (
     url: string | URL,
     init: RequestInit,
@@ -151,19 +157,24 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   ) => {
     const timeout = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
     let target = new URL(url);
+
     for (let redirects = 0; ; redirects++) {
       timeout.throwIfAborted();
+
       const response = await request(target, {
         ...init,
         signal: timeout,
         redirect: "manual",
         headers: { Accept: "application/json", "User-Agent": userAgent, ...init.headers },
       });
+
       const location =
         searchRedirects && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+
       if (location !== null) {
         await response.body?.cancel();
         const next = new URL(location, target);
+
         // Only the search GET can redirect. The API key stays on the original HTTPS origin.
         if (
           redirects >= 2 ||
@@ -176,6 +187,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         target = next;
         continue;
       }
+
       if (!response.ok) {
         await response.body?.cancel();
         throw new SubtitleRequestFailure(
@@ -186,6 +198,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
               : "unavailable",
         );
       }
+
       return JSON.parse(
         new TextDecoder("utf-8", { fatal: true }).decode(
           await readBody(response, JSON_LIMIT, timeout),
@@ -193,6 +206,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       ) as unknown;
     }
   };
+
   const subdlSearch = async (
     credentials: NonNullable<SubtitleCredentials["subdl"]>,
     input: SubtitleQuery,
@@ -200,6 +214,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   ): Promise<readonly SubtitleCandidate[]> => {
     const query = checkedQuery(input);
     const url = new URL("https://api.subdl.com/api/v1/subtitles");
+
     const params = new URLSearchParams({
       api_key: credentials.apiKey,
       ...(query.tmdbId !== undefined
@@ -212,13 +227,17 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       unpack: "1",
       client: "custom_integration",
     });
+
     if (query.kind === "episode") {
       params.set("season_number", String(query.season));
       params.set("episode_number", String(query.episode));
     }
+
     url.search = params.toString();
     const reply = SubDLReply().assert(await api(url, {}, signal));
+
     if (!reply.status) throw new SubtitleRequestFailure("unavailable");
+
     // SubDL may broaden an unsuccessful match. Do not import another title's results.
     if (
       (query.tmdbId !== undefined && reply.results?.[0]?.tmdb_id !== query.tmdbId) ||
@@ -226,6 +245,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
     )
       return [];
     const results: SubtitleCandidate[] = [];
+
     for (const sub of reply.subtitles ?? []) {
       const files = sub.unpack_files?.filter(
         (file) =>
@@ -234,6 +254,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
           file.episode === query.episode &&
           /^(srt|vtt)$/i.test(file.format),
       );
+
       if (files?.length) {
         for (const file of files)
           results.push({
@@ -259,8 +280,10 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         });
       }
     }
+
     return results.filter((sub) => query.languages.includes(sub.language)).slice(0, 100);
   };
+
   const openSearch = async (
     credentials: NonNullable<SubtitleCredentials["opensubtitles"]>,
     input: SubtitleQuery,
@@ -268,6 +291,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   ): Promise<readonly SubtitleCandidate[]> => {
     const query = checkedQuery(input);
     const url = new URL("https://api.opensubtitles.com/api/v1/subtitles");
+
     const languages = [
       ...new Set(
         query.languages.flatMap((language) =>
@@ -275,6 +299,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         ),
       ),
     ].sort();
+
     url.search = new URLSearchParams({
       type: query.kind,
       languages: languages.join(","),
@@ -290,6 +315,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         : { season_number: String(query.season), episode_number: String(query.episode) }),
     }).toString();
     url.searchParams.sort();
+
     const reply = OpenReply().assert(
       await api(
         url,
@@ -300,9 +326,11 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         true,
       ),
     );
+
     return reply.data
       .flatMap(({ attributes: sub }): SubtitleCandidate[] => {
         const title = sub.feature_details;
+
         if (
           !languages.includes(sub.language.toLowerCase()) ||
           (query.kind === "movie"
@@ -312,6 +340,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
               title.episode_number !== query.episode)
         )
           return [];
+
         return sub.files.map((file) => ({
           service: "opensubtitles",
           fileId: file.file_id,
@@ -326,6 +355,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       })
       .slice(0, 100);
   };
+
   const download = async (
     candidate: SubtitleCandidate,
     credentials: SubtitleCredentials,
@@ -336,11 +366,14 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
   }> => {
     let url: URL;
     let quota: { remaining: number; resetAt: string } | null = null;
+
     if (candidate.service === "subdl") {
       url = downloadURL("subdl", candidate.url);
     } else {
       const keys = credentials.opensubtitles;
+
       if (!keys) throw new SubtitleRequestFailure("not-configured");
+
       // Login and quota-consuming download are separate from search. No token on disk.
       const login = OpenLogin().assert(
         await api(
@@ -353,6 +386,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
           signal,
         ),
       );
+
       const reply = OpenDownload().assert(
         await api(
           `https://${login.base_url}/api/v1/download`,
@@ -368,37 +402,50 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
           signal,
         ),
       );
+
       url = downloadURL("opensubtitles", reply.link);
       quota = { remaining: reply.remaining, resetAt: reply.reset_time_utc };
     }
+
     const timeout = AbortSignal.any([signal, AbortSignal.timeout(30000)]);
+
     for (let redirects = 0; ; redirects++) {
       timeout.throwIfAborted();
+
       const response = await request(url, {
         signal: timeout,
         redirect: "manual",
         headers: { "User-Agent": userAgent },
       });
+
       const location = REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+
       if (location !== null) {
         await response.body?.cancel();
+
         if (redirects >= 3) throw new SubtitleRequestFailure("unavailable");
         url = downloadURL(candidate.service, new URL(location, url).href);
         continue;
       }
+
       if (!response.ok) {
         await response.body?.cancel();
         throw new SubtitleRequestFailure(response.status === 429 ? "quota" : "unavailable");
       }
+
       const data = await readBody(response, SUBTITLE_TEXT_LIMIT, timeout);
+
       const bytes =
         data[0] === 0x50 && data[1] === 0x4b ? await subtitleArchive(data, timeout) : data;
+
       let cues: ReturnType<typeof subtitleTextBytes>;
+
       try {
         cues = subtitleTextBytes(bytes, candidate.language);
       } catch {
         throw new SubtitleRequestFailure("unsupported");
       }
+
       return {
         subtitle: {
           service: candidate.service,
@@ -410,6 +457,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
       };
     }
   };
+
   // Fetch/schema errors can contain API keys and passwords. Never expose their messages.
   const safe = async <A>(signal: AbortSignal, run: () => Promise<A>): Promise<A> => {
     try {
@@ -421,6 +469,7 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
         : new SubtitleRequestFailure("unavailable");
     }
   };
+
   return {
     subdlSearch: (...args: Parameters<typeof subdlSearch>) =>
       safe(args[2], () => subdlSearch(...args)),
@@ -432,16 +481,20 @@ export function subtitleServiceClient(options: { userAgent: string; fetch?: type
 
 function checkedQuery(input: SubtitleQuery): SubtitleQuery {
   const query = Query().assert(input);
+
   if (query.tmdbId === undefined && !query.title?.trim())
     throw new SubtitleRequestFailure("unsupported");
   const languages = [...new Set(query.languages.map((value) => value.trim().toLowerCase()))].sort();
+
   if (!languages.length || languages.some((value) => !/^[a-z]{2,3}(?:-[a-z]{2,3})?$/.test(value)))
     throw new SubtitleRequestFailure("unsupported");
+
   return { ...query, languages };
 }
 
 function downloadURL(service: SubtitleService, value: string): URL {
   const url = new URL(value, service === "subdl" ? "https://dl.subdl.com" : undefined);
+
   if (
     url.protocol !== "https:" ||
     url.username ||
@@ -452,6 +505,7 @@ function downloadURL(service: SubtitleService, value: string): URL {
       : url.hostname !== "opensubtitles.com" && !url.hostname.endsWith(".opensubtitles.com"))
   )
     throw new SubtitleRequestFailure("unsupported");
+
   return url;
 }
 
@@ -459,6 +513,7 @@ function downloadURL(service: SubtitleService, value: string): URL {
 function requestedLanguage(value: string, requested: readonly string[]): string {
   const name = value.trim().toLowerCase();
   const names = new Intl.DisplayNames(["en"], { type: "language" });
+
   return requested.find((code) => code === name || names.of(code)?.toLowerCase() === name) ?? "";
 }
 
@@ -471,21 +526,27 @@ async function readBody(
     await response.body?.cancel();
     throw new SubtitleRequestFailure("unsupported");
   }
+
   if (!response.body) throw new SubtitleRequestFailure("unsupported");
   const reader = response.body.getReader();
+
   const abort = () => {
     void reader.cancel().catch(() => {});
   };
+
   signal.addEventListener("abort", abort, { once: true });
   const chunks: Uint8Array[] = [];
   let size = 0;
+
   try {
     while (true) {
       signal.throwIfAborted();
       const { value, done } = await reader.read();
       signal.throwIfAborted();
+
       if (done) break;
       size += value.length;
+
       if (size > limit) throw new SubtitleRequestFailure("unsupported");
       chunks.push(value);
     }
@@ -494,6 +555,7 @@ async function readBody(
     await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
+
   return Buffer.concat(chunks, size);
 }
 
@@ -506,45 +568,61 @@ async function subtitleArchive(data: Uint8Array, signal: AbortSignal): Promise<U
     let size = 0;
     let selected = 0;
     let complete = false;
+
     const end = (error?: unknown) => {
       if (finished) return;
       finished = true;
       signal.removeEventListener("abort", abort);
+
       for (const file of files) file.terminate();
+
       if (error) reject(error);
       else resolve(Buffer.concat(chunks, size));
     };
+
     const abort = () => end(signal.reason);
     signal.addEventListener("abort", abort, { once: true });
+
     const unzip = new Unzip((file) => {
       files.push(file);
+
       if (files.length > 64) return end(new SubtitleRequestFailure("unsupported"));
+
       if (
         file.name.startsWith("__MACOSX/") ||
         file.name.split("/").at(-1)?.startsWith("._") ||
         !/\.(srt|vtt)$/i.test(file.name)
       )
         return;
+
       if (++selected > 1 || (file.originalSize ?? 0) > SUBTITLE_TEXT_LIMIT)
         return end(new SubtitleRequestFailure("unsupported"));
       file.ondata = (error, chunk, final) => {
         if (finished) return;
+
         if (error) return end(new SubtitleRequestFailure("unsupported"));
         size += chunk.length;
+
         if (size > SUBTITLE_TEXT_LIMIT) return end(new SubtitleRequestFailure("unsupported"));
         chunks.push(chunk);
         complete = final;
+
         if (final && parsed) end();
       };
+
       file.start();
     });
+
     unzip.register(SubtitleInflate);
     let parsed = false;
+
     try {
       signal.throwIfAborted();
+
       for (let start = 0; start < data.length && !finished; start += 65536)
         unzip.push(data.subarray(start, start + 65536), start + 65536 >= data.length);
       parsed = true;
+
       if (!selected) end(new SubtitleRequestFailure("unsupported"));
       else if (complete) end();
     } catch {
@@ -568,6 +646,7 @@ class SubtitleInflate implements UnzipDecoder {
   }
   push(chunk: Uint8Array, final: boolean): void {
     if (this.stream.destroyed) return;
+
     if (final) this.stream.end(chunk);
     else this.stream.write(chunk);
   }

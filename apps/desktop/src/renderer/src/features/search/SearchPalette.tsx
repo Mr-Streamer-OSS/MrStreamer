@@ -62,15 +62,19 @@ export function SearchPalette() {
       }),
     [],
   );
+
   const finalFocus = () => {
     // The keyboard went on elsewhere, as to details a result opened: it stays there.
     const focused = document.activeElement;
+
     if (focused && focused !== document.body && !popup.current?.contains(focused)) return false;
     const element = opener.current;
+
     return element instanceof HTMLElement && element !== document.body && element.isConnected
       ? element
       : true;
   };
+
   return (
     <Dialog.Root open={open} onOpenChange={(next) => useUi.setState({ searchOpen: next })}>
       <Dialog.Portal>
@@ -102,6 +106,7 @@ type Result =
 
 /** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
+
 /** Movies, and then series, listed after the channels. */
 const TITLE_RESULTS = 6;
 
@@ -111,12 +116,14 @@ function Palette() {
   // Mounted each time it opens.
   const [query, setQuery] = useState(() => useUi.getState().searchFrom);
   const client = useQueryClient();
+
   // Complete fresh answers need no typing delay. Other searches keep the existing debounce.
   const fresh =
     query.trim() !== "" &&
     [queries.search(query), queries.programmes(query), queries.titleSearch(query)].every(
       (options) => {
         const cached = client.getQueryCache().get(hashKey(options.queryKey));
+
         return (
           cached?.state.status === "success" &&
           cached.state.fetchStatus === "idle" &&
@@ -125,6 +132,7 @@ function Palette() {
         );
       },
     );
+
   const searched = useDebounced(query, fresh ? 0 : 120);
   useSearchUsage("global", searched, true);
   // Share the Guide's catalogue read so the first name search builds during the typing delay.
@@ -132,11 +140,13 @@ function Palette() {
   const raw = useRef(query);
   const current = visible && query === searched && query.trim() !== "";
   const asked = current ? searched : "";
+
   const channels = useQuery({
     ...queries.search(asked),
     queryKey: current ? queries.search(asked).queryKey : ["library", "search", "paused", searched],
     placeholderData: (previous) => (current ? undefined : previous),
   });
+
   const programmes = useQuery({
     ...queries.programmes(asked),
     queryKey: current
@@ -144,6 +154,7 @@ function Palette() {
       : ["guide", "search", "paused", searched],
     placeholderData: (previous) => (current ? undefined : previous),
   });
+
   const titles = useQuery({
     ...queries.titleSearch(asked),
     queryKey: current
@@ -151,6 +162,7 @@ function Palette() {
       : ["ondemand", "search", "paused", searched],
     placeholderData: (previous) => (current ? undefined : previous),
   });
+
   const pending =
     !current ||
     channels.isFetching ||
@@ -159,6 +171,7 @@ function Palette() {
     channels.isPending ||
     programmes.isPending ||
     titles.isPending;
+
   const failed = channels.isError || programmes.isError || titles.isError;
   const categories = useCategoryMap();
   // Results come from every subscription: one says whose it is where another reads the same.
@@ -168,17 +181,22 @@ function Palette() {
   const subscriptions = useSubscriptions();
   const reminders = useReminders().data;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+
   const groups = useMemo(
     () => searchResultGroups(channels.data ?? []).slice(0, CHANNEL_RESULTS),
     [channels.data],
   );
+
   const [open, setOpen] = useState<string | null>(null);
   const [selected, select] = useState<string | null>(null);
+
   const results = useMemo((): Result[] => {
     if (!query.trim() || !searched.trim()) return [];
+
     return [
       ...groups.flatMap((group): Result[] => {
         const channel = group.copies[0]!;
+
         return [
           { kind: "channel", group, channel, copy: false, key: group.key },
           ...(expanded.has(group.key) && group.copies.length > 1
@@ -206,6 +224,7 @@ function Palette() {
 
   const identity = (result: Result) =>
     result.kind === "title" ? `title/${result.title.key}` : `${result.kind}/${result.key}`;
+
   const kept = results.findIndex((result) => identity(result) === selected);
   const active = Math.max(kept, 0);
   const setActive = (index: number) => select(results[index] ? identity(results[index]!) : null);
@@ -222,8 +241,10 @@ function Palette() {
   /** Group rows use Automatic; expanded copies keep their real subscription and quality choices. */
   const choose = (index: number) => {
     const result = results[index];
+
     if (!result || !current || raw.current !== searched || !useUi.getState().searchOpen) return;
     setActive(index);
+
     if (result.kind === "channel")
       watchChannel(
         result.copy ? result.channel : automaticSearchCopy(result.group, favourites, subscriptions),
@@ -234,6 +255,7 @@ function Palette() {
         titlePlayer.close();
         useUi.setState({ playingTitle: false });
       }
+
       openDetails({ kind: result.title.kind, ...ownedId(result.title) });
     } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
     else setOpen((current) => (current === result.key ? null : result.key));
@@ -248,20 +270,26 @@ function Palette() {
       event.altKey
     )
       return;
+
     if (!current || raw.current !== searched) return;
+
     if (event.key === "Enter" && event.target instanceof HTMLButtonElement) return;
+
     if (event.key === "ArrowDown") setActive(Math.min(active + 1, results.length - 1));
     else if (event.key === "ArrowUp") setActive(Math.max(active - 1, 0));
     else if (event.key === "Enter") choose(active);
     else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
       const result = results[active];
+
       if (result?.kind !== "channel" || result.group.copies.length < 2) return;
+
       if (event.key === "ArrowRight" && !result.copy && !expanded.has(result.group.key))
         setExpanded((current) => new Set(current).add(result.group.key));
       else if (event.key === "ArrowLeft" && expanded.has(result.group.key)) {
         setExpanded((current) => {
           const next = new Set(current);
           next.delete(result.group.key);
+
           return next;
         });
         setActive(
@@ -323,6 +351,7 @@ function Palette() {
           {results.map((result, index) => {
             if (result.kind === "title") {
               const { title } = result;
+
               return (
                 <button
                   key={title.key}
@@ -365,15 +394,19 @@ function Palette() {
                 </button>
               );
             }
+
             if (result.kind === "programme") {
               const { channel, programme } = result.match;
               const source = sourceOf(channel);
               const shows = source ? `${channel.title} · ${source}` : channel.title;
               const later = programme.start > now;
+
               const detail = later
                 ? `${clockTime(programme.start, now)} · ${shows}`
                 : `${t("On now")} · ${shows} · ${timeLeft(programme, now)}`;
+
               const reminded = reminderAt(reminders, channel, programme.start) !== undefined;
+
               return (
                 <div
                   key={result.key}
@@ -425,11 +458,14 @@ function Palette() {
                 </div>
               );
             }
+
             const { channel, group, copy } = result;
             const [categoryId] = channel.categoryIds;
+
             const category = categoryId
               ? categories.get(ownedKey({ subscriptionId: channel.subscriptionId, id: categoryId }))
               : undefined;
+
             return (
               <LiveResultRow
                 id={`${resultsId}-${index}`}
@@ -447,6 +483,7 @@ function Palette() {
                 onSelect={() => setActive(index)}
                 onToggle={() => {
                   const selectedRow = results[active];
+
                   if (
                     expanded.has(group.key) &&
                     selectedRow?.kind === "channel" &&
@@ -456,8 +493,10 @@ function Palette() {
                     setActive(index);
                   setExpanded((current) => {
                     const next = new Set(current);
+
                     if (next.has(group.key)) next.delete(group.key);
                     else next.add(group.key);
+
                     return next;
                   });
                 }}
@@ -529,6 +568,7 @@ function LiveResultRow({
   const subscriptionCount = new Set(group.copies.map((copy) => copy.subscriptionId)).size;
   const listing = useQuery({ ...queries.listings([channel]), enabled: copy });
   const guide = listing.data?.[ownedKey(channel)];
+
   return (
     <div
       id={id}

@@ -11,8 +11,10 @@ import type { Recording, ScheduledRecording } from "@mrstreamer/contracts/record
 import { QuitDialog } from "../../src/renderer/src/features/recordings/QuitDialog.tsx";
 
 const channel = { subscriptionId: SUBSCRIPTION, id: "11" };
+
 // Begun 9 minutes ago, a second over so whole minutes come out even.
 const start = Date.now() - 9 * 60_000 - 1000;
+
 const recording: Recording = {
   id: "r1",
   channel,
@@ -24,6 +26,7 @@ const recording: Recording = {
   bytes: 100_000_000,
   status: { kind: "recording" },
 };
+
 const schedule: ScheduledRecording = {
   id: "s1",
   plan: {
@@ -39,6 +42,7 @@ const schedule: ScheduledRecording = {
   next: { start: start + 3 * 60 * 60_000, stop: start + 4 * 60 * 60_000 },
   status: { kind: "planned" },
 };
+
 // Sooner, but held back: it wouldn't record with the app open either.
 const held: ScheduledRecording = {
   ...schedule,
@@ -49,6 +53,7 @@ const held: ScheduledRecording = {
 };
 
 const dialog = () => document.querySelector<HTMLElement>("[role=dialog]");
+
 const button = (text: string) =>
   [...(dialog()?.querySelectorAll("button") ?? [])].find(
     (each) => each.textContent?.trim() === text,
@@ -67,9 +72,12 @@ beforeEach(async () => {
 /** Main asks, as after Cmd+Q, Ctrl+Q or the tray's Quit; waits until the dialog says it all. */
 async function asked(): Promise<HTMLElement> {
   await act(async () => ipc.emit("window.leaveAsked", null));
+
   return vi.waitFor(() => {
     const shown = dialog();
+
     if (!shown?.textContent?.includes("Night Sessions")) throw new Error("Not asked yet");
+
     return shown;
   });
 }

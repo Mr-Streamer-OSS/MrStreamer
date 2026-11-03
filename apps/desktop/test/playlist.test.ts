@@ -31,6 +31,7 @@ afterEach(async () => {
     server.closeAllConnections();
     await new Promise((closed) => server.close(closed));
   }
+
   for (const host of hosts.splice(0)) await host.close();
 });
 
@@ -45,6 +46,7 @@ afterEach(async () => {
  */
 async function playlistHost() {
   const asked: { path: string; userAgent?: string; referer?: string }[] = [];
+
   const server = createServer((request, response) => {
     const { pathname } = new URL(request.url ?? "/", "http://host");
     asked.push({
@@ -55,29 +57,39 @@ async function playlistHost() {
       }),
     });
     const body = routes.get(pathname);
+
     if (body === undefined) return response.writeHead(404).end();
+
     if (body === "hold") return;
+
     if (typeof body === "number") return response.writeHead(body).end();
+
     if (pathname.endsWith("segment-1.ts")) {
       const packed = gzipSync(body);
+
       return response
         .writeHead(200, { "Content-Encoding": "gzip", "Content-Length": packed.length })
         .end(packed);
     }
+
     if (!pathname.endsWith(".m3u8")) return response.writeHead(200).end(body);
     response.writeHead(200);
     const text = Buffer.from(body);
     let at = 0;
+
     const next = () => {
       if (at >= text.length) return response.end();
       response.write(text.subarray(at, (at += 5)));
       setTimeout(next, 1);
     };
+
     next();
   });
+
   servers.push(server);
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
   const routes = new Map<string, string | Buffer | number>([
     [
       "/list.m3u",
@@ -114,6 +126,7 @@ async function playlistHost() {
     ["/guide.xml.gz", gzipSync(guideAround(Date.now()))],
     ["/panel", "<!doctype html><title>Panel</title>"],
   ]);
+
   return {
     origin,
     asked,
@@ -126,6 +139,7 @@ async function playlistHost() {
 /** `/other.m3u` with a first line that names the host's guide, and a channel the guide covers. */
 const namingGuide = (origin: string) =>
   `#EXTM3U x-tvg-url="${origin}/guide.xml.gz"\n#EXTINF:-1 tvg-id="Alpha.test@HD",Alpha\n${origin}/beta.ts\n`;
+
 /** The same channel under a first line that names none. */
 const namingNone = (origin: string) =>
   `#EXTM3U\n#EXTINF:-1 tvg-id="Alpha.test@HD",Alpha\n${origin}/beta.ts\n`;
@@ -134,9 +148,12 @@ const namingNone = (origin: string) =>
 function guideAround(now: number): string {
   const time = (at: number) =>
     `${new Date(at).toISOString().replace(/[-:T]/g, "").slice(0, 14)} +0000`;
+
   const programme = (from: number, to: number, title: string) =>
     `<programme start="${time(from)}" stop="${time(to)}" channel="Alpha.test@HD"><title>${title}</title></programme>`;
+
   const hour = 60 * 60 * 1000;
+
   return `<?xml version="1.0"?><tv>${programme(now - hour / 2, now + hour / 2, "Morning News")}${programme(now + hour / 2, now + hour, "Weather")}</tv>`;
 }
 
@@ -156,6 +173,7 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
   /** The subscription saved first. Without one, an id that names none that is. */
   const saved = async () => (await subscriptions.list())[0]?.id ?? "no-subscription";
   const own = async (id: string) => ({ subscriptionId: await saved(), id });
+
   return {
     own,
     subscriptions,
@@ -173,8 +191,10 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
       /** The first subscription's guide, as Settings shows it. */
       status: async () => {
         const [first] = await guide.status();
+
         if (!first) throw new Error("No subscription is saved");
         const { subscriptionId: _of, ...status } = first;
+
         return status;
       },
       /** Removes the subscription, with what was loaded from it. */
@@ -182,9 +202,11 @@ async function app(dataDir: string, secrets: Secrets = testSecrets) {
       listings: async (channelIds: readonly string[]) => {
         const channels = await Promise.all(channelIds.map(own));
         const listings = await guide.listings(channels);
+
         return Object.fromEntries(
           channels.flatMap((channel) => {
             const listing = listings[ownedKey(channel)];
+
             return listing ? [[channel.id, listing] as const] : [];
           }),
         );
@@ -262,14 +284,18 @@ describe("playlist subscriptions", () => {
     expect(session.format).toBe("hls");
     expect(master).not.toContain(host.origin);
     expect(segments).toHaveLength(2);
+
     for (const segment of segments) {
       expect(Buffer.from(await (await fetch(segment)).arrayBuffer())).toEqual(CLIP);
     }
+
     const upstream = host.asked.filter((request) => request.path.startsWith("/alpha/"));
     expect(upstream).toHaveLength(4);
+
     for (const request of upstream) {
       expect(request).toMatchObject({ userAgent: PLAYER, referer: `${host.origin}/` });
     }
+
     // A closed session's addresses lead nowhere.
     await playback.close(session.sessionId);
     expect((await fetch(segments[0] ?? "")).status).toBe(410);
@@ -283,9 +309,11 @@ describe("playlist subscriptions", () => {
 
     const session = await playback.open(PLAYLIST_CHANNELS.tracks.id, ["h264", "aac"]);
     const master = await (await fetch(session.url)).text();
+
     /** Where the player finds the rendition named `name`: an address of the proxy. */
     const rendition = (name: string) =>
       new RegExp(`NAME="${name}".*URI="([^"]+)"`).exec(master)?.[1] ?? "";
+
     const [segment] = addresses(await (await fetch(rendition("spa"))).text());
     const [lines] = addresses(await (await fetch(rendition("Deutsch"))).text());
 
@@ -370,10 +398,12 @@ describe("playlist subscriptions", () => {
     const session = await playback.open("Alpha.test@HD", ["h264", "aac"]);
     const [variant] = addresses(await (await fetch(session.url)).text());
     const segments = addresses(await (await fetch(variant!)).text());
+
     const selected = (url: string | null) => ({
       kind: "hls" as const,
       requestId: url ? new URL(url).pathname : null,
     });
+
     host.serve("/alpha/low/segment-0.ts", 404);
     expect((await fetch(segments[0]!)).status).toBe(404);
     expect(await playback.failure(session.sessionId, selected(segments[0]!))).toEqual({
@@ -468,6 +498,7 @@ describe("playlist subscriptions", () => {
       availability: "none",
       processing: { state: "empty" },
     };
+
     expect(await guide.status()).toMatchObject(none);
     const read = host.requests("/other.m3u");
     // The checks the app makes on its own leave the playlist alone from then on.
@@ -523,6 +554,7 @@ describe("playlist subscriptions", () => {
     await library.channels({});
     await guide.refresh();
     const playlist = await (await fetch(`${host.origin}/list.m3u`)).text();
+
     const nowOn = async (services: { guide: typeof guide }) =>
       (await services.guide.listings(["Alpha.test@HD"]))["Alpha.test@HD"]?.now?.title;
 
@@ -558,10 +590,12 @@ describe("playlist subscriptions", () => {
     await library.channels({});
     host.serve("/other.m3u", "hold");
     const read = host.requests("/other.m3u");
+
     const refresh = guide.refresh().then(
       () => "finished",
       () => "stopped",
     );
+
     await vi.waitFor(() => expect(host.requests("/other.m3u")).toBe(read + 1));
 
     await guide.clear();
@@ -587,6 +621,7 @@ describe("playlist subscriptions", () => {
         throw new AppFailure({ kind: "keychain-refused" });
       },
     });
+
     const [asking] = await locked.subscriptions.list();
 
     // Only the host is left to say which link: none of the link itself reaches the window.
@@ -609,10 +644,12 @@ describe("playlist subscriptions", () => {
     expect(await locked.library.channels({})).toHaveLength(2);
     // Checking the link read its first line; the channels came from the copy on disk.
     expect(host.requests("/list.m3u")).toBe(read + 1);
+
     // A new link entered for it, as after its token changed, is the same subscription still.
     const relinked = await locked.subscriptions.update(connected.id, {
       secret: `${host.origin}/list.m3u?token=n3w`,
     });
+
     expect(relinked).toEqual(connected);
     expect((await locked.viewing.state()).favourites).toEqual([starred]);
     expect(await readFile(join(dataDir, "subscription.json"), "utf8")).not.toMatch(/n3w|list\.m3u/);

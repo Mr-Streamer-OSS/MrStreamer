@@ -9,6 +9,7 @@ function posixProcesses() {
     return readdirSync("/proc").flatMap((entry) => {
       if (!/^\d+$/.test(entry)) return [];
       let raw: string;
+
       try {
         raw = readFileSync(`/proc/${entry}/stat`, "utf8");
       } catch (error) {
@@ -16,18 +17,22 @@ function posixProcesses() {
         if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return [];
         throw error;
       }
+
       // comm is parenthesized and may itself contain spaces or closing parentheses.
       const fields = raw
         .slice(raw.lastIndexOf(")") + 2)
         .trim()
         .split(/\s+/);
+
       const started = Number(fields[19]); // stat field 22: exact start ticks since boot.
       assert(Number.isSafeInteger(started) && started >= 0, `Invalid process stat: ${raw}`);
+
       return [
         { pid: Number(entry), parent: Number(fields[1]), group: Number(fields[2]), started, raw },
       ];
     });
   assert.equal(process.platform, "darwin", "POSIX ownership supports Linux and macOS only");
+
   return execFileSync("ps", ["-axo", "pid=,ppid=,pgid=,lstart=,args="], {
     encoding: "utf8",
     timeout: 5000,
@@ -38,7 +43,9 @@ function posixProcesses() {
       const match = raw
         .trim()
         .match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+\s+\d{4})\s+(.*)$/);
+
       if (!match) return [];
+
       return [
         {
           pid: Number(match[1]),
@@ -52,6 +59,7 @@ function posixProcesses() {
 }
 
 type ProcessRow = ReturnType<typeof posixProcesses>[number];
+
 export interface OwnershipSample {
   at: number;
   elapsedMs: number;
@@ -81,10 +89,12 @@ export function ownedGroup(
 ) {
   const started = performance.now();
   const pid = app.pid;
+
   const snapshot = (phase: OwnershipSample["phase"]) => {
     const at = Date.now();
     const before = performance.now();
     const all = posixProcesses();
+
     const sample: OwnershipSample = {
       at,
       elapsedMs: before - started,
@@ -98,9 +108,12 @@ export function ownedGroup(
       root: all.find((row) => row.pid === pid),
       group: all.filter((row) => row.group === pid),
     };
+
     record(sample); // Keep the raw rejected row, including acquisition and post-exit audits.
+
     return sample;
   };
+
   const first = snapshot("acquire");
   const root = first.root;
   assert(
@@ -111,8 +124,10 @@ export function ownedGroup(
       app.signalCode === null,
     "Spawned app is not a live direct child owning its detached process group",
   );
+
   if (process.platform === "darwin")
     assert(root.started >= Math.floor(startedAt / 1000) * 1000, "Process start predates spawn");
+
   const executable = realpathSync(
     process.platform === "linux"
       ? readlinkSync(`/proc/${pid}/exe`)
@@ -121,8 +136,10 @@ export function ownedGroup(
           timeout: 5000,
         }).trim(),
   );
+
   first.executable = executable;
   assert.equal(executable, expectedExecutable, "Process group root executable differs");
+
   const sample = () => {
     const { root: current, group } = snapshot("audit");
     assert(
@@ -138,8 +155,10 @@ export function ownedGroup(
       group.every((row) => row.started >= root.started),
       "Group member predates owned app",
     );
+
     return group;
   };
+
   return {
     root: { ...root, executable, startClock: first.startClock },
     sample,
@@ -150,11 +169,14 @@ export function ownedGroup(
     async drain(childGraceMs = 20_000) {
       const until = performance.now() + childGraceMs;
       let remaining = sample();
+
       while (remaining.length && performance.now() < until) {
         await delay(Math.min(200, Math.max(0, until - performance.now())));
         remaining = sample();
       }
+
       assert.equal(remaining.length, 0, "Owned process group survivors; profile retained");
+
       return remaining;
     },
   };

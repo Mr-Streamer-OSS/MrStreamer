@@ -55,11 +55,13 @@ export function ProviderForm({
   const [password, setPassword] = useState("");
   const [link, setLink] = useState("");
   const [busy, setBusy] = useState(false);
+
   // Keep the failed request's inputs so its message follows the interface language.
   const [failed, setFailed] = useState<{
     readonly error: ReturnType<typeof appError>;
     readonly server: string;
   } | null>(null);
+
   // Counts edits, so a sign-in that fails after the fields changed says nothing about them.
   const edits = useRef(0);
   // The keyboard's Go submits too, and can before `busy` renders: one sign-in at a time.
@@ -68,6 +70,7 @@ export function ProviderForm({
   useEffect(() => {
     const controller = new AbortController();
     leaving.current = controller;
+
     return () => controller.abort();
   }, []);
 
@@ -89,20 +92,25 @@ export function ProviderForm({
     // A playlist's link goes where a login's server goes, and as the password of an edit.
     const secret = kind === "m3u" ? link : password;
     const named = mode.kind === "add" ? { name } : {};
+
     const saving = saved
       ? update(saved.id, { name, ...defined({ password: secret || undefined }) }, signal)
       : kind === "m3u"
         ? add({ server: link, username: "", password: "", ...named }, signal)
         : add({ server, username, password, ...named }, signal);
+
     saving.then(
       () => {
         pending.current = false;
+
         if (!signal.aborted) onDone?.();
       },
       (cause: unknown) => {
         pending.current = false;
+
         if (signal.aborted) return;
         setBusy(false);
+
         if (edits.current !== submitted) return;
         setFailed({
           error: appError(cause),
@@ -116,6 +124,7 @@ export function ProviderForm({
   const label = LABELS[mode.kind];
   const failure = failed ? failureOf(failed.error, failed.server) : null;
   const unchanged = mode.kind === "edit" && !mode.member.needsSecret ? t("Unchanged") : undefined;
+
   return (
     <>
       {saved ? null : (

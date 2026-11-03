@@ -56,6 +56,7 @@ import { SavedTile, openSaved } from "../watchlist/SavedTile.tsx";
 
 const NO_CHANNELS: readonly LiveChannel[] = [];
 const NO_TITLES: readonly Title[] = [];
+
 /** Tile widths: channels and stills at 16:9, posters at 2:3. */
 const TILE_REM = 13;
 const POSTER_REM = 8.5;
@@ -69,6 +70,7 @@ function notForAdults(channel: LiveChannel | null): LiveChannel | null {
 /** Opens a list in Live TV. */
 function useBrowse(): (list: ChannelList) => void {
   const showList = useShowList();
+
   return (list) => {
     showList(list);
     openView("live");
@@ -79,10 +81,12 @@ export function HomeScreen({ active }: { active: boolean }) {
   const visible = usePresentationVisible();
   const browse = useBrowse();
   const subscriptions = useSubscriptions();
+
   const mappedOnly =
     subscriptions.length > 0 &&
     subscriptions.every((each) => each.kind === "m3u") &&
     subscriptions.some(hasTitles);
+
   const titleCollection = mappedOnly ? "all" : "new-month";
   const left = useSubscriptionPreferences();
   const categories = useQuery(queries.categories());
@@ -100,46 +104,58 @@ export function HomeScreen({ active }: { active: boolean }) {
   const posters = fit(POSTER_REM);
   const preferences = useQuery(queries.preferences());
   const rows = homeRows(preferences.data?.homeRows);
+
   const allowed = (id: HomeRowId) =>
     preferences.isSuccess && rows.some((row) => row.id === id && row.visible);
+
   const needs = (id: HomeRowId) => visible && allowed(id);
   const channelRows = { favourites, recent, category: inCategory };
   const isChannelRow = (id: HomeRowId): id is keyof typeof channelRows => id in channelRows;
+
   const promoted = rows
     .filter((row) => row.visible)
     .map((row) => row.id)
     .find((id): id is keyof typeof channelRows => isChannelRow(id) && channelRows[id].length > 0);
+
   const shown = {
     favourites: favourites.slice(0, promoted === "favourites" ? 6 : columns),
     recent: recent.slice(0, promoted === "recent" ? 6 : columns),
     category: inCategory.slice(0, promoted === "category" ? 6 : columns),
   };
+
   const onDemand = subscriptions.some(hasTitles);
+
   const newMovies = useHomeTitles(
     "movie",
     posters,
     titleCollection,
     onDemand && needs("new-movies"),
   );
+
   const newSeries = useHomeTitles(
     "series",
     posters,
     titleCollection,
     onDemand && needs("new-series"),
   );
+
   // Home's first Watchlist page always excludes adult saves; the full list has its own query.
   const saved = useQuery({
     ...queries.watchlist("saved", 0, PAGE, true),
     enabled: onDemand && needs("watchlist"),
   }).data;
+
   const continuing = useContinueWatching(undefined, allowed("continue"));
   const resume = useResume();
   const removal = useRemoveFromContinue();
   const playing = notForAdults(usePlayer((state) => state.channel));
+
   const streaming = usePlayer(
     (state) => state.phase.kind !== "idle" && state.phase.kind !== "failed",
   );
+
   const last = notForAdults(useLastChannel());
+
   // Each channel shown, once.
   const listed = useMemo(
     () => [
@@ -151,11 +167,13 @@ export function HomeScreen({ active }: { active: boolean }) {
     ],
     [playing, last, shown.favourites, shown.recent, shown.category],
   );
+
   const listings =
     useQuery({
       ...queries.listings(listed),
       enabled: visible && listed.length > 0,
     }).data ?? {};
+
   // Without a last channel, a favourite on now, or the first in your category, stands still.
   const hero =
     playing ??
@@ -169,6 +187,7 @@ export function HomeScreen({ active }: { active: boolean }) {
     kind: title.kind === "movie" ? ("movie" as const) : ("series" as const),
     version: title.kind === "movie" ? ownedId(title) : seriesOf(title),
   }));
+
   const recommendations =
     useQuery({
       queryKey: ["ondemand", "home-recommendations", seeds],
@@ -176,9 +195,12 @@ export function HomeScreen({ active }: { active: boolean }) {
       enabled: onDemand && needs("recommendations") && seeds.length > 0,
       staleTime: Infinity,
     }).data ?? [];
+
   const notice = catalogueState(categories);
+
   const stageShown =
     !(notice && !(mappedOnly && notice.kind === "empty")) && (!mappedOnly || !!hero);
+
   const tiles = (channels: readonly LiveChannel[]) =>
     channels.map((channel) => (
       <Tile
@@ -188,10 +210,13 @@ export function HomeScreen({ active }: { active: boolean }) {
         categories={categoryMap}
       />
     ));
+
   const sourceOf = useSourceOf();
+
   const playMovie = (title: Title) => {
     playTitle(movieNow({ ...title, ...pickedVersion(title, left) }, title.backdropUrl), 0);
   };
+
   const titles = (list: readonly Title[]) =>
     list.map((title) =>
       list.length <= 3 ? (
@@ -211,8 +236,10 @@ export function HomeScreen({ active }: { active: boolean }) {
         />
       ),
     );
+
   const entries = continuing.entries.slice(0, columns);
   const compact = (count: number) => (count <= 3 ? Math.min(3, posters) : undefined);
+
   const channelSections = {
     favourites: {
       title: t("Favourites"),
@@ -230,6 +257,7 @@ export function HomeScreen({ active }: { active: boolean }) {
       list: categoryList,
     },
   };
+
   const content: Record<HomeRowId, ReactNode> = {
     continue: entries.length > 0 && (
       <div>
@@ -395,18 +423,23 @@ export function HomeScreen({ active }: { active: boolean }) {
       </Section>
     ),
   };
+
   const remaining = rows.filter(
     (row) => row.visible && (!stageShown || row.id !== promoted) && content[row.id],
   );
+
   const titleRows = remaining.filter((row) => !isChannelRow(row.id));
+
   const titlesInOrder = [
     ...titleRows.filter((row) => row.id === "continue"),
     ...titleRows.filter((row) => row.id !== "continue"),
   ];
+
   // Continue leads the title rows; channel rows keep their saved positions between them.
   const displayed = remaining.map((row) =>
     isChannelRow(row.id) ? row : (titlesInOrder[titleRows.indexOf(row)] ?? row),
   );
+
   return (
     <div className="h-full overflow-y-auto">
       <WindowBar className="sticky top-0 z-20 bg-black" />
@@ -478,6 +511,7 @@ function useHomeTitles(
     ...queries.collection(kind, collection, undefined, 0, Math.max(count, 1)),
     enabled,
   });
+
   return page.data?.titles.slice(0, count) ?? NO_TITLES;
 }
 
@@ -504,11 +538,14 @@ function Hero({
   // A receiver on the network is connected, so the backdrop stands still and says why.
   const waits = usePreviewWaits();
   const hue = channel ? hueOf(channel.title) : 220;
+
   // The channel's recording that plays says when it aired, as Watch does.
   const archive = usePlayer((state) =>
     channel && sameOwned(state.channel, channel) ? state.archive : null,
   );
+
   const current = archive ? null : (listing?.now ?? null);
+
   return (
     <section
       className="relative aspect-video min-w-0 overflow-hidden rounded-2xl"
@@ -656,6 +693,7 @@ function ChannelLine({
   const now = useNow();
   const current = listing?.now;
   const source = useSourceOf()(channel);
+
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}
@@ -709,6 +747,7 @@ function Tile({
   const current = listing?.now ?? null;
   // Whose channel it is, where another subscription has one of its name.
   const source = useSourceOf()(channel);
+
   return (
     <button
       onMouseDown={(event) => event.preventDefault()}

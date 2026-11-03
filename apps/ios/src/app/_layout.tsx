@@ -61,6 +61,7 @@ export default function RootLayout() {
       startReminders();
     }
   }, [opening, restored]);
+
   return (
     <View style={styles.black}>
       {roster.kind === "ready" ? <App signedIn={roster.members.length > 0} /> : null}
@@ -72,6 +73,7 @@ export default function RootLayout() {
 /** The screens, Connect's or the tabs', with Watch over them, titled in the interface language. */
 function App({ signedIn }: { readonly signedIn: boolean }) {
   useLocale();
+
   return (
     <ThemeProvider value={theme}>
       <View style={styles.black}>

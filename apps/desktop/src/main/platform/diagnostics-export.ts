@@ -9,6 +9,7 @@ import type { Diagnostic, Outcome } from "@mrstreamer/core/diagnostics";
 
 const LOG_BYTES = 512 * 1024;
 const ENTRIES = 500;
+
 const OUTCOMES = [
   "ok",
   "interrupted",
@@ -36,6 +37,7 @@ const OUTCOMES = [
   "invalid-input",
   "unexpected",
 ] as const satisfies readonly Outcome[];
+
 const STREAM_OUTCOMES = [
   "ok",
   "refused",
@@ -44,8 +46,11 @@ const STREAM_OUTCOMES = [
   "network",
   "unsupported",
 ] as const;
+
 type Rule = "number" | "nullable-number" | "method" | readonly string[];
+
 const step = { ms: "number", outcome: OUTCOMES } as const;
+
 /** Only these properties and values can leave the app. Unknown properties never survive. */
 const FIELDS = {
   start: step,
@@ -97,14 +102,17 @@ const FIELDS = {
 
 function record(line: string): string | null {
   let value: unknown;
+
   try {
     value = JSON.parse(line);
   } catch {
     return null;
   }
+
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const known = Object.entries(FIELDS).find(([key]) => key === raw["op"]);
+
   if (
     !known ||
     typeof raw["at"] !== "string" ||
@@ -115,8 +123,10 @@ function record(line: string): string | null {
   const [op] = known;
   const rules: Readonly<Record<string, Rule>> = known[1];
   const safe: Record<string, string | number | null> = { at: raw["at"], op };
+
   for (const [key, rule] of Object.entries(rules)) {
     const field = raw[key];
+
     if (rule === "nullable-number" && field === null) safe[key] = null;
     else if (rule === "number" || rule === "nullable-number") {
       if (
@@ -132,21 +142,25 @@ function record(line: string): string | null {
       safe[key] = field;
     } else {
       const allowed = rule.find((candidate) => candidate === field);
+
       if (allowed === undefined) return null;
       safe[key] = allowed;
     }
   }
+
   return JSON.stringify(safe);
 }
 
 /** Reads a bounded tail even if a damaged or replaced log is much larger than the app writes. */
 async function lines(path: string): Promise<readonly string[]> {
   let file;
+
   try {
     file = await open(path, "r");
   } catch {
     return [];
   }
+
   try {
     const size = (await file.stat()).size;
     const start = Math.max(0, size - LOG_BYTES);
@@ -154,10 +168,12 @@ async function lines(path: string): Promise<readonly string[]> {
     const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
     const text = buffer.subarray(0, bytesRead).toString("utf8");
     const complete = start > 0 ? text.slice(text.indexOf("\n") + 1) : text;
+
     return complete
       .split("\n")
       .flatMap((line) => {
         const safe = record(line);
+
         return safe === null ? [] : [safe];
       })
       .slice(-ENTRIES);
@@ -183,23 +199,31 @@ export interface DiagnosticsContext {
 /** Holds one immutable preview, so Save writes precisely the file the viewer could inspect. */
 export function diagnosticsExporter(dataDir: string, context: () => Promise<DiagnosticsContext>) {
   let latest: Pick<DiagnosticsPreview, "id" | "text"> | null = null;
+
   return {
     async preview(): Promise<DiagnosticsPreview> {
       const build = await context();
+
       const recent = (await lines(join(dataDir, "diagnostics.1.log")))
         .concat(await lines(join(dataDir, "diagnostics.log")))
         .slice(-ENTRIES);
+
       const version = /^\d+\.\d+\.\d+(?:-nightly\.\d{8}\.\d+)?$/.test(build.version)
         ? build.version
         : "unknown";
+
       const commit = /^[a-f0-9]{7,40}$/.test(build.commit) ? build.commit : "unknown";
+
       const platform = ["darwin", "win32", "linux"].includes(build.platform)
         ? build.platform
         : "unknown";
+
       const arch = ["arm64", "x64", "ia32"].includes(build.arch) ? build.arch : "unknown";
+
       const failure = ["offline", "busy", "http", "invalid"].find(
         (kind) => kind === build.checked?.failure,
       );
+
       const checked =
         build.checked &&
         Number.isFinite(build.checked.at) &&
@@ -207,6 +231,7 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
         build.checked.at <= 8.64e15
           ? `${new Date(build.checked.at).toISOString()} · ${failure ?? "ok"}`
           : "none";
+
       const preview: DiagnosticsPreview = {
         id: randomUUID(),
         version,
@@ -218,6 +243,7 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
         entries: recent.length,
         failures: recent.filter((line) => {
           const value: unknown = JSON.parse(line);
+
           return (
             typeof value === "object" &&
             value !== null &&
@@ -242,7 +268,9 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
           "",
         ].join("\n"),
       };
+
       latest = { id: preview.id, text: preview.text };
+
       return preview;
     },
     /** A replaced preview cannot silently save a different file. */

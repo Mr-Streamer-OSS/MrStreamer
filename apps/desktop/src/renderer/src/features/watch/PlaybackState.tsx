@@ -62,6 +62,7 @@ interface Trouble {
 function useFailedSource(channel: LiveChannel): FailedSource | null {
   const subscriptions = useSubscriptions();
   const owner = subscriptions.find((each) => each.id === channel.subscriptionId);
+
   return owner
     ? {
         name: subscriptionName(owner),
@@ -77,12 +78,15 @@ function useTrouble(channel: LiveChannel): Trouble | null {
   const stream = usePlayer((state) => state.stream);
   const quality = useChannelQuality(channel);
   const source = useFailedSource(channel);
+
   if (phase.kind === "reconnecting") {
     return { ...reconnectingCopy(channel), evidence: "", tried: null };
   }
+
   if (phase.kind !== "failed") return null;
   const chosen = quality.chosen && isStreamsOwn(phase.problem) ? qualityName(quality.chosen) : null;
   const tried = triedStreams(channel, stream);
+
   return {
     ...failureCopy(phase, channel, { chosen, source, tried }),
     evidence: failureEvidence(phase, channel, { chosen, tried }),
@@ -97,13 +101,17 @@ function useTrouble(channel: LiveChannel): Trouble | null {
  */
 export function retryFailed(): boolean {
   const { phase } = player.state();
+
   if (phase.kind !== "failed" || !canRetry(phase.problem)) return false;
+
   if (phase.problem.kind === "receiver") {
     // One connect at a time.
     if (outputs.status().output.kind === "connecting") return false;
+
     if (phase.problem.lost) outputs.reconnect();
     else player.retry();
   } else player.retry();
+
   return true;
 }
 
@@ -115,6 +123,7 @@ export function retryFailed(): boolean {
  */
 export function PlaybackAnnouncement({ channel }: { channel: LiveChannel }) {
   const trouble = useTrouble(channel);
+
   return (
     <div role="status" className="sr-only">
       {trouble && `${trouble.title}. ${trouble.body}`}
@@ -142,6 +151,7 @@ export function PlaybackState({
   const output = useOutput((state) => state.status.output);
   const connectingFrom = useOutput((state) => state.connectingFrom);
   const closed = useClosed(phase.kind === "failed" ? phase : null);
+
   // The connect under way names the receiver it reaches, which need not be the one that failed.
   const receiver =
     output.kind === "receiver" || output.kind === "lost"
@@ -149,11 +159,13 @@ export function PlaybackState({
       : phase.kind === "failed" && phase.problem.kind === "receiver"
         ? connectingFrom
         : null;
+
   const channels = (
     <Button variant="secondary" onClick={onChannels}>
       {t("Channels")}
     </Button>
   );
+
   const troubled: Message | null =
     trouble && phase.kind === "failed"
       ? {
@@ -187,10 +199,13 @@ export function PlaybackState({
             ),
           }
         : null;
+
   // Closed: nothing in its place, not even what a receiver said before the failure.
   if (closed) return null;
+
   if (receiver) {
     const on = where(receiver);
+
     if (troubled) {
       return (
         <Block
@@ -207,8 +222,10 @@ export function PlaybackState({
         />
       );
     }
+
     // The receiver's own word once it started the channel: its remote pauses what the app can't.
     const said = receiverState(phase);
+
     return (
       <Block
         line={
@@ -243,6 +260,7 @@ export function PlaybackState({
       />
     );
   }
+
   if (phase.kind === "playing") return null;
 
   const message: Message =
@@ -313,6 +331,7 @@ function FailureActions({
   const chooseQuality = useChooseQuality();
   const source = useFailedSource(channel);
   const connecting = useOutput((state) => state.status.output.kind === "connecting");
+
   if (problem.kind === "receiver") {
     return (
       canRetry(problem) &&
@@ -324,6 +343,7 @@ function FailureActions({
       )
     );
   }
+
   // Its subscription's row in Settings is where a login is corrected, or entered again: the
   // other subscriptions' channels stay in the lists meanwhile.
   if (problem.kind === "app" && problem.error.kind === "invalid-login") {
@@ -336,6 +356,7 @@ function FailureActions({
       </>
     );
   }
+
   if (problem.kind === "app" && problem.error.kind === "needs-secret") {
     return (
       <>
@@ -349,12 +370,14 @@ function FailureActions({
       </>
     );
   }
+
   const retry = canRetry(problem) && (
     <Button variant="primary" onClick={retryFailed}>
       <RotateCw />
       {t("Retry")}
     </Button>
   );
+
   if (!isStreamsOwn(problem)) {
     return (
       <>
@@ -363,8 +386,10 @@ function FailureActions({
       </>
     );
   }
+
   if (quality.chosen) {
     const { alternative } = quality;
+
     return (
       <>
         {retry}
@@ -383,8 +408,10 @@ function FailureActions({
       </>
     );
   }
+
   // Unknown counts as some left: the menu then says what there is.
   const untried = channel.variants.length > 1 && (tried === null || tried.untried > 0);
+
   return (
     <>
       {retry}
@@ -441,8 +468,10 @@ function Remaining({ attempt, of, until }: { attempt: number; of: number; until:
   useEffect(() => {
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
+
     return () => clearInterval(timer);
   }, [until]);
+
   return t("attempt {attempt} of {of} in {seconds} s", {
     attempt,
     of,
@@ -455,8 +484,10 @@ function Elapsed({ since, what = t("Tuning") }: { since: number; what?: string }
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
+
     return () => clearInterval(timer);
   }, []);
+
   return (
     <>
       {what} · {t("{seconds} s", { seconds: Math.max(0, Math.floor((now - since) / 1000)) })}

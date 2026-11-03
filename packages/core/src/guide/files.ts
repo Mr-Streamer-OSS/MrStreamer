@@ -73,7 +73,9 @@ export function guideFiles(places: FilePlaces): GuideFiles {
   const claim = (store: string, file: string): Release | null => {
     const path = places.path(store, file);
     let entry = entries.get(path);
+
     if (entry?.going) return null;
+
     if (!entry) {
       entry = {
         store,
@@ -86,14 +88,17 @@ export function guideFiles(places: FilePlaces): GuideFiles {
       };
       entries.set(path, entry);
     }
+
     entry.holders++;
     const held = entry;
+
     return once(() => letGoOf(path, held));
   };
 
   /** A reader of `entry`'s open index, holding the claim `hold` until it lets go. */
   const reader = (entry: Entry, index: GuideIndex, hold: Release): Reader => {
     entry.readers++;
+
     return {
       index,
       release: once(() => {
@@ -101,6 +106,7 @@ export function guideFiles(places: FilePlaces): GuideFiles {
           entry.index.close();
           entry.index = null;
         }
+
         hold();
       }),
     };
@@ -110,31 +116,41 @@ export function guideFiles(places: FilePlaces): GuideFiles {
     claim,
     async open(store, file) {
       const hold = claim(store, file);
+
       if (!hold) return null;
       const entry = entries.get(places.path(store, file));
+
       if (!entry) return null;
+
       if (!entry.index) {
         const index = await openGuideIndex(places.path(store, file));
+
         if (!index) {
           hold();
+
           return null;
         }
+
         // Another reader opened it meanwhile: one index is enough.
         if (entry.index) index.close();
         else entry.index = index;
       }
+
       return reader(entry, entry.index, hold);
     },
     share(store, file) {
       const entry = entries.get(places.path(store, file));
+
       if (!entry?.index || entry.going) return null;
       const hold = claim(store, file);
+
       return hold && reader(entry, entry.index, hold);
     },
     known: (store, file) => entries.has(places.path(store, file)),
     async settled(store) {
       for (;;) {
         const held = [...entries.values()].filter((entry) => entry.store === store);
+
         if (held.length === 0) return;
         await Promise.all(held.map((entry) => entry.gone.promise));
       }
@@ -151,6 +167,7 @@ export function guideFiles(places: FilePlaces): GuideFiles {
 /** `run`, at most once however often it is called. */
 function once(run: () => void): Release {
   let done = false;
+
   return () => {
     if (done) return;
     done = true;

@@ -13,12 +13,14 @@ import { tempDir } from "./support.ts";
 /** A repository whose first commit, the pinned one, has a later change after it. */
 async function pinnedRepository(): Promise<{ repository: string; commit: string }> {
   const repository = await tempDir();
+
   const git = (...args: string[]) =>
     execFileSync(
       "git",
       ["-C", repository, "-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
       { encoding: "utf8" },
     ).trim();
+
   git("init", "-q");
   await writeFile(join(repository, "codec.c"), "the pinned source");
   git("add", ".");
@@ -26,6 +28,7 @@ async function pinnedRepository(): Promise<{ repository: string; commit: string 
   const commit = git("rev-parse", "HEAD");
   await writeFile(join(repository, "codec.c"), "a later change");
   git("commit", "-qam", "Later");
+
   return { repository, commit };
 }
 

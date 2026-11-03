@@ -65,9 +65,11 @@ import {
 } from "./app.ts";
 
 const [given, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
+
 if (!given) {
   throw new Error("Usage: node test/e2e/watchlist-app.ts <app executable> [-- args]");
 }
+
 const executable: string = given;
 
 // The fake provider's titles, by a part of the name it lists them under and by their ids.
@@ -77,25 +79,33 @@ const DROPPED = { name: "Index at the end", id: "90001" };
 const PRESSED_TWICE = { name: "Caption track" };
 const SERIES = { name: "TEST | Formats", id: "80000" };
 const ADULT_SERIES = { name: "After Dark", id: "79999" };
+
 /** A film both providers list, under an id of its own at each. */
 const SHARED = { id: "91001", there: "91000" };
+
 /** A film only the second lists, under the id the first has the shared film at. */
 const THEIRS = { id: "91001" };
+
 /** What the second subscription is called in Settings. */
 const SECOND = "Holiday house";
 
 const profile = mkdtempSync(join(tmpdir(), "mr-streamer-e2e-"));
 const provider = await startFakeProvider({ channels: 60 });
+
 // Another provider beside it, which numbers its titles as the first does.
 const second = await startFakeProvider({ channels: 60, second: true });
 const tmdb = await startFakeTmdb();
+
 process.env["MR_STREAMER_TMDB_API"] = tmdb.url;
+
 process.env["MR_STREAMER_TMDB_KEY"] = "test-key";
+
 const randomPort = () => 20000 + Math.floor(Math.random() * 20000);
 let port = randomPort();
 let app = launch(executable, rest, { port, profile });
 
 let failed = false;
+
 /** Prints how a check went. */
 function report(name: string, problems: readonly string[]): void {
   console.log(
@@ -108,7 +118,9 @@ const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
+
   if (!result.ok) throw new Error(`${method}: ${JSON.stringify(result.error)}`);
+
   return result.value;
 };
 
@@ -122,12 +134,14 @@ const subscriptions = (page: Page) => invoke<SubscriptionSummary[]>(page, "subsc
 /** Whether every saved subscription's movie and series lists are loaded. */
 async function listsLoaded(page: Page): Promise<boolean> {
   const { lists } = await invoke<OnDemandStatus>(page, "ondemand.status");
+
   return lists.length > 0 && lists.every((each) => each.fetchedAt !== null);
 }
 
 /** How many accounts the database holds a watchlist for, read as another program would. */
 function accountsSaved(): number {
   const db = new DatabaseSync(join(profile, "mrstreamer.db"), { readOnly: true });
+
   try {
     return Number(db.prepare("select count(distinct account) as n from watchlist").get()?.["n"]);
   } finally {
@@ -138,8 +152,10 @@ function accountsSaved(): number {
 // Expressions the page evaluates to an element, or nothing.
 const withText = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find((each) => each.textContent.trim() === ${JSON.stringify(text)})`;
+
 const pageButton = (label: string) => withText("header button", label);
 const sheetButton = (label: string) => withText('[role="dialog"] button', label);
+
 /** A poster, by a part of the name the provider lists its title under. */
 const poster = (name: string) =>
   `[...document.querySelectorAll("button[title]")].find((each) => each.title.includes(${JSON.stringify(name)}))`;
@@ -148,10 +164,12 @@ const poster = (name: string) =>
 const SHEET = `document.querySelector('[role="dialog"]')`;
 
 const exists = (page: Page, element: string) => page.evaluate<boolean>(`!!${element}`);
+
 const says = (page: Page, words: string, selector = "body") =>
   page.evaluate<boolean>(
     `(document.querySelector(${JSON.stringify(selector)})?.innerText ?? "").includes(${JSON.stringify(words)})`,
   );
+
 /** What has the keyboard: its words, or its label. */
 const focused = (page: Page) =>
   page.evaluate<string>(
@@ -165,13 +183,16 @@ async function click(page: Page, element: string): Promise<void> {
   });
   await page.evaluate(`${element}.scrollIntoView({ block: "nearest" })`);
   await delay(150);
+
   const point = await page.evaluate<{ x: number; y: number }>(`(() => {
     const box = ${element}.getBoundingClientRect();
     return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   })()`);
+
   for (const type of ["mousePressed", "mouseReleased"]) {
     await page.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
   }
+
   await delay(150);
 }
 
@@ -196,6 +217,7 @@ async function tabTo(page: Page, wanted: (focus: string) => boolean): Promise<bo
     await key(page, "Tab", 9);
     await delay(100);
   }
+
   return wanted(await focused(page));
 }
 
@@ -228,6 +250,7 @@ async function openFound(page: Page, title: Title): Promise<number> {
   const posters = await page.evaluate<number>(`${found}.length`);
   await click(page, `${found}[0]`);
   await waitFor(() => exists(page, `${SHEET}?.querySelector('[aria-label="Versions"]')`), 30_000);
+
   return posters;
 }
 
@@ -248,16 +271,19 @@ async function pickVersion(page: Page, words: string): Promise<void> {
 async function removeSubscription(page: Page, name: string, erase: boolean): Promise<void> {
   const before = (await subscriptions(page)).length;
   await openSubscriptions(page);
+
   // One subscription alone shows its details already; a row of several opens them.
   if (before > 1) await click(page, `(${subscriptionRow(name)})?.querySelector("button")`);
   await click(page, withText("button", `Remove ${name}`));
   await waitFor(() => says(page, "from this device?"), 10_000);
+
   if (erase) {
     await click(
       page,
       `${withText("label", "Also delete favourites, watchlist, history, progress and channels in lists")}?.querySelector('[role="checkbox"]')`,
     );
   }
+
   await click(page, withText("button", "Remove"));
   await waitFor(async () => (await subscriptions(page)).length === before - 1, 20_000);
 }
@@ -270,7 +296,9 @@ async function saveButton(page: Page): Promise<"Save" | "Saved"> {
         .find((each) => !each.disabled && ["Save", "Saved"].includes(each.textContent.trim()));
       return button ? button.textContent.trim() : null;
     })()`);
+
   await waitFor(async () => (await state()) !== null, 20_000);
+
   return (await state()) === "Saved" ? "Saved" : "Save";
 }
 
@@ -295,6 +323,7 @@ async function restart(page: Page): Promise<Page> {
   await delay(1500);
   port = randomPort();
   app = launch(executable, rest, { port, profile });
+
   return ready(await connect(port));
 }
 
@@ -303,6 +332,7 @@ async function ready(page: Page): Promise<Page> {
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await page.send("Network.enable");
   await page.send("Network.setBlockedURLs", { urls: ["*image.tmdb.org*", "*image.example*"] });
+
   return page;
 }
 
@@ -311,6 +341,7 @@ try {
   await login(page, provider);
   /** The first provider's subscription, which is another once its account is added again. */
   let [one] = await subscriptions(page);
+
   if (!one) throw new Error("The login saved no subscription.");
   /** What it is listed as: its server's host, as it has no name. */
   const FIRST = new URL(provider.url).host;
@@ -328,12 +359,15 @@ try {
         !(await exists(page, pageButton("Downloads"))),
       10_000,
     );
+
     const pages = await page.evaluate<string[]>(
       `[...document.querySelectorAll("header button")].map((each) => each.textContent.trim()).filter(Boolean)`,
     );
+
     if (pages.join() !== "Home,Live TV,Movies,Series") {
       problems.push(`the top bar has ${pages.join(", ")}`);
     }
+
     if (await exists(page, withText("h2", "Watchlist"))) problems.push("Home has a Watchlist row");
     report("The empty collections stay out of the top bar", problems);
   }
@@ -342,25 +376,31 @@ try {
     const problems: string[] = [];
     const details = provider.detailRequests();
     await openFromLists(page, "Movies", LONG_MOVIE.name);
+
     if ((await saveButton(page)) !== "Save") problems.push("a title not saved reads Saved");
     await click(page, sheetButton("Save"));
     await waitFor(() => exists(page, sheetButton("Saved")), 10_000).catch(() =>
       problems.push("the button doesn't read Saved"),
     );
+
     const pressed = await page.evaluate<string | null>(
       `${sheetButton("Saved")}?.getAttribute("aria-pressed") ?? null`,
     );
+
     if (pressed !== "true") problems.push(`Saved has aria-pressed ${pressed}`);
     const { entries } = await saved(page);
+
     if (entries.length !== 1 || entries[0]?.title?.id !== LONG_MOVIE.id) {
       problems.push(
         `the record holds ${entries.map((entry) => entry.title?.id).join() || "nothing"}`,
       );
     }
+
     // Opening the details asked the provider once; saving asked it nothing.
     if (provider.detailRequests() - details > 1) {
       problems.push(`${provider.detailRequests() - details} detail requests`);
     }
+
     await closeSheet(page);
     report("A click on Save in a movie's details saves it, and the button reads Saved", problems);
   }
@@ -372,34 +412,42 @@ try {
     await waitFor(async () => (await focused(page)).startsWith("Play"), 20_000).catch(async () =>
       problems.push(`the details open with the focus on "${await focused(page)}"`),
     );
+
     if (!(await tabTo(page, (focus) => focus === "Save"))) {
       problems.push(`Tab never reached Save, it stands on ${await focused(page)}`);
     }
+
     const total = async () => (await saved(page)).entries.length;
     await space(page);
     await waitFor(async () => (await total()) === 2, 10_000).catch(() =>
       problems.push("Space didn't save"),
     );
     await delay(300);
+
     if ((await focused(page)) !== "Saved") {
       problems.push(`after Space the focus is on ${await focused(page)}`);
     }
+
     await enter(page);
     await waitFor(async () => (await total()) === 1, 10_000).catch(() =>
       problems.push("Enter didn't remove"),
     );
     await delay(300);
+
     if ((await focused(page)) !== "Save") {
       problems.push(`after Enter the focus is on ${await focused(page)}`);
     }
+
     await space(page);
     await waitFor(async () => (await total()) === 2, 10_000).catch(() =>
       problems.push("Space didn't save again"),
     );
     const series = (await saved(page)).entries[0];
+
     if (series?.kind !== "series" || series.title?.versions.length !== 2) {
       problems.push(`the entry is ${JSON.stringify(series?.title?.versions ?? series?.kind)}`);
     }
+
     await closeSheet(page);
     report(
       "Tab reaches Save in a series' details; Space and Enter work it and it keeps the focus",
@@ -413,14 +461,17 @@ try {
     await saveButton(page);
     await click(page, sheetButton("Save"));
     await waitFor(() => exists(page, sheetButton("Saved")), 10_000);
+
     const entries = await Promise.all(
       TWO_VERSIONS.ids.map((id) =>
         invoke<OwnedId | null>(page, "watchlist.saved", { kind: "movie", version: own(id) }),
       ),
     );
+
     if (!entries[0] || entries[0].id !== entries[1]?.id) {
       problems.push(`its versions are saved as ${JSON.stringify(entries)}`);
     }
+
     if ((await saved(page)).total !== 3) problems.push("it isn't one more entry");
     await closeSheet(page);
     report("A film in two versions is one entry, whichever version names it", problems);
@@ -436,23 +487,29 @@ try {
     const newest = await names();
     await waitFor(async () => (await tiles(page)).length === 3, 10_000).catch(() => {});
     const shown = await tiles(page);
+
     if (shown.map(([name]) => name).join("|") !== newest.join("|")) {
       problems.push(
         `the page shows ${shown.map(([name]) => name).join(", ")}, not ${newest.join(", ")}`,
       );
     }
+
     if (shown.map(([, line]) => line.split(" · ")[0]).join() !== "Movie,Series,Movie") {
       problems.push(`the tiles say ${shown.map(([, line]) => line).join(" | ")}`);
     }
+
     const heading = await page.evaluate<string>(
       `document.querySelector("h1").parentElement.innerText.replace(/\\s+/g, " ")`,
     );
+
     if (heading !== "Watchlist 3") problems.push(`the heading reads ${heading}`);
 
     await click(page, withText("button[aria-pressed]", "A to Z"));
+
     const sorted = newest.toSorted((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base" }),
     );
+
     await waitFor(
       async () => (await tiles(page)).map(([name]) => name).join("|") === sorted.join("|"),
       10_000,
@@ -465,9 +522,11 @@ try {
     await waitFor(() => exists(page, SHEET), 10_000).catch(() =>
       problems.push("Enter opened nothing"),
     );
+
     if (!(await says(page, sorted[1] ?? "", '[role="dialog"]'))) {
       problems.push(`Enter didn't open ${sorted[1]}`);
     }
+
     await closeSheet(page);
     await click(page, withText("button[aria-pressed]", "Saved"));
 
@@ -477,6 +536,7 @@ try {
     );
     const all = `${withText("h2", "Watchlist")}?.parentElement.querySelector("button")`;
     const label = await page.evaluate<string>(`${all}?.innerText.replace(/\\s+/g, " ") ?? ""`);
+
     if (label.trim() !== "All 3") problems.push(`the row's link reads "${label}"`);
     await click(page, all);
     await waitFor(() => exists(page, withText("h1", "Watchlist")), 10_000).catch(() =>
@@ -490,29 +550,36 @@ try {
 
   {
     const problems: string[] = [];
+
     const clock = () =>
       page.evaluate<{ time: number; width: number }>(`(() => {
         const video = document.querySelector("video");
         return { time: video?.currentTime ?? 0, width: video?.videoWidth ?? 0 };
       })()`);
+
     await openWatchlist(page);
     await click(page, poster(LONG_MOVIE.name));
     await click(page, sheetButton("Play"));
     await waitFor(async () => (await clock()).time >= 4 && (await clock()).width > 0, 40_000).catch(
       async () => problems.push(`the movie didn't play: ${JSON.stringify(await clock())}`),
     );
+
     if (provider.mostFilesAtOnce() !== 1) {
       problems.push(`${provider.mostFilesAtOnce()} connections for its file at once`);
     }
+
     await key(page, "Escape", 27);
     await delay(2000);
+
     if (provider.activeStreams() !== 0) {
       problems.push(`${provider.activeStreams()} connections held after leaving`);
     }
+
     // Back in its details, it carries on from where it stopped, and is saved as before.
     await waitFor(() => exists(page, sheetButton("Resume")), 20_000).catch(() =>
       problems.push("its details don't offer Resume"),
     );
+
     if ((await saveButton(page)) !== "Saved") problems.push("playing it took it off the watchlist");
     await click(page, sheetButton("Resume"));
     await waitFor(async () => (await clock()).time >= 1, 40_000).catch(async () =>
@@ -521,11 +588,13 @@ try {
     await key(page, "Escape", 27);
     await delay(2000);
     await closeSheet(page);
+
     if (provider.mostFilesAtOnce() !== 1 || provider.activeStreams() !== 0) {
       problems.push(
         `${provider.mostFilesAtOnce()} connections at once, ${provider.activeStreams()} held`,
       );
     }
+
     if ((await saved(page)).total !== 3) problems.push("the watchlist changed");
     report("A saved movie plays and resumes on one connection, and stays saved", problems);
   }
@@ -538,21 +607,27 @@ try {
     const label = `Remove ${second?.title?.title ?? second?.name} from Watchlist`;
     // The grid is one stop in the Tab order: the arrow keys reach the tile, Tab its cross.
     await key(page, "ArrowRight", 39);
+
     if (!(await tabTo(page, (focus) => focus === label))) {
       problems.push(`Tab never reached "${label}", it stands on ${await focused(page)}`);
     }
+
     await enter(page);
     await waitFor(async () => (await saved(page)).total === 2, 10_000).catch(() =>
       problems.push("Enter on the cross removed nothing"),
     );
     await delay(500);
     const after = await saved(page);
+
     if (after.entries.some((entry) => entry.id === second?.id)) problems.push("it is still saved");
     const left = (await tiles(page)).map(([name]) => name);
+
     if (left.length !== 2) problems.push(`the page shows ${left.join(", ")}`);
+
     if (!/^Remove .+ from Watchlist$/.test(await focused(page))) {
       problems.push(`the focus went to "${await focused(page)}"`);
     }
+
     // Saved again for the checks that follow.
     await invoke(page, "watchlist.save", { kind: "series", version: own(SERIES.id) });
     report(
@@ -572,17 +647,21 @@ try {
     await waitFor(() => says(page, "Couldn't save. Try again.", '[role="dialog"]'), 10_000).catch(
       () => problems.push("no failure showed"),
     );
+
     if (!(await exists(page, sheetButton("Save"))))
       problems.push("the button no longer reads Save");
     other.exec("rollback");
+
     if ((await saved(page)).total !== 3) problems.push("the record changed though saving failed");
     other.close();
     await click(page, sheetButton("Save"));
     await waitFor(() => exists(page, sheetButton("Saved")), 10_000).catch(() =>
       problems.push("the second press didn't save"),
     );
+
     if (await says(page, "Couldn't save", '[role="dialog"]'))
       problems.push("the failure still shows");
+
     if ((await saved(page)).total !== 4)
       problems.push("the record doesn't hold it after the retry");
     await closeSheet(page);
@@ -596,9 +675,11 @@ try {
     const problems: string[] = [];
     await openFromLists(page, "Movies", PRESSED_TWICE.name);
     await saveButton(page);
+
     if (!(await tabTo(page, (focus) => focus === "Save"))) {
       problems.push(`Tab never reached Save, it stands on ${await focused(page)}`);
     }
+
     const { total } = await saved(page);
     // The main process says `watchlist.changed` after each change it made.
     await page.evaluate(`(() => {
@@ -608,6 +689,7 @@ try {
       });
     })()`);
     const changes = () => page.evaluate<number>("window.watchlistChanges");
+
     // Two presses in one task, so the second lands before the window has heard of the first:
     // that is when a second change could start. Real keys and clicks sent from here land later.
     const pressTwice = (label: string) =>
@@ -616,29 +698,38 @@ try {
         button.click();
         button.click();
       })()`);
+
     await pressTwice("Save");
     await waitFor(() => exists(page, sheetButton("Saved")), 10_000).catch(() =>
       problems.push("the button doesn't read Saved"),
     );
     await delay(500);
+
     if ((await changes()) !== 1)
       problems.push(`Save pressed twice made ${await changes()} changes`);
+
     if ((await saved(page)).total !== total + 1) problems.push("the record doesn't hold it");
+
     if ((await focused(page)) !== "Saved") {
       problems.push(`after Save the focus is on ${await focused(page)}`);
     }
+
     await pressTwice("Saved");
     await waitFor(() => exists(page, sheetButton("Save")), 10_000).catch(() =>
       problems.push("the button doesn't read Save again"),
     );
     await delay(500);
+
     if ((await changes()) !== 2) {
       problems.push(`Saved pressed twice brought the changes to ${await changes()}`);
     }
+
     if ((await saved(page)).total !== total) problems.push("the record still holds it");
+
     if ((await focused(page)) !== "Save") {
       problems.push(`after Saved the focus is on ${await focused(page)}`);
     }
+
     await page.evaluate("window.stopCounting()");
     await closeSheet(page);
     report("Save pressed twice at once makes one change, and keeps the focus", problems);
@@ -648,14 +739,17 @@ try {
     const problems: string[] = [];
     const dropped = (await saved(page)).entries[0];
     const name = dropped?.title?.title ?? "";
+
     const without = (listed: boolean) => {
       provider.serveTitles((all) =>
         listed
           ? all
           : { ...all, movies: all.movies.filter((movie) => String(movie.id) !== DROPPED.id) },
       );
+
       return invoke(page, "ondemand.refresh", { subscriptionId: one?.id });
     };
+
     const tile = `[...document.querySelectorAll("[data-remove]")].find((each) => each.getAttribute("aria-label") === ${JSON.stringify(`Remove ${name} from Watchlist`)})?.parentElement.querySelector("button")`;
     const line = () => page.evaluate<string>(`${tile}?.innerText ?? ""`);
     await openWatchlist(page);
@@ -668,16 +762,21 @@ try {
     await waitFor(() => exists(page, sheetButton("Remove from Watchlist")), 10_000).catch(() =>
       problems.push("its sheet has no Remove"),
     );
+
     const actions = await page.evaluate<string[]>(
       `[...document.querySelectorAll('[role="dialog"] button')].map((each) => each.textContent.trim() || each.getAttribute("aria-label"))`,
     );
+
     if (actions.join() !== "Remove from Watchlist,Close") {
       problems.push(`its sheet offers ${actions.join(", ")}`);
     }
+
     if (!(await says(page, "Your provider doesn't list it right now.", '[role="dialog"]'))) {
       problems.push("its sheet doesn't say why");
     }
+
     await closeSheet(page);
+
     if (!(await saved(page)).entries.some((entry) => entry.id === dropped?.id)) {
       problems.push("it went with the provider's row");
     }
@@ -702,6 +801,7 @@ try {
     await waitFor(async () => !(await exists(page, SHEET)), 10_000).catch(() =>
       problems.push("the sheet stays after Remove"),
     );
+
     if ((await saved(page)).total !== 3) problems.push("Remove took nothing off");
     await without(true);
     report(
@@ -711,11 +811,13 @@ try {
   }
 
   const FOR_ADULTS = 'document.querySelector(\'[role="checkbox"][aria-label="For adults"]\')';
+
   /** Ticks or unticks For adults in Settings, which is open, and waits until it is stored. */
   const tickAdults = async (shown: boolean) => {
     await click(page, withText("nav button", "Movies and series"));
     await waitFor(() => exists(page, FOR_ADULTS), 10_000);
     const ticked = await page.evaluate<string>(`${FOR_ADULTS}.getAttribute("aria-checked")`);
+
     if (ticked !== String(shown)) await click(page, FOR_ADULTS);
     await waitFor(
       async () =>
@@ -724,6 +826,7 @@ try {
       10_000,
     );
   };
+
   /** Shows or hides titles for adults in Settings, as the viewer does, and leaves Settings. */
   const showAdults = async (shown: boolean) => {
     await click(page, "document.querySelector('button[aria-label=\"Settings\"]')");
@@ -738,9 +841,11 @@ try {
     await openWatchlist(page);
     await delay(500);
     const hidden = { record: (await saved(page)).total, page: (await tiles(page)).length };
+
     if (hidden.record !== 3 || hidden.page !== 3) {
       problems.push(`hidden, the record counts ${hidden.record} and the page shows ${hidden.page}`);
     }
+
     if (await says(page, ADULT_SERIES.name)) problems.push("its name shows while hidden");
 
     await showAdults(true);
@@ -753,15 +858,18 @@ try {
     );
     await click(page, pageButton("Home"));
     await waitFor(() => exists(page, withText("h2", "Watchlist")), 10_000);
+
     if (await says(page, ADULT_SERIES.name)) problems.push("Home shows its name while hidden");
     const all = `${withText("h2", "Watchlist")}?.parentElement.querySelector("button")`;
     const label = await page.evaluate<string>(`${all}?.innerText.replace(/\\s+/g, " ") ?? ""`);
+
     if (label.trim() !== "All 3") problems.push(`Home's row counts "${label}"`);
     report("A saved title for adults shows and counts only while Settings shows them", problems);
   }
 
   {
     const problems: string[] = [];
+
     const listed = (all: boolean) => {
       provider.serveTitles((titles) =>
         all
@@ -771,8 +879,10 @@ try {
               series: titles.series.filter((series) => String(series.id) !== ADULT_SERIES.id),
             },
       );
+
       return invoke(page, "ondemand.refresh", { subscriptionId: one?.id });
     };
+
     await showAdults(true);
     await openWatchlist(page);
     // The provider drops the series for adults, and the viewer opens what was kept of it.
@@ -782,9 +892,11 @@ try {
     await waitFor(() => exists(page, sheetButton("Remove from Watchlist")), 10_000).catch(() =>
       problems.push("its sheet doesn't open"),
     );
+
     const name = await page.evaluate<string>(
       `${SHEET}?.querySelector("h2")?.textContent.trim() ?? ""`,
     );
+
     if (!name) problems.push("its sheet has no name");
 
     // Settings opens over the sheet with its shortcut: the page under a sheet takes no click.
@@ -803,14 +915,18 @@ try {
     })()`);
     await key(page, "Escape", 27);
     await delay(1000);
+
     if (await exists(page, SHEET)) {
       problems.push("its sheet came back once Settings closed");
       await closeSheet(page);
     }
+
     if (await page.evaluate<boolean>("window.drewHidden")) {
       problems.push("its name was drawn after Settings hid titles for adults");
     }
+
     const hidden = { record: (await saved(page)).total, page: (await tiles(page)).length };
+
     if (hidden.record !== 3 || hidden.page !== 3) {
       problems.push(`hidden, the record counts ${hidden.record} and the page shows ${hidden.page}`);
     }
@@ -820,6 +936,7 @@ try {
     await waitFor(async () => (await tiles(page)).length === 4, 10_000).catch(async () =>
       problems.push(`shown again, the page has ${(await tiles(page)).length} tiles`),
     );
+
     if (!(await says(page, name))) problems.push("shown again, its name isn't on the page");
     await listed(true);
     await waitFor(async () => !(await exists(page, tile)), 15_000).catch(() =>
@@ -839,12 +956,14 @@ try {
     await waitFor(() => exists(page, "document.querySelector('header')"));
     await waitFor(() => listsLoaded(page), 60_000);
     const after = (await saved(page)).entries.map((entry) => entry.id);
+
     if (after.join() !== before.join()) problems.push(`the record holds ${after.length} entries`);
     await openWatchlist(page);
     await waitFor(async () => (await tiles(page)).length === before.length, 15_000).catch(
       async () => problems.push(`the page shows ${(await tiles(page)).length} tiles`),
     );
     await click(page, poster(LONG_MOVIE.name));
+
     if ((await saveButton(page)) !== "Saved") problems.push("its details read Save");
     await closeSheet(page);
     report("Everything saved is there after a restart, in the same order", problems);
@@ -855,11 +974,14 @@ try {
   await closeSheet(page);
   await waitFor(() => listsLoaded(page), 60_000);
   const [, two] = await subscriptions(page);
+
   if (!two) throw new Error("The second subscription wasn't saved.");
+
   const [film] = await invoke<Title[]>(page, "ondemand.titles", {
     kind: "movie",
     versions: [own(SHARED.there, two)],
   });
+
   if (!film) throw new Error("The film both providers list isn't in the lists.");
   /** The entry the film both list is saved as, or none. */
   const both = async () => (await saved(page)).entries.find((each) => each.title?.key === film.key);
@@ -868,7 +990,9 @@ try {
     const problems: string[] = [];
     const before = (await saved(page)).total;
     const posters = await openFound(page, film);
+
     if (posters !== 1) problems.push(`${posters} posters show the film in Movies`);
+
     if ((await saveButton(page)) !== "Save") problems.push("the film reads Saved before it is");
     await page.evaluate(`(() => {
       window.watchlistChanges = 0;
@@ -881,18 +1005,23 @@ try {
       problems.push("the button doesn't read Saved"),
     );
     await delay(500);
+
     // Nothing asked which subscription: the sheet is all that is open, and one change was made.
     const open = await page.evaluate<number>(
       `document.querySelectorAll('[role="dialog"], [role="alertdialog"], [role="menu"]').length`,
     );
+
     if (open !== 1) problems.push(`${open} sheets, questions or menus are open after Save`);
     const changes = await page.evaluate<number>("window.watchlistChanges");
+
     if (changes !== 1) problems.push(`saving it for both made ${changes} changes`);
     await page.evaluate("window.stopCounting()");
     const entry = await both();
+
     if (entry?.sources.join() !== [one?.id, two.id].join()) {
       problems.push(`it is saved for ${entry?.sources.length ?? 0} subscriptions`);
     }
+
     if ((await saved(page)).total !== before + 1) problems.push("it isn't one more entry");
     await closeSheet(page);
     await key(page, "Escape", 27);
@@ -902,7 +1031,9 @@ try {
     const name = entry?.title?.title ?? "";
     await waitFor(async () => (await tiles(page)).length === before + 1, 10_000).catch(() => {});
     const shown = (await tiles(page)).filter(([each]) => each === name);
+
     if (shown.length !== 1) problems.push(`${shown.length} tiles show it`);
+
     if (shown.some(([, line]) => line.includes(SECOND) || line.includes(FIRST))) {
       problems.push(`its tile says ${shown.map(([, line]) => line).join()}`);
     }
@@ -917,29 +1048,37 @@ try {
     await waitFor(async () => (await clock()) >= 2, 45_000).catch(async () =>
       problems.push(`the second's version didn't play: ${await clock()}`),
     );
+
     if (second.fileRequests() === files.second || provider.fileRequests() !== files.first) {
       problems.push(
         `${second.fileRequests() - files.second} file requests at the second, ${provider.fileRequests() - files.first} at the first`,
       );
     }
+
     if (second.mostFilesAtOnce() !== 1) {
       problems.push(`${second.mostFilesAtOnce()} connections for its file at once`);
     }
+
     await key(page, "Escape", 27);
     await delay(2000);
+
     if (provider.activeStreams() + second.activeStreams() !== 0) {
       problems.push(
         `${provider.activeStreams()} and ${second.activeStreams()} connections held after leaving`,
       );
     }
+
     // How far it got is kept for the second's version alone, and it is saved as before.
     const progress = await invoke<TitleProgress[]>(page, "viewing.progress", {
       movies: film.versions.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
     });
+
     const played = progress.map((each) => each.title.subscriptionId);
+
     if (played.join() !== two.id || !progress.every((each) => each.position > 0)) {
       problems.push(`progress is kept for ${played.join() || "none"}`);
     }
+
     if ((await saveButton(page)) !== "Saved") problems.push("playing it took it off the watchlist");
     await pickVersion(page, "Automatic");
     await closeSheet(page);
@@ -950,12 +1089,15 @@ try {
     await waitFor(async () => (await saved(page)).total === before, 10_000).catch(() =>
       problems.push("the cross took nothing off"),
     );
+
     const left = await Promise.all(
       [own(SHARED.id), own(SHARED.there, two)].map((version) =>
         invoke<OwnedId | null>(page, "watchlist.saved", { kind: "movie", version }),
       ),
     );
+
     if (left.some(Boolean)) problems.push(`it is still saved as ${JSON.stringify(left)}`);
+
     if ((await tiles(page)).some(([each]) => each === name)) problems.push("its tile stays");
     report(
       "A film two subscriptions list is saved for both at once, is one tile, plays from the one picked, and goes for both",
@@ -967,12 +1109,15 @@ try {
     const problems: string[] = [];
     // The film both list again, and a film only the second lists.
     await invoke(page, "watchlist.save", { kind: "movie", version: own(SHARED.id) });
+
     const theirs = await invoke<OwnedId>(page, "watchlist.save", {
       kind: "movie",
       version: own(THEIRS.id, two),
     });
+
     const before = await saved(page);
     const firsts = before.entries.filter((each) => each.sources.join() === one?.id);
+
     /** The ids a list holds, in its order, without the film both list. */
     const others = (list: WatchlistPage) =>
       list.entries.flatMap((each) => (each.title?.key === film.key ? [] : [each.id])).join();
@@ -981,12 +1126,15 @@ try {
     await removeSubscription(page, SECOND, false);
     await closeSheet(page);
     const without = await saved(page);
+
     if (others(without) !== firsts.map((each) => each.id).join()) {
       problems.push(`with the second gone the list has ${without.total} entries`);
     }
+
     if ((await both())?.sources.join() !== one?.id) {
       problems.push("the film both saved didn't stay as the first's");
     }
+
     if (accountsSaved() !== 2)
       problems.push(`${accountsSaved()} accounts are kept in the database`);
     await openWatchlist(page);
@@ -1001,24 +1149,30 @@ try {
     const [, back] = await subscriptions(page);
     const again = await saved(page);
     const returned = again.entries.find((each) => each.id === theirs.id);
+
     if (back?.id === two.id || returned?.subscriptionId !== back?.id || !returned?.title) {
       problems.push(`added again, its own entry is ${JSON.stringify(returned ?? null)}`);
     }
+
     if ((await both())?.sources.join() !== [one?.id, back?.id].join()) {
       problems.push("added again, the film both saved isn't saved for both");
     }
+
     if (again.total !== before.total) problems.push(`the list has ${again.total} entries`);
 
     // With its box ticked, what its account saved goes for good, and the rest stays.
     await removeSubscription(page, SECOND, true);
     await closeSheet(page);
     const erased = await saved(page);
+
     if (others(erased) !== firsts.map((each) => each.id).join()) {
       problems.push(`with the second deleted the list has ${erased.total} entries`);
     }
+
     if ((await both())?.sources.join() !== one?.id) {
       problems.push("deleting the second's took the film both saved from the first");
     }
+
     if (accountsSaved() !== 1)
       problems.push(`${accountsSaved()} accounts are kept in the database`);
     report(
@@ -1030,6 +1184,7 @@ try {
   {
     const problems: string[] = [];
     const kept = (await saved(page)).entries.map((entry) => entry.id);
+
     /** Removes the only subscription, which returns to Connect, and connects its account again. */
     const reconnect = async (erase: boolean) => {
       await removeSubscription(page, FIRST, erase);
@@ -1038,16 +1193,22 @@ try {
       [one] = await subscriptions(page);
       await waitFor(() => listsLoaded(page), 60_000);
     };
+
     await reconnect(false);
     const back = (await saved(page)).entries.map((entry) => entry.id);
+
     if (back.join() !== kept.join()) {
       problems.push(`connected again, the account has ${back.length} of ${kept.length} entries`);
     }
+
     await reconnect(true);
+
     if ((await saved(page)).total !== 0) problems.push("its watchlist outlived the delete");
+
     if (accountsSaved() !== 0)
       problems.push(`${accountsSaved()} accounts are kept in the database`);
     await waitFor(async () => !(await exists(page, pageButton("Watchlist"))), 10_000);
+
     if (await exists(page, pageButton("Watchlist")))
       problems.push("empty Watchlist navigation remains");
     report(
@@ -1055,6 +1216,7 @@ try {
       problems,
     );
   }
+
   page.close();
 } catch (error) {
   console.error(`FAIL ${String(error)}`);
@@ -1065,4 +1227,5 @@ try {
   await delay(1000);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
+
 process.exit(failed ? 1 : 0);

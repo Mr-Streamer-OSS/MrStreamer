@@ -9,6 +9,7 @@ function classify(catalogue: OnDemandCatalogue) {
   const seriesAdult = adultIn(catalogue.seriesCategories);
   const movie = new Set(catalogue.movies.filter(movieAdult).map(({ id }) => id));
   const series = new Set(catalogue.series.filter(seriesAdult).map(({ id }) => id));
+
   return {
     movie,
     series,
@@ -32,9 +33,11 @@ function classify(catalogue: OnDemandCatalogue) {
  */
 export function titlePolicy(catalogue: OnDemandCatalogue) {
   const known = policies.get(catalogue);
+
   if (known) return known;
   const policy = classify(catalogue);
   policies.set(catalogue, policy);
+
   return policy;
 }
 
@@ -50,5 +53,6 @@ export function excludedSaved(
   if (!catalogue) return saved.adult;
   const policy = titlePolicy(catalogue);
   const listed = saved.versionIds.filter((id) => policy.known[saved.kind].has(id));
+
   return listed.length > 0 ? listed.every((id) => policy[saved.kind].has(id)) : saved.adult;
 }

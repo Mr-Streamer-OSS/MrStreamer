@@ -13,9 +13,11 @@ export default async function setPackageVersion(manifestPath: string): Promise<v
   const app = type({ version: "string" }).assert(
     JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")),
   );
+
   const version = packageVersion(app.version);
   const manifest = await readFile(manifestPath, "utf8");
   const identity = /(<Identity\b[^>]*?\sVersion=")[^"]*(")/;
+
   if (!identity.test(manifest)) throw new Error(`${manifestPath} has no Identity version.`);
   await writeFile(manifestPath, manifest.replace(identity, `$1${version}$2`));
   console.log(`  • MSIX version ${version} for ${app.version}`);

@@ -6,10 +6,14 @@ export function useDebounced<T>(value: T, delayMs: number): T {
   useEffect(() => {
     if (delayMs === 0) {
       setDebounced(value);
+
       return;
     }
+
     const timer = setTimeout(() => setDebounced(value), delayMs);
+
     return () => clearTimeout(timer);
   }, [value, delayMs]);
+
   return debounced;
 }

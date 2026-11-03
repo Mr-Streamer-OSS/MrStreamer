@@ -13,15 +13,19 @@ export const HOUR_MS = 60 * MINUTE_MS;
 
 /** How far back the guide keeps programmes, and so the most the grid goes back. */
 const KEPT_MS = 7 * DAY_MS;
+
 /** How far back the grid goes when no channel of the list keeps an archive. */
 const PAST_MS = 2 * HOUR_MS;
+
 /** How far ahead the grid goes at least, where the guide ends sooner or isn't known. */
 const AHEAD_MS = 2 * HOUR_MS;
+
 /** How far ahead the grid goes at most, as far as it goes back. */
 const AHEAD_MOST_MS = 7 * DAY_MS;
 
 /** Channels one read asks for, within `GUIDE_RANGE`. */
 export const PAGE_ROWS = 25;
+
 /** Hours one read covers, aligned to the epoch, within `GUIDE_RANGE`. */
 export const PAGE_MS = 6 * HOUR_MS;
 
@@ -53,6 +57,7 @@ export type GridAction = "live" | "start";
  */
 export function actionsOf(channel: LiveChannel, cell: Cell, now: number): readonly GridAction[] {
   if (cell.kind === "gap" || !archiveHolds(channel.catchupDays, cell.start, now)) return ["live"];
+
   return cell.stop <= now ? ["start", "live"] : ["live", "start"];
 }
 
@@ -69,6 +74,7 @@ export function longestArchive(channels: readonly LiveChannel[]): number {
 export function timeline(archiveDays: number, until: number | null, now: number): Span {
   const back = Math.min(Math.max(archiveDays * DAY_MS, PAST_MS), KEPT_MS);
   const ahead = Math.min(Math.max((until ?? now) - now, AHEAD_MS), AHEAD_MOST_MS);
+
   return {
     start: Math.floor((now - back) / HOUR_MS) * HOUR_MS,
     stop: Math.ceil((now + ahead) / HOUR_MS) * HOUR_MS,
@@ -83,6 +89,7 @@ export function pagesFor(rows: readonly number[], time: Span): Page[] {
   if (time.stop <= time.start) return [];
   const first = Math.floor(time.start / PAGE_MS);
   const last = Math.floor((time.stop - 1) / PAGE_MS);
+
   return [...new Set(rows.map((row) => Math.floor(row / PAGE_ROWS)))].flatMap((page) =>
     Array.from({ length: last - first + 1 }, (_, at) => ({ rows: page, time: first + at })),
   );
@@ -98,11 +105,14 @@ export function mergeSlots(
 ): readonly GuideSlot[] {
   const all = pages.flatMap((page) => page ?? []).toSorted((a, b) => a.start - b.start);
   const merged: GuideSlot[] = [];
+
   for (const programme of all) {
     const last = merged.at(-1);
+
     if (programme.stop > programme.start && (!last || programme.start >= last.stop))
       merged.push(programme);
   }
+
   return merged;
 }
 
@@ -114,16 +124,21 @@ export function mergeSlots(
 export function cellAt(programmes: readonly GuideSlot[], at: number, bounds: Span): Cell {
   let low = 0;
   let high = programmes.length;
+
   while (low < high) {
     const middle = (low + high) >> 1;
+
     if (programmes[middle]!.start <= at) low = middle + 1;
     else high = middle;
   }
+
   const before = programmes[low - 1];
   const after = programmes[low];
+
   if (before && before.stop > at)
     return { kind: "programme", start: before.start, stop: before.stop, slot: before };
   const hour = Math.floor(at / HOUR_MS) * HOUR_MS;
+
   return {
     kind: "gap",
     start: Math.max(before?.stop ?? bounds.start, hour, bounds.start),
@@ -139,6 +154,7 @@ export function nextCell(
   bounds: Span,
 ): Cell | null {
   const at = direction > 0 ? cell.stop : cell.start - 1;
+
   return at >= bounds.start && at < bounds.stop ? cellAt(programmes, at, bounds) : null;
 }
 
@@ -154,35 +170,45 @@ export function blocksIn(
   const on = programmes.filter(
     (programme) => programme.stop > shown.start && programme.start < shown.stop,
   );
+
   const blocks: Cell[] = on.map((slot) => ({
     kind: "programme",
     start: slot.start,
     stop: slot.stop,
     slot,
   }));
+
   for (const span of known) {
     let at = Math.max(span.start, shown.start);
     const stop = Math.min(span.stop, shown.stop);
+
     for (const programme of on) {
       if (at >= stop) break;
+
       if (programme.stop <= at) continue;
+
       if (programme.start > at)
         blocks.push({ kind: "gap", start: at, stop: Math.min(programme.start, stop) });
       at = Math.max(at, programme.stop);
     }
+
     if (at < stop) blocks.push({ kind: "gap", start: at, stop });
   }
+
   return blocks.toSorted((a, b) => a.start - b.start);
 }
 
 /** Adjacent spans joined: the pages of time read for a row, as one stretch where they touch. */
 export function joinSpans(spans: readonly Span[]): Span[] {
   const joined: Span[] = [];
+
   for (const span of spans.toSorted((a, b) => a.start - b.start)) {
     const last = joined.at(-1);
+
     if (last && span.start <= last.stop)
       joined[joined.length - 1] = { start: last.start, stop: Math.max(last.stop, span.stop) };
     else joined.push(span);
   }
+
   return joined;
 }

@@ -39,6 +39,7 @@ import { Row, RowForm } from "./Rows.tsx";
 import { defined } from "@mrstreamer/core/defined";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** An account that ends within this many days says how many are left, in place of the date. */
 const SOON_DAYS = 30;
 
@@ -56,6 +57,7 @@ export function SubscriptionSection() {
   // answer stays.
   useEffect(() => {
     if (!active) return;
+
     for (const { id } of client.getQueryData(queries.subscriptions().queryKey) ?? []) {
       void call("subscription.recheck", { subscriptionId: id }).then(
         (fresh) => keep(client, fresh),
@@ -78,6 +80,7 @@ export function SubscriptionSection() {
   // A single subscription shows its details at once, as the tab always did, also once the others
   // were removed, until the viewer closes them.
   const [only] = subscriptions;
+
   const expanded =
     only && subscriptions.length === 1 ? (opened === null ? null : only.id) : (opened ?? null);
 
@@ -86,6 +89,7 @@ export function SubscriptionSection() {
   useEffect(() => {
     if (!target) return;
     useUi.setState({ subscription: null });
+
     if (target.show === "details") {
       setForm(null);
       setOpened(target.id);
@@ -105,6 +109,7 @@ export function SubscriptionSection() {
         {subscriptions.map((subscription) => {
           const { id } = subscription;
           const mine = form && form.kind !== "add" && form.id === id ? form.kind : null;
+
           return (
             <SubscriptionRow
               key={id}
@@ -194,12 +199,15 @@ function replaced<S extends { readonly subscriptionId: string }>(
 /** What plays now, here or on a receiver, and from which subscription; null while nothing does. */
 function usePlaying(): { readonly subscriptionId: string; readonly name: string } | null {
   const title = useTitlePlayer((state) => state.now);
+
   const channel = usePlayer((state) =>
     state.phase.kind === "idle" || state.phase.kind === "failed" ? null : state.channel,
   );
+
   // A copy plays from this computer, of no subscription.
   if (title?.kind === "provider")
     return { subscriptionId: title.title.subscriptionId, name: title.name };
+
   return channel && { subscriptionId: channel.subscriptionId, name: channel.title };
 }
 
@@ -245,14 +253,17 @@ function SubscriptionRow({
   // The form that asks for its password or link has its Cancel here on the row, which waits
   // while a change to the subscription is on its way.
   const saving = useIsMutating({ mutationKey: updateKey(id) }) > 0;
+
   const retry = useMutation({
     mutationFn: () => call("library.refresh", { subscriptionId: id }),
     onSuccess: (status) =>
       client.setQueryData(queries.libraryStatus().queryKey, (all) => replaced(all, status)),
   });
+
   const failure = retry.error ? appError(retry.error) : (catalogue?.failure ?? null);
   // A lost password or link says so on the row, and is asked for where it is repaired.
   const failed = failure !== null && failure.kind !== "needs-secret" && !needsSecret;
+
   const note = [
     kind === "m3u" ? "M3U" : "Xtream",
     needsSecret
@@ -266,6 +277,7 @@ function SubscriptionRow({
   ]
     .filter(Boolean)
     .join(" · ");
+
   return (
     <li>
       <div
@@ -392,10 +404,12 @@ function unanswered(
   catalogue: CatalogueStatus | undefined,
 ): string {
   if (failure.kind !== "unreachable" || !catalogue?.failedAt) return describeError(failure);
+
   const since = t("{host} hasn't answered since {time}.", {
     host: hostOf(subscription.server),
     time: clockTime(catalogue.failedAt, Date.now()),
   });
+
   return catalogue.fetchedAt === null ? since : `${since} ${t("Its lists are from then.")}`;
 }
 
@@ -422,6 +436,7 @@ function Details({
 }) {
   const client = useQueryClient();
   const { id: subscriptionId, kind, account, server, needsSecret } = subscription;
+
   // New channels or new lists reach every view through `library.updated` and
   // `ondemand.updated`; the row shows what the refresh answered at once.
   const refreshChannels = useMutation({
@@ -429,10 +444,12 @@ function Details({
     onSuccess: (status) =>
       client.setQueryData(queries.libraryStatus().queryKey, (all) => replaced(all, status)),
   });
+
   const refreshTitles = useMutation({
     mutationFn: () => call("ondemand.refresh", { subscriptionId }),
     onSuccess: (status) => client.setQueryData(queries.onDemandStatus().queryKey, status),
   });
+
   return (
     <>
       <Row
@@ -536,6 +553,7 @@ const updateKey = (subscriptionId: string) => ["subscription.update", subscripti
  */
 function useUpdate(subscriptionId: string, onDone: () => void) {
   const client = useQueryClient();
+
   return useMutation({
     mutationKey: updateKey(subscriptionId),
     mutationFn: (change: { name?: string | null; secret?: string }) =>
@@ -543,6 +561,7 @@ function useUpdate(subscriptionId: string, onDone: () => void) {
     onSuccess: async (fresh, change) => {
       keep(client, fresh);
       onDone();
+
       // Its lists are fetched under the new login; what shows of them is read again.
       if (change.secret !== undefined) await client.invalidateQueries();
     },
@@ -568,6 +587,7 @@ function Edit({
   const [secret, setSecret] = useState("");
   const update = useUpdate(subscription.id, onDone);
   const playlist = subscription.kind === "m3u";
+
   return (
     <RowForm
       onSubmit={() =>
@@ -643,6 +663,7 @@ function Secret({
   const [secret, setSecret] = useState("");
   const update = useUpdate(subscription.id, onDone);
   const playlist = subscription.kind === "m3u";
+
   return (
     <RowForm onSubmit={() => secret && update.mutate({ secret })}>
       <p className="mb-4 text-[0.9375rem]">
@@ -707,20 +728,24 @@ function Remove({
   const client = useQueryClient();
   const { id } = subscription;
   const [eraseViewing, setEraseViewing] = useState(false);
+
   const remove = useMutation({
     mutationFn: async () => {
       // What plays from it ends here first, with how far it got saved under its own account,
       // which the main process has answered before it is asked to remove the subscription.
       const now = titlePlayer.state().now;
+
       if (now?.kind === "provider" && now.title.subscriptionId === id) {
         titlePlayer.close();
         useUi.setState({ playingTitle: false });
         await titlePlayer.saved();
       }
+
       if (player.current()?.subscriptionId === id) {
         player.reset();
         useUi.setState({ watching: false, channelsOpen: false });
       }
+
       return call("subscription.remove", { subscriptionId: id, eraseViewing });
     },
     onSuccess: async () => {
@@ -728,14 +753,17 @@ function Remove({
         player.reset();
         resetForAccount();
         useUi.setState({ settings: null });
+
         return client.resetQueries();
       }
+
       // The others stay as they are: only what named this one goes.
       leaveSubscription(id);
       client.setQueryData(queries.subscriptions().queryKey, others);
       await client.resetQueries({ queryKey: ["library", "browse"] });
       onKeep();
       await client.invalidateQueries();
+
       // The page under Settings may have tried its channel again meanwhile, as the one watched
       // last by a record that still named it. The record read again names one that stays.
       if (player.current()?.subscriptionId === id) player.reset();
@@ -747,7 +775,9 @@ function Remove({
         .getQueryCache()
         .findAll({ fetchStatus: "fetching" })
         .flatMap(({ queryKey, promise }) => (promise ? [{ queryKey, promise }] : []));
+
       void client.invalidateQueries();
+
       for (const { queryKey, promise } of underWay)
         void promise.then(
           () => client.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false }),
@@ -755,7 +785,9 @@ function Remove({
         );
     },
   });
+
   const stays = others.map(subscriptionName);
+
   const unfinished =
     useDownloads().data?.items.filter(
       (item) =>
@@ -763,6 +795,7 @@ function Remove({
         item.status.kind !== "complete" &&
         item.status.kind !== "missing",
     ).length ?? 0;
+
   return (
     <div className="mb-2 ml-5 border-b border-white/8 pt-2 pb-6">
       <p className="mb-3 text-[0.9375rem]">
@@ -847,6 +880,7 @@ function daysLeft(expiresAt: string): number {
 function expiry(expiresAt: string | null): string {
   if (!expiresAt) return t("No end date");
   const days = daysLeft(expiresAt);
+
   return `${day(expiresAt)} · ${days > 0 ? t("{count} days", { count: days }) : t("ended")}`;
 }
 
@@ -854,22 +888,30 @@ function expiry(expiresAt: string | null): string {
 function ending(expiresAt: string | null): string | null {
   if (!expiresAt) return null;
   const days = daysLeft(expiresAt);
+
   if (days <= 0) return t("ended");
+
   return days <= SOON_DAYS ? t("{count} days left", { count: days }) : day(expiresAt);
 }
 
 /** "1 of 2 in use", as the provider counts them, this app's own stream included. */
 function connections(account: SubscriptionSummary["account"]): string {
   const { maxConnections: max, activeConnections: active } = account;
+
   if (max === null) return active === null ? t("Not reported") : t("{active} in use", { active });
+
   return t("{active} of {max} in use", { active: active ?? 0, max });
 }
 
 function relativeTime(epochMs: number): string {
   const minutes = Math.round((Date.now() - epochMs) / 60_000);
+
   if (minutes < 1) return t("just now");
+
   if (minutes < 60) return t("{minutes} min ago", { minutes });
   const hours = Math.round(minutes / 60);
+
   if (hours < 24) return t("{hours} h ago", { hours });
+
   return formatDate(epochMs, "date");
 }

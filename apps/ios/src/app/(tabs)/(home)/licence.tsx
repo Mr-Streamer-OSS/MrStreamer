@@ -25,6 +25,7 @@ const WORDS = [
 /** `text` in the interface language when it is one of the build's own words; else as it came. */
 function said(text: string): string {
   const word = WORDS.find((each) => each === text);
+
   return word ? t(word) : text;
 }
 
@@ -41,7 +42,9 @@ export default function Licence() {
   useLayoutEffect(() => {
     navigation.setOptions({ title: component?.name ?? "" });
   }, [navigation, component]);
+
   if (!component) return <Message text={t("This build has no such licence.")} />;
+
   return (
     <ScrollView style={styles.screen} contentInsetAdjustmentBehavior="automatic">
       <Fact label={t("Licence")} value={component.licence} />

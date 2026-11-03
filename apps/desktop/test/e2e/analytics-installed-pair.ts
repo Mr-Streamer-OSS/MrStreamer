@@ -35,10 +35,12 @@ export async function installedTelemetryPair(
   assert.equal(next.version, candidate.version);
   assert.equal(next.source, candidate.source);
   assert.equal(candidate.executable?.toLowerCase(), runner.executable.toLowerCase());
+
   // Resolution already verifies tags, ancestry and published metadata. Recheck downloaded bytes
   // before the first installer and again before every replacement, not a second resolver.
   const validate = async (pkg: typeof stable) => {
     const bytes = await readFile(join(directory, pkg.file));
+
     if (pkg.provenance.assetDigest)
       assert.equal(pkg.provenance.assetDigest, `sha256:${pkg.sha256}`);
     assert.equal(bytes.length, pkg.bytes);
@@ -47,16 +49,20 @@ export async function installedTelemetryPair(
       createHash("sha512").update(bytes).digest("base64"),
       pkg.provenance.metadata.sha512,
     );
+
     return join(directory, pkg.file);
   };
+
   for (const pkg of receipt.packages) await validate(pkg);
   const installs: unknown[] = [];
   let current: string | null = null;
   let failed = true;
+
   return {
     prior: { executable: runner.executable, version: stable.version, source: stable.source },
     async select(which: "stable" | "candidate") {
       const pkg = which === "stable" ? stable : next;
+
       if (pkg.version === current) return;
       const installed = await installPublished(runner, await validate(pkg), pkg.version, current);
       current = pkg.version;

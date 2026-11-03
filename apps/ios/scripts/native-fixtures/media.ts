@@ -52,6 +52,7 @@ const SOUND = process.env.FIXTURE_SOUND === "1";
 /** The lavfi source of a `frequency` Hz tone, mono at 48 kHz, or as long a silence without SOUND. */
 export const tone = (frequency: number, seconds?: number) => {
   const length = seconds === undefined ? "" : `:d=${seconds}`;
+
   return SOUND
     ? `sine=frequency=${frequency}:sample_rate=48000${length}`
     : `aevalsrc=0:s=48000${length}`;
@@ -67,10 +68,13 @@ const ENCODERS: Readonly<Record<string, string>> = { mp3: "libmp3lame" };
  */
 export function silencing(clip: string): string[] {
   if (SOUND) return [];
+
   const codecs = probe<{ codec_name: string }>(clip, [
     ...["-select_streams", "a", "-show_entries", "stream=codec_name"],
   ]).map((stream) => stream.codec_name);
+
   if (codecs.length === 0 || peak(clip) <= -60) return [];
+
   return [
     ...codecs.flatMap((codec, index) => [`-c:a:${index}`, ENCODERS[codec] ?? codec]),
     ...["-af", "volume=0"],
@@ -85,8 +89,10 @@ export function dispositions(clip: string): string[] {
   const streams = probe<{ index: number; disposition: Record<string, number> }>(clip, [
     ...["-show_entries", "stream=index:stream_disposition"],
   ]);
+
   return streams.flatMap(({ index, disposition }) => {
     const flags = Object.keys(disposition).filter((flag) => disposition[flag] === 1);
+
     return [`-disposition:${index}`, flags.join("+") || "0"];
   });
 }
@@ -97,6 +103,7 @@ function probe<Stream>(clip: string, entries: string[]): Stream[] {
   const json = execFileSync("ffprobe", ["-v", "error", ...entries, "-of", "json", clip], {
     encoding: "utf8",
   });
+
   return (JSON.parse(json) as { streams: Stream[] }).streams;
 }
 
@@ -108,10 +115,13 @@ export function peak(file: string): number {
     ["-nostdin", "-i", file, "-map", "0:a", "-af", "volumedetect", "-f", "null", "-"],
     { encoding: "utf8" },
   );
+
   const peaks = [...stderr.matchAll(/max_volume: (\S+) dB/g)].map(([, level]) =>
     level === "-inf" ? -Infinity : Number(level),
   );
+
   if (peaks.length === 0) throw new Error(`ffmpeg measured no sound in ${file}`);
+
   return Math.max(...peaks);
 }
 
@@ -119,6 +129,7 @@ export function peak(file: string): number {
 function alive(pid: number) {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch (error) {
     // Another user's process that may not be signalled is running too.
@@ -134,14 +145,18 @@ function alive(pid: number) {
 function settle(dir: string, fill: (making: string) => void) {
   const parent = dirname(dir);
   mkdirSync(parent, { recursive: true });
+
   for (const left of readdirSync(parent)) {
     const pid = Number(/\.making-(\d+)$/.exec(left)?.[1]);
+
     if (left.startsWith(`${basename(dir)}.making-`) && (pid === process.pid || !alive(pid))) {
       rmSync(join(parent, left), { recursive: true, force: true });
     }
   }
+
   const making = `${dir}.making-${process.pid}`;
   fill(making);
+
   try {
     renameSync(making, dir);
   } catch (error) {
@@ -175,11 +190,13 @@ const declaredPath = (from: string, to: string) => relative(from, to).split(sep)
 export function mediaMaker(root: string, out: string, declaration: string, cache?: string) {
   const artifacts: Artifact[] = [];
   const provenance = () => ({ source, ffmpeg, artifacts });
+
   /** Adds `artifact` to what `declaration` in `out` declares. */
   const add = (artifact: Artifact) => {
     artifacts.push(artifact);
     writeFileSync(join(out, declaration), JSON.stringify(provenance(), null, 2));
   };
+
   const filesOf = (dir: string) =>
     readdirSync(dir)
       // A file still being written beside its place, by this server or another.
@@ -187,12 +204,14 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
       .toSorted()
       .map((file) => {
         const bytes = readFileSync(join(dir, file));
+
         return {
           file: declaredPath(out, join(dir, file)),
           bytes: bytes.length,
           sha256: sha256(bytes),
         };
       });
+
   const git = (args: readonly string[]) => {
     try {
       return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trimEnd();
@@ -200,11 +219,13 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
       return null;
     }
   };
+
   const sources = [
     "apps/ios/scripts",
     "apps/desktop/test/fake-provider.ts",
     "apps/desktop/test/fixtures",
   ];
+
   const source = {
     commit: git(["rev-parse", "HEAD"]),
     changed:
@@ -212,7 +233,9 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
         ?.split("\n")
         .filter(Boolean) ?? null,
   };
+
   const ffmpeg = execFileSync("ffmpeg", ["-version"], { encoding: "utf8" }).split("\n")[0] ?? "";
+
   /**
    * Runs ffmpeg with `args` into `output` in a directory of `name`'s and the command's own, unless
    * it already made it, and records it. `local` adds arguments naming paths in that directory.
@@ -230,11 +253,14 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
           ? [{ lavfi: arg }]
           : [{ file: declaredPath(root, arg), sha256: sha256(readFileSync(arg)) }],
     );
+
     const options = ["-v", "error", "-y", ...args];
     const key = sha256(JSON.stringify([ffmpeg, options, local("."), output, inputs]));
     const dir = join(out, "media", `${name}-${key.slice(0, 12)}`);
+
     if (!existsSync(dir)) {
       const kept = cache && join(cache, basename(dir));
+
       if (kept && existsSync(kept)) {
         settle(dir, (making) => cpSync(kept, making, { recursive: true }));
       } else {
@@ -242,13 +268,16 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
           mkdirSync(making, { recursive: true });
           execFileSync("ffmpeg", [...options, ...local(making), join(making, output)]);
         });
+
         if (kept) settle(kept, (making) => cpSync(dir, making, { recursive: true }));
       }
     }
+
     const path = join(dir, output);
     const command = [...options, ...local(dir), path];
     const named = command.map((arg) => (arg.startsWith(root) ? declaredPath(root, arg) : arg));
     add({ name, command: ["ffmpeg", ...named], inputs, files: filesOf(dir) });
+
     return { dir, output: path };
   }
 
@@ -259,10 +288,12 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
      */
     make(name: string, args: readonly string[], seconds = 2): Media {
       const hls = ["-f", "hls", "-hls_time", String(seconds), "-hls_playlist_type", "vod"];
+
       const { dir, output } = made(name, [...args, ...hls], "index.m3u8", (dir) => [
         "-hls_segment_filename",
         join(dir, "%03d.ts"),
       ]);
+
       return { dir, segments: segmentsOf(output) };
     },
     /** The file ffmpeg makes from `args`, named `file` in a directory of `name`'s, made once. */
@@ -290,9 +321,11 @@ export function mediaMaker(root: string, out: string, declaration: string, cache
 /** The segments an HLS media playlist lists, with their durations. */
 function segmentsOf(playlist: string): Media["segments"] {
   const lines = readFileSync(playlist, "utf8").split("\n");
+
   return lines.flatMap((line, index) => {
     const seconds = /^#EXTINF:([\d.]+)/.exec(line)?.[1];
     const file = lines[index + 1]?.trim();
+
     return seconds && file ? [{ file, seconds: Number(seconds) }] : [];
   });
 }
@@ -307,10 +340,12 @@ function newestSegment({ segments }: Media, started: number, now: number) {
   const passes = Math.floor(elapsed / loop);
   let within = elapsed - passes * loop;
   let index = 0;
+
   while (index < segments.length - 1 && within >= (segments[index]?.seconds ?? 0)) {
     within -= segments[index]?.seconds ?? 0;
     index++;
   }
+
   return passes * segments.length + index;
 }
 
@@ -328,21 +363,29 @@ function loopSegments(
 ) {
   const { segments } = media;
   const wraps = Math.floor(first / segments.length);
+
   const lines = [
     `#EXT-X-TARGETDURATION:${Math.ceil(Math.max(...segments.map((each) => each.seconds)))}`,
     `#EXT-X-MEDIA-SEQUENCE:${first}`,
     `#EXT-X-DISCONTINUITY-SEQUENCE:${first % segments.length === 0 && first > 0 ? wraps - 1 : wraps}`,
   ];
+
   let at = clock;
+
   for (let n = first; n <= last; n++) {
     const segment = segments[n % segments.length];
+
     if (n % segments.length === 0 && n > 0) lines.push("#EXT-X-DISCONTINUITY");
+
     if (at !== undefined && (n === first || n % segments.length === 0)) {
       lines.push(`#EXT-X-PROGRAM-DATE-TIME:${new Date(at).toISOString()}`);
     }
+
     lines.push(`#EXTINF:${segment?.seconds.toFixed(3)},`, uri(n));
+
     if (at !== undefined) at += (segment?.seconds ?? 0) * 1000;
   }
+
   return lines;
 }
 
@@ -358,6 +401,7 @@ export function livePlaylist(
 ): string {
   const newest = newestSegment(timing, started, now);
   const first = Math.max(0, newest - WINDOW + 1);
+
   return ["#EXTM3U", "#EXT-X-VERSION:3", ...loopSegments(media, first, newest, uri), ""].join("\n");
 }
 
@@ -376,12 +420,15 @@ export function recordingPlaylist(
   ended: boolean,
 ): string {
   let last = -1;
+
   for (let total = 0; ;) {
     const next = total + (media.segments[(last + 1) % media.segments.length]?.seconds ?? 0);
+
     if (ended ? total >= seconds : next > seconds) break;
     total = next;
     last++;
   }
+
   return [
     "#EXTM3U",
     "#EXT-X-VERSION:3",

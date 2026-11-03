@@ -18,16 +18,20 @@ export default function Playlist() {
     group?: string;
     left?: string;
   }>();
+
   const navigation = useNavigation();
   const locale = useLocale();
+
   const view: PlaylistView = group
     ? { kind: "group", group }
     : left
       ? { kind: "left-out" }
       : { kind: "groups" };
+
   useLayoutEffect(() => {
     // One group and Left out carry their own large title.
     navigation.setOptions({ title: view.kind === "groups" ? t("Playlist groups") : "" });
   }, [navigation, view.kind, locale]);
+
   return <PlaylistScreen id={id} view={view} />;
 }

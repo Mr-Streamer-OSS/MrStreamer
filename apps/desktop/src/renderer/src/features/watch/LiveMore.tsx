@@ -11,8 +11,11 @@ import { Menu, SoundChoices, type TrackMenu } from "./TrackMenus.tsx";
 import { VolumeControl } from "./VolumeControl.tsx";
 
 export type LiveMenu = TrackMenu | "more";
+
 const pages = ["sound", "quality", "output"] as const;
+
 type Page = (typeof pages)[number];
+
 const labels = {
   sound: "Sound",
   quality: "Quality",
@@ -44,11 +47,13 @@ export function LiveMore({
   const active = output.kind === "receiver" || output.kind === "lost";
   const destination = active ? receiverName(output.receiver) : t("This computer");
   const listed = offers.includes("cast");
+
   const available = {
     sound: sound !== null,
     quality: quality !== null,
     output: offers.length > 0,
   };
+
   const opened = menu !== null && menu !== "subtitles";
   const page = menu && menu !== "more" && menu !== "subtitles" ? menu : null;
   const valid = page === null || available[page];
@@ -61,6 +66,7 @@ export function LiveMore({
     moved.current = by;
     onMenu(next ?? "more");
   };
+
   // Tracks and output capabilities can disappear while their page is open.
   useEffect(() => {
     if (!valid) {
@@ -73,31 +79,38 @@ export function LiveMore({
     const by = moved.current;
     moved.current = null;
     const root = body.current;
+
     if (by === "pointer") root?.focus();
+
     if (by !== "keyboard") return;
+
     const target =
       (page === null && left.current
         ? root?.querySelector<HTMLElement>(`[data-live-page="${left.current}"]`)
         : null) ??
       root?.querySelector<HTMLElement>("[data-item][aria-pressed=true]:not(:disabled)") ??
       root?.querySelector<HTMLElement>("[data-item]:not(:disabled):not([data-live-back])");
+
     (target ?? root)?.focus();
   }, [page]);
   // Discovery belongs to the Play on page, and ends on Back, Escape, a pick or view closure.
   useEffect(() => {
     if (page !== "output" || !listed) return;
     outputs.list(true);
+
     return () => outputs.list(false);
   }, [page, listed]);
 
   const shownQuality = quality
     ? (quality.playing ?? quality.chosen ?? quality.automatic)
     : undefined;
+
   const playingSound = sound
     ? (sound.audio.find((track) => track.id === sound.audioId) ??
       sound.audio.find((track) => track.default) ??
       sound.audio[0])
     : null;
+
   const values = {
     sound: playingSound?.label,
     quality: quality
@@ -105,12 +118,15 @@ export function LiveMore({
       : undefined,
     output: destination,
   };
+
   const keys = { sound: null, quality: "Q", output: "O" };
   const done = () => onMenu(null);
+
   const action = (run: () => void) => {
     done();
     run();
   };
+
   return (
     // Apple's system picker measures this visible button even after the page closes.
     <span data-output="">
@@ -126,8 +142,10 @@ export function LiveMore({
           if (event.defaultPrevented) return;
           const target = event.target instanceof HTMLElement ? event.target : null;
           const next = target?.dataset["livePage"];
+
           if ((event.key === "ArrowRight" || event.key === "Enter") && next && !page) {
             const selected = pages.find((each) => each === next);
+
             if (selected) go(selected, "keyboard");
           } else if ((event.key === "ArrowLeft" || event.key === "Backspace") && page) {
             go(null, "keyboard");

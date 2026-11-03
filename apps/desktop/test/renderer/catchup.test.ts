@@ -51,6 +51,7 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let unmount = () => {};
+
 afterEach(() => {
   unmount();
   player.reset();
@@ -113,11 +114,14 @@ async function scheduleOf(channels: readonly LiveChannel[], programmes: readonly
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
   });
+
   const titles = () =>
     [...container.querySelectorAll("[data-index] button")].flatMap(
       (line) => line.querySelector("span + span > span")?.textContent ?? [],
     );
+
   await ready(() => expect(titles()).toContain("Afternoon"));
+
   return {
     /** The programmes of the open day, top to bottom. */
     titles,
@@ -140,6 +144,7 @@ const at = (start: number, title: string): Programme => ({
 
 describe("catch-up in the rest of the day", () => {
   const now = Date.now();
+
   const day = [
     // Three days ago: beyond the two the channel keeps.
     at(now - 72 * HOUR, "Long ago"),
@@ -188,6 +193,7 @@ describe("catch-up in the rest of the day", () => {
     await page.click("Breakfast");
     await ready(() => expect(player.state().phase.kind).toBe("failed"));
     const phase = player.state().phase;
+
     if (phase.kind !== "failed") throw new Error("The programme didn't fail.");
     expect(failureCopy(phase, een, { chosen: null, source: null, tried: null })).toEqual({
       title: "Can't open this channel",
@@ -206,6 +212,7 @@ describe("a recording that plays", () => {
   const start = Date.UTC(2026, 9, 13, 12, 0, 30);
   const minute = start - 30_000;
   const video = player.element;
+
   /** What the main process answers for a recording that starts at `from` and ends at `end`. */
   const session = (from: number, end: number): StreamSession => ({
     sessionId: "recording",
@@ -214,6 +221,7 @@ describe("a recording that plays", () => {
     format: "hls",
     archive: { start: from, end },
   });
+
   /** Plays `programme` and lets its clock run to `seconds`, a fraction of a millisecond in. */
   const playing = async (programme: Programme, seconds: number) => {
     ipc.always("playback.open", session(minute, programme.stop));
@@ -270,10 +278,12 @@ describe("a recording that plays", () => {
     // Three seconds of programme.
     const short = { ...at(minute, "Short"), stop: minute + 3000 };
     await playing(short, 0.5);
+
     for (let second = 1; second <= 6; second++) {
       video.currentTime = 0.5 + second;
       await vi.advanceTimersByTimeAsync(1000);
     }
+
     expect(player.state()).toMatchObject({ phase: { kind: "idle" }, stopped: true });
     expect(player.state().archive?.title).toBe("Short");
     expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "recording" }]);

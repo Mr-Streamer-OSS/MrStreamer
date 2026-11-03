@@ -58,6 +58,7 @@ import type { LiveMenu } from "./LiveMore.tsx";
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const PAGE_ROWS = 10;
+
 // One zap per wheel gesture, with small trackpad movements accumulated first.
 const WHEEL_THRESHOLD = 80;
 const WHEEL_PAUSE_MS = 250;
@@ -84,10 +85,12 @@ export function WatchScreen() {
   const [selected, setSelected] = useState(0);
   const [menu, setMenu] = useState<LiveMenu>(null);
   const keyboardMenu = useRef(false);
+
   // A receiver on the network has playback, or had it until its connection broke.
   const remote = useOutput(
     (state) => state.status.output.kind === "receiver" || state.status.output.kind === "lost",
   );
+
   const waiting = usePlayer((state) => state.waiting && state.phase.kind === "playing");
   useLiveSession(channel);
 
@@ -102,6 +105,7 @@ export function WatchScreen() {
   // A standing note, with nothing that moves: the picture itself says when it is over.
   useEffect(() => {
     flashNote(waiting ? t("Waiting for data") : null);
+
     return () => flashNote(null);
   }, [waiting]);
 
@@ -117,14 +121,18 @@ export function WatchScreen() {
 
   const switchBy = (direction: number) => {
     const target = adjacentChannel(channels, channel, direction);
+
     if (!target) return;
     player.zap(target);
     wake();
   };
+
   const wheel = useRef({ total: 0, at: -Infinity, switchedAt: -Infinity, zapped: false });
+
   const onPictureWheel = (event: WheelEvent<HTMLDivElement>) => {
     const ui = useUi.getState();
     const focused = document.activeElement;
+
     if (
       event.defaultPrevented ||
       event.ctrlKey ||
@@ -141,27 +149,36 @@ export function WatchScreen() {
       focused?.matches('input, textarea, [contenteditable="true"]')
     ) {
       wheel.current.total = 0;
+
       return;
     }
+
     if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
     const now = performance.now();
     const gesture = wheel.current;
+
     if (now - gesture.at > WHEEL_PAUSE_MS) {
       gesture.total = 0;
       gesture.zapped = false;
     }
+
     gesture.at = now;
+
     if (gesture.zapped || now - gesture.switchedAt < WHEEL_COOLDOWN_MS) return;
+
     const delta =
       event.deltaY *
       (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? event.currentTarget.clientHeight : 1);
+
     if (Math.sign(delta) !== Math.sign(gesture.total)) gesture.total = 0;
     gesture.total += delta;
+
     if (Math.abs(gesture.total) < WHEEL_THRESHOLD) return;
     gesture.zapped = true;
     gesture.switchedAt = now;
     switchBy(gesture.total > 0 ? 1 : -1);
   };
+
   const openChannels = () => {
     // The list needs the full window.
     if (miniPlayer.on()) void miniPlayer.leave();
@@ -174,19 +191,24 @@ export function WatchScreen() {
     );
     useUi.setState({ channelsOpen: true });
   };
+
   const closeChannels = () => useUi.setState({ channelsOpen: false });
+
   const openQuality = (byKeyboard = false) => {
     keyboardMenu.current = byKeyboard;
+
     // The menu opens over the full window's controls.
     if (miniPlayer.on()) void miniPlayer.leave();
     wake();
     setMenu("quality");
   };
+
   const choose = (picked: ChannelList) => {
     showList(picked);
     setPicking(false);
     setSelected(0);
   };
+
   const pick = (picked: ListEntry | undefined) => {
     if (picked?.kind === "group") toggle(picked.group);
     else if (picked?.kind === "list") choose(picked.list);
@@ -213,6 +235,7 @@ export function WatchScreen() {
     wake,
     menu,
   });
+
   latest.current = {
     picker,
     picking,
@@ -237,14 +260,19 @@ export function WatchScreen() {
     // the window and the system's list asked for from here.
     const view = new AbortController();
     outputs.viewShown(view.signal);
+
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
+
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
+
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.watching) return;
       const now = latest.current;
+
       // The menu's own keys: Escape closes it, and focus goes back to its button.
       if (now.menu) return;
+
       // What a failed channel offers takes Enter itself once Tab reached it, and a message's
       // cross and the bar's word on the downloads take Enter and Space. Everywhere else Enter
       // opens the list, also with another control of the bar in focus.
@@ -257,6 +285,7 @@ export function WatchScreen() {
       ) {
         return;
       }
+
       const {
         switchBy,
         openChannels,
@@ -267,13 +296,17 @@ export function WatchScreen() {
         toggleFavourite,
         wake,
       } = now;
+
       const step = (value: number, delta: number, length: number) =>
         Math.min(Math.max(value + delta, 0), Math.max(length - 1, 0));
+
       if (/^[0-9]$/.test(event.key)) {
         numberEntry.type(event.key);
         event.preventDefault();
+
         return;
       }
+
       switch (event.key) {
         case "Escape":
           if (numberEntry.active()) numberEntry.cancel();
@@ -288,29 +321,37 @@ export function WatchScreen() {
         case "PageDown": {
           const direction = event.key === "ArrowDown" || event.key === "PageDown" ? 1 : -1;
           const distance = event.key.startsWith("Page") ? PAGE_ROWS : 1;
+
           if (!now.channelsOpen) switchBy(direction);
           else if (now.picking) setEntry(step(now.entry, direction * distance, now.entries.length));
           else setSelected(step(now.selected, direction * distance, now.channels.length));
           break;
         }
+
         case "Home":
         case "End": {
           if (!now.channelsOpen) return;
           const last = event.key === "End";
+
           if (now.picking) setEntry(last ? Math.max(now.entries.length - 1, 0) : 0);
           else setSelected(last ? Math.max(now.channels.length - 1, 0) : 0);
           break;
         }
+
         case "Enter": {
           if (event.repeat || numberEntry.commit()) break;
+
           if (!now.channelsOpen) openChannels();
           else if (now.picking) pick(now.entries[now.entry]);
           else {
             const target = now.channels[now.selected];
+
             if (target) player.play(target);
           }
+
           break;
         }
+
         case "ArrowLeft":
           if (!now.channelsOpen) openChannels();
           else if (!now.picking) setPicking(true);
@@ -323,6 +364,7 @@ export function WatchScreen() {
           break;
         case "Backspace":
           if (event.repeat) break;
+
           if (numberEntry.active()) numberEntry.cancel();
           else if (now.channelsOpen && now.picking) {
             if (!now.picker.back()) setPicking(false);
@@ -378,12 +420,15 @@ export function WatchScreen() {
         default:
           return;
       }
+
       event.preventDefault();
       // Handled here only: the layer underneath, shown again by this key, must not take it too.
       event.stopPropagation();
     }
+
     // Before tooltips and popovers see the key: a tooltip on screen would keep Escape to itself.
     window.addEventListener("keydown", onKey, { capture: true });
+
     return () => {
       view.abort();
       window.removeEventListener("keydown", onKey, { capture: true });
@@ -392,8 +437,10 @@ export function WatchScreen() {
 
   if (!channel) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
+
   if (mini) {
     const playing = phase.kind !== "idle" && phase.kind !== "failed";
+
     return (
       <div
         data-view="watch"
@@ -455,6 +502,7 @@ export function WatchScreen() {
       </div>
     );
   }
+
   return (
     <div
       data-view="watch"

@@ -40,6 +40,7 @@ const File = lazy(() =>
 );
 
 type GuidesFile = Infer<typeof File>;
+
 /** An external guide as Settings shows it: nothing of its link but the origin. */
 export interface GuideLink extends Omit<GuidesFile["guides"][number], "key"> {
   /** The Keychain didn't give its link back: its saved guide still shows, and nothing refreshes. */
@@ -63,12 +64,15 @@ export type GuideRefusal =
 
 /** Each guide a channel without one is looked for in costs a native read: a handful at most. */
 export const GUIDE_LIMIT = 8;
+
 /** The longest guide id the native store reads (GuideIndex.swift). */
 export const MAPPING_MAX = 512;
 const FILE_NAME = "guides.json";
+
 /** Every external guide's id starts with it, and no subscription's does. */
 const PREFIX = "xmltv-";
 const EMPTY: GuidesFile = { version: 1, guides: [], mappings: {}, pendingSecrets: [] };
+
 /** As account.ts's providers send. */
 const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)`;
 
@@ -89,16 +93,20 @@ export function createGuides(
   let revisions = 0;
   /** One change at a time, as each reads the file and writes it back. */
   let changing: Promise<unknown> = Promise.resolve();
+
   const serially = <A>(change: () => Promise<A>): Promise<A> => {
     const run = changing.then(change);
     changing = run.catch(() => undefined);
+
     return run;
   };
+
   const commit = (next: GuidesFile) => {
     if (!writable) throw new Error("The guides file couldn't be read.");
     write(next);
     saved = next;
   };
+
   /** Tells the guide owner and screens what is saved and signed in. */
   const publish = () => {
     shown.set(
@@ -107,17 +115,20 @@ export function createGuides(
     mapped.set(new Map(Object.entries(saved.mappings)));
     owner.configure(new Map(saved.guides.map(({ id }) => [id, origins.get(id)])), mapped.get());
   };
+
   const originFor = (link: string): GuideOrigin => {
     const request: GuideRequest = {
       kind: "request",
       url: link,
       headers: { "User-Agent": USER_AGENT },
     };
+
     return {
       revision: ++revisions,
       provider: {
         async liveGuideRequest(signal) {
           signal?.throwIfAborted();
+
           return request;
         },
       },
@@ -126,13 +137,17 @@ export function createGuides(
       uncertain: playlistUncertain(link),
     };
   };
+
   const newId = () => {
     const taken = new Set([...saved.guides.map(({ id }) => id), ...saved.pendingSecrets]);
     const base = `${PREFIX}${now().toString(36)}`;
     let id = base;
+
     for (let next = 2; taken.has(id); next++) id = `${base}-${next}`;
+
     return id;
   };
+
   /** Removes `id`'s link from the Keychain, then from the pending ones; the next launch retries. */
   const dropSecret = (id: string) =>
     secrets
@@ -141,6 +156,7 @@ export function createGuides(
         commit({ ...saved, pendingSecrets: saved.pendingSecrets.filter((each) => each !== id) }),
       )
       .catch(() => undefined);
+
   /**
    * Cancels and closes the owner's work on `id`, already out of the file and the owner's guides,
    * before its guide is erased, then takes its link out of the Keychain. A guide or link the disk
@@ -150,6 +166,7 @@ export function createGuides(
     await owner.forget(id);
     await dropSecret(id);
   };
+
   /**
    * Adds `link` last, or in the place of guide `replacing`, which goes in the same write, and
    * downloads it.
@@ -160,11 +177,14 @@ export function createGuides(
     replacing?: string,
   ): Promise<GuideRefusal | null> => {
     const url = URL.parse(link.trim());
+
     if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
     const key = sha256Hex(url.href);
+
     if (saved.guides.some((each) => each.key === key && each.id !== replacing)) return "duplicate";
     const at = replacing ? saved.guides.findIndex((each) => each.id === replacing) : -1;
     const id = newId();
+
     try {
       commit({ ...saved, pendingSecrets: [...saved.pendingSecrets, id] });
       await secrets.write(id, url.href);
@@ -180,16 +200,22 @@ export function createGuides(
     } catch {
       return "saving";
     }
+
     origins.set(id, originFor(url.href));
+
     if (replacing) origins.delete(replacing);
     publish();
     void owner.attach(id);
+
     if (replacing) await retire(replacing);
+
     return null;
   };
+
   /** Takes `id` out of the file and the owner, then retires it. */
   const removed = async (id: string): Promise<GuideRefusal | null> => {
     if (!saved.guides.some((each) => each.id === id)) return null;
+
     try {
       commit({
         ...saved,
@@ -199,11 +225,14 @@ export function createGuides(
     } catch {
       return "saving";
     }
+
     origins.delete(id);
     publish();
     await retire(id);
+
     return null;
   };
+
   return {
     useLinks: () => useStore(shown),
     links: shown.get,
@@ -219,16 +248,20 @@ export function createGuides(
      */
     load(): { readonly ids: readonly string[]; readonly kept: readonly string[] } {
       let parsed: GuidesFile | type.errors | null = null;
+
       try {
         const contents = read();
+
         if (contents !== null) parsed = File()(contents);
         writable = !(parsed instanceof type.errors);
       } catch {
         writable = false;
       }
+
       saved = parsed === null || parsed instanceof type.errors ? EMPTY : parsed;
       origins.clear();
       publish();
+
       return { ids: saved.guides.map(({ id }) => id), kept: writable ? [] : [PREFIX] };
     },
     /** After the native store restored: removes links left pending, and signs each guide in. */
@@ -236,11 +269,15 @@ export function createGuides(
       serially(async () => {
         for (const id of saved.pendingSecrets)
           if (!saved.guides.some((each) => each.id === id)) await dropSecret(id);
+
         for (const { id, key } of saved.guides) {
           const link = await secrets.read(id).catch(() => null);
+
           if (link && sha256Hex(link) === key) origins.set(id, originFor(link));
         }
+
         publish();
+
         for (const id of origins.keys()) void owner.attach(id);
       }),
     /**
@@ -250,7 +287,9 @@ export function createGuides(
     add: (link: string, name = "") =>
       serially(async () => {
         if (saved.guides.length >= GUIDE_LIMIT) return "limit";
+
         if (name.includes("://")) return "name";
+
         return added(link, name.trim() || null);
       }),
     /**
@@ -260,8 +299,10 @@ export function createGuides(
     replace: (id: string, link: string) =>
       serially(async (): Promise<GuideRefusal | null> => {
         const old = saved.guides.find((each) => each.id === id);
+
         if (!old) return null;
         const url = URL.parse(link.trim());
+
         // A guide whose link the Keychain lost takes it back under its id, keeping its guide.
         if (url && sha256Hex(url.href) === old.key && !origins.has(id)) {
           try {
@@ -269,11 +310,14 @@ export function createGuides(
           } catch {
             return "saving";
           }
+
           origins.set(id, originFor(url.href));
           publish();
           void owner.attach(id);
+
           return null;
         }
+
         return added(link, old.name, id);
       }),
     remove: (id: string) => serially(() => removed(id)),
@@ -282,14 +326,18 @@ export function createGuides(
     map: (key: string, guideId: string | null) =>
       serially(async (): Promise<GuideRefusal | null> => {
         const id = guideId?.trim() || null;
+
         if (id && new TextEncoder().encode(id).length > MAPPING_MAX) return "long";
         const { [key]: _old, ...others } = saved.mappings;
+
         try {
           commit({ ...saved, mappings: id ? { ...others, [key]: id } : others });
         } catch {
           return "saving";
         }
+
         publish();
+
         return null;
       }),
     /** Erases the mappings of subscription `id`'s channels, as its history goes. */
@@ -299,6 +347,7 @@ export function createGuides(
         if (!writable) throw new Error("The guides file couldn't be read.");
         const prefix = `${subscriptionId}:`;
         const kept = Object.entries(saved.mappings).filter(([key]) => !key.startsWith(prefix));
+
         if (kept.length === Object.keys(saved.mappings).length) return;
         commit({ ...saved, mappings: Object.fromEntries(kept) });
         publish();

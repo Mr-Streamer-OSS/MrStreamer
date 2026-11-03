@@ -37,8 +37,10 @@ function serveRuns(): void {
   vi.stubGlobal("fetch", async (url: string) => {
     if (new URL(url).searchParams.get("only") === "subtitles") {
       const line = { at: 10, until: 12, text: "We sail at first light." };
+
       return new Response(`{"ready":true}\n${JSON.stringify(line)}\n`);
     }
+
     // A run's picture never comes, which these tests don't need.
     return new Response(new ReadableStream());
   });
@@ -68,6 +70,7 @@ async function opened(id: string): Promise<void> {
 function shownAt(position: number): string {
   player.element.currentTime = position;
   player.element.dispatchEvent(new Event("seeked"));
+
   return subtitleLayer.textContent;
 }
 
@@ -114,7 +117,9 @@ describe("a title's speed and subtitle timing", () => {
 
 describe("the Speed button", () => {
   let unmount = () => {};
+
   afterEach(() => unmount());
+
   async function menu(hereOnly: boolean, onSpeed: (speed: number) => void = () => {}) {
     const mounted = bareView();
     unmount = mounted.unmount;
@@ -122,6 +127,7 @@ describe("the Speed button", () => {
       createElement(SpeedMenu, { speed: 1, hereOnly, open: true, onSpeed, onOpenChange: () => {} }),
     );
     await act(settle);
+
     return [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')];
   }
 

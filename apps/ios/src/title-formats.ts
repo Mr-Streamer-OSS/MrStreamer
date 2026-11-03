@@ -69,7 +69,9 @@ interface TitleFormatsModule {
 function native(): TitleFormatsModule {
   const host: { expo?: { modules?: { TitleFormats?: TitleFormatsModule } } } = globalThis;
   const found = host.expo?.modules?.TitleFormats;
+
   if (!found) throw new Error("This build has no TitleFormats module.");
+
   return found;
 }
 
@@ -122,28 +124,39 @@ export function openFormat(
   // Listening from before the session exists, until it closed, for its own failure only.
   let stopped!: (failure: StreamFailure) => void;
   const failed = new Promise<StreamFailure>((resolve) => (stopped = resolve));
+
   const listening = native().addListener("onFailure", (event) => {
     if (event.id === id) stopped(streamFailure(event.failure));
   });
+
   native().create(id, url, headers ?? null, start);
   const closed = native().closed(id);
   void closed.then(() => listening.remove());
   const close = () => native().close(id);
+
   if (signal.aborted) close();
   else signal.addEventListener("abort", close, { once: true });
   const answer = native().open(id);
+
   const opened = answer.then((result): Opened => {
     if (signal.aborted || result.kind === "closed") throw signal.reason ?? new Error("closed");
+
     if (result.kind === "failed") {
       throw new AppFailure({ kind: "stream", failure: streamFailure(result.failure) });
     }
+
     if (result.kind === "direct") return result;
+
     const failure = () => {
       const found = native().failure(id);
+
       return found ? streamFailure(found) : null;
     };
+
     const { playlist, unshown } = result;
+
     return { kind: "session", session: { playlist, unshown, failure, failed } };
   });
+
   return { opened, close, closed };
 }

@@ -11,6 +11,7 @@ import { defined } from "@mrstreamer/core/defined";
 /** The app's services on `dir`, a new data folder unless given one, as a start of the app has them. */
 async function started(dir?: string) {
   const runtime = runtimeFor(mainLayer(testConfig(dir ?? (await tempDir()))));
+
   return {
     runtime,
     subscriptions: await promised(runtime, Subscriptions),
@@ -33,6 +34,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const provider = await fakeProvider({ titles: 1 });
     const other = await fakeProvider({ titles: 1, second: true });
     const seed = provider.titles.movies[0]!;
+
     const rows = Array.from({ length: 650 }, (_, index) => ({
       ...seed,
       id: 70000 + index,
@@ -41,6 +43,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       added: 1,
       adult: false,
     }));
+
     provider.serveTitles((all) => ({ ...all, movies: rows, series: [] }));
     other.serveTitles((all) => ({
       ...all,
@@ -102,6 +105,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const provider = await fakeProvider({ titles: 1 });
     const other = await fakeProvider({ titles: 1, second: true });
     const seed = provider.titles.movies[0]!;
+
     let movies = [
       { ...seed, id: 70001, name: "Shared 4K (NL)", tmdb: "4567" },
       { ...seed, id: 70002, name: "Shared FHD (EN)", tmdb: "4567" },
@@ -109,6 +113,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       { ...seed, id: 70011, name: "Adult SD (PL)", tmdb: "", adult: true },
       { ...seed, id: 70005, name: "Category adult SD (FR)", tmdb: "", categoryId: "505" },
     ];
+
     provider.serveTitles((all) => ({ ...all, movies, series: [] }));
     other.serveTitles((all) => ({
       ...all,
@@ -116,17 +121,20 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       series: [],
     }));
     const { runtime, subscriptions, titles, files, settings } = await started();
+
     try {
       const first = await subscriptions.add(demoLogin(provider));
       const second = await subscriptions.add(demoLogin(other));
       await titles.refresh(first.id);
       await titles.refresh(second.id);
+
       const choices = {
         qualities: ["4k", "full-hd", "hd", "unknown"],
         languages: ["de", "en", "nl", "unknown"],
         verified: [],
         files: 0,
       };
+
       expect(await titles.filterOptions("movie")).toEqual(choices);
       expect(await titles.filterOptions("series")).toEqual({
         qualities: [],
@@ -135,6 +143,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         files: 0,
       });
       const [source] = await subscriptions.saved();
+
       if (!source) throw new Error("Expected saved subscription");
       const file = await titles.file({ kind: "movie", subscriptionId: first.id, id: "70001" });
       await files.remember(source.key, source.fileRevision, {
@@ -145,6 +154,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         audio: ["en", null],
         subtitles: ["nl"],
       });
+
       const observed = {
         ...choices,
         verified: [
@@ -154,6 +164,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         ],
         files: 1,
       };
+
       expect(await titles.filterOptions("movie")).toEqual(observed);
       // Hints of titles for adults only once the viewer shows them, and they filter that row.
       const listedBefore = asked(provider);
@@ -215,6 +226,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       series: [],
     }));
     const { runtime, subscriptions, titles } = await started();
+
     try {
       const saved = await subscriptions.add(demoLogin(provider));
       const empty = { qualities: [], languages: [], verified: [], files: 0 };
@@ -222,12 +234,14 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       const held = provider.hold("titles");
       const refresh = titles.refresh(saved.id);
       await held.arrived;
+
       try {
         expect(await titles.filterOptions("movie")).toEqual(empty);
         expect(await titles.filterOptions("series")).toEqual(empty);
       } finally {
         held.release();
       }
+
       await refresh;
       const loaded = { qualities: ["hd"], languages: ["en"], verified: [], files: 0 };
       expect(await titles.filterOptions("movie")).toEqual(loaded);
@@ -246,6 +260,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     let series = [{ ...seed, name: "Hint sample 4K (NL)" }];
     provider.serveTitles((all) => ({ ...all, movies: [], series }));
     const { runtime, subscriptions, titles } = await started();
+
     try {
       const saved = await subscriptions.add(demoLogin(provider));
       const target = { subscriptionId: saved.id, id: String(seed.id) };
@@ -292,7 +307,9 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const saved = await subscriptions.add(demoLogin(provider));
     await titles.refresh(saved.id);
     const [source] = await subscriptions.saved();
+
     if (!source) throw new Error("Expected saved subscription");
+
     for (const [id, audio] of [
       ["71001", ["en"]],
       ["71002", ["nl"]],
@@ -308,7 +325,9 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         subtitles: [],
       });
     }
+
     const before = asked(provider);
+
     const collection = (filters?: Parameters<typeof titles.collection>[0]["filters"]) =>
       titles.collection({
         kind: "movie",
@@ -317,6 +336,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         limit: 20,
         ...defined({ filters }),
       });
+
     expect((await collection()).titles[0]?.id).toBe("71001");
     const dutch = await collection({ language: "nl", verified: { kind: "audio", language: "nl" } });
     expect(dutch).toMatchObject({
@@ -347,10 +367,12 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const dir = await tempDir();
     const provider = await fakeProvider({ titles: 2 });
     const seed = provider.titles.movies[0]!;
+
     let movies = [
       { ...seed, id: 70001, name: "Filter sample 4K (NL)", tmdb: "4567", adult: false },
       { ...seed, id: 70002, name: "Filter sample HD (EN)", tmdb: "4567", adult: false },
     ];
+
     provider.serveTitles((all) => ({ ...all, movies, series: [] }));
     let app = await started(dir);
     const subscription = await app.subscriptions.add(demoLogin(provider));
@@ -358,6 +380,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     expect(provider.titleListRequests()).toBe(0);
     await app.titles.refresh(subscription.id);
     const [source] = await app.subscriptions.saved();
+
     if (!source) throw new Error("Expected saved subscription");
     await app.files.remember(source.key, source.fileRevision, {
       kind: "movie",
@@ -378,11 +401,13 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
         filters: { quality: "4k", language: "en", verified: { kind: "audio", language: "en" } },
       }),
     ).toMatchObject({ total: 0, unfiltered: 1, titles: [] });
+
     const matched = await app.titles.searchKind("movie", "sample", {
       quality: "4k",
       language: "nl",
       verified: { kind: "audio", language: "en" },
     });
+
     expect(matched).toMatchObject({
       total: 1,
       unfiltered: 1,
@@ -442,13 +467,17 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
     const subscription = await app.subscriptions.add(demoLogin(provider));
     await app.titles.refresh(subscription.id);
     const [source] = await app.subscriptions.saved();
+
     if (!source) throw new Error("Expected saved subscription");
+
     const details = await app.titles.details("series", {
       subscriptionId: source.id,
       id: String(series[0]!.id),
     });
+
     if (details.kind !== "series") throw new Error("Expected series details");
     const first = details.seasons[0]!.episodes[0]!;
+
     const file = await app.titles.file({
       kind: "episode",
       subscriptionId: source.id,
@@ -457,6 +486,7 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       season: first.season,
       episode: first.number,
     });
+
     await app.files.remember(source.key, source.fileRevision, {
       kind: "episode",
       id: first.id,
@@ -467,14 +497,17 @@ describe("current movie and series filters", { timeout: 20000 }, () => {
       subtitles: ["nl"],
     });
     const before = asked(provider);
+
     const observed = async () => {
       const [title] = await app.titles.titles("series", [
         { subscriptionId: source.id, id: first.seriesId },
       ]);
+
       return title?.versions.find(
         (version) => version.subscriptionId === source.id && version.id === first.seriesId,
       )?.observed;
     };
+
     const tracks = { files: 1, audio: ["en", null], subtitles: ["nl"] };
     expect(await observed()).toEqual(tracks);
     expect(await app.titles.filterOptions("series")).toMatchObject({

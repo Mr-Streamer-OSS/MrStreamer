@@ -42,6 +42,7 @@ describe("Live TV discovery labels", () => {
       { id: "n", name: "BE - FR | NEWS" },
       { id: "s", name: "DE - DE | SPORT" },
     ];
+
     const channel = {
       id: "1",
       name: "BE - FR | Studio HD",
@@ -51,6 +52,7 @@ describe("Live TV discovery labels", () => {
       guideId: null,
       catchupDays: null,
     };
+
     const normalized = normalizeCatalogue({ categories, channels: [channel] });
     const joined = liveChannels(normalized.streams).channels[0]!;
     const streams = new Map(normalized.streams.map((stream) => [stream.id, stream]));

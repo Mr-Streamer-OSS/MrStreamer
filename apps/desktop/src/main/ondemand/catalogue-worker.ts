@@ -75,6 +75,7 @@ const setup = workerData as WorkerSetup;
 
 /** Counts arrivals of metadata that lists show, so collections built before them are built again. */
 let metadataVersion = 0;
+
 /** The viewer's language as the last call named it: TMDB's names are asked for in it. */
 let viewerLanguage = "en";
 
@@ -102,6 +103,7 @@ const metadata = metadataStore({
 let adults = false;
 
 const Category = lazy(() => type({ id: "string", name: "string" }));
+
 const ProviderTitle = lazy(() =>
   type({
     id: "string",
@@ -119,6 +121,7 @@ const ProviderTitle = lazy(() =>
     "episodeFiles?": "string[]",
   }),
 );
+
 /** Version 1 came before TMDB ids: still shown, but refreshed as soon as the app can. */
 const CachedCatalogue = lazy(() =>
   type({
@@ -149,6 +152,7 @@ interface Loaded {
 
 /** Each subscription's lists, by its id, once read from disk or fetched. */
 const loaded = new Map<string, Loaded>();
+
 /** Related facts follow raw list identity, so replacement or removal retains no stale snapshot. */
 const relatedFacts = new WeakMap<
   readonly ProviderTitle[],
@@ -158,20 +162,25 @@ const relatedFacts = new WeakMap<
 function relatedFactsOf(member: Loaded, kind: TitleKind, index: IndexedCatalogue) {
   const rows = kind === "movie" ? member.catalogue.movies : member.catalogue.series;
   let facts = relatedFacts.get(rows);
+
   if (!facts) {
     const names = new Map<string, string>();
+
     for (const row of rows) {
       const indexed = kindOf(index, kind).byId.get(
         ownedKey({ subscriptionId: member.subscriptionId, id: row.id }),
       );
+
       // The index's display name belongs to its primary version, before TMDB naming.
       if (indexed?.subscriptionId === member.subscriptionId && indexed.id === row.id) {
         names.set(row.id, indexed.title);
       }
     }
+
     facts = relatedProviderFacts(rows, names);
     relatedFacts.set(rows, facts);
   }
+
   return facts;
 }
 
@@ -180,6 +189,7 @@ const refreshing = new Map<
   string,
   { readonly revision: number; readonly done: Promise<null>; readonly abort: AbortController }
 >();
+
 /**
  * The lists a refresh fetched, by subscription, set aside until the main process says whether the
  * login they were asked under still stands.
@@ -209,22 +219,26 @@ let shown: Shown | null = null;
  */
 function wanted(): Wanted[] {
   const found = new Map<string, Wanted>();
+
   for (const { catalogue } of loaded.values()) {
     for (const [kind, titles, categories] of [
       ["movie", catalogue.movies, catalogue.movieCategories],
       ["tv", catalogue.series, catalogue.seriesCategories],
     ] as const) {
       const isAdult = adultIn(categories);
+
       for (const title of titles) {
         if (title.metadata === "lazy" || !title.tmdbId || (!adults && isAdult(title))) continue;
         const key = `${kind}:${title.tmdbId}`;
         const addedAt = title.addedAt ?? 0;
+
         if ((found.get(key)?.addedAt ?? -1) < addedAt) {
           found.set(key, { kind, tmdbId: title.tmdbId, addedAt });
         }
       }
     }
   }
+
   return [...found.values()];
 }
 
@@ -246,11 +260,13 @@ function remember(
     movies: catalogue.movies.length,
     series: catalogue.series.length,
   };
+
   loaded.set(subscriptionId, kept);
   // After the call that loaded it has answered, unless other lists took its place.
   setTimeout(() => {
     if (loaded.get(subscriptionId) === kept) metadata.want(wanted(), viewerLanguage);
   }, 0);
+
   return kept;
 }
 
@@ -258,6 +274,7 @@ function remember(
 function showing(now: boolean): void {
   if (now === adults) return;
   adults = now;
+
   if (loaded.size > 0) metadata.want(wanted(), viewerLanguage);
 }
 
@@ -268,6 +285,7 @@ function showing(now: boolean): void {
 function speaking(language: string): void {
   if (language === viewerLanguage) return;
   viewerLanguage = language;
+
   if (loaded.size > 0) metadata.want(wanted(), language);
 }
 
@@ -281,6 +299,7 @@ function named(title: Title, language: string): Title {
   const found = metadata.name(kind, title.tmdbId, language);
   const known = metadata.get(kind, title.tmdbId);
   const backdrop = title.backdropUrl ? null : known?.backdrop;
+
   return {
     ...title,
     ...defined({ title: found?.name, originalTitle: found?.original }),
@@ -290,15 +309,19 @@ function named(title: Title, language: string): Title {
 }
 
 const cachePath = (owner: CatalogueOwner) => join(owner.dir, "ondemand.json.gz");
+
 /** The cache from before it was packed, read once and removed after the next write. */
 const legacyCachePath = (owner: CatalogueOwner) => join(owner.dir, "ondemand.json");
 
 /** The lists still to be written, by subscription: the newest of each. */
 const unsaved = new Map<string, { readonly owner: CatalogueOwner; readonly kept: Loaded }>();
+
 /** The wait before those are written; null while none wait. */
 let waiting: NodeJS.Timeout | null = null;
+
 /** The caches being written. Writes go one at a time, and forgetting lists waits for them. */
 let writing: Promise<void> = Promise.resolve();
+
 /**
  * How long lists wait to be written. Turning them into JSON holds this thread for a quarter of a
  * second, and the pages the UI asks for right after a refresh come first. The wait is one for
@@ -310,6 +333,7 @@ const WRITE_AFTER_MS = 1000;
 /** Has a subscription's lists saved once the wait is over. */
 function persist(owner: CatalogueOwner, kept: Loaded): void {
   unsaved.set(owner.subscriptionId, { owner, kept });
+
   if (waiting) clearTimeout(waiting);
   waiting = setTimeout(() => void save(), WRITE_AFTER_MS);
 }
@@ -322,6 +346,7 @@ function persist(owner: CatalogueOwner, kept: Loaded): void {
 function save(): Promise<void> {
   if (waiting) clearTimeout(waiting);
   waiting = null;
+
   for (const pending of unsaved.values()) {
     const { owner, kept } = pending;
     writing = writing
@@ -343,12 +368,14 @@ function save(): Promise<void> {
           ...catalogue,
         });
         await removeFile(legacyCachePath(owner));
+
         if (unsaved.get(owner.subscriptionId) === pending) unsaved.delete(owner.subscriptionId);
       })
       // Keep the newest still-owned snapshot dirty. A later save or flush tries once again;
       // no retry loop can hold shutdown open or revive lists forgotten in the meantime.
       .catch(() => {});
   }
+
   return writing;
 }
 
@@ -357,6 +384,7 @@ const emptyBefore = new Set<string>();
 
 /** The cache files being read, by subscription, so the calls a start sends together read once. */
 const reading = new Map<string, Promise<Loaded | null>>();
+
 /** What names each of those reads, by subscription. */
 const readings = new Map<string, object>();
 
@@ -367,18 +395,23 @@ const readings = new Map<string, object>();
 function current(owner: CatalogueOwner): Promise<Loaded | null> {
   const { subscriptionId, key } = owner;
   const kept = loaded.get(subscriptionId);
+
   if (kept) return Promise.resolve(kept);
   const under = reading.get(subscriptionId);
+
   if (under) return under;
   /** Names this read: forgetting the subscription, or reading again after that, takes it over. */
   const token = {};
   readings.set(subscriptionId, token);
+
   const done = (async () => {
     const file =
       (await readJsonFile(cachePath(owner), CachedCatalogue())) ??
       (await readJsonFile(legacyCachePath(owner), CachedCatalogue()));
+
     // Forgotten while reading, when the subscription went.
     if (file?.key !== key || readings.get(subscriptionId) !== token) return null;
+
     return (
       loaded.get(subscriptionId) ??
       remember(
@@ -390,13 +423,17 @@ function current(owner: CatalogueOwner): Promise<Loaded | null> {
       )
     );
   })();
+
   reading.set(subscriptionId, done);
+
   const settled = () => {
     if (reading.get(subscriptionId) !== done) return;
     reading.delete(subscriptionId);
     readings.delete(subscriptionId);
   };
+
   done.then(settled, settled);
+
   return done;
 }
 
@@ -412,12 +449,14 @@ async function catalogueOf(
   required = false,
 ): Promise<Shown> {
   const members = (await Promise.all(owners.map(current))).flatMap((each) => each ?? []);
+
   if (required && members.length === 0 && owners.length > 0) {
     throw new AppFailure({
       kind: "unexpected",
       detail: t("Movies and series haven't loaded yet."),
     });
   }
+
   return shownOf(members, language);
 }
 
@@ -427,6 +466,7 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
     shown?.index.language === language &&
     shown.members.length === members.length &&
     shown.members.every((each, at) => each === members[at]);
+
   if (!shown || !same) {
     shown = {
       members,
@@ -435,14 +475,17 @@ function shownOf(members: readonly Loaded[], language: string): Shown {
       collections: new Map(),
     };
   }
+
   return shown;
 }
 
 /** Last-read tracks count only while their exact file remains in these owners' current lists. */
 function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[]): FilterFiles {
   const result = new Map<string, FilterFile[]>();
+
   if (known.length === 0) return result;
   let listings = found.fileListings.get(kind);
+
   if (!listings) {
     listings = new Map(
       found.members.flatMap((member) =>
@@ -454,23 +497,30 @@ function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[])
     );
     found.fileListings.set(kind, listings);
   }
+
   const titles = kindOf(found.index, kind).byId;
+
   for (const file of known) {
     const key = ownedKey({
       subscriptionId: file.subscriptionId,
       id: file.kind === "movie" ? file.id : (file.seriesId ?? ""),
     });
+
     if (kind === "movie") {
       if (file.kind !== "movie") continue;
       const listed = listings.get(key);
+
       if (!listed || listedFileKey("movie", listed) !== file.listingKey) continue;
     } else {
       if (file.kind !== "episode" || !file.seriesId || !file.tags) continue;
       const listed = listings.get(key);
+
       if (!listed || (listed.episodeFiles && !listed.episodeFiles.includes(file.id))) continue;
     }
+
     const title = titles.get(key);
     const version = title?.versions.find((version) => ownedKey(version) === key);
+
     if (!version) continue;
     const files = result.get(key) ?? [];
     files.push({
@@ -479,6 +529,7 @@ function filterFiles(found: Shown, kind: TitleKind, known: readonly KnownFile[])
     });
     result.set(key, files);
   }
+
   return result;
 }
 
@@ -487,6 +538,7 @@ function collectionsOf(found: Shown, kind: TitleKind): Collections {
   const key = `${kind}|${metadataVersion}`;
   const now = Date.now();
   let made = found.collections.get(key);
+
   if (!made || !made.validAt(now)) {
     const { language } = found.index;
     const tmdbKind = kind === "movie" ? "movie" : "tv";
@@ -500,12 +552,15 @@ function collectionsOf(found: Shown, kind: TitleKind): Collections {
       expiresAt: (id) => metadata.expiresAt(tmdbKind, id),
       now,
     });
+
     // Older metadata only takes memory.
     for (const old of found.collections.keys()) {
       if (!old.endsWith(`|${metadataVersion}`)) found.collections.delete(old);
     }
+
     found.collections.set(key, made);
   }
+
   return made;
 }
 
@@ -524,6 +579,7 @@ function statusOf(found: Loaded | null): WorkerStatus {
 async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
   const { subscriptionId, revision } = args;
   const under = refreshing.get(subscriptionId);
+
   // Playlist reads can finish out of order. Older lists must leave newer work and results alone.
   if (
     (under && under.revision > revision) ||
@@ -531,24 +587,29 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
   ) {
     throw new AppFailure({ kind: "unexpected", detail: t("Stopped.") });
   }
+
   if (under?.revision === revision) return under.done;
   // This subscription's, under the login it had before. Another subscription's goes on.
   under?.abort.abort();
   const abort = new AbortController();
+
   const done = (async () => {
     const provider = providerFor(args.account, { userAgent: setup.userAgent });
     const catalogue = args.catalogue ?? (await provider.onDemandCatalogue(abort.signal));
     const before = await current(args);
+
     // An empty list doesn't replace one that had titles, unless it comes twice in a row, as for
     // channels: panels answer an overloaded request with an empty list, and one list can fail
     // while the other arrives.
     for (const list of args.account.kind === "m3u" ? [] : (["movies", "series"] as const)) {
       const mark = `${subscriptionId}:${list}`;
       const lost = catalogue[list].length === 0 && (before?.[list] ?? 0) > 0;
+
       if (!lost || emptyBefore.has(mark)) {
         emptyBefore.delete(mark);
         continue;
       }
+
       emptyBefore.add(mark);
       throw new AppFailure({
         kind: "incomplete-catalogue",
@@ -557,7 +618,9 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
         list,
       });
     }
+
     if (abort.signal.aborted) throw new AppFailure({ kind: "unexpected", detail: t("Stopped.") });
+
     // A category list that comes back empty keeps the one before: panels answer an overloaded
     // request with an empty list too, and without its names, titles only a category marks for
     // adults would show everywhere.
@@ -572,11 +635,15 @@ async function refresh(args: WorkerCalls["refresh"]["args"]): Promise<null> {
           ? catalogue.seriesCategories
           : before.catalogue.seriesCategories,
     };
+
     fetched.set(subscriptionId, { revision, catalogue: kept });
+
     return null;
   })();
+
   const running = { revision, done, abort };
   refreshing.set(subscriptionId, running);
+
   try {
     return await done;
   } finally {
@@ -596,11 +663,14 @@ async function finishRefresh({
 }: WorkerCalls["finishRefresh"]["args"]): Promise<WorkerCalls["finishRefresh"]["result"]> {
   const { subscriptionId } = owner;
   const aside = fetched.get(subscriptionId);
+
   // Gone already when a call that shared the refresh ended it, or the subscription went.
   if (aside?.revision !== revision) return statusOf(await current(owner));
   fetched.delete(subscriptionId);
+
   if (!keep) return statusOf(await current(owner));
   const before = loaded.get(subscriptionId);
+
   const kept = remember(
     subscriptionId,
     Date.now(),
@@ -608,10 +678,12 @@ async function finishRefresh({
     owner.importRevision,
     randomUUID(),
   );
+
   // Written after answering, so the lists show without waiting for the disk. Quitting writes
   // them first; a write it cuts short all the same leaves the previous lists for the next start,
   // which refreshes them when due.
   persist(owner, kept);
+
   return before && marksForAdults(before.catalogue, kept.catalogue)
     ? { ...statusOf(kept), markedForAdults: true }
     : statusOf(kept);
@@ -627,18 +699,23 @@ function marksForAdults(before: OnDemandCatalogue, after: OnDemandCatalogue): bo
     [before.movies, before.movieCategories, after.movies, after.movieCategories],
     [before.series, before.seriesCategories, after.series, after.seriesCategories],
   ] as const;
+
   for (const [was, wasIn, now, nowIn] of kinds) {
     const wasAdult = adultIn(wasIn);
     const shown = new Map<string, boolean>();
+
     for (const title of was) if (!shown.has(title.id)) shown.set(title.id, wasAdult(title));
     const isAdult = adultIn(nowIn);
     const seen = new Set<string>();
+
     for (const title of now) {
       if (seen.has(title.id)) continue;
       seen.add(title.id);
+
       if (shown.get(title.id) === false && isAdult(title)) return true;
     }
   }
+
   return false;
 }
 
@@ -647,6 +724,7 @@ function aliases(title: Title) {
   if (!title.tmdbId) return "";
   const kind = title.kind === "movie" ? "movie" : "tv";
   const shown = metadata.name(kind, title.tmdbId, viewerLanguage);
+
   return {
     ...defined({ title: shown?.name, original: shown?.original }),
     names: metadata.searchAliases(kind, title.tmdbId),
@@ -657,6 +735,7 @@ function aliases(title: Title) {
 function artworkOf(saved: SavedMember): string | null {
   if (!saved.tmdbId) return null;
   const backdrop = metadata.get(saved.kind === "movie" ? "movie" : "tv", saved.tmdbId)?.backdrop;
+
   return backdrop ? tmdbImage(backdrop, 780) : null;
 }
 
@@ -667,8 +746,10 @@ function artworkOf(saved: SavedMember): string | null {
 function listedAs(index: IndexedCatalogue, entry: readonly SavedMember[]): Title | null {
   for (const member of entry) {
     const title = titleOf(index, member);
+
     if (title) return title;
   }
+
   return null;
 }
 
@@ -680,6 +761,7 @@ const handlers: {
 } = {
   status: async ({ adults: now, owners }) => {
     showing(now);
+
     return (await Promise.all(owners.map(current))).map(statusOf);
   },
   refresh,
@@ -688,8 +770,10 @@ const handlers: {
     speaking(language);
     const found = await catalogueOf(owners, language);
     const selected = byIds(found.index, kind, versions).map((title) => named(title, language));
+
     if (!files?.some((file) => file.tracks)) return selected;
     const wanted = new Set(selected.flatMap((title) => title.versions.map(ownedKey)));
+
     const read = files.filter(
       (file) =>
         file.tracks &&
@@ -700,8 +784,10 @@ const handlers: {
           }),
         ),
     );
+
     if (read.length === 0) return selected;
     const observed = filterFiles(found, kind, read);
+
     return selected.map((shown) => {
       return {
         ...shown,
@@ -709,6 +795,7 @@ const handlers: {
           const read = observed
             .get(ownedKey(version))
             ?.flatMap((file) => (file.tracks ? [file.tracks] : []));
+
           return read?.length
             ? {
                 ...version,
@@ -726,13 +813,16 @@ const handlers: {
   search: async ({ language, query, owners }) => {
     speaking(language);
     const { index } = await catalogueOf(owners, language);
+
     const matches = (kind: TitleKind) =>
       search(index, kind, query, aliases).map((title) => named(title, language));
+
     return { movies: matches("movie"), series: matches("series") };
   },
   searchKind: async ({ language, kind, query, limit, owners, filters, files = [] }) => {
     speaking(language);
     const found = await catalogueOf(owners, language);
+
     const page = searchPage(
       found.index,
       kind,
@@ -741,6 +831,7 @@ const handlers: {
       limit,
       filters ? { filters, files: filterFiles(found, kind, files) } : undefined,
     );
+
     return {
       ...page,
       titles: page.titles.map((title) => named(title, language)),
@@ -751,10 +842,12 @@ const handlers: {
     // Choices need version hints and observed tracks, not metadata decoration or collection order.
     const indexed = kindOf(found.index, kind).titles;
     const titles = adults ? indexed : indexed.filter((title) => !title.adult);
+
     return filterOptions(titles, filterFiles(found, kind, files));
   },
   rows: async ({ language, kind, tab, like, owners }) => {
     speaking(language);
+
     return collectionRows(
       collectionsOf(await catalogueOf(owners, language, true), kind),
       tab,
@@ -764,28 +857,36 @@ const handlers: {
   recommendations: async ({ owners, language, seeds }) => {
     const members = owners.flatMap((owner) => {
       const held = loaded.get(owner.subscriptionId);
+
       return held && held.importRevision === owner.importRevision ? [held] : [];
     });
+
     const found = shownOf(members, language);
+
     const catalogues = {
       movie: collectionsOf(found, "movie").list("all"),
       series: collectionsOf(found, "series").list("all"),
     };
+
     const recent = seeds.slice(0, 32).flatMap(({ kind, version }) => {
       const title = catalogues[kind].find(
         (title) =>
           !title.adult && title.versions.some((each) => ownedKey(each) === ownedKey(version)),
       );
+
       return title ? [{ title, version }] : [];
     });
+
     const excluded = new Set(recent.map(({ title }) => title.key));
     const used = new Set<string>();
     const results: HomeRecommendation[] = [];
+
     for (const { title: seed, version } of recent) {
       if (used.has(seed.key)) continue;
       used.add(seed.key);
       const own = members.find((member) => member.subscriptionId === version.subscriptionId);
       const facts = own ? relatedFactsOf(own, seed.kind, found.index) : undefined;
+
       const related = relatedTitles({
         opened: seed,
         version,
@@ -793,38 +894,50 @@ const handlers: {
         provider: (each) =>
           each.subscriptionId === version.subscriptionId ? (facts?.get(each.id) ?? null) : null,
       });
+
       let contributed = 0;
+
       for (const { title, reason } of related.titles) {
         if (excluded.has(title.key)) continue;
         excluded.add(title.key);
         results.push({ title, reason, seed: seed.title });
+
         if (results.length === 12) return results;
+
         if (++contributed === 4) break;
       }
+
       if (used.size === 3) break;
     }
+
     return results;
   },
   related: async ({ language, kind, version, owners, metadata: about }) => {
     const members = owners.flatMap((owner) => {
       const held = loaded.get(owner.subscriptionId);
+
       return held && held.importRevision === owner.importRevision ? [held] : [];
     });
+
     const found = shownOf(members, language);
     const titles = collectionsOf(found, kind).list("all");
+
     const seed = titles.find((title) =>
       title.versions.some((each) => ownedKey(each) === ownedKey(version)),
     );
+
     if (!seed) return { basis: null, titles: [] };
     // Category ids belong to this provider. No category from another owner can match it.
     const own = members.find((member) => member.subscriptionId === version.subscriptionId);
     const providerTitles = own ? relatedFactsOf(own, kind, found.index) : undefined;
+
     return relatedTitles({
       opened: about ? { ...seed, genres: about.genres, originalLanguage: about.language } : seed,
       version,
       titles,
       provider: (each) => {
         if (each.subscriptionId !== version.subscriptionId) return null;
+
         return providerTitles?.get(each.id) ?? null;
       },
     });
@@ -832,6 +945,7 @@ const handlers: {
   tiles: async ({ language, kind, of, owners }) => {
     speaking(language);
     const made = collectionsOf(await catalogueOf(owners, language, true), kind);
+
     return of === "genres"
       ? made.genres().map((genre) => ({
           id: `genre:${genre.name}` as const,
@@ -851,6 +965,7 @@ const handlers: {
     const found = await catalogueOf(owners, language, true);
     const made = collectionsOf(found, kind);
     const unfiltered = made.list(id, sort);
+
     const titles = filters
       ? filterTitles(
           unfiltered,
@@ -859,6 +974,7 @@ const handlers: {
           (version) => id !== "4k" || version.tags.some((tag) => tag === "4K" || tag === "UHD"),
         )
       : unfiltered;
+
     return {
       name: made.name(id) ?? "",
       total: titles.length,
@@ -871,28 +987,37 @@ const handlers: {
     const found = await catalogueOf(owners, language);
     /** The subscriptions whose lists were there to look in. */
     const held = new Set(found.members.map((each) => each.subscriptionId));
+
     const saved = entriesOf(members).flatMap((entry) => {
       const [first] = entry;
+
       if (!first) return [];
       const listed = listedAs(found.index, entry);
       const title = listed ? named(listed, language) : null;
+
       // For adults as the lists say now, or as they last said of a title they hold no more.
       if (!shown && (title?.adult ?? first.adult)) return [];
+
       return [{ first, entry, title, name: title?.title ?? first.name }];
     });
+
     const newest = (a: (typeof saved)[number], b: (typeof saved)[number]) =>
       savedFirst(b.first, a.first);
+
     saved.sort(
       sort === "title" ? (a, b) => byName.compare(a.name, b.name) || newest(a, b) : newest,
     );
+
     return {
       total: saved.length,
       entries: saved.slice(offset, offset + limit).map(({ first, entry, title }) => {
         const { subscriptionId, id, kind, name, year, savedAt } = first;
         const saving = new Set(entry.map((member) => member.subscriptionId));
+
         const sources = owners.flatMap((owner) =>
           saving.has(owner.subscriptionId) ? [owner.subscriptionId] : [],
         );
+
         return {
           subscriptionId,
           id,
@@ -911,13 +1036,17 @@ const handlers: {
   savedFacts: async ({ language, subscriptionId, entries, owners }) => {
     speaking(language);
     const { index, members } = await catalogueOf(owners, language);
+
     if (!members.some((each) => each.subscriptionId === subscriptionId)) return null;
+
     // Each title once, however many entries turn out to be it.
     const titles = new Set(
       entries.flatMap((entry) => titleOf(index, { ...entry, subscriptionId }) ?? []),
     );
+
     return [...titles].flatMap((title) => {
       const facts = factsOf(named(title, language), subscriptionId);
+
       // A title only another subscription lists now leaves what this one saved as it was.
       return facts.versionIds.length > 0 ? [facts] : [];
     });
@@ -925,6 +1054,7 @@ const handlers: {
   container: async ({ id, ...owner }) => {
     const found = await current(owner);
     const movie = found?.catalogue.movies.find((movie) => movie.id === id);
+
     return movie?.container
       ? { container: movie.container, listingKey: listedFileKey("movie", movie) }
       : null;
@@ -938,15 +1068,18 @@ const handlers: {
     readings.delete(subscriptionId);
     loaded.delete(subscriptionId);
     unsaved.delete(subscriptionId);
+
     for (const list of ["movies", "series"]) emptyBefore.delete(`${subscriptionId}:${list}`);
     // Its titles aren't wanted any more, unless another subscription lists them too.
     metadata.want(wanted(), viewerLanguage);
     await writing;
     await Promise.all([removeFile(cachePath(owner)), removeFile(legacyCachePath(owner))]);
+
     return null;
   },
   flush: async () => {
     await Promise.all([save(), metadata.close()]);
+
     return null;
   },
 };
@@ -963,5 +1096,6 @@ parentPort?.on("message", (request: WorkerRequest) => {
 
 function errorOf(cause: unknown): AppError {
   if (cause instanceof AppFailure) return cause.error;
+
   return { kind: "unexpected", detail: cause instanceof Error ? cause.message : String(cause) };
 }

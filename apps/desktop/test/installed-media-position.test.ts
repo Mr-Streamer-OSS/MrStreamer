@@ -8,6 +8,7 @@ import { media } from "./e2e/installed-media.ts";
 
 it("observes unrounded public Position seconds from the shipped Slider's native input", async () => {
   const window = new Window();
+
   try {
     const slider = (label: string, value: number) =>
       createElement(
@@ -24,6 +25,7 @@ it("observes unrounded public Position seconds from the shipped Slider's native 
           ),
         ),
       );
+
     // Another Position slider outside the title and a Sound slider cannot supply this value.
     window.document.body.innerHTML = renderToStaticMarkup(
       createElement(
@@ -38,11 +40,13 @@ it("observes unrounded public Position seconds from the shipped Slider's native 
         ),
       ),
     );
+
     const page = {
       async evaluate<T>(expression: string): Promise<T> {
         return runInNewContext(expression, { document: window.document, window }) as T;
       },
     };
+
     expect((await media({ page })).position).toBe(11.25);
     window.document.querySelector("[data-view=title] input[aria-label=Position]")!.remove();
     expect((await media({ page })).position).toBeNull();

@@ -85,9 +85,11 @@ describe("downloads", { timeout: 30_000 }, () => {
     const { a } = await withProviders(app);
     one.stallMovieFile(movie().id, 20_000, 500);
     let release = () => {};
+
     const removing = new Promise<void>((started) => {
       memory.removal = { started, done: new Promise((done) => (release = done)) };
     });
+
     const film = await app.addDownload(movieRef(a));
     await until(() => statusOf(app, film.id)?.kind === "transferring", "the transfer");
     const shown = app.downloadList().items.find((item) => item.id === film.id)!;
@@ -253,6 +255,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const blocked = new Folder(native.root, "documents", "downloads.json.next");
     blocked.create();
     let release = () => {};
+
     viewingSaves.hold = new Promise((done) => (release = done));
     let stopped: unknown = null;
     void app.stop().then((saved) => (stopped = saved));
@@ -352,11 +355,14 @@ describe("downloads", { timeout: 30_000 }, () => {
       const episodes = season.episodes.slice(1, count + 1);
       const only = { ...details, seasons: [{ ...season, episodes }] };
       const copies: Download[] = [];
+
       for (const episode of episodes) copies.push(await app.addDownload(episodeOf(episode)));
+
       for (const copy of copies) {
         await until(() => isComplete(app, copy.id), "the copy", 20_000);
         mediaFile(copy.id)!.delete();
       }
+
       appGoes("background");
       appGoes("active");
       const plan = app.planDownload(only, version, { kind: "season", season: season.number });
@@ -364,11 +370,13 @@ describe("downloads", { timeout: 30_000 }, () => {
       const forget = transfers.forgetResume.bind(transfers);
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
+
       const hold = vi.spyOn(transfers, "forgetResume").mockImplementationOnce(async (id) => {
         arrived.resolve();
         await released.promise;
         await forget(id);
       });
+
       onTestFinished(() => {
         released.resolve();
         hold.mockRestore();
@@ -379,17 +387,21 @@ describe("downloads", { timeout: 30_000 }, () => {
       expect(doc().items).toEqual(
         copies.slice(1).map((copy) => expect.objectContaining({ id: copy.id })),
       );
+
       if (change === "Cancel remaining") app.cancelRemaining(id);
       else if (change === "a new login") await app.update(a, { password: ONE.password });
       else if (change === "leaving") mounted = false;
       released.resolve();
       await until(() => app.seriesRun()?.phase === "done", "the run");
       const { result } = app.seriesRun()!;
+
       if (change === "nothing") {
         expect(result).toMatchObject({ replaced: 1, removed: 0, stopped: null });
         expect(app.downloadOf(plan.missing[0]!)?.status.kind).not.toBe("missing");
+
         return;
       }
+
       expect(result).toMatchObject({
         replaced: 0,
         removed: 1,
@@ -407,6 +419,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       expect(doc().items).toEqual(
         copies.slice(1).map((copy) => expect.objectContaining({ id: copy.id })),
       );
+
       for (const copy of copies.slice(1)) expect(statusOf(app, copy.id)?.kind).toBe("missing");
     });
   }
@@ -443,6 +456,7 @@ describe("downloads", { timeout: 30_000 }, () => {
       const id = app.startDownload(plan, { replace: false, stands: () => true })!;
       await arrived.promise;
       let anew: Promise<Download> | null = null;
+
       if (change === "removal") await app.removeDownload(failed.id);
       else if (change === "a new download of it") {
         await app.removeDownload(failed.id);
@@ -454,14 +468,17 @@ describe("downloads", { timeout: 30_000 }, () => {
       await until(() => app.seriesRun()?.phase === "done", "the run");
       const { result } = app.seriesRun()!;
       expect(result.retried).toBe(0);
+
       if (change === "removal" || change === "a new download of it") {
         expect(result).toMatchObject({ skipped: 1, stopped: null });
         const again = anew && (await anew);
         // Nothing removed comes back; the new download is the viewer's own, once.
         expect(app.downloadList().items.map((item) => item.id)).toEqual(again ? [again.id] : []);
         expect(again?.id).not.toBe(failed.id);
+
         return;
       }
+
       expect(result).toMatchObject({
         cancelled: 1,
         stopped: change === "Cancel remaining" ? "cancelled" : "login",
@@ -499,11 +516,14 @@ describe("downloads", { timeout: 30_000 }, () => {
 /** The first fixture series' details from `subscriptionId`, as its details screen reads them. */
 async function seriesDetails(app: App, subscriptionId: string) {
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No titles");
   const version = { subscriptionId, id: String(episode().series.id) };
   const title = app.titleOf(lists.index, "series", version)!;
   const details = await app.detailsOf({ ...title, ...version });
+
   if (details.kind !== "series") throw new Error("Not a series");
+
   return { version, details };
 }
 
@@ -527,8 +547,10 @@ describe("offline Next", { timeout: 30_000 }, () => {
     const from = await app.addDownload(episodeOf(first!));
     const to = await app.addDownload(episodeOf(second!));
     await until(() => isComplete(app, from.id) && isComplete(app, to.id), "the episode copies");
+
     return { app, a, from, to };
   }
+
   const item = (app: App) => app.playingItem(app.playbackState.get().phase);
 
   it("keeps the saved immediate order across a removed provider and cold launch, with Next during its countdown and no network", async () => {
@@ -648,24 +670,30 @@ describe("offline Next", { timeout: 30_000 }, () => {
         app.playNext();
         await sleep(20);
         expect(memory.played).toHaveLength(1);
+
         if (change === "Stop") void app.stop();
         else if (change === "navigation") app.request();
         else if (change === "target removed") await app.removeDownload(to.id);
         viewingSaves.hold = null;
         held.resolve();
         await app.progressSettled();
+
         if (change === "nothing") {
           await until(() => memory.played.length === 2, "the next local copy after its save");
           expect(memory.played[1]?.uri).toBe(`file://${mediaFile(to.id)!.path}`);
+
           if (from.title.kind !== "episode") throw new Error("Not an episode copy");
+
           const viewed = await app.progressOf({
             series: [{ subscriptionId: a, id: from.title.seriesId }],
           });
+
           expect(viewed.find((each) => each.title.id === from.title.id)?.position).toBe(40);
         } else {
           await sleep(30);
           expect(memory.played).toHaveLength(1);
         }
+
         await app.stop();
       },
     );
@@ -719,13 +747,16 @@ describe("offline Next", { timeout: 30_000 }, () => {
       const requests = one.fileRequests();
       await ends(app, from.id, () => {
         if (change === "lost before the end") mediaFile(to.id)!.delete();
+
         if (change === "truncated before the end") mediaFile(to.id)!.writeSync("x");
       });
+
       if (change === "removed during the countdown") {
         expect(app.upNextState.get()).not.toBeNull();
         await app.removeDownload(to.id);
         vi.advanceTimersByTime(1_000);
       }
+
       if (change === "truncated at countdown completion") {
         expect(app.upNextState.get()).toMatchObject({ seconds: 10 });
         vi.advanceTimersByTime(9_000);
@@ -733,6 +764,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
         mediaFile(to.id)!.writeSync("x");
         vi.advanceTimersByTime(1_000);
       }
+
       expect(app.upNextState.get()).toBeNull();
       vi.advanceTimersByTime(20_000);
       app.playUpNext();
@@ -765,6 +797,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
     },
     "the ended copy is removed": ({ app, from }) => app.removeDownload(from.id),
   };
+
   for (const [change, make] of Object.entries(changes)) {
     it(`ends the countdown and plays nothing more when ${change}`, async () => {
       const copies = await pair();
@@ -821,6 +854,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
       await app.remove(a, { keepHistory: false });
       const stored = doc();
       const row = stored.items.find((each: { id: string }) => each.id === from.id);
+
       if (continuation === undefined) delete row.continuation;
       else row.continuation = continuation;
       new DiskFile(native.root, "documents", "downloads.json").writeSync(JSON.stringify(stored));

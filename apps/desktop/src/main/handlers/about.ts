@@ -29,9 +29,12 @@ export function aboutHandlers({
       Effect.tryPromise({
         try: async () => {
           const text = exporter.textOf(id);
+
           if (text === null) throw new Error("The preview has expired.");
           const parent = window();
+
           if (!parent) return false;
+
           // In the interface language: what the system draws around it follows the system's.
           const selected = await dialog.showSaveDialog(parent, {
             title: t("Save diagnostics"),
@@ -40,8 +43,10 @@ export function aboutHandlers({
             filters: [{ name: t("Text"), extensions: ["txt"] }],
             properties: ["showOverwriteConfirmation"],
           });
+
           if (selected.canceled || !selected.filePath) return false;
           await writeFile(selected.filePath, text, "utf8");
+
           return true;
         },
         catch: () =>

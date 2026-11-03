@@ -50,11 +50,15 @@ export function subtitlesOfCopy(
 }
 
 const Stored = lazy(() => SavedSubtitle().merge({ "resultKey?": "string <= 64" }));
+
 type Stored = Infer<typeof Stored>;
+
 export const SAVED_SUBTITLES_TABLE = "saved_subtitles";
 export const SUBTITLE_RESULTS_TABLE = "saved_subtitle_results";
+
 /** Which bytes each result was saved for, by `FileProof`; a copy takes it only for those. */
 export const SUBTITLE_PROOFS_TABLE = "saved_subtitle_proofs";
+
 /** The proof key of a selected row without a result key, as a file track's timing. */
 const NO_RESULT = "";
 
@@ -139,101 +143,136 @@ export const savedSubtitlesLayer = Layer.effect(
   SavedSubtitles,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return closed(opened.failure);
+
     return yield* attempt(() => {
       const { db } = opened;
       prepareSavedSubtitles(db);
+
       const select = db.prepare(`select saved from saved_subtitles
         where account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`);
+
       const write = db.prepare(`insert into saved_subtitles
         (account, kind, id, source_stamp, listing_key, saved) values (?, ?, ?, ?, ?, ?)
         on conflict (account, kind, id) do update set source_stamp = excluded.source_stamp,
         listing_key = excluded.listing_key, saved = excluded.saved`);
+
       const remove = db.prepare(`delete from saved_subtitles
         where account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?`);
+
       const cached = db.prepare(`select saved from saved_subtitle_results where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? and result_key = ?`);
+
       const rememberResult = db.prepare(`insert into saved_subtitle_results
         (account, kind, id, source_stamp, listing_key, result_key, saved) values (?, ?, ?, ?, ?, ?, ?)
         on conflict (account, kind, id, source_stamp, listing_key, result_key)
         do update set saved = excluded.saved`);
+
       const pruneResults = db.prepare(`delete from saved_subtitle_results where rowid in (
         select rowid from saved_subtitle_results where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?
         order by rowid desc limit -1 offset 8)`);
+
       const touchResult = db.prepare(`delete from saved_subtitle_results where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? and result_key = ?`);
+
       const removeResults = db.prepare(`delete from saved_subtitle_results where
         account = ? and kind = ? and id = ? and (
           (source_stamp = ? and listing_key = ?) or not exists (
             select 1 from saved_subtitles where account = ? and kind = ? and id = ?
           )
         )`);
+
       const selectProof = db.prepare(`select proof from saved_subtitle_proofs where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? and result_key = ?`);
+
       const writeProof = db.prepare(`insert into saved_subtitle_proofs
         (account, kind, id, source_stamp, listing_key, result_key, proof) values (?, ?, ?, ?, ?, ?, ?)
         on conflict (account, kind, id, source_stamp, listing_key, result_key)
         do update set proof = excluded.proof`);
+
       const removeProof = db.prepare(`delete from saved_subtitle_proofs where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? and result_key = ?`);
+
       const removeProofs = db.prepare(
         `delete from saved_subtitle_proofs where account = ? and kind = ? and id = ?`,
       );
+
       const removeObsoleteProofs = db.prepare(`delete from saved_subtitle_proofs where
         account = ? and kind = ? and id = ? and (source_stamp != ? or listing_key != ?)`);
+
       const proofOf = (file: SubtitleFile, key: string) => {
         const row = selectProof.get(...identity(file), key);
+
         if (!row) return null;
+
         try {
           const parsed = Proof()(JSON.parse(String(row.proof)));
+
           return parsed instanceof type.errors ? null : parsed;
         } catch {
           return null;
         }
       };
+
       const selectResults = db.prepare(`select result_key, saved from saved_subtitle_results where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ? order by rowid`);
+
       const removeAll = db.prepare(
         `delete from saved_subtitles where account = ? and kind = ? and id = ?`,
       );
+
       const removeAllResults = db.prepare(
         `delete from saved_subtitle_results where account = ? and kind = ? and id = ?`,
       );
+
       const removeObsoleteResults = db.prepare(`delete from saved_subtitle_results where
         account = ? and kind = ? and id = ? and (source_stamp != ? or listing_key != ?)`);
+
       const identity = (file: SubtitleFile) =>
         [file.account, file.kind, file.id, file.sourceStamp, file.listingKey] as const;
+
       const read = (file: SubtitleFile): Stored | null => {
         const row = select.get(...identity(file));
+
         if (!row) return null;
+
         try {
           const parsed = Stored()(JSON.parse(String(row.saved)));
+
           return parsed instanceof type.errors ? null : parsed;
         } catch {
           return null;
         }
       };
+
       /** A result as the cache keeps it: cues, timing and key. Whether it shows is the selection's. */
       const result = (saved: Stored): SavedSubtitle => ({
         timing: saved.timing,
         subtitle: saved.subtitle,
         ...defined({ selection: saved.resultKey || undefined }),
       });
+
       const visible = (saved: Stored | null): SavedSubtitle | null =>
         saved
           ? { ...result(saved), ...defined({ shown: saved.shown === false ? false : undefined }) }
           : null;
+
       const cachedResult = (file: SubtitleFile, key: string): SavedSubtitle | null => {
         const row = cached.get(...identity(file), key);
+
         if (!row) return null;
+
         try {
           const parsed = SavedSubtitle()(JSON.parse(String(row.saved)));
+
           return parsed instanceof type.errors ? null : parsed;
         } catch {
           return null;
         }
       };
+
       /**
        * Saves the file's selected row. `proved` says which bytes its cues and timing are of now,
        * by its result key; without it, what is proven of it stays as it was.
@@ -249,11 +288,15 @@ export const savedSubtitlesLayer = Layer.effect(
         transaction(db, () => {
           removeObsoleteResults.run(...identity(file));
           removeObsoleteProofs.run(...identity(file));
+
           if (proved) {
             removeProof.run(...identity(file), key);
+
             if (proof !== null) writeProof.run(...identity(file), key, proof);
           }
+
           write.run(...identity(file), JSON.stringify(checked));
+
           if (checked.resultKey) {
             touchResult.run(...identity(file), checked.resultKey);
             rememberResult.run(
@@ -265,6 +308,7 @@ export const savedSubtitlesLayer = Layer.effect(
           }
         });
       };
+
       return {
         read: (file: SubtitleFile) => attempt(() => visible(read(file))),
         result: (file: SubtitleFile, key: string) => attempt(() => cachedResult(file, key)),
@@ -300,6 +344,7 @@ export const savedSubtitlesLayer = Layer.effect(
         ) =>
           attempt(() => {
             const previous = read(file);
+
             if (selection !== undefined && previous?.resultKey !== selection)
               throw new Error("The selected subtitle changed before its timing was saved.");
             save(file, { ...previous, timing, subtitle: previous?.subtitle ?? null }, { proof });
@@ -307,13 +352,18 @@ export const savedSubtitlesLayer = Layer.effect(
         show: (file: SubtitleFile, selection?: string) =>
           attempt(() => {
             const previous = read(file);
+
             if (previous?.subtitle && previous.resultKey === selection) {
               // Only `false` is stored: a row without the mark shows.
               const { shown, ...row } = previous;
+
               if (shown === false) save(file, row);
+
               return;
             }
+
             const held = selection ? cachedResult(file, selection) : null;
+
             if (!selection || !held?.subtitle)
               throw new Error("That subtitle is no longer saved for this file.");
             save(file, { timing: held.timing, subtitle: held.subtitle, resultKey: selection });
@@ -321,6 +371,7 @@ export const savedSubtitlesLayer = Layer.effect(
         hide: (file: SubtitleFile) =>
           attempt(() => {
             const previous = read(file);
+
             if (previous?.subtitle && previous.shown !== false)
               save(file, { ...previous, shown: false });
           }),
@@ -333,6 +384,7 @@ export const savedSubtitlesLayer = Layer.effect(
             /** Whether the result of `key` was saved for the very bytes the copy holds. */
             const proven = (key: string) => {
               const proof = proofOf(from, key);
+
               return (
                 proof !== null &&
                 proof.size === bytes.size &&
@@ -341,20 +393,27 @@ export const savedSubtitlesLayer = Layer.effect(
                 )
               );
             };
+
             const row = select.get(...identity(from));
+
             const selected =
               row && proven(read(from)?.resultKey ?? NO_RESULT) ? String(row.saved) : null;
+
             const results = selectResults
               .all(...identity(from))
               .filter((each) => proven(String(each.result_key)));
+
             transaction(db, () => {
               removeAll.run(to.account, to.kind, to.id);
               removeAllResults.run(to.account, to.kind, to.id);
+
               if (selected !== null) write.run(...identity(to), selected);
+
               for (const each of results) {
                 rememberResult.run(...identity(to), String(each.result_key), String(each.saved));
               }
             });
+
             return selected !== null || results.length > 0;
           }),
         forget: (file: SubtitleFile) =>
@@ -373,6 +432,7 @@ export const savedSubtitlesLayer = Layer.effect(
 
 function closed(detail: string): SavedSubtitles["Service"] {
   const fail = unavailable(detail);
+
   return {
     read: () => fail,
     result: () => fail,

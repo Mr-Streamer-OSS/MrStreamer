@@ -19,17 +19,22 @@ const properties: BuildProperties = {
   arch: "x64",
   distribution: "direct",
 };
+
 const { start, servers } = analyticsFixture(properties);
+
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 1000; i++) {
     if (await check()) return;
     await pause(5);
   }
+
   throw new Error("Lifecycle observation did not settle.");
 }
+
 function versions(events: CaptureEvent[]) {
   return events.filter((event) => event.event === "app_version_observed");
 }
+
 async function observed(session: Awaited<ReturnType<typeof start>>) {
   session.owner.setForeground(true);
   await until(
@@ -80,6 +85,7 @@ describe("foreground version lifecycle", () => {
   it("observes same-day upgrades, downgrades, re-upgrades and build/prerelease changes without recounting activity", async () => {
     const store = memoryStore();
     const history: CaptureEvent[] = [];
+
     const sequence = [
       { app_version: "0.0.18" },
       { app_version: "0.0.19" },
@@ -88,16 +94,19 @@ describe("foreground version lifecycle", () => {
       { app_version: "0.0.19-nightly.20261023.1", build_channel: "nightly" as const },
       { app_version: "0.0.19-nightly.20261023.1", build_channel: "unknown" as const },
     ];
+
     for (const build of sequence) {
       const session = await start({ store, properties: build });
       await observed(session);
       await session.owner.close();
       history.push(...session.events);
     }
+
     expect(history.filter((event) => event.event === "app_active_day")).toHaveLength(1);
     expect(new Set(history.map((event) => event.distinct_id)).size).toBe(1);
     const arrivals = versions(history);
     expect(arrivals).toHaveLength(sequence.length);
+
     for (let i = 1; i < arrivals.length; i++)
       expect(arrivals[i]?.properties).toMatchObject({
         observation_kind: "transition",
@@ -120,6 +129,7 @@ describe("foreground version lifecycle", () => {
         lastDay: new Date().toISOString().slice(0, 10),
         pending: [],
       });
+
       const session = await start({ store });
       await observed(session);
       expect(session.events).toHaveLength(1);
@@ -175,18 +185,21 @@ describe("foreground version lifecycle", () => {
   it("aborts an active version body and clears it permanently when Privacy is disabled", async () => {
     const store = memoryStore();
     let active: AbortSignal | undefined;
+
     const session = await start({
       store,
       transport: {
         send: async (event, signal) => {
           if (event.event !== "app_version_observed") return "accepted";
           active = signal;
+
           return new Promise((resolve) =>
             signal.addEventListener("abort", () => resolve("retry"), { once: true }),
           );
         },
       },
     });
+
     session.owner.setForeground(true);
     await until(() => active !== undefined);
     await session.owner.configure(false);
@@ -207,6 +220,7 @@ describe("foreground version lifecycle", () => {
         throw new Error("private storage detail");
       },
     };
+
     const session = await start({ store });
     session.owner.setForeground(true);
     await until(async () => (await session.owner.settings()).transport === "unavailable");
@@ -235,6 +249,7 @@ describe("foreground version lifecycle", () => {
       const directory = await tempDir();
       const id = randomUUID();
       const timestamp = new Date().toISOString();
+
       const event = {
         uuid: randomUUID(),
         distinct_id: id,
@@ -247,6 +262,7 @@ describe("foreground version lifecycle", () => {
           $geoip_disable: true,
         },
       };
+
       await writeFile(
         join(directory, "analytics.json"),
         JSON.stringify({
@@ -279,18 +295,21 @@ describe("foreground version lifecycle", () => {
   it("bounds offline lifecycle work by shared count and bytes and expires it after seven days", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const store = memoryStore();
+
     for (let i = 0; i < 70; i++) {
       const session = await start({
         store,
         properties: { app_version: `0.0.${i}` },
         transport: { send: async () => "not_sent" },
       });
+
       session.owner.setForeground(true);
       await until(
         async () => (await store.load())?.lifecycle?.baseline?.app_version === `0.0.${i}`,
       );
       await session.owner.close();
     }
+
     const kept = await store.load();
     expect(kept!.pending.length + kept!.lifecycle!.pending.length).toBeLessThanOrEqual(64);
     expect(Buffer.byteLength(JSON.stringify(kept))).toBeLessThanOrEqual(128 * 1024);
@@ -306,13 +325,16 @@ describe("loopback lifecycle delivery", () => {
   it("retains first/day/version and actual old queued observations through refused connections and restart with identical bodies", async () => {
     const server = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
+
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
       bodies.push(Buffer.concat(chunks).toString());
       res.end("ok");
     });
+
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
+
     if (!address || typeof address === "string") throw new Error("Missing loopback port.");
     const transport = localCapture(`http://127.0.0.1:${address.port}/i/v0/e/`)!;
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -331,6 +353,7 @@ describe("loopback lifecycle delivery", () => {
     expect(before!.lifecycle!.pending[0]?.attempts).toBe(0);
     const bodies: string[] = [];
     const expected: string[] = [];
+
     const recorder: CaptureTransport = {
       kind: "local",
       send: async (event, signal) => {
@@ -338,7 +361,9 @@ describe("loopback lifecycle delivery", () => {
         return transport.send(event, signal);
       },
     };
+
     await new Promise<void>((resolve) => server.listen(address.port, "127.0.0.1", resolve));
+
     for (const event of [
       ...before!.pending.map((item) => item.event),
       ...before!.lifecycle!.pending.map((item) => item.event),
@@ -346,6 +371,7 @@ describe("loopback lifecycle delivery", () => {
       await recorder.send(event, new AbortController().signal);
       expected.push(bodies.at(-1)!);
     }
+
     bodies.length = 0;
     const restarted = await start({ dataDir: directory, store, transport });
     await until(
@@ -369,18 +395,23 @@ describe("loopback lifecycle delivery", () => {
 
   it("allows at most three ambiguous body deliveries per UUID, retaining exact bytes across restart", async () => {
     const bodies: string[] = [];
+
     const server = createServer(async (req) => {
       const chunks: Buffer[] = [];
+
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
       bodies.push(Buffer.concat(chunks).toString());
     });
+
     servers.push(server);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
+
     if (!address || typeof address === "string") throw new Error("No port.");
     const transport = localCapture(`http://127.0.0.1:${address.port}/i/v0/e/`)!;
     vi.useFakeTimers({ toFake: ["Date"] });
     const store = memoryStore();
+
     for (let attempt = 0; attempt < 3; attempt++) {
       const session = await start({ store, transport });
       session.owner.setForeground(true);
@@ -394,17 +425,23 @@ describe("loopback lifecycle delivery", () => {
       await session.owner.close();
       vi.setSystemTime(Date.now() + 310000);
     }
+
     const grouped = new Map<string, string[]>();
+
     for (const body of bodies) {
       const event = CaptureEvent()(JSON.parse(body));
+
       if (event instanceof type.errors) throw new Error("Invalid wire.");
       grouped.set(event.uuid, [...(grouped.get(event.uuid) ?? []), body]);
     }
+
     expect(grouped.size).toBe(3);
+
     for (const copies of grouped.values()) {
       expect(copies).toHaveLength(3);
       expect(new Set(copies).size).toBe(1);
     }
+
     expect((await store.load())?.pending).toEqual([]);
     expect((await store.load())?.lifecycle?.pending).toEqual([]);
   }, 20000);

@@ -10,30 +10,39 @@ import type { SubtitleTitle } from "../src/downloaded-subtitles.ts";
 const port = nativePlayer();
 const keychain = new Map<string, string>();
 let locked = false;
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
+
 vi.mock("expo-secure-store", () =>
   keychainStore(() => {
     if (locked) throw new Error("The Keychain is locked");
+
     return keychain;
   }),
 );
+
 const { native } = await import("./native-files.ts");
 const { File, Directory, Paths } = await import("expo-file-system");
+
 const online = {
   ...(await import("../src/downloaded-subtitles.ts")),
   ...(await import("../src/online-subtitles.ts")),
 };
+
 const { play, stop, trackChoices } = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
 
 const SRT =
   "1\n00:00:01,000 --> 00:00:04,000\nHello there\n\n2\n00:00:05,000 --> 00:00:07,000\nGoodbye\n";
+
 const requests: URL[] = [];
 let answer: (url: URL) => Response | Promise<Response>;
 
 const searchReply = (tmdbId: number, kind: "movie" | "tv", subtitles: unknown[]) =>
   Response.json({ status: true, results: [{ tmdb_id: tmdbId, type: kind }], subtitles });
+
 const movieResult = {
   language: "EN",
   release_name: "Movie.2001.1080p",
@@ -49,6 +58,7 @@ const movie = () =>
     title: "Movie",
     year: 2001,
   });
+
 const item = (subtitles = movie()) => ({
   id: "sub-1:m1",
   subscriptionId: "sub-1",
@@ -59,6 +69,7 @@ const item = (subtitles = movie()) => ({
   versions: false,
   subtitles,
 });
+
 const open = (playing: ReturnType<typeof item>) =>
   play(
     playing,
@@ -73,7 +84,9 @@ const open = (playing: ReturnType<typeof item>) =>
 /** Searches and chooses the first result for `title`, as Watch's sheets would. */
 async function chooseFirst(title: SubtitleTitle) {
   const found = await online.findSubtitles(title);
+
   if (found?.kind !== "found") throw new Error(`Search: ${JSON.stringify(found)}`);
+
   return online.chooseSubtitle(title, found.results[0]!.id);
 }
 
@@ -82,6 +95,7 @@ beforeEach(async () => {
   keychain.clear();
   requests.length = 0;
   const folder = new Directory(Paths.document, "online-subtitles");
+
   if (folder.exists) folder.delete();
   preferences.updateMediaPreferences("titleLanguage", "nl");
   preferences.updateMediaPreferences("subtitles", { kind: "forced-only" });
@@ -92,14 +106,17 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", async (input: URL | string) => {
     const url = new URL(input);
     requests.push(url);
+
     return answer(url);
   });
   await online.saveSubtitleKey(" my-key ");
 });
+
 afterEach(() => {
   vi.unstubAllGlobals();
   native.sync = null;
   locked = false;
+
   return stop();
 });
 
@@ -137,6 +154,7 @@ describe("searching SubDL", () => {
 
   it("asks by title and year without a TMDB id, in the viewer's subtitle language first", async () => {
     preferences.updateMediaPreferences("subtitles", { kind: "language", language: "de" });
+
     const untitled = online.subtitleTitle({
       subscriptionId: "sub-1",
       id: "m9",
@@ -144,12 +162,14 @@ describe("searching SubDL", () => {
       title: "Some Movie",
       year: 1999,
     });
+
     const titled = (name?: string, year?: number) => () =>
       Response.json({
         status: true,
         results: [{ type: "movie", name, year }],
         subtitles: [{ ...movieResult, language: "DE" }],
       });
+
     answer = titled("Some movie", 1999);
     await open({ ...item(untitled), id: "sub-1:m9" });
     const found = await online.findSubtitles(untitled);
@@ -159,6 +179,7 @@ describe("searching SubDL", () => {
     expect(search.get("year")).toBe("1999");
     expect(search.has("tmdb_id")).toBe(false);
     expect(search.get("languages")).toBe("DE,NL,EN");
+
     // SubDL broadens a title it can't match: another title, year or none is another movie's.
     for (const broadened of [
       titled("Some Other Movie", 1999),
@@ -180,6 +201,7 @@ describe("searching SubDL", () => {
       year: null,
       episode: { season: 2, number: 3 },
     });
+
     answer = () =>
       searchReply(1399, "tv", [
         {
@@ -221,6 +243,7 @@ describe("searching SubDL", () => {
     ]);
     expect(requests.at(-1)!.searchParams.get("season_number")).toBe("2");
     expect(requests.at(-1)!.searchParams.get("episode_number")).toBe("3");
+
     // Without a TMDB id the series is known by its name alone, whatever year SubDL gives it.
     const untitled = online.subtitleTitle({
       subscriptionId: "sub-1",
@@ -230,6 +253,7 @@ describe("searching SubDL", () => {
       year: 2011,
       episode: { season: 2, number: 3 },
     });
+
     answer = () =>
       Response.json({
         status: true,
@@ -244,6 +268,7 @@ describe("searching SubDL", () => {
 
   it("names each service failure without its message, and asks for nothing without a key", async () => {
     const playing = await openTitle();
+
     for (const [status, reason] of [
       [403, "credentials"],
       [429, "quota"],
@@ -252,6 +277,7 @@ describe("searching SubDL", () => {
       answer = () => new Response("https://api.subdl.com/?api_key=my-key", { status });
       expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason });
     }
+
     answer = () =>
       Response.json({
         status: true,
@@ -273,8 +299,10 @@ describe("searching SubDL", () => {
     locked = true;
     expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "keychain" });
     locked = false;
+
     const from = (where: string, response: Response) =>
       Object.defineProperty(response, "url", { value: where });
+
     answer = () => from("https://elsewhere.example/api", searchReply(550, "movie", [movieResult]));
     expect(await online.findSubtitles(playing)).toEqual({ kind: "failed", reason: "unavailable" });
     answer = (url) =>
@@ -291,6 +319,7 @@ describe("searching SubDL", () => {
     const first = await openTitle();
     vi.stubGlobal("fetch", async (input: URL | string) => {
       await held;
+
       return answer(new URL(input));
     });
     const searching = online.findSubtitles(first);
@@ -342,6 +371,7 @@ describe("a chosen result", () => {
       timing: { offset: 1.5, speed: 1 },
     });
     expect(requests.length).toBe(asked);
+
     // A downloaded copy of the version is the same version.
     const copy = online.subtitleTitle({
       subscriptionId: "sub-1",
@@ -350,6 +380,7 @@ describe("a chosen result", () => {
       title: "Movie",
       year: 2001,
     });
+
     await open({ ...item(copy), id: "copy:7", subscriptionId: null as never });
     expect(online.shownSubtitle()?.title).toBe(copy);
   });
@@ -371,6 +402,7 @@ describe("a chosen result", () => {
       title: "Movie",
       year: 2001,
     });
+
     await open({ ...item(other), id: "sub-1:m2" });
     expect(online.shownSubtitle()).toBeNull();
     expect(online.keptSubtitle(other)).toBeNull();
@@ -378,17 +410,21 @@ describe("a chosen result", () => {
 
   it("takes WebVTT as it is, and refuses an empty, crowded or oversized download", async () => {
     const playing = await openTitle();
+
     const serving = (file: () => Response) => {
       answer = (url) =>
         url.hostname === "api.subdl.com" ? searchReply(550, "movie", [movieResult]) : file();
     };
+
     serving(() => new Response("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n"));
     expect(await chooseFirst(playing)).toEqual({ kind: "shown" });
     serving(() => new Response(zipSync({ "readme.txt": strToU8("none") })));
     expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
+
     const crowded = Object.fromEntries(
       Array.from({ length: 65 }, (_, i) => [`${i}.txt`, strToU8("x")]),
     );
+
     serving(() => new Response(zipSync({ ...crowded, "a.srt": strToU8(SRT) })));
     expect(await chooseFirst(playing)).toEqual({ kind: "failed", reason: "unsupported" });
     serving(() => new Response(SRT, { headers: { "content-length": String(11 * 1024 * 1024) } }));
@@ -437,12 +473,15 @@ describe("the file's own subtitles", () => {
       if (choice.kind === "subtitles")
         tracks = { ...tracks, selectedSubtitleId: choice.track?.id ?? null };
       port.tracks = tracks;
+
       return { kind: "requested" };
     });
   });
+
   const withTracks = async () => {
     const playing = await openTitle();
     const identity = port.identity();
+
     const subtitles: ObservedSubtitleTrack[] = [0, 1].map((i) => ({
       ...identity,
       revision: 1,
@@ -454,6 +493,7 @@ describe("the file's own subtitles", () => {
       isPlayable: true,
       forcedOnly: false,
     }));
+
     tracks = {
       ...identity,
       revision: 1,
@@ -465,8 +505,10 @@ describe("the file's own subtitles", () => {
     };
     port.tracks = tracks;
     await vi.waitFor(async () => expect(await checked()).toEqual(["English"]));
+
     return playing;
   };
+
   const checked = async () =>
     ((await trackChoices("subtitles")) ?? [])
       .filter((each) => each.selected)
@@ -495,20 +537,25 @@ describe("the file's own subtitles", () => {
     const playing = await withTracks();
     const found = await online.findSubtitles(playing);
     const release = holdDownloads();
+
     const choosing = online.chooseSubtitle(
       playing,
       found?.kind === "found" ? found.results[0]!.id : "",
     );
+
     let acknowledge!: () => void;
     const acknowledged = new Promise<void>((resolve) => (acknowledge = resolve));
     const select = port.selectObservedTrackAsync.getMockImplementation()!;
     port.selectObservedTrackAsync.mockImplementationOnce(async (...args) => {
       await acknowledged;
+
       return select(...args);
     });
+
     const picking = ((await trackChoices("subtitles")) ?? [])
       .find((each) => each.label === "German")
       ?.choose();
+
     release();
     expect(await choosing).toBeNull();
     acknowledge();
@@ -542,10 +589,12 @@ describe("the file's own subtitles", () => {
         : new Response(SRT);
     const found = await online.findSubtitles(playing);
     const release = holdDownloads();
+
     const choosing = online.chooseSubtitle(
       playing,
       found?.kind === "found" ? found.results[0]!.id : "",
     );
+
     expect(online.showKeptSubtitle(playing)).toBe(true);
     release();
     expect(await choosing).toBeNull();
@@ -556,10 +605,12 @@ describe("the file's own subtitles", () => {
     const playing = await withTracks();
     const found = await online.findSubtitles(playing);
     const release = holdDownloads();
+
     const choosing = online.chooseSubtitle(
       playing,
       found?.kind === "found" ? found.results[0]!.id : "",
     );
+
     await ((await trackChoices("subtitles")) ?? [])
       .find((each) => each.label === "German")
       ?.choose();
@@ -574,6 +625,7 @@ describe("the file's own subtitles", () => {
 describe("keeping", () => {
   it("keeps the 100 versions changed last", async () => {
     const { utimesSync } = await import("node:fs");
+
     const keep = (id: string) => {
       const title = online.subtitleTitle({
         subscriptionId: "sub-1",
@@ -582,6 +634,7 @@ describe("keeping", () => {
         title: "M",
         year: null,
       });
+
       online.playSubtitles(title);
       online.showDownloaded(title, {
         service: "subdl",
@@ -589,12 +642,15 @@ describe("keeping", () => {
         release: id,
         cues: [{ start: 1, end: 2, text: "x" }],
       });
+
       return title;
     };
+
     const first = keep("v0");
     const folder = new Directory(Paths.document, "online-subtitles");
     const [oldest] = folder.list();
     utimesSync(oldest!.uri.replace("file://", ""), new Date(2000, 0, 1), new Date(2000, 0, 1));
+
     for (let i = 1; i <= 100; i++) keep(`v${i}`);
     expect(folder.list()).toHaveLength(100);
     online.playSubtitles(first);
@@ -625,10 +681,12 @@ describe("privacy", () => {
     // A download under way, as for a copy that plays on without its provider, keeps nothing.
     const found = await online.findSubtitles(playing);
     const release = holdDownloads();
+
     const choosing = online.chooseSubtitle(
       playing,
       found?.kind === "found" ? found.results[0]!.id : "",
     );
+
     online.eraseSubtitles("sub-1");
     release();
     expect(await choosing).toBeNull();
@@ -645,6 +703,7 @@ describe("a refused save", () => {
       if (operation === "move-after-delete" && path.includes("online-subtitles"))
         throw new Error("Disk full");
     };
+
     expect(online.retimeSubtitle(playing, { offset: 5, speed: 1 })).toBe(false);
     expect(online.shownSubtitle()?.timing.offset).toBe(0);
     native.sync = null;
@@ -663,6 +722,7 @@ function holdDownloads() {
   const answering = answer;
   answer = (url) =>
     url.hostname === "dl.subdl.com" ? held.then(() => answering(url)) : answering(url);
+
   return release;
 }
 
@@ -670,5 +730,6 @@ function holdDownloads() {
 async function openTitle() {
   const playing = item();
   await open(playing);
+
   return playing.subtitles;
 }

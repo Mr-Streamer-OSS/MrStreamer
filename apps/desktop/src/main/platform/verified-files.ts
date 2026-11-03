@@ -64,25 +64,32 @@ export const verifiedFilesLayer = Layer.effect(
   VerifiedFiles,
   Effect.gen(function* () {
     const opened = yield* Database;
+
     if ("failure" in opened) return closed(opened.failure);
+
     return yield* attempt(() => {
       const { db } = opened;
       prepareVerifiedFiles(db);
+
       const read = db.prepare(
         "select facts from verified_files where account = ? and source_stamp = ?",
       );
+
       const write = db.prepare(`insert into verified_files (account, kind, id, source_stamp, facts)
         values (?, ?, ?, ?, ?) on conflict (account, kind, id) do update set
         source_stamp = excluded.source_stamp, facts = excluded.facts`);
+
       const remove = db.prepare(
         "delete from verified_files where account = ? and kind = ? and id = ? and json_extract(facts, '$.fileKey') = ?",
       );
+
       return {
         read: (account: string, sourceStamp: string) =>
           attempt(() =>
             read.all(account, sourceStamp).flatMap((row) => {
               try {
                 const facts = Facts()(JSON.parse(String(row.facts)));
+
                 return facts instanceof type.errors ? [] : [facts];
               } catch {
                 return [];
@@ -110,5 +117,6 @@ export const verifiedFilesLayer = Layer.effect(
 
 function closed(detail: string): VerifiedFiles["Service"] {
   const fail = unavailable(detail);
+
   return { read: () => fail, remember: () => fail, forget: () => fail };
 }

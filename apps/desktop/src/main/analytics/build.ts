@@ -9,6 +9,7 @@ export function analyticsReleaseConfiguration(options: {
   projectToken: string | undefined;
 }): { releaseBuild: boolean; capture: ProductionCaptureConfig | null } {
   const { host, projectToken } = options;
+
   if (
     !options.releaseBuild ||
     (host !== "https://eu.i.posthog.com" && host !== "https://us.i.posthog.com") ||
@@ -16,6 +17,7 @@ export function analyticsReleaseConfiguration(options: {
     !/^phc_[A-Za-z0-9_-]+$/.test(projectToken)
   )
     return { releaseBuild: false, capture: null };
+
   return {
     releaseBuild: true,
     capture: {
@@ -37,6 +39,7 @@ export function analyticsBuild(options: {
   store: boolean;
 }): Omit<BuildProperties, "update_channel"> {
   const version = parseVersion(options.version);
+
   return {
     app_version: version ? options.version.replace(/^v/, "") : "unknown",
     build_channel:

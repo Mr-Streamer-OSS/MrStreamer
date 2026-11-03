@@ -28,6 +28,7 @@ import {
 /** The app started on `dataDir`, with the services a viewer's personal state goes through. */
 async function started(dataDir: string) {
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+
   return {
     dispose: () => runtime.dispose(),
     profiles: await promised(runtime, Profiles),
@@ -56,6 +57,7 @@ async function personal(app: App) {
 /** Opens the database as another copy of the app would. */
 function onDisk<A>(dataDir: string, use: (db: DatabaseSync) => A): A {
   const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
   try {
     return use(db);
   } finally {
@@ -110,13 +112,17 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
   it("answers no profile while its registry can't be written, and imports the legacy lists once", async () => {
     const dataDir = await tempDir();
     const provider = await fakeProvider();
+
     // A subscription and the lists preferences.json kept before the viewing record and profiles.
     const login = runtimeFor(
       Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
     );
+
     const subscriptionId = (await (await promised(login, Subscriptions)).add(demoLogin(provider)))
       .id;
+
     await login.dispose();
+
     const legacy = JSON.stringify({
       volume: 0.4,
       muted: false,
@@ -124,11 +130,13 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
       lastCategoryId: null,
       favouriteChannelIds: ["2014", "2015"],
     });
+
     await writeFile(join(dataDir, "preferences.json"), legacy);
 
     // Another copy of the app holds the write lock for all of the upgraded start.
     const holder = new DatabaseSync(join(dataDir, "mrstreamer.db"));
     let refused: App;
+
     try {
       holder.exec("pragma journal_mode = wal; begin immediate");
       refused = await started(dataDir);

@@ -23,6 +23,7 @@ import { fakeStore, removeArtifacts, writeArtifact, type Built } from "./fake-st
 // check what reaches it: which requests, in what order, and with what in them.
 
 const COMMIT = "5f3a9c".padEnd(40, "0");
+
 const NOTES = [
   "**Stable** · built from `5f3a9c000000`",
   "",
@@ -34,6 +35,7 @@ const NOTES = [
   "",
   "**Full Changelog**: https://github.com/owner/app/compare/v0.0.4...v0.0.5",
 ].join("\n");
+
 const WHATS_NEW = "- Show the subtitle where a movie skips to\n- Keep the guide's place";
 
 /** The published stable release `version`, as the Store job's first step hands it on. */
@@ -55,6 +57,7 @@ function released(version = "0.0.5"): StoreRelease {
 function checked(version = "0.0.5", built: Partial<Built> = {}): CheckedRelease {
   const release = released(version);
   const { dir } = writeArtifact({ ...release, ...built });
+
   return { ...release, package: verifyPackage(release, dir) };
 }
 
@@ -64,13 +67,16 @@ function checked(version = "0.0.5", built: Partial<Built> = {}): CheckedRelease 
  */
 function relisted(listings: unknown, title?: string): unknown {
   if (!isRecord(listings)) return listings;
+
   return Object.fromEntries(
     Object.entries(listings).map(([language, listing]) => {
       if (!isRecord(listing) || !isRecord(listing["baseListing"])) return [language, listing];
+
       const prefix =
         language === "nl-nl"
           ? "Nieuwe versie met verbeteringen en oplossingen. De volledige wijzigingen staan in het Engels op github.com/Mr-Streamer-OSS/MrStreamer/releases.\n"
           : "";
+
       return [
         language,
         {
@@ -92,7 +98,9 @@ async function refusal(attempt: Promise<unknown>): Promise<string> {
     () => new Error("It went through."),
     (reason: unknown) => reason,
   );
+
   expect(error).toBeInstanceOf(StoreError);
+
   return error instanceof Error ? error.message : "";
 }
 
@@ -106,6 +114,7 @@ function uploadedPackage(
   fileName = release.package.fileName,
 ) {
   const zip = store.uploaded("1002");
+
   return zip && readZipEntry(zip, fileName);
 }
 
@@ -120,12 +129,14 @@ function drafted(options?: Parameters<typeof fakeStore>[0]) {
   const store = fakeStore(options);
   const id = store.draft();
   store.relist("en-us", EDITS);
+
   return { store, id };
 }
 
 /** The draft `id` as a run names it to submit, with the fingerprint a preflight reads from it. */
 async function named(store: ReturnType<typeof fakeStore>, release: CheckedRelease, id: string) {
   const read = await preflight(store.access(), release, { id, metadataSha256: null });
+
   return { id, metadataSha256: read.draftMetadataSha256 };
 }
 
@@ -433,11 +444,13 @@ describe("putting a release in a draft made in Partner Center", () => {
 
     expect(problems).toEqual([]);
     expect(draftMetadataSha256).toMatch(/^[0-9a-f]{64}$/);
+
     // The package's name in the draft: its own, then the draft and the start of the fingerprint.
     const fileName = release.package.fileName.replace(
       ".msix",
       `.draft-${id}.${draftMetadataSha256?.slice(0, 16)}.msix`,
     );
+
     // Which fields the owner edited, and never what they hold.
     expect(found.slice(5)).toEqual([
       `In progress: submission ${id}, PendingCommit.`,
@@ -490,11 +503,13 @@ describe("putting a release in a draft made in Partner Center", () => {
     const { metadataSha256 } = await named(store, release, id);
 
     const draft = store.pending();
+
     for (const field of Object.keys(draft).reverse()) {
       const value = draft[field];
       delete draft[field];
       draft[field] = value;
     }
+
     expect((await named(store, release, id)).metadataSha256).toBe(metadataSha256);
 
     store.relist("en-us", { keywords: EDITS.keywords.toReversed() });
@@ -568,6 +583,7 @@ describe("putting a release in a draft made in Partner Center", () => {
     expect(message).toContain(
       "differs from what the run found, in 1 field(s): listings.en-us.baseListing.keywords. Nothing was uploaded or committed.",
     );
+
     for (const keyword of EDITS.keywords) expect(message).not.toContain(keyword);
     expect(store.writes()).toEqual([`PUT /submissions/${id}`]);
 
@@ -746,6 +762,7 @@ describe("what a failure prints", () => {
     expect(message).toContain(
       "Microsoft says: BadRequest: Bearer [hidden] with [hidden] at [address]",
     );
+
     for (const secret of store.secrets) expect(message).not.toContain(secret);
   });
 
@@ -768,6 +785,7 @@ describe("what a failure prints", () => {
 
     expect(message).toContain("was refused with HTTP 403");
     expect(message).not.toContain("blob.core");
+
     for (const secret of store.secrets) expect(message).not.toContain(secret);
   });
 });
@@ -892,6 +910,7 @@ describe("What's new in the Store", () => {
         (_, index) =>
           `* A viewer-visible change ${index} by @wout in https://github.com/owner/app/pull/${index}`,
       ).join("\n");
+
       const text = storeNotes({ version: "0.0.9", notes }, language);
       expect(text.startsWith(introduction)).toBe(true);
       expect(text).toContain("github.com/Mr-Streamer-OSS/MrStreamer/releases");
@@ -907,6 +926,7 @@ describe("What's new in the Store", () => {
 
   it("keeps to the 1500 characters the Store takes, in whole titles", () => {
     const title = "A change with a title of some length";
+
     const notes = Array.from(
       { length: 80 },
       (_, index) => `* ${title} ${index} by @wout in https://github.com/owner/app/pull/${index}`,

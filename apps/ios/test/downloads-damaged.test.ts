@@ -37,11 +37,14 @@ function foreground() {
 
 async function seriesDetails(app: App, subscriptionId: string) {
   const lists = app.titleLists();
+
   if (lists.kind !== "ready") throw new Error("No titles");
   const version = { subscriptionId, id: String(episode().series.id) };
   const title = app.titleOf(lists.index, "series", version)!;
   const details = await app.detailsOf({ ...title, ...version });
+
   if (details.kind !== "series") throw new Error("Not a series");
+
   return { version, details };
 }
 
@@ -79,6 +82,7 @@ describe("damaged downloads", { timeout: 40_000 }, () => {
     // A size iOS won't read reads as 0: that copy isn't taken for damage, so nothing removes it.
     const media = mediaFile(whole.id)!;
     native.sizeOf = (path) => (path === media.path ? 0 : undefined);
+
     try {
       foreground();
       expect(statusOf(app, whole.id)?.kind).toBe("complete");
@@ -101,6 +105,7 @@ describe("damaged downloads", { timeout: 40_000 }, () => {
 
     // The damaged one goes, its file with it, and downloads again at its whole size.
     const replaced = await app.replaceMissingDownload(movieRef(a));
+
     if (replaced.kind !== "replaced") throw new Error(`Not replaced: ${replaced.kind}`);
     expect(statusOf(app, damaged.id)).toBeUndefined();
     expect(folder(damaged.id).exists).toBe(false);

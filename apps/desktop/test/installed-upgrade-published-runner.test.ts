@@ -16,11 +16,13 @@ import {
 
 vi.mock("node:child_process", async (original) => {
   const actual = await original<typeof import("node:child_process")>();
+
   return { ...actual, spawn: vi.fn(actual.spawn) };
 });
 
 vi.mock("./e2e/installed-upgrade-windows.ts", async (original) => {
   const windows = await original<typeof import("./e2e/installed-upgrade-windows.ts")>();
+
   return {
     ...windows,
     disposableRunner: vi.fn(),
@@ -56,6 +58,7 @@ describe("the installed upgrade run before and around native installation", () =
     const candidateTag = "v0.0.12-nightly.20261013.330";
     const stableSha = "a".repeat(40);
     const candidateSha = "b".repeat(40);
+
     const pkg = (stage: "stable" | "candidate", tag: string, source: string) => ({
       stage,
       version: tag.slice(1),
@@ -72,6 +75,7 @@ describe("the installed upgrade run before and around native installation", () =
         metadata: { sha256sums: sha256, latestYml: sha256, sha512 },
       },
     });
+
     receipt = {
       repository: "owner/player",
       resolvedAt: "2026-10-13T00:01:00Z",
@@ -82,6 +86,7 @@ describe("the installed upgrade run before and around native installation", () =
       limits: ["Synthetic contract test, no native proof."],
     };
     await save();
+
     for (const pkg of receipt.packages) await writeFile(join(packages, pkg.file), setup);
     vi.stubEnv("GITHUB_REPOSITORY", receipt.repository);
     vi.stubEnv("GITHUB_SHA", "c".repeat(40));
@@ -119,10 +124,12 @@ describe("the installed upgrade run before and around native installation", () =
     receipt.packages[0].source = receipt.resolved.stableSha;
     receipt.packages[1].version = receipt.resolved.candidateTag.slice(1);
     receipt.packages[1].provenance.tag = receipt.resolved.candidateTag;
+
     for (const pkg of receipt.packages) {
       pkg.file = `${pkg.stage}-Mr-Streamer-${pkg.version}-win-x64-setup.exe`;
       await writeFile(join(packages, pkg.file), setup);
     }
+
     await save();
     const evidence = join(temp, "pair-evidence");
     await mkdir(evidence);
@@ -148,16 +155,20 @@ describe("the installed upgrade run before and around native installation", () =
         },
       ])
       .mockReturnValue([]);
+
     const pair = await installedTelemetryPair(packages, evidence, {
       executable: runner.executable,
       version: candidate.version,
       source: candidate.source,
     });
+
     await pair.select("candidate");
     pair.accepted();
+
     let rejectUninstall: (error: Error) => void = () => {
       throw new Error("Uninstaller was not called");
     };
+
     vi.mocked(uninstall).mockImplementation(
       () =>
         new Promise((_, reject) => {
@@ -165,9 +176,11 @@ describe("the installed upgrade run before and around native installation", () =
         }),
     );
     let settled = false;
+
     const closing = pair.close().finally(() => {
       settled = true;
     });
+
     const outcome = expect(closing).rejects.toThrow("owned uninstall refused");
     await Promise.resolve();
     expect(uninstall).toHaveBeenCalledWith(runner);
@@ -191,12 +204,16 @@ describe("the installed upgrade run before and around native installation", () =
     receipt.packages[0].provenance.tag = receipt.resolved.stableTag;
     receipt.packages[1].version = receipt.resolved.candidateTag.slice(1);
     receipt.packages[1].provenance.tag = receipt.resolved.candidateTag;
+
     for (const pkg of receipt.packages)
       pkg.file = `${pkg.stage}-Mr-Streamer-${pkg.version}-win-x64-setup.exe`;
     await save();
+
     const { spawn: realSpawn } =
       await vi.importActual<typeof import("node:child_process")>("node:child_process");
+
     const child = vi.mocked(spawn);
+
     try {
       for (const focused of [false, true]) {
         // Replace only the child execution boundary. This Linux test cannot own a Windows install.
@@ -216,6 +233,7 @@ describe("the installed upgrade run before and around native installation", () =
         expect(argv).not.toContain(`--expected-source=${process.env["GITHUB_SHA"]}`);
         expect(argv?.includes("--native-case=compatibility")).toBe(focused);
       }
+
       expect(install).not.toHaveBeenCalled();
     } finally {
       child.mockReset();
@@ -240,6 +258,7 @@ describe("the installed upgrade run before and around native installation", () =
     receipt.packages[1].provenance.tag = receipt.resolved.candidateTag;
     receipt.packages[0].version = "0.0.15";
     receipt.packages[0].provenance.tag = receipt.resolved.stableTag;
+
     for (const pkg of receipt.packages)
       pkg.file = `${pkg.stage}-Mr-Streamer-${pkg.version}-win-x64-setup.exe`;
     await save();
@@ -310,6 +329,7 @@ describe("the installed upgrade run before and around native installation", () =
   it("records the setup's own PID/start time and hash, and refuses a foreign parent", async () => {
     const runner = disposableRunner();
     const setupPath = join(packages, receipt.packages[0].file);
+
     const installed = {
       version: "0.0.11",
       seconds: 1,
@@ -319,7 +339,9 @@ describe("the installed upgrade run before and around native installation", () =
       appAsarSha256: sha256,
       tools: {},
     };
+
     vi.mocked(install).mockResolvedValue(installed);
+
     const child = {
       pid: 123,
       parent: process.pid,
@@ -327,6 +349,7 @@ describe("the installed upgrade run before and around native installation", () =
       path: setupPath,
       created: "2099-01-01T00:00:00Z",
     };
+
     vi.mocked(processes).mockReturnValueOnce([child]).mockReturnValue([]);
     await expect(installPublished(runner, setupPath, "0.0.11", null)).resolves.toMatchObject({
       installer: {

@@ -53,6 +53,7 @@ export async function startFakePlaylist(
 ): Promise<FakePlaylist> {
   const asked: string[] = [];
   let guideNamed = false;
+
   const hls = (file: string) =>
     readFileSync(join(import.meta.dirname, "fixtures/hls", file.replaceAll("/", "")));
 
@@ -90,6 +91,7 @@ export async function startFakePlaylist(
     asked.push(pathname);
     const [, folder = "", file = ""] = /^\/([^/]*)\/?(.*)$/.exec(pathname) ?? [];
     let body: string | Buffer | null = null;
+
     try {
       if (pathname === "/playlist.m3u") body = playlist();
       else if (pathname === "/guide.xml") body = guide(Date.now(), options.catchup ?? false);
@@ -104,11 +106,13 @@ export async function startFakePlaylist(
     } catch {
       // A file the stream doesn't have.
     }
+
     if (body === null) return response.writeHead(404).end();
     response
       .writeHead(200, { "Content-Type": TYPES[extname(pathname)] ?? "application/octet-stream" })
       .end(body);
   });
+
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
@@ -148,7 +152,9 @@ export async function startFakePlaylist(
 function guide(now: number, catchup: boolean): string {
   const time = (at: number) =>
     `${new Date(at).toISOString().replace(/[-:T]/g, "").slice(0, 14)} +0000`;
+
   const hour = 60 * 60 * 1000;
+
   const programme = (
     from: number,
     to: number,
@@ -156,9 +162,11 @@ function guide(now: number, catchup: boolean): string {
     channel: string = PLAYLIST_CHANNELS.tracks.id,
   ) =>
     `<programme start="${time(from)}" stop="${time(to)}" channel="${channel}"><title>${title}</title></programme>`;
+
   // Half hours on the catch-up channel, "Archive 0" on now, from an hour before to two after.
   const half = hour / 2;
   const slot = Math.floor(now / half) * half;
+
   const archive = catchup
     ? [-2, -1, 0, 1, 2, 3].map((at) =>
         programme(
@@ -169,5 +177,6 @@ function guide(now: number, catchup: boolean): string {
         ),
       )
     : [];
+
   return `<?xml version="1.0"?><tv>${programme(now - hour, now + hour, "Test card")}${programme(now + hour, now + 2 * hour, "Closedown")}${archive.join("")}</tv>`;
 }

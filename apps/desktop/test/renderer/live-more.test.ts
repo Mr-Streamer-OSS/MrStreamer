@@ -16,9 +16,11 @@ import { player } from "../../src/renderer/src/player/player.ts";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   act(() => {
@@ -28,11 +30,13 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
+
 /**
  * Moves the fake clock on 30 ms, past the player's short timers and the animation frame in which
  * a menu takes focus. Called after the act that rendered, so that frame is already asked for.
  */
 const settle = () => act(() => vi.advanceTimersByTimeAsync(30));
+
 const channel: LiveChannel = {
   subscriptionId: SUBSCRIPTION,
   id: "one",
@@ -50,10 +54,12 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
   ipc.reset();
   const calls: (number | string)[] = [];
   let removeSound = () => {};
+
   function Controls() {
     const [menu, setMenu] = useState<LiveMenu>(null);
     const [soundAvailable, setSoundAvailable] = useState(true);
     removeSound = () => setSoundAvailable(false);
+
     const sound: ComponentProps<typeof LiveMore>["sound"] = soundAvailable
       ? {
           audio: [
@@ -65,6 +71,7 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
           onDone: () => setMenu(null),
         }
       : null;
+
     return createElement(LiveMore, {
       menu,
       onMenu: setMenu,
@@ -75,23 +82,29 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
       quality: null,
     });
   }
+
   const mounted = bareView();
   unmount = mounted.unmount;
   await mounted.render(createElement(Controls));
   await settle();
+
   function button(name: string) {
     const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
       (each) => each.getAttribute("aria-label") === name || each.textContent === name,
     );
+
     if (!found) throw new Error(`Missing ${name}`);
+
     return found;
   }
+
   async function click(name: string) {
     await act(async () => {
       button(name).dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     });
     await settle();
   }
+
   async function key(name: string) {
     await act(async () => {
       document.activeElement?.dispatchEvent(
@@ -100,6 +113,7 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
     });
     await settle();
   }
+
   await click("More");
   expect(button("Channel up").hasAttribute("aria-pressed")).toBe(false);
   expect(button("Channel up").textContent).toContain("Up");
@@ -145,6 +159,7 @@ it("keeps mouse actions, page focus and discovery tied to More as tracks and out
     scanning: false,
     output: { kind: "local" as const },
   };
+
   await act(async () => {
     ipc.emit("output.changed", local);
   });
@@ -176,6 +191,7 @@ const qualityChannel: LiveChannel = {
     { id: "one-hd", name: "One HD", tags: ["HD"], quality: "hd" },
   ],
 };
+
 const nextChannel: LiveChannel = {
   ...channel,
   id: "two",
@@ -183,6 +199,7 @@ const nextChannel: LiveChannel = {
   title: "Two",
   variants: [{ ...channel.variants[0]!, id: "two" }],
 };
+
 const cast = {
   offers: ["cast" as const],
   airplayRoutes: false,
@@ -203,6 +220,7 @@ async function watch() {
   });
   await mounted.render(createElement(WatchScreen));
   await settle();
+
   return mounted.container;
 }
 
@@ -210,14 +228,18 @@ function named(name: string) {
   const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (each) => each.getAttribute("aria-label") === name || each.textContent === name,
   );
+
   if (!found) throw new Error(`Missing ${name}`);
+
   return found;
 }
+
 async function pressKey(key: string) {
   await act(async () => {
     const target = document.activeElement ?? window;
     const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
     target.dispatchEvent(event);
+
     // happy-dom does not perform a button's native Enter activation.
     if (key === "Enter" && !event.defaultPrevented && target instanceof HTMLButtonElement)
       target.click();
@@ -303,6 +325,7 @@ it("wheel over the Live picture zaps once per gesture and leaves menu, list, dia
   let now = 1000;
   vi.spyOn(performance, "now").mockImplementation(() => now);
   const picture = () => container.querySelector("video")?.parentElement;
+
   const roll = async (deltaY: number, target = picture(), deltaX = 0) => {
     await act(async () => {
       target?.dispatchEvent(
@@ -311,6 +334,7 @@ it("wheel over the Live picture zaps once per gesture and leaves menu, list, dia
     });
     await settle();
   };
+
   const initial = ipc.argsOf("playback.open").length;
   await roll(10);
   expect(ipc.argsOf("playback.open")).toHaveLength(initial);
@@ -318,10 +342,12 @@ it("wheel over the Live picture zaps once per gesture and leaves menu, list, dia
   await act(() => vi.advanceTimersByTimeAsync(400));
   expect(ipc.argsOf("playback.open").at(-1)?.channel.id).toBe("two");
   const once = ipc.argsOf("playback.open").length;
+
   for (let i = 0; i < 8; i++) {
     now += 100;
     await roll(120);
   }
+
   expect(ipc.argsOf("playback.open")).toHaveLength(once);
   now += 800;
   await roll(-120);
@@ -397,6 +423,7 @@ it("a pointer Quality open on a failed channel starts Down on the chosen quality
 
 it("sets a channel's subtitle timing and look under CC, and lists them greyed while a TV plays", async () => {
   ipc.reset();
+
   const teletext: SubtitleTrack = {
     id: 1,
     page: 888,
@@ -406,6 +433,7 @@ it("sets a channel's subtitle timing and look under CC, and lists them greyed wh
     forced: false,
     default: false,
   };
+
   const pictures: SubtitleTrack = {
     ...teletext,
     id: 2,
@@ -413,7 +441,9 @@ it("sets a channel's subtitle timing and look under CC, and lists them greyed wh
     format: "picture",
     label: "DVB",
   };
+
   let show = (_subtitle: SubtitleTrack | null, _shows?: readonly SubtitleFormat[] | null) => {};
+
   function Controls() {
     const [open, setOpen] = useState<LiveMenu>(null);
     const [subtitle, setSubtitle] = useState<SubtitleTrack | null>(null);
@@ -422,6 +452,7 @@ it("sets a channel's subtitle timing and look under CC, and lists them greyed wh
       setSubtitle(next);
       setShows(receiver);
     };
+
     return createElement(TrackMenus, {
       showSound: false,
       audio: [],
@@ -435,17 +466,21 @@ it("sets a channel's subtitle timing and look under CC, and lists them greyed wh
       onSubtitle: setSubtitle,
     });
   }
+
   const mounted = bareView();
   unmount = () => {
     mounted.unmount();
     setSubtitleDelay(player.element, 0);
   };
+
   await mounted.render(createElement(Controls));
   await settle();
+
   const named = (name: string) =>
     [...document.querySelectorAll<HTMLButtonElement>("button")].find(
       (each) => each.getAttribute("aria-label") === name || each.textContent === name,
     );
+
   const click = async (name: string) => {
     await act(async () => {
       named(name)!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));

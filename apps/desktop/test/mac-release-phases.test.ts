@@ -125,6 +125,7 @@ describe("timing a Mac release step", () => {
       0,
       slow.findIndex((line) => line.text.startsWith("Notarization ")),
     );
+
     const last = timePhases(1_000_000, rejected).findLast((phase) => phase.seconds !== null);
 
     expect(last).toMatchObject({ name: "DMG notary round trip", finished: false });

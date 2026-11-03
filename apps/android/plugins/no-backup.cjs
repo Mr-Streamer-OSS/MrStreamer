@@ -7,6 +7,7 @@ const path = require("node:path");
 const { withAndroidManifest, withDangerousMod } = require("expo/config-plugins");
 
 const DOMAINS = ["root", "file", "database", "sharedpref", "external"];
+
 const excluded = (section) =>
   [
     `  <${section}>`,
@@ -16,6 +17,7 @@ const excluded = (section) =>
     ).map((domain) => `    <exclude domain="${domain}" path="." />`),
     `  </${section}>`,
   ].join("\n");
+
 const RULES = [
   '<?xml version="1.0" encoding="utf-8"?>',
   "<data-extraction-rules>",
@@ -29,10 +31,12 @@ module.exports = (config) =>
   withDangerousMod(
     withAndroidManifest(config, (manifest) => {
       const application = manifest.modResults.manifest.application?.[0];
+
       if (application) {
         application.$["android:dataExtractionRules"] = "@xml/data_extraction_rules";
         application.$["android:fullBackupContent"] = "false";
       }
+
       return manifest;
     }),
     [
@@ -41,6 +45,7 @@ module.exports = (config) =>
         const folder = path.join(project.modRequest.platformProjectRoot, "app/src/main/res/xml");
         fs.mkdirSync(folder, { recursive: true });
         fs.writeFileSync(path.join(folder, "data_extraction_rules.xml"), RULES);
+
         return project;
       },
     ],

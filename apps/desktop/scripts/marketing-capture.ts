@@ -59,15 +59,20 @@ import { startLinuxListing, verifyLinuxSources } from "./linux-listing.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 const desktop = join(import.meta.dirname, "..");
+
 /** The window's size, and how many pixels a capture holds for each of its points. */
 const WINDOW = { width: 1280, height: 800 };
 const SCALE = 2;
 const { featured } = manifest;
 const [episode, nextEpisode] = featured.episodes;
+
 if (!episode || !nextEpisode) throw new Error("The manifest lists no two episodes.");
+
 /** The subtitle the capture of the playing episode shows. */
 const [, line] = featured.subtitles.eng;
+
 if (!line) throw new Error("The manifest lists no second subtitle.");
+
 const { values: options } = parseArgs({
   options: {
     "cache-dir": { type: "string" },
@@ -76,24 +81,33 @@ const { values: options } = parseArgs({
     "linux-tools": { type: "string" },
   },
 });
+
 const linuxListing = options["linux-listing"];
+
 if (linuxListing && (process.platform !== "linux" || !options["linux-tools"]))
   throw new Error("--linux-listing requires Linux and --linux-tools <extracted prefix>.");
+
 if (!linuxListing && options["linux-tools"])
   throw new Error("--linux-tools requires --linux-listing.");
+
 const assets = join(desktop, "../../docs/assets", linuxListing ? "linux-listing" : "");
+
 mkdirSync(assets, { recursive: true });
+
 const only = parseOnly(options.only);
 const plan = capturePlan(only);
 const { wanted } = plan;
 const manifestFile = join(assets, linuxListing ? "manifest.json" : "marketing-capture.json");
 
 const root = join(desktop, "../..");
+
 const evidenceRoot = join(
   root,
   linuxListing ? ".local/verification/linux-listing" : ".local/marketing-captures",
 );
+
 mkdirSync(evidenceRoot, { recursive: true });
+
 const evidence = mkdtempSync(join(evidenceRoot, "capture-"));
 const executable = await electronExecutable();
 const cache = cacheDirectory(options["cache-dir"]);
@@ -102,6 +116,7 @@ const profile = mkdtempSync(join(tmpdir(), "mr-streamer-marketing-"));
 const session = `marketing-${Date.now()}`;
 const actions: { action: string; at: string }[] = [];
 const captures: CaptureEntry[] = [];
+
 const proof: Record<string, unknown> = {
   status: "running",
   source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
@@ -125,11 +140,14 @@ const proof: Record<string, unknown> = {
     "No audible audio, GPU, receiver, real-provider, mapped-M3U or locale acceptance is inferred.",
   ],
 };
+
 writeFileSync(
   join(evidence, "manifest.json"),
   readFileSync(join(root, "docs/assets/marketing-demo-sources.json")),
 );
+
 console.log(`Evidence: ${evidence}`);
+
 let app: ChildProcess | undefined;
 let demo: Awaited<ReturnType<typeof startMarketingDemo>> | undefined;
 let page: Page | undefined;
@@ -137,6 +155,7 @@ let windowId: number | undefined;
 let cuaStarted = false;
 let linux: Awaited<ReturnType<typeof startLinuxListing>> | undefined;
 let log = "";
+
 try {
   if (linuxListing) {
     proof["buildFiles"] = Object.fromEntries(
@@ -160,6 +179,7 @@ try {
     proof["analytics"] =
       "Unpackaged automated isolated profile; ambient MR_STREAMER_* overrides removed, no analytics endpoint configured. Build command and hashes retained separately.";
   }
+
   // Linux alone needs fontconfig. macOS uses its real system font.
   if (process.platform === "linux" && !linuxListing) {
     const fonts = join(profile, "fonts.conf");
@@ -176,8 +196,10 @@ try {
     );
     process.env["FONTCONFIG_FILE"] = fonts;
     const font = execFileSync("fc-match", ["-f", "%{family}", "system-ui"], { encoding: "utf8" });
+
     if (!font.includes("Inter")) throw new Error(`Install Inter: the system font is ${font}.`);
   }
+
   proof["media"] = Object.fromEntries(
     Object.entries(media).map(([name, paths]) => [
       name,
@@ -189,21 +211,27 @@ try {
     ]),
   );
   demo = await startMarketingDemo(media);
+
   if (linuxListing) {
     proof["sources"] = await verifyLinuxSources(cache);
     linux = await startLinuxListing(options["linux-tools"]!, evidence);
     proof["nativeSession"] = linux.identity;
     proof["limitations"] = [...(proof["limitations"] as string[]), ...linux.identity.limitations];
+
     // This directory is separate from every marketing master. A partial run keeps other entries.
     if (!existsSync(manifestFile)) writeFileSync(manifestFile, JSON.stringify({ captures: [] }));
   }
+
   const port = await freePort();
+
   const env = Object.fromEntries(
     Object.entries(linux?.env ?? process.env).filter(
       ([name]) => !name.startsWith("MR_STREAMER_") && name !== "ELECTRON_RUN_AS_NODE",
     ),
   );
+
   if (linuxListing) Object.assign(env, { LANG: "en_US.UTF-8", LANGUAGE: "en" });
+
   const args = [
     `--remote-debugging-port=${port}`,
     "--remote-debugging-address=127.0.0.1",
@@ -213,6 +241,7 @@ try {
     ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     desktop,
   ];
+
   app = spawn(executable, args, {
     cwd: root,
     detached: process.platform !== "win32",
@@ -225,6 +254,7 @@ try {
       MR_STREAMER_TMDB_KEY: "marketing-capture",
     },
   });
+
   for (const stream of [app.stdout, app.stderr])
     stream?.on("data", (chunk: Buffer) => {
       log += chunk.toString();
@@ -233,25 +263,31 @@ try {
   const connected = await connect(port);
   let actual: string[];
   let url: string;
+
   try {
     const identity = await connected.send("Browser.getBrowserCommandLine");
     actual = (identity.result as { arguments: string[] }).arguments;
+
     if (!args.every((arg) => actual.includes(arg))) throw new Error("CDP is not our app.");
     url = await connected.evaluate<string>("location.href");
+
     if (!url.startsWith(pathToFileURL(join(desktop, "out/renderer/")).href))
       throw new Error("Wrong renderer.");
   } catch (error) {
     connected.close();
     throw error;
   }
+
   page = connected;
   proof["instance"] = { pid: app.pid, port, profile, url, arguments: actual };
   proof["electron"] = await page.evaluate<string>("navigator.userAgent");
+
   if (process.platform === "darwin") {
     cua("start_session", {});
     cuaStarted = true;
     const permissions = cua("check_permissions", { prompt: false });
     proof["permissions"] = permissions;
+
     if (
       !record(permissions) ||
       permissions["accessibility"] !== true ||
@@ -260,15 +296,21 @@ try {
       throw new Error("CuaDriver grants missing.");
     const windows = cua("list_windows", { pid: app.pid });
     writeFileSync(join(evidence, "native-windows.json"), JSON.stringify(windows, null, 2));
+
     if (!record(windows) || !Array.isArray(windows["windows"])) throw new Error("No window list.");
+
     const owned = windows["windows"].find(
       (entry: unknown) =>
         record(entry) && entry["pid"] === app?.pid && entry["title"] === "Mr. Streamer",
     );
+
     if (record(owned) && typeof owned["window_id"] === "number") windowId = owned["window_id"];
+
     if (!windowId) throw new Error("No owned native window.");
   }
+
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+
   if (linux && app.pid) {
     proof["windowBounds"] = await linux.resize(app.pid);
   } else {
@@ -280,13 +322,16 @@ try {
     // Scroll bars stay out of the picture, as on a Mac, where they show only while scrolling.
     await page.send("Emulation.setScrollbarsHidden", { hidden: true });
   }
+
   // Images come from the demo; a remote image it doesn't know is refused.
   page.on("Fetch.requestPaused", (params) => {
     const { requestId, request } = params as { requestId: string; request: { url: string } };
     const picture = demo!.artwork(request.url);
+
     if (!picture) {
       return void page!.send("Fetch.failRequest", { requestId, errorReason: "BlockedByClient" });
     }
+
     void page!.send("Fetch.fulfillRequest", {
       requestId,
       responseCode: 200,
@@ -308,6 +353,7 @@ try {
     await click(page, "header button", "Series");
     await click(page, "button", featured.name);
   }
+
   if (wanted("library")) {
     await shows(page, [
       featured.overview,
@@ -325,16 +371,19 @@ try {
     await click(page, '[role="dialog"] button', `Play S${episode.season} E${episode.number}`);
     const time = () => page!.evaluate<number>(`document.querySelector("video")?.currentTime ?? 0`);
     await waitFor(async () => (await time()) > 0.5);
+
     if (wanted("watching")) {
       await openMenu(page, "Subtitles");
       await click(page, "[data-item]", "English");
       // Higher up, so the menu the capture shows open doesn't cover the subtitle.
       await click(page, "[role=radio]", "Higher");
       await key(page, "Escape", 27);
+
       const subtitle = () =>
         page!.evaluate<string>(
           `[...document.querySelector("video").textTracks].flatMap((track) => [...(track.activeCues ?? [])]).map((cue) => cue.text).join("|")`,
         );
+
       for (let attempt = 1; ; attempt++) {
         await waitFor(async () => (await time()) >= line.from + 0.6);
         await openMenu(page, "Subtitles");
@@ -346,17 +395,21 @@ try {
           "Nederlands",
           "Next episode",
         ]);
+
         const taken = await capture(page, "watching", {
           video: true,
           holds: async () => (await subtitle()) === line.text,
         });
+
         if (taken) break;
+
         if (attempt === 3) throw new Error(`The capture missed "${line.text}".`);
         // Close the menu and go back ten seconds for another try.
         await key(page, "Escape", 27);
         await key(page, "ArrowLeft", 37);
       }
     }
+
     await waitFor(async () => (await time()) > 12);
     action("Leave the played episode to seed real Continue watching and recommendations");
     await key(page, "Escape", 27);
@@ -368,6 +421,7 @@ try {
   if (plan.liveTv) {
     // Live TV: two favourites, and the channel watched last on top.
     await click(page, "header button", "Live TV");
+
     for (const channel of manifest.favourites) {
       await clickExpression(
         page,
@@ -375,12 +429,14 @@ try {
         `Favourite ${channel}`,
       );
     }
+
     await watch(page, manifest.guide);
     await shows(page, [
       "Favourites",
       "Recently watched",
       ...manifest.channels.flatMap((channel) => channel.programmes.slice(0, linuxListing ? 1 : 2)),
     ]);
+
     if (wanted("live-tv"))
       await capture(page, "live-tv", { fullScreen: true, video: true, pictures: "img" });
   }
@@ -394,15 +450,18 @@ try {
     await waitFor(() =>
       page!.evaluate<boolean>(`(${grid}?.querySelectorAll('[role=gridcell]').length ?? 0) > 20`),
     );
+
     // Left from what's on now, until the cursor's programme ended before the now line.
     const aired = () =>
       page!.evaluate<boolean>(
         `!!${selected} && ${selected}.getBoundingClientRect().right <= ${grid}.querySelector('.bg-white.w-px').getBoundingClientRect().x + 1`,
       );
+
     for (let presses = 0; presses < 4 && !(await aired()); presses++) {
       action("Press Left in the guide grid");
       await key(page, "ArrowLeft", 37);
     }
+
     if (!(await aired())) throw new Error("Left didn't reach a programme that aired.");
     const catchupChannels = manifest.channels.filter((channel) => channel.catchupDays).length;
     await waitFor(() =>
@@ -442,6 +501,7 @@ try {
       "Return from Home settings",
     );
   }
+
   // Every capture was taken: one provenance for the whole manifest.
   if (!only && !linuxListing)
     writeFileSync(manifestFile, JSON.stringify({ ...provenance(), captures }, null, 2) + "\n");
@@ -449,6 +509,7 @@ try {
 } catch (error) {
   proof["status"] = "failed";
   proof["error"] = String(error);
+
   if (page) await retain(page, "failure").catch(() => undefined);
   throw error;
 } finally {
@@ -462,6 +523,7 @@ try {
       profileRemoved: !existsSync(profile),
       ...defined({ fixturesClosed: linuxListing ? true : undefined }),
     };
+
     if (cuaStarted) {
       proof["windowsAfterExit"] = cua("list_windows", { pid: app?.pid });
       cua("end_session", {});
@@ -566,6 +628,7 @@ async function capture(
   },
 ): Promise<boolean> {
   if (wanted.fullScreen && !linuxListing) await fullScreen(page, true);
+
   if (wanted.pictures) {
     await waitFor(() =>
       page.evaluate<boolean>(`(() => {
@@ -577,28 +640,35 @@ async function capture(
       })()`),
     );
   }
+
   // The pointer rests in a corner, over nothing that lights up, while transitions settle.
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
   await delay(600);
   const reply = await page.send("Page.captureScreenshot", { format: "png" });
+
   if (reply.error) throw new Error(JSON.stringify(reply.error));
+
   if (wanted.holds && !(await wanted.holds())) return false;
   const box = wanted.video ? await videoBox(page) : null;
 
   const image = sharp(Buffer.from((reply.result as { data: string }).data, "base64"));
   const { width, height } = await image.metadata();
   const scale = linux ? 1 : SCALE;
+
   const expected = linux
     ? await page.evaluate<{ width: number; height: number }>(
         "({ width: innerWidth, height: innerHeight })",
       )
     : { width: WINDOW.width * SCALE, height: WINDOW.height * SCALE };
+
   if (width !== expected.width || height !== expected.height) {
     throw new Error(`${name} is ${width} × ${height}, not ${expected.width} × ${expected.height}.`);
   }
+
   if (box) {
     const left = Math.max(Math.round(box.left * scale), 0);
     const top = Math.max(Math.round(box.top * scale), 0);
+
     const stats = await image
       .clone()
       .extract({
@@ -608,16 +678,21 @@ async function capture(
         height: Math.min(Math.round(box.height * scale), expected.height - top),
       })
       .stats();
+
     // A picture that didn't reach the capture is one flat colour.
     const spread = Math.max(...stats.channels.map((channel) => channel.stdev));
+
     if (spread < 10) throw new Error(`${name} shows no picture where the video is.`);
   }
+
   if (linux) {
     if (!app?.pid) throw new Error("No owned app PID.");
     const file = `${name}.png`;
     const native = await linux.capture(app.pid, name);
+
     if (wanted.holds && !(await wanted.holds())) return false;
     copyFileSync(native.raw, join(assets, file));
+
     const entry: CaptureEntry = {
       name,
       file,
@@ -627,6 +702,7 @@ async function capture(
       sha256: native.sha256,
       videoBox: wanted.video ? await videoBox(page) : null,
     };
+
     captures.push(entry);
     recordCapture(manifestFile, entry, {
       ...provenance(),
@@ -653,12 +729,15 @@ async function capture(
     });
     await retain(page, name, Buffer.from((reply.result as { data: string }).data, "base64"));
     console.log(`Wrote Linux candidate ${join(assets, file)}`);
+
     return true;
   }
+
   const file = join(assets, `marketing-${name}.png`);
   // Lossless: every pixel as the window drew it, without the alpha channel it never uses.
   await image.removeAlpha().png({ compressionLevel: 9 }).toFile(file);
   await retain(page, name, Buffer.from((reply.result as { data: string }).data, "base64"));
+
   const entry: CaptureEntry = {
     name,
     file: `marketing-${name}.png`,
@@ -668,10 +747,13 @@ async function capture(
     sha256: hash(readFileSync(file)),
     videoBox: box,
   };
+
   captures.push(entry);
   recordCapture(manifestFile, entry, provenance());
+
   if (wanted.fullScreen) await fullScreen(page, false);
   console.log(`Wrote ${file}`);
+
   return true;
 }
 
@@ -694,21 +776,27 @@ function provenance() {
 function hash(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
+
 function action(label: string): void {
   console.log(label);
   actions.push({ action: label, at: new Date().toISOString() });
 }
+
 /** Pointer input into real rendered controls; never writes app state directly. */
 async function clickExpression(page: Page, target: string, label: string): Promise<void> {
   await waitFor(() => page.evaluate<boolean>(`!!(${target}) && !(${target}).disabled`));
   await page.evaluate(`(${target}).scrollIntoView({ block: "nearest" })`);
+
   const point = await page.evaluate<{ x: number; y: number }>(
     `(() => { const box = (${target}).getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; })()`,
   );
+
   action(label);
+
   for (const type of ["mousePressed", "mouseReleased"])
     await page.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
 }
+
 function cua(tool: string, arguments_: Record<string, unknown>) {
   const result: unknown = JSON.parse(
     execFileSync(
@@ -717,21 +805,27 @@ function cua(tool: string, arguments_: Record<string, unknown>) {
       { encoding: "utf8" },
     ),
   );
+
   if (record(result) && result["isError"]) throw new Error(JSON.stringify(result));
+
   return result;
 }
+
 /** Retains the actual page PNG, accessibility tree and native owned window without altering pixels. */
 async function retain(page: Page, name: string, captured?: Buffer): Promise<void> {
   if (!captured) {
     const reply = await page.send("Page.captureScreenshot", { format: "png" });
+
     if (reply.error) throw new Error(JSON.stringify(reply.error));
     captured = Buffer.from((reply.result as { data: string }).data, "base64");
   }
+
   writeFileSync(join(evidence, `${name}-raw.png`), captured);
   writeFileSync(
     join(evidence, `${name}-ax.json`),
     JSON.stringify(await page.send("Accessibility.getFullAXTree"), null, 2),
   );
+
   if (windowId) {
     const native = cua("get_window_state", {
       pid: app?.pid,
@@ -740,10 +834,12 @@ async function retain(page: Page, name: string, captured?: Buffer): Promise<void
       include_accessibility_tree: false,
       screenshot_out_file: join(evidence, `${name}-native.png`),
     });
+
     writeFileSync(join(evidence, `${name}-native.json`), JSON.stringify(native, null, 2));
     const image = sharp(join(evidence, `${name}-native.png`));
     const size = await image.metadata();
     const stats = await image.stats();
+
     if (
       !size.width ||
       size.width < WINDOW.width - 10 ||

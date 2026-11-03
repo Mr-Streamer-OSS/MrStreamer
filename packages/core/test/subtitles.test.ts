@@ -25,16 +25,21 @@ function decode(
   const decoder = subtitleDecoder(codec, page);
   const changes: SubtitleChange[] = [];
   const packets = [];
+
   for (let offset = 0; offset < channel.length; offset += chunkSize) {
     packets.push(...reader.push(channel.subarray(offset, offset + chunkSize)));
   }
+
   packets.push(...reader.end());
+
   for (const packet of packets) {
     if (packet.pid !== pid || packet.pts === null) continue;
     const data = codec === "captions" ? captionsInPicture(packet.payload, "h264") : packet.payload;
     const change = decoder.push(data, packet.pts / 90_000);
+
     if (change) changes.push(change);
   }
+
   return changes;
 }
 
@@ -69,6 +74,7 @@ describe("subtitles the player draws", () => {
     // Low on the screen, as the subtitles were placed.
     expect(picture.y).toBeGreaterThan(400);
     const colours = new Set<string>();
+
     for (let index = 0; index < picture.rgba.length; index += 4) {
       if (picture.rgba[index + 3] === 0) continue;
       colours.add(
@@ -77,13 +83,17 @@ describe("subtitles the player draws", () => {
           .join(""),
       );
     }
+
     expect([...colours].sort()).toEqual(["000", "111"]);
     // Every line of the letters is there, not only the first of each field.
     let rows = 0;
+
     for (let row = 0; row < picture.height; row++) {
       const line = picture.rgba.subarray(row * picture.width * 4, (row + 1) * picture.width * 4);
+
       if (line.some((value, index) => index % 4 === 3 && value > 0)) rows++;
     }
+
     expect(rows).toBeGreaterThanOrEqual(picture.height - 2);
     expect(cleared?.screen).toMatchObject({ kind: "picture", pictures: [] });
   });
@@ -119,6 +129,7 @@ function sei(header: readonly number[], pairs: readonly number[]): number[] {
     0xff,
     ...pairs,
   ];
+
   return [...header, 4, payload.length, ...payload, 0x80];
 }
 
@@ -135,6 +146,7 @@ describe("captions in Annex B pictures", () => {
       0, 0, 0, 1, ...sei([6], [0xfc, 0xc8, 0x49]),
       0, 0,
     ]);
+
     expect(captionsInPicture(picture, "h264")).toEqual(
       Uint8Array.from([0, 0x94, 0x20, 1, 0x9c, 0x20, 0, 0xc8, 0x49]),
     );
@@ -150,6 +162,7 @@ describe("captions in Annex B pictures", () => {
       0, 0, 0, 1, 2, 1, 0x88,
       0, 0, 0, 1, ...sei([80, 1], [0xfc, 0xc8, 0x49]),
     ]);
+
     expect(captionsInPicture(picture, "hevc")).toEqual(
       Uint8Array.from([0, 0x94, 0x20, 1, 0x9c, 0x20, 0, 0xc8, 0x49]),
     );
@@ -160,6 +173,7 @@ describe("captions in Annex B pictures", () => {
     (codec) => {
       const header = codec === "h264" ? [6] : [78, 1];
       const message = sei(header, [0xfc, 0x94, 0x20]);
+
       for (let padding = 0; padding < 6; padding++) {
         for (const tail of [[], [0], [0, 0], [0, 0, 1], [0, 0, 0, 1]]) {
           // prettier-ignore
@@ -171,6 +185,7 @@ describe("captions in Annex B pictures", () => {
             ...message.slice(header.length),
             0, 0, 0, 0, ...tail,
           ]);
+
           const original = input.slice();
           const pairs = captionsInPicture(input, codec);
           expect(pairs).toEqual(Uint8Array.from([0, 0x94, 0x20]));
@@ -178,6 +193,7 @@ describe("captions in Annex B pictures", () => {
           expect(input).toEqual(original);
         }
       }
+
       for (const input of [[], [0], [0, 0], [0, 0, 1], [0, 0, 1, ...header, 4, 15, 0xb5]]) {
         expect(captionsInPicture(Uint8Array.from(input), codec)).toEqual(new Uint8Array());
       }

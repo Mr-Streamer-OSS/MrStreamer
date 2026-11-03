@@ -149,9 +149,11 @@ const SERIES_DETAILS: ProviderDetails = {
 function tmdbAnswer(url: string): unknown {
   const path = new URL(url).pathname;
   const about = /\/(movie|tv)\/(\d+)$/.exec(path);
+
   if (about) {
     const id = about[2] ?? "";
     const known = META[id];
+
     return {
       title: about[1] === "movie" ? `Named ${id}` : undefined,
       name: about[1] === "tv" ? `Named ${id}` : undefined,
@@ -171,6 +173,7 @@ function tmdbAnswer(url: string): unknown {
       },
     };
   }
+
   if (/\/season\/\d+$/.test(path)) {
     return {
       episodes: [1, 2, 3].map((number) => ({
@@ -187,6 +190,7 @@ function tmdbAnswer(url: string): unknown {
       })),
     };
   }
+
   if (path.endsWith("/watch/providers/movie")) {
     return {
       results: [
@@ -195,17 +199,22 @@ function tmdbAnswer(url: string): unknown {
       ],
     };
   }
+
   if (path.endsWith("/watch/providers/tv")) return { results: [] };
+
   if (path.includes("/discover/movie")) {
     const service = new URL(url).searchParams.get("with_watch_providers");
+
     return { page: 1, total_pages: 1, results: service === "8" ? [{ id: 501 }, { id: 503 }] : [] };
   }
+
   return { status_code: 34 };
 }
 
 const standIn: typeof fetch = async (input) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const body = tmdbAnswer(url);
+
   return new Response(JSON.stringify(body), {
     status: "status_code" in (body as object) ? 404 : 200,
     headers: { "Content-Type": "application/json" },
@@ -245,6 +254,7 @@ function record(snapshot: ViewingSnapshot | null, save: (next: ViewingSnapshot) 
       ),
     ),
   );
+
   return <A>(use: (service: ViewingRecord["Service"]) => Effect.Effect<A, unknown>) =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -260,12 +270,14 @@ const correctness: readonly ProofCase[] = [
     run: () => {
       const index = indexCatalogue([{ subscriptionId: SUB, catalogue: CATALOGUE }], "nl");
       const movies = kindOf(index, "movie").titles;
+
       const made = collections({
         kind: "movie",
         titles: movies,
         language: "nl",
         metadata: (id) => {
           const known = META[id];
+
           return known
             ? {
                 ...known,
@@ -279,7 +291,9 @@ const correctness: readonly ProofCase[] = [
         services: [{ id: 8, name: "Netflix", ids: new Set(["501", "503"]) }],
         now: NOW,
       });
+
       const like = { subscriptionId: SUB, id: "4" };
+
       return plain({
         movies: movies.map(shown),
         series: kindOf(index, "series").titles.map(shown),
@@ -307,7 +321,9 @@ const correctness: readonly ProofCase[] = [
       const index = indexCatalogue([{ subscriptionId: SUB, catalogue: CATALOGUE }], "en");
       const [copper] = kindOf(index, "movie").titles;
       const [kestrel] = kindOf(index, "series").titles;
+
       if (!copper || !kestrel) return null;
+
       const movie = movieDetails(
         copper,
         { ...SERIES_DETAILS, seasons: [], episodes: [], container: "mp4" },
@@ -323,8 +339,10 @@ const correctness: readonly ProofCase[] = [
           directors: ["Lotte Smit"],
         },
       );
+
       const series = seriesDetails(kestrel, SERIES_DETAILS, null, "en");
       const first = series.seasons[0];
+
       return plain({
         movie: [movie.plot, movie.genres, movie.duration, movie.directors, movie.backdropUrl],
         seasons: series.seasons.map((season) => [
@@ -362,11 +380,14 @@ const correctness: readonly ProofCase[] = [
     compare: "same",
     run: async () => {
       let saved: ViewingSnapshot | null = null;
+
       const save = (next: ViewingSnapshot) => {
         saved = JSON.parse(JSON.stringify(next)) as ViewingSnapshot;
       };
+
       const run = record(null, save);
       const series = { subscriptionId: SUB, id: "20" };
+
       const episode = (season: number, number: number) => ({
         kind: "episode" as const,
         subscriptionId: SUB,
@@ -375,6 +396,7 @@ const correctness: readonly ProofCase[] = [
         season,
         episode: number,
       });
+
       await run((r) =>
         r.recordProgress("p1", { kind: "movie", subscriptionId: SUB, id: "4" }, 600, 6000, 1),
       );
@@ -386,21 +408,25 @@ const correctness: readonly ProofCase[] = [
       const standing = await relaunched((r) => r.episodes(series));
       const viewing = await relaunched((r) => r.state);
       const index = indexCatalogue([{ subscriptionId: SUB, catalogue: CATALOGUE }], "en");
+
       const details = seriesDetails(
         kindOf(index, "series").titles[0] as Title,
         SERIES_DETAILS,
         null,
         "en",
       );
+
       const stateOf = episodeStates(standing.progress, standing.marks);
       const goesOn = continuation(details, standing.progress, standing.marks);
       await relaunched((r) => r.undoMark("u1", series, mark?.revision ?? 0));
       const undone = await relaunched((r) => r.episodes(series));
+
       const entries = continueEntries(
         viewing,
         (kind, version) => byIds(index, kind, [version])[0],
         20,
       );
+
       return plain({
         mark: mark ? [mark.season, mark.episode, mark.watched] : null,
         undoable: standing.undoable === mark?.revision,
@@ -424,6 +450,7 @@ const correctness: readonly ProofCase[] = [
       const season = await client.season("601", 1, "nl");
       const services = await client.services("movie", "NL");
       let file: unknown = null;
+
       const store = metadataStore({
         read: async () => file,
         write: async (next) => {
@@ -433,10 +460,12 @@ const correctness: readonly ProofCase[] = [
         region: "NL",
         onChange: () => undefined,
       });
+
       store.want(
         ["501", "502", "504"].map((tmdbId, at) => ({ kind: "movie", tmdbId, addedAt: at })),
         "nl",
       );
+
       for (
         let tries = 0;
         tries < 200 && (store.status().known < 3 || store.status().fetching);
@@ -444,6 +473,7 @@ const correctness: readonly ProofCase[] = [
       ) {
         await new Promise((done) => setTimeout(done, 25));
       }
+
       return plain({
         details: [details.name, details.original, details.genres, details.popularity],
         about: [about.overview, about.runtime, about.directors, about.cast.map((c) => c.name)],
@@ -474,10 +504,12 @@ function largeCatalogue(movies: number, series: number): OnDemandCatalogue {
     "Meridian",
     "Kestrel",
   ];
+
   const rows = (count: number, offset: number) =>
     Array.from({ length: count }, (_, at) => {
       const id = offset + at;
       const language = ["NL", "EN", "DE", "FR", "MULTI"][id % 5];
+
       return row(
         String(id),
         `${language} | ${words[id % 9]} ${words[(id * 7) % 9]} ${id} (${2000 + (id % 25)}) [${id % 11 === 0 ? "4K" : "HD"}]`,
@@ -488,6 +520,7 @@ function largeCatalogue(movies: number, series: number): OnDemandCatalogue {
         },
       );
     });
+
   return { ...CATALOGUE, movies: rows(movies, 1_000_000), series: rows(series, 5_000_000) };
 }
 
@@ -495,6 +528,7 @@ function largeCatalogue(movies: number, series: number): OnDemandCatalogue {
 function timed<A>(run: () => A): { readonly value: A; readonly ms: number } {
   const started = Date.now();
   const value = run();
+
   return { value, ms: Date.now() - started };
 }
 
@@ -507,6 +541,7 @@ const measuredCases: readonly ProofCase[] = [
       const index = timed(() => indexCatalogue([{ subscriptionId: SUB, catalogue }], "en"));
       const films = timed(() => kindOf(index.value, "movie").titles.length);
       const series = timed(() => kindOf(index.value, "series").titles.length);
+
       const made = timed(() =>
         collections({
           kind: "movie",
@@ -518,10 +553,12 @@ const measuredCases: readonly ProofCase[] = [
           now: NOW,
         }),
       );
+
       const rows = timed(() => collectionRows(made.value, "new", null).length);
       const all = timed(() => made.value.list("all").length);
       const search = timed(() => searchPage(index.value, "movie", "copper lake").total);
       const again = timed(() => searchPage(index.value, "movie", "night fer").total);
+
       return {
         films: films.value,
         series: series.value,

@@ -22,17 +22,22 @@ import { defined } from "@mrstreamer/core/defined";
 /** A film in two versions that share TMDB id 100000: `TWO_SOUNDS` and `TWO_SOUNDS_DUBBED`. */
 const TWO_SOUNDS = "90000";
 const TWO_SOUNDS_DUBBED = "90006";
+
 /** Films in one version each, with TMDB ids 100001 and 100002. */
 const INDEX_AT_END = "90001";
 const OLD_AVI = "90002";
+
 /** Films the provider lists without a TMDB id. */
 const UNNAMED = "91000";
 const UNNAMED_TOO = "91014";
+
 /** A series in two versions that share TMDB id 90000: `FORMATS` and `FORMATS_ENGLISH`. */
 const FORMATS = "80000";
 const FORMATS_ENGLISH = "79998";
+
 /** A series in one version, with TMDB id 90001. */
 const FILES = "80001";
+
 /** A series the provider marks for adults. */
 const AFTER_DARK = "79999";
 
@@ -40,18 +45,23 @@ const AFTER_DARK = "79999";
 /** A film both list under TMDB id 101001: the first as `SHARED`, the second as `SHARED_THERE`. */
 const SHARED = "91001";
 const SHARED_THERE = "91000";
+
 /** The second's own film, with a TMDB id of its own, under the id the first has `SHARED` at. */
 const OTHER_STORY = "91001";
+
 /** A film neither gives a TMDB id, which reads the same at both: `NAMESAKE` and `NAMESAKE_THERE`. */
 const NAMESAKE = "91021";
 const NAMESAKE_THERE = "91020";
+
 /** A film for adults both list under TMDB id 101003: `ADULT_FILM` and `ADULT_FILM_THERE`. */
 const ADULT_FILM = "91003";
 const ADULT_FILM_THERE = "91002";
+
 /** The second's own series, whose TMDB id 100001 is the one `INDEX_AT_END` has as a film. */
 const OTHER_FILES = "80001";
 
 let tmdb: FakeTmdb | null = null;
+
 afterEach(async () => {
   await tmdb?.close();
   tmdb = null;
@@ -76,8 +86,10 @@ function relist(
   const apply = <T extends { readonly id: number }>(titles: readonly T[], change?: Relisted<T>) =>
     titles.flatMap((title) => {
       const changed = change?.[String(title.id)];
+
       return changed === null ? [] : [{ ...title, ...changed }];
     });
+
   provider.serveTitles((all) => ({
     ...all,
     movies: apply(all.movies, changes.movies),
@@ -110,12 +122,14 @@ type Of = 0 | 1;
 async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
   const dataDir = await tempDir();
   const providers = [await fakeProvider(), await fakeProvider({ second: true })] as const;
+
   if (withTmdb) tmdb = await startFakeTmdb();
   let dispose: (() => Promise<void>) | null = null;
 
   const start = async ({ locked = false }: { locked?: boolean } = {}) => {
     await dispose?.();
     const config = testConfig(dataDir);
+
     /** A keychain that no longer opens what it sealed, as after it was reset. */
     const refusing = {
       ...config.secrets,
@@ -123,6 +137,7 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
         throw new Error("The keychain denied access.");
       },
     };
+
     const runtime = runtimeFor(
       mainLayer({
         ...config,
@@ -133,6 +148,7 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
         }),
       }),
     );
+
     dispose = () => runtime.dispose();
     const watchlist = await promised(runtime, Watchlist);
     const onDemand = await promised(runtime, OnDemand);
@@ -140,16 +156,20 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
     const settings = await promised(runtime, Settings);
     const subscriptions = await promised(runtime, Subscriptions);
     const roster = await promised(runtime, Roster);
+
     /** The subscription saved for a provider now, by its id. */
     const idOf = async (of: Of = 0) =>
       (await subscriptions.list()).find((each) => each.server === providers[of].url)?.id ??
       "no-subscription";
+
     /** `id` as the subscription saved for a provider now lists it. */
     const own = async (id: string, of: Of = 0): Promise<OwnedId> => ({
       subscriptionId: await idOf(of),
       id,
     });
+
     const list = (sort: WatchlistSort = "saved") => watchlist.list({ sort, offset: 0, limit: 100 });
+
     return {
       watchlist,
       onDemand,
@@ -177,6 +197,7 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
       /** The account a provider's subscription keeps what it saved under. */
       account: async (of: Of = 0) => {
         const id = await idOf(of);
+
         return (await subscriptions.saved()).find((each) => each.id === id)?.key ?? "";
       },
     };
@@ -189,6 +210,7 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
     /** Runs `use` on the database through a connection of its own, as another build's would be. */
     database: <A>(use: (db: DatabaseSync) => A): A => {
       const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
       try {
         return use(db);
       } finally {
@@ -203,6 +225,7 @@ async function connected(options: { withTmdb?: boolean } = {}) {
   const app = await watchlistApp(options);
   const saving = await app.start();
   await saving.add(0);
+
   return { app, provider: app.providers[0], saving };
 }
 
@@ -213,6 +236,7 @@ async function two() {
   await saving.refresh(0);
   await saving.refresh(1);
   const [first, second] = app.providers;
+
   return { app, saving, first, second, a: await saving.idOf(0), b: await saving.idOf(1) };
 }
 
@@ -296,8 +320,10 @@ describe("watchlist", { timeout: 30_000 }, () => {
     expect(await saving.saved("movie", TWO_SOUNDS)).toEqual(film);
     expect(await saving.saved("movie", TWO_SOUNDS_DUBBED)).toEqual(film);
     expect(await saving.saved("series", FORMATS)).toEqual(series);
+
     const shownFirst = async () =>
       (await saving.list()).entries.map((entry) => [entry.id, entry.title?.id]);
+
     const english = await shownFirst();
     expect(english).toHaveLength(2);
 
@@ -319,6 +345,7 @@ describe("watchlist", { timeout: 30_000 }, () => {
       });
       expect(await saving.saved(kind, id)).toBeNull();
     }
+
     expect((await saving.list()).total).toBe(2);
   });
 });
@@ -589,6 +616,7 @@ describe("whose a saved title is", { timeout: 30_000 }, () => {
     ]) {
       await expect(change).rejects.toMatchObject({ error: { kind: "no-subscription" } });
     }
+
     expect((await saving.list()).total).toBe(1);
     expect(told).toEqual([]);
 
@@ -664,6 +692,7 @@ describe("whose a saved title is", { timeout: 30_000 }, () => {
     await saving.remove(0, true);
 
     expect((await saving.list()).entries).toMatchObject(left);
+
     const file = Buffer.concat(
       await Promise.all(
         ["mrstreamer.db", "mrstreamer.db-wal"].map((name) =>
@@ -671,6 +700,7 @@ describe("whose a saved title is", { timeout: 30_000 }, () => {
         ),
       ),
     );
+
     expect(file.includes(key)).toBe(false);
     // Added again, the account finds nothing of what it saved, and is given nothing.
     const restarted = await app.start();
@@ -683,6 +713,7 @@ describe("whose a saved title is", { timeout: 30_000 }, () => {
 describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
   /** The ids a page shows, in its order. */
   const ids = (page: WatchlistPage) => page.entries.map((entry) => entry.id);
+
   /** Which subscription's version each of a title's is. */
   const versionsOf = (entry: WatchlistPage["entries"][number] | undefined) =>
     (entry?.title?.versions ?? []).map(({ subscriptionId, id }) => ({ subscriptionId, id }));
@@ -1022,6 +1053,7 @@ describe("the watchlist of several subscriptions", { timeout: 30_000 }, () => {
       },
       { timeout: 5_000, interval: 50 },
     );
+
     return { saving, a, b, late, release: () => held.release() };
   }
 
@@ -1141,10 +1173,12 @@ describe("titles for adults on the watchlist", { timeout: 30_000 }, () => {
     const other = await saving.save("series", AFTER_DARK);
 
     expect(other.id).not.toBe(adult.id);
+
     const both = [
       { name: "Morning Light", available: true },
       { name: "After Dark", available: false },
     ];
+
     expect(await saving.shown()).toEqual(both);
     // Only the one saved as a title for adults hides with them.
     await saving.settings.update({ adultTitles: false });
@@ -1167,6 +1201,7 @@ describe("the watchlist beside the viewing record", { timeout: 30_000 }, () => {
     const { saving } = await connected();
     const movie = { kind: "movie" as const, ...(await saving.own(INDEX_AT_END)) };
     const series = await saving.own(FORMATS);
+
     const episode = {
       kind: "episode" as const,
       subscriptionId: series.subscriptionId,
@@ -1175,6 +1210,7 @@ describe("the watchlist beside the viewing record", { timeout: 30_000 }, () => {
       season: 1,
       episode: 1,
     };
+
     await saving.viewing.recordProgress(randomUUID(), movie, 600, 6000, Date.now());
     const record = await saving.viewing.state();
     const progress = await saving.viewing.progress({ movies: [movie] });

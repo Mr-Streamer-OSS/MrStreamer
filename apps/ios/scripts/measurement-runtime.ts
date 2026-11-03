@@ -3,6 +3,7 @@ import { File, Paths } from "expo-file-system";
 import { measurementRecords } from "./measurement-records.ts";
 
 const artifact = { source: "UNGENERATED", overlay: "UNGENERATED" };
+
 export const recordMeasurement = measurementRecords(
   () => performance.now(),
   (json) => {

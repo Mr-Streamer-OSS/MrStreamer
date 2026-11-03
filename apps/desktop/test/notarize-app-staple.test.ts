@@ -10,6 +10,7 @@ import { defined } from "@mrstreamer/core/defined";
 const require = createRequire(import.meta.url);
 const builder = createRequire(require.resolve("electron-builder"));
 const notarize = createRequire(builder.resolve("app-builder-lib"));
+
 const { notarize: notarizeApp } = notarize("@electron/notarize") as {
   notarize: (options: {
     appPath: string;
@@ -70,11 +71,13 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
     calls = join(directory, "calls.txt");
     staplePid = join(directory, "stapler.pid");
     mkdirSync(appPath);
+
     for (const tool of ["xcrun", "codesign", "ditto"]) {
       const path = join(directory, tool);
       writeFileSync(path, fakeTool);
       chmodSync(path, 0o755);
     }
+
     originalEnv = { ...process.env };
     process.env.PATH = `${directory}:${process.env.PATH ?? ""}`;
     process.env.STAPLE_CALLS = calls;
@@ -91,18 +94,23 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
   const commands = () => readFileSync(calls, "utf8").trim().split("\n");
   const attempts = () => commands().filter((command) => command === "staple").length;
   const submissions = () => commands().filter((command) => command === "submit").length;
+
   const assertStaplerExited = (): number => {
     const pid = Number(readFileSync(staplePid, "utf8"));
     expect(pid).toBeGreaterThan(0);
     let error: unknown;
+
     try {
       process.kill(pid, 0);
     } catch (caught) {
       error = caught;
     }
+
     expect(error).toMatchObject({ code: "ESRCH" });
+
     return pid;
   };
+
   const run = () =>
     notarizeApp({
       appPath,
@@ -113,12 +121,15 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
 
   async function runWithFastBackoff(): Promise<Error | undefined> {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
     const outcome = run().then(
       () => undefined,
       (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
     );
+
     // The public API starts asynchronous codesign, ditto and notary commands before stapling.
     const pump = setInterval(() => void vi.runOnlyPendingTimersAsync(), 10);
+
     try {
       return await outcome;
     } finally {
@@ -183,6 +194,7 @@ describe.skipIf(process.platform === "win32")("stapling the notarized release ap
     ) => {
       if (args[0] === "stapler") given.push(options.timeout);
       const timeout = args[0] === "stapler" ? options.timeout && options.timeout / 100 : undefined;
+
       return spawnSync(command, args, {
         ...options,
         ...defined({ timeout: timeout || undefined }),

@@ -27,22 +27,27 @@ const three = (patch: (shard: Shard, index: number) => Shard = (shard) => shard)
  */
 function withShards<T>(shards: readonly Shard[], use: (downloads: string, blobs: string) => T): T {
   const root = mkdtempSync(join(tmpdir(), "mrstreamer-test-shards-"));
+
   try {
     mkdirSync(join(root, "downloads"));
     shards.forEach((shard, position) => {
       const report = shard.report ?? "run";
       const index = shard.shard?.split("/")[0] ?? String(position + 1);
+
       const dir =
         shards.length === 1
           ? join(root, "downloads")
           : join(root, "downloads", `test-shard-${report}-${index}-${position}`);
+
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         join(dir, "shard.json"),
         JSON.stringify({ report, shard: shard.shard, identity: shard.identity ?? identity }),
       );
+
       if (shard.blob !== false) writeFileSync(join(dir, "blob.json"), `blob ${index}`);
     });
+
     return use(join(root, "downloads"), join(root, "blobs"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -57,6 +62,7 @@ const collect = (shards: readonly Shard[]) =>
 
 test("the CLI prints the identity output and exits failed on incomplete shards", () => {
   const cli = resolve(import.meta.dirname, "../scripts/test-shards.ts");
+
   const run = (shards: readonly Shard[]) =>
     withShards(shards, (downloads, blobs) =>
       spawnSync(process.execPath, [cli, downloads, "run", blobs], {
@@ -64,6 +70,7 @@ test("the CLI prints the identity output and exits failed on incomplete shards",
         env: { ...process.env, IDENTITY: identity },
       }),
     );
+
   const complete = run(three());
   assert.equal(complete.status, 0, complete.stderr);
   assert.equal(complete.stdout, `identity=${identity}\n`);
@@ -91,6 +98,7 @@ test("no shards, a missing shard or a missing blob is a problem; the blobs found
   const noBlob = collect(
     three((shard, index) => (index === 2 ? { ...shard, blob: false } : shard)),
   );
+
   assert.deepEqual(noBlob.problems, ["Shard 2/3: no Vitest blob report. Did its tests run?"]);
 
   // The lone surviving shard, downloaded straight into the folder.
@@ -121,6 +129,7 @@ test("a shard under another identity is complete but withholds the identity from
   const result = collect(
     three((shard, index) => (index === 3 ? { ...shard, identity: "b".repeat(64) } : shard)),
   );
+
   assert.deepEqual(result.problems, []);
   assert.equal(result.identity, "");
   assert.equal(result.mixed, true);

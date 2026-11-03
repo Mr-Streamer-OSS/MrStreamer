@@ -16,6 +16,7 @@ const category = { subscriptionId: SUBSCRIPTION, id: "news" };
 const remembered = { kind: "category" as const, category };
 const settle = () => act(() => vi.advanceTimersByTimeAsync(20));
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
@@ -34,6 +35,7 @@ beforeEach(() => {
   });
   ipc.always("ondemand.status", { lists: [], metadata: null });
 });
+
 afterEach(() => {
   cleanup();
   player.reset();
@@ -44,22 +46,26 @@ afterEach(() => {
 
 async function mount(cached = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   if (cached) client.setQueryData(queries.rememberedLiveBrowse().queryKey, remembered);
   const mounted = queryView(client);
   cleanup = mounted.unmount;
   await mounted.render(createElement(TooltipProvider, null, createElement(App)));
   await settle();
+
   return { client, container: mounted.container };
 }
 
 it.each([false, true])("opens only the restored discovery, cached=%s", async (cached) => {
   const read = ipc.hold("liveBrowse.get");
   await mount(cached);
+
   if (!cached) {
     expect(ipc.argsOf("library.browse")).toEqual([]);
     await act(async () => read.resolve(remembered));
     await settle();
   }
+
   expect(ipc.argsOf("library.browse").map(({ scope }) => scope)).toEqual([remembered]);
 });
 

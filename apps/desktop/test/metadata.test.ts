@@ -26,6 +26,7 @@ import {
 } from "./support.ts";
 
 let tmdb: FakeTmdb | null = null;
+
 afterEach(async () => {
   await tmdb?.close();
   tmdb = null;
@@ -35,7 +36,9 @@ afterEach(async () => {
 async function knownMovie(onDemand: Promised<OnDemand["Service"]>): Promise<Title> {
   const { titles } = await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 50 });
   const movie = titles.find((title) => title.tmdbId);
+
   if (!movie) throw new Error("The lists have no movie with a TMDB id.");
+
   return movie;
 }
 
@@ -50,20 +53,26 @@ async function metadataApp(key: string | null = "test-key") {
   const dataDir = await tempDir();
   const provider = await fakeProvider({ titles: 30 });
   let subscriptionId = "";
+
   const start = async () => {
     const runtime = runtimeFor(
       mainLayer({ ...testConfig(dataDir), tmdbKey: key, tmdbApi: fake.url }),
     );
+
     if (!subscriptionId) {
       const subscriptions = await promised(runtime, Subscriptions);
       ({ id: subscriptionId } = await subscriptions.add(demoLogin(provider)));
     }
+
     const onDemand = await promised(runtime, OnDemand);
     // Any list loads the catalogue, and with it the metadata.
     await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 10 });
+
     return { runtime, onDemand };
   };
+
   const own = (id: string) => ({ subscriptionId, id });
+
   return { start, tmdb: fake, own };
 }
 
@@ -92,6 +101,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
   it("asks TMDB about titles for adults only while Settings shows them", async () => {
     const app = await metadataApp();
     const { runtime, onDemand } = await app.start();
+
     const asked = async (wanted: number) =>
       vi.waitFor(
         async () => {
@@ -100,6 +110,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         },
         { timeout: 20_000 },
       );
+
     await vi.waitFor(async () =>
       expect((await onDemand.status()).metadata?.wanted).toBeGreaterThan(0),
     );
@@ -108,6 +119,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     expect(app.tmdb.detailRequests()).toBe(ordinary);
 
     await (await promised(runtime, Settings)).update({ adultTitles: true });
+
     const forAdults = (
       await Promise.all(
         (["movie", "series"] as const).map((kind) =>
@@ -115,6 +127,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         ),
       )
     ).flatMap((page) => page.titles.filter((title) => title.tmdbId));
+
     expect(forAdults.length).toBeGreaterThan(0);
     await asked(ordinary + forAdults.length);
     expect(app.tmdb.detailRequests()).toBe(ordinary + forAdults.length);
@@ -124,6 +137,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const provider = await fakeProvider({ titles: 5 });
     const config = testConfig(await tempDir());
     const adults: boolean[] = [];
+
     const runtime = runtimeFor(
       mainLayer({
         ...config,
@@ -134,15 +148,18 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
             if (request.method === "status") adults.push(request.args.adults);
             postMessage(request);
           };
+
           return worker;
         },
       }),
     );
+
     try {
       await (await promised(runtime, Subscriptions)).add(demoLogin(provider));
       const onDemand = await promised(runtime, OnDemand);
       const movie = await knownMovie(onDemand);
       const settings = await promised(runtime, Settings);
+
       for (const shown of [true, false]) {
         await settings.update({ adultTitles: shown });
         adults.length = 0;
@@ -180,21 +197,26 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
 
     const genres = await onDemand.tiles("movie", "genres");
     expect(genres.map((genre) => genre.name).sort()).toEqual(["Comedy", "Drama"]);
+
     const comedy = await onDemand.collection({
       kind: "movie",
       id: "genre:Comedy",
       offset: 0,
       limit: 500,
     });
+
     expect(comedy.titles.length).toBeGreaterThan(0);
     expect(comedy.titles.every((title) => title.genres.includes("Comedy"))).toBe(true);
 
     // Films made in Dutch with only a Dutch version: out of the English rows, but in All.
     const all = await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 500 });
+
     const dutch = all.titles.filter(
       (title) => Number(title.tmdbId) % 3 === 0 && title.tags.includes("NL"),
     );
+
     expect(dutch.length).toBeGreaterThan(0);
+
     const shown = new Set(
       [
         ...comedy.titles,
@@ -202,6 +224,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
           .titles,
       ].map((title) => title.id),
     );
+
     expect(dutch.some((title) => shown.has(title.id))).toBe(false);
 
     const services = await onDemand.tiles("movie", "services");
@@ -211,6 +234,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
 
     // For you leads with titles like one watched lately, named by one of its versions.
     const [watched] = comedy.titles;
+
     if (!watched) throw new Error("No comedy to be like.");
     const [alike] = await onDemand.rows("movie", "for-you", ownedId(watched));
     expect(alike).toMatchObject({
@@ -218,12 +242,14 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
       name: `More like ${watched.title}`,
     });
     expect(alike?.titles.some((title) => title.id === watched.id)).toBe(false);
+
     const page = await onDemand.collection({
       kind: "movie",
       id: `like:${ownedKey(watched)}`,
       offset: 0,
       limit: 5,
     });
+
     expect(page.titles).toEqual(alike?.titles.slice(0, 5));
   });
 
@@ -231,6 +257,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const app = await metadataApp();
     const { runtime, onDemand } = await app.start();
     const settings = await promised(runtime, Settings);
+
     const done = () =>
       vi.waitFor(
         async () => {
@@ -239,11 +266,13 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         },
         { timeout: 20_000 },
       );
+
     /** What a title shows, by TMDB's rules as the fake TMDB plays them. */
     const expected = (tmdbId: string, language: string) => {
       const id = Number(tmdbId);
       const shown = tmdbName(id, language);
       const madeIn = id % 3 === 0 ? "nl" : "en";
+
       // Without a translation, the English name stands in; for an English film, its own.
       const name =
         shown.name !== shown.original || madeIn === language
@@ -251,6 +280,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
           : madeIn === "en"
             ? shown.original
             : tmdbName(id, "en").name;
+
       return {
         title: name,
         originalTitle: name === shown.original ? null : shown.original,
@@ -258,6 +288,7 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         originalLanguage: madeIn,
       };
     };
+
     const all = async () =>
       (await onDemand.collection({ kind: "movie", id: "all", offset: 0, limit: 500 })).titles;
 
@@ -267,13 +298,16 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
         async () => {
           const titles = (await all()).filter((title) => title.tmdbId);
           expect(titles.length).toBeGreaterThan(0);
+
           for (const title of titles) {
             expect(title).toMatchObject(expected(title.tmdbId ?? "", language));
           }
+
           return titles;
         },
         { timeout: 20_000 },
       );
+
     await done();
     const english = await named("en");
     // A Dutch film shown by its English name is found by its Dutch one.
@@ -333,13 +367,16 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
   it("asks TMDB again for details it couldn't answer, or had no key for", async () => {
     const app = await metadataApp(null);
     const { runtime, onDemand } = await app.start();
+
     const { titles } = await onDemand.collection({
       kind: "movie",
       id: "all",
       offset: 0,
       limit: 50,
     });
+
     const [movie, other] = titles.filter((title) => title.tmdbId);
+
     if (!movie || !other) throw new Error("The lists have too few movies with a TMDB id.");
     const plot = async (title: Title) => (await onDemand.details("movie", title)).plot;
 
@@ -370,20 +407,24 @@ describe("TMDB metadata", { timeout: 30_000 }, () => {
     const settings = await promised(runtime, Settings);
     await settings.update({ tmdbKey: "another-key" });
     await onDemand.reconfigure();
+
     const listed = await vi.waitFor(
       async () => {
         const [title] = await onDemand.titles("movie", [movie]);
         expect(title?.originalLanguage).not.toBeNull();
+
         return title;
       },
       { timeout: 20_000 },
     );
+
     const downloads = app.tmdb.aboutRequests();
 
     // TMDB didn't answer then, so it is asked once more, now that it does.
     const again = await vi.waitFor(async () => {
       const details = await onDemand.details("movie", movie);
       expect(details.plot).toMatch(/^TMDB's story of /);
+
       return details;
     });
 
@@ -418,6 +459,7 @@ describe("episode details", { timeout: 30_000 }, () => {
     const { runtime, onDemand } = await app.start();
     await (await promised(runtime, Settings)).update({ titleLanguage: "nl" });
     const details = await onDemand.details("series", app.own(SERIES));
+
     if (details.kind !== "series") throw new Error("Not a series.");
     expect(app.tmdb.seasonRequests()).toEqual([]);
 
@@ -509,6 +551,7 @@ describe("episode details", { timeout: 30_000 }, () => {
   it("keeps the provider's episodes while TMDB fails or is slow, and asks again later", async () => {
     const app = await metadataApp();
     const { onDemand } = await app.start();
+
     const titles = async () =>
       (await onDemand.season(app.own(SERIES), 1)).map((episode) => episode.title);
 
@@ -520,8 +563,10 @@ describe("episode details", { timeout: 30_000 }, () => {
     vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
       const deadline = new AbortController();
       setTimeout(() => deadline.abort(new DOMException("Timed out", "TimeoutError")), ms);
+
       return deadline.signal;
     });
+
     try {
       const asked = app.tmdb.seasonRequests().length;
       const slow = titles();
@@ -577,11 +622,13 @@ function slowTmdb(
   } = {},
 ) {
   const clock = { time: 1000 * DAY, lastAnswer: 0, requests: 0 };
+
   const client = tmdbClient({
     key: "test-key",
     api: "http://tmdb.test/3",
     fetch: async (input) => {
       const url = new URL(String(input));
+
       // Streaming services: none.
       if (!/^\/3\/movie\/\d+$/.test(url.pathname)) return new Response("{}", { status: 404 });
       const id = Number(url.pathname.split("/").at(-1));
@@ -591,7 +638,9 @@ function slowTmdb(
       clock.requests++;
       options.asked?.(clock.requests);
       const status = options.status?.(id) ?? 200;
+
       if (status !== 200) return new Response("{}", { status });
+
       return Response.json({
         title: language === "en" ? `Title ${id}` : `Titel ${id}`,
         original_title: `Title ${id}`,
@@ -603,6 +652,7 @@ function slowTmdb(
       });
     },
   });
+
   return { clock, client, now: () => clock.time };
 }
 
@@ -624,12 +674,14 @@ const open = (
 describe("TMDB metadata store", { timeout: 30_000 }, () => {
   it("fetches a list given while an earlier one is being fetched", async () => {
     let store: ReturnType<typeof metadataStore> | null = null;
+
     // As after a refresh that lists 20 more, while the fifth title is being asked about.
     const tmdb = slowTmdb({
       asked: (requests) => {
         if (requests === 5) store?.want(wantedTitles(60));
       },
     });
+
     store = open(await newFile(), tmdb);
     store.want(wantedTitles(40));
     await settled(store);
@@ -640,8 +692,10 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
     const path = await newFile();
     // No request gets through, and the waits before each is tried again pass on a fake clock.
     vi.useFakeTimers({ toFake: ["setTimeout"] });
+
     try {
       const changes: boolean[] = [];
+
       const store = metadataStore({
         path,
         client: tmdbClient({
@@ -652,13 +706,16 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
         region: "NL",
         onChange: () => changes.push(store.status().fetching),
       });
+
       store.want(wantedTitles(3));
       expect(store.status().fetching).toBe(true);
+
       while (store.status().fetching) {
         await vi.advanceTimersByTimeAsync(1000);
         // Lets the store read and write its file.
         await new Promise((resolve) => setImmediate(resolve));
       }
+
       expect(store.status()).toMatchObject({ known: 0, fetching: false });
       // The UI hears that it stopped.
       expect(changes.at(-1)).toBe(false);
@@ -679,6 +736,7 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
         }),
       ),
     );
+
     const store = metadataStore({
       path,
       client: null,
@@ -686,6 +744,7 @@ describe("TMDB metadata store", { timeout: 30_000 }, () => {
       onChange: () => {},
       now: () => 200 * DAY,
     });
+
     store.want(wantedTitles(2));
     await vi.waitFor(() => expect(store.get("movie", "2")).not.toBeNull());
     expect(store.get("movie", "1")).toBeNull();
@@ -696,6 +755,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
   /** What the store told the UI, and when by the fake clock. */
   function notices(clock: { time: number }) {
     const told: { content: boolean; at: number }[] = [];
+
     return {
       told,
       onChange: ({ content }: { content: boolean }) => told.push({ content, at: clock.time }),
@@ -709,6 +769,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     first.want(wantedTitles(count));
     await settled(first);
     await first.flush();
+
     return path;
   }
 
@@ -760,9 +821,11 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     // Apart from the one that ends the run, which comes when it does.
     const gaps = content.slice(1, -1).map((at, index) => at - (content[index] ?? 0));
     expect(gaps.length).toBeGreaterThan(3);
+
     for (const [index, gap] of gaps.entries()) {
       expect(gap).toBeGreaterThanOrEqual(gaps[index - 1] ?? 0);
     }
+
     expect(gaps.at(-1)).toBeGreaterThanOrEqual(2 * (gaps[0] ?? 0));
     // Doubling from 3 s and 30 s apart at most, each plus the answer that came due.
     expect(gaps[0]).toBeLessThan(10_000);
@@ -809,14 +872,17 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     const tmdb = slowTmdb();
     const seen = notices(tmdb.clock);
     let switchedAt: number | null = null;
+
     const store = open(await newFile(), tmdb, (notice) => {
       seen.onChange(notice);
+
       // With the gap grown to 30 s, as a long run does.
       if (switchedAt === null && seen.told.filter(({ content }) => content).length === 6) {
         switchedAt = tmdb.clock.time;
         change(store);
       }
     });
+
     store.want(wantedTitles(200));
     await settled(store);
 
@@ -835,10 +901,12 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     tmdb.clock.time += 10 * DAY;
     const seen = notices(tmdb.clock);
     const heard: (string | null)[] = [];
+
     const store: ReturnType<typeof metadataStore> = open(path, tmdb, (notice) => {
       seen.onChange(notice);
       heard.push(store.name("movie", "1", "en")?.name ?? null);
     });
+
     store.want(wantedTitles(3));
     await settled(store);
     expect(tmdb.clock.requests).toBe(requests);
@@ -870,6 +938,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
         }),
       ),
     );
+
     const store = metadataStore({
       path,
       client: null,
@@ -877,6 +946,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
       onChange: () => {},
       now: () => now,
     });
+
     await vi.waitFor(() =>
       expect(store.searchAliases("movie", "1")).toEqual([
         "Spider-Man",
@@ -911,6 +981,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
       expect(store.get("movie", "1")).toBeNull();
       expect(seen.told).toEqual([]);
     };
+
     const dir = await tempDir();
     await quiet(join(dir, "none.json.gz"), null);
     await writeFile(join(dir, "broken.json.gz"), "not a metadata file");
@@ -931,6 +1002,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
     changing.clock.time = tmdb.clock.time;
     const start = changing.clock.time;
     const told: { at: number; shown: number | undefined }[] = [];
+
     const store: ReturnType<typeof metadataStore> = open(path, changing, ({ content }) => {
       if (content) {
         told.push({
@@ -939,6 +1011,7 @@ describe("when the store tells the UI of metadata", { timeout: 30_000 }, () => {
         });
       }
     });
+
     store.want(wantedTitles(200));
     await settled(store);
 
@@ -980,12 +1053,15 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
     postMessage(request: WorkerRequest) {
       if (request.method === "status" && this.holding) {
         this.held = request;
+
         return;
       }
+
       const value =
         request.method === "status"
           ? request.args.owners.map(() => ({ movies: 10, series: 0, fetchedAt: 1 }))
           : null;
+
       queueMicrotask(() => this.emit("message", { id: request.id, ok: true, value }));
     }
     async terminate() {
@@ -998,6 +1074,7 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
     // The stand-in takes requests as a thread does and answers them as the worker's events.
     const thread: Pick<Worker, "postMessage"> = worker;
     const provider = await fakeProvider();
+
     const runtime = runtimeFor(
       mainLayer({
         ...testConfig(await tempDir()),
@@ -1005,6 +1082,7 @@ describe("TMDB's progress to the UI", { timeout: 30_000 }, () => {
         catalogueWorker: () => thread as Worker,
       }),
     );
+
     try {
       await (await promised(runtime, Subscriptions)).add(demoLogin(provider));
       const onDemand = await promised(runtime, OnDemand);

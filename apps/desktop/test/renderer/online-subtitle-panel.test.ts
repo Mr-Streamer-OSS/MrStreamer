@@ -23,6 +23,7 @@ const saved: SavedSubtitle = {
     cues: [{ start: 1, end: 3, text: "Hello." }],
   },
 };
+
 const results = [
   {
     id: "first-result",
@@ -41,6 +42,7 @@ const results = [
     downloads: null,
   },
 ];
+
 const english: SubtitleTrack = {
   id: 3,
   page: null,
@@ -50,30 +52,39 @@ const english: SubtitleTrack = {
   forced: false,
   default: false,
 };
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+
 /** Lets the panel, the player and React Query catch up, on the fake clock every test runs on. */
 const settle = () => vi.advanceTimersByTimeAsync(20);
+
 function offered(text: string) {
   return [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (each) => each.textContent?.includes(text) || each.getAttribute("aria-label") === text,
   );
 }
+
 function button(text: string) {
   const found = offered(text);
+
   if (!found) throw new Error(`Missing button: ${text}`);
+
   return found;
 }
+
 async function press(key: string, target: Element = document.activeElement ?? document.body) {
   await act(async () => {
     const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
     target.dispatchEvent(event);
+
     // happy-dom does not perform a button's native Enter activation.
     if (key === "Enter" && !event.defaultPrevented && target instanceof HTMLButtonElement)
       target.click();
     await settle();
   });
 }
+
 async function opened(tracks: readonly SubtitleTrack[] = []) {
   ipc.reset();
   onlineSubtitles.bind(null);
@@ -114,6 +125,7 @@ async function opened(tracks: readonly SubtitleTrack[] = []) {
   );
   await settle();
 }
+
 async function render(node: ReturnType<typeof createElement>) {
   container = document.createElement("div");
   document.body.append(container);
@@ -127,9 +139,11 @@ async function render(node: ReturnType<typeof createElement>) {
     await settle();
   });
 }
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
@@ -142,6 +156,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
 describe("subtitle choices while the picture plays", () => {
   it("does not search on open, shows complete results, keeps the panel after choosing and cancels a pending request on close", async () => {
     await opened();
@@ -189,13 +204,16 @@ describe("subtitle choices while the picture plays", () => {
     const field = container!.querySelector<HTMLInputElement>("#subtitle-offset")!;
     expect(field).not.toBeNull();
     await act(async () => field.focus());
+
     for (const key of ["Backspace", "ArrowLeft", "ArrowUp", "Home"]) {
       field.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
       expect(document.activeElement).toBe(field);
       expect(container?.querySelector("#subtitle-offset")).not.toBeNull();
     }
+
     ipc.always("subtitles.timing", { ...saved, timing: { offset: -2.5, speed: 1 } });
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+
     for (const text of ["", "-", "-2", "-2.", "-2.5"]) {
       await act(async () => {
         setValue.call(field, text);
@@ -203,6 +221,7 @@ describe("subtitle choices while the picture plays", () => {
       });
       expect(field.value).toBe(text);
     }
+
     await act(async () => field.blur());
     expect(field.value).toBe("-2.5");
     expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.offset).toBe(-2.5);
@@ -227,6 +246,7 @@ describe("subtitle choices while the picture plays", () => {
     expect(ipc.argsOf("subtitles.timing")).toHaveLength(writes);
     expect(titlePlayer.state().savedSubtitle?.timing.speed).toBe(25 / 23.976);
     await act(async () => drift.focus());
+
     for (const text of ["1.0", "1.", "1.04"]) {
       await act(async () => {
         setValue.call(drift, text);
@@ -234,6 +254,7 @@ describe("subtitle choices while the picture plays", () => {
       });
       expect(drift.value).toBe(text);
     }
+
     expect(ipc.argsOf("subtitles.timing").at(-1)?.timing.speed).toBe(1.04);
   });
 
@@ -244,11 +265,13 @@ describe("subtitle choices while the picture plays", () => {
     await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
     expect(document.activeElement?.textContent).toContain("Saved for this version");
     const walked: string[] = [];
+
     for (let step = 0; step < 10; step++) {
       await press("ArrowDown");
       const at = document.activeElement;
       walked.push(at?.getAttribute("aria-label") ?? at?.textContent ?? "");
     }
+
     expect(walked).toEqual([
       "Forget downloaded subtitles",
       "Reset",
@@ -484,12 +507,14 @@ describe("subtitle choices while the picture plays", () => {
     async (how) => {
       await opened();
       titlePlayer.acceptDownloaded("movie", saved);
+
       const panel = (open: boolean) =>
         createElement(
           QueryClientProvider,
           { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
           createElement(SubtitlePanel, { open, onClose: () => {} }),
         );
+
       await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
       await act(async () => {
         button("Search subtitles").click();
@@ -528,6 +553,7 @@ describe("subtitle choices while the picture plays", () => {
     ...(["Off", "C off"] as const).map((choice) => ({ choice, reply: "failure" as const })),
   ])("keeps $choice when a pending download returns $reply", async ({ choice, reply }) => {
     await opened(choice === "C without a track" ? [] : [english]);
+
     if (choice === "C off" || choice === "saved result")
       titlePlayer.acceptDownloaded("movie", saved);
     await render(createElement(SubtitlePanel, { open: true, onClose: () => {} }));
@@ -565,9 +591,11 @@ describe("subtitle choices while the picture plays", () => {
     // Main may have saved the download before the cancel reached it, so it hears the choice that
     // stands, after the cancel: the held saved result by its key, or that nothing of it shows.
     await titlePlayer.downloadedEditsSaved();
+
     const told = ipc
       .methods()
       .filter((method) => /^subtitles\.(cancel|show|hide|timing)$/.test(method));
+
     if (choice === "saved result") {
       ipc.always("subtitles.timing", saved);
       await titlePlayer.setDownloadedTiming({ offset: 1, speed: 25 / 23.976 });
@@ -586,6 +614,7 @@ describe("subtitle choices while the picture plays", () => {
       expect(told).toEqual(["subtitles.cancel", "subtitles.hide"]);
       expect(ipc.argsOf("subtitles.hide")).toEqual([{ sessionId: "movie" }]);
     }
+
     expect(container?.textContent).not.toContain("Downloading");
     expect(container?.textContent).not.toContain("Late release");
     expect(container?.textContent).not.toContain("3 service downloads remain");

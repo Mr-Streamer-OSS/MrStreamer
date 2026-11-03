@@ -26,6 +26,7 @@ export function IconButton({
   height?: number;
 }) {
   const { focused, handlers } = useKeyboardFocus();
+
   return (
     <Pressable
       accessibilityRole="button"

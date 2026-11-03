@@ -12,16 +12,22 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** The picture may run this far behind the newest data before it jumps forward. */
 const LIVE_MAX_LATENCY_S = 8;
+
 /** How much buffer a jump forward keeps, against the next network hiccup. */
 const LIVE_KEEP_BUFFER_S = 3;
+
 /** No picture or sound within this long counts as a failed start. */
 const START_TIMEOUT_MS = 20_000;
+
 /** A clock that stands still this long after playback started counts as a broken stream. */
 const STALL_TIMEOUT_MS = 15_000;
+
 /** A clock that stands still this long while it should move is worth a word to the viewer. */
 const WAITING_MS = 3000;
+
 /** This much buffered media without the clock starting means the stream cannot be decoded. */
 const UNPLAYABLE_BUFFER_S = 4;
+
 /**
  * A clock that stands still this long while that much media waits beyond it means the stream's
  * timing is broken, as with frames that lack timestamps: data arrives but cannot be played.
@@ -30,6 +36,7 @@ const BROKEN_TIMING_STALL_MS = 4000;
 
 /** The optional libraries, loaded on first use (see `createEngine`). */
 type HlsJs = typeof Hls;
+
 type MpegtsJs = typeof mpegts;
 
 export type EngineName = "mpegts.js" | "hls.js" | "native";
@@ -95,6 +102,12 @@ export interface Engine {
    * offers none to choose from, so a stream it plays shows no Sound or CC.
    */
   readonly tracks: EngineTracks | null;
+  /**
+   * Holds an HLS stream's quality at the variant whose playlist is at `variant`, from the next
+   * segment on, or with null lets the engine pick again. A variant this player can't decode fails
+   * as unsupported rather than leaving another in its place. Engines without qualities ignore it.
+   */
+  fix?(variant: string | null): void;
   info(): StreamInfo;
   /** Stops playback, closes the connection and frees the video element. */
   destroy(): void;
@@ -117,17 +130,22 @@ export function createEngine(
   return loadingEngine(format, video, async () => {
     if (format === "mpegts") {
       const { default: mpegts } = await import("mpegts.js");
+
       return () => mpegtsEngine(mpegts, video, url, ends);
     }
+
     try {
       const { default: Hls } = await import("hls.js");
+
       if (Hls.isSupported()) {
         const { hlsTracks } = await import("./hls-tracks.ts");
+
         return () => hlsEngine(Hls, hlsTracks, video, url, sound, ends);
       }
     } catch {
       // A missing optional chunk must still allow the browser's own HLS playback.
     }
+
     return () => nativeEngine(video, url, ends, { kind: "hls", requestId: null });
   });
 }
@@ -143,11 +161,14 @@ function loadingEngine(
   const pending: ((engine: Engine) => void)[] = [];
   const { promise: started, resolve, reject } = Promise.withResolvers<void>();
   started.catch(() => {});
+
   const forward = (action: (engine: Engine) => void): void => {
     if (destroyed) return;
+
     if (current) action(current);
     else pending.push(action);
   };
+
   const tracks: EngineTracks = {
     onChange: (listener) => forward((engine) => engine.tracks?.onChange(listener)),
     setAudio: (id) => forward((engine) => engine.tracks?.setAudio(id)),
@@ -159,10 +180,12 @@ function loadingEngine(
     onSubtitleAvailable: (listener, language, known) =>
       forward((engine) => engine.tracks?.onSubtitleAvailable(listener, language, known)),
   };
+
   void load()
     .then((create) => {
       if (destroyed) return;
       current = create();
+
       for (const action of pending.splice(0)) forward(action);
       void current.started.then(resolve, reject);
     })
@@ -172,6 +195,7 @@ function loadingEngine(
         detail: t("The stream could not be decoded."),
       } satisfies EngineError),
     );
+
   return {
     get name() {
       return current?.name ?? (format === "mpegts" ? "mpegts.js" : "hls.js");
@@ -186,6 +210,7 @@ function loadingEngine(
     get tracks() {
       return current ? current.tracks : format === "hls" ? tracks : null;
     },
+    fix: (variant) => forward((engine) => engine.fix?.(variant)),
     info: () => current?.info() ?? elementInfo(video),
     destroy() {
       if (destroyed) return;
@@ -209,6 +234,7 @@ function mpegtsEngine(
       detail: t("This system cannot play MPEG-TS live streams."),
     });
   }
+
   const player = mpegts.createPlayer(
     { type: "mpegts", isLive: true, url },
     {
@@ -224,6 +250,7 @@ function mpegtsEngine(
       liveBufferLatencyMinRemain: LIVE_KEEP_BUFFER_S,
     },
   );
+
   const life = lifecycle(
     video,
     () => {
@@ -234,6 +261,7 @@ function mpegtsEngine(
     },
     ends,
   );
+
   player.on(mpegts.Events.ERROR, (type: unknown, detail: unknown, info: unknown) => {
     life.fail(mpegtsError(mpegts, type, detail, info));
   });
@@ -247,6 +275,7 @@ function mpegtsEngine(
     if (!privateData || typeof packet !== "object" || packet === null) return;
     const { pid, data, pts, nearest_pts } = packet as Record<string, unknown>;
     const at = typeof pts === "number" ? pts : nearest_pts;
+
     if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
       privateData(pid, data, at / 1000);
     }
@@ -265,6 +294,7 @@ function mpegtsEngine(
     info() {
       // createPlayer returns the base Player type; for MSE playback mediaInfo carries codec details.
       const media: mpegts.MSEPlayerMediaInfo = player.mediaInfo;
+
       return {
         ...elementInfo(video),
         fps: numberOr(media.fps),
@@ -281,11 +311,15 @@ function mpegtsError(mpegts: MpegtsJs, type: unknown, detail: unknown, info: unk
     info && typeof info === "object" && "msg" in info && typeof info.msg === "string"
       ? info.msg
       : String(detail);
+
   if (type === mpegts.ErrorTypes.NETWORK_ERROR) return { kind: "network", detail: message };
+
   if (detail === mpegts.ErrorDetails.MEDIA_FORMAT_UNSUPPORTED)
     return { kind: "wrong-container", detail: message };
+
   if (detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED)
     return { kind: "unsupported", detail: message };
+
   return { kind: "media", detail: message };
 }
 
@@ -307,38 +341,70 @@ function hlsEngine(
     renderTextTracksNatively: false,
     ...(ends === null ? { autoStartLoad: false } : { startPosition: 0 }),
   });
+
   const tracks = hlsTracks(hls, video, sound);
   let released = false;
   let supportTimer: ReturnType<typeof setTimeout> | undefined;
+  // While a recording shares the stream, the main process sends only the variant it holds, which
+  // `fix` names by its playlist's address. Once the levels are listed, `follow` holds it, or
+  // with null lets hls.js pick again.
+  let fixed: string | null = null;
+  let follow: (() => void) | null = null;
+  let loading = false;
+
+  /** Starts loading once: at `level`, else where hls.js would. */
+  const load = (level?: number) => {
+    if (loading) return;
+
+    if (level !== undefined) hls.startLevel = level;
+    hls.startLoad();
+    loading = true;
+  };
+
+  /** The level `fixed` names, when hls.js lists it. */
+  const heldLevel = () =>
+    fixed === null ? undefined : hls.levels.find(({ uri }) => uri === fixed);
+
   if (ends === null) {
     hls.once(Hls.Events.MANIFEST_PARSED, () => {
       // Reading firstAutoLevel starts hls.js's own capability checks. Let their handlers remove
       // unsupported levels before using any index; another read can start further checks.
       const checked = new Set<Promise<unknown>>();
       const validated = new Map<(typeof hls.levels)[number], boolean>();
+
       // Capability services are advisory: a slow service must not consume the start watchdog.
       const deadline = new Promise<"timeout">((resolve) => {
         supportTimer = setTimeout(() => resolve("timeout"), 1000);
       });
+
       async function start(): Promise<void> {
-        while (!released) {
+        // A held level takes over from this (`hold`).
+        while (!released && !loading && !heldLevel()) {
           const initial = hls.firstAutoLevel;
+
           const pending = hls.levels.flatMap((level) =>
             level.supportedPromise && !checked.has(level.supportedPromise)
               ? [level.supportedPromise]
               : [],
           );
+
           if (pending.length) {
             pending.forEach((promise) => checked.add(promise));
             const result = await Promise.race([Promise.allSettled(pending), deadline]);
+
             if (released) return;
+
             if (result === "timeout") {
-              hls.startLoad();
+              if (!heldLevel()) load();
+
               return;
             }
+
             continue;
           }
+
           const tier = hls.levels[initial];
+
           // Keep the initial audio groups, including their stable rendition identities. Starting
           // in another group can lose the requested language before ABR ever reaches this tier.
           if (
@@ -363,7 +429,9 @@ function hlsEngine(
                   : lowest,
               initial,
             );
+
             const candidate = hls.levels[lowest]!;
+
             if (
               lowest !== initial &&
               candidate.supportedResult?.supported !== true &&
@@ -380,34 +448,108 @@ function hlsEngine(
                 ),
                 deadline,
               ]);
+
               if (released) return;
+
               if (result === "timeout") {
-                hls.startLoad();
+                if (!heldLevel()) load();
+
                 return;
               }
+
               validated.set(candidate, result);
               continue;
             }
-            hls.startLevel = lowest;
+
+            return load(lowest);
           }
-          hls.startLoad();
-          return;
+
+          return load();
         }
       }
-      // Selection is optional. Unexpected selection errors fall back to normal loading; a
-      // loader failure still uses the engine's existing failure path.
-      void start()
-        .catch(() => {
+
+      /** The one startup selection under way, which a hold given up meanwhile shares. */
+      let starting: Promise<void> | null = null;
+
+      /**
+       * Whether this player decodes `level`, as hls.js's capability check says. It is advisory:
+       * one hls.js couldn't make, as when the capability service failed or only a supplemental
+       * codec isn't supported, or that doesn't answer within a second, counts as yes.
+       */
+      async function decodes(level: (typeof hls.levels)[number]): Promise<boolean> {
+        const decoded = ({ supported, error }: NonNullable<typeof level.supportedResult>) =>
+          supported || error !== undefined;
+
+        if (level.supportedResult) return decoded(level.supportedResult);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        return Promise.race([
+          hls.getMediaDecodingInfo(level).then(decoded, () => true),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(true), 1000);
+          }),
+        ]).finally(() => clearTimeout(timer));
+      }
+
+      /**
+       * Holds the level `fixed` names, from the start while nothing loads yet. The main process
+       * sends no other variant meanwhile, so one this player can't decode can't play here: that
+       * fails as unsupported, and the player asks for a stream of its own instead, which never
+       * shares the recording's. With none held, or one hls.js doesn't list, as a twin of another
+       * at a second address, hls.js picks as startup does, while the main process still sends only
+       * the held one.
+       */
+      async function hold(): Promise<void> {
+        const variant = fixed;
+        const level = heldLevel();
+
+        if (!level) {
+          if (loading) hls.loadLevel = -1;
+
+          // A selection that ended for a hold given up since starts again.
+          while (!released && !loading && !heldLevel())
+            await (starting ??= start().finally(() => (starting = null)));
+
+          return;
+        }
+
+        // The level playing already plays.
+        const playable = level === hls.levels[hls.currentLevel] || (await decodes(level));
+
+        // A later `fix` holds its own.
+        if (released || fixed !== variant) return;
+        // hls.js may have removed it meanwhile as unsupported.
+        const index = playable ? hls.levels.indexOf(level) : -1;
+
+        if (index < 0) {
+          life.fail({ kind: "unsupported", detail: t("The stream could not be decoded.") });
+
+          return;
+        }
+
+        load(index);
+        hls.loadLevel = index;
+      }
+
+      // Selection is optional. Unexpected selection errors fall back to normal loading, but for
+      // a held level, which nothing may stand in for. A loader failure still uses the engine's
+      // existing failure path.
+      follow = () =>
+        void hold().catch(() => {
           if (released) return;
+
           try {
-            hls.startLoad();
+            if (!heldLevel()) return load();
           } catch {
-            life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+            // Fails below.
           }
-        })
-        .finally(() => clearTimeout(supportTimer));
+
+          life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
+        });
+      follow();
     });
   }
+
   const life = lifecycle(
     video,
     () => {
@@ -419,6 +561,7 @@ function hlsEngine(
     ends,
     { kind: "hls", requestId: null },
   );
+
   hls.on(Hls.Events.ERROR, (_event, data) => {
     if (tracks.subtitleError(data) || !data.fatal) return;
     life.fail(hlsError(Hls, data, url));
@@ -432,8 +575,14 @@ function hlsEngine(
     ...life.handle,
     onPrivateData: () => {},
     tracks: tracks.handle,
+    fix(variant) {
+      fixed = variant;
+
+      if (!released) follow?.();
+    },
     info() {
       const level = hls.levels[hls.currentLevel];
+
       return {
         ...elementInfo(video),
         fps: level?.frameRate || null,
@@ -453,10 +602,13 @@ function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
     Hls.ErrorDetails.LEVEL_PARSING_ERROR,
     Hls.ErrorDetails.LEVEL_EMPTY_ERROR,
   ].includes(data.details);
+
   const network = data.type === Hls.ErrorTypes.NETWORK_ERROR && !parsing;
+
   const unsupported =
     data.details === Hls.ErrorDetails.MANIFEST_INCOMPATIBLE_CODECS_ERROR ||
     data.details === Hls.ErrorDetails.BUFFER_INCOMPATIBLE_CODECS_ERROR;
+
   // Only loader failures select a request. Parsing errors can also carry a URL or fragment, even
   // when hls.js labels them network errors. A key failure must never select its media fragment.
   const transport = [
@@ -471,6 +623,7 @@ function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
     Hls.ErrorDetails.KEY_LOAD_ERROR,
     Hls.ErrorDetails.KEY_LOAD_TIMEOUT,
   ].includes(data.details);
+
   const address =
     data.response?.url ??
     data.context?.url ??
@@ -479,9 +632,11 @@ function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
     data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT
       ? (data.part?.url ?? data.frag?.url)
       : undefined);
+
   const base = URL.parse(source);
   const request = address ? URL.parse(address) : null;
   const prefix = base?.pathname.replace(/\.m3u8$/, "/");
+
   const requestId =
     network &&
     transport &&
@@ -494,6 +649,7 @@ function hlsError(Hls: HlsJs, data: ErrorData, source: string): EngineError {
         /^[0-9a-z]+$/.test(request.pathname.slice(prefix.length))))
       ? request.pathname
       : null;
+
   return {
     kind: network ? "network" : unsupported ? "unsupported" : "media",
     detail: data.details,
@@ -512,6 +668,7 @@ export function nativeEngine(
   const life = lifecycle(video, () => {}, ends, failure);
   video.src = url;
   void video.play().catch(() => {});
+
   return {
     name: "native",
     ...life.handle,
@@ -524,6 +681,7 @@ export function nativeEngine(
 function failedEngine(name: EngineName, video: HTMLVideoElement, error: EngineError): Engine {
   const life = lifecycle(video, () => {}, null);
   life.fail(error);
+
   return {
     name,
     ...life.handle,
@@ -574,6 +732,7 @@ function lifecycle(
     const now = Date.now();
     const sinceCheck = now - lastCheckAt;
     lastCheckAt = now;
+
     if (video.currentTime > lastTime + 0.05) {
       if (!settled && video.currentTime - lastTime > 0.25) begin();
       // A jump forward to catch up with live moves the clock further than the stream played.
@@ -581,9 +740,12 @@ function lifecycle(
       lastTime = video.currentTime;
       lastProgressAt = now;
       wait(false);
+
       if (ends !== null && played >= ends) onEnded();
+
       return;
     }
+
     if (!settled) {
       if (bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
         fail({
@@ -604,7 +766,9 @@ function lifecycle(
       wait(false);
     } else {
       const stalled = now - lastProgressAt;
+
       if (stalled >= WAITING_MS) wait(true);
+
       if (stalled > BROKEN_TIMING_STALL_MS && bufferedAhead(video) >= UNPLAYABLE_BUFFER_S) {
         fail({ kind: "media", detail: t("The stream arrives, but its timing is broken.") });
       } else if (stalled > STALL_TIMEOUT_MS) {
@@ -628,8 +792,10 @@ function lifecycle(
   function fail(error: EngineError): void {
     if (finished) return;
     finished = true;
+
     if (failure && !error.failure) error = { ...error, failure };
     detach();
+
     if (!settled) {
       settled = true;
       reject(error);
@@ -653,21 +819,27 @@ function lifecycle(
       detail: error?.message || t("The stream could not be decoded."),
     });
   };
+
   video.addEventListener("error", onError);
 
   // Played to its end. One that never got going sent nothing to play.
   const onEnded = () => {
     if (finished) return;
+
     if (!settled && video.currentTime === 0) {
       fail({ kind: "network", detail: t("The stream stopped delivering data.") });
+
       return;
     }
+
     begin();
     finished = true;
     detach();
+
     if (endedListener) endedListener();
     else pendingEnd = true;
   };
+
   if (ends !== null) video.addEventListener("ended", onEnded);
 
   function detach(): void {
@@ -684,6 +856,7 @@ function lifecycle(
       started,
       onFailure(listener: (error: EngineError) => void): void {
         failureListener = listener;
+
         if (pendingFailure) {
           listener(pendingFailure);
           pendingFailure = null;
@@ -691,6 +864,7 @@ function lifecycle(
       },
       onEnded(listener: () => void): void {
         endedListener = listener;
+
         if (pendingEnd) {
           pendingEnd = false;
           listener();
@@ -705,6 +879,7 @@ function lifecycle(
         destroyed = true;
         finished = true;
         detach();
+
         if (!settled) reject({ kind: "network", detail: "Stopped." } satisfies EngineError);
         teardown();
         video.pause();
@@ -718,6 +893,7 @@ function lifecycle(
 /** Seconds of media buffered beyond the current position. */
 function bufferedAhead(video: HTMLVideoElement): number {
   const { buffered, currentTime } = video;
+
   return buffered.length > 0 ? buffered.end(buffered.length - 1) - currentTime : 0;
 }
 

@@ -51,6 +51,7 @@ export function sourceIdentity() {
   let ranges: boolean | null = null;
   /** The mark each address gave of the file, null for an answer without one. */
   const marks = new Map<string, string | null>();
+
   /**
    * The resource read, by its path and query, with the mark each host serving it gave, by
    * `resourceKey`, for `proof`. Another path or query is another resource, maybe other bytes under
@@ -60,6 +61,7 @@ export function sourceIdentity() {
    */
   let proven: { readonly resource: string; readonly marks: Map<string, string> } | "mixed" | null =
     null;
+
   /** Some answer of the file came without a mark. */
   let unmarked = false;
   /** Marks of the files replaced since, by "address mark". */
@@ -86,6 +88,7 @@ export function sourceIdentity() {
     /** The proof of the file read so far, while every answer of it carried a mark. */
     get proof(): FileProof | null {
       if (size === null || proven === null || proven === "mixed" || unmarked) return null;
+
       return { size, marks: [...proven.marks].map(([resource, mark]) => ({ resource, mark })) };
     },
     /**
@@ -103,53 +106,72 @@ export function sourceIdentity() {
     observe(answer: Response, ranged: boolean): Held | null {
       const range = /^bytes (\d+)-\d+\/(\d+)$/.exec(answer.headers.get("content-range") ?? "");
       const length = answer.headers.get("content-length");
+
       const held =
         answer.status === 206 && range
           ? { start: Number(range[1]), size: Number(range[2]) }
           : answer.status === 200 && length !== null
             ? { start: 0, size: Number(length) }
             : null;
+
       if (!held || !Number.isSafeInteger(held.size)) {
         // Its bytes are read all the same, and nothing tells which file they are of.
         proven = "mixed";
+
         return null;
       }
+
       if (ranged) ranges = answer.status === 206;
       const address = URL.parse(answer.url);
       const resource = address ? address.origin + address.pathname : "";
       const mark = strongMark(answer.headers);
       const known = marks.get(resource);
+
       const other =
         (size !== null && size !== held.size) ||
         (known !== undefined && known !== null && mark !== null && known !== mark);
+
       const replaced = mark !== null && retired.has(`${resource} ${mark}`);
+
       if (replaced && !other) {
         // What it sends may be read too, and it is of a file that is gone.
         proven = "mixed";
+
         return { ...held, other: false, stale: true };
       }
+
       if (other) {
         // A file that is back can't be told from its copies that never left: forget them all.
         if (replaced) retired.clear();
+
         for (const [each, old] of marks) if (old !== null) retired.add(`${each} ${old}`);
+
         for (const oldest of retired) {
           if (retired.size <= RETIRED_KEPT) break;
           retired.delete(oldest);
         }
+
         marks.clear();
         proven = null;
         unmarked = false;
         generation++;
       }
+
       size = held.size;
+
       if (mark === null) unmarked = true;
+
       if (mark !== null || !marks.has(resource)) marks.set(resource, mark);
+
       if (mark !== null && proven !== "mixed") {
         const read = address ? address.pathname + address.search : "";
+
         if (proven === null) proven = { resource: read, marks: new Map() };
+
         if (proven.resource === read) proven.marks.set(resourceKey(answer.url), mark);
         else proven = "mixed";
       }
+
       return { ...held, other, stale: false };
     },
   };
@@ -164,6 +186,7 @@ export function sourceIdentity() {
  */
 export function resourceKey(address: string): string {
   const url = URL.parse(address);
+
   return createHash("sha256")
     .update(url ? url.origin + url.pathname + url.search : "")
     .digest("hex");
@@ -172,9 +195,12 @@ export function resourceKey(address: string): string {
 /** The mark of an answer that tells its file from any other: a strong ETag, or an old enough date. */
 export function strongMark(headers: Headers): string | null {
   const tag = headers.get("etag");
+
   if (tag !== null && !tag.startsWith("W/")) return `etag ${tag}`;
   const modified = Date.parse(headers.get("last-modified") ?? "");
   const sent = Date.parse(headers.get("date") ?? "");
+
   if (Number.isNaN(modified) || Number.isNaN(sent) || sent - modified < 1000) return null;
+
   return `modified ${modified}`;
 }

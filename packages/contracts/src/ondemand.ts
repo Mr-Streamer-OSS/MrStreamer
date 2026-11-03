@@ -5,6 +5,7 @@ import type { OwnedId } from "./subscription.ts";
 import { lazy, type Infer } from "./lazy.ts";
 
 export const TITLE_KINDS = ["movie", "series"] as const;
+
 export type TitleKind = (typeof TITLE_KINDS)[number];
 
 /**
@@ -284,10 +285,12 @@ export function isCollectionId(text: string): text is CollectionId {
 
 /** How a collection's page is ordered. */
 export const COLLECTION_SORTS = ["added", "popular", "rating", "title"] as const;
+
 export type CollectionSort = (typeof COLLECTION_SORTS)[number];
 
 /** The tabs of rows: For you, and New. */
 export const ROW_TABS = ["for-you", "new"] as const;
+
 export type RowTab = (typeof ROW_TABS)[number];
 
 /** One row of a tab: a collection's first titles, and how many it has. */
@@ -324,6 +327,7 @@ export const RawTitleRef = lazy(() =>
     episode: "number.integer >= 0",
   }),
 );
+
 export type RawTitleRef = Infer<typeof RawTitleRef>;
 
 /**
@@ -331,6 +335,7 @@ export type RawTitleRef = Infer<typeof RawTitleRef>;
  * episode's `seriesId` is in that subscription too.
  */
 export const TitleRef = lazy(() => RawTitleRef().and({ subscriptionId: "string > 0" }));
+
 export type TitleRef = Infer<typeof TitleRef>;
 
 /** The series version an episode belongs to, in the episode's own subscription. */

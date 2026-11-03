@@ -4,12 +4,14 @@ import { xtreamProvider } from "../src/xtream.ts";
 
 const login = ["fixture user", "p/w"];
 const original = "https://panel.test/xmltv.php?username=fixture+user&password=p%2Fw";
+
 const decide = (location: string, followed = 0, current = original) =>
   nextProviderRedirect({ original, current, location, followed, login });
 
 describe("provider guide transport", () => {
   it("builds the descriptor without HTTP and reuses its exact endpoint and headers for the body API", async () => {
     const requests: { url: string; headers: Headers; redirect: RequestInit["redirect"] }[] = [];
+
     const provider = xtreamProvider(
       { server: "https://panel.test", username: login[0]!, password: login[1]! },
       {
@@ -20,14 +22,17 @@ describe("provider guide transport", () => {
             headers: new Headers(init?.headers),
             redirect: init?.redirect,
           });
+
           return new Response("<tv/>", { headers: { "Content-Length": "5" } });
         },
       },
     );
+
     const descriptor = await provider.liveGuideRequest?.();
     expect(requests).toEqual([]);
     expect(descriptor?.kind).toBe("request");
     const body = await provider.liveGuide();
+
     if (descriptor?.kind !== "request" || body.kind !== "document")
       throw new Error("missing document");
     expect(requests[0]?.url).toBe(descriptor.url);
@@ -58,11 +63,13 @@ describe("provider guide transport", () => {
   it("closes every redirect body before following, retaining the original headers", async () => {
     let closed = 0;
     const seen: string[] = [];
+
     const request = providerFetch(
       async (input, init) => {
         seen.push(String(input));
         expect(init?.redirect).toBe("manual");
         expect(new Headers(init?.headers).get("User-Agent")).toBe("fixture");
+
         return seen.length === 1
           ? new Response(
               new ReadableStream({
@@ -76,6 +83,7 @@ describe("provider guide transport", () => {
       },
       { secrets: login },
     );
+
     expect(await (await request(original, { headers: { "User-Agent": "fixture" } })).text()).toBe(
       "ok",
     );
@@ -87,6 +95,7 @@ describe("provider guide transport", () => {
       { server: "https://panel.test", username: "user", password: "pw" },
       { userAgent: "fixture", fetch: async () => new Response(null, { status }) },
     );
+
     await expect(provider.liveGuide()).rejects.toMatchObject({ error: { kind: "invalid-login" } });
   });
 });
@@ -98,11 +107,14 @@ it.each(["http://[private-canary", "file:///fixture-user/private-canary"])(
       async () => new Response(null, { status: 302, headers: { Location: location } }),
       { secrets: login },
     );
+
     const failure = await request(original).then(
       () => null,
       (cause: unknown) => cause,
     );
+
     expect(failure).toBeInstanceOf(TypeError);
+
     if (!(failure instanceof Error)) throw new Error("missing safe failure");
     expect(failure.message).not.toMatch(/too many/);
     expect(failure.message).toMatch(/valid URL|http or https/);

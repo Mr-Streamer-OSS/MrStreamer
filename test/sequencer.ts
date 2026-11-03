@@ -9,7 +9,9 @@ import { BaseSequencer, type TestSpecification } from "vitest/node";
 const durations: Readonly<Record<string, number>> = JSON.parse(
   readFileSync(new URL("durations.json", import.meta.url), "utf8"),
 );
+
 const recorded = Object.values(durations).sort((a, b) => a - b);
+
 /** A file the table doesn't name yet counts as the median one. */
 const unrecorded = recorded[Math.floor(recorded.length / 2)] ?? 1;
 
@@ -17,6 +19,7 @@ export class DurationSequencer extends BaseSequencer {
   /** The recorded seconds of a file, by its path from the root with forward slashes. */
   #seconds(spec: TestSpecification) {
     const path = relative(this.ctx.config.root, spec.moduleId).replaceAll("\\", "/");
+
     return durations[path] ?? unrecorded;
   }
 
@@ -35,9 +38,11 @@ export class DurationSequencer extends BaseSequencer {
   override async shard(files: TestSpecification[]) {
     const { index, count } = this.ctx.config.shard ?? { index: 1, count: 1 };
     const loads = Array.from({ length: count }, () => 0);
+
     return this.#longestFirst(files).filter((spec) => {
       const least = loads.indexOf(Math.min(...loads));
       loads[least] = (loads[least] ?? 0) + this.#seconds(spec);
+
       return least === index - 1;
     });
   }

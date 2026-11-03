@@ -5,12 +5,16 @@ import type { MediaPolicy } from "../src/media-policy.ts";
 
 // The real playback owner queries a native-port stand-in. Labels are display names, not facts.
 const port = nativePlayer();
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => port }));
+
 const { play, stop, trackChoices, retry } = await import("../src/playback.ts");
 const preferences = await import("../src/media-preferences.ts");
 const { native } = await import("./native-files.ts");
 const query = port.getObservedTracksAsync.getMockImplementation();
+
 const item = {
   id: "movie",
   subscriptionId: null,
@@ -20,6 +24,7 @@ const item = {
   next: false,
   versions: false,
 };
+
 const open = () =>
   play(
     item,
@@ -30,10 +35,13 @@ const open = () =>
     },
     { watch: true, login: [] },
   );
+
 const sheet = async (of: "audio" | "subtitles") =>
   ((await trackChoices(of)) ?? []).map((choice) => `${choice.selected ? "✓ " : ""}${choice.label}`);
+
 const choose = async (of: "audio" | "subtitles", label: string) =>
   ((await trackChoices(of)) ?? []).find((choice) => choice.label === label)?.choose();
+
 let tracks: ObservedTrackSnapshot;
 
 beforeEach(async () => {
@@ -45,10 +53,12 @@ beforeEach(async () => {
   preferences.updateMediaPreferences("subtitles", { kind: "forced-only" });
   preferences.updateMediaPreferences("liveQuality", "fhd");
   port.getObservedTracksAsync.mockReset();
+
   if (query) port.getObservedTracksAsync.mockImplementation(query);
   port.tracks = null;
   await open();
   const identity = port.identity();
+
   const sounds: ObservedAudioTrack[] = [
     { language: "en", label: "English", name: "Stereo 1", isDefault: false },
     { language: "en", label: "English", name: "Surround 2", isDefault: true },
@@ -61,6 +71,7 @@ beforeEach(async () => {
     group: "audio",
     isPlayable: true,
   }));
+
   const subtitles: ObservedSubtitleTrack[] = [0, 1].map((i) => ({
     ...identity,
     revision: 1,
@@ -72,6 +83,7 @@ beforeEach(async () => {
     isPlayable: true,
     forcedOnly: i === 1,
   }));
+
   tracks = {
     ...identity,
     revision: 1,
@@ -91,17 +103,21 @@ beforeEach(async () => {
         : { selectedSubtitleId: choice.track?.id ?? null }),
     };
     port.tracks = tracks;
+
     return { kind: "requested" };
   });
 });
+
 afterEach(() => {
   native.sync = null;
+
   return stop();
 });
 
 describe("actual native track choices", () => {
   it("checks one sound and hands back each exact observed record, in both directions", async () => {
     expect(await sheet("audio")).toEqual(["English · Stereo 1", "✓ English · Surround 2", "Dutch"]);
+
     for (const [label, checked] of [
       ["English · Stereo 1", 0],
       ["English · Surround 2", 1],
@@ -110,6 +126,7 @@ describe("actual native track choices", () => {
       await choose("audio", label);
       expect(((await trackChoices("audio")) ?? [])[checked]?.selected).toBe(true);
     }
+
     expect(
       port.selectObservedTrackAsync.mock.calls
         .filter((call) => call[2].kind === "audio")
@@ -176,11 +193,14 @@ describe("actual native track choices", () => {
 const tick = async () => {
   for (let turn = 0; turn < 60; turn++) await Promise.resolve();
 };
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
+
   return { promise, resolve };
 }
+
 const sound = (
   id: string,
   language: string,
@@ -196,6 +216,7 @@ const sound = (
   isPlayable: true,
   ...facts,
 });
+
 const text = (id: string, language: string, forcedOnly = false): ObservedSubtitleTrack => ({
   ...port.identity(),
   revision: 1,
@@ -207,20 +228,24 @@ const text = (id: string, language: string, forcedOnly = false): ObservedSubtitl
   isPlayable: true,
   forcedOnly,
 });
+
 /** Retag the actual menu records for this attempt and revision, as the native producer does. */
 function snapshot(
   revision: number,
   parts: Partial<ObservedTrackSnapshot> = {},
 ): ObservedTrackSnapshot {
   const identity = port.identity();
+
   const audio: ObservedTrackSnapshot["audio"] = parts.audio ?? {
     state: "ready",
     options: [sound("en", "en", { isDefault: true }), sound("de", "de"), sound("nl", "nl")],
   };
+
   const subtitles: ObservedTrackSnapshot["subtitles"] = parts.subtitles ?? {
     state: "ready",
     options: [text("en", "en", true), text("nl", "nl", true), text("plain-nl", "nl")],
   };
+
   return {
     subtitleOffAllowed: true,
     selectedAudioId: "en",
@@ -238,23 +263,28 @@ function snapshot(
     },
   };
 }
+
 function publish(next: ObservedTrackSnapshot) {
   tracks = next;
   port.tracks = next;
   port.observation({ kind: "tracks", tracks: next });
 }
+
 const requests = () =>
   port.selectObservedTrackAsync.mock.calls.map(
     ([, , choice]) => `${choice.kind}:${choice.track?.id ?? "off"}`,
   );
+
 const soundsRequested = () =>
   port.selectObservedTrackAsync.mock.calls
     .filter(([, , choice]) => choice.kind === "audio")
     .map(([, , choice]) => choice.track?.id);
+
 const captionsRequested = () =>
   port.selectObservedTrackAsync.mock.calls
     .filter(([, , choice]) => choice.kind === "subtitles")
     .map(([, , choice]) => choice.track?.id ?? "off");
+
 async function choosing(
   audio: MediaPolicy["audio"],
   subtitles: MediaPolicy["subtitles"] = { kind: "off" },
@@ -271,11 +301,13 @@ describe("automatic policy in the one playback owner", () => {
     publish(snapshot(1, { audio: { state: "ready", options: [] }, selectedAudioId: null }));
     await tick();
     expect(soundsRequested()).toEqual([]);
+
     const options = [
       sound("en", "en", { isDefault: true }),
       sound("nl", "nl"),
       sound("main", "nl", { isDefault: true }),
     ];
+
     publish(snapshot(2, { audio: { state: "ready", options } }));
     await tick();
     expect(soundsRequested()).toEqual(["main"]);
@@ -369,9 +401,12 @@ describe("automatic policy in the one playback owner", () => {
       port.selectObservedTrackAsync.mockImplementation(async (...args) => {
         if (args[2].kind === "audio") {
           if (outcome === "rejected") throw new Error("bridge refused");
+
           return { kind: outcome === "keep" ? "requested" : outcome };
         }
+
         if (!select) throw new Error("No native selection port");
+
         return select(...args);
       });
       publish(
@@ -397,13 +432,16 @@ describe("automatic policy in the one playback owner", () => {
     let reading = false;
     port.selectObservedTrackAsync.mockImplementation(async (...args) => {
       if (args[2].kind === "audio") return ack.promise;
+
       if (!select) throw new Error("No native selection port");
+
       return select(...args);
     });
     publish(snapshot(1, { selectedSubtitleId: "en" }));
     await tick();
     port.getObservedTracksAsync.mockImplementationOnce(async () => {
       reading = true;
+
       return readback.promise;
     });
     ack.resolve({ kind: "requested" });
@@ -419,15 +457,18 @@ describe("automatic policy in the one playback owner", () => {
 
   it("finishes post-request readback when a newer stale row supersedes the group operation", async () => {
     await choosing({ kind: "follow-title" }, { kind: "forced-only" });
+
     const subtitles = {
       state: "ready" as const,
       options: [text("en", "en", true), text("de", "de", true)],
     };
+
     publish(snapshot(1, { subtitles, selectedSubtitleId: "en" }));
     await tick();
     const rows = (await trackChoices("audio")) ?? [];
     const german = rows.find((row) => row.label === "de");
     const dutch = rows.find((row) => row.label === "nl");
+
     if (!german || !dutch) throw new Error("Missing native rows");
     const acknowledgement = deferred<{ kind: "requested" }>();
     const earlierQuery = deferred<ObservedTrackSnapshot>();
@@ -450,6 +491,7 @@ describe("automatic policy in the one playback owner", () => {
       // The actual sound changed; only this post-request query observes it, with no new event.
       tracks = snapshot(2, { subtitles, selectedAudioId: "de", selectedSubtitleId: "en" });
       port.tracks = tracks;
+
       return tracks;
     });
     earlierQuery.resolve(snapshot(1, { subtitles, selectedSubtitleId: "en" }));
@@ -537,10 +579,12 @@ describe("automatic policy in the one playback owner", () => {
   it("stops one group's automatic requests after three consecutive stale answers", async () => {
     await choosing({ kind: "follow-title" });
     port.selectObservedTrackAsync.mockResolvedValue({ kind: "stale" });
+
     for (let revision = 1; revision <= 5; revision++) {
       publish(snapshot(revision, { selectedAudioId: "nl" }));
       await tick();
     }
+
     expect(soundsRequested()).toEqual(["en", "en", "en"]);
   });
 
@@ -572,9 +616,11 @@ describe("automatic policy in the one playback owner", () => {
     port.selectObservedTrackAsync.mockImplementation(async (...args) => {
       if (!select) throw new Error("No native selection port");
       const result = await select(...args);
+
       if (args[2].kind === "audio") {
         port.observation({ kind: "tracks", tracks });
       }
+
       return result;
     });
     publish(snapshot(1, { selectedSubtitleId: "en" }));
@@ -601,10 +647,12 @@ describe("automatic policy in the one playback owner", () => {
     publish(snapshot(1, { selectedSubtitleId: "plain-nl" }));
     await tick();
     expect(requests()).toEqual(["subtitles:off"]);
+
     const audio = {
       state: "ready" as const,
       options: [sound("en", "en", { isDefault: true }), sound("nl", "nl", { isPlayable: false })],
     };
+
     publish(snapshot(2, { audio }));
     await tick();
     publish(
@@ -718,7 +766,9 @@ describe("confirmed manual choices and Retry holds", () => {
         tracks = { ...tracks, selectedSubtitleId: args[2].track?.id ?? null };
         port.tracks = tracks;
       }
+
       if (!select) throw new Error("No native selection port");
+
       return select(...args);
     });
     publish(snapshot(1, { selectedAudioId: "nl", selectedSubtitleId: "en" }));
@@ -751,6 +801,7 @@ describe("confirmed manual choices and Retry holds", () => {
       liveQuality: "sd",
       subtitles: { kind: "language", language: "fr" },
     });
+
     if (!select) throw new Error("No native selection port");
     port.selectObservedTrackAsync.mockImplementation(select);
     await choose("subtitles", "nl · 2");
@@ -787,6 +838,7 @@ describe("confirmed manual choices and Retry holds", () => {
       if (operation === "write" && path.endsWith("media-preferences.json.next"))
         throw new Error("disk full");
     };
+
     await choose("audio", "de");
     expect(await sheet("audio")).toContain("✓ de");
     expect(preferences.getMediaPreferences().audio).toEqual({ kind: "follow-title" });
@@ -806,6 +858,7 @@ describe("confirmed manual choices and Retry holds", () => {
       await tick();
       port.selectObservedTrackAsync.mockImplementationOnce(async () => {
         if (answer === "rejected") throw new Error("bridge refused");
+
         return { kind: answer };
       });
       await choose("audio", "de");
@@ -821,6 +874,7 @@ describe("confirmed manual choices and Retry holds", () => {
     publish(snapshot(1, { selectedSubtitleId: "en" }));
     await tick();
     const stale = ((await trackChoices("audio")) ?? []).find((row) => row.label === "de");
+
     if (!stale) throw new Error("No German row");
     publish(snapshot(2, { selectedAudioId: "nl", selectedSubtitleId: "nl" }));
     await stale.choose();
@@ -852,6 +906,7 @@ describe("confirmed manual choices and Retry holds", () => {
       port.selectObservedTrackAsync.mockResolvedValue({ kind: "requested" });
       await choose("audio", "de");
       const old = snapshot(1, { selectedAudioId: "de" });
+
       if (ending === "stop") await stop();
       else await open();
       port.observation({ kind: "tracks", tracks: old }, old);
@@ -924,14 +979,17 @@ describe("confirmed manual choices and Retry holds", () => {
       await choose("audio", "de");
       retry();
       await tick();
+
       const audio = [
         sound("en", "en", { isDefault: true }),
         sound("nl", "nl"),
         ...Array.from({ length: matches }, (_, index) => sound(`moved-${index}`, "de")),
       ];
+
       publish(snapshot(1, { audio: { state: "ready", options: audio }, selectedAudioId: "nl" }));
       await tick();
       expect(soundsRequested()).toEqual(["de", matches === 1 ? "moved-0" : "en"]);
+
       if (matches !== 1) {
         publish(
           snapshot(2, {
@@ -953,9 +1011,11 @@ describe("confirmed manual choices and Retry holds", () => {
     await tick();
     const german = ((await trackChoices("audio")) ?? []).find((row) => row.label === "de");
     const dutch = ((await trackChoices("audio")) ?? []).find((row) => row.label === "nl");
+
     const subtitles = ((await trackChoices("subtitles")) ?? []).find(
       (row) => row.label === "nl · 2",
     );
+
     if (!german || !dutch || !subtitles) throw new Error("Missing native rows");
     const ack = deferred<{ kind: "requested" }>();
     onTestFinished(() => ack.resolve({ kind: "requested" }));
@@ -984,9 +1044,11 @@ describe("confirmed manual choices and Retry holds", () => {
     port.selectObservedTrackAsync.mockImplementationOnce(async () => ack.promise);
     tracks = snapshot(1);
     port.tracks = tracks;
+
     const subtitles = ((await trackChoices("subtitles")) ?? []).find(
       (row) => row.label === "nl · 2",
     );
+
     if (!subtitles) throw new Error("No Dutch subtitle row");
     const picking = subtitles.choose();
     await tick();

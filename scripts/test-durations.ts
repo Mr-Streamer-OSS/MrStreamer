@@ -20,20 +20,26 @@ export default class TestDurations implements Reporter {
   onTestRunEnd(modules: readonly TestModule[]) {
     const config = this.#vitest?.config;
     const output = typeof config?.outputFile === "object" ? config.outputFile["durations"] : "";
+
     if (!config || !output) throw new Error("Pass --outputFile.durations=<file>");
+
     const seconds = modules
       .map((module) => {
         const taken = module.diagnostic();
+
         const ms =
           taken.environmentSetupDuration +
           taken.prepareDuration +
           taken.collectDuration +
           taken.setupDuration +
           taken.duration;
+
         const path = relative(config.root, module.moduleId).replaceAll("\\", "/");
+
         return [path, Math.round(ms / 100) / 10] as const;
       })
       .sort(([a], [b]) => (a < b ? -1 : 1));
+
     writeFileSync(output, `${JSON.stringify(Object.fromEntries(seconds), null, 2)}\n`);
   }
 }

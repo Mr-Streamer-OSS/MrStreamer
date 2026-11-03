@@ -10,6 +10,7 @@ const brand = `${root}/apps/desktop/assets/brand`;
 const output = `${root}/docs/assets/store`;
 const font = `${brand}/fonts/Inter.ttf`;
 const hat = await sharp(`${brand}/hat.png`).trim().png().toBuffer();
+
 await mkdir(output, { recursive: true });
 
 async function text(value: string, size: number, weight: number) {
@@ -64,10 +65,12 @@ const layouts = [
 ];
 
 const exports = [];
+
 for (const layout of layouts) {
   const picture = await sharp(hat)
     .resize(layout.hat.width, layout.hat.height, { fit: "inside" })
     .toBuffer({ resolveWithObject: true });
+
   const layers: OverlayOptions[] = [
     {
       input: picture.data,
@@ -75,6 +78,7 @@ for (const layout of layouts) {
       top: layout.hat.top + Math.round((layout.hat.height - picture.info.height) / 2),
     },
   ];
+
   for (const line of [
     ...("title" in layout ? [{ ...layout.title, text: "mr. streamer", weight: 800 }] : []),
     ...("caption" in layout ? [{ ...layout.caption, weight: 450 }] : []),
@@ -86,6 +90,7 @@ for (const layout of layouts) {
       left: "left" in line ? line.left : Math.round((layout.width - image.info.width) / 2),
     });
   }
+
   const bytes = await sharp({
     create: {
       width: layout.width,
@@ -98,6 +103,7 @@ for (const layout of layouts) {
     .removeAlpha()
     .png()
     .toBuffer();
+
   await writeFile(`${output}/${layout.name}.png`, bytes);
   exports.push({
     file: `${layout.name}.png`,
@@ -116,7 +122,9 @@ const thumbnail = await sharp(`${output}/signature-landscape.png`)
   .resize(1920, 1080)
   .png()
   .toBuffer();
+
 await writeFile(`${output}/store-trailer-thumbnail.png`, thumbnail);
+
 exports.push({
   file: "store-trailer-thumbnail.png",
   width: 1920,
@@ -139,6 +147,7 @@ const sources = await Promise.all(
     }),
   ),
 );
+
 await writeFile(
   `${output}/manifest.json`,
   `${JSON.stringify(

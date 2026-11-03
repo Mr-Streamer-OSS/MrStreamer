@@ -49,18 +49,22 @@ const DAY = 24 * HOUR;
 /** `bytes` as a sender splits them: in pieces of `size`. */
 async function* pieces(bytes: Uint8Array | string, size = 64 * 1024): AsyncGenerator<Uint8Array> {
   const all = typeof bytes === "string" ? Buffer.from(bytes) : bytes;
+
   for (let at = 0; at < all.length; at += size) yield all.subarray(at, at + size);
 }
 
 /** `document` as a sender splits it, all at once: in pieces of `size`. */
 function* slices(document: string, size: number): Generator<Uint8Array> {
   const all = Buffer.from(document);
+
   for (let at = 0; at < all.length; at += size) yield all.subarray(at, at + size);
 }
 
 async function text(document: AsyncIterable<Uint8Array>): Promise<string> {
   const read: Uint8Array[] = [];
+
   for await (const piece of document) read.push(piece);
+
   return Buffer.concat(read).toString("utf8");
 }
 
@@ -70,6 +74,7 @@ async function refusal(work: Promise<unknown>): Promise<unknown> {
     () => null,
     (thrown: unknown) => thrown,
   );
+
   return cause instanceof AppFailure && cause.error.kind === "guide" ? cause.error.failure : cause;
 }
 
@@ -105,6 +110,7 @@ describe("an XMLTV document as it arrives", () => {
   it("fails a gzip that stops early or is damaged, and never as a guide that just ends", async () => {
     const packed = gzipSync(tv(...Array.from({ length: 400 }, (_, at) => later(`c${at}.test`))));
     const cut = packed.subarray(0, packed.length - 12);
+
     const damaged = Buffer.concat([
       packed.subarray(0, 40),
       Buffer.alloc(24, 7),
@@ -125,6 +131,7 @@ describe("an XMLTV document as it arrives", () => {
     const bomb = gzipSync(Buffer.alloc(1024 * 1024, "a"));
     expect(bomb.length).toBeLessThan(4096);
     let handed = 0;
+
     const counted = async (document: AsyncIterable<Uint8Array>) => {
       for await (const piece of document) handed += piece.byteLength;
     };
@@ -147,7 +154,9 @@ describe("reading XMLTV as it arrives", () => {
   const read = (document: string, size: number) => {
     let programmes = 0;
     const reader = xmltvReader({ programme: () => programmes++, channel: () => {} }, 1024 * 1024);
+
     for (const piece of slices(document, size)) reader.push(piece);
+
     return { ending: reader.end(), programmes };
   };
 
@@ -158,14 +167,17 @@ describe("reading XMLTV as it arrives", () => {
     ] as const) {
       const found: XmltvProgramme[] = [];
       const channels: XmltvChannel[] = [];
+
       const reader = xmltvReader(
         { programme: (entry) => found.push(entry), channel: (entry) => channels.push(entry) },
         1024 * 1024,
       );
+
       const document = tv(
         '<channel ignored="unused" id="wrong" id="one&amp;only"><display-name>One</display-name></channel>',
         `<programme stop='20261002140000 +0000' ignored='unused' channel='wrong' start='20261002130000 +0000' channel='one&amp;only'><title>${raw}</title><desc>${raw}</desc></programme>`,
       );
+
       for (const piece of slices(document, 7)) reader.push(piece);
 
       expect(channels).toEqual([{ id: "one&only", name: "One" }]);
@@ -183,6 +195,7 @@ describe("reading XMLTV as it arrives", () => {
 
   describe("as one whole <tv> and nothing that only reads like one", () => {
     const one = later("one.test");
+
     /** A programme whose description is `text`, as a CDATA section holds it. */
     const described = (text: string) =>
       later("two.test").replace("</programme>", `<desc><![CDATA[${text}]]></desc></programme>`);
@@ -256,6 +269,7 @@ function catalogueOf(
 ): MappedChannels {
   const all = Object.keys(ids).map(liveChannel);
   const byId = new Map(all.map((channel) => [channel.id, channel]));
+
   return mappedChannels(
     {
       all,
@@ -288,6 +302,7 @@ const directories: string[] = [];
 async function guideDir() {
   const dir = await mkdtemp(join(tmpdir(), "mr-streamer-guide-index-"));
   directories.push(dir);
+
   return dir;
 }
 
@@ -302,6 +317,7 @@ async function index(document: string | Uint8Array, build: Partial<GuideBuild> =
   const target = join(dir, `${Math.random()}.sqlite`);
   await writeFile(join(dir, "document"), document);
   const told: number[] = [];
+
   const summary = await buildGuideIndex(
     {
       document: join(dir, "document"),
@@ -314,9 +330,12 @@ async function index(document: string | Uint8Array, build: Partial<GuideBuild> =
     },
     (programmes) => told.push(programmes),
   );
+
   const guide = await openGuideIndex(target);
+
   if (!guide) throw new Error("The index can't be opened.");
   opened.push(guide);
+
   return { guide, summary, told, target };
 }
 
@@ -324,6 +343,7 @@ describe("indexing a guide", () => {
   /** Every programme of a guide channel the index keeps, as [title, start, stop]. */
   const of = (guide: GuideIndex, id: string) => {
     const channel = guide.channels.get(id);
+
     return channel
       ? guide
           .range(channel, 0, Number.MAX_SAFE_INTEGER)
@@ -363,6 +383,7 @@ describe("indexing a guide", () => {
       ["none.test", "20261002210000", "20261002220000"],
       ["minus.test", "20261002163000 -0430", "20261002173000 -0430"],
     ] as const;
+
     const { guide } = await index(
       tv(
         ...equivalent.map(([id, start, stop]) => programme(id, start, stop, id)),
@@ -378,6 +399,7 @@ describe("indexing a guide", () => {
         programme("clocks.test", "20261025023000 +0100", "20261025030000 +0100", "After"),
       ),
     );
+
     const nine = Date.UTC(2026, 9, 2, 21);
 
     for (const [id] of equivalent) expect(of(guide, id)).toEqual([[id, nine, nine + HOUR]]);
@@ -424,8 +446,11 @@ describe("indexing a guide", () => {
         programme("one.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Evening"),
       ),
     );
+
     const channel = guide.channels.get("one.test");
+
     if (!channel) throw new Error("No channel.");
+
     const titles = (programmes: readonly { title: string }[]) =>
       programmes.map((each) => each.title);
 
@@ -455,6 +480,7 @@ describe("indexing a guide", () => {
     const minute = 60_000;
     // A description cut where the character it ends on is two code units: the whole character goes.
     const description = `${"d".repeat(GUIDE_KEPT.descriptionChars - 1)}😀${"e".repeat(500)}`;
+
     const { guide } = await index(
       tv(
         `<channel id="one.test"><display-name>${"N".repeat(400)}</display-name></channel>`,
@@ -467,7 +493,9 @@ describe("indexing a guide", () => {
         programme(`${"x".repeat(GUIDE_KEPT.idChars + 1)}`, stamp(NOON), stamp(NOON + HOUR), "Lost"),
       ),
     );
+
     const channel = guide.channels.get("one.test");
+
     if (!channel) throw new Error("No channel.");
 
     expect(channel.name).toBe("N".repeat(GUIDE_KEPT.nameChars));
@@ -484,11 +512,13 @@ describe("indexing a guide", () => {
   it("answers a whole day of one-minute programmes where the clocks go back two hours, the one a search finds among them, and a grid's stretch without descriptions", async () => {
     const zone = process.env["TZ"];
     process.env["TZ"] = "Antarctica/Troll";
+
     try {
       // 25 October 2026 at Troll: +02:00 until 01:00 UTC, +00:00 after, so 26 hours long.
       const morning = new Date(2026, 9, 25).setHours(0, 0, 0, 0);
       const midnight = new Date(2026, 9, 25).setHours(24, 0, 0, 0);
       expect(midnight - morning).toBe(26 * HOUR);
+
       // A programme on as the day begins, then one a minute to its end.
       const { guide, target } = await index(
         tv(
@@ -503,7 +533,9 @@ describe("indexing a guide", () => {
         ),
         { since: morning, archive: 2 * DAY },
       );
+
       const channel = guide.channels.get("one.test");
+
       if (!channel) throw new Error("No channel.");
 
       const day = guide.schedule(channel, morning, morning, midnight);
@@ -516,6 +548,7 @@ describe("indexing a guide", () => {
       expect(guide.schedule(channel, morning, morning, morning + 2 * MINUTE)).toHaveLength(
         GUIDE_SCHEDULE.atLeast,
       );
+
       // Late in the day, what a search of it finds.
       const [found] = [
         ...eachMatch(
@@ -528,6 +561,7 @@ describe("indexing a guide", () => {
           }),
         ),
       ];
+
       expect(found?.later).toEqual({
         start: morning - MINUTE / 2 + 1_400 * MINUTE,
         title: "Needle",
@@ -574,8 +608,11 @@ describe("indexing a guide", () => {
         ),
       ),
     );
+
     const channel = guide.channels.get("one.test");
+
     if (!channel) throw new Error("No channel.");
+
     const read = (from: number, until: number) =>
       guide.schedule(channel, NOON + HOUR / 2, from, until).map((programme) => programme.title);
 
@@ -634,6 +671,7 @@ describe("indexing a guide", () => {
         programme("long.test", stamp(NOON - 23 * HOUR), stamp(NOON + HOUR), "Old long"),
       ),
     );
+
     // Six hours on, the source lists from an hour ago only, and no longer lists one channel.
     // It begins another 20 hours ago: what came before it there ends before the archive window.
     const { guide, summary } = await index(
@@ -677,6 +715,7 @@ describe("indexing a guide", () => {
         programme("over.test", stamp(NOON - 3 * HOUR), stamp(NOON - 2 * HOUR), "Ended news"),
       ),
     );
+
     // One names an id that ended before the one on now; Two names only an ended one.
     const catalogue = catalogueOf({ "1": ["past.test", "future.test"], "2": ["over.test"] });
     const guides = ownGuide(guide, target);
@@ -701,18 +740,22 @@ describe("indexing a guide", () => {
 
   it("answers repeated coverage requests correctly", async () => {
     const ids = Array.from({ length: 3 }, (_, n) => `c${n}.test`);
+
     const { guide } = await index(
       tv(...ids.map((id) => programme(id, stamp(NOON), stamp(NOON + HOUR), "Show"))),
     );
+
     const catalogue = catalogueOf(
       Object.fromEntries(ids.map((_, n) => [String(n), [`c${n}.test`]])),
     );
+
     const guides = ownGuide(guide);
 
     const answers = await Promise.all([
       coverage(guides, catalogue, NOON),
       coverage(guides, catalogue, NOON),
     ]);
+
     expect(answers.map((each) => each.covered)).toEqual([3, 3]);
     expect((await coverage(guides, catalogue, NOON + 1)).covered).toBe(3);
   });
@@ -724,6 +767,7 @@ describe("indexing a guide", () => {
         programme("own.test", stamp(NOON), stamp(NOON + HOUR), "Own"),
       ),
     );
+
     const catalogue = catalogueOf({
       "1": ["shared.test"],
       "2": ["shared.test"],
@@ -739,6 +783,7 @@ describe("indexing a guide", () => {
       NOON,
       NOON + HOUR,
     );
+
     const shared = [
       {
         start: NOON,
@@ -747,6 +792,7 @@ describe("indexing a guide", () => {
         guide: guideRef(OWN_GUIDE, "shared.test"),
       },
     ];
+
     expect(page).toEqual({
       "1": shared,
       "2": shared,
@@ -768,12 +814,15 @@ describe("indexing a guide", () => {
         programme("three.test", stamp(NOON - 20 * HOUR), stamp(NOON + 4 * HOUR), "Rolling news"),
       ),
     );
+
     const keys = (ids: string[]) => ids.map((id) => guide.channels.get(id)?.key ?? 0);
     const all = ["one.test", "two.test", "three.test"];
+
     const first = (words: string[], ids = all, limit = 50) =>
       searchFirst({ path: target, words, at: NOON, channels: keys(ids), limit }).map(
         (found) => found.programme.title,
       );
+
     const each = (words: string[], until: number, ids = all) =>
       Object.fromEntries(
         [
@@ -820,7 +869,9 @@ describe("indexing a guide", () => {
         programme("c0", stamp(NOON + HOUR), stamp(NOON + 2 * HOUR), "News late"),
       ),
     );
+
     const keys = Array.from({ length: 51 }, (_, n) => guide.channels.get(`c${n}`)?.key ?? 0);
+
     const found = searchFirst({
       path: target,
       words: ["news"],
@@ -863,21 +914,26 @@ describe("indexing a guide", () => {
     expect((await index(whole.slice(0, -"</tv>".length))).guide.until).toBe(NOON + 2 * HOUR);
     // Without a `<tv>` around its programmes, too.
     expect((await index(`${later("one.test")}</tvirus>`)).guide.until).toBe(NOON + 2 * HOUR);
+
     const ended = await index(
       tv(programme("one.test", "20261002090000 +0000", "20261002100000 +0000", "Past")),
     );
+
     expect(ended.guide.until).toBe(NOON - 2 * HOUR);
     expect(await refusal(index(tv()))).toEqual({ kind: "empty" });
   });
 
   it("refuses a guide past a limit whole, writing nothing, and reads one at it, however many programmes it has", async () => {
     const limits = { ...GUIDE_LIMITS, elementBytes: 2048, channels: 3 };
+
     const channels = (count: number) =>
       Array.from({ length: count }, (_, at) => `<channel id="c${at}.test"/>`);
+
     /** Half-hour programmes from one o'clock on, an hour apart: all still to come. */
     const programmes = (count: number, channel = () => "c0.test") =>
       Array.from({ length: count }, (_, at) => {
         const start = NOON + (at + 1) * HOUR;
+
         return programme(channel(), stamp(start), stamp(start + HOUR / 2), `Programme ${at}`);
       });
 
@@ -897,8 +953,10 @@ describe("indexing a guide", () => {
 
     const long = (bytes: number) => {
       const element = programme("c0.test", "20261002130000 +0000", "20261002140000 +0000", "");
+
       return element.replace("<title>", `<title>${"t".repeat(bytes - Buffer.byteLength(element))}`);
     };
+
     expect((await index(tv(long(2048)), { limits })).guide.until).toBe(NOON + 2 * HOUR);
     expect(await refusal(index(tv(long(2049)), { limits }))).toEqual({
       kind: "too-large",
@@ -939,6 +997,7 @@ describe("a subscription's guides in order", () => {
         programme("own.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Own news"),
       ),
     );
+
     const early = await index(
       tv(
         programme("own.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "External own"),
@@ -946,6 +1005,7 @@ describe("a subscription's guides in order", () => {
         programme("shared.test", stamp(NOON + 3 * HOUR), stamp(NOON + 4 * HOUR), "Early late"),
       ),
     );
+
     const late = await index(
       tv(
         programme("shared.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Late news"),
@@ -954,6 +1014,7 @@ describe("a subscription's guides in order", () => {
         programme("late.test", stamp(NOON - HOUR), stamp(NOON + HOUR), "Only late news"),
       ),
     );
+
     return guidesOf(
       [
         { source: OWN_GUIDE, origin: null, index: own.guide, path: own.target },
@@ -975,6 +1036,7 @@ describe("a subscription's guides in order", () => {
 
   it("takes each channel whole from the first guide with programmes for it, its own guide first", async () => {
     const ordered = await guides();
+
     const catalogue = catalogueOf({
       "1": ["own.test"],
       "2": ["shared.test"],
@@ -1039,6 +1101,7 @@ describe("a subscription's guides in order", () => {
         programme("shared.test", stamp(NOON - 2 * HOUR), stamp(NOON - 10 * MINUTE), "Own ended"),
       ),
     );
+
     const source = await index(
       tv(
         programme(
@@ -1056,6 +1119,7 @@ describe("a subscription's guides in order", () => {
         programme("shared.test", stamp(NOON + 2 * HOUR), stamp(NOON + 3 * HOUR), "Source later"),
       ),
     );
+
     const ordered = guidesOf(
       [
         { source: OWN_GUIDE, origin: null, index: own.guide, path: own.target },
@@ -1068,6 +1132,7 @@ describe("a subscription's guides in order", () => {
       ],
       new Map([["source", "https://source.example"]]),
     );
+
     const catalogue = catalogueOf({ "1": ["shared.test"] });
     const fromSource = guideRef("source", "shared.test");
 
@@ -1093,9 +1158,12 @@ describe("a subscription's guides in order", () => {
               (await rangeAt(ordered, catalogue, ["1"], NOON, cuts[at] ?? to, to))["1"] ?? [],
           ),
       );
+
       const seen = new Map(pages.flat().map((slot) => [`${slot.guide} ${slot.start}`, slot]));
+
       return [...seen.values()].toSorted((one, other) => one.start - other.start);
     };
+
     const whole = await paged(NOON - 6 * HOUR, NOON + 6 * HOUR);
     expect(whole.map(({ title, guide }) => [title, guide])).toEqual([
       ["Source earlier", fromSource],
@@ -1128,6 +1196,7 @@ describe("a subscription's guides in order", () => {
 
   it("shows a mapped channel the guide channel of the guide it names, alone, and its slot's details from there", async () => {
     const ordered = await guides();
+
     const catalogue = catalogueOf(
       { "1": ["shared.test"], "2": [], "3": ["shared.test"], "4": ["shared.test"] },
       {
@@ -1159,12 +1228,14 @@ describe("a subscription's guides in order", () => {
     expect(
       programmeAt(ordered, catalogue, "1", guideRef("late", "late.test"), NOON - HOUR, NOON),
     ).toBeNull();
+
     const lateRef = {
       ref: guideRef("late", "shared.test"),
       id: "shared.test",
       source: "late",
       origin: "https://late.example",
     };
+
     expect(mapChannel(ordered, catalogue, liveChannel("1"), NOON)).toEqual({
       id: "1",
       number: null,
@@ -1201,10 +1272,12 @@ describe("a subscription's guides in order", () => {
 describe("mappings over a catalogue", () => {
   it("finds a mapping's channel by any of its streams' ids, and keeps those of channels the provider no longer lists apart", () => {
     const three = liveChannel("3");
+
     const byId = new Map([
       ["3", three],
       ["30", three],
     ]);
+
     const mapped = mappedChannels(
       {
         all: [three],

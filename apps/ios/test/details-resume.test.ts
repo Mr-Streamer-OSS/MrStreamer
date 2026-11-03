@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
+
   return { promise, resolve };
 }
 
@@ -49,16 +50,22 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: { text: "#FFFFFF", dim: "#8E8E93" },
     Message: ({ text, action }: { text: string; action?: { label: string; onPress(): void } }) =>
@@ -76,10 +83,13 @@ vi.mock("../src/ui.tsx", async () => {
       ),
   };
 });
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   const pass = ({ children }: { children?: React.ReactNode }) =>
     createElement(Fragment, null, children);
+
   return {
     Docked: pass,
     Placeholders: pass,
@@ -88,24 +98,29 @@ vi.mock("../src/loading.tsx", async () => {
     loadingStatus: (what: string) => ({ text: `Loading ${what}.` }),
   };
 });
+
 vi.mock("../src/titles-ui.tsx", () => ({
   Artwork: () => null,
   ProgressLine: () => null,
   Shelf: () => null,
   TextTabs: () => null,
 }));
+
 vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   retryTitles: () => undefined,
   useRoster: () => ({ kind: "ready", members: scenario.members }),
 }));
+
 vi.mock("../src/resume.ts", () => ({
   openDetails: () => undefined,
   versionOf: (key: string) => {
     const at = key.indexOf(":");
+
     return { subscriptionId: key.slice(0, at), id: key.slice(at + 1) };
   },
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => scenario.lists,
   useMetadataVersion: () => 0,
@@ -114,21 +129,25 @@ vi.mock("../src/titles.ts", () => ({
   detailsOf: (title: OwnedId) => scenario.details(title),
   titleFile: async (ref: { kind: string; subscriptionId: string; id: string }) => {
     scenario.opened.push(`${ref.kind} ${ref.subscriptionId}:${ref.id}`);
+
     return { url: `file:${ref.subscriptionId}:${ref.id}`, container: "mp4" };
   },
   useCollections: () => null,
   episodesOf: async (_title: unknown, season: { episodes: readonly Episode[] }) => season.episodes,
 }));
+
 vi.mock("../src/viewing.ts", () => ({
   useViewing: () => null,
   progressOf: async () => {
     const held = scenario.next.progress;
     scenario.next.progress = null;
+
     return held ?? [];
   },
   seriesViewing: async () => {
     const held = scenario.next.standing;
     scenario.next.standing = null;
+
     return held ?? { progress: [], marks: [], undoable: null };
   },
   recordProgress: async () => undefined,
@@ -137,6 +156,7 @@ vi.mock("../src/viewing.ts", () => ({
   relist: async () => undefined,
   undoMark: async () => undefined,
 }));
+
 vi.mock("../src/downloads.ts", () => ({
   useDownloadOf: () => undefined,
   useDownloads: () => undefined,
@@ -147,24 +167,30 @@ vi.mock("../src/downloads.ts", () => ({
   removeDownload: async () => undefined,
   retryDownload: async () => undefined,
 }));
+
 vi.mock("../src/watchlist.ts", () => ({
   useWatchlist: () => [],
   savedEntry: () => undefined,
   saveTitle: () => undefined,
   removeTitle: () => undefined,
 }));
+
 vi.mock("../src/sources.ts", () => ({
   loginOf: () => [],
   currentSource: () => undefined,
   onSignedIn: () => () => {},
 }));
+
 vi.mock("../src/header.tsx", () => ({ useTabs: () => null, openOnTabs: () => undefined }));
+
 const native = vi.hoisted(() => ({ player: null as ReturnType<typeof nativePlayer> | null }));
+
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => {
     const port = nativePlayer();
     port.currentTime = 120;
     native.player = port;
+
     return port;
   },
 }));
@@ -208,6 +234,7 @@ const catalogue: OnDemandCatalogue = {
     },
   ],
 };
+
 const LABELS: Record<string, string> = { a: "Home", b: "Cabin" };
 
 /** Providers a and b, each listing the film and the series; the series' details answer. */
@@ -216,11 +243,14 @@ function providers() {
     ["a", "b"].map((subscriptionId) => ({ subscriptionId, catalogue })),
     "en",
   );
+
   scenario.lists = { kind: "ready", index };
   scenario.members = ["a", "b"].map((id) => ({ entry: { id }, label: LABELS[id] ?? id }));
   scenario.details = async (version) => {
     const title = byIds(index, "series", [version])[0];
+
     if (!title) return new Promise(() => undefined);
+
     const episode: Episode = {
       subscriptionId: version.subscriptionId,
       id: "e1",
@@ -233,6 +263,7 @@ function providers() {
       stillUrl: null,
       airDate: null,
     };
+
     const facts: SeriesDetails = {
       kind: "series",
       title,
@@ -246,6 +277,7 @@ function providers() {
       backdropUrl: null,
       seasons: [{ number: 1, name: "Season 1", posterUrl: null, episodes: [episode] }],
     };
+
     return facts;
   };
 }
@@ -256,9 +288,11 @@ async function settled() {
 }
 
 let unmount = () => {};
+
 afterEach(async () => {
   unmount();
   unmount = () => {};
+
   scenario.menu = null;
   scenario.opened.length = 0;
   scenario.next = { progress: null, standing: null };
@@ -271,18 +305,22 @@ async function mount(kind: "movie" | "series" = "movie") {
   providers();
   const container = document.createElement("div");
   const root = createRoot(container);
+
   /** Draws the screen again, for `version` when given, `asked` for as another opener would. */
   const render = (version = `a:${kind === "movie" ? 1 : 2}`, asked = false) =>
     React.act(() => root.render(React.createElement(DetailsScreen, { kind, version, asked })));
+
   render();
   unmount = () => React.act(() => root.unmount());
   await settled();
+
   const press = (testID: string) =>
     React.act(() =>
       container
         .querySelector(`[data-testid="${testID}"]`)!
         .dispatchEvent(new Event("click", { bubbles: true })),
     );
+
   return {
     render,
     press,
@@ -291,6 +329,7 @@ async function mount(kind: "movie" | "series" = "movie") {
     choose(label: string) {
       press("details-version");
       const menu = scenario.menu;
+
       if (!menu) throw new Error("No version menu");
       React.act(() => menu.pick(menu.options.findIndex((each) => each.startsWith(label))));
     },
@@ -301,6 +340,7 @@ async function mount(kind: "movie" | "series" = "movie") {
 function holdProgress() {
   const held = deferred<readonly TitleProgress[]>();
   scenario.next.progress = held.promise;
+
   return () => held.resolve([]);
 }
 
@@ -308,12 +348,14 @@ function holdProgress() {
 function holdStanding() {
   const held = deferred<SeriesViewing>();
   scenario.next.standing = held.promise;
+
   return () => held.resolve({ progress: [], marks: [], undoable: null });
 }
 
 /** Something played earlier and closed, its save still going; answers the save. */
 async function closedWithSaveGoing() {
   const save = deferred<void>();
+
   const item = {
     id: "old",
     subscriptionId: "a",
@@ -323,6 +365,7 @@ async function closedWithSaveGoing() {
     next: false,
     versions: false,
   };
+
   await playback.play(
     item,
     {
@@ -339,6 +382,7 @@ async function closedWithSaveGoing() {
   native.player?.state(true);
   void playback.closeWatch();
   native.player?.state(false);
+
   return () => save.resolve();
 }
 
@@ -411,6 +455,7 @@ describe("a film's Resume, then another version", () => {
     await settled();
     unmount();
     unmount = () => {};
+
     answer();
     await settled();
     expect(scenario.opened).toEqual([]);
@@ -431,6 +476,7 @@ describe("a series' Play or an episode, then another version", () => {
       expect(scenario.opened).toEqual([]);
       unmount();
       unmount = () => {};
+
       storage.writeState(() => ({ subscription: null, recent: [], region: null }));
     }
   });

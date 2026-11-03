@@ -60,12 +60,14 @@ let changing: Promise<unknown> = Promise.resolve();
 function serially<A>(change: () => Promise<A>): Promise<A> {
   const run = changing.then(change);
   changing = run.catch(() => undefined);
+
   return run;
 }
 
 async function ids(): Promise<string[]> {
   const listed = await SecureStore.getItemAsync(INDEX, OPTIONS);
   const parsed: unknown = listed ? JSON.parse(listed) : [];
+
   return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
 }
 

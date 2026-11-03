@@ -27,6 +27,7 @@ export const colors = { text: "#FFFFFF", dim: "#A1A1A6", fill: "#1C1C1E", line: 
 /** A row's height, which grows with Dynamic Type so lists can still measure rows up front. */
 export function useRowHeight(): number {
   const { fontScale } = useWindowDimensions();
+
   return Math.round(Math.max(60, 24 + 38 * fontScale));
 }
 
@@ -53,8 +54,10 @@ export function useListWidth() {
   const { fontScale } = useWindowDimensions();
   const width = useContentWidth();
   const split = splitAt(width, fontScale);
+
   if (!split) return { split, width, gutter: 16 };
   const gutter = width >= 1200 ? 32 : width >= 1000 ? 24 : 20;
+
   return { split, width: Math.min(520, Math.floor(314 + width * 0.15)), gutter };
 }
 
@@ -65,6 +68,7 @@ export const stackedActions = 48;
 export function monogram(title: string): string {
   const words = title.split(/\s+/).filter(Boolean);
   const letters = words.length > 1 ? words.map((word) => word[0]).join("") : title;
+
   return letters.slice(0, 3).toUpperCase();
 }
 
@@ -84,6 +88,7 @@ export function ChannelLogo({
   large?: boolean;
 }) {
   const logo = useArtwork(channel.logoUrl);
+
   return (
     <View style={[styles.mark, style]}>
       {logo.kind === "shown" ? (
@@ -148,12 +153,15 @@ export const ChannelRow = memo(function ChannelRow({
   const row = useRef<ComponentRef<typeof Pressable>>(null);
   const tags = channel.tags.join(" ");
   const star = favourite ? t("Remove from Favourites") : t("Add to Favourites");
+
   const actions = [
     ...(onFavourite ? [{ name: "favourite", label: star }] : []),
     ...(onLists ? [{ name: "lists", label: t("Lists") }] : []),
   ];
+
   // At large text, the star goes under the lines, so the name keeps the row's width.
   const stacked = largeText(useWindowDimensions().fontScale) && Boolean(onFavourite);
+
   return (
     <View
       style={[styles.row, { height }, onFavourite && styles.starred, stacked && styles.stacked]}
@@ -176,7 +184,9 @@ export const ChannelRow = memo(function ChannelRow({
               accessibilityActions: [{ name: "activate" }, ...actions],
               onAccessibilityAction: ({ nativeEvent }: AccessibilityActionEvent) => {
                 if (nativeEvent.actionName === "activate") onPress(channel);
+
                 if (nativeEvent.actionName === "favourite") onFavourite?.(channel, !favourite);
+
                 if (nativeEvent.actionName === "lists") onLists?.(channel);
               },
             }

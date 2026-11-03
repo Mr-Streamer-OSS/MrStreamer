@@ -23,23 +23,29 @@ import {
 describe("installed subtitle network boundary", () => {
   it("uses the real service protocol and ZIP parser with a loopback fixture", async () => {
     const fixture = await startSubtitleFixture();
+
     try {
       const client = subtitleServiceClient({
         userAgent: "installed-upgrade-contract",
         fetch: subtitleFetch(fixture.origin, fetch),
       });
+
       const signal = new AbortController().signal;
+
       const candidates = await client.subdlSearch(
         { apiKey: "synthetic-installed-subdl" },
         { tmdbId: 123, kind: "movie", languages: ["en"] },
         signal,
       );
+
       expect(candidates).toHaveLength(1);
+
       const downloaded = await client.download(
         candidates[0]!,
         { subdl: { apiKey: "synthetic-installed-subdl" } },
         signal,
       );
+
       expect(downloaded.subtitle).toEqual({
         service: "subdl",
         language: "en",
@@ -56,6 +62,7 @@ describe("installed subtitle network boundary", () => {
     const server = createServer((request, response) => {
       void (async () => {
         const body = [];
+
         for await (const chunk of request) body.push(Buffer.from(chunk));
         response.setHeader("Content-Type", "application/json");
         response.end(
@@ -68,14 +75,18 @@ describe("installed subtitle network boundary", () => {
         );
       })();
     });
+
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
+
     if (!address || typeof address === "string") throw new Error("No echo address");
     const origin = `http://127.0.0.1:${address.port}`;
     const observations: { host: string; path: string }[] = [];
+
     try {
       const boundary = subtitleFetch(origin, fetch, (request) => observations.push(request));
+
       const response = await boundary(
         new Request("https://api.subdl.com/api/v1/subtitles?film_name=two+words", {
           method: "POST",
@@ -83,6 +94,7 @@ describe("installed subtitle network boundary", () => {
           headers: { "x-contract": "preserved" },
         }),
       );
+
       expect(await response.json()).toEqual({
         path: "/api.subdl.com/api/v1/subtitles?film_name=two+words",
         method: "POST",
@@ -107,6 +119,7 @@ describe("installed subtitle network boundary", () => {
     const fixture = await startSubtitleFixture();
     const attempts: string[] = [];
     const request = subtitleFetch(fixture.origin, fetch, (each) => attempts.push(each.host));
+
     try {
       const controller = new AbortController();
       controller.abort(new Error("contract cancellation"));
@@ -148,28 +161,36 @@ describe("installed subtitle network boundary", () => {
       })().catch(error => { console.error(error); process.exitCode = 1; });
     `,
     );
+
     const child = spawn(process.execPath, ["--inspect-brk=127.0.0.1:0", entry], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, NODE_OPTIONS: "", ELECTRON_RUN_AS_NODE: "" },
     });
+
     let main: Awaited<ReturnType<typeof connect>> | undefined;
+
     const ended = new Promise((resolve) =>
       child.once("exit", (code, signal) => resolve({ code, signal })),
     );
+
     let output = "";
     child.stdout.on("data", (chunk) => {
       output += String(chunk);
     });
+
     try {
       const port = await new Promise<number>((resolve, reject) => {
         let stderr = "";
+
         const deadline = setTimeout(
           () => reject(new Error("Inspector did not announce a loopback port")),
           10_000,
         );
+
         child.stderr.on("data", (chunk) => {
           stderr += String(chunk);
           const found = /ws:\/\/127\.0\.0\.1:(\d+)\//.exec(stderr);
+
           if (found) {
             clearTimeout(deadline);
             resolve(Number(found[1]));
@@ -180,6 +201,7 @@ describe("installed subtitle network boundary", () => {
           reject(error);
         });
       });
+
       main = await connect(port, "node", { pollMs: 10 });
       expect(await inspectorOwner(port, [child.pid!])).toBe(child.pid);
       await expect(inspectorOwner(port, [process.pid])).rejects.toThrow("not an owned launch");
@@ -191,6 +213,7 @@ describe("installed subtitle network boundary", () => {
       });
       await resumeMain(main);
       const until = Date.now() + 10_000;
+
       while (!output.includes("\n") && Date.now() < until)
         await new Promise((resolve) => setTimeout(resolve, 20));
       expect(JSON.parse(output.trim())).toMatchObject({
@@ -207,6 +230,7 @@ describe("installed subtitle network boundary", () => {
       expect(await ended).toEqual({ code: 0, signal: null });
     } finally {
       main?.close();
+
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
       await ended;
       await fixture.stop();

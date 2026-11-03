@@ -24,10 +24,12 @@ export function observeOpen<A>(
     yield* before;
     const turn = yield* coordination.begin;
     const failed = observe();
+
     return yield* Effect.suspend(() => open(turn)).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
           if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return;
+
           if (yield* coordination.passed(turn)) return;
           const error = Cause.findErrorOption(exit.cause);
           failed(

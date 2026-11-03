@@ -32,15 +32,19 @@ import { queries, subscriptionName, useSubscriptions } from "../../lib/queries.t
 import { defined } from "@mrstreamer/core/defined";
 
 export const PROVIDER_LISTS = "provider-lists";
+
 const EMPTY_BROWSE: LiveBrowseResult = {
   channels: [],
   total: 0,
   counts: { browseTopics: 0, countries: 0, languages: 0, subscriptions: 0 },
   facets: { browseTopics: [], countries: [], languages: [], subscriptions: [] },
 };
+
 const NO_IDS: readonly OwnedId[] = [];
+
 /** Channels whose listings are asked for together. */
 const LISTINGS_PAGE = 40;
+
 /** A search waits this long for typing to pause, as the other searches do. */
 const SEARCH_DELAY_MS = 120;
 const NO_WORDS: readonly string[] = [];
@@ -65,6 +69,7 @@ export function browseQuery(
   customLists: readonly CustomList[] | undefined,
 ): LiveBrowseQuery {
   const filters = list.filters ?? EMPTY_LIVE_FILTERS;
+
   return {
     scope:
       list.kind === "category"
@@ -100,6 +105,7 @@ export function useListChannels(list: ChannelList, visibility: "viewer" | "ordin
   const viewing = useQuery({ ...queries.viewing(), select: channelHistory });
   const customLists = useQuery(queries.customLists());
   const preferences = useQuery(queries.preferences());
+
   // Favourites and Recently watched are the record's, a list of the viewer's is its own: what
   // the list holds is read before the channels it shows.
   const holder =
@@ -108,14 +114,18 @@ export function useListChannels(list: ChannelList, visibility: "viewer" | "ordin
       : list.kind === "custom"
         ? customLists
         : null;
+
   const unknown = holder && !holder.isSuccess ? holder : null;
   const request = browseQuery(list, viewing.data, visibility, preferences.data, customLists.data);
   const empty = request.scope.kind === "channels" && request.scope.channels.length === 0;
+
   const result = useQuery({
     ...queries.browse(request),
     enabled: !empty && !unknown,
   });
+
   const data = empty && !unknown ? EMPTY_BROWSE : result.data;
+
   return {
     channels: unknown ? undefined : data?.channels,
     data,
@@ -134,10 +144,13 @@ export function resolveDiscovery(
 ): ChannelList {
   if (list.kind === "custom")
     return !customLists || customLists.some((each) => each.id === list.id) ? list : { kind: "all" };
+
   if (list.kind !== "category" || !categories) return list;
+
   const category = categories.find((each) =>
     each.members.some((member) => sameOwned(member, list.category)),
   );
+
   return category ? { ...list, category: ownedId(category) } : { kind: "all" };
 }
 
@@ -147,10 +160,12 @@ export function useHomeDiscovery(): ChannelList {
   const remembered = useQuery(queries.rememberedLiveBrowse());
   const categories = useQuery(queries.categories());
   const customLists = useQuery(queries.customLists());
+
   const discovery =
     list.kind === "favourites" || list.kind === "recent"
       ? (remembered.data ?? { kind: "all" as const })
       : list;
+
   return resolveDiscovery(discovery, categories.data, customLists.data);
 }
 
@@ -187,26 +202,33 @@ export function useListSearch(
   useEffect(() => {
     if (text.trim() === "") {
       settle("");
+
       return;
     }
+
     const timer = setTimeout(() => settle(text), SEARCH_DELAY_MS);
+
     return () => clearTimeout(timer);
   }, [text]);
   const query = text.trim() === "" ? "" : settled.trim();
   const until = endOfDay(useNow());
   const searching = text.trim() !== "";
+
   // Disabled queries still hash their keys on render. Empty search needs no channel scope.
   const scope = useMemo(
     () => ({ channels: searching ? channels.map(ownedId) : [] }),
     [channels, searching],
   );
+
   const grouped = useQuery({
     ...queries.searchGroups(),
     // Start the one catalogue decision during the typing delay, before programme search waits.
     enabled: searching && visible,
   });
+
   const actionable = text.trim() === "" || text === settled;
   const programmeSearch = queries.listSearch(scope, actionable ? query : "", until);
+
   const found = useQuery({
     ...programmeSearch,
     enabled: visible && actionable && query !== "",
@@ -215,42 +237,55 @@ export function useListSearch(
       : ["guide", "searchList", "paused", scope, query, until],
     placeholderData: (previous) => (actionable ? undefined : previous),
   });
+
   const pending =
     searching && (!actionable || found.isPending || found.isFetching || grouped.isPending);
+
   const failed = searching && found.isError;
   useEffect(() => {
     if (!searching) return;
     // Fold names during the typing delay, alongside the catalogue decision.
     const timer = setTimeout(() => searchNames(channels), 0);
+
     return () => clearTimeout(timer);
   }, [channels, searching]);
   const matches = found.data?.matches ?? NO_MATCHES;
+
   const result = useMemo(() => {
     const words = searchWords(query);
+
     if (!searching || words.length === 0) {
       return { channels, query: "", words: NO_WORDS, matches: NO_MATCHES, groups: null };
     }
+
     const names = searchNames(channels);
     const asked = nameQuery(query);
+
     const found = channels.filter(
       (channel, index) =>
         matches[ownedKey(channel)] !== undefined ||
         (names[index] !== undefined && scoreNames(asked, names[index]) !== undefined),
     );
+
     // Only fresh decisions join copies. Keep every current copy of a matching group, without
     // constructing display groups for the rest of a large list.
     const stamps = !grouped.isStale && !grouped.isError ? grouped.data : undefined;
+
     const keys = new Set(
       found.map((channel) => stamps?.[ownedKey(channel)]?.key ?? ownedKey(channel)),
     );
+
     const stamped = channels.flatMap((channel) => {
       const id = ownedKey(channel);
       const stamp = stamps?.[id];
+
       return keys.has(stamp?.key ?? id)
         ? [{ ...channel, searchGroup: stamp ?? { key: id, order: 0 } }]
         : [];
     });
+
     const groups = new Map(searchResultGroups(stamped).map((group) => [group.key, group]));
+
     return {
       channels: found,
       groups: [...keys].flatMap((key) => groups.get(key) ?? []),
@@ -259,6 +294,7 @@ export function useListSearch(
       matches,
     };
   }, [channels, query, matches, searching, grouped.data, grouped.isStale, grouped.isError]);
+
   return { ...result, actionable, pending, failed };
 }
 
@@ -271,6 +307,7 @@ const foldedNames = new WeakMap<readonly LiveChannel[], readonly SearchNames[]>(
  */
 function searchNames(channels: readonly LiveChannel[]): readonly SearchNames[] {
   let names = foldedNames.get(channels);
+
   if (!names) {
     names = channels.map((channel) =>
       indexNames(
@@ -280,6 +317,7 @@ function searchNames(channels: readonly LiveChannel[]): readonly SearchNames[] {
     );
     foldedNames.set(channels, names);
   }
+
   return names;
 }
 
@@ -316,6 +354,7 @@ const TOPIC_LABELS = {
   regional: "Regional",
   other: "Other",
 } as const;
+
 function topicTitle(topic: BrowseTopic): string {
   return t(TOPIC_LABELS[topic]);
 }
@@ -323,15 +362,19 @@ function topicTitle(topic: BrowseTopic): string {
 // Serialize discovery writes so rapid topic/native/All changes settle in the viewer's order.
 let remembering = Promise.resolve();
 let rememberTurn = 0;
+
 export function useShowList(): (list: ChannelList) => void {
   const client = useQueryClient();
+
   return useCallback(
     (list) => {
       const current = useUi.getState().list;
       const filters = list.filters ?? (sameList(current, list) ? current.filters : undefined);
       const next = filters ? { ...list, filters } : list;
       useUi.setState({ list: next });
+
       if (list.kind === "favourites" || list.kind === "recent") return;
+
       const selection: LiveDiscovery =
         list.kind === "topic"
           ? { kind: "topic", topic: list.topic }
@@ -340,6 +383,7 @@ export function useShowList(): (list: ChannelList) => void {
             : list.kind === "custom"
               ? { kind: "custom", id: list.id }
               : { kind: "all" };
+
       const turn = ++rememberTurn;
       const account = useUi.getState().account;
       void client.cancelQueries({ queryKey: queries.rememberedLiveBrowse().queryKey });
@@ -348,8 +392,10 @@ export function useShowList(): (list: ChannelList) => void {
         .catch(() => {})
         .then(async () => {
           if (useUi.getState().account !== account) return;
+
           try {
             const saved = await call("liveBrowse.remember", selection);
+
             if (turn === rememberTurn && useUi.getState().account === account)
               client.setQueryData(queries.rememberedLiveBrowse().queryKey, saved);
             await client.invalidateQueries({ queryKey: ["subscription-preferences"] });
@@ -397,6 +443,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
   const recent = useListChannels({ kind: "recent" });
   const subscriptions = useSubscriptions();
   const locale = useLocale();
+
   const selectedKey =
     selected.kind === "category"
       ? ownedKey(selected.category)
@@ -405,12 +452,14 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         : selected.kind === "custom"
           ? `custom:${selected.id}`
           : selected.kind;
+
   const selectedGroup =
     selected.kind === "category"
       ? (categories?.find((category) =>
           category.members.some((member) => sameOwned(member, selected.category)),
         )?.group ?? null)
       : null;
+
   const [group, setGroup] = useState<string | null>(selectedGroup);
   const [providers, setProviders] = useState(selected.kind === "category");
   const [query, search] = useState("");
@@ -422,15 +471,18 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
     search("");
     setEntry(0);
   }, [selectedKey, selectedGroup]);
+
   const entries = useMemo(() => {
     const all = categories ?? [];
     const names = new Map(subscriptions.map((each) => [each.id, subscriptionName(each)]));
     const duplicates = new Map<string, number>();
+
     for (const category of all)
       duplicates.set(
         JSON.stringify([category.group, category.title]),
         (duplicates.get(JSON.stringify([category.group, category.title])) ?? 0) + 1,
       );
+
     const categoryEntry = (category: Category, finding: boolean): ListEntry => {
       const sources =
         (duplicates.get(JSON.stringify([category.group, category.title])) ?? 0) > 1
@@ -440,6 +492,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
               ),
             ].join(", ")
           : "";
+
       return {
         kind: "list",
         list: { kind: "category", category: ownedId(category) },
@@ -448,20 +501,25 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         context: [finding ? category.group : null, sources].filter(Boolean).join(" · "),
       };
     };
+
     const words = searchWords(query);
+
     if (words.length > 0)
       return all
         .filter((category) => {
           const text = normalize(
             [category.name, category.title, category.group].filter(Boolean).join(" "),
           );
+
           return words.every((word) => text.includes(word));
         })
         .map((category) => categoryEntry(category, true));
+
     if (group !== null)
       return all
         .filter((category) => category.group === group)
         .map((category) => categoryEntry(category, false));
+
     const result: ListEntry[] = [
       {
         kind: "list",
@@ -482,10 +540,12 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         count: catalogue.data?.total ?? 0,
       },
     ];
+
     if (!providers) {
       const counts = new Map(
         catalogue.data?.facets.browseTopics.map((each) => [each.value, each.count]),
       );
+
       const own: ListEntry[] = [
         ...(customLists ?? []).map((list): ListEntry => ({
           kind: "list",
@@ -495,6 +555,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         })),
         ...(create ? [{ kind: "new" } as const] : []),
       ];
+
       result.push(
         ...own.map((entry, at) => (at === 0 ? { ...entry, apart: true as const } : entry)),
         ...BROWSE_TOPICS.map((topic, at): ListEntry => ({
@@ -506,14 +567,18 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         })),
         { kind: "group", group: PROVIDER_LISTS, count: catalogue.data?.total ?? 0 },
       );
+
       return result;
     }
+
     result.length = 0;
     const groups = new Map<string, number>();
+
     for (const category of all)
       if (category.group !== null)
         groups.set(category.group, (groups.get(category.group) ?? 0) + category.channelCount);
     const placed = new Set<string>();
+
     for (const category of all) {
       if (category.group === null) result.push(categoryEntry(category, false));
       else if (!placed.has(category.group)) {
@@ -525,6 +590,7 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
         });
       }
     }
+
     return result;
   }, [
     categories,
@@ -539,16 +605,19 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
     query,
     providers,
   ]);
+
   const openGroup = (group: string) => {
     if (group === PROVIDER_LISTS) setProviders(true);
     else setGroup(group);
     search("");
     setEntry(0);
   };
+
   const setQuery = (query: string) => {
     search(query);
     setEntry(0);
   };
+
   /**
    * Back at the root, out of a Find, a country and Provider lists, on New list: where a list
    * made from a channel row's lists menu is named.
@@ -559,28 +628,37 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
     setProviders(false);
     setEntry(3 + (customLists?.length ?? 0));
   };
+
   const back = () => {
     if (query.trim() !== "") {
       setQuery("");
+
       return true;
     }
+
     if (group === null) {
       if (!providers) return false;
       setProviders(false);
       // Back on Provider lists, after the three personal entries, the viewer's lists and topics.
       setEntry(3 + (customLists?.length ?? 0) + (create ? 1 : 0) + BROWSE_TOPICS.length);
+
       return true;
     }
+
     // Restore the country's position in the provider-ordered root, including ungrouped rows.
     const root: string[] = [];
+
     for (const category of categories ?? []) {
       if (category.group === null) root.push(ownedKey(category));
       else if (!root.includes(category.group)) root.push(category.group);
     }
+
     setEntry(Math.max(0, root.indexOf(group)));
     setGroup(null);
+
     return true;
   };
+
   const count =
     providers && group === null
       ? (catalogue.data?.total ?? 0)
@@ -588,11 +666,13 @@ export function useListPicker(selected: ChannelList, { create = false } = {}) {
           (sum, category) => sum + (category.group === group ? category.channelCount : 0),
           0,
         );
+
   // A country removed by refresh never leaves an empty, unreachable branch.
   useEffect(() => {
     if (categories && group !== null && !categories.some((category) => category.group === group))
       setGroup(null);
   }, [categories, group]);
+
   return {
     entries,
     group: group ?? (providers ? PROVIDER_LISTS : null),
@@ -620,6 +700,7 @@ export function useVisibleListings(
 ): ReadonlyMap<string, Listing> {
   const visiblePage = usePresentationVisible();
   const pages = [...new Set(visible.map((index) => Math.floor(index / LISTINGS_PAGE)))];
+
   return useQueries({
     queries: pages.map((page) => ({
       ...queries.listings(channels.slice(page * LISTINGS_PAGE, (page + 1) * LISTINGS_PAGE)),
@@ -627,9 +708,11 @@ export function useVisibleListings(
     })),
     combine: (results) => {
       const merged = new Map<string, Listing>();
+
       for (const result of results) {
         for (const [key, listing] of Object.entries(result.data ?? {})) merged.set(key, listing);
       }
+
       return merged;
     },
   });
@@ -643,6 +726,8 @@ export function adjacentChannel(
 ): LiveChannel | undefined {
   if (list.length === 0) return undefined;
   const index = list.findIndex((channel) => sameOwned(channel, current));
+
   if (index === -1) return delta > 0 ? list[0] : list[list.length - 1];
+
   return list[(index + delta + list.length) % list.length];
 }

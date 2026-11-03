@@ -122,7 +122,9 @@ function press(label: string): Promise<void> {
   const button = [...container.querySelectorAll("button")].find(
     (each) => each.textContent === label || each.getAttribute("aria-label") === label,
   );
+
   if (!button) throw new Error(`No ${label} button in "${text()}"`);
+
   return act(async () => button.click());
 }
 
@@ -266,6 +268,7 @@ it.each([
   await watchToEnd(finale ?? pilot);
 
   await wait(15_000);
+
   for (const line of says) expect(text()).toContain(line);
   expect(text()).not.toContain("Plays in");
   expect(opened()).toHaveLength(1);
@@ -469,6 +472,7 @@ it("asks no provider, record or receiver, and picks the saved languages in the n
     audioId: 2,
     subtitle: { id: 3 },
   });
+
   // Nothing goes to the provider, the record, a receiver or an online subtitle service: the
   // window bar's own status reads are local.
   const reaching = ipc
@@ -479,5 +483,6 @@ it("asks no provider, record or receiver, and picks the saved languages in the n
         (method.startsWith("ondemand.") && method !== "ondemand.status") ||
         ["playback.openTitle", "subtitles.search", "subtitles.choose"].includes(method),
     );
+
   expect(reaching).toEqual([]);
 });

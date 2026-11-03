@@ -74,20 +74,29 @@ export function nextCopy(list: DownloadList, id: string): NextCopy | undefined {
   const current = list.items.find((item) => item.id === id);
   const place = current && placeOf(current);
   const series = current?.series ? list.series[current.series] : undefined;
+
   if (!current || !place || !series) return undefined;
   const chain = chainsOf(series).find((each) => each.some((step) => same(step, place)));
+
   if (!chain) return undefined;
   const next = chain[chain.findIndex((step) => same(step, place)) + 1];
+
   if (!next) return { kind: "end" };
   const after: Place = { season: next.season, episode: next.episode };
+
   const copies = list.items.filter((item) => {
     const at = item.series === current.series ? placeOf(item) : null;
+
     return at !== null && same(at, after);
   });
+
   const complete = copies.find((item) => item.status.kind === "complete");
+
   if (complete) return { kind: "copy", copy: complete, ...after };
   const unfinished = copies.find((item) => !onComputer(item));
+
   if (unfinished) return { kind: "unfinished", copy: unfinished, ...after };
+
   return { kind: "missing", ...after };
 }
 
@@ -101,13 +110,17 @@ export function nextCopy(list: DownloadList, id: string): NextCopy | undefined {
 export function copyShelf(list: DownloadList): readonly ShelfItem[] {
   const shelf: ShelfItem[] = [];
   const groups = new Map<string, Download[]>();
+
   for (const item of list.items) {
     if (!onComputer(item)) continue;
+
     if (!item.series || !placeOf(item)) {
       shelf.push({ kind: "copy", copy: item });
       continue;
     }
+
     const group = groups.get(item.series);
+
     if (group) group.push(item);
     else {
       const copies = [item];
@@ -115,6 +128,7 @@ export function copyShelf(list: DownloadList): readonly ShelfItem[] {
       shelf.push({ kind: "series", key: item.series, copies, seasons: [] });
     }
   }
+
   return shelf.map((item) =>
     item.kind === "copy"
       ? item
@@ -147,6 +161,7 @@ function chainsOf(series: DownloadSeries): readonly (readonly (Place & { run: st
   const all = series.seasons.flatMap(({ number, episodes }) =>
     episodes.map((episode) => ({ season: number, episode, run: `${number}:${episodes[0]}` })),
   );
+
   return series.sourceOrder
     ? [all]
     : [all.filter((place) => place.season !== 0), all.filter((place) => place.season === 0)];
@@ -161,12 +176,15 @@ function seasonsOf(
   series: DownloadSeries | undefined,
 ): readonly ShelfSeason[] {
   const seasons: { key: string; number: number; entries: ShelfEntry[] }[] = [];
+
   // Stretches next to each other are of other seasons (seriesEpisodeSeasons): each makes one run.
   const add = (key: string, season: number, entry: ShelfEntry) => {
     const last = seasons.at(-1);
     const run = last?.number === season ? last : { key, number: season, entries: [] };
+
     if (run !== last) seasons.push(run);
     const before = run.entries.at(-1);
+
     if (entry.kind === "gap" && before?.kind === "gap") {
       run.entries[run.entries.length - 1] = {
         kind: "gap",
@@ -174,37 +192,48 @@ function seasonsOf(
       };
     } else run.entries.push(entry);
   };
+
   const byPlace = new Map<string, Download[]>();
+
   for (const copy of copies) {
     const key = keyOf(placeOf(copy)!);
     byPlace.set(key, [...(byPlace.get(key) ?? []), copy]);
   }
+
   const at = (step: Place) => byPlace.get(keyOf(step)) ?? [];
   const placed = new Set<Download>();
+
   for (const chain of series ? chainsOf(series) : []) {
     const first = chain.findIndex((step) => at(step).length > 0);
     const last = chain.findLastIndex((step) => at(step).length > 0);
+
     for (const step of first < 0 ? [] : chain.slice(first, last + 1)) {
       const here = at(step);
+
       for (const copy of here) {
         add(step.run, step.season, { kind: "copy", copy });
         placed.add(copy);
       }
+
       if (here.length === 0) add(step.run, step.season, { kind: "gap", episodes: [step.episode] });
     }
   }
+
   const rest = copies
     .filter((copy) => !placed.has(copy))
     .toSorted((a, b) => order(placeOf(a)!, placeOf(b)!));
+
   for (const copy of rest) {
     const { season } = placeOf(copy)!;
     add(`unlisted:${season}`, season, { kind: "copy", copy });
   }
+
   return seasons;
 }
 
 /** By season, specials after the numbered ones, then by number. */
 function order(a: Place, b: Place): number {
   const season = (place: Place) => (place.season === 0 ? Infinity : place.season);
+
   return season(a) - season(b) || a.episode - b.episode;
 }

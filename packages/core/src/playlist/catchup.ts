@@ -64,15 +64,19 @@ export function playlistCatchup(
   const read = (...names: string[]) =>
     names.map((name) => entry.attributes[name]).find((value) => value?.trim()) ??
     names.map((name) => entry.header[name]).find((value) => value?.trim());
+
   const mode = read("catchup", "catch-up", "catchup-type")?.trim().toLowerCase();
   const days = Number(read("catchup-days", "tvg-rec", "timeshift")?.trim());
+
   if (!mode || !Number.isInteger(days) || days <= 0) return null;
   const source = read("catchup-source")?.trim() ?? null;
   const template = templateOf(mode, entry.url, source);
+
   // A template whose placeholders can sit elsewhere than its path and query is none, and so is
   // one that doesn't name its start completely there.
   if (!template || !plain(template) || !origin(template)) return null;
   const catchup = { days, template };
+
   return archiveAddress(catchup, { start: 0, end: 1 }, 1) ? catchup : null;
 }
 
@@ -92,8 +96,10 @@ export function archiveAddress(
   const end = Math.ceil(window.end / 1000);
   const duration = end - start;
   const clock = wallClock(start * 1000, null);
+
   const divided = (seconds: number, by: string | undefined) =>
     String(Math.max(0, Math.ceil(seconds / (by ? Math.max(1, Number(by)) : 1))));
+
   const filled = catchup.template
     .replaceAll(/\$\{(start|end|now|timestamp|duration|offset)\}/g, (_, name: string) =>
       name === "start"
@@ -131,7 +137,9 @@ export function archiveAddress(
           return clock.second;
       }
     });
+
   const url = URL.parse(filled);
+
   return url && (url.protocol === "http:" || url.protocol === "https:")
     ? { url: filled, start: start * 1000 }
     : null;
@@ -153,15 +161,21 @@ const PLACEHOLDER = /\$\{[a-z]+\}|\{[a-zA-Z]+(?::\d+)?\}/g;
 function plain(template: string): boolean {
   if (/[#\s\\]/.test(template)) return false;
   const parts = /^https?:\/\/([^/?]*)([^?]*)/i.exec(template);
+
   if (!parts) return false;
   const [, authority = "", path = ""] = parts;
+
   if (!authority || /[@{}$]/.test(authority)) return false;
   const dot = (segment: string) => /^(\.|%2e){1,2}$/i.test(segment);
+
   if (path.split("/").some(dot)) return false;
   const query = template.slice(parts[0].length + 1);
+
   if (/[;?]/.test(query)) return false;
   const keys = [...new URLSearchParams(query).keys()].map((key) => key.toLowerCase());
+
   if (new Set(keys).size !== keys.length) return false;
+
   return URL.canParse(template.replaceAll(PLACEHOLDER, "1"));
 }
 
@@ -172,7 +186,9 @@ function plain(template: string): boolean {
  */
 function origin(template: string): "second" | "minute" | null {
   if (/\{utc\}|\$\{start\}/.test(template)) return "second";
+
   if (!["{Y}", "{m}", "{d}", "{H}", "{M}"].every((part) => template.includes(part))) return null;
+
   return template.includes("{S}") ? "second" : "minute";
 }
 
@@ -199,9 +215,12 @@ function templateOf(mode: string, url: string, source: string | null): string | 
 /** Flussonic's archive address beside a stream's: MPEG-TS from a moment on, or an HLS stretch. */
 function flussonic(url: string): string | null {
   const match = /^(https?:\/\/[^/?#]+\/.+)\/([^/?#]+?)(\.m3u8)?(\?[^#]*)?$/i.exec(url);
+
   if (!match) return null;
   const [, base, name = "", playlist, query = ""] = match;
+
   if (playlist) return `${base}/${name}-{utc}-{duration}.m3u8${query}`;
+
   return name === "mpegts" ? `${base}/timeshift_abs-{utc}.ts${query}` : null;
 }
 
@@ -211,7 +230,9 @@ function xtreamCodes(url: string): string | null {
     /^(https?:\/\/[^/?#]+(?:\/[^?#]*?)??)\/(?:live\/)?([^/?#]+)\/([^/?#]+)\/(\d+)(\.\w+)?$/i.exec(
       url,
     );
+
   if (!match) return null;
   const [, base, user, pass, id, extension = ".ts"] = match;
+
   return `${base}/timeshift/${user}/${pass}/{duration:60}/{Y}-{m}-{d}:{H}-{M}/${id}${extension}`;
 }

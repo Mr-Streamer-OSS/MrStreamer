@@ -376,6 +376,7 @@ const none: Viewing = {
 };
 
 type ChannelOf = (channelId: string) => LiveChannel | undefined;
+
 type FavouriteOf = (streamId: string) => FavouriteGroup | undefined;
 
 /** Favourites as the catalogue alone groups them: each the channel listed now, with its streams. */
@@ -383,6 +384,7 @@ const byChannel =
   (channelOf: ChannelOf): FavouriteOf =>
   (streamId) => {
     const channel = channelOf(streamId);
+
     return (
       channel && {
         id: channel.id,
@@ -447,8 +449,10 @@ function relisted(
 ): string[] {
   // The versions in whatever order: the lists put the one that suits the viewer best in front.
   const said = (each: typeof now) => JSON.stringify([each.versions.toSorted(), each.listing]);
+
   return kept.flatMap((state) => {
     const last = leading(state);
+
     return last?.title.seriesId === seriesId && said(state) !== said(now) ? [last.series] : [];
   });
 }
@@ -468,8 +472,10 @@ function shownAs(
   by: "channelsOf" | "favouritesOf",
 ): OwnedId | null {
   const owner = saved.ofAccount.get(account);
+
   if (!owner) return null;
   const { subscriptionId } = owner;
+
   return { subscriptionId, id: saved[by].get(subscriptionId)?.(id)?.id ?? id };
 }
 
@@ -477,6 +483,7 @@ function shownAs(
 function stateOf(stored: StoredViewing, { key }: ViewingOwner): ViewingState {
   const own = (list: readonly StoredChannel[]) =>
     list.flatMap(({ account, id }) => (account === key ? [id] : []));
+
   return { favourites: own(stored.favourites), recent: own(stored.recent) };
 }
 
@@ -495,27 +502,35 @@ function eventsOf(found: Found, owner: ViewingOwner, command: ViewingCommand): A
  */
 function rearranged(found: Found, { original, order }: FavouriteOrder): AccountEvent[] | Failed {
   const streams = new Map<string, StoredChannel[]>();
+
   for (const stream of found.stored.favourites) {
     const channel = shownAs(found, stream, "favouritesOf");
+
     if (!channel) continue;
     const key = ownedKey(channel);
     const stored = streams.get(key);
+
     if (stored) stored.push(stream);
     else streams.set(key, [stream]);
   }
+
   const shown = [...streams.keys()];
   const listed = original.map(ownedKey);
+
   if (shown.length !== listed.length || shown.some((key, at) => key !== listed[at])) {
     return changed;
   }
+
   const wanted = order.map(ownedKey);
   // The channels arranged take one another's places; every other favourite stays in its own.
   const arranged = new Set(wanted);
   let next = 0;
   const placed = shown.map((key) => (arranged.has(key) ? (wanted[next++] ?? key) : key));
+
   // An order that changes nothing leaves the stored ids as they are, a channel's streams apart
   // from one another included.
   if (placed.every((key, at) => key === shown[at])) return [];
+
   return reordered(
     found.stored.favourites,
     placed.flatMap((key) => streams.get(key) ?? []),
@@ -537,6 +552,7 @@ function make() {
     yield* Effect.gen(function* () {
       const lists = yield* legacy.take;
       const key = (yield* account.owners).find((owner) => owner.original)?.key ?? null;
+
       if (lists && !key) return;
       yield* store.importOnce({
         account: key,
@@ -556,15 +572,19 @@ function make() {
     /** The saved subscriptions with their channels. Finding those can take a read from disk. */
     const saved = Effect.gen(function* () {
       const owners = yield* account.owners;
+
       const lookups = yield* Effect.forEach(owners, ({ subscriptionId }) =>
         Effect.gen(function* () {
           const channelOf = yield* channels.lookup(subscriptionId);
+
           const favouriteOf = channels.favourite
             ? yield* channels.favourite(subscriptionId)
             : byChannel(channelOf);
+
           return { subscriptionId, channelOf, favouriteOf };
         }),
       );
+
       return {
         owners,
         ofAccount: new Map(owners.map((owner) => [owner.key, owner])),
@@ -579,7 +599,9 @@ function make() {
      */
     const settled = Effect.gen(function* () {
       let found = yield* saved;
+
       while (!sameOwners(yield* account.owners, found.owners)) found = yield* saved;
+
       return found;
     });
 
@@ -592,6 +614,7 @@ function make() {
         titles.flatMap(({ subscriptionId, id }) =>
           subscriptionId === owner.subscriptionId ? [id] : [],
         );
+
       return { movieIds: own(filter.movies), seriesIds: own(filter.series) };
     };
 
@@ -605,31 +628,38 @@ function make() {
         ...new Map(
           list.flatMap((stream) => {
             const channel = shownAs(found, stream, by);
+
             return channel ? [[ownedKey(channel), channel] as const] : [];
           }),
         ).values(),
       ];
+
       const { stored } = found;
+
       return {
         favourites: listed(stored.favourites, "favouritesOf"),
         recent: listed(stored.recent, "channelsOf").slice(0, RECENT_LIMIT),
         continueWatching: stored.continueWatching
           .flatMap(({ account, progress }) => {
             const owner = found.ofAccount.get(account);
+
             return owner ? [progressOf(owner, progress)] : [];
           })
           .slice(0, CONTINUE_OFFERED),
         marked: stored.marked
           .flatMap(({ account, mark, next }) => {
             const owner = found.ofAccount.get(account);
+
             if (!owner) return [];
             const series = { subscriptionId: owner.subscriptionId, id: mark.title.seriesId };
+
             return [{ series, kept: mark.series, at: mark.at, next }];
           })
           .slice(0, CONTINUE_OFFERED),
         recentTitles: (stored.recentTitles ?? [])
           .flatMap(({ account, progress }) => {
             const owner = found.ofAccount.get(account);
+
             return owner ? [progressOf(owner, progress)] : [];
           })
           .slice(0, 32),
@@ -644,6 +674,7 @@ function make() {
     ) => {
       const wanted = new Set(named.map((each) => each.subscriptionId));
       const found = owners.filter((owner) => wanted.has(owner.subscriptionId));
+
       return found.length === wanted.size ? found : null;
     };
 
@@ -669,8 +700,10 @@ function make() {
         if (!ownersOf(yield* account.owners, named)) return yield* gone;
         const found = yield* settled;
         const owners = ownersOf(found.owners, named);
+
         if (!owners) return yield* gone;
         const at = yield* Clock.currentTimeMillis;
+
         const stored = yield* store.commit({
           accounts: found.owners.map((owner) => owner.key),
           commandId,
@@ -680,7 +713,9 @@ function make() {
               ? gone
               : events({ ...found, stored }, owners, look),
         });
+
         yield* PubSub.publish(changes, stored.sequence);
+
         return shown({ ...found, stored });
       });
 
@@ -692,20 +727,25 @@ function make() {
     const playedIn = (filter: TitleFilter) =>
       Effect.gen(function* () {
         const owners = ownersOf(yield* account.owners, namedIn(filter));
+
         if (!owners) return yield* noSubscription;
+
         const played = yield* Effect.forEach(owners, (owner) =>
           Effect.gen(function* () {
             const own = rawFilter(filter, owner);
+
             const titles = [
               ...(yield* store.marksIn(owner.key, own.seriesIds ?? [])),
               ...(yield* store.titles(owner.key, own)),
             ].map(({ title }) => title);
+
             return [
               owner.key,
               [...new Map(titles.map((title) => [removalScope(title), title])).values()],
             ] as const;
           }),
         );
+
         return new Map(played);
       });
 
@@ -713,16 +753,20 @@ function make() {
       state: Effect.gen(function* () {
         // Catalogue lookups may have waited across a source removal.
         const found = yield* settled;
+
         if (found.owners.length === 0) return none;
         const stored = yield* store.read(found.owners.map((owner) => owner.key));
+
         return shown({ ...found, stored });
       }),
       setFavourite: (commandId: string, channel: OwnedId, favourite: boolean) =>
         run(commandId, [channel], (found, [owner]) => {
           if (!owner) return noSubscription;
+
           const ids = found.favouritesOf.get(owner.subscriptionId)?.(channel.id)?.streamIds ?? [
             channel.id,
           ];
+
           return eventsOf(found, owner, {
             kind: "set-favourite",
             channelIds: [...new Set(ids)],
@@ -732,6 +776,7 @@ function make() {
       reorderFavourites: (commandId: string, order: FavouriteOrder) => {
         const listed = new Set(order.original.map(ownedKey));
         const arranged = order.order.map(ownedKey);
+
         if (
           new Set(arranged).size !== arranged.length ||
           arranged.some((key) => !listed.has(key))
@@ -745,6 +790,7 @@ function make() {
             }),
           );
         }
+
         // An order for favourites of a subscription that went is one for a list that changed.
         return run(commandId, order.original, (found) => rearranged(found, order), changed);
       },
@@ -794,7 +840,9 @@ function make() {
               // The word of a play the viewer marked an episode during, or after, comes too
               // late: where the series goes on is what its marks say.
               const marks = look.marksIn(owner.key, rawFilter({ series }, owner).seriesIds ?? []);
+
               if (marks.some((mark) => mark.at >= since)) return [];
+
               return eventsOf(found, owner, {
                 kind: "finish-series",
                 titles: played.get(owner.key) ?? [],
@@ -806,20 +854,24 @@ function make() {
         Effect.gen(function* () {
           const named = new Set(namedIn(titles).map((each) => each.subscriptionId));
           const owners = (yield* account.owners).filter((owner) => named.has(owner.subscriptionId));
+
           const played = yield* Effect.forEach(owners, (owner) =>
             Effect.map(store.titles(owner.key, rawFilter(titles, owner)), (rows) =>
               rows.map((progress) => progressOf(owner, progress)),
             ),
           );
+
           return played.flat();
         }),
       episodes: (series: OwnedId) =>
         Effect.gen(function* () {
           const owner = ownersOf(yield* account.owners, [series])?.[0];
+
           if (!owner) return { progress: [], marks: [], undoable: null };
           const { keys, versions } = yield* listed.identity(series);
           const played = yield* store.titles(owner.key, { seriesIds: versions });
           const kept = yield* store.marks(owner.key, keys);
+
           return {
             progress: played.map((progress) => progressOf(owner, progress)),
             marks: standing(kept).map(markOf),
@@ -829,21 +881,27 @@ function make() {
       markEpisode: (commandId: string, episode: EpisodeRef, watched: boolean) =>
         Effect.gen(function* () {
           const { subscriptionId: _owner, ...title } = episode;
+
           const same = (mark: { readonly season: number; readonly episode: number }) =>
             mark.season === title.season && mark.episode === title.episode;
+
           // Asked first: the lists and the details can take a while, and nothing of the record
           // is read until they answered.
           const { key, keys, versions } = yield* listed.identity(seriesOf(episode));
           const listing = listingOf(yield* listed.seasons(seriesOf(episode)));
+
           const lists = listing.some(
             (season) => season.number === title.season && season.episodes.includes(title.episode),
           );
+
           if (!lists) {
             return yield* new Failed({ error: { kind: "title-not-found", titleId: episode.id } });
           }
+
           yield* run(commandId, [episode], (_found, [owner], look) => {
             if (!owner) return noSubscription;
             const held = standing(look.marks(owner.key, keys)).find(same);
+
             const replayed = look
               .titles(owner.key, { seriesIds: versions })
               .some(
@@ -852,7 +910,9 @@ function make() {
                   same(entry.title) &&
                   entry.since > (held?.at ?? Infinity),
               );
+
             if (held?.watched === watched && !replayed) return [];
+
             return [
               {
                 account: owner.key,
@@ -862,6 +922,7 @@ function make() {
           });
           const owner = ownersOf(yield* account.owners, [episode])?.[0];
           const stored = owner ? standing(yield* store.marks(owner.key, keys)).find(same) : null;
+
           return stored ? markOf(stored) : null;
         }),
       undoMark: (commandId: string, series: OwnedId, revision: number) =>
@@ -869,11 +930,14 @@ function make() {
           const { keys, versions } = yield* listed.identity(series);
           yield* run(commandId, [series], (_found, [owner], look) => {
             if (!owner) return noSubscription;
+
             const mark = undoable(
               look.marks(owner.key, keys),
               look.titles(owner.key, { seriesIds: versions }),
             );
+
             if (mark?.revision !== revision) return markChanged;
+
             return [
               {
                 account: owner.key,
@@ -891,11 +955,13 @@ function make() {
         Effect.gen(function* () {
           const listing = listingOf(seasons);
           const owner = ownersOf(yield* account.owners, [series])?.[0];
+
           if (!owner || !listing.some((season) => season.episodes.length > 0)) return;
           const { keys, versions } = yield* listed.identity(series);
           const now = { versions, listing };
           // Read first: most details read are of a series that lists what it did, or has no marks.
           const stale = relisted(yield* store.marks(owner.key, keys), series.id, now);
+
           if (stale.length === 0) return;
           yield* run(commandId, [series], (_found, [mine], look) =>
             mine

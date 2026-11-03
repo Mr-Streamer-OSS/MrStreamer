@@ -275,18 +275,22 @@ const state = store<Playback>({
   muted: true,
   closing: [],
 });
+
 /** Seconds played of the current stream, apart from the rest so only the clock redraws. */
 const clock = store(0);
+
 /** A title's length in seconds, once known; 0 for live and before it loaded. */
 const length = store(0);
 
 export const usePlayback = () => useStore(state);
+
 /** Read-only, for telemetry, which follows the player without a screen. */
 export const playbackState: Pick<Store<Playback>, "get" | "subscribe"> = state;
 export const playbackClock: Pick<Store<number>, "get" | "subscribe"> = clock;
 export const usePlaybackClock = () => useStore(clock);
 export const playbackLength: Pick<Store<number>, "get" | "subscribe"> = length;
 export const usePlaybackLength = () => useStore(length);
+
 /**
  * The rate the player says it plays at, or plays at once played again; null before the current
  * stream's first report. Only the native player's own report sets it, never a request.
@@ -295,6 +299,7 @@ const speed = store<number | null>(null);
 export const playbackSpeed: Pick<Store<number | null>, "get" | "subscribe"> = speed;
 export const usePlaybackSpeed = () => useStore(speed);
 const upNext = store<UpNext | null>(null);
+
 /** The countdown to the next episode while Watch shows one; null otherwise. */
 export const upNextState: Pick<Store<UpNext | null>, "get" | "subscribe"> = upNext;
 export const useUpNext = () => useStore(upNext);
@@ -312,8 +317,10 @@ export interface ChannelStatus {
  */
 export function channelStatus(phase: Phase): ChannelStatus | null {
   if (phase.kind === "idle" || phase.kind === "failed" || !phase.item.live) return null;
+
   const word =
     phase.kind === "loading" ? "Connecting" : phase.kind === "paused" ? "Paused" : "Playing";
+
   return { id: phase.item.id, word };
 }
 
@@ -339,6 +346,7 @@ export interface Request {
 
 /** Rises with viewer requests and Watch/navigation context changes: only the latest stands. */
 let requests = 0;
+
 /** The screen the viewer is on, as navigation reports it. */
 let screen = "";
 
@@ -368,6 +376,7 @@ function supersede() {
 export function request(): Request {
   supersede();
   const mine = requests;
+
   return { stands: () => mine === requests };
 }
 
@@ -383,8 +392,10 @@ export function onScreen(path: string) {
 
 /** Whether setting Watch aside paused what played, so bringing Watch back plays it again. */
 let resumeOnReturn = false;
+
 /** Viewer Pause waits for application and a paused acknowledgement; away clears on return. */
 let pauseOnStart: false | "viewer" | "viewer-applied" | "away" = false;
+
 /**
  * Close silenced what it paused, which had sound: Play from paused brings that sound back. A new
  * play, Stop, Watch shown again and the viewer's own mute or unmute each end it.
@@ -453,13 +464,17 @@ let current: {
 
 /** The open connection to the TV every play goes to while one is chosen; null plays here. */
 let link: TvLink | null = null;
+
 /** Rises with every change of route, so a connect that ends late never takes over a newer one. */
 let routes = 0;
+
 /** Settles once the latest connect to a TV did, and was closed if it came too late. */
 let connecting: Promise<void> = Promise.resolve();
 
 type FormatReader = ReturnType<typeof openFormat>;
+
 type Group = "audio" | "subtitles";
+
 interface PendingConfirmation {
   readonly kind: "manual" | "hold";
   readonly selection: ObservedTrackSelection;
@@ -468,6 +483,7 @@ interface PendingConfirmation {
   readonly changed: boolean;
   readonly choice: Choice;
 }
+
 interface GroupState {
   authority: "automatic" | "hold" | "manual";
   evaluated: number;
@@ -476,6 +492,7 @@ interface GroupState {
   queued: boolean;
   pending: PendingConfirmation | null;
 }
+
 interface Resource {
   readonly id: number;
   /** The item key it plays, `copy:<id>` for a downloaded copy. */
@@ -529,6 +546,7 @@ interface TvPlay {
   loaded: TvLoaded | null;
   status: TvStatus | null;
 }
+
 let attempts = 0;
 const closing = new Set<Resource>();
 
@@ -561,12 +579,14 @@ function stands(resource: Resource): boolean {
 
 onSignedIn(() => {
   if (!current || sourceStands(current)) return;
+
   if (!current.resource.retired) void stop();
   else endRecovery();
 });
 
 const attended = () => {
   const { watch, pip, external, tv } = state.get();
+
   return watch || pip || external || tv.kind === "on";
 };
 
@@ -579,7 +599,9 @@ function noteClosing() {
   const holding = [
     ...new Set([...closing].flatMap((r) => (r.subscriptionId === null ? [] : [r.subscriptionId]))),
   ];
+
   const now = state.get().closing;
+
   if (holding.length !== now.length || holding.some((id, at) => id !== now[at])) {
     state.set((s) => ({ ...s, closing: holding }));
   }
@@ -593,11 +615,14 @@ function noteClosing() {
 function retire(resource: Resource) {
   if (resource.settlement) return resource.settlement;
   resource.retired = true;
+
   for (const group of [resource.audio, resource.subtitles]) {
     group.op++;
     group.pending = null;
   }
+
   closing.add(resource);
+
   if (!resource.submitted) giveBack(resource);
   const { tv } = resource;
   // A TV's stream never reached the player here: its readers are the relay's.
@@ -612,6 +637,7 @@ function retire(resource: Resource) {
       await tv.relay?.revoke();
     } else {
       const receipt = await resource.detach;
+
       if (
         receipt?.kind !== "detached" ||
         receipt.attemptId !== resource.id ||
@@ -622,6 +648,7 @@ function retire(resource: Resource) {
         throw new Error("Player reader closure was not acknowledged.");
       }
     }
+
     await resource.opening;
     await Promise.all(resource.formats.map((format) => format.closed));
     closing.delete(resource);
@@ -630,22 +657,26 @@ function retire(resource: Resource) {
     giveBack(resource);
   })();
   resource.controller.abort();
+
   for (const format of resource.formats) format.close();
   noteClosing();
   void resource.settlement.catch(() =>
     resource.uncertain(new Error("Player reader closure was not acknowledged.")),
   );
+
   return resource.settlement;
 }
 
 /** The selection deadline never changes the real closing ledger or resumes a failed selection. */
 async function waitForReaders(resource: Resource) {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const aborted = new Promise<never>((_, reject) => {
     const abort = () => reject(new Error("Selection ended."));
     resource.controller.signal.addEventListener("abort", abort, { once: true });
     resource.opening.then(() => resource.controller.signal.removeEventListener("abort", abort));
   });
+
   try {
     await Promise.race([
       Promise.all([...closing].map((r) => r.closed)),
@@ -658,21 +689,28 @@ async function waitForReaders(resource: Resource) {
     clearTimeout(timer);
   }
 }
+
 let checkpoint: ReturnType<typeof setInterval> | null = null;
 const KEPT: Saved = { saved: true };
+
 /** Every save of progress asked so far, one after another, ending with how the latest went. */
 let saving: Promise<Saved> = Promise.resolve(KEPT);
+
 /** Whether the latest save was refused, so a run of refusals is told once. */
 let refusing = false;
+
 /**
  * Told when a save is refused after one that was kept, unless its subscription went; Watch
  * registers it.
  */
 let refused: (() => void) | null = null;
+
 /** Told each failure's category, never its message; telemetry registers it. */
 let failed: ((failure: AnalyticsFailure) => void) | null = null;
+
 /** Ends Picture in Picture; Watch registers it while its view can. */
 let endPictureInPicture: (() => void) | null = null;
+
 /**
  * How a stream takes its subscription's connection from downloads and gives it back; downloads.ts
  * registers it. `acquire` resolves once the download requests of that subscription ended and the
@@ -683,13 +721,16 @@ export interface Admission {
   acquire(subscriptionId: string, lease: string): Promise<void>;
   release(lease: string): void;
 }
+
 let admission: Admission | null = null;
+
 /** Names this process's leases, apart from an earlier process's. */
 const LEASES = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Gives `resource`'s lease back, once. */
 function giveBack(resource: Resource) {
   const { lease } = resource;
+
   if (lease === null) return;
   resource.lease = null;
   admission?.release(lease);
@@ -698,12 +739,14 @@ function giveBack(resource: Resource) {
 /** Seconds into the stream that plays: where the TV last said, else the player here. */
 function streamTime(): number {
   const tv = current?.resource.tv;
+
   return tv ? (tv.status?.time ?? current?.stoppedAt ?? 0) : player().currentTime;
 }
 
 /** The stream's length in seconds as whoever plays it knows it; NaN while unknown. */
 function streamLength(): number {
   const tv = current?.resource.tv;
+
   return tv ? (tv.status?.duration ?? Number.NaN) : player().duration;
 }
 
@@ -714,11 +757,14 @@ async function acquireBeforeLookup(resource: Resource, subscriptionId: string) {
   resource.lease = lease;
   const { signal } = resource.controller;
   let abort = () => {};
+
   const cancelled = new Promise<never>((_, reject) => {
     abort = () => reject(signal.reason);
+
     if (signal.aborted) abort();
     else signal.addEventListener("abort", abort, { once: true });
   });
+
   try {
     await Promise.race([admission.acquire(subscriptionId, lease), cancelled]);
   } finally {
@@ -733,6 +779,7 @@ async function acquireBeforeLookup(resource: Resource, subscriptionId: string) {
 function report(): Promise<Saved> {
   const save = current?.options.progress;
   const duration = streamLength();
+
   if (
     !current?.loaded ||
     current.item.live ||
@@ -741,23 +788,28 @@ function report(): Promise<Saved> {
   ) {
     return saving.then(() => KEPT);
   }
+
   const position = Math.min(streamTime(), duration);
   saving = saving.then(async (): Promise<Saved> => {
     try {
       await save(position, duration);
       refusing = false;
+
       return KEPT;
     } catch (cause) {
       const error = appError(cause);
+
       // A save whose subscription went, as removing its provider stops what plays, wasn't kept,
       // but the viewer chose that: it isn't told, and leaves a run of refusals as it was.
       if (error.kind !== "no-subscription") {
         if (!refusing) refused?.();
         refusing = true;
       }
+
       return { saved: false, error };
     }
   });
+
   return saving;
 }
 
@@ -767,6 +819,7 @@ export function progressSettled(): Promise<void> {
 }
 
 let created: VideoPlayer | null = null;
+
 /** The player, made on first use. */
 export function player(): VideoPlayer {
   if (created) return created;
@@ -781,13 +834,16 @@ export function player(): VideoPlayer {
     // Back on the phone with Watch and Picture in Picture closed, Home's preview is silent again.
     const { watch, pip } = state.get();
     const silent = !isExternalPlaybackActive && !watch && !pip;
+
     if (silent) made.muted = true;
     state.set((s) => ({ ...s, external: isExternalPlaybackActive, muted: silent || s.muted }));
     attentionChanged();
+
     // AirPlay chosen while a TV plays takes over from the TV.
     if (isExternalPlaybackActive && link) playHere(false);
   });
   created = made;
+
   return made;
 }
 
@@ -796,21 +852,26 @@ function release(): Promise<Saved> {
   const saved = report();
   cancelUpNext();
   endAtLength(false);
+
   if (current) {
     clearWatchdog(current.epoch);
     playingTime(current.epoch, false);
   }
+
   if (current?.loaded && !current.item.live) {
     const at = Math.max(0, streamTime() - current.offset);
     current.stoppedAt = current.item.past ? Math.min(at, lengthOf(current.item, null)) : at;
   }
+
   if (checkpoint) clearInterval(checkpoint);
   checkpoint = null;
+
   if (current) void retire(current.resource);
   player().pause();
   clock.set(0);
   length.set(0);
   speed.set(null);
+
   return saved;
 }
 
@@ -827,6 +888,7 @@ function cancelEpoch(epoch: Epoch) {
 
 function playingTime(epoch: Epoch, playing: boolean) {
   const now = Date.now();
+
   if (epoch.playingSince !== null) epoch.playedMs += now - epoch.playingSince;
   epoch.playingSince = playing ? now : null;
 }
@@ -839,6 +901,7 @@ function fail(failure: PlaybackFailure): void {
   epoch.last = failure;
   playingTime(epoch, false);
   clearWatchdog(epoch);
+
   const step = nextStep(
     failure,
     {
@@ -859,19 +922,25 @@ function fail(failure: PlaybackFailure): void {
       sourceStands: sourceStands(owned),
     },
   );
+
   if (step.kind === "fail") return terminal(owned);
   release();
   owned.loaded = false;
   epoch.candidate = step.candidate;
   state.set((s) => ({ ...s, phase: { kind: "loading", item: choice.item } }));
+
   if (current !== owned || epoch.terminal) return;
+
   if (!attended() || held !== null || !sourceStands(owned)) return terminal(owned);
+
   if (step.kind === "candidate") return void admit(owned);
   epoch.reconnects = step.reconnects;
   const id = epoch.id;
   epoch.backoff = setTimeout(() => {
     epoch.backoff = null;
+
     if (current !== owned || current.epoch.id !== id || epoch.terminal) return;
+
     if (!attended() || held !== null || !sourceStands(owned)) return terminal(owned);
     void admit(owned);
   }, step.delayMs);
@@ -881,12 +950,14 @@ function fail(failure: PlaybackFailure): void {
 function terminal(owned: NonNullable<typeof current>): void {
   const { item, options, epoch } = owned;
   const failure = epoch.last;
+
   if (current !== owned || epoch.terminal || !failure) return;
   epoch.terminal = true;
   cancelEpoch(epoch);
   playingTime(epoch, false);
   const formatFailure = failure.kind === "format" ? failure.failure : null;
   const native = failure.kind === "native" ? failure.failure : null;
+
   const analytics = formatFailure
     ? appFailure({ kind: "stream", failure: formatFailure })
     : failure.kind === "lookup"
@@ -904,10 +975,13 @@ function terminal(owned: NonNullable<typeof current>): void {
                   native?.kind === "http"
                 ? "unavailable"
                 : "app";
+
   release();
   failed?.(analytics);
+
   if (!epoch.played) options.outcome?.(false);
   owned.loaded = false;
+
   const message = formatFailure
     ? describeError({ kind: "stream", failure: formatFailure })
     : failure.kind === "lookup"
@@ -925,6 +999,7 @@ function terminal(owned: NonNullable<typeof current>): void {
                   ? "The previous stream is still closing. Try again."
                   : "The player stopped. Try again.",
           );
+
   if (current !== owned) return;
   state.set((s) => ({
     ...s,
@@ -943,6 +1018,7 @@ function terminal(owned: NonNullable<typeof current>): void {
 /** Cancel a pending automatic open or backoff, keeping the last real failure. */
 function endRecovery() {
   const owned = current;
+
   if (owned && (owned.epoch.backoff !== null || (owned.resource.automatic && !owned.loaded)))
     terminal(owned);
 }
@@ -955,19 +1031,24 @@ function attentionChanged() {
 /** Armed time is retained while disarmed. Only actual media progress resets a stall. */
 function reconsiderWatchdog(mediaTime?: number): void {
   const owned = current;
+
   if (!owned || owned.resource.retired || owned.epoch.terminal || !sourceStands(owned)) return;
   const { epoch, resource } = owned;
   const watchdog = epoch.watchdog;
+
   if (!watchdog) return;
   const now = Date.now();
   clearTimeout(watchdog.timer ?? undefined);
   watchdog.timer = null;
+
   if (watchdog.armedAt !== null) watchdog.spentMs += now - watchdog.armedAt;
   watchdog.armedAt = null;
+
   if (watchdog.stage === "stall" && mediaTime !== undefined && Number.isFinite(mediaTime)) {
     if (watchdog.lastMedia !== null && mediaTime > watchdog.lastMedia) watchdog.spentMs = 0;
     watchdog.lastMedia = mediaTime;
   }
+
   // The initial native paused sample still counts while the app shows Connecting.
   if (
     !attended() ||
@@ -977,6 +1058,7 @@ function reconsiderWatchdog(mediaTime?: number): void {
   )
     return;
   const limit = watchdog.stage === "startup" ? START_TIMEOUT_MS : STALL_TIMEOUT_MS;
+
   if (watchdog.spentMs >= limit) return fail({ kind: "deadline", stage: watchdog.stage });
   watchdog.armedAt = now;
   watchdog.timer = setTimeout(() => {
@@ -999,6 +1081,7 @@ function applyViewerPause(resource: Resource) {
       s.phase.item !== current?.item
     )
       return s;
+
     return { ...s, phase: { kind: "paused", item: s.phase.item } };
   });
 }
@@ -1007,6 +1090,7 @@ function applyViewerPause(resource: Resource) {
 function startAttached(resource: Resource) {
   // The rate it plays at; a paused player keeps it for its next play.
   player().playbackRate = speedOf(current);
+
   if (pauseOnStart === "viewer") applyViewerPause(resource);
   else if (!pauseOnStart && !resource.holdInitialPlay) player().play();
 }
@@ -1021,6 +1105,7 @@ function acceptItem(resource: Resource, identity: ObservedItemIdentity) {
   )
     return false;
   resource.itemId = identity.itemId;
+
   return true;
 }
 
@@ -1039,18 +1124,23 @@ function acceptTracks(resource: Resource, tracks: ObservedTrackSnapshot) {
 
 const soundOf = (resource: Resource) =>
   resource.audioWork > 0 ? undefined : resource.confirmedSound;
+
 const selectedId = (tracks: ObservedTrackSnapshot, group: Group) =>
   group === "audio" ? tracks.selectedAudioId : tracks.selectedSubtitleId;
+
 const sameLanguages = (a: readonly (string | null)[], b: readonly (string | null)[]) =>
   a.length === b.length && a.every((language, at) => language === b[at]);
 
 /** Every accepted event or query, including same-revision selection readback, reaches this owner. */
 function onSnapshot(resource: Resource) {
   const tracks = resource.tracks;
+
   if (!tracks || !stands(resource)) return;
+
   if (tracks.revision > resource.factsRevision) {
     resource.factsRevision = tracks.revision;
     const facts = resource.observed && !resource.viaSession ? observedFileTracks(tracks) : null;
+
     if (
       facts &&
       (!resource.facts ||
@@ -1058,6 +1148,7 @@ function onSnapshot(resource: Resource) {
         !sameLanguages(facts.subtitles, resource.facts.subtitles))
     ) {
       resource.facts = facts;
+
       try {
         resource.observed?.(facts);
       } catch {
@@ -1065,13 +1156,17 @@ function onSnapshot(resource: Resource) {
       }
     }
   }
+
   for (const group of ["audio", "subtitles"] as const) {
     if (!stands(resource)) return;
     tryConfirm(resource, group);
   }
+
   settleSound(resource);
+
   for (const group of ["audio", "subtitles"] as const) {
     const state = resource[group];
+
     if (state.authority !== "manual" && tracks.revision > state.evaluated)
       schedule(resource, group);
   }
@@ -1080,7 +1175,9 @@ function onSnapshot(resource: Resource) {
 /** Only the latest post-ack snapshot with all audio work finished confirms the actual sound. */
 function settleSound(resource: Resource) {
   const tracks = resource.tracks;
+
   if (resource.audioWork > 0 || !tracks || !stands(resource)) return;
+
   if (resource.accepted > resource.audioAck) {
     resource.confirmedSound =
       tracks.audio.state === "ready"
@@ -1091,7 +1188,9 @@ function settleSound(resource: Resource) {
           ? null
           : undefined;
   }
+
   const sound = resource.confirmedSound;
+
   if (
     resource.subtitles.authority !== "manual" &&
     sound !== undefined &&
@@ -1106,25 +1205,35 @@ function tryConfirm(resource: Resource, group: Group) {
   const state = resource[group];
   const pending = state.pending;
   const tracks = resource.tracks;
+
   if (!pending || !tracks) return;
+
   if (!stands(resource) || current?.choice !== pending.choice || state.op !== pending.op) {
     state.pending = null;
+
     return;
   }
+
   if (!confirms(pending.selection, pending.revision, tracks)) return;
   state.pending = null;
+
   if (pending.kind === "hold") {
     state.authority = "manual";
+
     return;
   }
+
   pending.choice.holds[group] = holdOf(pending.selection);
+
   if (!pending.changed) return;
+
   const memory = remembered(
     pending.selection,
     soundOf(resource),
     getMediaPreferences(),
     pending.choice.context,
   );
+
   if (memory?.field === "audio") updateMediaPreferences("audio", memory.value);
   else if (memory) updateMediaPreferences("subtitles", memory.value);
 }
@@ -1132,6 +1241,7 @@ function tryConfirm(resource: Resource, group: Group) {
 /** An earlier query cannot stand in for readback of a newer native request. */
 async function readbackAfterRequest(resource: Resource) {
   await resource.querying?.catch(() => null);
+
   if (!stands(resource)) return;
   await refreshTracks(resource);
 }
@@ -1139,18 +1249,22 @@ async function readbackAfterRequest(resource: Resource) {
 /** `choice`'s version while one of its downloaded subtitles shows: the file's own stay off. */
 function downloadedOver(choice: Choice): SubtitleTitle | undefined {
   const title = choice.item.subtitles;
+
   return title && shownSubtitle()?.title === title ? title : undefined;
 }
 
 /** The version a downloaded subtitle showed over when the current file's subtitles were decided. */
 let decidedOver: SubtitleTitle | undefined;
+
 // A downloaded subtitle shown or taken away decides the current file's own subtitles anew: off
 // while one shows, else as the policy and any confirmed hold say.
 onShownSubtitle(() => {
   const over = current ? downloadedOver(current.choice) : undefined;
+
   if (over === decidedOver) return;
   decidedOver = over;
   const resource = current?.resource;
+
   if (!current || !resource || !stands(resource)) return;
   const hold = current.choice.holds.subtitles;
   Object.assign(resource.subtitles, groupState(hold), { op: resource.subtitles.op + 1 });
@@ -1160,28 +1274,36 @@ onShownSubtitle(() => {
 /** One pending evaluate-now token per group, deciding from current facts only at dequeue. */
 function schedule(resource: Resource, group: Group) {
   const state = resource[group];
+
   if (!stands(resource) || state.queued || state.authority === "manual") return;
   const choice = current!.choice;
   state.queued = true;
   const token = state.op;
+
   if (group === "audio") resource.audioWork++;
   resource.selections = resource.selections.then(async () => {
     state.queued = false;
+
     try {
       if (!stands(resource) || state.op !== token || state.authority === "manual") return;
       const tracks = resource.tracks;
+
       if (!tracks || (state.pending && state.pending.revision >= tracks.revision)) return;
       state.evaluated = tracks.revision;
       const sound = soundOf(resource);
+
       if (group === "subtitles") resource.subtitleSound = sound;
       const downloaded = group === "subtitles" && downloadedOver(choice) !== undefined;
       const hold = downloaded ? undefined : choice.holds[group];
       const held = state.authority === "hold" && hold ? rematch(hold, tracks) : null;
+
       if (held && confirms(held, tracks.revision, tracks)) {
         state.authority = "manual";
         state.pending = null;
+
         return;
       }
+
       const decision = held
         ? { kind: "select" as const, selection: held }
         : group === "audio"
@@ -1192,25 +1314,33 @@ function schedule(resource: Resource, group: Group) {
               choice.context,
               sound,
             );
+
       if (decision.kind !== "select" || state.stale >= 3) return;
       const op = ++state.op;
       state.pending = null;
+
       const result = await player().selectObservedTrackAsync(
         tracks,
         tracks.revision,
         decision.selection,
       );
+
       if (!stands(resource) || state.op !== op) return;
+
       if (result.kind === "stale") {
         state.stale++;
+
         return;
       }
+
       if (result.kind !== "requested") return;
       state.stale = 0;
+
       if (group === "audio") {
         resource.audioAck = resource.accepted;
         resource.confirmedSound = undefined;
       }
+
       if (held) {
         state.pending = {
           kind: "hold",
@@ -1222,7 +1352,9 @@ function schedule(resource: Resource, group: Group) {
         };
         tryConfirm(resource, group);
       }
+
       await readbackAfterRequest(resource);
+
       if (!stands(resource) || state.op !== op) return;
     } catch {
       // A refused bridge call changes no authority, hold or accepted preference.
@@ -1240,33 +1372,43 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
   // A pick over a downloaded subtitle isn't remembered. A download under way ends now, so it can't
   // show over this pick while the native one is requested.
   const downloaded = group === "subtitles" ? downloadedOver(choice) : undefined;
+
   if (group === "subtitles" && choice.item.subtitles) endSubtitleWork(choice.item.subtitles);
   const state = resource[group];
   const op = ++state.op;
   state.pending = null;
+
   if (group === "audio") resource.audioWork++;
   resource.selections = resource.selections.then(async () => {
     let dropped = true;
+
     try {
       const tracks = resource.tracks;
+
       if (!tracks || !stands(resource) || state.op !== op || tracks.revision !== revision) return;
+
       if (selection.track ? !selection.track.isPlayable : !tracks.subtitleOffAllowed) return;
       const before = selectedId(tracks, group);
       const result = await player().selectObservedTrackAsync(tracks, revision, selection);
+
       if (!stands(resource) || state.op !== op || result.kind !== "requested") return;
       dropped = false;
+
       // The file's own subtitles, once requested, take the downloaded one's place for this
       // version and end a download under way. Decided here, so the change isn't decided again.
       if (group === "subtitles" && choice.item.subtitles) {
         decidedOver = undefined;
         hideSubtitle(choice.item.subtitles);
       }
+
       state.authority = "manual";
       state.stale = 0;
+
       if (group === "audio") {
         resource.audioAck = resource.accepted;
         resource.confirmedSound = undefined;
       }
+
       state.pending = {
         kind: "manual",
         selection,
@@ -1277,22 +1419,26 @@ function chooseManually(resource: Resource, revision: number, selection: Observe
       };
       tryConfirm(resource, group);
       await readbackAfterRequest(resource);
+
       if (!stands(resource) || state.op !== op) return;
     } catch {
       // Rejection never confirms a pick.
     } finally {
       if (group === "audio" && --resource.audioWork === 0) settleSound(resource);
+
       if (dropped && stands(resource) && state.op === op) {
         state.evaluated = -1;
         schedule(resource, group);
       }
     }
   });
+
   return resource.selections;
 }
 
 function refreshTracks(resource: Resource): Promise<ObservedTrackSnapshot | null> {
   if (!stands(resource) || resource.itemId === null) return Promise.resolve(null);
+
   if (resource.querying) return resource.querying;
   const expected = { attemptId: resource.id, itemId: resource.itemId };
   const before = resource.tracks;
@@ -1301,7 +1447,9 @@ function refreshTracks(resource: Resource): Promise<ObservedTrackSnapshot | null
     .then(
       (tracks) => {
         if (!tracks || "kind" in tracks || !stands(resource)) return null;
+
         if (resource.tracks === before) acceptTracks(resource, tracks);
+
         return resource.tracks;
       },
       () => null,
@@ -1309,11 +1457,13 @@ function refreshTracks(resource: Resource): Promise<ObservedTrackSnapshot | null
     .finally(() => {
       resource.querying = null;
     });
+
   return resource.querying;
 }
 
 function observe(event: PlaybackObservation) {
   const resource = current?.resource;
+
   if (
     !resource ||
     !stands(resource) ||
@@ -1323,7 +1473,9 @@ function observe(event: PlaybackObservation) {
     event.sequence <= resource.sequence
   )
     return;
+
   if (event.kind === "detached") return; // Only the retained promise proves drain.
+
   if (event.kind === "attached") {
     if (!acceptItem(resource, event)) return;
   } else if (event.kind === "failure" && resource.itemId === null && event.itemId !== null) {
@@ -1331,39 +1483,51 @@ function observe(event: PlaybackObservation) {
     if (!acceptItem(resource, { attemptId: event.attemptId, itemId: event.itemId })) return;
   } else if (event.itemId !== resource.itemId) return;
   resource.sequence = event.sequence;
+
   if (!current) return;
+
   switch (event.kind) {
     case "attached":
       if (pauseOnStart === "viewer") applyViewerPause(resource);
+
       return;
     case "failure": {
       if (!event.terminal) return;
       const stopped = resource.session?.failure();
+
       return fail(
         stopped ? { kind: "format", failure: stopped } : { kind: "native", failure: event.failure },
       );
     }
+
     case "media-services-reset":
       return fail({ kind: "reset" });
     case "ready": {
       if (!current.item.live) length.set(lengthOf(current.item, event.durationSeconds));
+
       if (current.seek !== null) {
         const from = current.seek + current.offset;
         current.seek = null;
+
         // A recording still being made would start where it is now, so a programme always seeks.
         if (from > 0 || current.item.past) player().currentTime = from;
       }
+
       void refreshTracks(resource);
+
       return;
     }
+
     case "tracks":
       acceptTracks(resource, event.tracks);
       void refreshTracks(resource);
+
       return;
     case "ended":
       if (!pauseOnStart && !current.item.live) {
         const saved = report();
         current.options.ended?.();
+
         if (
           current.item.next &&
           state.get().watch &&
@@ -1372,35 +1536,47 @@ function observe(event: PlaybackObservation) {
         )
           countDown(current, saved);
       }
+
       return;
     case "state": {
       const previous = resource.timeControl;
       resource.timeControl = event.timeControl;
       const playing = event.timeControl === "playing";
       const paused = event.timeControl === "paused";
+
       if (held && paused) held.acknowledged = true;
       else if (held?.acknowledged && previous === "paused" && playing) held = null;
       const viewerPaused = paused && pauseOnStart === "viewer-applied";
+
       if (viewerPaused) pauseOnStart = false;
       clock.set(Math.max(0, event.mediaTimeSeconds - current.offset));
+
       if (event.speed) speed.set(event.speed);
+
       if (!stands(resource) || resource.sequence !== event.sequence) return;
       endAtLength(playing);
       const { phase } = state.get();
+
       if (phase.kind === "idle" || phase.kind === "failed") return;
+
       if (playing && pauseOnStart) {
         if (pauseOnStart === "viewer") applyViewerPause(resource);
         else player().pause();
+
         return;
       }
+
       if (playing && !current.loaded) {
         current.loaded = true;
         current.epoch.playedOn = current.epoch.candidate;
+
         if (!current.epoch.played) {
           current.epoch.played = true;
           current.options.outcome?.(true);
+
           if (!stands(resource)) return;
         }
+
         if (current.epoch.watchdog?.stage === "startup") {
           clearWatchdog(current.epoch);
           current.epoch.watchdog = {
@@ -1412,21 +1588,27 @@ function observe(event: PlaybackObservation) {
           };
         }
       }
+
       playingTime(current.epoch, playing);
+
       if (playing) checkpoint ??= setInterval(report, CHECKPOINT_MS);
       else if (checkpoint !== null) {
         clearInterval(checkpoint);
         checkpoint = null;
       }
+
       if (!playing && phase.kind === "playing") report();
+
       const kind = playing
         ? "playing"
         : phase.kind === "loading" && !viewerPaused && !(paused && pauseOnStart)
           ? "loading"
           : "paused";
+
       if (kind !== phase.kind && stands(resource) && resource.sequence === event.sequence) {
         state.set((s) => ({ ...s, phase: { kind, item: phase.item } }));
       }
+
       if (stands(resource)) reconsiderWatchdog(event.mediaTimeSeconds);
     }
   }
@@ -1438,8 +1620,10 @@ function bridgeCode(cause: unknown): string | null {
     if ("code" in cause && cause.code === "ERR_OBSERVED_NOT_DRAINED") return cause.code;
     cause = "cause" in cause ? cause.cause : null;
   }
+
   return null;
 }
+
 let admitted = false;
 
 /** One same-player bootstrap retry yields through the async bridge, without a media reload. */
@@ -1450,12 +1634,14 @@ async function attach(
   try {
     const result = await player().replaceObservedAsync(source, resource.id);
     admitted = true;
+
     return result;
   } catch (cause) {
     if (admitted || !stands(resource) || bridgeCode(cause) !== "ERR_OBSERVED_NOT_DRAINED")
       throw cause;
     const result = await player().replaceObservedAsync(source, resource.id);
     admitted = true;
+
     return result;
   }
 }
@@ -1469,6 +1655,7 @@ async function attach(
 export function play(item: Playing, plan: Plan, options: PlayOptions) {
   const { audio, subtitles } = getMediaPreferences();
   const before = current && sourceStands(current) ? current.choice : undefined;
+
   const choice: Choice = {
     item,
     plan,
@@ -1481,9 +1668,11 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
     }),
     holds: item.live && before?.item.live && before.item.id === item.id ? { ...before.holds } : {},
   };
+
   const started = start(choice, choice.options);
   // Once it is the current play, so the listener below reconsiders its tracks, not the last's.
   playSubtitles(item.subtitles ?? null);
+
   return started;
 }
 
@@ -1491,10 +1680,13 @@ export function play(item: Playing, plan: Plan, options: PlayOptions) {
 async function start(choice: Choice, options: PlayOptions) {
   supersede();
   seekAt = -Infinity;
+
   if (current) cancelEpoch(current.epoch);
   release();
+
   const signedIn =
     choice.item.subscriptionId === null ? undefined : currentSource(choice.item.subscriptionId);
+
   const epoch: Epoch = {
     id: ++epochs,
     signedIn,
@@ -1510,7 +1702,9 @@ async function start(choice: Choice, options: PlayOptions) {
     playingSince: null,
     playedMs: 0,
   };
+
   const resource = makeResource(choice, epoch, false);
+
   const owned = {
     item: choice.item,
     choice,
@@ -1523,6 +1717,7 @@ async function start(choice: Choice, options: PlayOptions) {
     stoppedAt: null,
     resource,
   };
+
   current = owned;
   resumeOnReturn = false;
   pauseOnStart = false;
@@ -1531,6 +1726,7 @@ async function start(choice: Choice, options: PlayOptions) {
   state.set((s) => {
     const muted = options.watch || s.watch ? false : s.muted;
     player().muted = muted;
+
     return {
       ...s,
       phase: { kind: "loading", item: owned.item },
@@ -1550,11 +1746,14 @@ function makeResource(choice: Choice, epoch: Epoch, automatic: boolean): Resourc
   let drained!: () => void;
   let uncertain!: (cause: Error) => void;
   let opened!: () => void;
+
   const closed = new Promise<void>((resolve, reject) => {
     drained = resolve;
     uncertain = reject;
   });
+
   void closed.catch(() => undefined); // Admission and reader handles still observe rejection.
+
   const resource: Resource = {
     id: ++attempts,
     key: item.id,
@@ -1600,15 +1799,18 @@ function makeResource(choice: Choice, epoch: Epoch, automatic: boolean): Resourc
     submitted: false,
     tv: link ? { link, relay: null, loaded: null, status: null } : null,
   };
+
   return resource;
 }
 
 /** Automatic attempts preserve viewer requests, presentation, options, Choice and source binding. */
 async function admit(owned: NonNullable<typeof current>) {
   if (current !== owned || owned.epoch.terminal) return;
+
   if (!sourceStands(owned) || !attended() || held !== null) return terminal(owned);
   const resource = makeResource(owned.choice, owned.epoch, true);
   owned.resource = resource;
+
   // A recording plays on where it got to, or where it was to start, even from another stream
   // whose recording starts elsewhere; a channel plays live again.
   if (owned.item.past) owned.seek = owned.stoppedAt ?? owned.options.from ?? 0;
@@ -1620,11 +1822,15 @@ async function admit(owned: NonNullable<typeof current>) {
 
 function attemptStands(owned: NonNullable<typeof current>, resource: Resource) {
   if (!stands(resource)) return false;
+
   if (!recheckPlayback()) return false;
+
   if (resource.automatic && (!attended() || held !== null)) {
     terminal(owned);
+
     return false;
   }
+
   return true;
 }
 
@@ -1632,9 +1838,11 @@ function attemptStands(owned: NonNullable<typeof current>, resource: Resource) {
 export function recheckPlayback(): boolean {
   try {
     current?.resource.admit?.();
+
     return true;
   } catch (cause) {
     fail({ kind: "lookup", error: appError(cause) });
+
     return false;
   }
 }
@@ -1646,38 +1854,50 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
   const { controller } = resource;
   const open = plan.kind === "file" ? plan.open : plan.candidates[epoch.candidate]?.open;
   let stage: "readers" | "lookup" | "native" = "native";
+
   try {
     if (!attemptStands(owned, resource)) return;
+
     if (!open) return fail({ kind: "bridge" });
+
     if (player().mrStreamerPlaybackContract !== 1) throw new Error("Player contract unavailable.");
     stage = "readers";
     await waitForReaders(resource);
+
     if (!attemptStands(owned, resource)) return;
     stage = "lookup";
+
     if (item.subscriptionId !== null) await acquireBeforeLookup(resource, item.subscriptionId);
+
     if (!attemptStands(owned, resource)) return;
+
     if (!epoch.sourceBound) {
       epoch.signedIn =
         item.subscriptionId === null ? undefined : currentSource(item.subscriptionId);
       epoch.sourceBound = true;
     }
+
     const source = await open(controller.signal);
     resource.admit = source.admit ?? null;
     owned.offset =
       item.past && source.start !== undefined
         ? Math.max(0, (item.past.start - source.start) / 1000)
         : 0;
+
     if (!attemptStands(owned, resource)) return;
+
     if (resource.tv) return await attachTv(owned, resource, source);
     resource.observed =
       plan.kind === "file" && !item.live && item.subscriptionId !== null
         ? (source.observed ?? null)
         : null;
+
     let playable: Parameters<typeof attach>[1] = {
       uri: source.url,
       ...defined({ headers: source.headers ? { ...source.headers } : undefined }),
       contentType: source.container === "m3u8" ? "hls" : "auto",
     };
+
     if (!item.live && THROUGH_SESSION.has(source.container.toLowerCase())) {
       resource.submitted = true;
       const opening = openFormat(source.url, source.headers, options.from ?? 0, controller.signal);
@@ -1685,7 +1905,9 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       // Observe failure now, even if opening itself is still pending.
       void opening.closed.catch(() => undefined);
       const opened = await opening.opened;
+
       if (!attemptStands(owned, resource)) return opening.close();
+
       if (opened.kind === "session") {
         const { session } = opened;
         resource.session = session;
@@ -1697,7 +1919,9 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
         owned.seek = null;
       } else {
         await opening.closed;
+
         if (!attemptStands(owned, resource)) return;
+
         // MP4 or MOV after all, which AVFoundation refuses on the phone under a name such as
         // .mkv, or a file the session can't read. As `progressive`, modules/title-formats opens
         // it as MP4 only when it is one.
@@ -1705,8 +1929,10 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
           playable = { uri: source.url, contentType: "progressive" };
       }
     }
+
     stage = "native";
     resource.submitted = true;
+
     if (plan.kind === "live") {
       epoch.watchdog = {
         stage: "startup",
@@ -1717,10 +1943,14 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       };
       reconsiderWatchdog();
     }
+
     if (!attemptStands(owned, resource)) return;
     const result = await attach(resource, playable);
+
     if (!attemptStands(owned, resource)) return;
+
     if (result.attemptId !== resource.id) return fail({ kind: "bridge" });
+
     if (result.kind === "attached") {
       if (!acceptItem(resource, result)) return fail({ kind: "bridge" });
       startAttached(resource);
@@ -1731,10 +1961,12 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
       ) {
         return fail({ kind: "bridge" });
       }
+
       fail({ kind: "native", failure: result.failure });
     } else fail({ kind: "cancelled" });
   } catch (cause) {
     if (!attemptStands(owned, resource)) return;
+
     if (stage === "lookup") {
       const error = appError(cause);
       fail(
@@ -1745,6 +1977,7 @@ async function runAttempt(owned: NonNullable<typeof current>, resource: Resource
     } else fail({ kind: stage === "readers" ? "detach-timeout" : "bridge" });
   } finally {
     resource.opened();
+
     if (!stands(resource) && !resource.retired) void retire(resource);
   }
 }
@@ -1768,22 +2001,28 @@ function groupState(hold: TrackHold | undefined): GroupState {
 async function attachTv(owned: NonNullable<typeof current>, resource: Resource, source: Source) {
   const tv = resource.tv!;
   const { item, choice } = owned;
+
   try {
     const way = tvPath(source.container, item.live);
+
     if (way.kind === "refused") throw new TvRefused(way.refusal);
     resource.submitted = true;
     let url = source.url;
     let headers = source.headers;
+
     let kind: Parameters<typeof serveOnRelay>[2] =
       way.kind === "file"
         ? { hls: false, contentType: way.contentType }
         : { hls: true, strict: way.kind === "session" };
+
     if (way.kind === "session") {
       const opening = openFormat(source.url, source.headers, 0, resource.controller.signal);
       resource.formats.push(opening);
       void opening.closed.catch(() => undefined);
       const opened = await opening.opened;
+
       if (!attemptStands(owned, resource)) return opening.close();
+
       if (opened.kind === "session") {
         resource.session = opened.session;
         resource.viaSession = true;
@@ -1795,14 +2034,19 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
       } else {
         // An MP4 or MOV under another name goes as it is.
         await opening.closed;
+
         if (!attemptStands(owned, resource)) return;
         kind = { hls: false, contentType: "video/mp4" };
       }
     }
+
     const hold = choice.holds.audio;
+
     const sound =
       hold && "language" in hold ? hold.language : audioTarget(choice.policy.audio, choice.context);
+
     tv.relay = await serveOnRelay(url, headers, kind, sound, resource.controller.signal);
+
     if (!attemptStands(owned, resource)) return;
     const from = owned.seek === null ? 0 : owned.seek + owned.offset;
     owned.seek = null;
@@ -1820,10 +2064,12 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
       (status) => onTvStatus(owned, resource, status),
       resource.controller.signal,
     );
+
     // A Pause pressed while the LOAD was on its way, after it left playing.
     if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") tv.loaded.pause();
   } catch (cause) {
     if (!attemptStands(owned, resource)) return;
+
     if (cause instanceof TvRefused) {
       const category =
         cause.refusal === "network"
@@ -1831,6 +2077,7 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
           : cause.refusal === "unreadable"
             ? "unavailable"
             : "unsupported";
+
       failOnTv(owned, refusalText(cause.refusal), category);
     } else
       failOnTv(owned, tvText("{tv} couldn't play it.", { tv: tv.link.tv.name }), "unavailable");
@@ -1857,25 +2104,32 @@ function refusalText(refusal: TvRefused["refusal"]): string {
 /** What the TV says of what it plays, as the player's own reports would. */
 function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, status: TvStatus) {
   const tv = resource.tv;
+
   if (!tv || current !== owned || !stands(resource)) return;
+
   // Another sender's media there now, or a stop on the TV: the route ends where the title got to,
   // and the TV is left to whoever plays there.
   if (status.state === "stopped" || status.state === "taken") {
     return void (link === tv.link && endTv("stopped"));
   }
+
   const before = tv.status?.state;
   // An idle TV says 0 or nothing for where it was: the last real place stands, or the end.
   const idle = status.state === "ended" || status.state === "failed";
+
   const time = !idle
     ? status.time
     : status.state === "ended"
       ? (status.duration ?? tv.status?.duration ?? tv.status?.time ?? 0)
       : (tv.status?.time ?? 0);
+
   tv.status = { ...status, time, duration: status.duration ?? tv.status?.duration ?? null };
   clock.set(Math.max(0, time - owned.offset));
+
   if (!owned.item.live && status.duration !== null) {
     length.set(lengthOf(owned.item, status.duration));
   }
+
   if (status.state === "failed") {
     return failOnTv(
       owned,
@@ -1883,62 +2137,83 @@ function onTvStatus(owned: NonNullable<typeof current>, resource: Resource, stat
       "unavailable",
     );
   }
+
   const { phase } = state.get();
+
   if (phase.kind === "idle" || phase.kind === "failed") return;
+
   if (status.state === "ended") {
     if (before === "ended") return;
+
     // A channel the TV says finished has stopped coming.
     if (owned.item.live) {
       return failOnTv(owned, t("The stream stopped delivering data."), "network");
     }
+
     playingTime(owned.epoch, false);
     const saved = report();
     owned.options.ended?.();
     state.set((s) => ({ ...s, phase: { kind: "paused", item: phase.item } }));
+
     if (owned.item.next && state.get().watch && held?.by !== "viewer") countDown(owned, saved);
+
     return;
   }
+
   const playing = status.state === "playing";
+
   // The TV's report acknowledges the viewer's Pause, and playing again after it clears it, as
   // the player's own reports do here.
   if (status.state === "paused") {
     if (held) held.acknowledged = true;
+
     if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") pauseOnStart = false;
   } else if (playing && held?.acknowledged) held = null;
+
   // A programme from catch-up stops at its end, even where its recording sends on.
   if (playing && owned.item.past && time - owned.offset >= lengthOf(owned.item, null)) {
     tv.loaded?.pause();
   }
+
   // Paused from the start, as after Pause while connecting, its place on the TV still counts.
   if (playing || status.state === "paused") owned.loaded = true;
+
   if (playing && owned.epoch.playedOn === null) {
     owned.epoch.playedOn = owned.epoch.candidate;
+
     if (!owned.epoch.played) {
       owned.epoch.played = true;
       owned.options.outcome?.(true);
+
       if (!stands(resource)) return;
     }
   }
+
   playingTime(owned.epoch, playing);
+
   if (playing) checkpoint ??= setInterval(report, CHECKPOINT_MS);
   else if (checkpoint !== null) {
     clearInterval(checkpoint);
     checkpoint = null;
   }
+
   if (status.state === "paused" && phase.kind === "playing") report();
   const kind = playing ? "playing" : status.state === "paused" ? "paused" : "loading";
+
   if (kind !== phase.kind) state.set((s) => ({ ...s, phase: { kind, item: phase.item } }));
 }
 
 /** Ends this play on the TV with `message`; nothing tries again on its own. */
 function failOnTv(owned: NonNullable<typeof current>, message: string, category: AnalyticsFailure) {
   const { epoch } = owned;
+
   if (current !== owned || epoch.terminal) return;
   epoch.terminal = true;
   cancelEpoch(epoch);
   playingTime(epoch, false);
   release();
   failed?.(category);
+
   if (!epoch.played) owned.options.outcome?.(false);
   owned.loaded = false;
   state.set((s) => ({ ...s, phase: { kind: "failed", item: owned.item, error: message } }));
@@ -1947,7 +2222,9 @@ function failOnTv(owned: NonNullable<typeof current>, message: string, category:
 /** Where what plays is, in seconds of the title, to go on from on another route. */
 function handover(): number | undefined {
   if (!current || current.item.live) return undefined;
+
   if (current.loaded) return Math.max(0, streamTime() - current.offset);
+
   return current.stoppedAt ?? current.options.from;
 }
 
@@ -1960,6 +2237,7 @@ function replay(from: number | undefined, paused: boolean) {
     watch: state.get().watch,
     ...defined({ from }),
   });
+
   if (paused) {
     held = { by: "viewer", acknowledged: false };
     pauseOnStart = "viewer";
@@ -1985,36 +2263,46 @@ let unfollowVolume = () => {};
  */
 export async function playOnTv(tv: Tv): Promise<string | null> {
   const route = state.get().tv;
+
   if (route.kind === "on" && route.tv.id === tv.id && link) return null;
   const mine = ++routes;
   state.set((s) => ({ ...s, tv: { kind: "connecting", tv } }));
   let settled!: () => void;
   connecting = new Promise<void>((resolve) => (settled = resolve));
   let opened: TvLink;
+
   try {
     opened = await connectTv(tv);
   } catch {
     settled();
+
     if (mine !== routes) return null;
     state.set((s) => ({ ...s, tv: link ? { kind: "on", tv: link.tv } : { kind: "off" } }));
+
     return tvText("Couldn't connect to {tv}.", { tv: tv.name });
   }
+
   if (mine !== routes) {
     await opened.close();
     settled();
+
     return null;
   }
+
   settled();
   const before = link;
   const from = handover();
   link = opened;
   follow(opened);
+
   if (state.get().pip) endPictureInPicture?.();
   state.set((s) => ({ ...s, tv: { kind: "on", tv }, pip: false }));
   const playing = current?.resource;
   // A Pause of the viewer's, even one pressed while the TV connected, holds on the TV too.
   replay(from, held?.by === "viewer");
+
   if (before) void closeAfter(before, playing?.settlement);
+
   return null;
 }
 
@@ -2042,6 +2330,7 @@ function dropLink() {
   link = null;
   unfollowVolume();
   volume.set(null);
+
   return ending;
 }
 
@@ -2053,6 +2342,7 @@ export function playHere(paused = true) {
   const from = handover();
   const ending = dropLink();
   state.set((s) => ({ ...s, tv: { kind: "off" } }));
+
   if (!ending) return;
   const playing = current?.resource;
   replay(from, paused && !current?.item.live);
@@ -2066,25 +2356,31 @@ export function playHere(paused = true) {
  */
 function endTv(why: TvEnd, done?: () => void) {
   const ending = link;
+
   if (!ending) {
     // Left while still connecting: the TV doesn't start once the app is away, and the time iOS
     // gave lasts until the connect settled and was closed.
     if (state.get().tv.kind === "connecting") {
       routes++;
       state.set((s) => ({ ...s, tv: { kind: "off" } }));
+
       return void connecting.finally(() => done?.());
     }
+
     return done?.();
   }
+
   dropLink();
   const owned = current;
   const { phase } = state.get();
+
   const message =
     why === "left"
       ? tvText("Stopped on the TV when you left the app.")
       : why === "lost"
         ? tvText("Lost {tv}.", { tv: ending.tv.name })
         : tvText("{tv} stopped playing it.", { tv: ending.tv.name });
+
   if (owned && phase.kind !== "idle") {
     supersede();
     cancelEpoch(owned.epoch);
@@ -2092,6 +2388,7 @@ function endTv(why: TvEnd, done?: () => void) {
     release();
     owned.loaded = false;
   }
+
   state.set((s) => ({
     ...s,
     tv: { kind: "ended", tv: ending.tv, why },
@@ -2111,6 +2408,7 @@ onLeftApp((done) => endTv("left", done));
 export function liveStream() {
   if (!current?.item.live || current.choice.plan.kind !== "live") return null;
   const { kind } = state.get().phase;
+
   return {
     channel: current.item.id,
     explicit: current.choice.plan.explicit,
@@ -2140,12 +2438,14 @@ export function retry() {
  */
 export async function stop(): Promise<Saved> {
   supersede();
+
   if (current) cancelEpoch(current.epoch);
   const saved = release();
   const readers = current?.resource.settlement;
   current = null;
   // Stop ends playing everywhere: the TV closes once its stream's readers did.
   const ending = dropLink();
+
   if (ending) void closeAfter(ending, readers);
   playSubtitles(null);
   endPictureInPicture?.();
@@ -2166,6 +2466,7 @@ export async function stop(): Promise<Saved> {
   // Saved says only whether progress was kept. Reader failure remains in closing and on the
   // captured reader handle, even when Stop returns its save result.
   await readers?.catch(() => undefined);
+
   return saved;
 }
 
@@ -2181,6 +2482,7 @@ export function togglePause() {
   const { phase } = state.get();
   // On the TV, its own report of playing or paused follows the request.
   const onTv = current?.resource.tv?.loaded;
+
   if (onTv && phase.kind !== "idle" && phase.kind !== "failed") {
     if (phase.kind === "paused") {
       held = null;
@@ -2190,21 +2492,27 @@ export function togglePause() {
       held = { by: "viewer", acknowledged: false };
       onTv.pause();
     }
+
     attentionChanged();
+
     return;
   }
+
   if (phase.kind === "playing" || phase.kind === "loading") {
     held = { by: "viewer", acknowledged: false };
     pauseOnStart = phase.kind === "loading" ? "viewer" : false;
+
     if (pauseOnStart === "viewer" && current && current.resource.itemId !== null) {
       applyViewerPause(current.resource);
     } else player().pause();
   } else if (phase.kind === "paused") {
     held = null;
     pauseOnStart = false;
+
     if (soundOnPlay) setMuted(false);
     player().play();
   }
+
   attentionChanged();
 }
 
@@ -2218,14 +2526,17 @@ const speedOf = (owned: typeof current): Speed =>
  */
 export function setSpeed(next: Speed): boolean {
   if (!updateMediaPreferences("titleSpeed", next)) return false;
+
   // One still opening takes it as it attaches.
   if (current?.resource.itemId != null) player().playbackRate = speedOf(current);
+
   return true;
 }
 
 /** Moves by `seconds`; a programme from catch-up, within the programme. */
 export function seekBy(seconds: number) {
   const at = streamTime() - (current?.offset ?? 0) + seconds;
+
   if (current?.item.past || current?.resource.tv) return seekTo(Math.min(length.get() || at, at));
   moved(at);
   player().seekBy(seconds);
@@ -2236,6 +2547,7 @@ export function seekTo(seconds: number) {
   const at = Math.max(0, seconds);
   moved(at);
   const tv = current?.resource.tv;
+
   if (tv) tv.loaded?.seek(at + (current?.offset ?? 0));
   else player().currentTime = at + (current?.offset ?? 0);
   clock.set(at);
@@ -2254,12 +2566,15 @@ function endAtLength(playing: boolean, at?: number) {
   if (ending) clearTimeout(ending);
   ending = null;
   const owned = current;
+
   if (!playing || !owned?.item.past || owned.resource.tv) return;
   const left = (from = player().currentTime - owned.offset) => length.get() - from;
   ending = setTimeout(
     () => {
       ending = null;
+
       if (current !== owned) return;
+
       if (left() > 0.5) endAtLength(true);
       else player().pause();
     },
@@ -2287,10 +2602,13 @@ type Track =
 
 function labelled<T extends Track>(tracks: readonly T[], fallback: string) {
   const labels = tracks.map((track) => track.label || track.language || fallback);
+
   return tracks.map((track, i) => {
     const label = labels[i] ?? fallback;
+
     if (labels.indexOf(label) === labels.lastIndexOf(label)) return { track, label };
     const number = labels.slice(0, i + 1).filter((other) => other === label).length;
+
     return { track, label: `${label} · ${track.name || number}` };
   });
 }
@@ -2304,14 +2622,20 @@ export async function trackChoices(
   of: "audio" | "subtitles",
 ): Promise<readonly TrackChoice[] | null> {
   const resource = current?.resource;
+
   if (!resource) return null;
   const tracks = await refreshTracks(resource);
+
   if (!tracks || !stands(resource)) return null;
   const group = of === "audio" ? tracks.audio : tracks.subtitles;
+
   if (group.state === "absent") return [];
+
   if (group.state !== "ready") return null;
+
   const choose = (selection: ObservedTrackSelection) =>
     chooseManually(resource, tracks.revision, selection);
+
   if (of === "audio") {
     return labelled(
       tracks.audio.options.filter((track) => track.isPlayable),
@@ -2323,6 +2647,7 @@ export async function trackChoices(
       choose: () => choose({ kind: "audio", track }),
     }));
   }
+
   return [
     ...(tracks.subtitleOffAllowed
       ? [
@@ -2389,10 +2714,12 @@ export function cancelUpNext() {
  */
 function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
   const find = owned.options.upNext;
+
   if (!find) return;
   // A request still waiting, such as Next episode pressed just before the end, goes on.
   cancelUpNext();
   let found: Upcoming | null = null;
+
   const mine: NonNullable<typeof counting> = {
     stands: () =>
       counting === mine &&
@@ -2402,10 +2729,12 @@ function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
       playingItem(state.get().phase) === owned.item &&
       (found?.stands?.() ?? true),
   };
+
   counting = mine;
   void find(saved).then(
     (next) => {
       found = next;
+
       if (!next || !mine.stands()) return void (counting === mine && cancelUpNext());
       mine.play = next.play;
       let left = DEFAULT_NEXT_EPISODE_DELAY;
@@ -2428,8 +2757,11 @@ function countDown(owned: NonNullable<typeof current>, saved: Promise<Saved>) {
 export function playOrPause(command: "play" | "pause" | "toggle") {
   if (upNext.get()) return cancelUpNext();
   const paused = state.get().phase.kind === "paused";
+
   if (command === "toggle" || (command === "play" && paused)) return togglePause();
+
   if (command !== "pause") return;
+
   if (!paused) return togglePause();
   resumeOnReturn = false;
   cancelUpNext();
@@ -2462,14 +2794,19 @@ export function openWatch() {
   soundOnPlay = false;
   player().muted = false;
   const { pip, aside, phase } = state.get();
+
   if (pip) endPictureInPicture?.();
   state.set((s) => ({ ...s, watch: true, aside: false, muted: false }));
   const resume = aside && resumeOnReturn;
+
   if (pauseOnStart === "away") pauseOnStart = false;
+
   if (held?.by === "away" || resume) held = null;
   resumeOnReturn = false;
   attentionChanged();
+
   if (!resume || (phase.kind !== "playing" && phase.kind !== "paused")) return;
+
   if (phase.item.live) retry();
   else if (phase.kind === "paused") {
     pauseOnStart = false;
@@ -2489,21 +2826,28 @@ export function closeWatch(): Promise<Saved> {
   supersede();
   const { pip, external, phase, muted, tv } = state.get();
   const away = !pip && !external && tv.kind !== "on";
+
   if (away) {
     if (phase.kind === "playing" || phase.kind === "loading") {
       held ??= { by: "away", acknowledged: false };
     }
+
     resumeOnReturn = false;
+
     if ((phase.kind === "playing" || phase.kind === "loading") && !pauseOnStart) {
       pauseOnStart = "away";
     }
+
     soundOnPlay = !muted;
+
     if (phase.kind === "playing") player().pause();
   }
+
   const silent = away || muted;
   player().muted = silent;
   state.set((s) => ({ ...s, watch: false, aside: false, muted: silent }));
   attentionChanged();
+
   return report();
 }
 
@@ -2516,17 +2860,22 @@ export function closeWatch(): Promise<Saved> {
 export function setAside() {
   supersede();
   const { phase, external, tv } = state.get();
+
   if (phase.kind === "idle" || external || tv.kind === "on") return void closeWatch();
+
   if (phase.kind === "playing" || phase.kind === "loading") {
     held ??= { by: "away", acknowledged: false };
   }
+
   resumeOnReturn =
     (phase.kind === "playing" || phase.kind === "loading") &&
     pauseOnStart !== "viewer" &&
     pauseOnStart !== "viewer-applied";
+
   if ((phase.kind === "playing" || phase.kind === "loading") && !pauseOnStart) {
     pauseOnStart = "away";
   }
+
   if (phase.kind === "playing") player().pause();
   // Paused, it makes no sound; played again from the accessory, it plays as Watch would.
   player().muted = false;
@@ -2542,7 +2891,9 @@ export function setAside() {
 export function unsetAside() {
   if (!state.get().aside) return;
   resumeOnReturn = false;
+
   if (pauseOnStart === "away") pauseOnStart = false;
+
   if (held?.by === "away") held = null;
   player().muted = false;
   state.set((s) => ({ ...s, watch: true, aside: false, muted: false }));
@@ -2555,12 +2906,16 @@ export function unsetAside() {
  */
 export function pictureInPicture(active: boolean) {
   supersede();
+
   if (active) {
     state.set((s) => ({ ...s, pip: true, watch: false, aside: false }));
     attentionChanged();
+
     return;
   }
+
   const { watch } = state.get();
+
   if (!watch) player().muted = true;
   state.set((s) => ({ ...s, pip: false, muted: s.watch ? s.muted : true }));
   attentionChanged();
@@ -2575,10 +2930,12 @@ export function pictureInPicture(active: boolean) {
 export function restoreFromPictureInPicture(): Playing | null {
   const { phase, pip } = state.get();
   const item = playingItem(phase);
+
   if (!pip || item === null) return null;
   player().muted = false;
   state.set((s) => ({ ...s, watch: true, muted: false }));
   attentionChanged();
+
   return item;
 }
 

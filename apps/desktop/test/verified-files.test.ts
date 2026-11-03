@@ -10,10 +10,12 @@ import { promised, runtimeFor, tempDir } from "./support.ts";
 describe("verified file tracks", () => {
   it("keeps each file separate across restart, rejects old source facts and erases with viewing", async () => {
     const dir = await tempDir();
+
     const layer = () =>
       Layer.mergeAll(verifiedFilesLayer, viewingStoreLayer, watchlistStoreLayer).pipe(
         Layer.provide(databaseLayer(dir)),
       );
+
     const first = runtimeFor(layer());
     const tracks = await promised(first, VerifiedFiles);
     await tracks.remember("account", "saved-login", {

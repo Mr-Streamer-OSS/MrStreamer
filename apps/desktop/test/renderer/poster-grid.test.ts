@@ -59,6 +59,7 @@ const all = (titles: readonly Title[], total = titles.length): CollectionPage =>
 const playlist = { ...SAVED, kind: "m3u" as const, playlistMapped: true };
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
   ipc.reset();
@@ -71,6 +72,7 @@ beforeEach(() => {
     settings: null,
   });
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
@@ -91,6 +93,7 @@ const press = (key: string) =>
 function focused() {
   const control = document.activeElement;
   const item = control?.closest('[role="listitem"]');
+
   return {
     label: control?.getAttribute("aria-label") ?? null,
     position: item
@@ -114,6 +117,7 @@ async function shown(page: (active: boolean) => ReactElement) {
     stopWatchlist();
     mounted.unmount();
   };
+
   return render;
 }
 
@@ -122,6 +126,7 @@ async function movies() {
   ipc.always("subscription.list", [playlist]);
   ipc.always("ondemand.status", { lists: [], metadata: null });
   ipc.always("ondemand.filterOptions", { qualities: [], languages: [], verified: [], files: 0 });
+
   return shown((active) => createElement(TitlesPage, { kind: "movie", active }));
 }
 
@@ -194,6 +199,7 @@ describe("a collection", () => {
     const titles = Array.from({ length: 240 }, (_, index) =>
       film(`t${index}`, `Title ${index}`, 2000),
     );
+
     const list = { catalogue: titles };
     ipc.answer("ondemand.collection", ({ offset, limit }) =>
       all(list.catalogue.slice(offset, offset + limit), list.catalogue.length),
@@ -203,8 +209,10 @@ describe("a collection", () => {
     await press("End");
     await settle();
     await press("Home");
+
     for (let step = 0; step < 119; step++) await press("ArrowRight");
     expect(focused()).toEqual({ label: "Title 119, 2000", position: "120 of 240" });
+
     return { titles, list, render };
   }
 
@@ -245,6 +253,7 @@ describe("a collection", () => {
       "ondemand.collection",
       ({ id, offset, limit }) => id === "all" && offset === 120 && limit === 120,
     );
+
     list.catalogue = [...titles.slice(0, 50), titles[239]!, ...titles.slice(50, 239)];
     await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
     await settle();
@@ -255,6 +264,7 @@ describe("a collection", () => {
       "ondemand.collection",
       ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
     );
+
     list.catalogue = list.catalogue.slice(0, 220);
     await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
     await settle();
@@ -298,17 +308,21 @@ describe("a collection", () => {
       list.catalogue = [added, ...titles];
       await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
       await settle();
+
       const answer = () =>
         act(async () => held.resolve(all(list.catalogue.slice(120, 240), list.catalogue.length)));
+
       if (beforeClose) await answer();
       await act(async () => useUi.setState({ details: null }));
       await render(true);
       await settle();
+
       if (!beforeClose) {
         expect(focused().label ?? "Title 119, 2000").toBe("Title 119, 2000");
         await answer();
         await settle();
       }
+
       expect(focused()).toEqual({ label: "Title 119, 2000", position: "121 of 241" });
     },
   );
@@ -322,11 +336,13 @@ describe("a collection", () => {
       const titles = Array.from({ length: 300 }, (_, index) =>
         film(`t${index}`, `Title ${index}`, 2000),
       );
+
       ipc.answer("ondemand.collection", ({ offset, limit }) =>
         all(titles.slice(offset, offset + limit), titles.length),
       );
       const last = ipc.hold("ondemand.collection", ({ offset }) => offset === 240);
       await movies();
+
       if (fromPoster) {
         await press("ArrowDown");
         expect(focused().label).toBe("Title 1, 2000");
@@ -355,10 +371,12 @@ describe("a collection", () => {
       await act(async () => ipc.emit("ondemand.updated", { lists: [], metadata: null }));
       await settle();
       list.catalogue = titles.filter((title) => title.id !== "t119");
+
       const current = ipc.hold(
         "ondemand.collection",
         ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
       );
+
       await act(async () =>
         ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
       );
@@ -367,6 +385,7 @@ describe("a collection", () => {
       await press("Enter");
       expect(useUi.getState().details).toBeNull();
       const field = document.querySelector<HTMLInputElement>('input[aria-label="Search movies"]')!;
+
       if (outside) await act(async () => field.focus());
 
       // The pre-reset page cannot restore its selected title, cursor or pending focus.
@@ -381,6 +400,7 @@ describe("a collection", () => {
       const stop = document.querySelector('[role="listitem"] [tabindex="0"]');
       expect(stop?.getAttribute("aria-label")).toBe("Title 0, 2000");
       expect(stop?.closest('[role="listitem"]')?.getAttribute("aria-posinset")).toBe("1");
+
       if (outside) expect(document.activeElement).toBe(field);
       else expect(focused()).toEqual({ label: "Title 0, 2000", position: "1 of 239" });
     },
@@ -393,10 +413,12 @@ describe("a collection", () => {
     await render(false);
     await act(async () => (document.activeElement as HTMLElement | null)?.blur());
     list.catalogue = titles.filter((title) => title.id !== "t119");
+
     const current = ipc.hold(
       "ondemand.collection",
       ({ id, offset, limit }) => id === "all" && offset === 0 && limit === 120,
     );
+
     await act(async () =>
       ipc.emit("ondemand.updated", { lists: [], metadata: null, markedForAdults: true }),
     );
@@ -419,6 +441,7 @@ describe("a collection", () => {
     const titles = Array.from({ length: 300 }, (_, index) =>
       film(`t${index}`, `Title ${index}`, 2000),
     );
+
     ipc.answer("ondemand.collection", ({ offset, limit }) =>
       all(titles.slice(offset, offset + limit), titles.length),
     );
@@ -452,6 +475,7 @@ describe("the search of a kind", () => {
     await movies();
     const answer = ipc.hold("ondemand.searchKind", ({ query }) => query === "a");
     const field = document.querySelector<HTMLInputElement>('input[aria-label="Search movies"]')!;
+
     const type = (value: string) =>
       act(async () => {
         field.focus();
@@ -492,6 +516,7 @@ describe("the Watchlist", () => {
     sources: [SUBSCRIPTION],
     listed: true,
   });
+
   const saved = [arrival, blade, contact].map(entry);
   const cross = () => document.activeElement?.getAttribute("aria-label");
 
@@ -508,6 +533,7 @@ describe("the Watchlist", () => {
       [...document.querySelectorAll<HTMLElement>('[role="listitem"] [tabindex="0"]')].map((each) =>
         each.getAttribute("aria-label"),
       );
+
     expect(tabbable()).toEqual(["Arrival, Movie, 2016", "Remove Arrival from Watchlist"]);
     await act(async () =>
       document.querySelector<HTMLElement>('[aria-label="Remove Arrival from Watchlist"]')!.focus(),
@@ -541,6 +567,7 @@ describe("the Watchlist", () => {
     const removal = ipc.hold("watchlist.remove");
     useUi.setState({ view: "watchlist" });
     await shown((active) => createElement(WatchlistPage, { active }));
+
     return removal;
   }
 
@@ -554,9 +581,11 @@ describe("the Watchlist", () => {
     async (_, order, count) => {
       const entries = saved.slice(0, count);
       const removal = await watchlist(entries);
+
       const pressed = document.querySelector<HTMLElement>(
         `[aria-label="Remove ${entries[0]!.name} from Watchlist"]`,
       )!;
+
       // The cross pressed with the keyboard, then Tab on to the window bar before it answers.
       await act(async () => {
         pressed.focus();
@@ -567,10 +596,12 @@ describe("the Watchlist", () => {
       await act(async () => outside.focus());
 
       ipc.always("watchlist.list", { total: count - 1, entries: entries.slice(1) });
+
       if (order === "list changes") {
         await act(async () => ipc.emit("watchlist.changed", null));
         await settle();
       }
+
       await act(async () => removal.resolve(null));
       await settle();
       expect(document.body.textContent?.includes("Nothing saved yet")).toBe(count === 1);
@@ -580,9 +611,11 @@ describe("the Watchlist", () => {
 
   it("gives the page the focus once the last title goes with the cross that had it", async () => {
     const removal = await watchlist(saved.slice(0, 1));
+
     const only = document.querySelector<HTMLElement>(
       '[aria-label="Remove Arrival from Watchlist"]',
     )!;
+
     await act(async () => {
       only.focus();
       only.click();

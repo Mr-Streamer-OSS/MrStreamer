@@ -156,6 +156,7 @@ const MARK_TABLES = ["marked_episodes", "marked_series"] as const;
 const CONTINUE_WINDOW = 2000;
 
 const Ids = lazy(() => type("string.json.parse").pipe(type("string[]")));
+
 const EventRow = lazy(() =>
   type({
     sequence: "number",
@@ -167,7 +168,9 @@ const EventRow = lazy(() =>
     "payload?": "string | null",
   }),
 );
+
 const ChannelEventType = lazy(() => type("'favourite-added' | 'favourite-removed' | 'watched'"));
+
 const TitlePayload = lazy(() =>
   type("string.json.parse").pipe(
     type({
@@ -178,6 +181,7 @@ const TitlePayload = lazy(() =>
     }),
   ),
 );
+
 const Listing = lazy(() =>
   type({
     number: "number.integer >= 0",
@@ -185,6 +189,7 @@ const Listing = lazy(() =>
     "files?": "string[]",
   }).array(),
 );
+
 const EpisodeTitle = lazy(() =>
   type({
     kind: "'episode'",
@@ -194,6 +199,7 @@ const EpisodeTitle = lazy(() =>
     episode: "number.integer >= 0",
   }),
 );
+
 const MarkPayload = lazy(() =>
   type("string.json.parse").pipe(
     type({
@@ -206,6 +212,7 @@ const MarkPayload = lazy(() =>
     }),
   ),
 );
+
 /** A mark as its row and an Undo keep it, whole. */
 const Mark = lazy(() =>
   type({
@@ -218,13 +225,16 @@ const Mark = lazy(() =>
     revision: "number",
   }),
 );
+
 const MarkRow = lazy(() => type({ mark: type("string.json.parse").pipe(Mark()) }));
+
 const ListedRow = lazy(() =>
   type({
     series: "string",
     versions: type("string.json.parse").pipe(type("string[]")),
   }),
 );
+
 /** What a marked series keeps beside its episodes' marks. */
 const SeriesRow = lazy(() =>
   type({
@@ -241,7 +251,9 @@ const SeriesRow = lazy(() =>
     ),
   }),
 );
+
 const StateRow = lazy(() => type({ favourites: "string", recent: "string", sequence: "number" }));
+
 const PlacedRow = lazy(() =>
   type({ type: ChannelEventType(), channel_id: "string", sequence: "number" }),
 );
@@ -279,10 +291,13 @@ export function observedViewingStoreLayer(
     ViewingStore,
     Effect.gen(function* () {
       const opened = yield* Database;
+
       if ("failure" in opened) return closed(opened.failure);
       const { db } = opened;
+
       return yield* Effect.try(() => {
         prepare(db);
+
         return storeOn(db, usage);
       }).pipe(
         Effect.catchTag("UnknownError", (failure) =>
@@ -312,10 +327,14 @@ function prepare(db: DatabaseSync): void {
         .prepare(`pragma table_info(${table})`)
         .all()
         .some((column) => column["name"] === name);
+
     if (!has("events", "payload")) db.exec("alter table events add column payload text");
+
     if (!has("titles", "removed_at")) db.exec("alter table titles add column removed_at integer");
+
     if (!has("titles", "since")) db.exec("alter table titles add column since integer");
   });
+
   // A build from before marks that erased an account deleted its events and left its marks.
   // The same confirmed erasure also clears display details written by a newer build.
   const erased = db
@@ -323,11 +342,14 @@ function prepare(db: DatabaseSync): void {
       "select distinct account from marked_series as kept where not exists (select 1 from events where events.account = kept.account)",
     )
     .all();
+
   for (const { account } of erased) {
     if (typeof account === "string")
       deleteForGood(db, [...MARK_TABLES, DETAIL_CACHE_TABLE], account);
   }
+
   const stored = db.prepare("select value from meta where key = 'state-version'").get();
+
   if (stored?.["value"] !== String(STATE_VERSION)) rebuild(db);
 }
 
@@ -337,6 +359,7 @@ function prepare(db: DatabaseSync): void {
  */
 function deleteForGood(db: DatabaseSync, tables: readonly string[], account: string): void {
   db.exec("pragma secure_delete = on");
+
   try {
     transaction(db, () => {
       for (const table of tables) {
@@ -348,6 +371,7 @@ function deleteForGood(db: DatabaseSync, tables: readonly string[], account: str
   } finally {
     db.exec("pragma secure_delete = off");
   }
+
   db.exec("pragma wal_checkpoint(truncate)");
 }
 
@@ -356,40 +380,52 @@ function eventOf(
   raw: unknown,
 ): { account: string; sequence: number; at: number; event: ViewingEvent } | null {
   const row = EventRow()(raw);
+
   if (row instanceof type.errors || row.version > EVENT_VERSION) return null;
   const base = { account: row.account, sequence: row.sequence, at: row.at };
   const channelType = ChannelEventType()(row.type);
+
   if (!(channelType instanceof type.errors)) {
     return { ...base, event: { type: channelType, channelId: row.channel_id } };
   }
+
   if (
     row.type === "episode-marked" ||
     row.type === "episode-mark-undone" ||
     row.type === "series-listed"
   ) {
     const said = row.payload ? MarkPayload()(row.payload) : null;
+
     if (!said || said instanceof type.errors) return null;
     const { series, title, watched, versions, listing, revision } = said;
+
     if (row.type === "series-listed") {
       return versions && listing
         ? { ...base, event: { type: row.type, series, versions, listing } }
         : null;
     }
+
     if (!title) return null;
+
     if (row.type === "episode-mark-undone") {
       return revision === undefined
         ? null
         : { ...base, event: { type: row.type, series, title, revision } };
     }
+
     return watched === undefined || !versions || !listing
       ? null
       : { ...base, event: { type: row.type, series, title, watched, versions, listing } };
   }
+
   const payload = row.payload ? TitlePayload()(row.payload) : null;
+
   if (!payload || payload instanceof type.errors) return null;
+
   if (row.type === "title-removed" || row.type === "series-finished") {
     return { ...base, event: { type: row.type, title: payload.title } };
   }
+
   if (row.type === "title-progress" && payload.position !== undefined && payload.duration) {
     return {
       ...base,
@@ -402,6 +438,7 @@ function eventOf(
       },
     };
   }
+
   return null;
 }
 
@@ -410,31 +447,42 @@ function rebuild(db: DatabaseSync): void {
   transaction(db, () => {
     const records = new Map<string, { channelEvents: ChannelEvent[]; sequence: number }>();
     const views = new Map<string, ReturnType<typeof remembered>>();
+
     for (const raw of db.prepare("select * from events order by sequence").all()) {
       const read = eventOf(raw);
+
       if (!read) continue;
       const { account, sequence, at, event } = read;
       let record = records.get(account);
+
       if (!record) records.set(account, (record = { channelEvents: [], sequence: 0 }));
       record.sequence = sequence;
+
       if (!isMarkEvent(event) && !isTitleEvent(event)) {
         record.channelEvents.push(event);
         continue;
       }
+
       let memory = views.get(account);
+
       if (!memory) views.set(account, (memory = remembered()));
       project(memory.view, event, at, sequence);
     }
+
     db.exec(
       "delete from state; delete from titles; delete from marked_episodes; delete from marked_series;",
     );
+
     for (const [account, { channelEvents, sequence }] of records) {
       save(db, account, apply(emptyState, channelEvents), sequence);
     }
+
     for (const [account, { rows, series }] of views) {
       for (const row of rows.values()) saveTitle(db, account, row);
+
       for (const [key, state] of series) saveSeries(db, account, key, state, "all");
     }
+
     db.prepare("insert or replace into meta (key, value) values ('state-version', ?)").run(
       String(STATE_VERSION),
     );
@@ -472,26 +520,34 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       "select series from marked_series where account = ? and hidden = 0 and at > 0 order by at desc limit ?",
     ),
   };
+
   /** Where each account's channels stand, by account, once worked out in this run. */
   const places = new Map<string, Placed>();
 
   /** Where `account`'s channels stand: from its events the first time, then as kept since. */
   const placedOf = (account: string): Placed => {
     let placed = places.get(account);
+
     if (placed) return placed;
     placed = { favourites: new Map(), recent: new Map() };
+
     for (const raw of statements.placed.all(account, EVENT_VERSION)) {
       const row = PlacedRow()(raw);
+
       if (!(row instanceof type.errors)) place(placed, row.type, row.channel_id, row.sequence);
     }
+
     places.set(account, placed);
+
     return placed;
   };
 
   const titleRows = (rows: readonly unknown[]): TitleRow[] =>
     rows.flatMap((raw) => {
       const row = TitleRowShape()(raw);
+
       if (row instanceof type.errors) return [];
+
       return [
         {
           title: row.title,
@@ -515,6 +571,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       ...(filter.seriesIds ?? []).flatMap((id) => statements.seriesTitles.all(account, id)),
       ...(filter.movieIds ?? []).flatMap((id) => {
         const row = statements.title.get(account, `movie:${id}`);
+
         return row ? [row] : [];
       }),
     ]);
@@ -522,10 +579,13 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   /** What `account` keeps under a series' key, or null when nothing was ever marked under it. */
   const seriesOf = (account: string, key: string): SeriesMarks | null => {
     const row = SeriesRow()(statements.series.get(account, key));
+
     if (row instanceof type.errors) return null;
+
     return {
       marks: statements.marks.all(account, key).flatMap((raw) => {
         const mark = MarkRow()(raw);
+
         return mark instanceof type.errors ? [] : [mark.mark];
       }),
       versions: row.versions,
@@ -545,7 +605,9 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const seriesIn = (account: string, seriesIds: readonly string[]): string[] =>
     statements.listed.all(account).flatMap((raw) => {
       const row = ListedRow()(raw);
+
       if (row instanceof type.errors) return [];
+
       return row.versions.some((id) => seriesIds.includes(id)) ? [row.series] : [];
     });
 
@@ -564,6 +626,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     removedAt: (title) => {
       const seriesId = title.kind === "episode" ? title.seriesId : null;
       const removed = statements.removedAt.get(account, titleKey(title), seriesId);
+
       return typeof removed?.["removed_at"] === "number" ? removed["removed_at"] : null;
     },
     saveRow: (row) => saveTitle(db, account, row),
@@ -574,6 +637,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     covering: (seriesId) =>
       seriesIn(account, [seriesId]).flatMap((key) => {
         const state = seriesOf(account, key);
+
         return state ? [[key, state] as const] : [];
       }),
     saveSeries: (key, state, changed) => saveSeries(db, account, key, state, changed),
@@ -586,6 +650,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
    */
   const nextOf = (account: string, key: string, state: SeriesMarks) => {
     const keys = [...new Set([key, ...state.versions.map((id) => `id:${id}`)])];
+
     return goesOn(
       state.listing,
       titlesOf(account, { seriesIds: state.versions }),
@@ -599,6 +664,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       const key = row["series"];
       const state = typeof key === "string" ? seriesOf(account, key) : null;
       const mark = state && leading(state);
+
       return typeof key === "string" && state && mark
         ? [{ mark, next: nextOf(account, key, state) }]
         : [];
@@ -607,9 +673,11 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   /** An account's lists as stored, and how far its record has come. */
   const listsOf = (account: string): Pick<AccountRecord, "state" | "sequence"> => {
     const row = StateRow()(statements.state.get(account));
+
     if (row instanceof type.errors) return { state: emptyState, sequence: 0 };
     const favourites = Ids()(row.favourites);
     const recent = Ids()(row.recent);
+
     return {
       state: {
         favourites: favourites instanceof type.errors ? [] : favourites,
@@ -621,6 +689,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
 
   const readOne = (account: string): AccountRecord => {
     const rows = titleRows(statements.recentTitles.all(account, CONTINUE_WINDOW));
+
     return {
       ...listsOf(account),
       continueWatching: continueWatching(rows),
@@ -636,6 +705,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const read = (accounts: readonly string[]): StoredViewing => {
     const records = accounts.map((account) => ({ account, ...readOne(account) }));
     const several = records.length > 1;
+
     const list = (of: "favourites" | "recent"): StoredChannel[] =>
       several
         ? merged(
@@ -647,12 +717,15 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
             of === "favourites" ? 1 : -1,
           )
         : records.flatMap(({ account, state }) => state[of].map((id) => ({ account, id })));
+
     const continuing = records.flatMap(({ account, continueWatching }) =>
       continueWatching.map((progress) => ({ account, progress })),
     );
+
     const marks = records.flatMap(({ account, marked }) =>
       marked.map((each) => ({ account, ...each })),
     );
+
     return {
       favourites: list("favourites"),
       recent: list("recent"),
@@ -684,8 +757,10 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
     const written: { account: string; event: ChannelEvent; sequence: number }[] = [];
     /** How far each account's record came, by account, in the order first written to. */
     const last = new Map<string, number>();
+
     for (const { account, event } of events) {
       const channel = !isTitleEvent(event) && !isMarkEvent(event);
+
       const result = statements.event.run(
         account,
         event.type,
@@ -695,15 +770,19 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         commandId,
         channel ? null : payloadOf(event),
       );
+
       const sequence = Number(result.lastInsertRowid);
       last.set(account, sequence);
+
       if (channel) written.push({ account, event, sequence });
       else project(stored(account), event, at, sequence);
     }
+
     for (const [account, sequence] of last) {
       const own = written.flatMap((each) => (each.account === account ? [each.event] : []));
       save(db, account, apply(listsOf(account).state, own), sequence);
     }
+
     return written;
   };
 
@@ -714,6 +793,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const written = (write: () => ReturnType<typeof append>): void => {
     for (const { account, event, sequence } of transaction(db, write)) {
       const placed = places.get(account);
+
       // An account not worked out yet reads these with the rest of its events.
       if (placed) place(placed, event.type, event.channelId, sequence);
     }
@@ -731,24 +811,30 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
         written(() => {
           if (statements.done.get(commandId)) return [];
           const events = decide(read(accounts), look);
+
           // Thrown, so the transaction ends with nothing written.
           if (events instanceof Failed) throw events;
           // Reordering writes remove/add pairs. Only a net addition is a viewer action.
           const removed = new Map<string, Set<string>>();
+
           for (const { account, event } of events) {
             if (event.type !== "favourite-removed") continue;
             const channels = removed.get(account) ?? new Set<string>();
             channels.add(event.channelId);
             removed.set(account, channels);
           }
+
           favouriteAdded = events.some(
             ({ account, event }) =>
               event.type === "favourite-added" && !removed.get(account)?.has(event.channelId),
           );
           statements.receipt.run(commandId);
+
           return append(commandId, at, events);
         });
+
         if (favouriteAdded) added?.();
+
         return read(accounts);
       }),
     importOnce: ({ account, at, events }) =>
@@ -758,6 +844,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
           if (statements.imported.get()) return [];
           imported = true;
           statements.markImported.run(String(at));
+
           return account
             ? append(
                 "import",
@@ -766,6 +853,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
               )
             : [];
         });
+
         return imported;
       }),
     // The events go too, so no rebuild, here or in an older build, brings anything back, and so
@@ -860,7 +948,9 @@ function saveSeries(
     // When it was last marked, which the series that show are read in the order of.
     leading(state)?.at ?? 0,
   );
+
   if (changed === "none") return;
+
   if (changed === "all") {
     db.prepare("delete from marked_episodes where account = ? and series = ?").run(account, key);
   } else {
@@ -868,13 +958,16 @@ function saveSeries(
       "delete from marked_episodes where account = ? and series = ? and season = ? and episode = ?",
     ).run(account, key, changed.season, changed.episode);
   }
+
   const insert = db.prepare(
     "insert into marked_episodes (account, series, season, episode, mark) values (?, ?, ?, ?, ?)",
   );
+
   for (const mark of state.marks) {
     if (changed !== "all" && (mark.season !== changed.season || mark.episode !== changed.episode)) {
       continue;
     }
+
     insert.run(account, key, mark.season, mark.episode, JSON.stringify(mark));
   }
 }
@@ -900,6 +993,7 @@ function saveTitle(db: DatabaseSync, account: string, row: TitleRow): void {
 /** A store for when the database can't open: every call reports why. */
 function closed(detail: string): ViewingStore["Service"] {
   const fail = unavailable(detail);
+
   return {
     read: () => fail,
     titles: () => fail,

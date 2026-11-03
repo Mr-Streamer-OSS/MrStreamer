@@ -22,6 +22,7 @@ import {
 /** The app's services on `dataDir`, as a start of the app reads them. */
 async function started(dataDir: string) {
   const runtime = runtimeFor(mainLayer(testConfig(dataDir)));
+
   return {
     runtime,
     subscriptions: await promised(runtime, Subscriptions),
@@ -42,9 +43,11 @@ async function onDemandApp(options: { titles?: number } = {}) {
   const dataDir = await tempDir();
   const provider = await fakeProvider(options);
   let subscriptionId = "";
+
   const start = async () => {
     const app = await started(dataDir);
     const { service } = app;
+
     const onDemand = {
       ...service,
       refresh: () => service.refresh(subscriptionId),
@@ -53,18 +56,23 @@ async function onDemandApp(options: { titles?: number } = {}) {
       status: async () => {
         const { lists, metadata } = await service.status();
         const [first] = lists;
+
         if (!first) throw new Error("No subscription has movies and series");
         const { subscriptionId: of, ...own } = first;
         expect(of).toBe(subscriptionId);
+
         return { ...own, metadata };
       },
     };
+
     return { ...app, onDemand };
   };
+
   const app = await start();
   const reconnect = () => app.subscriptions.add(demoLogin(provider));
   subscriptionId = (await reconnect()).id;
   const own = (id: string) => ({ subscriptionId, id });
+
   return { provider, dataDir, start, own, reconnect, subscriptionId, ...app };
 }
 
@@ -83,6 +91,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       expect.any(String),
     ]);
     expect(newest.titles[0]).toMatchObject({ kind: "movie", tags: ["MULTI"], adult: false });
+
     const all = await onDemand.collection({
       kind: "movie",
       id: "all",
@@ -90,6 +99,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       offset: 0,
       limit: 1000,
     });
+
     expect(all.titles.some((title) => title.adult)).toBe(false);
     expect(all.total).toBe(all.titles.length);
     expect((await onDemand.status()).movies).toBeGreaterThan(all.total);
@@ -99,8 +109,10 @@ describe("movies and series", { timeout: 20_000 }, () => {
   it("lists titles for adults on their own once the viewer asks, and series marked so whatever their category", async () => {
     const { onDemand, settings } = await onDemandApp();
     const adult = () => onDemand.collection({ kind: "movie", id: "adult", offset: 0, limit: 100 });
+
     const series = (id: "all" | "adult") =>
       onDemand.collection({ kind: "series", id, sort: "title", offset: 0, limit: 1000 });
+
     expect((await adult()).total).toBe(0);
     expect((await series("all")).titles.map((title) => title.title)).not.toContain("After Dark");
     expect((await onDemand.search("after dark")).series).toEqual([]);
@@ -117,6 +129,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
 
   it("keeps titles only their category marks for adults out when the categories come back empty", async () => {
     const { onDemand, provider } = await onDemandApp();
+
     const adultInAll = async () =>
       (
         await onDemand.collection({
@@ -127,6 +140,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
           limit: 1000,
         })
       ).titles.some((title) => title.name.startsWith("Adult Film"));
+
     expect(await adultInAll()).toBe(false);
 
     provider.emptyTitleCategories(true);
@@ -138,14 +152,18 @@ describe("movies and series", { timeout: 20_000 }, () => {
 
   it("shows the episodes the provider added once the lists are refreshed", async () => {
     const { onDemand, provider, own } = await onDemandApp();
+
     const episodes = async () => {
       const details = await onDemand.details("series", own("80000"));
+
       return details.kind === "series" ? details.seasons.flatMap((season) => season.episodes) : [];
     };
+
     const before = await episodes();
 
     const series = provider.titles.series.find((each) => each.id === 80_000);
     const season = series?.seasons.at(-1);
+
     if (!series || !season?.[0]) throw new Error("The fake provider has no test series.");
     // The fake provider lists what its titles hold when asked.
     (season as unknown[]).push({ ...season[0], id: 81_012 });
@@ -193,6 +211,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     expect(provider.detailRequests()).toBe(0);
     // Without TMDB, a title's details are the provider's.
     const [first] = versions;
+
     if (!first) throw new Error("The fake provider has no movies.");
     const details = await onDemand.details("movie", first);
     expect(details.cast).toEqual([
@@ -215,13 +234,16 @@ describe("movies and series", { timeout: 20_000 }, () => {
       ["Season 2", 2],
     ]);
     setLanguage({ locale: "de-DE", formats: "de-DE" });
+
     try {
       const again = await onDemand.details("series", own("80000"));
+
       if (again.kind !== "series") throw new Error("Not a series.");
       expect(again.seasons.map((season) => season.name)).toEqual(["Staffel 1", "Staffel 2"]);
     } finally {
       setLanguage({ locale: "en-US", formats: "en-US" });
     }
+
     expect(details.seasons[0]?.episodes[0]).toMatchObject({
       ...own("81000"),
       seriesId: "80000",
@@ -235,6 +257,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       ["81001", 2],
       ["81002", 3],
     ]);
+
     const file = await onDemand.file({
       kind: "episode",
       ...own("81003"),
@@ -242,6 +265,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       season: 1,
       episode: 2,
     });
+
     expect(file.container).toBe("mp4");
   });
 
@@ -285,6 +309,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       await onDemand.refresh();
       const before = await onDemand.status();
       const told = await collect(app.runtime, onDemand.changes);
+
       if (answer === "refusal") provider.failTitles("login");
       const held = provider.hold("titles");
       const late = onDemand.refresh();
@@ -300,6 +325,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
       expect(app.own("").subscriptionId).toBe(again.id);
       expect(await onDemand.status()).toEqual(before);
       expect(told).toEqual([]);
+
       if (answer === "lists") {
         await app.runtime.dispose();
         expect(await (await app.start()).onDemand.status()).toEqual(before);
@@ -310,6 +336,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
   it("marks for adults only by the row the lists show for an id, the first, in either kind", async () => {
     const app = await onDemandApp();
     const { onDemand, provider, own } = app;
+
     // Series 80001 and film 91001 each listed twice, an ordinary row and one for adults, and
     // with `newcomer` a series new to the lists, for adults from the start.
     const twice = (
@@ -323,6 +350,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
         const shows = [show, { ...show, adult: true }];
         // A category named for adults marks a film.
         const movies = [movie, { ...movie, categoryId: "505" }];
+
         return {
           ...all,
           series: [
@@ -338,21 +366,25 @@ describe("movies and series", { timeout: 20_000 }, () => {
           ],
         };
       });
+
     const adult = async () => [
       (await onDemand.titles("series", [own("80001")]))[0]?.adult,
       (await onDemand.titles("movie", [own("91001")]))[0]?.adult,
     ];
+
     twice("ordinary first", "ordinary first");
     await onDemand.refresh();
     const told = await collect(app.runtime, onDemand.changes);
     const marked: boolean[] = [];
     const shown: (boolean | undefined)[][] = [];
+
     const refresh = async () => {
       await onDemand.refresh();
       await vi.waitFor(() => expect(told).toHaveLength(marked.length + 1));
       marked.push(told.at(-1)!.markedForAdults === true);
       shown.push(await adult());
     };
+
     // The same lists: the rows they show stay ordinary.
     await refresh();
     // The series' row for adults comes first, so the series shows for adults; then unchanged.
@@ -380,10 +412,13 @@ describe("movies and series", { timeout: 20_000 }, () => {
 
   it("marks for adults however close the fetches, and related titles never offer them", async () => {
     const dataDir = await tempDir();
+
     const entry =
       inject("catalogueWorker") ??
       new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url);
+
     const href = typeof entry === "string" ? pathToFileURL(entry).href : entry.href;
+
     // Only the worker's wall clock stands still, as in catalogue-persistence.test.ts: both lists
     // are fetched at the same millisecond.
     const runtime = runtimeFor(
@@ -396,6 +431,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
           }),
       }),
     );
+
     const onDemand = await promised(runtime, OnDemand);
     const settings = await promised(runtime, Settings);
     const subscriptions = await promised(runtime, Subscriptions);
@@ -405,11 +441,13 @@ describe("movies and series", { timeout: 20_000 }, () => {
     const fetchedAt = (await onDemand.status()).lists[0]?.fetchedAt;
     const told = await collect(runtime, onDemand.changes);
     await settings.update({ adultTitles: true });
+
     // A series of the same category: related through it, while it is listed for everyone.
     const near = async () =>
       (await onDemand.related("series", { subscriptionId: id, id: "80003" })).titles.map(
         ({ title }) => title.id,
       );
+
     expect(await near()).toContain("80001");
     provider.serveTitles((all) => ({
       ...all,
@@ -448,6 +486,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
 
     expect(await onDemand.titles("movie", [theirs])).toEqual([]);
     expect(await onDemand.titles("movie", [theirs, own(id)])).toHaveLength(1);
+
     for (const asked of [
       onDemand.details("movie", theirs),
       onDemand.season({ ...theirs, id: "80000" }, 1),
@@ -455,6 +494,7 @@ describe("movies and series", { timeout: 20_000 }, () => {
     ]) {
       await expect(asked).rejects.toMatchObject({ error: { kind: "no-subscription" } });
     }
+
     expect(provider.detailRequests()).toBe(0);
     // Nor does a title like one of another subscription's lead a row.
     const rows = (like: typeof theirs) => onDemand.rows("movie", "for-you", like);
@@ -476,19 +516,24 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const b = (await app.subscriptions.add(demoLogin(second))).id;
     await app.service.refresh(a);
     await app.service.refresh(b);
+
     return { ...app, dataDir, first, second, a, b };
   }
+
   const of = (subscriptionId: string, id: number | string) => ({ subscriptionId, id: String(id) });
+
   type App = Awaited<ReturnType<typeof two>>;
 
   /** Every title of a kind's All, read a page at a time as the grid reads it. */
   async function all(service: App["service"], kind: "movie" | "series") {
     const first = await service.collection({ kind, id: "all", offset: 0, limit: 50 });
     const titles = [...first.titles];
+
     while (titles.length < first.total) {
       const next = await service.collection({ kind, id: "all", offset: titles.length, limit: 50 });
       titles.push(...next.titles);
     }
+
     return { total: first.total, titles };
   }
 
@@ -496,7 +541,9 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
   function films({ first, second, a, b }: App) {
     const known = (tmdb: string | undefined, id: number) =>
       tmdb === "0" || (tmdb === undefined && id % 7 === 0) ? null : (tmdb ?? String(id + 10_000));
+
     const keys = new Set<string>();
+
     for (const [subscriptionId, provider] of [
       [a, first],
       [b, second],
@@ -507,6 +554,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
         keys.add(tmdb ? `movie:tmdb:${tmdb}` : `movie:${subscriptionId}:${movie.id}`);
       }
     }
+
     return keys;
   }
 
@@ -521,8 +569,10 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     expect(new Set(keys).size).toBe(keys.length);
     expect(new Set(keys)).toEqual(films(app));
     expect(listed.total).toBe(keys.length);
+
     const each = (provider: typeof first) =>
       provider.titles.movies.filter((movie) => !movie.adult).length;
+
     expect(listed.total).toBeLessThan(each(first) + each(second));
     expect(await service.status()).toMatchObject({
       lists: [
@@ -534,6 +584,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     // Versions join by their film alone: not by an id two providers share, nor by a name.
     const titled = async (version: ReturnType<typeof of>) => {
       const [title] = await service.titles("movie", [version]);
+
       return title;
     };
 
@@ -590,9 +641,12 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
 
   it("lists the seasons and episodes of the version asked, and makes up none from another's", async () => {
     const { service, first, second, a, b } = await two();
+
     const episodes = async (series: ReturnType<typeof of>) => {
       const details = await service.details("series", series);
+
       if (details.kind !== "series") throw new Error("Not a series");
+
       return details.seasons.map((season) =>
         season.episodes.map((episode) => [episode.subscriptionId, episode.id]),
       );
@@ -632,6 +686,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     await expect(service.season(of(b, 80_000), 2)).rejects.toMatchObject({
       error: { kind: "title-not-found" },
     });
+
     const file = (subscriptionId: string) =>
       service.file({
         kind: "episode",
@@ -641,6 +696,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
         season: 1,
         episode: 1,
       });
+
     expect((await file(a)).url.startsWith(first.url)).toBe(true);
     expect((await file(b)).url.startsWith(second.url)).toBe(true);
   });
@@ -655,6 +711,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     let page: Awaited<ReturnType<typeof all>> | undefined;
     let search: Awaited<ReturnType<typeof app.service.search>> | undefined;
     let searchKind: Awaited<ReturnType<typeof app.service.searchKind>> | undefined;
+
     const opening = Promise.all([
       all(app.service, "movie").then((value) => {
         page = value;
@@ -666,6 +723,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
         searchKind = value;
       }),
     ]);
+
     try {
       await held.arrived;
       await vi.waitFor(() => expect(page?.total).toBeGreaterThan(0), { timeout: 10_000 });
@@ -746,6 +804,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     const before = await all(app.service, "movie");
     const { lists } = await app.service.status();
     await app.runtime.dispose();
+
     for (const provider of [app.first, app.second, third]) provider.failTitles(500);
 
     const restarted = await started(app.dataDir);
@@ -753,6 +812,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
     // Each has what it loaded, as old as it was: none is asked for again, and none could answer.
     expect((await restarted.service.status()).lists).toEqual(lists);
     expect(await all(restarted.service, "movie")).toEqual(before);
+
     for (const id of [app.a, app.b, c]) {
       expect(await restarted.service.isStale(id, "12 hours")).toBe(false);
     }
@@ -789,6 +849,7 @@ describe("the movies and series of several subscriptions", { timeout: 30_000 }, 
   it("has no movies or series for a playlist beside a subscription that has them", async () => {
     const { service, subscriptions, subscriptionId: a } = await onDemandApp();
     const playlist = await startFakePlaylist();
+
     try {
       await subscriptions.add({ server: playlist.link, username: "", password: "" });
 

@@ -9,6 +9,7 @@ type Audio =
   | { readonly kind: "follow-title" }
   | { readonly kind: "original" }
   | { readonly kind: "language"; readonly language: TitleLanguage };
+
 type Subtitles =
   | { readonly kind: "forced-only" }
   | { readonly kind: "off" }
@@ -16,10 +17,12 @@ type Subtitles =
 
 /** How large downloaded subtitles show, from the app's text size. */
 export const SUBTITLE_SIZES = ["small", "medium", "large"] as const;
+
 export type SubtitleSize = (typeof SUBTITLE_SIZES)[number];
 
 /** The speeds a movie or an episode plays at, slowest first; 1 is its own. As the desktop's. */
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+
 export type Speed = (typeof SPEEDS)[number];
 
 /** Global media policies. Native track and Live variant consumers apply these on a later item. */
@@ -49,10 +52,12 @@ let cached: Store<MediaPreferences> | undefined;
 
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
 const knownLanguage = (value: unknown) => TITLE_LANGUAGES.find(({ code }) => code === value)?.code;
 
 /** Each subscription's chosen stream per channel, by channel id: what core's chosenVariant reads. */
 type ChannelPicks = Readonly<Record<string, Readonly<Record<string, string>>>>;
+
 const channelPicksShape = (value: unknown): value is ChannelPicks =>
   record(value) &&
   Object.values(value).every(
@@ -64,8 +69,10 @@ function audioOf(value: unknown): Audio {
   if (record(value)) {
     if (value["kind"] === "original") return { kind: "original" };
     const language = knownLanguage(value["language"]);
+
     if (value["kind"] === "language" && language) return { kind: "language", language };
   }
+
   return { kind: "follow-title" };
 }
 
@@ -73,8 +80,10 @@ function subtitlesOf(value: unknown): Subtitles {
   if (record(value)) {
     if (value["kind"] === "off") return { kind: "off" };
     const language = knownLanguage(value["language"]);
+
     if (value["kind"] === "language" && language) return { kind: "language", language };
   }
+
   return { kind: "forced-only" };
 }
 
@@ -89,17 +98,21 @@ function accepted(value: MediaPreferences): MediaPreferences {
 /** Read synchronously on first use, before the title owner starts any indexing. */
 function saved(): Store<MediaPreferences> {
   if (cached) return cached;
+
   // The primary wins. Accepted backup contents precede a pending proposal, which a
   // refused native delete-then-move replacement may leave as the only primary candidate.
   for (const name of [FILE, BACKUP, `${BACKUP}.next`, `${FILE}.next`]) {
     try {
       const file = new File(Paths.document, name);
+
       if (!file.exists) continue;
       const raw: unknown = JSON.parse(file.textSync());
+
       if (!record(raw)) {
         writable = false;
         continue;
       }
+
       contents = raw;
       checkpointed = name === BACKUP || name === `${BACKUP}.next`;
       break;
@@ -109,6 +122,7 @@ function saved(): Store<MediaPreferences> {
       writable = false;
     }
   }
+
   writable &&= contents["version"] === undefined || contents["version"] === 1;
   cached = store(
     accepted({
@@ -121,6 +135,7 @@ function saved(): Store<MediaPreferences> {
       titleSpeed: SPEEDS.find((speed) => speed === contents["titleSpeed"]) ?? 1,
     }),
   );
+
   return cached;
 }
 
@@ -131,6 +146,7 @@ function saved(): Store<MediaPreferences> {
  */
 export const getMediaPreferences = (): MediaPreferences => saved().get();
 export const useMediaPreferences = (): MediaPreferences => useStore(saved());
+
 export const onMediaPreferences = (listener: () => void): (() => void) =>
   saved().subscribe(listener);
 
@@ -150,6 +166,7 @@ export const effectiveTitleLanguage = (): string =>
  */
 function propose(next: Record<string, unknown>): boolean {
   if (!writable) return false;
+
   if (!checkpointed) {
     try {
       // Expo overwrites by deleting then moving. A checkpoint refusal must leave the
@@ -160,6 +177,7 @@ function propose(next: Record<string, unknown>): boolean {
       return false;
     }
   }
+
   try {
     writeJson(FILE, next);
   } catch {
@@ -167,14 +185,18 @@ function propose(next: Record<string, unknown>): boolean {
     // next launch, even when native replacement deleted the primary and cleanup fails.
     try {
       const pending = new File(Paths.document, `${FILE}.next`);
+
       if (pending.exists) pending.delete();
     } catch {
       // The disk can refuse cleanup too; keep the running accepted snapshot.
     }
+
     return false;
   }
+
   contents = next;
   checkpointed = false;
+
   return true;
 }
 
@@ -188,9 +210,12 @@ export function updateMediaPreferences<K extends keyof MediaPreferences>(
 ): boolean {
   const source = saved();
   const current = source.get();
+
   if (JSON.stringify(current[field]) === JSON.stringify(value)) return true;
+
   if (!propose({ ...contents, version: 1, [field]: value })) return false;
   source.set(accepted({ ...current, [field]: value }));
+
   return true;
 }
 
@@ -198,7 +223,9 @@ export function updateMediaPreferences<K extends keyof MediaPreferences>(
 function changeablePicks(): ChannelPicks | null {
   saved();
   const picks = contents["channelVariants"];
+
   if (picks === undefined) return {};
+
   return channelPicksShape(picks) ? picks : null;
 }
 
@@ -209,8 +236,10 @@ function proposePicks(
   channels: Readonly<Record<string, string>>,
 ): boolean {
   const { [subscriptionId]: _replaced, ...others } = picks;
+
   const next =
     Object.keys(channels).length > 0 ? { ...others, [subscriptionId]: channels } : others;
+
   return propose({ ...contents, version: 1, channelVariants: next });
 }
 
@@ -240,12 +269,15 @@ export function updateChannelPick(
 ): boolean {
   if (streamId !== null && !channel.variants.some(({ id }) => id === streamId)) return false;
   const picks = changeablePicks();
+
   if (!picks) return false;
   const aliases = new Set([channel.id, ...channel.variants.map(({ id }) => id)]);
   const before = picks[channel.subscriptionId] ?? {};
   const others = Object.fromEntries(Object.entries(before).filter(([id]) => !aliases.has(id)));
   const after = streamId === null ? others : { ...others, [channel.id]: streamId };
+
   if (samePicks(before, after)) return true;
+
   return proposePicks(picks, channel.subscriptionId, after);
 }
 
@@ -256,7 +288,10 @@ export function updateChannelPick(
  */
 export function forgetChannelPicks(subscriptionId: string): boolean {
   const picks = changeablePicks();
+
   if (!picks) return false;
+
   if (!Object.hasOwn(picks, subscriptionId)) return true;
+
   return proposePicks(picks, subscriptionId, {});
 }

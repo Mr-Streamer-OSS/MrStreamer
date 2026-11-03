@@ -80,6 +80,7 @@ function span(file: string): { readonly from: number; readonly to: number } {
     .split("\n")
     .filter(Boolean)
     .map((line) => line.split(",").map(Number));
+
   return {
     from: Math.min(...packets.map(([pts = 0]) => pts)),
     to: Math.max(...packets.map(([pts = 0, duration = 0]) => pts + duration)),
@@ -91,10 +92,13 @@ function mediaPlaylist(name: string): string {
   const files = readdirSync(out)
     .filter((file) => new RegExp(`^${name}-\\d+\\.mpegts$`).test(file))
     .toSorted();
+
   const listed = files.map((file) => {
     const { from, to } = span(file);
+
     return `#EXTINF:${((to - from) / 90_000).toFixed(3)},\n${file}`;
   });
+
   return [
     "#EXTM3U",
     "#EXT-X-VERSION:3",
@@ -113,6 +117,7 @@ function clock(seconds: number): string {
 }
 
 rmSync(out, { recursive: true, force: true });
+
 mkdirSync(out, { recursive: true });
 
 segments("video", "smptebars=size=128x72:rate=10", SECONDS, [
@@ -121,6 +126,7 @@ segments("video", "smptebars=size=128x72:rate=10", SECONDS, [
   // show, so the picture starts at the same time as the sound.
   ...["-g", "20", "-keyint_min", "20", "-sc_threshold", "0", "-bf", "0", "-an"],
 ]);
+
 for (const [name, hertz] of [
   ["sound-en", 440],
   ["sound-es", 660],
@@ -132,6 +138,7 @@ for (const [name, hertz] of [
 }
 
 const starts = span("video-0.mpegts").from;
+
 for (const name of ["sound-en", "sound-es"]) {
   if (span(`${name}-0.mpegts`).from !== starts) {
     throw new Error(`${name} doesn't start when the picture does.`);
@@ -141,6 +148,7 @@ for (const name of ["sound-en", "sound-es"]) {
 for (const name of ["video", "sound-en", "sound-es"]) {
   writeFileSync(join(out, `${name}.m3u8`), mediaPlaylist(name));
 }
+
 for (const { file, line } of SUBTITLES) {
   const cues = line
     ? Array.from(
@@ -148,6 +156,7 @@ for (const { file, line } of SUBTITLES) {
         (_, at) => `${clock(at * 2 + 0.25)} --> ${clock(at * 2 + 1.75)}\n${line(at + 1)}\n`,
       )
     : [];
+
   // The lines' times count from the picture's first frame.
   const header = `WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:${starts},LOCAL:00:00:00.000\n`;
   writeFileSync(join(out, `${file}.vtt`), [header, ...cues].join("\n"));
@@ -168,6 +177,7 @@ for (const { file, line } of SUBTITLES) {
 }
 
 const media = (attributes: string) => `#EXT-X-MEDIA:${attributes}`;
+
 writeFileSync(
   join(out, "master.m3u8"),
   [

@@ -198,19 +198,26 @@ export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUT
     /<!-- package:(homebrew|aur):(link|command|details|availability|lane) -->/g,
     (_mark, name: PackageName, part: "link" | "command" | "details" | "availability" | "lane") => {
       const route = routes[name];
+
       if (
         route.publication.state !== "published" ||
         !/^\d+\.\d+\.\d+$/.test(route.publication.lastVerifiedVersion)
       )
         return "";
+
       const anchor = (words: string) =>
         `<a data-package="${name}" href="${escapeHtml(route.url)}">${escapeHtml(words)}</a>`;
+
       if (part === "lane") return ` <span>·</span> ${anchor(LANE[name][0])}${LANE[name][1]}`;
+
       if (part === "command")
         return `<p class="command"><span>or</span> <code>${escapeHtml(route.install)}</code></p>`;
       const link = anchor(`${route.name} · ${route.platform}, ${route.architecture}`);
+
       if (part === "availability") return `<span>Also on ${link}.</span>`;
+
       if (part === "link") return link;
+
       return `<div class="package-route">${link}<small>${escapeHtml(route.updates)} Package ${escapeHtml(route.publication.lastVerifiedVersion)}.</small><pre><code>${escapeHtml(route.install)}</code></pre></div>`;
     },
   );
@@ -220,17 +227,24 @@ export function writePackages(html: string, routes: PackageRoutes = PACKAGE_ROUT
 function linkTo(href: string, source: string): string | null {
   if (href.startsWith("#")) {
     const page = PAGES.find((page) => page.markdown === source);
+
     return page ? page.address + href : `${REPOSITORY}/blob/main/${source}${href}`;
   }
+
   if (/^(https?:|mailto:)/i.test(href)) return href;
+
   if (/^(\/\/|[a-z][\w+.-]*:)/i.test(href)) return null;
   const [path = "", fragment] = href.split("#", 2);
   const suffix = fragment === undefined ? "" : `#${fragment}`;
+
   if (path.startsWith("/")) return PAGES.some((page) => page.address === path) ? href : null;
   const target = relative(repository, resolve(repository, dirname(source), path));
   const page = PAGES.find((page) => page.markdown === target);
+
   if (page) return page.address + suffix;
+
   if (target.startsWith("..")) return null;
+
   // Contributing and maintainer documents are not public website routes.
   return `${REPOSITORY}/blob/main/${target}${suffix}`;
 }
@@ -246,6 +260,7 @@ const LEGACY_ANCHOR = /^<a id="([a-z0-9_-]+)"><\/a>$/;
  */
 function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Marked {
   const headings = new Map<string, number>();
+
   return new Marked({
     renderer: {
       heading({ text, tokens, depth }) {
@@ -254,6 +269,7 @@ function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Mark
           .replace(/[^\w\s-]/g, "")
           .trim()
           .replace(/\s+/g, "-");
+
         const count = headings.get(slug) ?? 0;
         headings.set(slug, count + 1);
         const id = anchorPrefix + (count === 0 ? slug : `${slug}-${count}`);
@@ -261,6 +277,7 @@ function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Mark
         // styles.css sizes a page title so its longest word fits the width.
         const longest = Math.max(...text.split(/\s+/).map((word) => word.length));
         const fit = level === 1 ? ` style="--longest: ${longest}"` : "";
+
         return `<h${level} id="${id}"${fit}>${this.parser.parseInline(tokens)}</h${level}>\n`;
       },
       link({ href, title, tokens }) {
@@ -268,19 +285,23 @@ function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Mark
           anchorPrefix && href.startsWith("#")
             ? `/releases#${anchorPrefix}${href.slice(1)}`
             : linkTo(href, source);
+
         const text = this.parser.parseInline(tokens);
+
         return target
           ? `<a href="${escapeHtml(target)}"${title ? ` title="${escapeHtml(title)}"` : ""}>${text}</a>`
           : text;
       },
       image({ href, text }) {
         const target = linkTo(href, source);
+
         return target
           ? `<a href="${escapeHtml(target)}">${escapeHtml(text || "Image")}</a>`
           : escapeHtml(text);
       },
       paragraph({ text }) {
         const legacy = LEGACY_ANCHOR.exec(text.trim())?.[1];
+
         return legacy ? `<a id="${anchorPrefix}${legacy}"></a>\n` : false;
       },
       html({ text }) {
@@ -290,15 +311,19 @@ function markdownFor(source: string, headingOffset = 0, anchorPrefix = ""): Mark
       // column's name to show above it there.
       table({ header, rows }) {
         if (header.length < 3) return false;
+
         const cells = (row: typeof header, tag: "th" | "td") =>
           row
             .map((cell, column) => {
               const label =
                 tag === "td" ? ` data-label="${escapeHtml(header[column]?.text ?? "")}"` : "";
+
               return `<${tag}${label}>${this.parser.parseInline(cell.tokens)}</${tag}>`;
             })
             .join("");
+
         const body = rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("\n");
+
         return `<table>\n<thead>\n<tr>${cells(header, "th")}</tr>\n</thead>\n<tbody>\n${body}\n</tbody>\n</table>\n`;
       },
     },
@@ -366,28 +391,37 @@ function renderDocument(text: string, source: string, eyebrow?: string, after?: 
   const render = (tokens: MarkedToken[]) => markdown.parser(tokens);
   // marked types its tokens with an open-ended member; every token its lexer makes is a MarkedToken.
   const tokens = (markdown.lexer(text) as MarkedToken[]).filter((token) => token.type !== "space");
+
   const isSection = (token: MarkedToken | undefined) =>
     token?.type === "heading" && token.depth === 2;
+
   const isAnchor = (token: MarkedToken | undefined) =>
     token?.type === "paragraph" && LEGACY_ANCHOR.test(token.text.trim());
+
   // A section starts at its heading, or at the first of the old fragments' anchors right above it.
   const anchorsThenSection = (index: number): boolean =>
     isSection(tokens[index]) || (isAnchor(tokens[index]) && anchorsThenSection(index + 1));
+
   const starts = (index: number) => !isAnchor(tokens[index - 1]) && anchorsThenSection(index);
 
   const [title] = tokens;
+
   if (title?.type !== "heading" || title.depth !== 1)
     throw new Error(`${source} doesn't open with its title.`);
   const groups: MarkedToken[][] = [[]];
+
   for (const [index, token] of tokens.entries()) {
     if (index === 0) continue;
+
     if (starts(index)) groups.push([]);
     groups.at(-1)?.push(token);
   }
+
   const [intro = [], ...parts] = groups;
 
   const [first, second] = intro;
   const answer = first?.type === "paragraph" ? first : undefined;
+
   const points =
     answer &&
     second?.type === "list" &&
@@ -396,6 +430,7 @@ function renderDocument(text: string, source: string, eyebrow?: string, after?: 
     )
       ? second
       : undefined;
+
   const others = intro.slice((answer ? 1 : 0) + (points ? 1 : 0));
 
   return (
@@ -416,16 +451,20 @@ function renderDocument(text: string, source: string, eyebrow?: string, after?: 
         const at = part.findIndex(isSection);
         const anchors = part.slice(0, at);
         const [heading, lead, ...rest] = part.slice(at);
+
         const dek =
           lead?.type === "paragraph" && lead.tokens.length === 1 && lead.tokens[0]?.type === "em"
             ? lead
             : undefined;
+
         const body = dek || !lead ? rest : [lead, ...rest];
         const tables = body.filter((token) => token.type === "table");
+
         const table =
           tables.length === 1 && body.length > 1 && !body.some(({ type }) => type === "heading")
             ? tables[0]
             : undefined;
+
         return {
           anchors: render(anchors),
           heading: render(heading ? [heading] : []),
@@ -444,12 +483,15 @@ const markdownOf = (file: string) => readFileSync(join(repository, file), "utf8"
 function guideIndex(): string {
   const tasks = TASKS.map(([task, slug, fragment]) => {
     const guide = GUIDES.find((guide) => guide.slug === slug);
+
     return `<li><a href="/docs/${slug}#${fragment}">${escapeHtml(task)}<span>${guide?.title ?? ""}</span></a></li>`;
   }).join("");
+
   const guides = GUIDES.map(
     (guide) =>
       `<div><dt><a href="/docs/${guide.slug}">${guide.title}</a></dt><dd>${escapeHtml(guide.summary)}</dd></div>`,
   ).join("");
+
   return (
     opening({
       title: "<h1>Guides</h1>",
@@ -465,17 +507,21 @@ function guideNav(slug: GuideSlug): string {
   const index = GUIDES.findIndex((guide) => guide.slug === slug);
   const previous = GUIDES[(index + GUIDES.length - 1) % GUIDES.length];
   const next = GUIDES[(index + 1) % GUIDES.length];
+
   if (!previous || !next) return "";
+
   return `<nav class="guide-nav" aria-label="Other guides"><h2>Other guides</h2><a class="previous" href="/docs/${previous.slug}"><span>Previous guide</span><b><span aria-hidden="true">← </span>${previous.title}</b></a><a class="next" href="/docs/${next.slug}"><span>Next guide</span><b>${next.title}<span aria-hidden="true"> →</span></b></a></nav>`;
 }
 
 function releaseHistory(releases: readonly Release[] | null): string {
   const title = "<h1>Releases</h1>";
+
   if (!releases?.length)
     return opening({
       title,
       answer: `<p>Release history is unavailable here. Read the stable releases and notes on <a href="${RELEASES}">GitHub Releases</a>.</p>`,
     });
+
   return (
     opening({
       title,
@@ -487,12 +533,14 @@ function releaseHistory(releases: readonly Release[] | null): string {
           dateStyle: "long",
           timeZone: "UTC",
         }).format(new Date(release.published));
+
         const headings: number[] = [];
         const markdown = new Marked();
         markdown.walkTokens(markdown.lexer(release.notes), (token) => {
           if (token.type === "heading") headings.push(token.depth);
         });
         const offset = 3 - (headings.length ? Math.min(...headings) : 3);
+
         return {
           heading: `<h2 id="v${release.version}">${release.version}</h2>`,
           dek: `<time datetime="${escapeHtml(release.published)}">${date}</time>`,
@@ -507,8 +555,10 @@ function releaseHistory(releases: readonly Release[] | null): string {
 /** The policy's own website analytics switch, under its heading. analytics.ts brings it to life. */
 function withAnalyticsSwitch(policy: string): string {
   const heading = /<h\d id="website-analytics">.*?<\/h\d>\n/;
+
   if (!heading.test(policy))
     throw new Error("docs/privacy.md lacks its Website analytics heading.");
+
   return policy.replace(
     heading,
     (found) =>
@@ -526,13 +576,17 @@ export function renderPage(
   releases: readonly Release[] | null,
 ): string {
   const page = PAGES.find((page) => page.file === file);
+
   if (!page || page.address === "/") throw new Error(`No document page for ${file}`);
   const version = downloads?.installers.length ? downloads.version : null;
+
   const title =
     page.address === "/download" && version
       ? `Download Mr. Streamer ${version} for Mac, Windows and Linux`
       : page.title;
+
   const guide = GUIDES.find((guide) => page.address === `/docs/${guide.slug}`);
+
   let content = page.markdown
     ? renderDocument(
         markdownOf(page.markdown),
@@ -541,15 +595,21 @@ export function renderPage(
         page.address === "/about" ? RELEASE_LINE : undefined,
       )
     : "";
+
   if (page.address === "/privacy") content = withAnalyticsSwitch(content);
+
   if (page.address === "/docs") content = guideIndex();
+
   if (page.address === "/faq")
     content = writePackages(readFileSync(join(root, "src/faq.html"), "utf8"));
+
   if (page.address === "/download")
     content = writePackages(readFileSync(join(root, "src/download.html"), "utf8"));
+
   if (page.address === "/releases") content = releaseHistory(releases);
   // The article names its kind for styles.css: "guide" for every guide, else its address.
   const kind = guide ? "guide" : page.address.slice(1);
+
   let html = readFileSync(join(root, "src/page.html"), "utf8")
     .replaceAll("<!-- title -->", escapeHtml(title))
     .replaceAll("<!-- description -->", escapeHtml(page.description))
@@ -557,9 +617,11 @@ export function renderPage(
     .replaceAll("<!-- kind -->", kind)
     .replaceAll(`href="${guide ? "/docs" : page.address}"`, `$& aria-current="page"`)
     .replace("<!-- content -->", () => content + (guide ? guideNav(guide.slug) : ""));
+
   if (page.address === "/download")
     html = html
       .replace("<title>", "<title data-download-title>")
       .replace('<meta property="og:title"', '<meta property="og:title" data-download-title');
+
   return html;
 }

@@ -84,12 +84,14 @@ async function watching(): Promise<void> {
 
 const button = (label: string) =>
   container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
 const thumb = () => container.querySelector<HTMLInputElement>('input[aria-label="Position"]');
 
 /** The scrubber's control, which takes the pointer, laid out from the window's left edge. */
 function control(): HTMLElement {
   const element = thumb()!.parentElement!.parentElement!.parentElement!;
   element.getBoundingClientRect = () => new DOMRect(0, 0, WIDTH, 24);
+
   return element;
 }
 
@@ -144,6 +146,7 @@ afterEach(() => {
   act(() => titlePlayer.close());
   unmount();
   unmount = () => {};
+
   container.remove();
   useUi.setState({ playingTitle: false });
   vi.useRealTimers();

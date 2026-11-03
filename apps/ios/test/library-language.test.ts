@@ -30,11 +30,14 @@ const scenario = vi.hoisted(() => ({
   /** The provider's answer for a title's details; unanswered when null. */
   provided: null as ProviderDetails | null,
 }));
+
 /** One answer per source, as the app's stores give: a new render alone makes nothing new. */
 const stable = vi.hoisted(() => {
   const made = new Map<unknown, unknown>();
+
   return <T>(source: unknown, make: () => T): T => {
     if (!made.has(source)) made.set(source, make());
+
     return made.get(source) as T;
   };
 });
@@ -50,32 +53,43 @@ vi.mock("react-native", async () => ({
     },
   },
 }));
+
 vi.mock("react-native-safe-area-context", async () => {
   const { createElement } = await import("react");
+
   return {
     SafeAreaView: ({ children }: { children?: React.ReactNode }) =>
       createElement("div", null, children),
   };
 });
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({ router: { push: () => undefined } }));
+
 vi.mock("../src/glass.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     Glass: ({ children }: { children: React.ReactNode }) => createElement("div", null, children),
   };
 });
+
 vi.mock("../src/ui.tsx", async () => {
   const { createElement } = await import("react");
+
   return {
     colors: {},
     Message: ({ text }: { text: string }) => createElement("p", null, text),
   };
 });
+
 vi.mock("../src/loading.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   const pass = ({ children }: { children?: React.ReactNode }) =>
     createElement(Fragment, null, children);
+
   return {
     Docked: pass,
     Placeholders: pass,
@@ -86,8 +100,10 @@ vi.mock("../src/loading.tsx", async () => {
     loadingStatus: () => null,
   };
 });
+
 vi.mock("../src/titles-ui.tsx", async () => {
   const { createElement, Fragment } = await import("react");
+
   return {
     Artwork: () => null,
     ProgressLine: () => null,
@@ -131,14 +147,18 @@ vi.mock("../src/titles-ui.tsx", async () => {
       ),
   };
 });
+
 vi.mock("../src/header.tsx", () => ({ tabHref: () => "/" }));
+
 vi.mock("../src/tab-bar.ts", () => ({ useFixedTabBar: () => undefined }));
+
 vi.mock("../src/account.ts", () => ({
   members: () => scenario.members,
   reloadTitles: () => undefined,
   retryTitles: () => undefined,
   useRoster: () => stable(scenario.members, () => ({ kind: "ready", members: scenario.members })),
 }));
+
 vi.mock("../src/resume.ts", () => ({
   detailsHref: () => "/",
   openDetails: () => undefined,
@@ -146,9 +166,11 @@ vi.mock("../src/resume.ts", () => ({
   useContinueWatching: () => [],
   versionOf: (key: string) => {
     const at = key.indexOf(":");
+
     return { subscriptionId: key.slice(0, at), id: key.slice(at + 1) };
   },
 }));
+
 vi.mock("../src/titles.ts", () => ({
   useTitleLists: () => stable(scenario.index, () => ({ kind: "ready", index: scenario.index })),
   useCollections: (kind: string) => (kind === "movie" ? scenario.made : null),
@@ -163,6 +185,7 @@ vi.mock("../src/titles.ts", () => ({
   // As the app reads them: core makes the details of the provider's answer at each read.
   detailsOf: async (title: Title) => {
     const { seriesDetails } = await import("@mrstreamer/core/ondemand/details");
+
     return scenario.provided
       ? seriesDetails(title, scenario.provided, null, "en")
       : new Promise(() => undefined);
@@ -170,6 +193,7 @@ vi.mock("../src/titles.ts", () => ({
   // Without TMDB, a season's episodes are the provider's.
   episodesOf: async (_title: Title, season: Season) => season.episodes,
 }));
+
 vi.mock("../src/viewing.ts", () => ({
   useViewing: () => null,
   progressOf: async () => [],
@@ -178,6 +202,7 @@ vi.mock("../src/viewing.ts", () => ({
   seriesViewing: async () => ({ progress: [], marks: [] }),
   undoMark: async () => undefined,
 }));
+
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
@@ -185,19 +210,24 @@ vi.mock("../src/play-title.ts", () => ({
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));
+
 vi.mock("../src/playback.ts", () => ({ request: () => ({ stands: () => true }) }));
+
 vi.mock("../src/storage.ts", () => ({
   useSavedState: () => ({}),
   pickedVersion: () => null,
   pickVersion: () => undefined,
 }));
+
 vi.mock("../src/watchlist.ts", () => ({
   useWatchlist: () => [],
   savedEntry: () => undefined,
   saveTitle: () => undefined,
   removeTitle: () => undefined,
 }));
+
 vi.mock("../src/downloads.ts", () => ({ useDownloadOf: () => undefined }));
+
 vi.mock("../src/download-controls.tsx", () => ({
   DownloadButton: () => null,
   actionsOf: () => [],
@@ -205,6 +235,7 @@ vi.mock("../src/download-controls.tsx", () => ({
   showActions: () => undefined,
   stateWord: () => "",
 }));
+
 vi.mock("../src/series-download-row.tsx", () => ({ SeriesDownloadRow: () => null }));
 
 const { CollectionScreen } = await import("../src/titles-screen.tsx");
@@ -212,25 +243,32 @@ const { DetailsScreen } = await import("../src/details-screen.tsx");
 
 let container: ReturnType<typeof document.createElement>;
 let unmount = () => {};
+
 function mount(element: React.ReactElement) {
   container = document.createElement("div");
   const root = createRoot(container);
   React.act(() => root.render(element));
   unmount = () => React.act(() => root.unmount());
 }
+
 const speak = (locale: Locale) => React.act(() => setLanguage({ locale, formats: locale }));
 const text = () => container.textContent ?? "";
+
 const button = (label: string) => {
   const found = [...container.querySelectorAll("button")].find(
     (each) => each.getAttribute("aria-label") === label,
   );
+
   if (!found) throw new Error(`No button labelled ${label}`);
+
   return found;
 };
+
 const version = () =>
   [...container.querySelectorAll("button")].find(
     (each) => each.getAttribute("data-testid") === "details-version",
   );
+
 const press = (label: string) => React.act(() => button(label).click());
 const grid = () => container.querySelector('[data-testid="grid"]')?.textContent;
 
@@ -284,12 +322,14 @@ it("shows a title's details in the language, keeping the version picked for Play
     addedAt: 1,
     adult: false,
   };
+
   const catalogue: OnDemandCatalogue = {
     movieCategories: [],
     seriesCategories: [],
     series: [],
     movies: [movie],
   };
+
   scenario.members = [
     { entry: { id: "a" }, label: "Home" },
     { entry: { id: "b" }, label: "Cabin" },
@@ -334,6 +374,7 @@ it("names every numbered season in a new language, whatever the provider calls i
     addedAt: 1,
     adult: false,
   };
+
   scenario.members = [{ entry: { id: "a" }, label: "Home" }];
   scenario.index = indexCatalogue(
     [
@@ -344,6 +385,7 @@ it("names every numbered season in a new language, whatever the provider calls i
     ],
     "en",
   );
+
   const episode = (id: string, season: number) => ({
     id,
     season,
@@ -356,6 +398,7 @@ it("names every numbered season in a new language, whatever the provider calls i
     addedAt: null,
     container: "mkv",
   });
+
   // The provider names season 1 and the specials in Spanish and leaves season 2 to the app.
   scenario.provided = {
     originalName: null,

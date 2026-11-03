@@ -29,6 +29,7 @@ const movie = (name: string): Title => ({
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id: "1", tags: [] }],
 });
+
 const page = (name: string) => ({ name: "All", total: 1, titles: [movie(name)] });
 const rows = (name: string) => [{ id: "popular" as const, ...page(name) }];
 
@@ -39,9 +40,11 @@ Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
 });
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -82,25 +85,31 @@ async function mount(home: boolean) {
     stop();
     mounted.unmount();
   };
+
   await mounted.render(
     home
       ? createElement(HomeScreen, { active: false })
       : createElement(TitlesPage, { kind: "movie", active: false }),
   );
+
   const click = async (label: string) => {
     await until(() =>
       expect(
         [...container.querySelectorAll("button")].some((each) => each.textContent === label),
       ).toBe(true),
     );
+
     const button = [...container.querySelectorAll("button")].find(
       (each) => each.textContent === label,
     );
+
     expect(button).toBeDefined();
     await act(async () => button!.click());
   };
+
   // TitlesPage remembers its last tab across mounts, just as it does in the app.
   if (!home) await click("For you");
+
   return { container, click };
 }
 
@@ -113,6 +122,7 @@ it.each(["Home", "For you", "All movies"] as const)(
     const firstRows = entry === "For you" ? ipc.hold("ondemand.rows") : null;
     const view = await mount(entry === "Home");
     const allCollection = entry === "All movies" ? ipc.hold("ondemand.collection") : null;
+
     if (allCollection) await view.click("All movies");
     const method = firstRows ? "ondemand.rows" : "ondemand.collection";
     await until(() => expect(ipc.argsOf(method).length).toBeGreaterThan(0));
@@ -131,6 +141,7 @@ it.each(["Home", "For you", "All movies"] as const)(
               .find((heading) => heading.textContent === "Movies")
               ?.closest("section")?.textContent
           : view.container.textContent;
+
       expect(shown).toContain("Current catalogue");
       expect(shown).not.toContain("Old catalogue");
       expect(ipc.argsOf(method).length).toBeGreaterThan(before);

@@ -17,20 +17,25 @@ const sorts = {
   rating: "Rating",
   title: "Title",
 } as const;
+
 const qualities: Record<Exclude<QualityHint, "unknown">, string> = {
   "4k": "4K",
   "full-hd": "Full HD",
   hd: "HD",
   sd: "SD",
 };
+
 const qualityName = (quality: QualityHint) =>
   quality === "unknown" ? t("Unknown") : qualities[quality];
+
 const languageName = (code: string) =>
   TITLE_LANGUAGES.find((language) => language.code === code)?.name ??
   (code === "multi" ? t("Multiple languages") : t("Unknown"));
+
 // Observed languages are canonical codes, including those outside the offered hint languages.
 const knownLanguageName = (code: string) =>
   code === "unknown" ? t("Unknown") : (trackLanguageName(code) ?? code);
+
 /** "Audio: Dutch" or "Subtitles: Dutch", for a known track's choice. */
 const trackLabel = (kind: "audio" | "subtitles", code: string) =>
   t(kind === "audio" ? "Audio: {language}" : "Subtitles: {language}", {
@@ -50,16 +55,20 @@ export function BrowseControls({
   onChange: (choices: BrowseChoices) => void;
 }) {
   const [open, setOpen] = useState(false);
+
   const count = result
     ? t(kind === "movie" ? "{shown} of {count} movies" : "{shown} of {count} series", {
         shown: result.titles.length,
         count: result.total,
       })
     : null;
+
   const active = Boolean(
     choices.sort || choices.filters.quality || choices.filters.language || choices.filters.verified,
   );
+
   const verified = choices.filters.verified;
+
   return (
     <View>
       <View style={styles.summary}>

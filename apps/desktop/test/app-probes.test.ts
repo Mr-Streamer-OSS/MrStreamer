@@ -18,6 +18,7 @@ it("reports cumulative CPU in seconds and percent of one core over the actual wi
     cpuSeconds: 0,
     percentOneCore: 0,
   });
+
   for (const [before, after, elapsed] of [
     [undefined, 1, 60_000],
     [1, undefined, 60_000],
@@ -37,6 +38,7 @@ it("does not label Linux context switches or Windows placeholder zero as wakeups
 it("refuses ambiguous diagnostic CLI invocations before starting an app", () => {
   const scratch = mkdtempSync(join(tmpdir(), "mr-streamer-cli-"));
   const output = join(scratch, "results", "app.json");
+
   try {
     for (const [args, message] of [
       [
@@ -58,6 +60,7 @@ it("refuses ambiguous diagnostic CLI invocations before starting an app", () => 
         ["apps/desktop/test/e2e/measure-app.ts", ...args, "--json", output, "not-an-app"],
         { encoding: "utf8" },
       );
+
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(message);
       expect(result.stderr).not.toMatch(/spawn|ENOENT/);
@@ -75,6 +78,7 @@ it("attributes V8 self time by function and keeps idle, native and collector tim
     url: functionName.startsWith("(") ? "" : url,
     lineNumber,
   });
+
   const summary = profileSummary({
     nodes: [
       { id: 1, callFrame: frame("(root)"), children: [2, 3, 5, 6] },
@@ -90,6 +94,7 @@ it("attributes V8 self time by function and keeps idle, native and collector tim
     startTime: 0,
     endTime: 21_000,
   });
+
   expect(summary).toMatchObject({
     sampledUs: 21_000,
     idleUs: 15_000,
@@ -119,6 +124,7 @@ it("counts each thread's outer task time once and never reports missing thread t
     dur,
     ...defined({ tdur }),
   });
+
   const summary = traceSummary(
     [
       { name: "process_name", ph: "M", pid: 7, tid: 0, ts: 0, args: { name: "Renderer" } },
@@ -142,6 +148,7 @@ it("counts each thread's outer task time once and never reports missing thread t
     ],
     7,
   );
+
   expect(summary.threads).toEqual([
     expect.objectContaining({
       thread: "CrRendererMain",

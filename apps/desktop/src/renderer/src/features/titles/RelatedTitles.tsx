@@ -31,6 +31,7 @@ export function RelatedTitles({
     ...queries.related(details.kind, details.title),
     enabled: !switching,
   });
+
   const picks = related.data?.titles ?? [];
   const returned = useRef<HTMLButtonElement>(null);
   const returning = useRef(returnTo !== null);
@@ -41,6 +42,7 @@ export function RelatedTitles({
     returning.current = false;
     onReturn?.(returned.current);
   });
+
   return (
     <section
       className="mt-8 min-w-0"

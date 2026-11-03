@@ -2,6 +2,7 @@ import type { Driver } from "./language.ts";
 
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;
+
 const audio = `document.querySelector('select[aria-label="Audio in"]')`;
 const subtitles = `document.querySelector('select[aria-label="Subtitles"]')`;
 
@@ -29,15 +30,19 @@ export async function preferencesScenario(d: Driver): Promise<void> {
     await d.click("Open Playback", button("nav button", "Playback"));
     await d.wait(() => d.exists(audio));
   };
+
   const pick = async (select: string, name: string) => {
     await d.evaluate(`${select}.focus()`);
     d.action(`Choose ${name} with native select typeahead`);
+
     for (const char of name.slice(0, 2)) {
       await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
       await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
     }
+
     await d.key("Tab", 9);
   };
+
   const saved = () =>
     d.evaluate<{
       revision: number;
@@ -100,6 +105,7 @@ export async function preferencesScenario(d: Driver): Promise<void> {
   );
   await d.wait(async () => {
     const current = await saved();
+
     return current.audio === "es" && current.subtitles === "fr" && current.autoplay === false;
   });
   const before = await saved();
@@ -115,6 +121,7 @@ export async function preferencesScenario(d: Driver): Promise<void> {
     ),
   );
   const after = await saved();
+
   if (
     after.audio !== before.audio ||
     after.subtitles !== before.subtitles ||

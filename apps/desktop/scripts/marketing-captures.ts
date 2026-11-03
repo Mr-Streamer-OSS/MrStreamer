@@ -4,19 +4,23 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 /** Every capture, in the order the viewer's path takes them. */
 export const CAPTURES = ["library", "watching", "live-tv", "tv-guide", "home"] as const;
+
 export type CaptureName = (typeof CAPTURES)[number];
 
 /** The names given as `--only a,b`, or undefined for every capture. Fails on a name it doesn't know. */
 export function parseOnly(value: string | undefined): readonly CaptureName[] | undefined {
   if (value === undefined) return undefined;
   const names = value.split(",").map((name) => name.trim());
+
   const known = names.filter((name): name is CaptureName =>
     CAPTURES.some((capture) => capture === name),
   );
+
   if (known.length !== names.length) {
     const unknown = names.filter((name) => !known.some((capture) => capture === name));
     throw new Error(`No capture named ${unknown.join(", ")}: ${CAPTURES.join(", ")}.`);
   }
+
   return known;
 }
 
@@ -29,6 +33,7 @@ export function parseOnly(value: string | undefined): readonly CaptureName[] | u
 export function capturePlan(only: readonly CaptureName[] | undefined) {
   const wanted = (name: CaptureName) => !only || only.includes(name);
   const episode = wanted("watching") || wanted("home");
+
   return {
     wanted,
     series: wanted("library") || episode,
@@ -64,9 +69,11 @@ export function recordCapture(file: string, entry: CaptureEntry, provenance: Pro
   const manifest: CaptureManifest = JSON.parse(readFileSync(file, "utf8"));
   const recorded = { ...entry, provenance };
   const at = manifest.captures.findIndex((each) => each.name === entry.name);
+
   const captures =
     at === -1
       ? [...manifest.captures, recorded]
       : manifest.captures.map((each, index) => (index === at ? recorded : each));
+
   writeFileSync(file, JSON.stringify({ ...manifest, captures }, null, 2) + "\n");
 }

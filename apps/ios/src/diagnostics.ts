@@ -37,9 +37,13 @@ function loaded(list: Loadable<unknown>): string {
 
 function account({ entry, account, needsSecret }: Member): string {
   if (entry.kind === "demo") return "demo";
+
   if (needsSecret) return "needs its password or link again";
+
   if (!account) return "checking";
+
   if ("kind" in account) return `failed (${kindOf(account)})`;
+
   return checked(account.state, /^(active|expired|banned|disabled|unknown)$/);
 }
 
@@ -49,8 +53,10 @@ const PROVIDER_KINDS = { xtream: "Xtream", m3u: "M3U", demo: "Demo" } as const;
 function providerCount(all: readonly Member[]): string {
   const counted = Object.entries(PROVIDER_KINDS).flatMap(([kind, name]) => {
     const count = all.filter((member) => member.entry.kind === kind).length;
+
     return count > 0 ? [`${count} ${name}`] : [];
   });
+
   return counted.join(", ") || "none";
 }
 
@@ -67,7 +73,9 @@ const KEYS = { yours: "yours, in the Keychain", app: "the app's" } as const;
 
 function tmdb(standing: MetadataStanding): string[] {
   if (standing.kind === "reading") return ["TMDB", "  Key: checking"];
+
   if (standing.kind === "no-key") return ["TMDB", "  Key: none"];
+
   const status = {
     waiting: "waiting for the lists",
     unlinked: "no titles with a TMDB id",
@@ -76,6 +84,7 @@ function tmdb(standing: MetadataStanding): string[] {
     fetching: "asking",
     answered: "answered",
   }[standing.kind];
+
   return [
     "TMDB",
     `  Key: ${KEYS[standing.key]}`,
@@ -93,6 +102,7 @@ export function diagnosticsText(): string {
   const system = checked(String(Platform.Version), /^\d{1,3}(\.\d{1,3}){0,2}$/);
   const all = members();
   const now = Date.now();
+
   return [
     `Mr. Streamer ${version} (${build})`,
     `iOS ${system}`,

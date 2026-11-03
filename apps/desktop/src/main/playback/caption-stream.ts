@@ -8,8 +8,10 @@ import { captionsInPicture } from "@mrstreamer/core/subtitles/captions";
 
 const PACKET = 188;
 const SYNC = 0x47;
+
 /** Where the copied captions go: a PID broadcasts leave for private use. */
 export const CAPTION_PID = 0x1ff0;
+
 /**
  * Pictures held to put captions in display order: they arrive in decoding order, which differs
  * when B-frames are used, and caption letters follow the pictures they are shown with.
@@ -39,28 +41,36 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
     if (!picture) return [];
     const { pts, parts } = picture;
     picture = null;
+
     if (!video) return [];
     pictures++;
     const out: Uint8Array[] = [];
+
     // Pictures this far behind can't come before any still to arrive.
     while (waiting[0] && pictures - waiting[0].seen >= REORDER) {
       out.push(...pesPackets(waiting.shift()!));
     }
+
     const pairs = captionsInPicture(concat(parts), video.codec);
     present ||= pairs.length > 0;
+
     // Pairs that are all padding say nothing.
     if (!pairs.some((byte, index) => index % 3 !== 0 && (byte & 0x7f) !== 0)) return out;
+
     for (let index = 0; index + 3 <= pairs.length; index += 3) {
       if ((pairs[index + 1]! & 0x7f) >= 0x10) {
         const channel = pairs[index] === 0 ? 1 : 3;
+
         if (!channels.has(channel)) {
           channels.add(channel);
           onChannels([...channels].sort());
         }
       }
     }
+
     waiting.push({ pts, pairs, seen: pictures });
     waiting.sort((a, b) => a.pts - b.pts);
+
     return out;
   }
 
@@ -68,6 +78,7 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
     const header = [0, 0, 1, 0xbd, ...u16(3 + 5 + pairs.length), 0x80, 0x80, 5, ...ptsBytes(pts)];
     const pes = concat([Uint8Array.from(header), pairs]);
     const packets: Uint8Array[] = [];
+
     for (let offset = 0; offset < pes.length; offset += 184) {
       const chunk = pes.subarray(offset, offset + 184);
       const packet = new Uint8Array(PACKET).fill(0xff);
@@ -78,13 +89,17 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
         CAPTION_PID & 0xff,
         (stuffing > 0 ? 0x30 : 0x10) | (counter++ & 0x0f),
       ]);
+
       if (stuffing > 0) {
         packet[4] = stuffing - 1;
+
         if (stuffing > 1) packet[5] = 0x00;
       }
+
       packet.set(chunk, 4 + stuffing);
       packets.push(packet);
     }
+
     return packets;
   }
 
@@ -101,19 +116,23 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
       const out: Uint8Array[] = [];
       // `data[run, offset)` is unchanged input not in `out` yet.
       let run = 0;
+
       const flush = (to: number) => {
         if (to > run) out.push(data.subarray(run, to));
         run = to;
       };
+
       for (let offset = 0; offset < end; offset += PACKET) {
         if (data[offset] !== SYNC) continue;
         const pid = ((data[offset + 1]! & 0x1f) << 8) | data[offset + 2]!;
         const start = (data[offset + 1]! & 0x40) !== 0;
+
         if (pid === 0 && start) {
           programPid = patProgram(data.subarray(offset, offset + PACKET)) ?? programPid;
         } else if (pid === programPid && start) {
           const packet = data.subarray(offset, offset + PACKET);
           video = tableVideo(packet) ?? video;
+
           if (present) {
             // The program table goes out as a copy of our own with the caption stream listed.
             const patched = new Uint8Array(packet);
@@ -124,12 +143,15 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
           }
         } else if (video && pid === video.pid) {
           const payload = payloadOf(data, offset);
+
           if (start) {
             const captions = captionPackets();
+
             if (captions.length > 0) {
               flush(offset);
               out.push(...captions);
             }
+
             const pts = payload ? pesTime(payload) : null;
             picture =
               pts === null || !payload
@@ -140,7 +162,9 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
           }
         }
       }
+
       flush(end);
+
       return concat(out);
     },
   };
@@ -149,31 +173,41 @@ export function createCaptionCopy(onChannels: (channels: readonly number[]) => v
 /** The payload of the transport packet at `offset`, after any adaptation field. */
 function payloadOf(data: Uint8Array, offset = 0): Uint8Array | null {
   const adaptation = (data[offset + 3]! >> 4) & 0x03;
+
   if (adaptation === 0 || adaptation === 2) return null;
   const start = adaptation === 3 ? 5 + data[offset + 4]! : 4;
+
   return start < PACKET ? data.subarray(offset + start, offset + PACKET) : null;
 }
 
 /** The PMT pid of the first program in a PAT packet. */
 function patProgram(packet: Uint8Array): number | null {
   const payload = payloadOf(packet);
+
   if (!payload) return null;
   const section = payload.subarray(1 + payload[0]!);
+
   if (section[0] !== 0x00) return null;
   const length = ((section[1]! & 0x0f) << 8) | section[2]!;
+
   for (let offset = 8; offset + 4 <= 3 + length - 4 && offset + 4 <= section.length; offset += 4) {
     const program = (section[offset]! << 8) | section[offset + 1]!;
+
     if (program !== 0) return ((section[offset + 2]! & 0x1f) << 8) | section[offset + 3]!;
   }
+
   return null;
 }
 
 /** The program's H.264 or HEVC picture, from a PMT packet. */
 function tableVideo(packet: Uint8Array): { pid: number; codec: "h264" | "hevc" } | null {
   const section = tableSection(packet);
+
   if (!section) return null;
+
   for (const entry of entries(section)) {
     const type = section[entry]!;
+
     if (type === 0x1b || type === 0x24) {
       return {
         pid: ((section[entry + 1]! & 0x1f) << 8) | section[entry + 2]!,
@@ -181,24 +215,30 @@ function tableVideo(packet: Uint8Array): { pid: number; codec: "h264" | "hevc" }
       };
     }
   }
+
   return null;
 }
 
 /** The program table section in a PMT packet, without its CRC, when it fits the packet. */
 function tableSection(packet: Uint8Array): Uint8Array | null {
   const payload = payloadOf(packet);
+
   if (!payload) return null;
   const start = 1 + payload[0]!;
   const section = payload.subarray(start);
+
   if (section[0] !== 0x02) return null;
   const length = ((section[1]! & 0x0f) << 8) | section[2]!;
+
   if (3 + length > section.length) return null;
+
   return section.subarray(0, 3 + length - 4);
 }
 
 /** Offsets of the entries in a program table section. */
 function* entries(section: Uint8Array): Generator<number> {
   const programInfo = ((section[10]! & 0x0f) << 8) | section[11]!;
+
   for (let offset = 12 + programInfo; offset + 5 <= section.length;) {
     yield offset;
     offset += 5 + (((section[offset + 3]! & 0x0f) << 8) | section[offset + 4]!);
@@ -208,10 +248,13 @@ function* entries(section: Uint8Array): Generator<number> {
 /** Lists the caption stream in a PMT packet, in place, when there's room and it isn't there. */
 function addCaptionStream(packet: Uint8Array): void {
   const section = tableSection(packet);
+
   if (!section) return;
+
   for (const entry of entries(section)) {
     if ((((section[entry + 1]! & 0x1f) << 8) | section[entry + 2]!) === CAPTION_PID) return;
   }
+
   // Private data, named by a registration descriptor so nothing mistakes it for sound.
   const entry = [
     0x06,
@@ -226,8 +269,10 @@ function addCaptionStream(packet: Uint8Array): void {
     0x30,
     0x38,
   ];
+
   const payload = payloadOf(packet)!;
   const at = packet.length - payload.length + 1 + payload[0]!;
+
   if (at + section.length + entry.length + 4 > PACKET) return;
   const body = Uint8Array.from([...section, ...entry]);
   const length = body.length - 3 + 4;
@@ -249,6 +294,7 @@ function pesTime(payload: Uint8Array): number | null {
   if (payload[0] !== 0 || payload[1] !== 0 || payload[2] !== 1 || !(payload[7]! & 0x80)) {
     return null;
   }
+
   return (
     ((payload[9]! >> 1) & 0x07) * 2 ** 30 +
     (payload[10]! << 22) +
@@ -261,6 +307,7 @@ function pesTime(payload: Uint8Array): number | null {
 function ptsBytes(pts: number): number[] {
   const high = Math.floor(pts / 2 ** 30) & 0x07;
   const low = pts % 2 ** 30;
+
   return [
     0x21 | (high << 1),
     (low >>> 22) & 0xff,
@@ -277,10 +324,13 @@ function u16(value: number): number[] {
 /** CRC-32/MPEG-2, the checksum of every PSI section. */
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
+
   for (const byte of bytes) {
     crc ^= byte << 24;
+
     for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
   }
+
   return crc >>> 0;
 }
 
@@ -289,9 +339,11 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
   if (parts.length === 1) return parts[0]!;
   const joined = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
+
   for (const part of parts) {
     joined.set(part, at);
     at += part.length;
   }
+
   return joined;
 }

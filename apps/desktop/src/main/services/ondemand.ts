@@ -109,10 +109,13 @@ interface Flight<A, E = never> {
 function younger(at: number, now: number, age: number): boolean {
   return Number.isFinite(at) && at <= now && now - at < age;
 }
+
 /** How many seasons TMDB described stay in memory, each in one language. */
 const SEASONS_KEPT = 100;
+
 /** How long TMDB gets to describe a title, or a season; the provider's details stand after that. */
 const ABOUT_TIMEOUT_MS = 4000;
+
 /** Search results a Movies or Series page shows; a longer list needs more words. */
 const SEARCH_PAGE = 300;
 
@@ -121,10 +124,13 @@ const SEARCH_PAGE = 300;
  * Every list the UI shows asks again when the status changes, and the failure changes it.
  */
 const RETRY_AFTER_MS = 60_000;
+
 /** How many subscriptions' lists are fetched at a time. */
 const FETCHES_AT_ONCE = 2;
+
 /** How long a worker that is stopping gets to write what it still holds. */
 const STOP_WITHIN_MS = 2000;
+
 /** A subscription whose lists aren't loaded. */
 const NOTHING: WorkerStatus = { movies: 0, series: 0, fetchedAt: null };
 
@@ -307,25 +313,31 @@ function make(deps: OnDemandDeps) {
     const settings = yield* Settings;
     const cache = Option.getOrNull(yield* Effect.serviceOption(DetailCache));
     const verifiedFiles = Option.getOrNull(yield* Effect.serviceOption(VerifiedFiles));
+
     /** The language whose versions titles show and play first. */
     const language = Effect.map(
       settings.get,
       (preferences) => preferences.titleLanguage ?? DEFAULT_TITLE_LANGUAGE,
     );
+
     const updates = yield* PubSub.unbounded<OnDemandUpdate>();
     const progress = yield* PubSub.unbounded<OnDemandStatus["metadata"]>();
     const detailed = yield* PubSub.unbounded<TitleKey>();
     const scope = yield* Effect.scope;
+
     /** The TMDB key the worker runs with: the viewer's own, or the app's. */
     const keyOf = (preferences: { readonly tmdbKey?: string }) =>
       preferences.tmdbKey?.trim() || deps.tmdbKey;
+
     let tmdbKey = keyOf(yield* settings.get);
+
     let metadataProgress: MetadataProgress = {
       known: 0,
       wanted: 0,
       refused: false,
       fetching: false,
     };
+
     const worker = yield* Effect.acquireRelease(
       Effect.sync(() =>
         workerClient(
@@ -351,8 +363,10 @@ function make(deps: OnDemandDeps) {
       ),
       (client) => Effect.promise(() => client.stop()),
     );
+
     /** Why each subscription's latest refresh failed, by its id, until one succeeds. */
     const failures = new Map<string, { readonly error: AppError; readonly at: number }>();
+
     /** Owns a refresh through acceptance, including the wait for a title-fetch slot. */
     const refreshing = new Map<
       string,
@@ -362,6 +376,7 @@ function make(deps: OnDemandDeps) {
         readonly fiber: Fiber.Fiber<void, Failed>;
       }
     >();
+
     /** Counts restarts of the worker. */
     let generation = 0;
     const details = new Map<string, Downloaded>();
@@ -376,6 +391,7 @@ function make(deps: OnDemandDeps) {
     const forgotten = new Set<string>();
     const currentSources = new Map<string, Source>();
     const sourceKey = (source: SavedSubscription) => JSON.stringify([source.id, source.revision]);
+
     const stands = (source: Source) =>
       Effect.map(
         subscriptions.stands(source),
@@ -384,9 +400,11 @@ function make(deps: OnDemandDeps) {
           !forgotten.has(sourceKey(source)) &&
           sameSource(source, currentSources.get(source.id)),
       );
+
     const cancelSource = (id: string) =>
       Effect.gen(function* () {
         const fibers: Fiber.Fiber<unknown, unknown>[] = [];
+
         for (const flights of [providerFlights, asking, seasonFlights]) {
           for (const [key, flight] of flights)
             if (flight.source.id === id) {
@@ -395,21 +413,27 @@ function make(deps: OnDemandDeps) {
               fibers.push(flight.fiber);
             }
         }
+
         yield* Fiber.interruptAll(fibers);
       });
+
     const useSource = (source: Source) =>
       Effect.gen(function* () {
         if (forgotten.has(sourceKey(source)) || !(yield* subscriptions.stands(source)))
           return yield* switched;
         const previous = currentSources.get(source.id);
+
         if (previous && !sameSource(source, previous)) {
           currentSources.set(source.id, source);
+
           for (const [key, entry] of details)
             if (entry.version.subscriptionId === source.id) details.delete(key);
           yield* cancelSource(source.id);
         } else currentSources.set(source.id, source);
+
         if (!(yield* stands(source))) return yield* switched;
       });
+
     /** Fork only the operation in the service scope. Interrupting join detaches its caller. */
     const shared = <A, E>(
       flights: Map<string, Flight<A, E>>,
@@ -421,8 +445,10 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           if (!(yield* stands(source))) return yield* switched;
           const kept = flights.get(key);
+
           if (kept) return kept.fiber;
           const token = {};
+
           const fiber = yield* Effect.forkIn(
             restore(work).pipe(
               Effect.ensuring(
@@ -436,10 +462,13 @@ function make(deps: OnDemandDeps) {
             ),
             scope,
           );
+
           flights.set(key, { source, token, fiber });
+
           return fiber;
         }),
       );
+
     /** Only a key change permits metadata fallback. A caller's cancellation detaches its wait. */
     const joinFlight = <A, E>(
       fiber: Fiber.Fiber<A, E>,
@@ -451,18 +480,24 @@ function make(deps: OnDemandDeps) {
           Effect.gen(function* () {
             if (Exit.isSuccess(exit)) return exit.value;
             const cause = exit.cause;
+
             if (!Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
             const saved = yield* subscriptions.saved;
+
             if (forgotten.has(sourceKey(source)) || !saved.some((each) => each.id === source.id))
               return yield* noSubscription;
+
             if (fallback && reconfigured.has(fiber) && (yield* stands(source)))
               return yield* fallback;
+
             return yield* switched;
           }),
         ),
       );
+
     const read = (key: DetailKey) =>
       cache ? cache.read(key).pipe(Effect.orElseSucceed(() => null)) : Effect.succeed(null);
+
     const providerKey = (
       source: SavedSubscription,
       kind: TitleKind,
@@ -476,8 +511,10 @@ function make(deps: OnDemandDeps) {
       titleKind: kind,
       id,
     });
+
     const detailKey = (source: SavedSubscription, kind: TitleKind, id: string) =>
       JSON.stringify(providerKey(source, kind, id));
+
     const fetchOne = (yield* Semaphore.make(FETCHES_AT_ONCE)).withPermits(1);
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
 
@@ -506,9 +543,11 @@ function make(deps: OnDemandDeps) {
      */
     const held = Effect.gen(function* () {
       const saved = yield* listed;
+
       if (saved.length === 0) return [];
       const adults = (yield* settings.get).adultTitles ?? false;
       const worked = yield* call("status", { owners: saved.map(ownerOf), adults });
+
       return saved.map((subscription, at) => ({ subscription, worked: worked[at] ?? NOTHING }));
     });
 
@@ -520,10 +559,12 @@ function make(deps: OnDemandDeps) {
       ...defined({ importRevision: worked.importRevision || undefined }),
       failure: failures.get(subscriptionId)?.error ?? null,
     });
+
     const stampOf = (source: SavedSubscription) =>
       Effect.gen(function* () {
         const adults = (yield* settings.get).adultTitles ?? false;
         const [status] = yield* call("status", { owners: [ownerOf(source)], adults });
+
         return status?.importRevision === source.importRevision
           ? status?.catalogueStamp
           : undefined;
@@ -538,17 +579,21 @@ function make(deps: OnDemandDeps) {
           ),
         ),
       );
+
       return {
         lists: found.map(({ subscription, worked }) => statusOf(subscription.id, worked)),
         metadata: tmdbKey ? metadataProgress : null,
       } satisfies OnDemandStatus;
     });
+
     /** Tells the UI the status; `marked` after lists that mark a title they listed for adults. */
     const publish = (marked: boolean) =>
       Effect.flatMap(status, (current) =>
         PubSub.publish(updates, marked ? { ...current, markedForAdults: true } : current),
       );
+
     const publishStatus = publish(false);
+
     /** Tells the UI TMDB's progress alone, with no word from the worker about the lists. */
     const publishProgress = Effect.suspend(() =>
       PubSub.publish(progress, tmdbKey ? metadataProgress : null),
@@ -566,6 +611,7 @@ function make(deps: OnDemandDeps) {
          * answered under one that isn't, lists or a refusal, is neither kept nor told.
          */
         const stillSaved = stands(source);
+
         // The worker fetches the lists and sets them aside; it keeps them only once told to.
         const fetched = Effect.gen(function* () {
           const catalogue = playlist
@@ -576,12 +622,16 @@ function make(deps: OnDemandDeps) {
                   catch: failedWith,
                 })
               : undefined;
+
           yield* call("refresh", { ...owner, account, ...defined({ catalogue }) });
           const keep = yield* stillSaved;
           const finished = yield* call("finishRefresh", { ...owner, keep });
+
           if (!keep) return yield* switched;
+
           return finished.markedForAdults === true;
         });
+
         yield* fetched.pipe(
           fetchOne,
           diagnosed("titles"),
@@ -606,14 +656,20 @@ function make(deps: OnDemandDeps) {
       Effect.gen(function* () {
         yield* useSource(source);
         const under = refreshing.get(source.id);
+
         if (playlist && under && sameSource(source, under.source)) {
           yield* Fiber.await(under.fiber);
+
           if (!(yield* stands(source))) return yield* switched;
+
           return yield* refreshOf(source, playlist);
         }
+
         let running = under && sameSource(source, under.source) ? under : null;
+
         if (!running) {
           const token = {};
+
           const fiber = yield* Effect.forkIn(
             fetchAndStore(source, playlist).pipe(
               Effect.ensuring(
@@ -624,9 +680,11 @@ function make(deps: OnDemandDeps) {
             ),
             scope,
           );
+
           running = { source, token, fiber };
           refreshing.set(source.id, running);
         }
+
         return yield* joinFlight(running.fiber, source);
       });
 
@@ -643,25 +701,31 @@ function make(deps: OnDemandDeps) {
         const found = yield* held;
         const all = found.map(({ subscription }) => ownerOf(subscription));
         const sources = new Map((yield* subscriptions.sources).map((each) => [each.id, each]));
+
         const missing = found.flatMap(({ subscription, worked }) =>
           worked.fetchedAt === null ? [subscription] : [],
         );
+
         // Refresh asks the provider again whenever the viewer does.
         const due = missing.flatMap((subscription) => {
           const failed = failures.get(subscription.id);
           const source = sources.get(subscription.id);
+
           return source &&
             (refreshing.has(source.id) || !(failed && Date.now() - failed.at < RETRY_AFTER_MS))
             ? [source]
             : [];
         });
+
         const browsing = read === true;
+
         if (missing.length < found.length) {
           for (const source of due) {
             // One that failed waits for its own refresh, or the next start.
             if (!failures.has(source.id))
               yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
           }
+
           if (!browsing) {
             yield* Effect.forEach(
               due.filter(
@@ -671,37 +735,51 @@ function make(deps: OnDemandDeps) {
               (source) => refreshOf(source).pipe(Effect.ignore),
               { concurrency: "unbounded" },
             );
+
             for (const source of due.filter((source) => read.has(source.id)))
               if (!(yield* stands(source))) return yield* switched;
           }
+
           return all;
         }
+
         if (missing.length === 0) return all;
+
         if (browsing && due.length > 0) {
           // Race only the callers joining service-owned refreshes. Losing a wait must not cancel
           // that provider's fetch: it can still join the catalogue and publish its own status.
           const failed = yield* Effect.raceAll(due.map((source) => refreshOf(source))).pipe(
             Effect.match({ onFailure: (cause) => cause, onSuccess: () => null }),
           );
+
           if (failed) return yield* failed;
+
           return all;
         }
+
         if (!browsing) {
           for (const source of due) yield* Effect.forkIn(Effect.ignore(refreshOf(source)), scope);
+
           if (!missing.some((subscription) => read.has(subscription.id))) return all;
         }
+
         const waiting = browsing ? due : due.filter((source) => read.has(source.id));
+
         const failed = yield* Effect.forEach(
           waiting,
           (source) =>
             Effect.match(refreshOf(source), { onFailure: (cause) => cause, onSuccess: () => null }),
           { concurrency: "unbounded" },
         );
+
         for (const source of waiting) if (!(yield* stands(source))) return yield* switched;
+
         if (failed.includes(null)) return all;
+
         const first = browsing
           ? missing[0]
           : missing.find((subscription) => read.has(subscription.id));
+
         return yield* failed.find((each) => each !== null) ??
           new Failed({
             error: (first && failures.get(first.id)?.error) ?? {
@@ -718,13 +796,16 @@ function make(deps: OnDemandDeps) {
     ) =>
       Effect.gen(function* () {
         const made = yield* owners(read);
+
         return yield* run(made, yield* language);
       });
 
     const aboutKey = (kind: TitleKind, id: string, viewer: string) =>
       JSON.stringify([kind, id, viewer]);
+
     const validAbout = (key: string, now: number) => {
       const kept = abouts.get(key);
+
       return kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_EXPIRE_MS)
         ? kept.value
         : null;
@@ -736,6 +817,7 @@ function make(deps: OnDemandDeps) {
         if (!title.tmdbId) return { value: null, flight: undefined };
         const key = aboutKey(ref.kind, title.tmdbId, viewer);
         let kept = abouts.get(key);
+
         if (!kept) {
           const disk = yield* read({
             kind: "about",
@@ -743,13 +825,16 @@ function make(deps: OnDemandDeps) {
             id: title.tmdbId,
             language: viewer,
           });
+
           if (disk?.kind === "about") {
             kept = disk;
             keep(abouts, key, disk, DETAILS_KEPT);
           }
         }
+
         const now = yield* Clock.currentTimeMillis;
         const value = validAbout(key, now);
+
         if (
           (kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)) ||
           !tmdbKey
@@ -757,6 +842,7 @@ function make(deps: OnDemandDeps) {
           return { value, flight: undefined };
         const flightKey = JSON.stringify([sourceKey(source), key]);
         const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
+
         const flight = yield* shared(
           asking,
           flightKey,
@@ -775,13 +861,17 @@ function make(deps: OnDemandDeps) {
                   throw cause;
                 }),
             ).pipe(Effect.orElseSucceed(() => undefined));
+
             if (answer === undefined || !(yield* stands(source))) return undefined;
+
             const record = {
               kind: "about",
               at: yield* Clock.currentTimeMillis,
               value: answer,
             } as const;
+
             keep(abouts, key, record, DETAILS_KEPT);
+
             if (cache)
               yield* cache
                 .remember(
@@ -789,10 +879,13 @@ function make(deps: OnDemandDeps) {
                   record,
                 )
                 .pipe(Effect.ignore);
+
             if (late.has(flightKey) && answer) yield* PubSub.publish(detailed, ref);
+
             return answer;
           }),
         );
+
         return { value, flight, key, flightKey };
       });
 
@@ -826,8 +919,10 @@ function make(deps: OnDemandDeps) {
         const key = detailKey(source, kind, id);
         const stamp = yield* stampOf(source);
         let kept = details.get(key);
+
         if (!kept || kept.sourceRevision !== source.revision) {
           const disk = yield* read(providerKey(source, kind, id));
+
           if (disk?.kind === "provider")
             kept = {
               raw: disk.value,
@@ -840,7 +935,9 @@ function make(deps: OnDemandDeps) {
             };
           else kept = undefined;
         }
+
         const now = yield* Clock.currentTimeMillis;
+
         // An upgraded unstamped catalogue can cache display data too. Only currentDetails can
         // authorize files; after restart this display-only record still requires provider renewal.
         const legacyDisplay =
@@ -849,12 +946,16 @@ function make(deps: OnDemandDeps) {
           stamp === undefined &&
           kept.catalogueStamp === undefined &&
           younger(kept.at, now, DAY);
+
         if (kept && (currentDetails(source, kept, stamp, now) || legacyDisplay)) {
           if (!(yield* stands(source))) return yield* switched;
           keep(details, key, { ...kept, title }, DETAILS_KEPT);
+
           return { ...kept, title };
         }
+
         const flightKey = JSON.stringify([key, source.revision, stamp ?? null]);
+
         const flight = yield* shared(
           providerFlights,
           flightKey,
@@ -867,11 +968,14 @@ function make(deps: OnDemandDeps) {
                   : source.provider.seriesDetails(id, signal),
               catch: failedWith,
             }).pipe(diagnosed("details"));
+
             if (!(yield* stands(source))) return yield* switched;
+
             // A refresh during this request cannot bless an answer asked of the previous catalogue.
             // A source replaced as that was read switched, whatever the catalogue did.
             if ((yield* stampOf(source)) !== stamp || !(yield* listedTitle(source, kind, id)))
               return yield* (yield* stands(source)) ? overtaken : switched;
+
             const downloaded: Downloaded = {
               raw,
               at: yield* Clock.currentTimeMillis,
@@ -881,7 +985,9 @@ function make(deps: OnDemandDeps) {
               version: { subscriptionId: source.id, id },
               sourceRevision: source.revision,
             };
+
             if (!(yield* stands(source))) return yield* switched;
+
             if (cache)
               yield* cache
                 .remember(providerKey(source, kind, id), {
@@ -891,20 +997,25 @@ function make(deps: OnDemandDeps) {
                   value: raw,
                 })
                 .pipe(Effect.ignore);
+
             if (!(yield* stands(source))) return yield* switched;
             keep(details, key, downloaded, DETAILS_KEPT);
+
             return downloaded;
           }),
         );
+
         return yield* joinFlight(flight, source).pipe(
           Effect.catch((cause) =>
             Effect.gen(function* () {
               if (!fallback || !kept) return yield* cause;
+
               if (!(yield* listedTitle(source, kind, id)) || !(yield* stands(source)))
                 return yield* switched;
               // A newer catalogue's request may already have renewed this record while the old one failed.
               const shown = { ...(details.get(key) ?? kept), title };
               keep(details, key, shown, DETAILS_KEPT);
+
               return shown;
             }),
           ),
@@ -917,15 +1028,21 @@ function make(deps: OnDemandDeps) {
         yield* useSource(source);
         const viewer = yield* language;
         const title = yield* listedTitle(source, kind, id);
+
         if (!title) return yield* new Failed({ error: { kind: "title-not-found", titleId: id } });
         const metadata = yield* askAbout(source, { subscriptionId, kind, id }, title, viewer);
         const downloaded = yield* providerRead(source, kind, id, title, fallback);
+
         if (!(yield* stands(source))) return yield* switched;
+
         if (metadata.flightKey && asking.has(metadata.flightKey)) late.add(metadata.flightKey);
+
         const about = metadata.key
           ? validAbout(metadata.key, yield* Clock.currentTimeMillis)
           : metadata.value;
+
         const { raw } = downloaded;
+
         const version = {
           ...title,
           subscriptionId,
@@ -934,6 +1051,7 @@ function make(deps: OnDemandDeps) {
             title.versions.find((each) => each.subscriptionId === subscriptionId && each.id === id)
               ?.tags ?? title.tags,
         };
+
         return {
           raw,
           source,
@@ -941,6 +1059,7 @@ function make(deps: OnDemandDeps) {
           about: Effect.gen(function* () {
             if (metadata.flight)
               yield* joinFlight(metadata.flight, source, Effect.succeed(undefined));
+
             return metadata.key
               ? validAbout(metadata.key, yield* Clock.currentTimeMillis)
               : metadata.value;
@@ -959,10 +1078,12 @@ function make(deps: OnDemandDeps) {
         const files: KnownFile[] = [];
         const now = yield* Clock.currentTimeMillis;
         const found = kind === "series" && details.size > 0 ? yield* held : [];
+
         for (const source of yield* listed) {
           const known = yield* verifiedFiles
             .read(source.key, source.fileRevision)
             .pipe(Effect.orElseSucceed(() => []));
+
           if (kind === "movie") {
             for (const file of known)
               if (file.kind === "movie")
@@ -975,11 +1096,14 @@ function make(deps: OnDemandDeps) {
                 });
             continue;
           }
+
           const episodes = new Map(
             known.filter((file) => file.kind === "episode").map((file) => [file.id, file]),
           );
+
           if (onlyRead && episodes.size === 0) continue;
           const seen = new Set<string>();
+
           for (const held of details.values()) {
             if (
               held.title.kind !== "series" ||
@@ -993,30 +1117,38 @@ function make(deps: OnDemandDeps) {
               )
             )
               continue;
+
             const tags = onlyRead
               ? []
               : (held.title.versions.find(
                   (version) =>
                     version.subscriptionId === source.id && version.id === held.version.id,
                 )?.tags ?? []);
+
             for (const episode of held.raw.episodes) {
               const found = episodes.get(episode.id);
+
               if (onlyRead && found?.seriesId !== held.version.id) continue;
+
               if (seen.has(episode.id)) continue;
               seen.add(episode.id);
               const listingKey = listedFileKey("episode", episode);
+
               const tracks =
                 found?.seriesId === held.version.id && found.listingKey === listingKey
                   ? { audio: found.audio, subtitles: found.subtitles }
                   : undefined;
+
               if (onlyRead && !tracks) continue;
               const named = onlyRead ? [] : titleName(episode.name).tags;
+
               // Read-only facts need no listing hints. Explicit episode quality otherwise wins.
               const hints = onlyRead
                 ? []
                 : qualityHint(named) === "unknown"
                   ? [...tags, ...named]
                   : [...tags.filter((tag) => qualityHint([tag]) === "unknown"), ...named];
+
               files.push({
                 subscriptionId: source.id,
                 kind: "episode",
@@ -1029,12 +1161,14 @@ function make(deps: OnDemandDeps) {
             }
           }
         }
+
         return files;
       });
 
     /** One read of validated observations decorates each season without joining rows by id. */
     const episodeObserver = Effect.map(knownFiles("series", true), (known) => {
       const files = new Map(known.map((file) => [ownedKey(file), file.tracks]));
+
       return <E extends Episode>(episode: E) => ({
         ...episode,
         ...defined({
@@ -1043,6 +1177,7 @@ function make(deps: OnDemandDeps) {
                 const tracks = files.get(
                   ownedKey({ subscriptionId: episode.subscriptionId, id: version.id }),
                 );
+
                 return tracks ? { ...version, observed: { files: 1, ...tracks } } : version;
               })
             : undefined,
@@ -1062,24 +1197,30 @@ function make(deps: OnDemandDeps) {
         const key = JSON.stringify([tmdbId, number, asked]);
         const storage = { kind: "season", id: tmdbId, number, language: asked } as const;
         let kept = seasons.get(key);
+
         if (!kept) {
           const disk = yield* read(storage);
+
           if (disk?.kind === "season") {
             kept = disk;
             keep(seasons, key, disk, SEASONS_KEPT);
           }
         }
+
         const now = yield* Clock.currentTimeMillis;
+
         const usable =
           kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_EXPIRE_MS)
             ? kept.value
             : null;
+
         if (
           (kept && younger(kept.at, now, kept.value === null ? DAY : TMDB_REFRESH_MS)) ||
           !tmdbKey
         )
           return usable;
         const client = tmdb({ key: tmdbKey, ...defined({ api: deps.tmdbApi || undefined }) });
+
         const fiber = yield* shared(
           seasonFlights,
           JSON.stringify([sourceKey(source), key]),
@@ -1098,18 +1239,25 @@ function make(deps: OnDemandDeps) {
                   throw cause;
                 }),
             ).pipe(Effect.orElseSucceed(() => undefined));
+
             if (answer === undefined || !(yield* stands(source))) return undefined;
+
             const record = {
               kind: "season",
               at: yield* Clock.currentTimeMillis,
               value: answer,
             } as const;
+
             keep(seasons, key, record, SEASONS_KEPT);
+
             if (cache) yield* cache.remember(storage, record).pipe(Effect.ignore);
+
             return answer;
           }),
         );
+
         const answer = yield* joinFlight(fiber, source, Effect.succeed(undefined));
+
         return answer === undefined ? usable : answer;
       });
 
@@ -1119,8 +1267,10 @@ function make(deps: OnDemandDeps) {
       refresh: (subscriptionId: string, playlist?: PlaylistRefresh) =>
         Effect.gen(function* () {
           const source = playlist?.source ?? (yield* subscriptions.sourceOf(subscriptionId));
+
           // Unmapped playlists retain Live-only behavior.
           if (hasTitles(source)) yield* refreshOf(source, playlist);
+
           return yield* status;
         }),
 
@@ -1128,9 +1278,11 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const found = yield* held.pipe(Effect.orElseSucceed(() => []));
           const worked = found.find(({ subscription }) => subscription.id === subscriptionId);
+
           if (!worked) return false;
           const { fetchedAt } = worked.worked;
           const now = yield* Clock.currentTimeMillis;
+
           return (
             fetchedAt === null ||
             worked.worked.importRevision !== worked.subscription.importRevision ||
@@ -1146,6 +1298,7 @@ function make(deps: OnDemandDeps) {
       recommendations: (seeds: readonly HomeSeed[]) =>
         Effect.gen(function* () {
           const saved = yield* listed;
+
           return yield* call("recommendations", {
             owners: saved.map(ownerOf),
             language: yield* language,
@@ -1156,17 +1309,21 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const saved = yield* listed;
           const source = saved.find((each) => each.id === version.subscriptionId);
+
           if (!source) return { basis: null, titles: [] };
           const viewer = yield* language;
+
           const [title] = yield* call("byIds", {
             owners: saved.map(ownerOf),
             language: viewer,
             kind,
             versions: [version],
           });
+
           const about = title?.tmdbId
             ? validAbout(aboutKey(kind, title.tmdbId, viewer), yield* Clock.currentTimeMillis)
             : null;
+
           return yield* call("related", {
             owners: saved.map(ownerOf),
             language: viewer,
@@ -1192,7 +1349,9 @@ function make(deps: OnDemandDeps) {
               if (id === "adult" && !(yield* settings.get).adultTitles) {
                 return { name: "For adults", total: 0, titles: [] };
               }
+
               const files = filters ? yield* knownFiles(kind) : undefined;
+
               return yield* call("collection", {
                 owners,
                 language,
@@ -1212,6 +1371,7 @@ function make(deps: OnDemandDeps) {
           (owners, language) =>
             Effect.gen(function* () {
               const files = filters ? yield* knownFiles(kind) : undefined;
+
               return yield* call("searchKind", {
                 owners,
                 language,
@@ -1226,6 +1386,7 @@ function make(deps: OnDemandDeps) {
       filterOptions: (kind: TitleKind) =>
         Effect.gen(function* () {
           const saved = yield* listed;
+
           return yield* call("filterOptions", {
             owners: saved.map(ownerOf),
             language: yield* language,
@@ -1238,12 +1399,14 @@ function make(deps: OnDemandDeps) {
       details: (kind: TitleKind, version: OwnedId) =>
         Effect.gen(function* () {
           const { shown } = yield* detailsOf(kind, version);
+
           if (
             shown.kind !== "series" ||
             !shown.seasons.some((season) => season.episodes.some((episode) => episode.versions))
           )
             return shown;
           const observe = yield* episodeObserver;
+
           return {
             ...shown,
             seasons: shown.seasons.map((season) => ({
@@ -1256,15 +1419,19 @@ function make(deps: OnDemandDeps) {
       season: (series: OwnedId, number: number) =>
         Effect.gen(function* () {
           const { shown, about, source } = yield* detailsOf("series", series);
+
           const season =
             shown.kind === "series"
               ? shown.seasons.find((each) => each.number === number)
               : undefined;
+
           if (!season) {
             return yield* new Failed({ error: { kind: "title-not-found", titleId: series.id } });
           }
+
           const { tmdbId, originalLanguage } = shown.title;
           const answers: (readonly EpisodeAbout[])[] = [];
+
           if (tmdbId) {
             // Names fall back as titles' do: the viewer's language, English, the series' own,
             // which TMDB says as the details open if the lists don't know it yet. Each is asked
@@ -1272,18 +1439,25 @@ function make(deps: OnDemandDeps) {
             const madeIn = originalLanguage
               ? Effect.succeed(originalLanguage)
               : Effect.map(about, (said) => said?.language ?? null);
+
             const asked = new Set<string>();
+
             for (const next of [language, Effect.succeed("en"), madeIn]) {
               const wanted = yield* next;
+
               if (!wanted || asked.has(wanted)) continue;
               asked.add(wanted);
               const answer = yield* seasonIn(source, tmdbId, number, wanted);
+
               if (!answer) break;
               answers.push(answer);
+
               if (named(season, answers)) break;
             }
           }
+
           if (!(yield* stands(source))) return yield* switched;
+
           return yield* observedEpisodes(seasonEpisodes(season, answers));
         }),
 
@@ -1333,28 +1507,38 @@ function make(deps: OnDemandDeps) {
         Effect.gen(function* () {
           const source = yield* subscriptions.sourceOf(ref.subscriptionId);
           const kind = ref.kind === "movie" ? "movie" : "series";
+
           const version = {
             subscriptionId: ref.subscriptionId,
             id: ref.kind === "movie" ? ref.id : ref.seriesId,
           };
+
           const [title] = yield* loaded(
             (owners, language) => call("byIds", { owners, language, kind, versions: [version] }),
             new Set([version.subscriptionId]),
           );
+
           if (!title) return null;
+
           if (ref.kind === "movie") {
             const current = yield* call("container", { ...ownerOf(source), id: ref.id });
+
             return current?.listingKey === listingKey
               ? { tmdbId: title.tmdbId, title: title.title, year: title.year }
               : null;
           }
+
           yield* useSource(source);
+
           const held = yield* providerRead(source, "series", ref.seriesId, title, false).pipe(
             Effect.orElseSucceed(() => null),
           );
+
           if (!held) return null;
           const episode = held.raw.episodes.find((entry) => entry.id === ref.id);
+
           if (!episode || listedFileKey("episode", episode) !== listingKey) return null;
+
           return {
             tmdbId: title.tmdbId,
             title: title.title,
@@ -1369,17 +1553,23 @@ function make(deps: OnDemandDeps) {
           const source = yield* subscriptions.sourceOf(title.subscriptionId);
           yield* useSource(source);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: title.id } });
+
           if (title.kind === "movie") {
             const listed = yield* call("container", { ...ownerOf(source), id: title.id });
+
             if (!listed) return yield* missing;
+
             const file = yield* Effect.tryPromise({
               try: (signal) =>
                 source.provider.titleFile("movie", title.id, listed.container, signal),
               catch: failedWith,
             });
+
             if (!(yield* stands(source))) return yield* switched;
+
             return { ...file, revision: source.revision, listingKey: listed.listingKey };
           }
+
           const series = yield* detailsOf(
             "series",
             {
@@ -1388,20 +1578,28 @@ function make(deps: OnDemandDeps) {
             },
             false,
           );
+
           const episode = series.raw.episodes.find((each) => each.id === title.id);
+
           if (!episode) return yield* missing;
+
           const file = yield* Effect.tryPromise({
             try: (signal) =>
               source.provider.titleFile("episode", title.id, episode.container, signal),
             catch: failedWith,
           });
+
           if (!(yield* stands(source))) return yield* switched;
+
           const current =
             (yield* stampOf(source)) === series.evidence.catalogueStamp &&
             (yield* listedTitle(source, "series", title.seriesId));
+
           // A login replaced during those reads is switched, whatever they found.
           if (!(yield* stands(source))) return yield* switched;
+
           if (!current) return yield* overtaken;
+
           return {
             ...file,
             revision: source.revision,
@@ -1417,12 +1615,15 @@ function make(deps: OnDemandDeps) {
           failures.delete(id);
           yield* cancelSource(id);
           const refresh = refreshing.get(id);
+
           if (refresh) {
             refreshing.delete(id);
             yield* Fiber.interrupt(refresh.fiber);
           }
+
           for (const [key, entry] of details)
             if (entry.version.subscriptionId === id) details.delete(key);
+
           if (cache) yield* cache.forget(id).pipe(Effect.ignore);
           yield* call("forget", ownerOf(subscription)).pipe(Effect.ignore);
           yield* publishStatus;
@@ -1430,15 +1631,19 @@ function make(deps: OnDemandDeps) {
 
       reconfigure: Effect.gen(function* () {
         const next = keyOf(yield* settings.get);
+
         if (next === tmdbKey) return;
         tmdbKey = next;
         generation++;
+
         const fibers = [...asking.values(), ...seasonFlights.values()].map(
           (flight) => flight.fiber,
         );
+
         asking.clear();
         seasonFlights.clear();
         late.clear();
+
         for (const fiber of fibers) reconfigured.add(fiber);
         yield* Fiber.interruptAll(fibers);
         failures.clear();
@@ -1472,6 +1677,7 @@ export const subscriptionChanged = (): AppError => ({
   kind: "unexpected",
   detail: t("The subscription changed while loading titles."),
 });
+
 const switched = Effect.failSync(() => new Failed({ error: subscriptionChanged() }));
 const overtaken = Effect.failSync(() => new Overtaken({ error: subscriptionChanged() }));
 
@@ -1479,12 +1685,14 @@ const overtaken = Effect.failSync(() => new Overtaken({ error: subscriptionChang
 function keep<V>(map: Map<string, V>, key: string, value: V, limit: number): void {
   map.delete(key);
   map.set(key, value);
+
   if (map.size > limit) map.delete(map.keys().next().value ?? "");
 }
 
 /** Whether every episode of `season` that TMDB lists has a name in one of its answers. */
 function named(season: Season, answers: readonly (readonly EpisodeAbout[])[]): boolean {
   const [first = []] = answers;
+
   return season.episodes.every(
     (episode) =>
       !first.some((each) => each.number === episode.number) ||
@@ -1501,6 +1709,7 @@ function named(season: Season, answers: readonly (readonly EpisodeAbout[])[]): b
 function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void) {
   let worker: Worker | null = null;
   let nextId = 1;
+
   const pending = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (cause: unknown) => void; worker: Worker }
@@ -1521,8 +1730,10 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     started.on("message", (reply: WorkerReply | WorkerEvent) => {
       if ("event" in reply) return onEvent(reply);
       const entry = pending.get(reply.id);
+
       if (!entry) return;
       pending.delete(reply.id);
+
       if (reply.ok) entry.resolve(reply.value);
       else entry.reject(new Failed({ error: reply.error }));
     });
@@ -1532,6 +1743,7 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
       failAll(started, new Error("The catalogue worker stopped."));
     });
     worker = started;
+
     return started;
   };
 
@@ -1540,6 +1752,7 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     args: WorkerCalls[M]["args"],
   ): Promise<WorkerCalls[M]["result"]> => {
     const id = nextId++;
+
     return new Promise((resolve, reject) => {
       const to = running();
       pending.set(id, { resolve: resolve as (value: unknown) => void, reject, worker: to });
@@ -1552,12 +1765,14 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
     call,
     async stop(): Promise<void> {
       const current = worker;
+
       if (!current) return;
       // The worker writes what it still holds, each subscription's lists and TMDB's metadata, so
       // the next start reads them. It gets a moment for that and no longer: a quit never waits
       // on a worker that doesn't answer, and what isn't written by then stays as the disk had it.
       const flushed = call("flush", {}).catch(() => null);
       await Promise.race([flushed, new Promise((done) => setTimeout(done, STOP_WITHIN_MS))]);
+
       if (worker === current) worker = null;
       await current.terminate();
     },

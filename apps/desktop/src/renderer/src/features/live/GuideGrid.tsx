@@ -90,14 +90,19 @@ import {
 
 /** An hour's width: 196 px at the 14 px rem the design was drawn at. */
 const HOUR_REM = 14;
+
 /** The channels' column. */
 const COLUMN_REM = 14;
+
 /** A channel's row, 48 px at 14 px. */
 const ROW_REM = 48 / 14;
+
 /** The times along the top. */
 const HEAD_REM = 2;
+
 /** Rows above and below the view that are drawn, and read, before they scroll in. */
 const OVERSCAN = 6;
+
 /** How long after a key the cursor's details may still grow as they are read. */
 const DETAILS_SETTLE_MS = 2000;
 const HALF_HOUR_MS = HOUR_MS / 2;
@@ -166,13 +171,16 @@ export function GuideGrid({
   // reaches. One that is being read again, or kept after a failed download, says no end: as far
   // as the grid goes.
   const statuses = useQuery(queries.guideStatus()).data;
+
   const subscriptionIds = useMemo(
     () => new Set(channels.map((channel) => channel.subscriptionId)),
     [channels],
   );
+
   const until = (statuses ?? []).reduce<number | null>(
     (furthest, { subscriptionId, processing }) => {
       if (!subscriptionIds.has(subscriptionId)) return furthest;
+
       const ends =
         processing.state === "ready"
           ? processing.until
@@ -180,10 +188,12 @@ export function GuideGrid({
               (processing.state === "failed" && processing.kept === null)
             ? null
             : Infinity;
+
       return ends === null ? furthest : Math.max(furthest ?? 0, ends);
     },
     null,
   );
+
   const archiveDays = useMemo(() => longestArchive(channels), [channels]);
   const reminders = useReminders().data;
   const schedules = useSchedules().data;
@@ -201,11 +211,13 @@ export function GuideGrid({
   const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
     const element = scroller.current;
+
     if (!element) return;
     const measure = () => setWidth(element.clientWidth);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+
     return () => observer.disconnect();
   }, []);
 
@@ -216,34 +228,43 @@ export function GuideGrid({
       channels.findIndex((channel) => ownedKey(channel) === playingKey),
       0,
     );
+
     return { index, channel: channels[index] ?? null, at: now, asked: 0 };
   });
+
   // Found again once per list and cursor, not on each render as the grid scrolls.
   const index = useMemo(() => {
     const found =
       cursor.channel && !sameOwned(channels[cursor.index], cursor.channel)
         ? channels.findIndex((channel) => sameOwned(channel, cursor.channel))
         : cursor.index;
+
     return Math.min(found === -1 ? cursor.index : found, Math.max(channels.length - 1, 0));
   }, [channels, cursor]);
+
   // The cursor's row stays drawn while it is scrolled out of view, with its details, so the keys
   // find its programmes.
   const rangeExtractor = useCallback(
     (range: Range) => {
       const drawn = defaultRangeExtractor(range);
+
       if (index >= range.count || drawn.includes(index)) return drawn;
+
       return [...drawn, index].sort((a, b) => a - b);
     },
     [index],
   );
+
   // The virtualizer places every row again when this changes: once per list, not per render.
   const getItemKey = useCallback(
     (index: number) => {
       const channel = channels[index];
+
       return channel ? ownedKey(channel) : index;
     },
     [channels],
   );
+
   const virtualizer = useVirtualizer({
     count: channels.length,
     getScrollElement: () => scroller.current,
@@ -255,6 +276,7 @@ export function GuideGrid({
     overscan: OVERSCAN,
     rangeExtractor,
   });
+
   useEffect(() => {
     virtualizer.measure();
   }, [rem, virtualizer]);
@@ -276,27 +298,34 @@ export function GuideGrid({
   // last scroll read, so nothing is laid out twice.
   const scrolled = useRef(0);
   const shifting = useRef(0);
+
   const shiftTitles = useCallback(() => {
     if (shifting.current) return;
     shifting.current = requestAnimationFrame(() => {
       shifting.current = 0;
       const element = scroller.current;
+
       if (element) shiftAt(element, scrolled.current, 2.75 * geometry.current.rem);
     });
   }, []);
+
   useLayoutEffect(shiftTitles);
   useEffect(() => () => cancelAnimationFrame(shifting.current), []);
+
   const follow = useCallback(() => {
     const element = scroller.current;
+
     if (!element) return;
     const { origin, end, msPx, columnPx } = geometry.current;
     const from = Math.min(origin + element.scrollLeft / msPx, end);
     const to = from + Math.max(element.clientWidth - columnPx, 0) / msPx;
     leftAt.current = from;
+
     if (element.scrollLeft !== scrolled.current) {
       scrolled.current = element.scrollLeft;
       shiftTitles();
     }
+
     setDay(new Date(from).setHours(0, 0, 0, 0));
     const start = Math.max(Math.floor(from / HOUR_MS) * HOUR_MS - HOUR_MS, origin);
     const stop = Math.min(Math.ceil(to / HOUR_MS) * HOUR_MS + HOUR_MS, end);
@@ -304,10 +333,12 @@ export function GuideGrid({
       current.start === start && current.stop === stop ? current : { start, stop },
     );
   }, [shiftTitles]);
+
   /** Scrolls across to put `at` at the programmes' left edge. */
   const scrollTo = useCallback(
     (at: number) => {
       const element = scroller.current;
+
       if (!element) return;
       const { origin, msPx } = geometry.current;
       leftAt.current = at;
@@ -316,12 +347,15 @@ export function GuideGrid({
     },
     [follow],
   );
+
   /** Now, a quarter of the way across. */
   const nowAt = useCallback(() => {
     const { msPx, columnPx, minute } = geometry.current;
     const room = Math.max((scroller.current?.clientWidth ?? 0) - columnPx, 0);
+
     return minute - room / 4 / msPx;
   }, []);
+
   useLayoutEffect(() => {
     if (width === 0) return;
     scrollTo(leftAt.current ?? nowAt());
@@ -332,6 +366,7 @@ export function GuideGrid({
     items.map((item) => item.index),
     drawn,
   );
+
   const reads = useQueries({
     queries: pages.map((page) => ({
       ...queries.range(
@@ -342,20 +377,27 @@ export function GuideGrid({
       enabled: visible,
     })),
   });
+
   const answers = new Map<string, Readonly<Record<string, readonly GuideSlot[]>>>();
+
   for (const [index, page] of pages.entries()) {
     const data = reads[index]?.data;
+
     if (data) answers.set(`${page.rows}:${page.time}`, data);
   }
+
   // Each row keeps its programmes while its pages' answers stay the same, so rows already drawn
   // draw nothing again as others scroll in.
   const kept = useRef(new Map<string, RowGuide>());
+
   const rowGuide = (index: number): RowGuide => {
     const channel = channels[index];
+
     if (!channel || drawn.stop <= drawn.start) return NO_GUIDE;
     const key = ownedKey(channel);
     const rows = Math.floor(index / PAGE_ROWS);
     const times: number[] = [];
+
     for (
       let time = Math.floor(drawn.start / PAGE_MS);
       time <= Math.floor((drawn.stop - 1) / PAGE_MS);
@@ -366,9 +408,11 @@ export function GuideGrid({
     const pagesRead = answered.map((time) => answers.get(`${rows}:${time}`)?.[key]);
     const covered = answered.join(",");
     const before = kept.current.get(key);
+
     // A row whose page is being read again, as when the list changed around it, keeps what it
     // showed until the answer is in, rather than showing nothing meanwhile.
     if (before && answered.length === 0) return before;
+
     if (
       before &&
       before.covered === covered &&
@@ -376,6 +420,7 @@ export function GuideGrid({
       before.pages.every((page, at) => page === pagesRead[at])
     )
       return before;
+
     const guide: RowGuide = {
       pages: pagesRead,
       covered,
@@ -384,9 +429,12 @@ export function GuideGrid({
         answered.map((time) => ({ start: time * PAGE_MS, stop: (time + 1) * PAGE_MS })),
       ),
     };
+
     kept.current.set(key, guide);
+
     return guide;
   };
+
   useEffect(() => {
     // Forget rows long out of view.
     if (kept.current.size > 4 * (items.length + PAGE_ROWS)) kept.current.clear();
@@ -404,6 +452,7 @@ export function GuideGrid({
    */
   const offered = (channel: LiveChannel, cell: Cell): readonly GridAction[] =>
     remote ? ["live"] : actionsOf(channel, cell, now);
+
   /** Watches `channel` live, or plays `cell` from its start. */
   const act = (channel: LiveChannel, cell: Cell, action: GridAction) => {
     if (action === "live" || cell.kind === "gap") return onWatch(channel);
@@ -416,6 +465,7 @@ export function GuideGrid({
       description: read?.description ?? null,
     });
   };
+
   // Keys and the rows' callbacks read the latest render.
   const latest = useRef({
     channels,
@@ -429,6 +479,7 @@ export function GuideGrid({
     open,
     onKeys,
   });
+
   latest.current = { channels, index, cursor, at, bounds, rowGuide, act, offered, open, onKeys };
   useImperativeHandle(
     ref,
@@ -436,7 +487,9 @@ export function GuideGrid({
       key(key) {
         const { channels, index, cursor, at: now, bounds, rowGuide, act, offered } = latest.current;
         const channel = channels[index];
+
         if (!channel) return "ignored";
+
         const move = (to: number, at = now) => {
           const target = Math.min(Math.max(to, 0), channels.length - 1);
           setCursor({
@@ -448,17 +501,22 @@ export function GuideGrid({
           setOpen(true);
           // The grid takes the focus, so assistive technology follows its cursor.
           const grid = scroller.current;
+
           if (grid && document.activeElement !== grid) grid.focus({ preventScroll: true });
+
           return "handled" as const;
         };
+
         switch (key) {
           case "ArrowUp":
           case "ArrowDown":
           case "PageUp":
           case "PageDown": {
             const by = key.startsWith("Page") ? JUMP_ROWS : 1;
+
             return move(index + (key === "ArrowUp" || key === "PageUp" ? -by : by));
           }
+
           case "Home":
             return move(0);
           case "End":
@@ -468,14 +526,19 @@ export function GuideGrid({
             const { programmes } = rowGuide(index);
             const cell = cellAt(programmes, now, bounds);
             const next = nextCell(programmes, cell, key === "ArrowLeft" ? -1 : 1, bounds);
+
             if (next) return move(index, next.start);
+
             return key === "ArrowLeft" ? "lists" : "handled";
           }
+
           case "Enter": {
             const cell = cellAt(rowGuide(index).programmes, now, bounds);
             act(channel, cell, offered(channel, cell)[0] ?? "live");
+
             return "handled";
           }
+
           default:
             return "ignored";
         }
@@ -488,6 +551,7 @@ export function GuideGrid({
   // The grid opens on the playing channel, once its channels are in.
   useEffect(() => {
     let initial = index;
+
     if (channels.length && cursor.channel === null && cursor.asked === 0) {
       initial = Math.max(
         channels.findIndex((channel) => ownedKey(channel) === playingKey),
@@ -495,6 +559,7 @@ export function GuideGrid({
       );
       setCursor({ ...cursor, index: initial, channel: channels[initial] ?? null });
     }
+
     if (initial > 0) virtualizer.scrollToIndex(initial, { align: "center" });
   }, [channels.length > 0]);
 
@@ -506,9 +571,11 @@ export function GuideGrid({
   useEffect(() => {
     if (cursor.asked === 0) return;
     const element = scroller.current;
+
     if (!element) return;
     const outgrows = (row: HTMLElement) => row.offsetHeight > element.clientHeight - headPx;
     const row = element.querySelector<HTMLElement>(`[data-index="${index}"]`);
+
     if (row) virtualizer.measureElement(row);
     const tall = !row || outgrows(row);
     virtualizer.scrollToIndex(index, { align: tall ? "start" : "auto" });
@@ -521,10 +588,14 @@ export function GuideGrid({
     const to = (cell.stop - origin) * msPx;
     const margin = rem;
     let target = left;
+
     if (from < left) target = from - margin;
     else if (to > left + room) target = Math.min(from - margin, to - room + margin);
+
     if (target !== left) scrollTo(origin + Math.max(target, 0) / msPx);
+
     if (tall || !row) return;
+
     // Details read just after the key, as a description, can still make it outgrow the room: it
     // then shows its top too, while the keys are in the grid. The viewer's own wheel or click, or
     // a later change, is left alone.
@@ -533,12 +604,14 @@ export function GuideGrid({
       observer.disconnect();
       virtualizer.scrollToIndex(index, { align: "start" });
     });
+
     observer.observe(row);
     const done = new AbortController();
     const stop = () => observer.disconnect();
     element.addEventListener("wheel", stop, { signal: done.signal, passive: true });
     element.addEventListener("pointerdown", stop, { signal: done.signal });
     const settled = setTimeout(stop, DETAILS_SETTLE_MS);
+
     return () => {
       stop();
       done.abort();
@@ -549,16 +622,19 @@ export function GuideGrid({
   const watchLive = useRef(onWatch);
   watchLive.current = onWatch;
   const watch = useCallback((channel: LiveChannel) => watchLive.current(channel), []);
+
   /** A double click: what Enter does on that cell. */
   const play = useCallback((channel: LiveChannel, cell: Cell) => {
     const { act, offered } = latest.current;
     act(channel, cell, offered(channel, cell)[0] ?? "live");
   }, []);
+
   const doAction = useCallback(
     (channel: LiveChannel, cell: Cell, action: GridAction) =>
       latest.current.act(channel, cell, action),
     [],
   );
+
   /** A click on a programme, or a stretch without one, of row `row` at `at`. */
   const pick = useCallback((row: number, at: number) => {
     const { channels, index, cursor, at: before, bounds, rowGuide, open, onKeys } = latest.current;
@@ -572,6 +648,7 @@ export function GuideGrid({
   const cursorCell = cellAt(rowGuide(index).programmes, at, bounds);
   const cursorShown = showCursor || open;
   const nowPx = columnPx + (minute - origin) * msPx;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col px-6">
       <div
@@ -605,9 +682,11 @@ export function GuideGrid({
           )}
           {items.map((item) => {
             const channel = channels[item.index];
+
             if (!channel) return null;
             const guide = rowGuide(item.index);
             const here = item.index === index;
+
             return (
               <div
                 key={item.key}
@@ -669,6 +748,7 @@ function shiftAt(grid: HTMLElement, scrolled: number, room: number) {
     const shift = Math.min(Math.max(scrolled - start, 0), Math.max(width - room, 0));
     const title = block.firstElementChild;
     const margin = shift > 0 ? `${Math.round(shift)}px` : "";
+
     if (title instanceof HTMLElement && title.style.marginLeft !== margin)
       title.style.marginLeft = margin;
   }
@@ -693,6 +773,7 @@ function Head({
   onNow: () => void;
 }) {
   const ticks: number[] = [];
+
   for (
     let at = Math.ceil(drawn.start / HALF_HOUR_MS) * HALF_HOUR_MS;
     at < drawn.stop;
@@ -700,6 +781,7 @@ function Head({
   )
     ticks.push(at);
   const x = (at: number) => (at - origin) * msPx;
+
   return (
     <div
       className="sticky top-0 z-20 flex bg-black text-xs text-muted-foreground tabular-nums"
@@ -811,18 +893,24 @@ const GridRow = memo(function GridRow({
   onAction: (channel: LiveChannel, cell: Cell, action: GridAction) => void;
 }) {
   const blocks = blocksIn(programmes, known, { start: drawnStart, stop: drawnStop });
+
   const place = (cell: Span) => {
     const start = Math.max(cell.start, origin);
+
     return { left: (start - origin) * msPx, width: (cell.stop - start) * msPx };
   };
+
   /** The moment under the pointer, within `cell`. */
   const pointed = (event: MouseEvent<HTMLElement>, cell: Span) => {
     const area = event.currentTarget.parentElement?.getBoundingClientRect();
     const at = origin + (event.clientX - (area?.left ?? 0)) / msPx;
+
     return Math.min(Math.max(at, cell.start, origin), cell.stop - 1);
   };
+
   const selected = (cell: Span) =>
     cursor !== null && cursor.start === cell.start && cursor.stop === cell.stop;
+
   return (
     <div role="row" aria-rowindex={index + 1}>
       <div
@@ -883,8 +971,10 @@ const GridRow = memo(function GridRow({
             const chosen = selected(block);
             const box = place(block);
             const reminded = reminderAt(reminders, channel, slot.start) !== undefined;
+
             const scheduled =
               !ended && recordsAt(scheduleAt(schedules, channel, slot.start), slot.start);
+
             return (
               <div
                 key={slot.start}
@@ -986,10 +1076,12 @@ function Details({
   onAction: (action: GridAction) => void;
 }) {
   const slot = cell.kind === "programme" ? cell.slot : null;
+
   const read = useQuery({
     ...queries.programme(channel, slot ?? { guide: "", start: 0 }),
     enabled: slot !== null,
   }).data;
+
   const on = slot !== null && slot.start <= minute && minute < slot.stop;
   const schedule = scheduleAt(useSchedules().data, channel, slot?.start ?? 0);
   // A schedule the guide holds, another show listed then or none, won't record: Record re-saves
@@ -998,10 +1090,12 @@ function Details({
   const [scheduling, setScheduling] = useState(false);
   const open = slot !== null && scheduling;
   const record = useRef<HTMLButtonElement>(null);
+
   const close = () => {
     setScheduling(false);
     record.current?.focus({ preventScroll: true });
   };
+
   return (
     <div
       role="region"
@@ -1090,5 +1184,6 @@ function spanText(span: Span, now: number): string {
       : span.start < endOfDay(now)
         ? formatDate(span.start, "time")
         : comingTime(span.start, now);
+
   return t("{start} to {end}", { start, end: formatDate(span.stop, "time") });
 }

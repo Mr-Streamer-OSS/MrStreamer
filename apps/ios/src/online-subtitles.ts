@@ -44,13 +44,18 @@ export type Found = { readonly kind: "found"; readonly results: readonly FoundSu
 export function findSubtitles(title: SubtitleTitle): Promise<Found | null> {
   found = null;
   const search = ++searches;
+
   return forPlay<Found>(title, async (signal) => {
     const key = await subdlKey();
+
     if (signal.aborted) return null;
+
     if (!key) return { kind: "failed", reason: "not-configured" };
     const candidates = await subdlSearch(key, { ...title.query, languages: languages() }, signal);
+
     if (signal.aborted) return null;
     found = { title, search, candidates };
+
     return {
       kind: "found",
       results: candidates.map(({ language, release, hearingImpaired }, i) => ({
@@ -73,12 +78,17 @@ export type Chosen =
  */
 export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<Chosen | null> {
   const [search, index] = id.split(".").map(Number);
+
   const candidate =
     found?.title === title && found.search === search ? found.candidates[index ?? -1] : undefined;
+
   if (!candidate) return null;
+
   return forPlay<Chosen>(title, async (signal) => {
     const subtitle = await subdlDownload(candidate, signal);
+
     if (signal.aborted) return null;
+
     return showDownloaded(title, subtitle)
       ? { kind: "shown" }
       : { kind: "failed", reason: "not-saved" };
@@ -87,8 +97,10 @@ export async function chooseSubtitle(title: SubtitleTitle, id: string): Promise<
 
 /** The search or download under way, which a newer one, or another play, ends. */
 let work: AbortController | null = null;
+
 /** Searches begun, which number their results' ids so one search's can't pick another's. */
 let searches = 0;
+
 /** The latest search's results, for its play: "<search>.<position>" is the id the sheet shows. */
 let found: {
   readonly title: SubtitleTitle;
@@ -105,22 +117,26 @@ async function forPlay<T>(
   task: (signal: AbortSignal) => Promise<T | null>,
 ): Promise<T | Failed | null> {
   const play = playOf(title);
+
   if (!play) return null;
   work?.abort();
   const controller = new AbortController();
   const end = () => controller.abort();
   play.addEventListener("abort", end, { once: true });
   work = controller;
+
   try {
     return await task(controller.signal);
   } catch (cause) {
     if (controller.signal.aborted) return null;
+
     return {
       kind: "failed",
       reason: cause instanceof SubtitleFailure ? cause.reason : "unavailable",
     };
   } finally {
     play.removeEventListener("abort", end);
+
     if (work === controller) work = null;
   }
 }
@@ -128,17 +144,20 @@ async function forPlay<T>(
 /** The viewer's subtitle language, then the language of titles, then English. */
 function languages(): string[] {
   const { subtitles } = getMediaPreferences();
+
   const wanted = [
     subtitles.kind === "language" ? subtitles.language : null,
     effectiveTitleLanguage(),
     "en",
   ];
+
   return [...new Set(wanted.filter((code): code is string => !!code && /^[a-z]{2,3}$/.test(code)))];
 }
 
 // The viewer's SubDL API key, in the Keychain. Settings sees only whether one is saved.
 
 const KEY = "online-subtitles.subdl";
+
 /** Whether a key is saved; null until the Keychain answered. */
 const keySaved = store<boolean | null>(null);
 let keyRead: Promise<void> | null = null;
@@ -154,6 +173,7 @@ export function useSubtitleKey(): boolean | null {
       keyRead = null;
     },
   );
+
   return useStore(keySaved);
 }
 
@@ -165,6 +185,7 @@ const subdlKey = () =>
 /** Saves `key` as the SubDL key. Throws `keychain-refused` when the Keychain won't keep it. */
 export async function saveSubtitleKey(key: string) {
   const trimmed = key.trim();
+
   if (!trimmed || trimmed.length > 4096) throw new AppFailure({ kind: "keychain-refused" });
   await keychainSecrets.write(KEY, trimmed);
   keySaved.set(true);
@@ -241,6 +262,7 @@ async function subdlSearch(
   if (query.languages.length === 0) throw new SubtitleFailure("unsupported");
   const kind = query.kind === "movie" ? "movie" : "tv";
   const url = new URL("https://api.subdl.com/api/v1/subtitles");
+
   const params = new URLSearchParams({
     api_key: key,
     ...(query.tmdbId !== undefined
@@ -253,24 +275,31 @@ async function subdlSearch(
     unpack: "1",
     client: "custom_integration",
   });
+
   if (query.kind === "episode") {
     params.set("season_number", String(query.season));
     params.set("episode_number", String(query.episode));
   }
+
   url.search = params.toString();
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(15_000)]);
   const response = await request(url, { headers: { Accept: "application/json" } }, timeout);
+
   // An answer from where a redirect led, not SubDL's own API, isn't taken.
   if (response.url && new URL(response.url).origin !== url.origin) refuse(response, "unavailable");
+
   const text = new TextDecoder("utf-8", { fatal: true }).decode(
     await body(response, JSON_LIMIT, timeout),
   );
+
   const reply = SubDLReply()(JSON.parse(text));
+
   if (reply instanceof type.errors || !reply.status) throw new SubtitleFailure("unavailable");
   // SubDL may broaden an unsuccessful match, and its subtitles are for its first result. Without
   // a TMDB id, that result must name the title asked for, and the year when one was asked.
   const first = reply.results?.[0];
   const asked = normalize(query.title ?? "");
+
   if (
     first?.type !== kind ||
     (query.tmdbId !== undefined
@@ -281,6 +310,7 @@ async function subdlSearch(
   )
     return [];
   const results: Candidate[] = [];
+
   for (const sub of reply.subtitles ?? []) {
     const files = sub.unpack_files?.filter(
       (file) =>
@@ -289,6 +319,7 @@ async function subdlSearch(
         file.episode === query.episode &&
         /^(srt|vtt)$/i.test(file.format),
     );
+
     if (files?.length) {
       for (const file of files)
         results.push({
@@ -310,10 +341,12 @@ async function subdlSearch(
       });
     }
   }
+
   // A file anywhere but SubDL's download host isn't listed; the other results still are.
   return results
     .flatMap((sub) => {
       const url = query.languages.includes(sub.language) && listedURL(sub.url);
+
       return url ? [{ ...sub, url }] : [];
     })
     .slice(0, 100);
@@ -334,13 +367,16 @@ async function subdlDownload(
 ): Promise<DownloadedSubtitle> {
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   const response = await request(downloadURL(candidate.url), {}, timeout);
+
   // A redirect followed elsewhere ends on a file SubDL didn't serve.
   try {
     if (response.url) downloadURL(response.url);
   } catch {
     refuse(response, "unsupported");
   }
+
   const text = textOf(await body(response, SUBTITLE_TEXT_LIMIT, timeout));
+
   try {
     return {
       service: "subdl",
@@ -361,6 +397,7 @@ function refuse(response: Response, reason: SubtitleFailureReason): never {
 
 async function request(url: URL, init: RequestInit, signal: AbortSignal): Promise<Response> {
   let response: Response;
+
   try {
     response = await fetch(url, {
       ...init,
@@ -370,6 +407,7 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal): Promis
   } catch {
     throw new SubtitleFailure("unavailable");
   }
+
   if (!response.ok) {
     void response.body?.cancel().catch(() => {});
     throw new SubtitleFailure(
@@ -380,6 +418,7 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal): Promis
           : "unavailable",
     );
   }
+
   return response;
 }
 
@@ -389,15 +428,19 @@ async function body(response: Response, limit: number, signal: AbortSignal): Pro
     void response.body?.cancel().catch(() => {});
     throw new SubtitleFailure("unsupported");
   }
+
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
+
   try {
     for (;;) {
       signal.throwIfAborted();
       const { value, done } = await reader.read();
+
       if (done) break;
       size += value.byteLength;
+
       if (size > limit) throw new SubtitleFailure("unsupported");
       chunks.push(value);
     }
@@ -405,12 +448,15 @@ async function body(response: Response, limit: number, signal: AbortSignal): Pro
     void reader.cancel().catch(() => {});
     throw cause instanceof SubtitleFailure ? cause : new SubtitleFailure("unavailable");
   }
+
   const whole = new Uint8Array(size);
   let at = 0;
+
   for (const chunk of chunks) {
     whole.set(chunk, at);
     at += chunk.byteLength;
   }
+
   return whole;
 }
 
@@ -424,34 +470,43 @@ function textOf(data: Uint8Array): Uint8Array {
   let entries = 0;
   let picked = 0;
   let files: Record<string, Uint8Array>;
+
   try {
     files = unzipSync(data, {
       filter: ({ name, originalSize }) => {
         if (++entries > 64) throw new SubtitleFailure("unsupported");
         const base = name.split("/").at(-1) ?? "";
+
         if (name.startsWith("__MACOSX/") || base.startsWith("._") || !/\.(srt|vtt)$/i.test(base))
           return false;
+
         if (++picked > 1 || originalSize > SUBTITLE_TEXT_LIMIT)
           throw new SubtitleFailure("unsupported");
+
         return true;
       },
     });
   } catch {
     throw new SubtitleFailure("unsupported");
   }
+
   const [only] = Object.values(files);
+
   if (!only) throw new SubtitleFailure("unsupported");
+
   return only;
 }
 
 /** A SubDL file's address: HTTPS on dl.subdl.com only, without a login or port. */
 function downloadURL(value: string): URL {
   let url: URL;
+
   try {
     url = new URL(value, "https://dl.subdl.com");
   } catch {
     throw new SubtitleFailure("unsupported");
   }
+
   if (
     url.protocol !== "https:" ||
     url.username ||
@@ -460,6 +515,7 @@ function downloadURL(value: string): URL {
     url.hostname !== "dl.subdl.com"
   )
     throw new SubtitleFailure("unsupported");
+
   return url;
 }
 
@@ -467,5 +523,6 @@ function downloadURL(value: string): URL {
 function requestedLanguage(value: string, requested: readonly string[]): string {
   const name = value.trim().toLowerCase();
   const names = new Intl.DisplayNames(["en"], { type: "language" });
+
   return requested.find((code) => code === name || names.of(code)?.toLowerCase() === name) ?? "";
 }

@@ -7,14 +7,17 @@ interface ReviewLogin {
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
 const verifier = (value: unknown): value is string =>
   typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 
 /** Configuration is a secret binding, never an API response or shipped client login. */
 export function readLogin(secret: string | undefined): ReviewLogin | null {
   if (!secret || secret.length > 2048) return null;
+
   try {
     const value: unknown = JSON.parse(secret);
+
     if (
       !object(value) ||
       typeof value.username !== "string" ||
@@ -22,9 +25,11 @@ export function readLogin(secret: string | undefined): ReviewLogin | null {
       !verifier(value.passwordSha256)
     )
       return null;
+
     if (value.retiring === undefined)
       return { username: value.username, passwordSha256: value.passwordSha256 };
     const old = value.retiring;
+
     if (
       !object(old) ||
       !verifier(old.passwordSha256) ||
@@ -33,6 +38,7 @@ export function readLogin(secret: string | undefined): ReviewLogin | null {
           !Number.isFinite(Date.parse(old.retireAfterUtc))))
     )
       return null;
+
     return {
       username: value.username,
       passwordSha256: value.passwordSha256,
@@ -55,19 +61,24 @@ export async function validLogin(
   now: number,
 ): Promise<boolean> {
   const text = new TextEncoder();
+
   const [givenUser, expectedUser, givenPassword] = await Promise.all([
     crypto.subtle.digest("SHA-256", text.encode(username)),
     crypto.subtle.digest("SHA-256", text.encode(login.username)),
     crypto.subtle.digest("SHA-256", text.encode(password)),
   ]);
+
   const sameUser = crypto.subtle.timingSafeEqual(givenUser, expectedUser);
   const current = crypto.subtle.timingSafeEqual(givenPassword, bytes(login.passwordSha256));
+
   const old = crypto.subtle.timingSafeEqual(
     givenPassword,
     bytes(login.retiring?.passwordSha256 ?? login.passwordSha256),
   );
+
   const retiringActive =
     login.retiring !== undefined &&
     (login.retiring.retireAfterUtc === null || now < Date.parse(login.retiring.retireAfterUtc));
+
   return sameUser && (current || (old && retiringActive));
 }

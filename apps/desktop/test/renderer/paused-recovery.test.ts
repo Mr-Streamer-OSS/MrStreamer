@@ -55,6 +55,7 @@ async function pausedMovie(from = 0): Promise<void> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
 });
+
 afterEach(() => {
   titlePlayer.close();
   vi.useRealTimers();

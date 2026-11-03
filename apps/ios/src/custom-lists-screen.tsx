@@ -99,9 +99,11 @@ function whyNot(error: AppError): string {
 function change(name: string, write: () => void): boolean {
   try {
     write();
+
     return true;
   } catch (cause) {
     Alert.alert(t("{name} wasn't changed", { name }), whyNot(appError(cause)));
+
     return false;
   }
 }
@@ -131,21 +133,27 @@ function askName(naming: Naming) {
         text: naming.action,
         onPress: (typed = "") => {
           const name = typed.trim();
+
           if (!name) return;
+
           try {
             naming.write(name);
           } catch (cause) {
             const error = appError(cause);
+
             // The one name a list refuses as invalid: too long, as custom-lists.ts says.
             if (error.kind === "invalid-input") {
               const message = t("A list's name has 1 to {max} characters.", {
                 max: CUSTOM_LIST_NAME_MAX,
               });
+
               return askName({ ...naming, message, typed });
             }
+
             if (error.kind !== "list-name-taken") {
               return Alert.alert(naming.failed(name), whyNot(error));
             }
+
             const folded = normalize(name);
             const other = currentChannelLists().find((list) => normalize(list.name) === folded);
             askName({
@@ -171,10 +179,12 @@ export function openListSheet(channel: Channel, anchor?: number) {
   const holding = listsHolding(channel);
   const holds = lists.map((list) => holding.has(list.id));
   const catalogue = currentCatalogue();
+
   const provider =
     channel.ambiguous && catalogue.kind === "ready"
       ? catalogue.library.labels.get(channel.subscriptionId)
       : undefined;
+
   const named = provider ? `${channel.title}, ${provider}` : channel.title;
   ActionSheetIOS.showActionSheetWithOptions(
     {
@@ -189,7 +199,9 @@ export function openListSheet(channel: Channel, anchor?: number) {
     },
     (index) => {
       const list = lists[index];
+
       if (list) return void change(list.name, () => setMember(list.id, channel, !holds[index]));
+
       if (index !== lists.length) return;
       askName({
         title: t("New list"),
@@ -236,6 +248,7 @@ export function Entry({
 /** Live's rows for the viewer's lists, under Favourites; none without lists. */
 export function ListEntries() {
   const lists = useChannelLists();
+
   return (
     <>
       {lists.map((list) => (
@@ -292,6 +305,7 @@ export function ChannelListScreen({ id }: { id: string }) {
     open.current = draft;
   }, [draft]);
   useEffect(() => () => void (open.current = null), []);
+
   if (!list) {
     return (
       <View style={styles.screen}>
@@ -299,14 +313,17 @@ export function ChannelListScreen({ id }: { id: string }) {
       </View>
     );
   }
+
   const library = catalogue.kind === "ready" ? catalogue.library : null;
   const placeOf = (channel: Channel) => library?.placeOf.get(channel.key) ?? "";
+
   const detailOf = (entry: ListEntry) =>
     entry.kind === "listed"
       ? entry.channel.key === playing?.id
         ? t(playing.word)
         : placeOf(entry.channel)
       : t("{provider}: {why}", { provider: entry.label, why: why(entry.why) });
+
   const rows = draft?.order ?? list.entries;
   /** The list's name now, which Rename may have changed since a draft began. */
   const nameNow = () => currentChannelLists().find((each) => each.id === id)?.name ?? list.name;
@@ -316,20 +333,24 @@ export function ChannelListScreen({ id }: { id: string }) {
     const now = currentChannelLists()
       .find((each) => each.id === id)
       ?.entries.find((each) => each.member === entry.member);
+
     if (now?.kind === "listed" && now.channel.key === entry.channel.key) {
       return playChannel(now.channel, placeOf(now.channel), { watch: true });
     }
+
     Alert.alert(
       t("{name} didn't play", { name: entry.channel.title }),
       t("{list} changed meanwhile: choose it again as it shows now.", { list: nameNow() }),
     );
   };
+
   const remove = (entry: ListEntry) => change(list.name, () => removeMember(list.id, entry.member));
 
   const move = (entry: ListEntry, by: number) => {
     if (!draft) return;
     const from = draft.order.indexOf(entry);
     const to = Math.min(Math.max(from + by, 0), draft.order.length - 1);
+
     if (from < 0 || to === from) return;
     const order = draft.order.toSpliced(from, 1).toSpliced(to, 0, entry);
     setDraft({ ...draft, order });
@@ -341,40 +362,52 @@ export function ChannelListScreen({ id }: { id: string }) {
       }),
     );
   };
+
   const drop = (entry: ListEntry) => {
     if (draft) setDraft({ ...draft, order: draft.order.filter((each) => each !== entry) });
   };
+
   const save = (sent: Draft) => {
     const name = nameNow();
+
     const closed = () =>
       Alert.alert(t("{name} wasn't saved", { name }), t("Nothing was moved: the list was closed."));
+
     if (open.current !== sent) return closed();
     const order = sent.order.map((entry) => entry.member);
+
     const removed = sent.from.entries
       .filter((entry) => !sent.order.includes(entry))
       .map((entry) => entry.member);
+
     if (removed.length === 0 && order.every((each, at) => each === sent.from.entries[at]?.member)) {
       return setDraft(null);
     }
+
     try {
       arrangeList(sent.from, order, removed);
       setDraft(null);
     } catch (cause) {
       const error = appError(cause);
+
       if (error.kind === "no-list" || error.kind === "list-changed") {
         setDraft(null);
+
         if (error.kind === "no-list") return closed();
+
         return Alert.alert(
           t("{name} changed", { name }),
           t("Nothing was moved or removed. It changed while you edited it: edit it as it is now."),
         );
       }
+
       Alert.alert(t("Couldn't save {name}", { name }), describeError(error), [
         { text: t("Cancel"), style: "cancel" },
         { text: t("Try again"), onPress: () => save(sent) },
       ]);
     }
   };
+
   const rename = () =>
     askName({
       title: t("Rename list"),
@@ -383,6 +416,7 @@ export function ChannelListScreen({ id }: { id: string }) {
       failed: () => t("{name} wasn't changed", { name: nameNow() }),
       write: (name) => renameList(id, name),
     });
+
   const confirmDelete = () => {
     const name = nameNow();
     Alert.alert(t("Delete {name}?", { name }), t("Its channels stay in Live."), [
@@ -505,6 +539,7 @@ function ListRow({
 }) {
   const row = useRef<ComponentRef<typeof Pressable>>(null);
   const removeAction = { name: "remove", label: t("Remove from {list}", { list: listName }) };
+
   if (entry.kind === "unavailable") {
     return (
       <View style={[styles.row, { minHeight: height }]}>
@@ -538,12 +573,17 @@ function ListRow({
       </View>
     );
   }
+
   const { channel } = entry;
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "activate") onPlay(entry);
+
     if (nativeEvent.actionName === "lists") openListSheet(channel);
+
     if (nativeEvent.actionName === "remove") onRemove(entry);
   };
+
   return (
     <View style={[styles.row, { minHeight: height }]}>
       <Pressable
@@ -598,12 +638,17 @@ function ArrangedRow({
   const title = titleOf(entry);
   const first = position === 0;
   const last = position === count - 1;
+
   const act = ({ nativeEvent }: AccessibilityActionEvent) => {
     if (nativeEvent.actionName === "up") onMove(entry, -1);
+
     if (nativeEvent.actionName === "down") onMove(entry, 1);
+
     if (nativeEvent.actionName === "remove") onRemove(entry);
   };
+
   const glyph = large ? 28 : 17;
+
   const moves = (
     <>
       <Hidden
@@ -622,6 +667,7 @@ function ArrangedRow({
       />
     </>
   );
+
   return (
     <View style={[styles.arranged, { minHeight: height }, large && styles.arrangedLarge]}>
       <View style={[styles.arrangedLine, large && styles.arrangedTop]}>
@@ -704,6 +750,7 @@ function Lines({
   const listed = entry.kind === "listed";
   const tags = listed ? entry.channel.tags.join(" ") : "";
   const lines = large ? 2 : 1;
+
   return (
     <View style={[styles.lines, stacked && styles.linesStacked]}>
       {listed ? (

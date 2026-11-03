@@ -13,6 +13,7 @@ import {
 } from "../scripts/release-ui.ts";
 
 const roots: string[] = [];
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -21,15 +22,19 @@ afterEach(async () => {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "release-ui-contract-"));
   roots.push(root);
+
   const write = async (path: string, content: string) => {
     const absolute = join(root, path);
     await mkdir(join(absolute, ".."), { recursive: true });
     await writeFile(absolute, content);
   };
+
   await write(".gitignore", ".local/\napps/desktop/out/\n");
   await write("apps/desktop/package.json", JSON.stringify({ name: "fixture", version: "0.0.11" }));
+
   for (const path of ["main/index.js", "preload/index.cjs", "renderer/index.html"])
     await write(`apps/desktop/out/${path}`, path);
+
   const child = `
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -59,11 +64,14 @@ if (process.argv[2] !== 'doctor') {
   } else finish(options.exit ?? 0);
 }
 `;
+
   await write(".cursor/skills/verify-mrstreamer/scripts/control.ts", child);
   await write("apps/desktop/test/e2e/analytics-app.ts", child);
   await write(".local/options.json", "{}");
+
   const git = (...args: string[]) =>
     execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+
   git("init", "-q");
   git("add", ".");
   git(
@@ -77,6 +85,7 @@ if (process.argv[2] !== 'doctor') {
   );
   const revision = git("rev-parse", "HEAD");
   const build = await recordBuild(root, revision, "0.0.11");
+
   return {
     root,
     revision,
@@ -120,10 +129,12 @@ describe("release UI public runner/report contract", () => {
 
   it("rejects absent scenario proof even when the child exits zero", async () => {
     const f = await fixture();
+
     const result = await inspectScenario(join(f.root, ".local/absent"), "analytics", f.build, {
       code: 0,
       signal: null,
     });
+
     expect(result.status).toBe("failed");
     expect(result.errors.some((error) => error.includes("ENOENT"))).toBe(true);
   });
@@ -133,6 +144,7 @@ describe("release UI public runner/report contract", () => {
     await f.write(".local/options.json", JSON.stringify({ hold: true }));
     const abort = new AbortController();
     const output = join(f.root, ".local/cancel");
+
     const pending = runReleaseUI({
       root: f.root,
       revision: f.revision,
@@ -140,6 +152,7 @@ describe("release UI public runner/report contract", () => {
       output,
       signal: abort.signal,
     });
+
     for (let i = 0; i < 100; i++) {
       if (
         await readFile(join(output, "live-tv/started")).then(
@@ -150,6 +163,7 @@ describe("release UI public runner/report contract", () => {
         break;
       await delay(20);
     }
+
     abort.abort();
     const report = await pending;
     expect(report.exitCode).toBe(130);
@@ -166,6 +180,7 @@ describe("release UI public runner/report contract", () => {
   it("bounds a stalled child and fails its timeout despite completed teardown", async () => {
     const f = await fixture();
     await f.write(".local/options.json", JSON.stringify({ hold: true }));
+
     const report = await runReleaseUI({
       root: f.root,
       revision: f.revision,
@@ -173,6 +188,7 @@ describe("release UI public runner/report contract", () => {
       output: join(f.root, ".local/timeout"),
       timeoutMs: 200,
     });
+
     expect(report.status).toBe("failed");
     expect(report.results.every((result) => result.errors.includes("timeout"))).toBe(true);
   });

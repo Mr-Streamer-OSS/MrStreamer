@@ -25,20 +25,26 @@ const memory = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.0" } } }));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer() }));
 
 vi.mock("expo-secure-store", () => ({
   ...keychain(() => memory.keychain),
   getItemAsync: async (key: string) => {
     const password = memory.keychain.get(key) ?? null;
+
     if (memory.holdPasswords.has(key)) {
       await new Promise<void>((release) => memory.heldPasswords.push({ key, release }));
     }
+
     if (memory.refusedPasswords.has(key)) throw new Error("Keychain refused");
+
     return password;
   },
 }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
 
 const LISTS = new Set([
@@ -49,14 +55,18 @@ const LISTS = new Set([
   "get_series_categories",
   "get_series",
 ]);
+
 const passThrough = globalThis.fetch;
+
 vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
   const action = new URL(input).searchParams.get("action") ?? "login";
   memory.requests.push(action);
   const list = LISTS.has(action);
+
   if ((list && memory.holdLists) || (!list && action === "login" && memory.holdLogins)) {
     await new Promise<void>((go) => memory.held.push(go));
   }
+
   return passThrough(input, init);
 });
 
@@ -68,8 +78,10 @@ interface FakeProvider {
   failTitles(status: number | null): void;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -84,12 +96,14 @@ const ONE = { username: "one", password: "one+Pw@1" };
 const TWO = { username: "two", password: "two+Pw@2" };
 let one: FakeProvider;
 let two: FakeProvider;
+
 beforeAll(async () => {
   [one, two] = await Promise.all([
     startFakeProvider({ ...ONE, channels: 300, titles: 400 }),
     startFakeProvider({ ...TWO, channels: 300, titles: 400, second: true }),
   ]);
 });
+
 afterAll(async () => {
   await Promise.all([one.close(), two.close()]);
 });
@@ -97,8 +111,10 @@ afterAll(async () => {
 const folder = join(native.root, "cache", "catalogues");
 const pathOf = (name: string) => join(folder, name);
 const settle = (ms = 100) => new Promise((done) => setTimeout(done, ms));
+
 const listsAskedSince = (from: number) =>
   memory.requests.slice(from).filter((action) => LISTS.has(action));
+
 const release = () => {
   for (const go of memory.held.splice(0)) go();
 };
@@ -106,6 +122,7 @@ const release = () => {
 /** Lets one pending native password answer, preserving the other held reads. */
 function releasePassword(id: string) {
   const at = memory.heldPasswords.findIndex((held) => held.key === `s.${id}`);
+
   if (at < 0) throw new Error("No held password for the subscription");
   memory.heldPasswords.splice(at, 1)[0]!.release();
 }
@@ -133,14 +150,17 @@ async function launch() {
   const titles = await import("../src/titles.ts");
   const startup = await import("../src/startup.ts");
   const { kindOf } = await import("@mrstreamer/core/ondemand/catalogue");
+
   const seen = {
     opened: null as Opened | null,
     listsShown: 0,
     published: [] as ReadonlySet<string>[],
   };
+
   /** The subscriptions whose movies and series the published lists hold. */
   const titlesFrom = () => {
     const lists = titles.titleLists();
+
     return new Set(
       lists.kind === "ready"
         ? (["movie", "series"] as const).flatMap((kind) =>
@@ -151,6 +171,7 @@ async function launch() {
         : [],
     );
   };
+
   titles.onTitleLists(() => {
     if (titles.titleLists().kind !== "ready") return;
     seen.listsShown++;
@@ -171,13 +192,17 @@ async function launch() {
     };
   });
   void startup.startUp();
+
   return { ...account, ...titles, ...startup, seen, titlesFrom };
 }
+
 type App = Awaited<ReturnType<typeof launch>>;
 
 const member = (app: App, id: string) => {
   const found = app.members().find((each) => each.entry.id === id);
+
   if (!found) throw new Error(`No subscription ${id}`);
+
   return found;
 };
 
@@ -187,9 +212,11 @@ async function savedBoth() {
   await until(() => app.currentStartup().kind === "open", "the first launch");
   const a = await app.add({ server: one.url, ...ONE });
   const b = await app.add({ server: two.url, ...TWO });
+
   if (!a || !b) throw new Error("An add was cancelled");
   const files = [a, b].flatMap((id) => [`${id}.live.json`, `${id}.titles.json`]);
   await until(() => files.every((name) => existsSync(pathOf(name))), "four lists saved");
+
   return { a, b };
 }
 
@@ -205,19 +232,24 @@ beforeEach(async () => {
   memory.requests.length = 0;
   memory.holdLogins = false;
   memory.holdLists = false;
+
   for (const panel of [one, two]) {
     panel.failCatalogue(null);
     panel.failTitles(null);
   }
+
   const { Directory, Paths } = await import("./native-files.ts");
+
   for (const each of [Paths.document, Paths.cache])
     new Directory(each).create({ idempotent: true });
 });
+
 afterEach(() => {
   memory.holdLogins = false;
   memory.holdLists = false;
   release();
   memory.holdPasswords.clear();
+
   for (const held of memory.heldPasswords.splice(0)) held.release();
   native.gate = null;
   vi.useRealTimers();
@@ -234,9 +266,11 @@ describe("opening after a launch", () => {
     const app = await launch();
     expect(app.currentStartup().kind).toBe("opening");
     let waited = 0;
+
     for (; waited < 7_000 && app.currentStartup().kind !== "open"; waited += 10) {
       await vi.advanceTimersByTimeAsync(10);
     }
+
     expect(app.currentStartup().kind).toBe("open");
     expect(waited).toBeLessThan(7_000);
     expect(memory.requests.slice(from).filter((action) => action === "login")).toHaveLength(2);
@@ -251,11 +285,13 @@ describe("opening after a launch", () => {
       // Indexed once, with both providers' lists: not again as the second's arrived.
       listsShown: 1,
     });
+
     for (const id of [a, b]) {
       expect(member(app, id).account).toBeNull();
       expect(member(app, id).live).toMatchObject({ kind: "ready", from: "cache" });
       expect(member(app, id).titles).toMatchObject({ kind: "ready", from: "cache" });
     }
+
     // Fresh copies stand for the lists: once the logins answer, none is asked for.
     memory.holdLogins = false;
     release();
@@ -279,6 +315,7 @@ describe("opening after a launch", () => {
     await settle(500);
     expect(app.titleLists().kind).not.toBe("ready");
     native.gate = null;
+
     for (const go of holds.splice(0)) go();
     await until(() => app.currentStartup().kind === "open", "the app to open");
     expect(app.seen.opened).toMatchObject({ titlesFrom: new Set([a, b]), listsShown: 1 });
@@ -286,6 +323,7 @@ describe("opening after a launch", () => {
 
   it("publishes one combined saved title library when launch passwords answer at different times", async () => {
     const { a, b } = await savedBoth();
+
     for (const id of [a, b]) memory.holdPasswords.add(`s.${id}`);
     memory.holdLogins = true;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -310,6 +348,7 @@ describe("opening after a launch", () => {
 
   it("flushes known saved titles at the deadline with a held password and admits its later library after opening", async () => {
     const { a, b } = await savedBoth();
+
     for (const id of [a, b]) memory.holdPasswords.add(`s.${id}`);
     memory.holdLogins = true;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -336,6 +375,7 @@ describe("opening after a launch", () => {
     "ends the launch title batch when a held password is %s",
     async (answer) => {
       const { a, b } = await savedBoth();
+
       if (answer === "missing") memory.keychain.delete(`s.${b}`);
       else memory.refusedPasswords.add(`s.${b}`);
       memory.holdPasswords.add(`s.${b}`);
@@ -366,6 +406,7 @@ describe("opening after a launch", () => {
         () => memory.heldPasswords.length === 1 && member(app, a).titles.kind === "ready",
         "one saved list and one pending password",
       );
+
       if (change === "removal") await app.remove(b, { keepHistory: false });
       else await app.update(b, { password: TWO.password });
       await until(
@@ -376,6 +417,7 @@ describe("opening after a launch", () => {
       const sources = await import("../src/sources.ts");
       const authoritative = sources.currentSource(b);
       expect(app.titlesFrom().has(a)).toBe(true);
+
       if (change === "removal") expect(app.titlesFrom()).toEqual(new Set([a]));
       else expect(authoritative).toBeDefined();
       releasePassword(b);
@@ -394,10 +436,12 @@ describe("opening after a launch", () => {
     const app = await launch();
     await until(() => app.currentStartup().kind === "open", "the app to open");
     expect(app.seen.opened).toMatchObject({ channelsFrom: new Set([a, b]), movies: true });
+
     for (const id of [a, b]) {
       // Shown while they load again: what loading.tsx's status line says nothing of.
       expect(member(app, id).live).toMatchObject({ kind: "loading", last: expect.anything() });
     }
+
     await until(() => memory.held.length >= 4, "the list requests");
 
     one.failCatalogue(503);
@@ -454,20 +498,25 @@ describe("opening after a launch", () => {
     const app = await launch();
     await until(() => holds.length > 0, "two's titles read");
     const answer = { settled: false, failed: null as unknown };
+
     const looked = app.listedIndex(b, AbortSignal.timeout(5_000)).then(
       (index) => {
         answer.settled = true;
+
         return index;
       },
       (cause: unknown) => {
         answer.settled = true;
         answer.failed = cause;
+
         return null;
       },
     );
+
     await settle(200);
     expect(answer).toEqual({ settled: false, failed: null });
     native.gate = null;
+
     for (const go of holds.splice(0)) go();
     const index = await looked;
     expect(answer.failed).toBeNull();
@@ -478,6 +527,7 @@ describe("opening after a launch", () => {
 
   it("opens the real saved roster at the deadline while Keychain hasn't answered, without authorizing a source", async () => {
     const { a, b } = await savedBoth();
+
     for (const id of [a, b]) memory.holdPasswords.add(`s.${id}`);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const app = await launch();
@@ -496,6 +546,7 @@ describe("opening after a launch", () => {
     );
 
     memory.holdPasswords.clear();
+
     for (const held of memory.heldPasswords.splice(0)) held.release();
     await vi.advanceTimersByTimeAsync(2_000);
     expect(app.titlesFrom()).toEqual(new Set([a, b]));
@@ -520,6 +571,7 @@ describe("opening after a launch", () => {
     app.reloadChannels(a);
     await until(() => member(app, a).live.kind === "ready", "the healthy refresh");
     expect(member(app, a).live).toMatchObject({ kind: "ready", from: "provider" });
+
     for (const held of memory.heldPasswords.splice(0)) held.release();
     await until(() => member(app, b).needsSecret, "the missing password");
     expect(member(app, b)).toMatchObject({ needsSecret: true, live: { kind: "idle" } });
@@ -535,6 +587,7 @@ describe("opening after a launch", () => {
     await until(() => memory.heldPasswords.length === 1, "the held password");
     await app.remove(b, { keepHistory: false });
     expect(app.members().map((each) => each.entry.id)).toEqual([a]);
+
     for (const held of memory.heldPasswords.splice(0)) held.release();
     await app.startUp();
     await until(() => app.currentStartup().kind === "open", "the app to open");
@@ -550,6 +603,7 @@ describe("opening after a launch", () => {
     const app = await launch();
     await until(() => memory.heldPasswords.length === 1, "the held password");
     await app.update(b, { name: "Renamed" });
+
     for (const held of memory.heldPasswords.splice(0)) held.release();
     await app.startUp();
     await until(() => app.currentStartup().kind === "open", "the app to open");
@@ -566,6 +620,7 @@ describe("opening after a launch", () => {
     await app.update(b, { password: TWO.password });
     const sources = await import("../src/sources.ts");
     const edited = sources.sourceOf(b);
+
     for (const held of memory.heldPasswords.splice(0)) held.release();
     await app.startUp();
     expect(sources.sourceOf(b)).toBe(edited);
@@ -614,6 +669,7 @@ describe("opening after a launch", () => {
     });
     // The read answers late: nothing of the removed subscription shows.
     native.gate = null;
+
     for (const go of holds.splice(0)) go();
     await settle(300);
     expect(app.members().map((each) => each.entry.id)).toEqual([a]);
@@ -651,16 +707,19 @@ describe("opening after a launch", () => {
     const lookups = { b: "waiting" };
     const forOne = await app.listedIndex(a, AbortSignal.timeout(5_000));
     expect(forOne).toBe((app.titleLists() as { index: unknown }).index);
+
     const forTwo = app.listedIndex(b, AbortSignal.timeout(5_000)).then(
       (index) => ((lookups.b = "answered"), index),
       () => ((lookups.b = "failed"), null),
     );
+
     await vi.advanceTimersByTimeAsync(500);
     expect(lookups.b).toBe("waiting");
 
     // Two's read answers late: its titles join one's in the lists that show.
     vi.useRealTimers();
     native.gate = null;
+
     for (const go of holds.splice(0)) go();
     await until(() => app.titlesFrom().size === 2, "two's titles joining");
     expect(app.titlesFrom()).toEqual(new Set([a, b]));

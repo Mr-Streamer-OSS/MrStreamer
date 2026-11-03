@@ -81,8 +81,10 @@ import { VolumeControl } from "../watch/VolumeControl.tsx";
 /** Controls fade out after this long without input. */
 const IDLE_MS = 3000;
 const SKIP_S = 10;
+
 /** How long the note that subtitles can't be had stays. */
 const SUBTITLES_UNAVAILABLE_MS = 5000;
+
 /** Which menu is open over the title's controls: one of the tracks' or its speed. */
 type TitleMenu = TrackMenu | "speed";
 
@@ -92,10 +94,13 @@ type TitleMenu = TrackMenu | "speed";
  */
 function toEpisodes(series: SeriesDetails): void {
   const { details } = useUi.getState();
+
   const underneath =
     details?.kind === "series" &&
     series.title.versions.some((version) => sameOwned(version, details));
+
   leaveTitle();
+
   if (!underneath) openDetails({ kind: "series", ...ownedId(series.title) });
 }
 
@@ -123,6 +128,7 @@ export function TitleWatch() {
   // What happens to the title when a receiver lets go of it depends on whether it is on screen.
   useEffect(() => {
     titlePlayer.setShown(true);
+
     return () => titlePlayer.setShown(false);
   }, []);
 
@@ -143,10 +149,12 @@ export function TitleWatch() {
           : null,
       subtitleNote === "unavailable",
     );
+
     const timer =
       subtitleNote === "unavailable"
         ? setTimeout(() => flashNote(null), SUBTITLES_UNAVAILABLE_MS)
         : undefined;
+
     return () => {
       clearTimeout(timer);
       flashNote(null);
@@ -166,17 +174,22 @@ export function TitleWatch() {
     // the window and the system's list asked for from here.
     const view = new AbortController();
     outputs.viewShown(view.signal);
+
     function onKey(event: KeyboardEvent) {
       const ui = useUi.getState();
+
       if (event.defaultPrevented || isTyping(event) || hasModifier(event) || event.isComposing)
         return;
+
       if (ui.searchOpen || ui.settings || ui.updateDialog || !ui.playingTitle) return;
       const current = latest.current;
       current.wake();
+
       // The menu's own keys: Escape closes it, and focus goes back to its button. A message's
       // cross takes Enter and Space, so Space closes it rather than playing the title again, and
       // so does the bar's word on the downloads, which opens Downloads.
       if (current.menu || pressesClose(event) || pressesDownloads(event)) return;
+
       switch (event.key) {
         case " ":
         case "k":
@@ -193,6 +206,7 @@ export function TitleWatch() {
           if (!player.nudgeVolume(event.key === "ArrowUp" ? 0.05 : -0.05)) {
             flash(t("TV remote sets volume"));
           }
+
           break;
         case "f":
           if (miniPlayer.on()) void miniPlayer.leave(true);
@@ -226,8 +240,10 @@ export function TitleWatch() {
           else {
             const direction = event.key.toLowerCase() === "g" ? -1 : 1;
             const state = titlePlayer.state();
+
             if (state.downloadedOn && state.savedSubtitle) {
               const timing = state.savedSubtitle.timing;
+
               const offset =
                 Math.round(
                   Math.max(
@@ -235,6 +251,7 @@ export function TitleWatch() {
                     Math.min(600, timing.offset + direction * (event.shiftKey ? 1 : 0.1)),
                   ) * 10,
                 ) / 10;
+
               void titlePlayer
                 .setDownloadedTiming({ ...timing, offset })
                 .catch(() => flash(t("Subtitle timing could not be saved")));
@@ -245,6 +262,7 @@ export function TitleWatch() {
               );
             } else nudgeSubtitles(state.subtitle, direction);
           }
+
           break;
         case "<":
         case ">":
@@ -259,12 +277,15 @@ export function TitleWatch() {
         default:
           return;
       }
+
       event.preventDefault();
       // Handled here only: the layer underneath, shown again by this key, must not take it too.
       event.stopPropagation();
     }
+
     // Before tooltips and popovers see the key, which would otherwise keep Escape to themselves.
     window.addEventListener("keydown", onKey, { capture: true });
+
     return () => {
       view.abort();
       window.removeEventListener("keydown", onKey, { capture: true });
@@ -273,15 +294,18 @@ export function TitleWatch() {
 
   if (!now) return null;
   const controlsVisible = awake || phase.kind !== "playing" || menu !== null || remote;
+
   // Keep the end screen while the next episode opens, including an unheld Instant transition.
   const starting =
     continued && (phase.kind === "opening" || phase.kind === "starting" || (failure && !closed));
+
   const end =
     now.kind === "provider" && now.series ? (
       ((phase.kind === "ended" && next !== undefined) || starting) && <NextUp series={now.series} />
     ) : now.kind === "copy" && ((phase.kind === "ended" && copyEnds) || starting) ? (
       <CopyNextUp />
     ) : null;
+
   if (mini) {
     return (
       <div
@@ -330,6 +354,7 @@ export function TitleWatch() {
       </div>
     );
   }
+
   return (
     <div
       data-view="title"
@@ -440,6 +465,7 @@ function PlayPause({ size = "icon" }: { size?: "icon" | "icon-sm" }) {
   const phase = useTitlePlayer((state) => state.phase);
   const paused = phase.kind !== "playing";
   const label = phase.kind === "ended" ? t("Play again") : paused ? t("Play") : t("Pause");
+
   return (
     <Tooltip label={label}>
       <Button
@@ -470,9 +496,11 @@ function Scrubber() {
   const confirmed = useTitlePlayer((state) => state.confirmed);
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? position;
+
   if (!duration) {
     return <div className="text-sm text-muted-foreground">{clock(position)}</div>;
   }
+
   return (
     <div className="flex items-center gap-4 text-[0.8125rem] tabular-nums">
       <span className="w-14 text-right">{clock(shown)}</span>
@@ -520,6 +548,7 @@ function Tracks({ menu, onMenu }: { menu: TitleMenu; onMenu: (menu: TitleMenu) =
   const speed = useTitlePlayer((state) => state.speed);
   const shows = useTitlePlayer((state) => state.shows);
   const downloadedOn = useTitlePlayer((state) => state.downloadedOn);
+
   return (
     <>
       {shows === null && (
@@ -574,15 +603,20 @@ function State() {
   const remote = useTitlePlayer((state) => state.shows !== null);
   const output = useOutput((state) => state.status.output);
   const closed = useClosed(phase.kind === "failed" ? phase : null);
+
   // On a receiver there is never a picture here: this says what it does and where.
   const receiver =
     remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
+
   // Closed: nothing in its place, not even what a receiver said before the failure.
   if (!now || closed) return null;
+
   if (receiver && phase.kind !== "ended" && phase.kind !== "reconnecting") {
     const on = where(receiver);
+
     if (phase.kind === "failed") {
       const { problem } = phase;
+
       const failed =
         problem.kind === "receiver"
           ? receiverProblem(
@@ -592,6 +626,7 @@ function State() {
               t("{title} stopped at {position}.", { title: now.name, position: clock(position) }),
             )
           : null;
+
       return (
         <Stated
           title={failed?.title ?? problemTitle(problem)}
@@ -608,6 +643,7 @@ function State() {
         </Stated>
       );
     }
+
     return (
       <Stated
         line={
@@ -631,10 +667,12 @@ function State() {
       </Stated>
     );
   }
+
   if (phase.kind === "playing" || phase.kind === "paused") return null;
   let body: ReactNode = null;
   let actions: ReactNode = null;
   let title = now.name;
+
   switch (phase.kind) {
     case "opening":
     case "starting":
@@ -673,6 +711,7 @@ function State() {
         title = problemTitle(phase.problem);
         body = problemBody(phase.problem);
       }
+
       actions = (
         <>
           <Button variant="primary" onClick={() => titlePlayer.retry()}>
@@ -689,6 +728,7 @@ function State() {
       );
       break;
   }
+
   return (
     <Stated title={title} body={body} failure={phase.kind === "failed" ? phase : undefined}>
       {actions}
@@ -799,10 +839,13 @@ function NextUp({ series }: { series: SeriesDetails }) {
   const countdown = useTitlePlayer((state) => state.countdown);
   const remote = useTitlePlayer((state) => state.shows !== null);
   const output = useOutput((state) => state.status.output);
+
   // On a receiver, where the next one plays, and the way back.
   const receiver =
     remote && (output.kind === "receiver" || output.kind === "lost") ? output.receiver : null;
+
   if (now?.kind !== "provider" || now.title.kind !== "episode") return null;
+
   if (phase.kind === "opening" || phase.kind === "starting") {
     return (
       <EndOfEpisode
@@ -817,6 +860,7 @@ function NextUp({ series }: { series: SeriesDetails }) {
       </EndOfEpisode>
     );
   }
+
   if (phase.kind === "failed") {
     return (
       <EndOfEpisode
@@ -836,12 +880,15 @@ function NextUp({ series }: { series: SeriesDetails }) {
       </EndOfEpisode>
     );
   }
+
   const finished = t("Finished {episode}", {
     episode: episodeLabel(now.title.season, now.title.episode),
   });
+
   if (!next) {
     // None left to watch after it: the series' last episode, or the later ones are watched.
     const last = nextEpisode(series, now.title) === null;
+
     return (
       <EndOfEpisode
         artworkUrl={now.artworkUrl}
@@ -862,7 +909,9 @@ function NextUp({ series }: { series: SeriesDetails }) {
       </EndOfEpisode>
     );
   }
+
   const length = next.duration ? runtime(next.duration) : null;
+
   return (
     <EndOfEpisode
       artworkUrl={next.stillUrl ?? series.backdropUrl}
@@ -919,12 +968,15 @@ function CopyNextUp() {
   const phase = useTitlePlayer((state) => state.phase);
   const next = useTitlePlayer((state) => state.nextCopy);
   const countdown = useTitlePlayer((state) => state.countdown);
+
   if (now?.kind !== "copy") return null;
+
   const downloads = (
     <Button variant="secondary" size="lg" onClick={openDownloads}>
       {t("Downloads")}
     </Button>
   );
+
   if (phase.kind === "opening" || phase.kind === "starting") {
     return (
       <EndOfEpisode
@@ -937,6 +989,7 @@ function CopyNextUp() {
       </EndOfEpisode>
     );
   }
+
   if (phase.kind === "failed") {
     return (
       <EndOfEpisode
@@ -958,13 +1011,17 @@ function CopyNextUp() {
       </EndOfEpisode>
     );
   }
+
   if (!next || now.title.kind !== "episode") return null;
+
   const finished = `${t("Finished {episode}", {
     episode: episodeLabel(now.title.season, now.title.episode),
   })} · ${t("Offline")}`;
+
   if (next.kind === "copy") {
     const { copy, season } = next;
     const length = copy.duration ? runtime(copy.duration) : null;
+
     return (
       <EndOfEpisode
         artworkUrl={copy.wideUrl ?? copy.posterUrl}
@@ -1003,6 +1060,7 @@ function CopyNextUp() {
       </EndOfEpisode>
     );
   }
+
   const stopped =
     next.kind === "end"
       ? {
@@ -1025,6 +1083,7 @@ function CopyNextUp() {
             ),
             detail: statusLine(next.copy),
           };
+
   return (
     <EndOfEpisode
       artworkUrl={now.artworkUrl}

@@ -32,11 +32,14 @@ interface RoundTripDriver extends Driver {
 
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+
 const SETTINGS = "document.querySelector('header button[aria-pressed]')";
 const HEADING = "document.querySelector('main h1')?.textContent";
 const SUBSCRIPTION_ROWS = "document.querySelectorAll('main section > ul > li')";
+
 const row = (name: string) =>
   `[...document.querySelectorAll('main [data-index]')].find(r => r.querySelector('[title=${JSON.stringify(name)}]'))`;
+
 const check = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
@@ -44,9 +47,11 @@ const check = (value: boolean, message: string) => {
 /** Read-only diagnostics of the profile's database: never a user path, never a write. */
 function onDisk(profile: string, account: string) {
   const db = new DatabaseSync(join(profile, "mrstreamer.db"), { readOnly: true });
+
   try {
     const count = (sql: string, ...params: string[]) =>
       Number(db.prepare(sql).get(...params)?.["n"] ?? 0);
+
     return {
       lists: count("select count(*) as n from custom_lists"),
       membersOfErased: count(
@@ -77,6 +82,7 @@ async function remembered(profile: string): Promise<unknown> {
     string,
     unknown
   >;
+
   return file["rememberedLiveBrowse"] ?? null;
 }
 
@@ -85,6 +91,7 @@ async function eraseBackup(d: Driver) {
   await d.click("Open Settings to remove a subscription", SETTINGS);
   await d.click("Open Subscriptions", named("nav button", "Subscriptions"));
   const item = `${SUBSCRIPTION_ROWS}[1]`;
+
   if (!(await d.exists(`${item}.querySelector('[role=region]')`)))
     await d.click("Open the second subscription", `${item}.querySelector('button')`);
   await d.click(
@@ -111,6 +118,7 @@ async function eraseBackup(d: Driver) {
 async function search(d: Driver, name: string, text: string) {
   await d.click("Open Live TV", named("header button", "Live TV"));
   await d.wait(async () => typeof (await d.evaluate<string | undefined>(HEADING)) === "string");
+
   if ((await d.evaluate<string | undefined>(HEADING)) !== "All channels")
     await d.click(
       "Open All channels",
@@ -118,6 +126,7 @@ async function search(d: Driver, name: string, text: string) {
     );
   await d.wait(async () => (await d.evaluate<string | undefined>(HEADING)) === "All channels");
   const field = `document.querySelector('main input[aria-label^="Search "]')`;
+
   if ((await d.evaluate<string>(`${field}?.value ?? ''`)) !== "")
     await d.click(
       "Clear the search",
@@ -140,6 +149,7 @@ export async function customListRoundTripScenario(
   await d.click("Open Live TV", named("header button", "Live TV"));
   await makeList(d, "Round trip");
   await openList(d, "All channels");
+
   for (const [name, text] of [
     [FIRST, "H.264 + AAC"],
     [SECOND, "H.264 + AAC"],
@@ -148,6 +158,7 @@ export async function customListRoundTripScenario(
     await rowMenu(d, name, text);
     await tick(d, "Round trip", true);
   }
+
   await d.click(
     "Clear the list search",
     "document.querySelector('main button[aria-label=\"Clear search\"]')",
@@ -169,14 +180,17 @@ export async function customListRoundTripScenario(
   d.observed["priorUserAgent"] = await d.evaluate<string>("navigator.userAgent");
   // The prior release's own files, by hash: the app it runs is the one published.
   const priorDoctor = d.observed["priorDoctor"];
+
   const executable =
     priorDoctor && typeof priorDoctor === "object" && "executable" in priorDoctor
       ? String(priorDoctor.executable)
       : "";
+
   const sha256 = async (path: string) =>
     createHash("sha256")
       .update(await readFile(path))
       .digest("hex");
+
   d.observed["priorFiles"] = {
     executable: await sha256(executable),
     appAsar: await sha256(join(dirname(executable), "resources/app.asar")),

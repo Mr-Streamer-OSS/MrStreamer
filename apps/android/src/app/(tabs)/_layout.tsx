@@ -10,6 +10,7 @@ export const unstable_settings = { anchor: START_DESTINATION };
 // destination's root returns to Live, and at Live's root leaves the app.
 export default function DestinationsLayout() {
   const layout = layoutFor(useWindowDimensions().width);
+
   return (
     <Tabs
       backBehavior="initialRoute"

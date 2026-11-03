@@ -51,7 +51,9 @@ const decoded = (text: string) => {
 export function safeUrl(url: string | null, login: Login): string | null {
   if (url === null || url.length > URL_LENGTH) return null;
   const parsed = URL.parse(url);
+
   if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return null;
+
   return exposes(url, login, LAYERS, parsed) ? null : url;
 }
 
@@ -70,6 +72,7 @@ export function exposes(
   address = text.includes(":") ? URL.parse(text) : null,
 ): boolean {
   const { username, passwords, uncertain } = login;
+
   if (
     (username !== "" && text === username) ||
     uncertain.some((each) => whole(text, each)) ||
@@ -77,14 +80,20 @@ export function exposes(
   ) {
     return true;
   }
+
   const next = new Set([decoded(text), decoded(text.replaceAll("+", " "))]);
   next.delete(text);
+
   if (!address && next.size === 0) return false;
+
   if (layers === 0 || next.has(null)) return true;
+
   if (address && (address.username !== "" || address.password !== "")) return true;
+
   const parts = address
     ? [address.hash.slice(1), ...address.pathname.split("/"), ...[...address.searchParams].flat()]
     : [];
+
   return [...parts, ...next].some((part) => part !== null && exposes(part, login, layers - 1));
 }
 
@@ -97,6 +106,7 @@ export function exposes(
 export function holds(value: unknown, login: Login): boolean {
   if (typeof value === "string")
     return (login.passwords.length > 0 || login.uncertain.length > 0) && textHolds(value, login);
+
   return (
     typeof value === "object" &&
     value !== null &&
@@ -106,18 +116,24 @@ export function holds(value: unknown, login: Login): boolean {
 
 function textHolds(text: string, { passwords, uncertain }: Login): boolean {
   const forms = new Set([text]);
+
   for (let layer = [text], times = 0; ; times++) {
     const found = (form: string) =>
       uncertain.some((each) => whole(form, each)) || passwords.some((each) => form.includes(each));
+
     if (layer.some(found)) return true;
     const next = new Set<string>();
+
     // Only text with an escape or a "+" reads otherwise decoded.
     for (const form of layer.filter((each) => /[%+]/.test(each))) {
       for (const read of [unescaped(form), unescaped(form.replaceAll("+", " "))])
         if (!forms.has(read)) next.add(read);
     }
+
     if (next.size === 0) return false;
+
     if (times === LAYERS) return true;
+
     for (const form of next) forms.add(form);
     layer = [...next];
   }

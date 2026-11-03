@@ -27,12 +27,15 @@ function record(value: unknown): value is Record<string, unknown> {
 // Later samples are allowlisted and bounded. The primary rejected URL stays exact.
 function fields(value: unknown, names: readonly string[]) {
   const result: Record<string, string | number | boolean> = {};
+
   if (record(value))
     for (const name of names) {
       const field = value[name];
+
       if (typeof field === "string") result[name] = field.slice(0, 2048);
       else if (typeof field === "number" || typeof field === "boolean") result[name] = field;
     }
+
   return result;
 }
 
@@ -44,7 +47,9 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
     laterFile?: string;
     errors: { phase: string; error: string }[];
   } = { launchOrdinal: context.launchOrdinal, errors: [] };
+
   let phase = "primary-write";
+
   try {
     const guardTime = new Date().toISOString();
     const name = `renderer-launch-failure-${context.launchOrdinal}-${randomUUID()}`;
@@ -82,10 +87,12 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
     link.primaryFile = primaryFile;
     phase = "later-write";
     const deadline = performance.now() + 2000;
+
     const appStatus = () => ({
       exitCode: context.app.exitCode,
       signalCode: context.app.signalCode,
     });
+
     const samples: {
       phase: string;
       startedAt: string;
@@ -94,12 +101,15 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       result?: unknown;
       error?: string;
     }[] = [];
+
     const sample = async (phase: string, read: (timeoutMs: number) => Promise<unknown>) => {
       const startedAt = new Date().toISOString();
       let timer: ReturnType<typeof setTimeout> | undefined;
       let outcome: { result?: unknown; error?: string };
+
       try {
         const timeoutMs = Math.min(500, Math.floor(deadline - performance.now()));
+
         if (timeoutMs <= 0) throw new Error("Diagnostic deadline exhausted");
         outcome = {
           result: await Promise.race([
@@ -115,6 +125,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       } finally {
         clearTimeout(timer);
       }
+
       samples.push({
         phase,
         startedAt,
@@ -123,21 +134,29 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
         ...outcome,
       });
     };
+
     const pageRead = async (method: string, timeoutMs: number) => {
       const reply = await context.page.send(method, {}, timeoutMs);
+
       if (reply.error !== undefined) throw new Error(JSON.stringify(reply.error));
+
       return reply.result;
     };
+
     // These first reads use the same page socket as the rejected location evaluation.
     await sample("same-page-frame-tree", async (timeoutMs) => {
       const result = await pageRead("Page.getFrameTree", timeoutMs);
+
       if (!record(result) || !record(result["frameTree"])) throw new Error("No frame tree");
+
       return fields(result["frameTree"]["frame"], ["id", "loaderId", "url", "unreachableUrl"]);
     });
     await sample("same-page-navigation-history", async (timeoutMs) => {
       const result = await pageRead("Page.getNavigationHistory", timeoutMs);
+
       if (!record(result) || !Array.isArray(result["entries"]))
         throw new Error("No navigation history");
+
       return {
         ...fields(result, ["currentIndex"]),
         entries: result["entries"].map((entry: unknown) =>
@@ -149,9 +168,12 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       const response = await fetch(`http://127.0.0.1:${context.pagePort}/json/list`, {
         signal: AbortSignal.timeout(timeoutMs),
       });
+
       if (!response.ok) throw new Error(`Target listing HTTP ${response.status}`);
       const targets: unknown = await response.json();
+
       if (!Array.isArray(targets)) throw new Error("No target list");
+
       return targets.map((target: unknown) =>
         fields(target, ["id", "type", "url", "title", "attached"]),
       );
@@ -171,8 +193,10 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       })()`,
         timeoutMs,
       );
+
       if (!record(result) || !Array.isArray(result["webContents"]))
         throw new Error("No main identity/webContents");
+
       return {
         ...fields(result, ["pid", "executable", "resources", "appPath", "version"]),
         webContents: result["webContents"].map((contents: unknown) =>
@@ -198,5 +222,6 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
   } catch (diagnosticError) {
     link.errors.push({ phase, error: String(diagnosticError) });
   }
+
   throw error;
 }

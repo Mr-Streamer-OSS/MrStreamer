@@ -8,9 +8,11 @@ import { TitlesPage } from "../../src/renderer/src/features/titles/TitlesPage.ts
 import { queries } from "../../src/renderer/src/lib/queries.ts";
 
 let cleanup = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   cleanup();
   ipc.reset();

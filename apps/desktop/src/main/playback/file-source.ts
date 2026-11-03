@@ -19,9 +19,11 @@ const TYPES: Readonly<Record<string, string>> = {
 /** Answers requests for the file at `path`, as `Provider.request` answers for a provider's file. */
 export function fileRequest(path: string, container: string) {
   const contentType = TYPES[container.toLowerCase()] ?? "application/octet-stream";
+
   return async (_url: string, init: RequestInit = {}): Promise<Response> => {
     init.signal?.throwIfAborted();
     const found = await stat(path).catch(() => null);
+
     if (!found?.isFile()) return new Response(null, { status: 404 });
     const size = found.size;
     // Changes when the file on disk does, as a server's would.
@@ -30,22 +32,27 @@ export function fileRequest(path: string, container: string) {
     const range = asked === null ? null : /^bytes=(\d+)-(\d*)$/.exec(asked);
     const start = range ? Number(range[1]) : 0;
     const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+
     if (range && start >= size) {
       return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
     }
+
     const headers: Record<string, string> = {
       "Accept-Ranges": "bytes",
       "Content-Type": contentType,
       "Content-Length": String(Math.max(0, end - start + 1)),
       ETag: etag,
     };
+
     if (range) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+
     if (size === 0) return new Response(null, { status: range ? 206 : 200, headers });
     const file = createReadStream(path, { start, end });
     const stop = () => file.destroy();
     init.signal?.addEventListener("abort", stop, { once: true });
     file.once("close", () => init.signal?.removeEventListener("abort", stop));
     const body = Readable.toWeb(file) as ReadableStream<Uint8Array>;
+
     return new Response(body, { status: range ? 206 : 200, headers });
   };
 }

@@ -15,17 +15,24 @@ const scenario = vi.hoisted(() => ({
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native", async () => (await import("./react-native.ts")).reactNative);
+
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ id: "fflate@0.8.2" }),
   useNavigation: () => ({
     setOptions: (options: Record<string, unknown>) => scenario.options.push(options),
   }),
 }));
+
 vi.mock("../src/open-link.ts", () => ({ openLink: () => undefined }));
+
 const REPORT = "Mr. Streamer 0.2.0 (12)\nProviders: 1";
+
 vi.mock("../src/diagnostics.ts", () => ({ diagnosticsText: () => REPORT }));
+
 vi.mock("../src/licences.ts", () => ({
   licenceOf: () => ({
     id: "fflate@0.8.2",
@@ -47,15 +54,19 @@ const { default: Licence } = await import("../src/app/(tabs)/(home)/licence.tsx"
 
 let container: ReturnType<typeof document.createElement>;
 let root: Root | null = null;
+
 function open(node: React.ReactNode) {
   container = document.createElement("div");
   root = createRoot(container);
   React.act(() => root!.render(node));
 }
+
 const speak = (locale: Locale) => React.act(() => setLanguage({ locale, formats: locale }));
 const latest = () => scenario.options.at(-1)!;
+
 const share = () => {
   const items = latest()["unstable_headerRightItems"] as () => { label: string }[];
+
   return items()[0]!.label;
 };
 
@@ -84,8 +95,10 @@ it("words Diagnostics in the language and shares its text as written", () => {
 it("labels a licence in the language and keeps its names, versions and paths", () => {
   speak("es-ES");
   open(React.createElement(Licence));
+
   const facts = () =>
     [...container.querySelectorAll("[aria-label]")].map((each) => each.getAttribute("aria-label"));
+
   expect(facts()).toEqual([
     "Licencia, MIT",
     "Versión, 0.8.2",

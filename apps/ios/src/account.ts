@@ -201,6 +201,7 @@ export type Catalogue =
 
 const roster = store<Roster>({ kind: "restoring" });
 const catalogue = store<Catalogue>({ kind: "loading" });
+
 /**
  * Saved lists a launch is still establishing, by `kind|id`: null reserves a possible read while
  * its password is pending; a Source means that login's saved list is being read. All reservations
@@ -211,25 +212,34 @@ const reading = store<ReadonlyMap<string, Source | null>>(new Map());
 
 export const useRoster = () => useStore(roster);
 export const useCatalogue = () => useStore(catalogue);
+
 /** Every subscription's channels as they stand, for owners outside React. */
 export const currentCatalogue = () => catalogue.get();
+
 /** Calls `listener` whenever every subscription's channels change. */
 export const onCatalogue = (listener: () => void) => catalogue.subscribe(listener);
+
 /** Whether launch still establishes a saved list, including its password: by `kind`/`id` if given. */
 export const readingSaved = (kind?: Kind, id?: string) =>
   [...reading.get().keys()].some((key) => {
     const at = key.indexOf("|");
+
     return (!kind || key.slice(0, at) === kind) && (!id || key.slice(at + 1) === id);
   });
+
 /** Calls `listener` when launch password/list reservations or reads change. */
 export const onReadingSaved = (listener: () => void) => reading.subscribe(listener);
+
 /** The saved subscriptions as they stand, for owners outside React. */
 export const members = (): readonly Member[] => {
   const now = roster.get();
+
   return now.kind === "ready" ? now.members : [];
 };
+
 /** The roster as it stands: whether launch has read the registry yet, for owners outside React. */
 export const currentRoster = () => roster.get();
+
 /** Calls `listener` whenever a subscription or its lists change. */
 export const onRoster = (listener: () => void) => roster.subscribe(listener);
 
@@ -244,6 +254,7 @@ const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)
 const uncached: typeof fetch = (input, init) => {
   const headers = new Headers(init?.headers);
   headers.set("Cache-Control", "no-store");
+
   return fetch(input, { ...init, headers });
 };
 
@@ -270,6 +281,7 @@ const loginFor = (entry: SubscriptionEntry, secret: string): readonly string[] =
 /** The registry as last written. */
 let registry: Registry = EMPTY_REGISTRY;
 let file: RegistryFile = { registry, demo: { kind: "absent" }, opaque: {} };
+
 /** Personal cleanup must not turn a launch-time reserved id into demo authority mid-launch. */
 let demoReservedAtLaunch = false;
 const demoReserved = () => demoReservedAtLaunch || demoConflict(registry);
@@ -279,13 +291,17 @@ const entriesOf = () => [
   ...registry.subscriptions,
   ...(file.demo.kind === "active" && !demoReserved() ? [demoEntry] : []),
 ];
+
 /** Loads under way, by `kind|id`. */
 const loads = new Map<string, AbortController>();
 let revisions = 0;
+
 /** By id: the revision when its saved lists were last deleted; no list of an older login is saved. */
 const dropped = new Map<string, number>();
+
 /** Told after each change to `dropped` and as Demo starts erasing (`onSavable`). */
 const fences = new Set<() => void>();
+
 /** A saved list younger than this shows as loaded at launch, and isn't asked for again. */
 const FRESH_FOR = 12 * 60 * 60 * 1000;
 
@@ -294,6 +310,7 @@ let changing: Promise<unknown> = Promise.resolve();
 
 /** Each exact signed-in Source's download generation, once bound. */
 const bindings = new WeakMap<Source, string>();
+
 /** Rises whenever bindings are invalidated: a binding begun before writes nothing. */
 let bindingEpoch = 0;
 let launchSettled = () => {};
@@ -303,6 +320,7 @@ const launched = new Promise<void>((resolve) => (launchSettled = resolve));
 function serially<A>(change: () => Promise<A>): Promise<A> {
   const run = changing.then(change);
   changing = run.catch(() => undefined);
+
   return run;
 }
 
@@ -331,15 +349,20 @@ export const downloadGeneration = (source: Source): string | null => bindings.ge
 export function bindDownloadSource(id: string, captured: Source): Promise<void> {
   const epoch = bindingEpoch;
   const current = () => currentSource(id) === captured && bindingEpoch === epoch;
+
   return serially(async () => {
     if (!current() || bindings.has(captured) || !transfers.available()) return;
+
     try {
       const observed = await transfers.sourceState(id);
+
       if (!current()) return;
+
       const generation =
         observed.state === "enabled" && observed.generation !== null
           ? observed.generation
           : await transfers.enableSource(id, observed);
+
       if (current()) bindings.set(captured, generation);
     } catch {
       if (current()) bindings.delete(captured);
@@ -353,6 +376,7 @@ export function bindDownloadSource(id: string, captured: Source): Promise<void> 
  */
 export function unbindDownloads(source?: Source): void {
   bindingEpoch++;
+
   for (const each of source ? [source] : signedIn()) bindings.delete(each);
 }
 
@@ -364,8 +388,10 @@ export function unbindDownloads(source?: Source): void {
 async function fenceDownloads(id: string): Promise<void> {
   // A build without the native owner holds no download authority to fence.
   if (!transfers.available()) return;
+
   try {
     const observed = await transfers.sourceState(id);
+
     if (observed.state === "missing" || observed.state === "revoked") return;
     await transfers.revokeSource(id, observed);
   } catch {
@@ -389,11 +415,13 @@ function commitFile(next: RegistryFile) {
 /** Names by id: a subscription's own, else its host; two that read the same are numbered. */
 function labelsOf(entries: readonly Member["entry"][]): ReadonlyMap<string, string> {
   const seen = new Map<string, number>();
+
   return new Map(
     entries.map((entry) => {
       const label = entry.name ?? hostOf(entry.server);
       const count = (seen.get(label) ?? 0) + 1;
       seen.set(label, count);
+
       return [entry.id, count === 1 ? label : `${label} ${count}`];
     }),
   );
@@ -406,21 +434,28 @@ function syncRoster() {
   const entries = entriesOf();
   const labels = labelsOf(entries);
   const known = new Map(members().map((member) => [member.entry.id, member]));
+
   const next = entries.map((entry): Member => {
     const label = labels.get(entry.id) ?? entry.server;
     const member = known.get(entry.id);
+
     if (!member) {
       return { entry, label, account: null, needsSecret: false, live: IDLE, titles: IDLE };
     }
+
     return member.entry === entry && member.label === label ? member : { ...member, entry, label };
   });
+
   roster.set({ kind: "ready", members: next });
   const ids = next.map((member) => member.entry.id);
+
   // After the roster, so what waits on a removed subscription's read sees it gone with it.
   for (const key of reading.get().keys()) {
     const id = key.slice(key.indexOf("|") + 1);
+
     if (!ids.includes(id)) stopReading(id);
   }
+
   setViewingOwners(ids);
   setWatchlistOwners(ids);
 }
@@ -431,11 +466,14 @@ function syncRoster() {
  */
 function stopReading(id: string, kind?: Kind, source?: Source | null) {
   const now = reading.get();
+
   const keys = (kind ? [kind] : (["live", "titles"] as const))
     .map((each) => `${each}|${id}`)
     .filter((key) => now.has(key) && (source === undefined || now.get(key) === source));
+
   if (keys.length === 0) return;
   const next = new Map(now);
+
   for (const key of keys) next.delete(key);
   reading.set(next);
 }
@@ -479,6 +517,7 @@ export const savable = (id: string, source: Source) =>
  */
 export function onSavable(listener: () => void): () => void {
   fences.add(listener);
+
   return () => void fences.delete(listener);
 }
 
@@ -505,6 +544,7 @@ async function dropSaved(id: string, guideGone = guide.forget(id)): Promise<bool
   dropped.set(id, revisions);
   savableChanged();
   const gone = await Promise.all([guideGone, dropLists(id), dropTitles(id)]);
+
   return gone.every(Boolean);
 }
 
@@ -515,7 +555,9 @@ async function dropSaved(id: string, guideGone = guide.forget(id)): Promise<bool
  */
 async function clearSaved(id: string, guideGone?: Promise<boolean>): Promise<void> {
   const before = dropped.get(id);
+
   if (await dropSaved(id, guideGone)) return;
+
   if (before === undefined) dropped.delete(id);
   else dropped.set(id, before);
   savableChanged();
@@ -538,14 +580,19 @@ async function recoverLogin(id: string, before: Source | undefined): Promise<voi
   if (currentSource(id) !== before) return;
   const password = await keychainSecrets.read(id).catch(() => null);
   const entry = registry.subscriptions.find((each) => each.id === id);
+
   if (!entry || currentSource(id) !== before) return;
+
   if (password) return signIn(entry, password, "again");
   dropSource(id);
   stopReading(id);
+
   for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
   const error: AppError = { kind: "needs-secret", subscriptionId: id };
+
   const settled = <A>(now: Loadable<A>): Loadable<A> =>
     now.kind === "loading" ? { kind: "failed", error, last: now.last, since: Date.now() } : now;
+
   setMember(id, (member) => ({
     ...member,
     needsSecret: true,
@@ -561,21 +608,27 @@ async function recoverLogin(id: string, before: Source | undefined): Promise<voi
  */
 async function fromSaved(id: string, kind: Kind, source: Source): Promise<boolean> {
   const saved = await readList(id, kind, mappingOf(source), () => savable(id, source));
+
   try {
     const member = members().find((each) => each.entry.id === id);
+
     if (currentSource(id) !== source || member?.[kind].kind !== "idle") return false;
+
     if (!saved) return true;
     savedUnder.set(saved.catalogue, source);
     const fresh = Date.now() - saved.fetchedAt < FRESH_FOR;
+
     const shown = <A>(value: A): Loadable<A> =>
       fresh
         ? { kind: "ready", value, from: "cache", fetchedAt: saved.fetchedAt, took: null }
         : { kind: "loading", last: value };
+
     setMember(id, (now) =>
       saved.kind === "live"
         ? { ...now, live: shown(saved.catalogue) }
         : { ...now, titles: shown(saved.catalogue) },
     );
+
     return !fresh;
   } finally {
     // After the list shows, so what waits for every read sees it in the roster.
@@ -598,6 +651,7 @@ function follow<A extends Record<keyof A, readonly unknown[]>>(
   landed: (value: A, source: Source, fetchedAt: number) => void,
 ) {
   const source = currentSource(id);
+
   if (!source) return;
   const key = `${kind}|${id}`;
   loads.get(key)?.abort();
@@ -612,10 +666,12 @@ function follow<A extends Record<keyof A, readonly unknown[]>>(
       const fetchedAt = Date.now();
       const before = shown();
       const last = before ? lastOf(before) : null;
+
       const same =
         last !== null &&
         savedUnder.get(last) === source &&
         (await inTasks(sameSteps(answer, last), stands));
+
       if (!stands()) return;
       const value = same && shown() === before ? last : answer;
       set(() => ({ kind: "ready", value, from: "provider", fetchedAt, took: fetchedAt - started }));
@@ -690,6 +746,7 @@ function check(id: string, source: Source, load: Promise<boolean> = Promise.reso
     .then(async (account) => {
       if (currentSource(id) !== source) return;
       setMember(id, (member) => ({ ...member, account }));
+
       if ((await load) && currentSource(id) === source) reloadTitles(id);
     });
 }
@@ -709,7 +766,9 @@ function signIn(entry: SubscriptionEntry, secret: string, checked: AccountStatus
     login: loginFor(entry, secret),
     uncertain: entry.kind === "xtream" ? [] : playlistUncertain(secret),
   };
+
   secrets.set(source, secret);
+
   if (entry.kind === "m3u" && entry.mapping)
     mappings.set(source, sha256Hex(JSON.stringify(entry.mapping)));
   signedSource(entry, source, checked);
@@ -717,6 +776,7 @@ function signIn(entry: SubscriptionEntry, secret: string, checked: AccountStatus
 
 /** Each signed-in Source's password or link, for a playlist's mapping to sign it in again. */
 const secrets = new WeakMap<Source, string>();
+
 /** What a mapped playlist's Source makes its lists under, as its saved copies name it. */
 const mappings = new WeakMap<Source, string>();
 const mappingOf = (source: Source) => mappings.get(source) ?? null;
@@ -734,6 +794,7 @@ function signedSource(
   const { id } = entry;
   setSource(id, source);
   void guide.attach(id);
+
   if (checked === null) {
     // Replace password reservations without briefly releasing the titles' launch batch.
     reading.set((now) => new Map([...now, [`live|${id}`, source], [`titles|${id}`, source]]));
@@ -741,21 +802,27 @@ function signedSource(
     // A replaced login's launch reads end: this one's lists come from its provider.
     stopReading(id);
   }
+
   setMember(id, (member) => ({
     ...member,
     needsSecret: false,
     account: checked === "again" ? null : checked,
   }));
+
   if (checked === "again") {
     reloadChannels(id);
     check(id, source);
+
     return;
   }
+
   if (checked) {
     reloadChannels(id);
     reloadTitles(id);
+
     return;
   }
+
   void fromSaved(id, "live", source).then((load) => {
     if (load && currentSource(id) === source) reloadChannels(id);
   });
@@ -765,6 +832,7 @@ function signedSource(
 /** Checks a subscription's login and reads all its lists again: its Retry. */
 export function retry(id: string) {
   const source = currentSource(id);
+
   if (!source) return;
   setMember(id, (member) => ({ ...member, account: null }));
   reloadChannels(id);
@@ -776,6 +844,7 @@ async function settleSecret(id: string) {
   if (!registry.subscriptions.some((entry) => entry.id === id)) {
     await keychainSecrets.remove(id);
   }
+
   commit({ ...registry, pendingSecrets: withoutPending(registry.pendingSecrets, id) });
 }
 
@@ -791,6 +860,7 @@ async function restorePassword(entry: SubscriptionEntry): Promise<void> {
   const password = await keychainSecrets.read(id).catch(() => null);
   await serially(async () => {
     const now = registry.subscriptions.find((each) => each.id === id);
+
     if (
       !now ||
       !sameAccount(now, entry) ||
@@ -798,8 +868,10 @@ async function restorePassword(entry: SubscriptionEntry): Promise<void> {
       dropped.get(id) !== deleted
     ) {
       stopReading(id, undefined, null);
+
       return;
     }
+
     if (password) signIn(keyedBy(now, password), password, null);
     else {
       setMember(id, (member) => ({ ...member, needsSecret: true }));
@@ -818,6 +890,7 @@ function keyedBy(entry: SubscriptionEntry, link: string): SubscriptionEntry {
   if (entry.kind !== "m3u") return entry;
   const key = playlistKey(link);
   const server = URL.parse(link)?.origin;
+
   if (
     key === entry.key ||
     !server ||
@@ -827,6 +900,7 @@ function keyedBy(entry: SubscriptionEntry, link: string): SubscriptionEntry {
   )
     return entry;
   const next = { ...entry, server, key };
+
   try {
     commit({
       ...registry,
@@ -835,7 +909,9 @@ function keyedBy(entry: SubscriptionEntry, link: string): SubscriptionEntry {
   } catch {
     return entry;
   }
+
   syncRoster();
+
   return next;
 }
 
@@ -862,10 +938,12 @@ export function restore(): Promise<void> {
     );
     // Registry readiness chooses the real routes. It never grants credentials or cache access.
     syncRoster();
+
     if (!saved && firstLaunch()) {
       await keychainSecrets.clear().catch(() => undefined);
       writeState((state) => state);
     }
+
     // A write that fails leaves the old files as they were, and the next launch tries again.
     try {
       if (!saved) writeRegistry(file);
@@ -873,16 +951,21 @@ export function restore(): Promise<void> {
     } catch {
       // Shown from memory for now.
     }
+
     // Before erasing histories, which take their channels' guide mappings.
     const external = guides.load();
+
     for (const id of registry.pendingSecrets) await settleSecret(id).catch(() => undefined);
+
     for (const id of registry.erasing) await eraseHistory(id).catch(() => undefined);
     const ids = entriesOf().map((entry) => entry.id);
     await guide.restore([...ids, ...external.ids], external.kept);
     void guides.restore();
     pruneLists(ids);
     pruneDetails(ids);
+
     if (entriesOf().some((entry) => entry.kind === "demo")) signInDemo(null);
+
     return registry.subscriptions;
   }).then(
     (entries) =>
@@ -894,6 +977,7 @@ export function restore(): Promise<void> {
           stop();
           resolve();
         };
+
         const stop = reading.subscribe(settle);
         void Promise.all(entries.map(restorePassword)).then(settle, (cause: unknown) => {
           stop();
@@ -902,22 +986,27 @@ export function restore(): Promise<void> {
         settle();
       }),
   );
+
   void restored.then(launchSettled, launchSettled);
   void restored.then(retryDemoAfterLaunch, () => undefined);
+
   return restored;
 }
 
 export type DemoPending = "downloads" | "history" | "saved-data" | "registry";
+
 export type DemoRefusal =
   | "reserved-id"
   | "unreadable-demo"
   | "registry-refused"
   | "marker-not-absent"
   | "downloads-refused";
+
 export type DemoErase =
   | { readonly kind: "erased"; readonly files: "deleted" | "deferred" }
   | { readonly kind: "incomplete"; readonly pending: readonly DemoPending[] }
   | { readonly kind: "refused"; readonly reason: DemoRefusal };
+
 export type DemoStart =
   { readonly kind: "started" } | Exclude<DemoErase, { readonly kind: "erased" }>;
 
@@ -925,6 +1014,7 @@ interface DemoDownloads {
   readonly erase: (id: string, reason: "demo-reset") => Promise<Erased>;
   readonly ready: Promise<void>;
 }
+
 let demoDownloads: DemoDownloads | undefined;
 let connectedDownloads = (_port: DemoDownloads) => {};
 const downloadsConnected = new Promise<DemoDownloads>((resolve) => (connectedDownloads = resolve));
@@ -938,9 +1028,11 @@ export function connectDemoDownloads(port: DemoDownloads): void {
 
 /** Whole demo operations are ordered; personal account changes can still run between stages. */
 let demoChain: Promise<unknown> = Promise.resolve();
+
 function demoOperation<A>(run: () => Promise<A>): Promise<A> {
   const next = demoChain.then(run);
   demoChain = next.catch(() => undefined);
+
   return next;
 }
 
@@ -948,6 +1040,7 @@ export const startDemo = (): Promise<DemoStart> =>
   demoOperation(async () => {
     if (!demoReserved() && file.demo.kind === "active") return { kind: "started" };
     const erased = await eraseDemo();
+
     return erased.kind === "erased" ? activateDemo() : erased;
   });
 
@@ -958,32 +1051,40 @@ export const endDemo = (): Promise<DemoErase> => demoOperation(eraseDemo);
 export const resetDemo = (): Promise<DemoStart> =>
   demoOperation(async () => {
     const erased = await eraseDemo();
+
     return erased.kind === "erased" ? activateDemo() : erased;
   });
 
 function activateDemo(): Promise<DemoStart> {
   return serially(async () => {
     if (demoReserved()) return { kind: "refused", reason: "reserved-id" };
+
     if (file.demo.kind !== "absent") return { kind: "refused", reason: "marker-not-absent" };
+
     try {
       commitFile({ ...file, demo: { kind: "active" } });
     } catch {
       return { kind: "refused", reason: "registry-refused" };
     }
+
     syncRoster();
     signInDemo("again");
+
     return { kind: "started" };
   });
 }
 
 let launchRetryAsked = false;
+
 function retryDemoAfterLaunch() {
   if (launchRetryAsked || file.demo.kind !== "erasing" || demoReserved()) return;
   launchRetryAsked = true;
+
   const retry = () =>
     demoOperation(() =>
       file.demo.kind === "erasing" && !demoReserved() ? eraseDemo() : Promise.resolve(null),
     );
+
   void retry()
     .then((result) => {
       if (result?.kind !== "incomplete" || !result.pending.includes("downloads")) return;
@@ -998,6 +1099,7 @@ function retryDemoAfterLaunch() {
 /** A deadline only refuses settlement. Late work cannot erase history or clear the marker. */
 async function demoSettlement(run: () => Promise<boolean>): Promise<boolean | "unsettled"> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
     return await Promise.race([
       run().catch(() => "unsettled" as const),
@@ -1013,23 +1115,28 @@ async function demoSettlement(run: () => Promise<boolean>): Promise<boolean | "u
 async function eraseDemo(): Promise<DemoErase> {
   const staged = await serially(async () => {
     if (demoReserved()) return { kind: "refused", reason: "reserved-id" } as const;
+
     if (file.demo.kind === "unreadable")
       return { kind: "refused", reason: "unreadable-demo" } as const;
     const leaving = file.demo.kind === "active";
+
     // Source revocation is finite, distinct from each record's explicit removal fence below.
     try {
       await fenceDownloads(DEMO_ID);
     } catch {
       return { kind: "refused", reason: "downloads-refused" } as const;
     }
+
     if (file.demo.kind !== "erasing") {
       try {
         commitFile({ ...file, demo: { kind: "erasing" } });
       } catch {
         return { kind: "refused", reason: "registry-refused" } as const;
       }
+
       savableChanged();
     }
+
     // Intents and their finite domain removals precede Source/roster changes, even on refusal.
     const removal = await demoDownloads?.erase(DEMO_ID, "demo-reset").catch(() => undefined);
     let filesDeleted = false;
@@ -1039,24 +1146,31 @@ async function eraseDemo(): Promise<DemoErase> {
       },
       () => undefined,
     );
+
     // Observe an early save failure while the remaining serial work runs.
     const saved =
       removal?.saved.then(
         () => true,
         () => false,
       ) ?? Promise.resolve(true);
+
     for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${DEMO_ID}`)?.abort();
     dropSource(DEMO_ID);
     const savedGone = dropSaved(DEMO_ID).catch(() => false);
+
     if (leaving) {
       const { phase } = playbackState.get();
       const from = phase.kind === "idle" ? undefined : phase.item.subscriptionId;
+
       if (from === DEMO_ID || (entriesOf().length === 0 && from !== null)) void stop();
       else request();
     }
+
     syncRoster();
+
     return { kind: "staged", removal, saved, savedGone, filesDeleted: () => filesDeleted } as const;
   });
+
   if (staged.kind !== "staged") return staged;
 
   // Never hold the account writer while waiting for progress, viewing or cache work.
@@ -1064,30 +1178,39 @@ async function eraseDemo(): Promise<DemoErase> {
     if (!(await staged.saved)) throw new Error("Demo progress did not settle");
     await progressSettled();
     await viewingChangesSettled();
+
     return staged.savedGone;
   });
+
   return serially(async () => {
     const pending: DemoPending[] = [];
+
     if (!staged.removal?.trusted || staged.removal.kept !== 0) pending.push("downloads");
+
     if (settled === "unsettled") pending.push("history");
     else if (!settled) pending.push("saved-data");
+
     if (pending.length === 0) {
       try {
         writeState((state) => forgotten(state, DEMO_ID, true));
         eraseWatchlist(DEMO_ID);
         eraseListMembers(DEMO_ID);
         eraseSubtitles(DEMO_ID);
+
         if (viewingHolds(DEMO_ID)) await eraseViewing(DEMO_ID);
       } catch {
         pending.push("history");
       }
     }
+
     if (pending.length > 0) return { kind: "incomplete", pending };
+
     try {
       commitFile({ ...file, demo: { kind: "absent" } });
     } catch {
       return { kind: "incomplete", pending: ["registry"] };
     }
+
     return { kind: "erased", files: staged.filesDeleted() ? "deleted" : "deferred" };
   });
 }
@@ -1104,6 +1227,7 @@ const alreadySaved = () =>
  */
 function playlistLink(typed: string): string {
   const { account } = parseLogin({ server: typed, username: "", password: "" });
+
   if (account.kind === "m3u") return account.link;
   throw new AppFailure({ kind: "incomplete-login", detail: "Enter the playlist's M3U link." });
 }
@@ -1119,11 +1243,14 @@ export interface PlaylistReport {
 /** The signed-in playlist `id`, or why it has none. */
 function signedPlaylist(id: string) {
   const entry = registry.subscriptions.find((each) => each.id === id);
+
   if (entry?.kind !== "m3u") throw new AppFailure({ kind: "no-subscription" });
   const source = sourceOf(id);
   const link = secrets.get(source);
   const inspect = source.provider.playlistImport;
+
   if (!link || !inspect) throw new AppFailure({ kind: "needs-secret", subscriptionId: id });
+
   return { entry, source, link, inspect };
 }
 
@@ -1135,6 +1262,7 @@ export async function playlistReport(id: string, signal?: AbortSignal): Promise<
   const { entry, inspect } = signedPlaylist(id);
   const imported = await inspect(signal);
   const modes = new Map(entry.mapping?.groups.map(({ group, mode }) => [group, mode]));
+
   return {
     status: imported.status,
     groups: [...imported.groups].map(([group, samples]) => ({
@@ -1162,13 +1290,16 @@ export async function mapPlaylist(id: string, group: string, mode: PlaylistMode)
   const { source, inspect } = signedPlaylist(id);
   const imported = await inspect();
   const groups = [...imported.groups.keys()].map(playlistGroupId);
+
   if (!groups.includes(group))
     throw new AppFailure({ kind: "unexpected", detail: "This playlist group is gone. Reload it." });
   await serially(async () => {
     const now = signedPlaylist(id);
+
     if (now.source !== source)
       throw new AppFailure({ kind: "unexpected", detail: "The playlist changed. Try again." });
     const mapping = mapPlaylistGroup(now.entry.mapping, groups, group, mode);
+
     // The file holds no more: one with more couldn't be read back.
     if (mapping.groups.length > 10_000)
       throw new AppFailure({
@@ -1183,6 +1314,7 @@ export async function mapPlaylist(id: string, group: string, mode: PlaylistMode)
     // Before the new login, which its own lists may then be saved under. The guide stays: it
     // names channels, which a mapping doesn't rename.
     const gone = dropSaved(id, Promise.resolve(true));
+
     try {
       syncRoster();
       signIn(next, now.link, "again");
@@ -1219,6 +1351,7 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
   const { account } = parseLogin(input);
   const status = await authenticate(account, signal);
   const secret = account.kind === "xtream" ? account.password : account.link;
+
   const identity =
     account.kind === "xtream"
       ? account
@@ -1227,26 +1360,32 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
           server: new URL(account.link).origin,
           key: playlistKey(account.link),
         };
+
   return serially(async () => {
     if (signal?.aborted) return null;
     const name = nameOf(input.name);
     const known = registry.subscriptions.find((entry) => sameAccount(entry, identity));
+
     if (known) {
       const before = currentSource(known.id);
       await fenceDownloads(known.id);
       await clearSaved(known.id);
+
       try {
         await keychainSecrets.write(known.id, secret);
         const entry = name === undefined || name === known.name ? known : { ...known, name };
+
         if (entry !== known) {
           commit({
             ...registry,
             subscriptions: registry.subscriptions.map((each) => (each === known ? entry : each)),
           });
         }
+
         // The roster follows the registry, whatever an earlier change left of it.
         syncRoster();
         signIn(entry, secret, status);
+
         return entry.id;
       } catch (cause) {
         // Best effort: the change still fails with its own error.
@@ -1254,10 +1393,12 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
         throw cause;
       }
     }
+
     const retired = registry.retired.find((each) => sameAccount(each, identity));
     const id = retired?.id ?? newSubscriptionId(registry, Date.now(), account.kind);
     // Should the app stop before the registry lists it, the next launch removes its password.
     commit({ ...registry, pendingSecrets: withPending(registry.pendingSecrets, id) });
+
     const entry: SubscriptionEntry =
       identity.kind === "xtream"
         ? {
@@ -1275,17 +1416,22 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
               mapping: retired?.kind === "m3u" && retired.mapping ? retired.mapping : undefined,
             }),
           };
+
     const first = registry.subscriptions.length === 0;
+
     try {
       // A retired id's lists and downloads went with its removal, unless refused then.
       await fenceDownloads(id);
       await clearSaved(id);
       await keychainSecrets.write(id, secret);
+
       // Left while the password was written: it goes again, and nothing is saved.
       if (signal?.aborted) {
         await settleSecret(id).catch(() => undefined);
+
         return null;
       }
+
       commit({
         ...registry,
         subscriptions: [...registry.subscriptions, entry],
@@ -1296,10 +1442,12 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
       await settleSecret(id).catch(() => undefined);
       throw cause;
     }
+
     // Saved: from here on it shows and signs in, whatever fails after.
     syncRoster();
     signIn(entry, secret, status);
     noteAction("playlist_added");
+
     // An older build shows the subscription it knew; with none left, it shows this one. Only an
     // older build reads it: when it can't be written, that build shows Connect instead. Older
     // builds know no playlists.
@@ -1317,6 +1465,7 @@ export async function add(input: LoginInput, signal?: AbortSignal): Promise<stri
         // This build has the subscription saved.
       }
     }
+
     return id;
   });
 }
@@ -1337,21 +1486,28 @@ export async function update(
   signal?: AbortSignal,
 ): Promise<void> {
   const entry = registry.subscriptions.find((each) => each.id === id);
+
   if (!entry) throw new AppFailure({ kind: "no-subscription" });
+
   const password =
     change.password && entry.kind === "m3u" ? playlistLink(change.password) : change.password;
+
   // A playlist goes by its new link from now on: adding that link again finds this one.
   const key = password && entry.kind === "m3u" ? playlistKey(password) : null;
+
   const taken = () =>
     registry.subscriptions.some(
       (each) => each.id !== id && key !== null && sameAccount(each, { kind: "m3u", key }),
     );
+
   if (taken()) throw alreadySaved();
   const status = password ? await authenticate(accountOf(entry, password), signal) : null;
   await serially(async () => {
     if (signal?.aborted) return;
     const now = registry.subscriptions.find((each) => each.id === id);
+
     if (!now) throw new AppFailure({ kind: "no-subscription" });
+
     if (taken()) throw alreadySaved();
     const before = currentSource(id);
     // A playlist's link and its fingerprint change together: should the registry refuse the new
@@ -1360,21 +1516,26 @@ export async function update(
     const previous = now.kind === "m3u" && before ? secrets.get(before) : undefined;
     let written = false;
     let committed = false;
+
     if (password) {
       await fenceDownloads(id);
       await clearSaved(id);
     }
+
     try {
       if (password) {
         await keychainSecrets.write(id, password);
         written = true;
       }
+
       const name = nameOf(change.name);
       const named = name === undefined || name === now.name ? now : { ...now, name };
+
       const next =
         password && named.kind === "m3u" && key !== null
           ? { ...named, server: new URL(password).origin, key }
           : named;
+
       if (next !== now) {
         commit({
           ...registry,
@@ -1383,10 +1544,12 @@ export async function update(
         committed = true;
         syncRoster();
       }
+
       if (password && status) signIn(next, password, status);
     } catch (cause) {
       if (written && !committed && previous)
         await keychainSecrets.write(id, previous).catch(() => undefined);
+
       if (password) await recoverLogin(id, before).catch(() => undefined);
       throw cause;
     }
@@ -1408,9 +1571,11 @@ export async function update(
 export function remove(id: string, { keepHistory }: { keepHistory: boolean }): Promise<void> {
   return serially(async () => {
     const entry = registry.subscriptions.find((each) => each.id === id);
+
     if (!entry) return;
     await fenceDownloads(id);
     commit(withoutSubscription(registry, entry, keepHistory));
+
     for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
     dropSource(id);
     // After any write of them under way. What the disk refuses goes at the next launch, or before
@@ -1421,6 +1586,7 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
     // unless it shows a downloaded copy, which needs no subscription.
     const { phase } = playbackState.get();
     const from = phase.kind === "idle" ? undefined : phase.item.subscriptionId;
+
     if (from === id || (entriesOf().length === 0 && from !== null)) stop();
     else request();
     // The roster without it ends its unfinished downloads (downloads.ts); finished copies stay.
@@ -1434,7 +1600,9 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
         commit({ ...registry, pendingSecrets: withoutPending(registry.pendingSecrets, id) }),
       )
       .catch(() => undefined);
+
     if (!keepHistory) return eraseHistory(id);
+
     try {
       writeState((state) => forgotten(state, id, false));
     } catch {
@@ -1449,6 +1617,7 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
  */
 function forgotten(state: SavedState, id: string, erase: boolean): SavedState {
   const original = state.subscription?.id === id;
+
   return {
     ...(erase ? withoutVersions(state, id) : state),
     subscription: original ? null : state.subscription,
@@ -1479,7 +1648,9 @@ async function eraseHistory(id: string): Promise<void> {
       if (!forgetChannelPicks(id)) throw new Error("Channel picks kept.");
     }),
   ]);
+
   const failed = erased.find((each) => each.status === "rejected");
+
   if (failed) throw failed.reason;
   commit({ ...registry, erasing: withoutPending(registry.erasing, id) });
 }
@@ -1498,16 +1669,20 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
     if (channel.adult) return false;
     const member = members().find((each) => each.entry.id === channel.subscriptionId);
     const latest = member && shownOf(member.live);
+
     if (!latest) return true;
     const adult = adultIn(latest.categories);
+
     return !latest.channels.some(
       (row) => adult(row) && channel.variants.some((variant) => variant.id === row.id),
     );
   };
+
   if (!permitted()) return null;
   const picks = channelPicks(channel.subscriptionId);
   const { liveQuality } = getMediaPreferences();
   let kept: Channel = channel;
+
   if (past) {
     try {
       kept = { ...channel, variants: archiveVariants(channel, past, Date.now()) };
@@ -1515,6 +1690,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
       const refused = async () => {
         throw cause;
       };
+
       return {
         kind: "live",
         candidates: [{ variantId: channel.id, open: refused }],
@@ -1522,10 +1698,12 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
       };
     }
   }
+
   // The accepted pick is kept under the channel's id, so it is found among all its streams, and
   // plays where it keeps the window too.
   const accepted = chosenVariant(channel, picks);
   const pick = asked ?? (accepted && kept.variants.includes(accepted) ? accepted.id : undefined);
+
   const [first, ...rest] = streamsToPlay(kept, { liveQuality, channelVariants: picks }, pick).map(
     (variant) => ({
       variantId: variant.id,
@@ -1534,13 +1712,17 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
         if (!permitted())
           throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
         const { provider } = sourceOf(channel.subscriptionId);
+
         // Still kept as it opens, or a failure that says why not.
         if (past) archiveVariants({ ...channel, variants: [variant] }, past, Date.now());
+
         const stream = past
           ? await provider.archiveStream(variant.id, past, signal)
           : { ...(await provider.liveStream(variant.id, signal)), start: undefined };
+
         if (!permitted())
           throw new AppFailure({ kind: "channel-not-found", channelId: channel.id });
+
         return {
           admit: () => {
             if (!permitted())
@@ -1553,6 +1735,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
       },
     }),
   );
+
   return first
     ? {
         kind: "live",
@@ -1579,8 +1762,10 @@ export function playChannel(
   const { programme, ...rest } = options;
   const past = programme && { start: programme.start, end: programme.stop };
   const plan = livePlan(channel, options.variantId, past);
+
   if (!plan) return;
   const { subscriptionId } = channel;
+
   if (programme) {
     void play(
       {
@@ -1596,14 +1781,18 @@ export function playChannel(
       plan,
       { ...rest, login: loginOf(subscriptionId) },
     );
+
     return;
   }
+
   if (options.watch) {
     const { phase } = playbackState.get();
     const watching = phase.kind !== "idle" && phase.item.live;
+
     if (watching && chosen !== null && chosen !== channel.key) noteAction("channel_changed");
     chosen = channel.key;
   }
+
   rememberChannel(channel.key);
   void play(
     {
@@ -1633,6 +1822,7 @@ export function channelQuality(channel: Channel): readonly QualityChoice[] {
   const picked = chosenVariant(channel, channelPicks(channel.subscriptionId));
   const live = liveStream();
   const playing = live?.channel === channel.key ? live.playing : null;
+
   return [
     { variantId: null, quality: null, name: "Automatic", saved: picked === null, playing: false },
     ...channel.variants.map((variant) => ({
@@ -1653,6 +1843,7 @@ export function chooseChannelQuality(
 ): boolean {
   if (!updateChannelPick(channel, variantId)) return false;
   playChannel(channel, place, { watch: true });
+
   return true;
 }
 
@@ -1664,8 +1855,10 @@ export function chooseChannelQuality(
 
 /** Parts by subscription id: only those whose channels show. */
 const parts = new Map<string, { readonly catalogue: LiveCatalogue; readonly part: Part }>();
+
 /** The parts last joined and the library they make. */
 let joined: { readonly parts: readonly Labelled[]; readonly library: Library } | null = null;
+
 /** Whether `work` is running. */
 let working = false;
 
@@ -1673,6 +1866,7 @@ let working = false;
 const liveSources = (all = members()): LiveSource[] =>
   all.flatMap((member) => {
     const listed = lastOf(member.live);
+
     return listed
       ? [{ subscriptionId: member.entry.id, label: member.label, catalogue: listed }]
       : [];
@@ -1688,6 +1882,7 @@ const shows = (source: LiveSource) =>
 const labelled = (sources: readonly LiveSource[], fresh?: Part): Labelled[] =>
   sources.flatMap(({ subscriptionId, label }) => {
     const part = fresh?.subscriptionId === subscriptionId ? fresh : parts.get(subscriptionId)?.part;
+
     return part ? [{ label, part }] : [];
   });
 
@@ -1698,9 +1893,11 @@ function libraryOf(shown: readonly Labelled[]): Library {
     joined.parts.every(
       (each, at) => each.part === shown[at]?.part && each.label === shown[at]?.label,
     );
+
   if (joined && same) return joined.library;
   const library = combine(shown);
   joined = { parts: shown, library };
+
   return library;
 }
 
@@ -1713,25 +1910,34 @@ function publish() {
   recheckPlayback();
   const all = members();
   const sources = liveSources(all);
+
   for (const source of sources) {
     const before = parts.get(source.subscriptionId);
+
     if (!before || before.catalogue === source.catalogue) continue;
     const wasAdult = adultIn(before.catalogue.categories);
+
     const permitted = new Set(
       before.catalogue.channels.filter((row) => !wasAdult(row)).map((row) => row.id),
     );
+
     const isAdult = adultIn(source.catalogue.categories);
+
     if (source.catalogue.channels.some((row) => permitted.has(row.id) && isAdult(row))) {
       parts.delete(source.subscriptionId);
     }
   }
+
   for (const id of parts.keys()) {
     if (!sources.some((source) => source.subscriptionId === id)) parts.delete(id);
   }
+
   const pending = sources.some(
     (source) => parts.get(source.subscriptionId)?.catalogue !== source.catalogue,
   );
+
   const shown = labelled(sources);
+
   if (shown.length === 0) joined = null;
   const failing = all.filter((member) => member.live.kind === "failed" || member.needsSecret);
   const loading = pending || all.some((member) => member.live.kind === "loading");
@@ -1754,6 +1960,7 @@ function publish() {
   // The favourites show by the channels that show: the same library, kept while a list reloads
   // or fails, and none while no subscription's channels show.
   setViewingChannels(library?.byKey ?? NO_CHANNELS);
+
   if (pending) void work();
 }
 
@@ -1763,17 +1970,21 @@ const NO_CHANNELS: ReadonlyMap<string, Channel> = new Map();
 async function work() {
   if (working) return;
   working = true;
+
   try {
     for (;;) {
       const source = liveSources().find(
         (each) => parts.get(each.subscriptionId)?.catalogue !== each.catalogue,
       );
+
       if (!source) return;
       const wanted = () => shows(source);
       const part = await inTasks(partSteps(source), wanted);
+
       if (!part) continue;
       const shown = labelled(liveSources(), part);
       const library = await inTasks(combineSteps(shown), wanted);
+
       // Checked again: an answer may have changed the roster since the last slice.
       if (!library || !wanted()) continue;
       parts.set(source.subscriptionId, { catalogue: source.catalogue, part });

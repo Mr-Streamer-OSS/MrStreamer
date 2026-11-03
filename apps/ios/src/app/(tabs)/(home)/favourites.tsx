@@ -5,5 +5,6 @@ import { useFixedTabBar } from "../../../tab-bar.ts";
 export default function Favourites() {
   // A virtualised list: iOS can't shrink the tab bar as it scrolls.
   useFixedTabBar(true);
+
   return <FavouritesScreen />;
 }

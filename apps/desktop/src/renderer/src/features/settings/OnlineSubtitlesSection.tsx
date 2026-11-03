@@ -21,6 +21,7 @@ export const subtitleSettingsQuery = {
   queryKey: ["subtitles", "settings"] as const,
   queryFn: () => call("subtitles.settings"),
 };
+
 export function OnlineSubtitlesSection() {
   const client = useQueryClient();
   const settings = useQuery({ ...subtitleSettingsQuery, refetchOnMount: "always" });
@@ -29,6 +30,7 @@ export function OnlineSubtitlesSection() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const saved = settings.data;
+
   const update = useMutation({
     mutationFn: ({
       preferences,
@@ -40,6 +42,7 @@ export function OnlineSubtitlesSection() {
     }) => call("subtitles.configure", { preferences, ...defined({ credentials }) }),
     onSuccess: (next, input) => {
       client.setQueryData(subtitleSettingsQuery.queryKey, next);
+
       if (input.credentials) {
         setEditing(null);
         setApiKey("");
@@ -48,6 +51,7 @@ export function OnlineSubtitlesSection() {
       }
     },
   });
+
   const change = (patch: Partial<OnlineSubtitlePreferences>, credentials?: SubtitleCredentials) => {
     if (!saved || update.isPending) return;
     update.mutate({
@@ -69,6 +73,7 @@ export function OnlineSubtitlesSection() {
       ...defined({ credentials }),
     });
   };
+
   const feedback = (row: SettingsControl) =>
     update.variables?.row === row ? (
       <SaveFeedback
@@ -77,6 +82,7 @@ export function OnlineSubtitlesSection() {
         retry={() => update.mutate(update.variables!)}
       />
     ) : null;
+
   return (
     <Section title={t("Online subtitles")}>
       <p className="py-2 text-sm">
@@ -124,9 +130,11 @@ export function OnlineSubtitlesSection() {
                 checked={saved?.languages.includes(code) ?? false}
                 onChange={(event) => {
                   if (!saved) return;
+
                   const languages = event.currentTarget.checked
                     ? [...saved.languages, code]
                     : saved.languages.filter((each) => each !== code);
+
                   if (languages.length > 0 && languages.length <= 10) change({ languages });
                 }}
               />

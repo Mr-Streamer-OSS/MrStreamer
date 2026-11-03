@@ -36,10 +36,12 @@ export function QualityChoices({
   onDone,
 }: QualityProps) {
   const choices = qualityChoices(channel);
+
   const pick = (variantId: string | null) => {
     onChoose(variantId);
     onDone();
   };
+
   return (
     <>
       <Choice chosen={chosen === null} onChoose={() => pick(null)}>

@@ -7,8 +7,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // as React would, at the moment they ask.
 
 const fakePlayer = nativePlayer();
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => fakePlayer }));
+
 vi.mock("../src/store.ts", async (original) => ({
   ...(await original<typeof import("../src/store.ts")>()),
   useStore: <S>(source: { get(): S }) => source.get(),
@@ -33,6 +36,7 @@ const item = {
   next: false,
   versions: false,
 };
+
 const open = async () => ({ url: "file:a:1", container: "mp4" });
 
 /** Plays a movie in Watch, then moves it to Picture in Picture as the native view reports. */

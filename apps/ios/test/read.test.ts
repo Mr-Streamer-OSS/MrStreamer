@@ -11,13 +11,16 @@ import { describe, expect, it } from "vitest";
 const REACT_DOM = "react-dom/client";
 
 type Root = { render(node: unknown): void; unmount(): void };
+
 /** happy-dom's document; the app's own types have no DOM. */
 const { document } = globalThis as typeof globalThis & {
   document: { createElement(tag: string): object };
 };
+
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: object): Root;
 };
+
 const { useRead } = await import("../src/read.ts");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,18 +31,23 @@ const readOf = (key: string) => () => new Promise<string>((resolve) => answers.s
 
 /** Each render's view of the read: what the screen would act on. */
 const seen: string[] = [];
+
 function Probe({ request, again }: { request: string; again: number }) {
   const read = React.useMemo(() => readOf(request), [request]);
   const loaded = useRead(request, read, again);
   seen.push(`${request}:${loaded.kind === "ready" ? loaded.value : loaded.kind}`);
+
   return null;
 }
 
 async function mount() {
   const root = createRoot(document.createElement("div"));
+
   const show = (request: string, again = 0) =>
     React.act(() => root.render(React.createElement(Probe, { request, again })));
+
   const release = (key: string, value: string) => React.act(async () => answers.get(key)?.(value));
+
   return { show, release, root };
 }
 

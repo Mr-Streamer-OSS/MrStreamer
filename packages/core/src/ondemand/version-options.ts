@@ -24,6 +24,7 @@ export function versionOptions(
   providers: readonly string[],
 ): readonly VersionOptionGroup[] {
   const order = new Map(providers.map((id, index) => [id, index]));
+
   const groups = new Map<
     string,
     {
@@ -32,10 +33,13 @@ export function versionOptions(
       language: number;
     }
   >();
+
   const seen = new Set<string>();
+
   for (const version of versions) {
     if (seen.has(ownedKey(version))) continue;
     seen.add(ownedKey(version));
+
     if (!order.has(version.subscriptionId)) order.set(version.subscriptionId, order.size);
     const quality = qualityHint(version.tags);
     const tags = version.tags.filter((tag) => qualityHint([tag]) === "unknown");
@@ -43,10 +47,12 @@ export function versionOptions(
     const language = named ? 0 : tags.length === 0 ? 1 : 2;
     const key = JSON.stringify([version.subscriptionId, quality, label, asListed]);
     const held = groups.get(key);
+
     if (held) {
       held.group.versions.push(version);
       continue;
     }
+
     groups.set(key, {
       quality: QUALITY_ORDER.indexOf(quality),
       language,
@@ -60,6 +66,7 @@ export function versionOptions(
       },
     });
   }
+
   return [...groups.values()]
     .sort(
       (a, b) =>

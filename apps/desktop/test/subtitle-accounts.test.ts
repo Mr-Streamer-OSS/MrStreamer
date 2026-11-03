@@ -6,6 +6,7 @@ import { SubtitleAccounts } from "../src/main/services/subtitle-accounts.ts";
 import { promised, runtimeFor, tempDir, testSecrets } from "./support.ts";
 
 const preferences = { enabled: false, languages: ["en", "nl"], service: "both" as const };
+
 const keys = {
   subdl: { apiKey: "private-subdl-key" },
   opensubtitles: {
@@ -21,6 +22,7 @@ describe("online subtitle account settings", () => {
       runtimeFor(SubtitleAccounts.layer(await tempDir(), testSecrets)),
       SubtitleAccounts,
     );
+
     const secret = "private-key".repeat(1000);
     await expect(accounts.update(preferences, { subdl: { apiKey: secret } })).rejects.toMatchObject(
       {
@@ -50,6 +52,7 @@ describe("online subtitle account settings", () => {
     });
     expect(secrets.open).not.toHaveBeenCalled();
     const stored = await readFile(join(dir, "subtitle-accounts.json"), "utf8");
+
     for (const secret of [keys.subdl.apiKey, ...Object.values(keys.opensubtitles)])
       expect(stored).not.toContain(secret);
     await first.dispose();
@@ -62,10 +65,12 @@ describe("online subtitle account settings", () => {
 
   it("updates one service independently and leaves saved settings intact when the keychain refuses", async () => {
     const dir = await tempDir();
+
     const accounts = await promised(
       runtimeFor(SubtitleAccounts.layer(dir, testSecrets)),
       SubtitleAccounts,
     );
+
     await accounts.update(preferences, keys);
     await accounts.update({ ...preferences, enabled: true }, { subdl: null });
     expect(await accounts.get()).toEqual({
@@ -89,6 +94,7 @@ describe("online subtitle account settings", () => {
       ),
       SubtitleAccounts,
     );
+
     // Displaying or changing non-secret settings does not prompt the keychain.
     await refused.update({ ...preferences, enabled: false });
     await expect(

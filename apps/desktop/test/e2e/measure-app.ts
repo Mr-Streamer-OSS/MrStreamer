@@ -59,21 +59,28 @@ const { values: options, positionals } = parseArgs({
   },
   allowPositionals: true,
 });
+
 const [executable, ...rest] = positionals;
+
 const probes =
   options["idle-probes"] ||
   options["live-profile"] ||
   options["steady-profile"] ||
   options["query-retention"];
+
 if (options["diagnostics-only"] && !probes)
   throw new Error(
     "--diagnostics-only requires --idle-probes, --live-profile, --steady-profile or --query-retention",
   );
+
 if (options["covered-idle"] && probes)
   throw new Error("Run --covered-idle separately from the CPU/profile probes");
+
 if (!["diagnostic", "quiet"].includes(options["host-condition"]))
   throw new Error("--host-condition must be diagnostic or quiet");
+
 const appDirectory = rest.find((argument) => existsSync(join(argument, "out/main/index.js")));
+
 if (!executable) {
   throw new Error(
     "Usage: node test/e2e/measure-app.ts [--runs 3] [--subscriptions 1] [--revision sha] [--json file] <app executable> [-- args]",
@@ -97,14 +104,19 @@ const RUNS = positiveCount(options.runs, "runs", 20);
 const SUBSCRIPTIONS = positiveCount(options.subscriptions, "subscriptions", 4);
 const TITLES = positiveCount(options.titles, "titles", 100_000);
 const SERIES = options.series ? positiveCount(options.series, "series", 100_000) : undefined;
+
 const SEARCH_RUNS = options["search-runs"]
   ? positiveCount(options["search-runs"], "search-runs", 100)
   : 0;
+
 const TEST_CHANNELS = ["H.264 + AAC", "H.264 + MP2", "H.264 + MP3", "H.264 + AC-3"];
 
 const output = options.json ?? join(process.cwd(), ".local/measurements", `app-${Date.now()}.json`);
+
 prepareMeasurementOutput(output);
+
 const providers: Awaited<ReturnType<typeof startFakeProvider>>[] = [];
+
 for (let index = 0; index < SUBSCRIPTIONS; index++)
   providers.push(
     await startFakeProvider({
@@ -127,12 +139,15 @@ for (let index = 0; index < SUBSCRIPTIONS; index++)
           ],
           { stdio: ["ignore", "pipe", "ignore"] },
         );
+
         encoder.stdout.pipe(out);
         signal.addEventListener("abort", () => encoder.kill("SIGKILL"), { once: true });
       },
     }),
   );
+
 const provider = providers[0]!;
+
 for (const provider of providers)
   provider.serveGuide(
     fakeGuide(
@@ -145,8 +160,10 @@ for (const provider of providers)
   );
 
 const results = new Map<keyof typeof APP_METRICS, number[]>();
+
 const record = (name: keyof typeof APP_METRICS, value: number) =>
   results.set(name, [...(results.get(name) ?? []), value]);
+
 const observations: { [key: string]: number | string | boolean }[] = [];
 const searchSamples: Record<string, number[]> = {};
 const coldSearchSamples: number[] = [];
@@ -161,6 +178,7 @@ let electron = "unavailable";
 let calibration: Awaited<ReturnType<typeof calibrate>> = [];
 
 const ROWS_SHOWN = `!!document.querySelector("main h1") && document.querySelectorAll("main [role=button]").length > 5`;
+
 function rowsShown(page: Page): Promise<boolean> {
   return page.evaluate<boolean>(ROWS_SHOWN);
 }
@@ -174,6 +192,7 @@ const FRESH_PICTURE = `(() => {
   window.__movingTime = video.currentTime;
   return previous !== null && previous !== undefined && video.currentTime > previous;
 })()`;
+
 function freshPicture(page: Page): Promise<boolean> {
   return page.evaluate<boolean>(FRESH_PICTURE);
 }
@@ -195,6 +214,7 @@ try {
     },
   );
   let page = await connect(port, "page", { pollMs: 5, app });
+
   if (options["covered-idle"]) {
     mainInspector = await connect(inspectPort, "node", { app });
     // Diagnostic-only instrumentation of Electron's registered boundary, without query text or
@@ -212,8 +232,11 @@ try {
       return true;
     })()`);
   }
+
   activePage = page;
+
   if (probes && !mainInspector) mainInspector = await connect(inspectPort, "node", { app });
+
   if (probes) {
     // Check the owned main and page before login or any other UI mutation. A reused debug
     // port must fail without driving another instance, even one with the same renderer URL.
@@ -221,8 +244,10 @@ try {
       `(() => { const { app, BrowserWindow } = process.getBuiltinModule('module').createRequire(process.execPath)('electron');
         return { pid: process.pid, profile: app.getPath('userData'), urls: BrowserWindow.getAllWindows().map(w => w.webContents.getURL()) }; })()`,
     );
+
     const browser = await page.send("Browser.getBrowserCommandLine");
     const browserArguments = (browser.result as { arguments?: string[] } | undefined)?.arguments;
+
     if (
       browser.error ||
       !browserArguments?.includes(`--user-data-dir=${profile}`) ||
@@ -240,12 +265,15 @@ try {
     });
     probeOwnershipVerified = true;
   }
+
   electron = electronVersion(executable);
   await page.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await login(page, provider);
+
   for (const [index, extra] of providers.entries()) {
     if (index > 0) await addSubscription(page, extra, `Measurement ${index + 1}`);
   }
+
   if (SUBSCRIPTIONS > 1) await clickText(page, "Back");
   await clickText(page, "Home");
   await waitFor(
@@ -282,6 +310,7 @@ try {
       hostCondition: options["host-condition"],
     });
   }
+
   if (options["diagnostics-only"]) {
     writeFileSync(
       output,
@@ -313,6 +342,7 @@ try {
       await timed("guide open", page, buttonClick("Live TV"), ROWS_SHOWN);
       await clickText(page, "TEST | Formats and failures");
       await delay(1000);
+
       // Opening the rail branch is setup; this existing metric starts at the All click.
       if (await revealFixtureList(page, "All channels"))
         observations.push({ name: "Reveal fixture list", list: "All channels" });
@@ -323,8 +353,10 @@ try {
         `document.querySelector("main h1")?.textContent === "All channels" && (${ROWS_SHOWN})`,
       );
     }
+
     await clickText(page, "TEST | Formats and failures");
     await waitFor(() => rowsShown(page));
+
     for (let run = 0; run < RUNS; run++) {
       const channel = TEST_CHANNELS[run % TEST_CHANNELS.length]!;
       const requests = streamRequests();
@@ -334,17 +366,21 @@ try {
       await key(page, "Escape", 27);
       await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[data-view="watch"]')`));
     }
+
     await clickRow(page, TEST_CHANNELS[RUNS % TEST_CHANNELS.length]!);
     await waitFor(() => freshPicture(page));
+
     for (let run = 0; run < RUNS; run++) {
       const requests = streamRequests();
       await timed("channel switch", page, () => key(page, "ArrowDown", 40), FRESH_PICTURE);
       await delay(1000);
       record("streams opened per switch (count)", streamRequests() - requests);
     }
+
     await key(page, "Escape", 27);
     await clickText(page, "Home");
     await delay(1000);
+
     for (let run = 0; run < RUNS; run++) {
       await page.evaluate(`document.querySelector('[aria-label="Search"]').click()`);
       await delay(500);
@@ -364,18 +400,22 @@ try {
     for (const query of SEARCH_RUNS ? ["H.264 + AAC", "TEST | Index at the end", "news"] : []) {
       const samples: number[] = [];
       searchSamples[query] = samples;
+
       for (let run = -1; run < SEARCH_RUNS; run++) {
         await page.evaluate(`document.querySelector('[aria-label="Search"]').click()`);
         await delay(150);
+
         const expected =
           query === "news"
             ? `document.querySelector('[role="dialog"]')?.innerText.includes("On now")`
             : `[...document.querySelectorAll('[role="dialog"] [data-index]')].some(row => row.innerText.toLowerCase().includes(${JSON.stringify(query.toLowerCase())}))`;
+
         const shown = observe(page, expected);
         // Unique raw whitespace preserves normalized words while bypassing query-result caching.
         const typed = options["uncached-search"] ? query + " ".repeat(run + 2) : query;
         await page.send("Input.insertText", { text: typed });
         const elapsed = await shown;
+
         if (run >= 0) samples.push(elapsed);
         observations.push({
           name: "warm palette",
@@ -397,6 +437,7 @@ try {
     await clickText(page, "Watch");
     await waitFor(() => page.evaluate<boolean>(`!!document.querySelector('[data-view="watch"]')`));
     await delay(1000);
+
     if (options["covered-idle"]) {
       const started = Date.now();
       observations.push({ name: "covered idle begins", at: started });
@@ -405,13 +446,16 @@ try {
       await delay(42_000);
       await delay(42_000);
       observations.push({ name: "covered idle ends", at: Date.now() });
+
       const calls = await mainInspector!.evaluate<
         { method: string; at: number; channels: number }[]
       >(`globalThis.__maintenanceCalls.filter(call => call.at >= ${started})`);
+
       for (const call of calls) observations.push({ name: "covered IPC", ...call });
       mainInspector!.close();
       mainInspector = undefined;
     }
+
     record("streams opened, Home to Watch (count)", streamRequests() - requests);
     page.close();
     await quit(app);
@@ -424,35 +468,42 @@ try {
       app = launch(executable, rest, { port, profile });
       page = await connect(port, "page", { pollMs: 5, app });
       activePage = page;
+
       const loaded = await observeAcrossLoad(
         page,
         // Home's Stage names the channel its preview plays once the catalogue is read.
         `!!document.querySelector("[data-home-preview] h2") && !document.body.innerText.includes("Loading channels")`,
         started,
       );
+
       observations.push({
         name: "cold start",
         initialNavigationObserved: loaded.navigationObserved,
       });
       record("cold start to Home", loaded.elapsedMs);
+
       if (options["cold-search"]) {
         await page.evaluate(`document.querySelector('[aria-label="Search"]').click()`);
         await waitFor(() =>
           page.evaluate<boolean>(`!!document.querySelector('[role="combobox"]')`),
         );
+
         const shown = observe(
           page,
           `document.querySelector('[role="dialog"]')?.innerText.includes("TEST | Index at the end")`,
         );
+
         await page.send("Input.insertText", { text: "TEST | Index at the end" });
         coldSearchSamples.push(await shown);
         await key(page, "Escape", 27);
         await waitFor(() => page.evaluate<boolean>(`!document.querySelector('[role="dialog"]')`));
       }
+
       const detailRequests = providers.reduce(
         (total, provider) => total + provider.detailRequests(),
         0,
       );
+
       await openLongSeries(page);
       observations.push({
         name: "cold series provider details",
@@ -464,21 +515,27 @@ try {
       page.close();
       await quit(app);
     }
+
     app = null;
 
     record("installed size (MB)", installedSize(executable));
     report();
+
     const metrics = Object.fromEntries(
       Object.entries(APP_METRICS).map(([name, unit]) => {
         const samples = results.get(name as keyof typeof APP_METRICS) ?? [];
+
         const expected =
           name === "installed size (MB)" || name === "streams opened, Home to Watch (count)"
             ? 1
             : RUNS;
+
         if (samples.length !== expected) throw new Error(`Incomplete metric: ${name}`);
+
         return [name, metric(unit, samples)];
       }),
     );
+
     saveMeasurement(output, {
       schemaVersion: 1,
       tool: "app",
@@ -529,6 +586,7 @@ try {
         completeMetrics: true,
         movingPicture: ["time to picture", "channel switch"].every((name) => {
           const pictures = observations.filter((observation) => observation["name"] === name);
+
           return (
             pictures.length === RUNS &&
             pictures.every(
@@ -585,6 +643,7 @@ try {
       2,
     ),
   );
+
   if (activePage && (!probes || probeOwnershipVerified)) {
     try {
       const capture = await activePage.send("Page.captureScreenshot", { format: "png" });
@@ -606,10 +665,12 @@ try {
       /* The process may already have closed. Raw partial samples remain. */
     }
   }
+
   throw error;
 } finally {
   mainInspector?.close();
   activePage?.close();
+
   if (app) await quit(app);
   await Promise.all(providers.map((provider) => provider.close()));
   await delay(1000);
@@ -633,6 +694,7 @@ try {
 function streamRequests() {
   return providers.reduce((total, provider) => total + provider.streamRequests(), 0);
 }
+
 async function timed(
   name: keyof typeof APP_METRICS,
   page: Page,
@@ -644,11 +706,14 @@ async function timed(
       `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
     );
   const observation = observe(page, condition, typeof act === "string" ? act : "");
+
   const [elapsed] = await Promise.all([
     observation,
     typeof act === "string" ? Promise.resolve() : act(),
   ]);
+
   record(name, elapsed);
+
   if (condition === FRESH_PICTURE) {
     observations.push({
       name,
@@ -657,6 +722,7 @@ async function timed(
       )),
       streamsOpened: streamRequests(),
     });
+
     if (name === "time to picture" && results.get(name)?.length === 1) {
       const capture = await page.send("Page.captureScreenshot", { format: "png" });
       writeFileSync(
@@ -676,10 +742,12 @@ async function movingWarmup(page: Page, name: string, act: string | (() => Promi
   await page.evaluate(
     `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
   );
+
   const [elapsedMs] = await Promise.all([
     observe(page, FRESH_PICTURE, typeof act === "string" ? act : ""),
     typeof act === "string" ? Promise.resolve() : act(),
   ]);
+
   observations.push({
     name,
     elapsedMs,
@@ -705,14 +773,17 @@ async function openLongSeries(page: Page): Promise<void> {
   await waitFor(() => page.evaluate<boolean>(`!!${poster}`));
   await delay(1000);
   const dialog = `document.querySelector('[role="dialog"]')`;
+
   const title = observe(
     page,
     `${dialog}?.querySelector("h2")?.textContent.includes("Long-running")`,
   );
+
   const episodes = observe(
     page,
     `[...(${dialog}?.querySelectorAll("button") ?? [])].filter((row) => Number.isInteger(Number(row.firstElementChild?.textContent.trim())) && Number(row.firstElementChild?.textContent.trim()) > 0).length >= 26`,
   );
+
   // Attach handlers for both observers before dispatching the click or awaiting anything else.
   const pending = Promise.all([title, episodes, page.evaluate(`${poster}.click()`)]);
   const [titleMs, episodesMs] = await pending;
@@ -735,11 +806,13 @@ function buttonClick(text: string): string {
     target.click();
   })()`;
 }
+
 async function clickText(page: Page, text: string): Promise<unknown> {
   if (text === "All channels" || text === "TEST | Formats and failures") {
     if (await revealFixtureList(page, text))
       observations.push({ name: "Reveal fixture list", list: text });
   }
+
   return page.evaluate(buttonClick(text));
 }
 
@@ -750,6 +823,7 @@ function rowClick(channel: string): string {
       .find((row) => row.textContent.includes(${JSON.stringify(channel)})).click();
   })()`;
 }
+
 function clickRow(page: Page, channel: string): Promise<unknown> {
   return page.evaluate(rowClick(channel));
 }
@@ -759,6 +833,7 @@ async function quit(child: ChildProcess): Promise<void> {
   const exited = new Promise((resolve) => child.once("exit", resolve));
   child.kill("SIGTERM");
   await Promise.race([exited, delay(10_000)]);
+
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
     await exited;
@@ -769,21 +844,26 @@ async function quit(child: ChildProcess): Promise<void> {
 function installedSize(file: string): number {
   const folder = process.platform === "darwin" ? dirname(dirname(dirname(file))) : dirname(file);
   const bytes = sizeOf(folder);
+
   return bytes / 1e6;
 }
 
 function sizeOf(path: string): number {
   let total = 0;
+
   for (const entry of readdirSync(path, { withFileTypes: true })) {
     const full = join(path, entry.name);
+
     if (entry.isDirectory()) total += sizeOf(full);
     else if (entry.isFile()) total += statSync(full).size;
   }
+
   return total;
 }
 
 function report(): void {
   console.log(`| Measure | Median | Runs |\n| --- | --- | --- |`);
+
   for (const [name, values] of results) {
     const unit = name.includes("(") ? "" : " ms";
     const shown = (value: number) => `${Math.round(value * 10) / 10}${unit}`;

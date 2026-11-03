@@ -9,6 +9,7 @@ import { PACKAGE_ROUTES, type PackageRoutes, type PackageName } from "../src/pac
 const template = readFileSync(join(import.meta.dirname, "../src/download.html"), "utf8");
 const home = readFileSync(join(import.meta.dirname, "../index.html"), "utf8");
 const faq = readFileSync(join(import.meta.dirname, "../src/faq.html"), "utf8");
+
 const unpublished: PackageRoutes = {
   homebrew: {
     ...PACKAGE_ROUTES.homebrew,
@@ -136,6 +137,7 @@ describe("independently published download routes", () => {
     expect(
       template.content.querySelector(`[data-package="${name === "aur" ? "homebrew" : "aur"}"]`),
     ).toBeNull();
+
     return template.content;
   }
 
@@ -145,6 +147,7 @@ describe("independently published download routes", () => {
       for (const state of ["published", "withdrawn", "unpublished"] as const) {
         const page = written(faq, name, state);
         const link = page.querySelector<HTMLAnchorElement>("[data-package]");
+
         if (state === "published") {
           const route = PACKAGE_ROUTES[name];
           expect(link?.href).toBe(route.url);
@@ -167,9 +170,11 @@ describe("independently published download routes", () => {
     (name, formats, withRoute) => {
       for (const state of ["published", "withdrawn", "unpublished"] as const) {
         const page = written(home, name, state);
+
         const lanes = [...page.querySelectorAll("#downloads dd")].map((dd) =>
           dd.textContent?.replace(/\s+/g, " ").trim(),
         );
+
         expect(lanes).toContain(state === "published" ? withRoute : formats);
         expect(page.querySelector<HTMLAnchorElement>("[data-package]")?.href).toBe(
           state === "published" ? PACKAGE_ROUTES[name].url : undefined,

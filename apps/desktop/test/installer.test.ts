@@ -20,12 +20,14 @@ class FakeUpdater extends EventEmitter implements Updater {
 
   async checkForUpdates() {
     await this.metadata.promise;
+
     return { updateInfo: { version: "0.0.2" } };
   }
 
   async downloadUpdate(token: CancellationToken) {
     this.downloads.push(token);
     await this.transfer.promise;
+
     return [];
   }
 

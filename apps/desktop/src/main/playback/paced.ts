@@ -18,6 +18,7 @@ const PACKET = 188;
 const SYNC = 0x47;
 const PCR_HZ = 90_000;
 const PCR_WRAP = 2 ** 33;
+
 /** A step of the clock between two PCRs that counts as time passing; more is a cut. */
 const MAX_STEP_S = 5;
 
@@ -43,9 +44,11 @@ export async function* pacedEpochs(
   endS: number,
 ): AsyncGenerator<HlsTsEpoch> {
   const clock = pacing(leadS, signal, endS, () => performance.now());
+
   for await (const epoch of epochs) {
     clock.epoch(epoch.layout.pcrPid);
     yield { ...epoch, chunks: clock.read(epoch.chunks) };
+
     if (clock.ended || signal.aborted) return;
   }
 }
@@ -61,43 +64,58 @@ function pacing(leadS: number, signal: AbortSignal, endS: number, now: () => num
   /** Seconds of the recording sent so far, by its clock. */
   let media = 0;
   let started: number | null = null;
+
   async function* read(chunks: AsyncIterable<Uint8Array>): AsyncGenerator<Uint8Array> {
     for await (const chunk of chunks) {
       const data = carry.length ? join(carry, chunk) : chunk;
       let offset = 0;
+
       while (offset + PACKET <= data.length) {
         // Out of step with the packets: on to the next sync byte.
         if (data[offset] !== SYNC) {
           offset++;
           continue;
         }
+
         const clock = pcrOf(data, offset);
         const marked = discontinuity(data, offset);
         const packetPid = ((data[offset + 1]! & 0x1f) << 8) | data[offset + 2]!;
         offset += PACKET;
+
         if (clock !== null) pid ??= packetPid;
+
         if (packetPid !== pid) continue;
         cut ||= marked;
+
         if (clock === null) continue;
+
         if (previous !== null && !cut) {
           const step = ((clock - previous + PCR_WRAP) % PCR_WRAP) / PCR_HZ;
+
           if (step <= MAX_STEP_S) media += step;
         }
+
         previous = clock;
         cut = false;
       }
+
       carry = data.slice(offset);
       started ??= now();
       const ahead = media - (now() - started) / 1000;
+
       if (ahead > leadS) await wait((ahead - leadS) * 1000, signal);
+
       if (signal.aborted) return;
       yield chunk;
+
       if (media >= endS) {
         ended = true;
+
         return;
       }
     }
   }
+
   return {
     read,
     get ended() {
@@ -111,16 +129,20 @@ function pacing(leadS: number, signal: AbortSignal, endS: number, now: () => num
     },
   };
 }
+
 /** Whether the packet at `offset` has an adaptation field that marks a discontinuity. */
 function discontinuity(data: Uint8Array, offset: number): boolean {
   const adaptation = (data[offset + 3]! >> 4) & 0x02;
+
   return adaptation !== 0 && data[offset + 4]! > 0 && (data[offset + 5]! & 0x80) !== 0;
 }
 
 /** The 90 kHz base of the PCR in the packet at `offset`, or null when it carries none. */
 function pcrOf(data: Uint8Array, offset: number): number | null {
   const adaptation = (data[offset + 3]! >> 4) & 0x02;
+
   if (!adaptation || data[offset + 4]! < 7 || (data[offset + 5]! & 0x10) === 0) return null;
+
   return (
     data[offset + 6]! * 2 ** 25 +
     (data[offset + 7]! << 17) +
@@ -134,6 +156,7 @@ function join(a: Uint8Array, b: Uint8Array): Uint8Array {
   const joined = new Uint8Array(a.length + b.length);
   joined.set(a);
   joined.set(b, a.length);
+
   return joined;
 }
 
@@ -144,6 +167,7 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
       signal.removeEventListener("abort", done);
       resolve();
     };
+
     const timer = setTimeout(done, ms);
     signal.addEventListener("abort", done, { once: true });
   });

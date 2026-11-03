@@ -19,5 +19,6 @@ export function destinationIn(segments: readonly string[]): DestinationRoute {
  */
 export function useOpenShared(): (screen: SharedScreen) => void {
   const segments: readonly string[] = useSegments();
+
   return (screen) => router.navigate(hrefOn(destinationIn(segments), screen));
 }

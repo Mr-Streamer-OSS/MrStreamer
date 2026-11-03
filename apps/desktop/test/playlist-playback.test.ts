@@ -14,9 +14,12 @@ import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
+
 const hasTools =
   spawnSync(FFMPEG, ["-version"]).status === 0 && spawnSync(FFPROBE, ["-version"]).status === 0;
+
 const closers: (() => Promise<void>)[] = [];
+
 afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
@@ -26,6 +29,7 @@ async function host(unsupportedHeaders = false) {
   let origin = "";
   let refused = 0;
   const requests: { agent: string; range: string | undefined }[] = [];
+
   const server = createServer((request, response) => {
     if (request.url?.startsWith("/list")) {
       return response.end(
@@ -41,24 +45,30 @@ async function host(unsupportedHeaders = false) {
         ].join("\n"),
       );
     }
+
     const agent =
       unsupportedHeaders && request.headers["user-agent"] === userAgent
         ? "Twelve"
         : request.headers["user-agent"];
+
     const referer = unsupportedHeaders && agent === "Twelve" ? undefined : `${origin}/${agent}`;
+
     if (
       request.url !== "/same.mp4" ||
       (agent !== "Twelve" && agent !== "Twenty") ||
       request.headers.referer !== referer
     ) {
       refused++;
+
       return response.writeHead(403).end();
     }
+
     requests.push({ agent, range: request.headers.range });
     const body = fixture(agent === "Twelve" ? "title-h264-aac.mp4" : "title-h264-eac3-subs.mkv");
     const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
     const start = range ? Number(range[1]) : 0;
     const end = range?.[2] ? Math.min(Number(range[2]), body.length - 1) : body.length - 1;
+
     if (start >= body.length) return response.writeHead(416).end();
     response.writeHead(range ? 206 : 200, {
       "Content-Type": agent === "Twelve" ? "video/mp4" : "video/x-matroska",
@@ -69,17 +79,20 @@ async function host(unsupportedHeaders = false) {
     });
     response.end(body.subarray(start, end + 1));
   });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   closers.push(async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
+
   return { link: `${origin}/list?token=fake`, requests, refused: () => refused };
 }
 
 async function started(dir: string) {
   const runtime = runtimeFor(mainLayer({ ...testConfig(dir), ffmpeg: FFMPEG, ffprobe: FFPROBE }));
+
   return {
     runtime,
     subscriptions: await promised(runtime, Subscriptions),
@@ -95,12 +108,15 @@ async function mapped(provider: Awaited<ReturnType<typeof host>>, dir: string) {
   await app.titles.refresh(saved.id);
   const source = (await app.subscriptions.sources())[0]!;
   const catalogue = await source.provider.onDemandCatalogue();
+
   const refs = catalogue.movies.map((movie): TitleRef => ({
     kind: "movie",
     subscriptionId: saved.id,
     id: movie.id,
   }));
+
   expect(refs).toHaveLength(2);
+
   return { app, refs };
 }
 
@@ -128,6 +144,7 @@ describe.skipIf(!hasTools)("mapped playlist file playback", () => {
     await first.runtime.dispose();
     const app = await started(dir);
     const sessions = [];
+
     for (const ref of refs) {
       const file = await app.titles.file(ref);
       // E-AC-3 too, so the second version's sound plays as it is.
@@ -139,11 +156,13 @@ describe.skipIf(!hasTools)("mapped playlist file playback", () => {
       expect((await answer.arrayBuffer()).byteLength).toBeGreaterThan(1000);
       await app.playback.close(session.sessionId);
     }
+
     expect(sessions[0]?.duration).toBeCloseTo(12, 0);
     expect(sessions[0]?.subtitles).toHaveLength(1);
     expect(sessions[1]?.duration).toBeCloseTo(20, 0);
     expect(sessions[1]?.subtitles).toHaveLength(2);
     expect(provider.refused()).toBe(0);
+
     for (const agent of ["Twelve", "Twenty"])
       expect(provider.requests.some((request) => request.agent === agent && request.range)).toBe(
         true,
@@ -157,18 +176,22 @@ describe.skipIf(!hasTools)("mapped playlist file playback", () => {
     const local = await app.playback.openTitle(refs[0]!, first.url, ["h264", "aac"], first);
     expect(local.duration).toBeCloseTo(12, 0);
     const second = await app.titles.file(refs[1]!);
+
     const receiver = await app.playback.openReceiverTitle(
       refs[1]!,
       second.url,
       { address: "127.0.0.1", decoders: ["h264", "aac"] },
       second,
     );
+
     expect(receiver.duration).toBeCloseTo(20, 0);
     expect(receiver.subtitles).toHaveLength(2);
+
     const loaded = await app.playback.loadReceiverTitle(receiver.sessionId, {
       audio: receiver.audio[0]?.id ?? null,
       subtitle: null,
     });
+
     expect(loaded).not.toBeNull();
     const master = await (await fetch(loaded!.url)).text();
     const media = master.split("\n").find((line) => line && !line.startsWith("#"))!;

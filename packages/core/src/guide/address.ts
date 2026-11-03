@@ -22,12 +22,16 @@ export interface GuideAddress {
  */
 export function guideAddress(typed: string): GuideAddress | null {
   const raw = typed.trim();
+
   if (raw === "") return null;
   const url = URL.parse(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+
   if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) return null;
+
   if (url.username !== "" || url.password !== "" || url.hostname === "") return null;
   // What follows # never reaches a server.
   url.hash = "";
+
   return {
     href: url.href,
     origin: url.origin,

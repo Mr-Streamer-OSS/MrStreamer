@@ -30,10 +30,13 @@ export const remindersQuery = () =>
  */
 export function syncReminders(client: QueryClient): () => void {
   const { queryKey } = remindersQuery();
+
   const read = () =>
     void client.cancelQueries({ queryKey }).then(() => client.invalidateQueries({ queryKey }));
+
   const stopChanges = listen("reminders.changed", read);
   const stopPreferences = listen("preferences.changed", read);
+
   return () => {
     stopChanges();
     stopPreferences();
@@ -54,14 +57,18 @@ export function reminderAt(
 ): Reminder | undefined {
   if (!list) return undefined;
   let index = indexes.get(list);
+
   if (!index) {
     index = new Map();
+
     for (const reminder of list.reminders)
       for (const stream of reminder.streams)
         index.set(`${reminder.channel.subscriptionId}\n${stream}\n${reminder.start}`, reminder);
     indexes.set(list, index);
   }
+
   const of = (id: string) => index.get(`${channel.subscriptionId}\n${id}\n${start}`);
+
   return of(channel.id) ?? channel.variants.map((variant) => of(variant.id)).find(Boolean);
 }
 
@@ -86,6 +93,7 @@ export function useReminderToggle(channel: LiveChannel, start: number): Reminder
   const list = useReminders();
   const reminder = reminderAt(list.data, channel, start);
   const underWay = useRef(false);
+
   const change = useMutation({
     mutationFn: async (current: Reminder | undefined) => {
       if (current) await call("reminders.cancel", { id: current.id });
@@ -96,7 +104,9 @@ export function useReminderToggle(channel: LiveChannel, start: number): Reminder
       underWay.current = false;
     },
   });
+
   const error = change.isError ? appError(change.error) : null;
+
   return {
     ready: !list.isPending,
     set: reminder !== undefined,

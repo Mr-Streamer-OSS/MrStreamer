@@ -25,12 +25,14 @@ const BLOCK = 1024 * 1024;
 function block(index: number, generation: number): Buffer {
   const bytes = Buffer.allocUnsafe(BLOCK);
   let state = (index * 2654435761 + generation * 40503 + 1) >>> 0;
+
   for (let at = 0; at < BLOCK; at += 4) {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
     bytes.writeUInt32LE(state >>> 0, at);
   }
+
   return bytes;
 }
 
@@ -38,15 +40,20 @@ if (process.argv[2] === "serve") {
   const size = Number(process.argv[3]) * BLOCK;
   let generation = 0;
   let wholeOnly = false;
+
   const server = createServer((request, response) => {
     if (request.url === "/replace") {
       generation++;
+
       return response.end("ok");
     }
+
     if (request.url === "/whole") {
       wholeOnly = true;
+
       return response.end("ok");
     }
+
     const range = wholeOnly ? null : /^bytes=(\d+)-$/.exec(request.headers.range ?? "");
     const start = range ? Number(range[1]) : 0;
     const etag = `"file-${generation}"`;
@@ -62,18 +69,23 @@ if (process.argv[2] === "serve") {
     });
     const mine = generation;
     let at = from;
+
     const send = () => {
       while (at < size) {
         const index = Math.floor(at / BLOCK);
         const piece = block(index, mine).subarray(at - index * BLOCK);
         at += piece.length;
+
         if (!response.write(piece)) return void response.once("drain", send);
       }
+
       response.end();
     };
+
     response.on("close", () => (at = size + 1));
     send();
   });
+
   server.listen(0, "127.0.0.1", () => {
     const address = server.address();
     process.send?.(typeof address === "object" && address ? address.port : 0);
@@ -84,17 +96,21 @@ if (process.argv[2] === "serve") {
 
 async function measure(mebibytes: number, out: string | undefined) {
   const size = mebibytes * BLOCK;
+
   const server: ChildProcess = fork(import.meta.filename, ["serve", String(mebibytes)], {
     stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
+
   const port = await new Promise<number>((resolve) =>
     server.once("message", (m) => resolve(Number(m))),
   );
+
   const origin = `http://127.0.0.1:${port}`;
   const dir = await mkdtemp(join(tmpdir(), "download-memory-"));
   const part = join(dir, "media.mkv.part");
   const results: Record<string, unknown>[] = [];
   const baseline = process.memoryUsage().rss;
+
   try {
     const run = async (
       name: string,
@@ -104,13 +120,16 @@ async function measure(mebibytes: number, out: string | undefined) {
       const stop = new AbortController();
       let peak = process.memoryUsage().rss;
       let peakBuffers = process.memoryUsage().arrayBuffers;
+
       const sampler = setInterval(() => {
         const usage = process.memoryUsage();
         peak = Math.max(peak, usage.rss);
         peakBuffers = Math.max(peakBuffers, usage.arrayBuffers);
       }, 50);
+
       let last = { received: 0, restarted: false };
       const started = performance.now();
+
       const outcome = await transfer({
         url: `${origin}/movie.mkv`,
         headers: {},
@@ -122,16 +141,20 @@ async function measure(mebibytes: number, out: string | undefined) {
         disk: options.disk ?? fileDisk,
         progress: (at) => {
           last = at;
+
           if (options.stopAt !== undefined && at.received >= options.stopAt) stop.abort();
         },
         identify: () => {},
       });
+
       clearInterval(sampler);
       const seconds = (performance.now() - started) / 1000;
+
       const onDisk = await stat(part).then(
         (found) => found.size,
         () => 0,
       );
+
       const result = {
         name,
         outcome: outcome.kind,
@@ -143,8 +166,10 @@ async function measure(mebibytes: number, out: string | undefined) {
         peakRssAboveBaselineMiB: Math.round(((peak - baseline) / BLOCK) * 10) / 10,
         peakArrayBuffersMiB: Math.round((peakBuffers / BLOCK) * 10) / 10,
       };
+
       results.push(result);
       console.error(JSON.stringify(result));
+
       return { outcome, last };
     };
 
@@ -175,16 +200,20 @@ async function measure(mebibytes: number, out: string | undefined) {
     // 6. A disk that fills a third of the way: failed, with a partial and no copy.
     await rm(part);
     let written = 0;
+
     const filling: Disk = {
       ...fileDisk,
       write: (path, start) => {
         const file = fileDisk.write(path, start);
+
         return new Writable({
           write(chunk: Buffer, _encoding, done) {
             written += chunk.length;
+
             if (written > third) {
               return done(Object.assign(new Error("no space left on device"), { code: "ENOSPC" }));
             }
+
             if (file.write(chunk)) done();
             else file.once("drain", () => done());
           },
@@ -198,11 +227,13 @@ async function measure(mebibytes: number, out: string | undefined) {
         });
       },
     };
+
     await run("disk full a third of the way", null, { disk: filling });
   } finally {
     server.kill();
     await rm(dir, { recursive: true, force: true });
   }
+
   const report = {
     at: new Date().toISOString(),
     node: process.version,
@@ -211,15 +242,20 @@ async function measure(mebibytes: number, out: string | undefined) {
     baselineRssMiB: Math.round((baseline / BLOCK) * 10) / 10,
     results,
   };
+
   console.log(JSON.stringify(report, null, 2));
+
   if (out) await writeFile(out, JSON.stringify(report, null, 2));
 }
 
 /** Whether the file at `path` is the generated file of `generation`, byte for byte. */
 async function sameAs(path: string, size: number, generation: number): Promise<boolean> {
   const expected = createHash("sha256");
+
   for (let index = 0; index * BLOCK < size; index++) expected.update(block(index, generation));
   const actual = createHash("sha256");
+
   for await (const chunk of createReadStream(path)) actual.update(chunk as Buffer);
+
   return expected.digest("hex") === actual.digest("hex");
 }

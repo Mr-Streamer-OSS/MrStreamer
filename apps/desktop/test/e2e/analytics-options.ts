@@ -5,6 +5,7 @@ export function analyticsOptions(args: string[]) {
   const flags = new Set<string>();
   const values = new Map<string, string>();
   const positional: string[] = [];
+
   for (const arg of args) {
     if (
       [
@@ -23,13 +24,16 @@ export function analyticsOptions(args: string[]) {
     ) {
       const split = arg.indexOf("=");
       const name = arg.slice(0, split);
+
       if (values.has(name) || arg.length === split + 1) throw new Error(`Invalid ${name}`);
       values.set(name, arg.slice(split + 1));
     } else if (arg !== "--") positional.push(arg);
   }
+
   const [executable, ...appArgs] = positional;
   const native = flags.has("--native-telemetry");
   const nativeCase = values.get("--native-case");
+
   if (
     nativeCase &&
     ![
@@ -49,10 +53,13 @@ export function analyticsOptions(args: string[]) {
     throw new Error("Unknown native telemetry case");
   const expectedVersion = values.get("--expected-version");
   const expectedSource = values.get("--expected-source");
+
   for (const source of [expectedSource, values.get("--prior-source")])
     if (source && !/^[a-f0-9]{40}$/.test(source)) throw new Error("Expected a full source SHA");
+
   if (executable && (!expectedVersion || !expectedSource))
     throw new Error("Packaged verification requires --expected-version= and --expected-source=");
+
   if (
     native &&
     (flags.has("--observe-rollover") ||
@@ -61,6 +68,7 @@ export function analyticsOptions(args: string[]) {
       flags.has("--lifecycle"))
   )
     throw new Error("Native acceptance cannot change the ordinary workload");
+
   if (
     !native &&
     ["--native-case", "--prior-executable", "--prior-source", "--installed-pair"].some((key) =>
@@ -68,12 +76,16 @@ export function analyticsOptions(args: string[]) {
     )
   )
     throw new Error("Native options require --native-telemetry");
+
   if (nativeCase === "windows-retry" && process.platform !== "win32")
     throw new Error("windows-retry requires actual Windows");
+
   if (values.has("--prior-executable") !== values.has("--prior-source"))
     throw new Error("Prior executable and source must be supplied together");
+
   if (values.has("--installed-pair") && values.has("--prior-executable"))
     throw new Error("Select an installed Windows pair or separate prior executable");
+
   return {
     executable: executable ? resolve(executable) : undefined,
     appArgs,

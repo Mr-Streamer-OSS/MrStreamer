@@ -293,6 +293,7 @@ export interface FakeProvider {
 
 /** Requests a test can keep waiting, by what they ask for. */
 type Held = "channels" | "guide" | "titles";
+
 /** What each `player_api.php` action a test can hold asks for. */
 const HELD_ACTIONS: Readonly<Record<string, Held>> = {
   get_live_streams: "channels",
@@ -328,20 +329,26 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const slotReleaseMs = options.slotReleaseMs ?? 300;
   const streams = options.streams ?? (options.live ? liveStreams : defaultStreams);
   const built = buildCatalogue(options.channels ?? 300, options.adultChannels ?? false);
+
   const catalogue = options.channelOf
     ? { ...built, channels: built.channels.map(options.channelOf) }
     : built;
+
   const listed = buildTitles(options.titles ?? 120, options.second ?? false, options.series);
+
   const withLong = options.longSeries
     ? { ...listed, series: [longSeries(), ...listed.series].slice(0, options.series) }
     : listed;
+
   const titles = options.titlesOf ? options.titlesOf(withLong) : withLong;
   const movieFiles = new Map(titles.movies.map((movie) => [String(movie.id), movie]));
+
   const episodeFiles = new Map(
     titles.series
       .flatMap((series) => series.seasons.flat())
       .map((episode) => [String(episode.id), episode]),
   );
+
   let titleFailure: number | "login" | null = null;
   let detailFailure: number | null = null;
   let titleCategoriesEmpty = false;
@@ -364,15 +371,19 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   let select = (all: readonly FakeChannel[]): readonly FakeChannel[] => all;
   let selectCategories = (all: FakeCatalogue["categories"]): FakeCatalogue["categories"] => all;
   let catalogueFailure: number | null = null;
+
   const channels = new Map(
     catalogue.channels.map((channel) => [String(channel.streamId), channel]),
   );
+
   let slots = 0;
+
   /** Gives back the connection slot of a request that closed, `slotReleaseMs` later. */
   const freeSlot = () => {
     if (slotReleaseMs > 0) setTimeout(() => slots--, slotReleaseMs);
     else slots--;
   };
+
   let origin = "";
   let guideAnswer: string | number | "hold" | null = null;
   let guidePieceBytes = 0;
@@ -383,9 +394,11 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   const timeZone = options.timeZone === undefined ? "Europe/Amsterdam" : options.timeZone;
   /** What a test asked to keep waiting, until it releases each. */
   const held = new Map<Held, { readonly arrived: () => void; readonly released: Promise<void> }>();
+
   /** Answers a request now, or once the test releases it when it is being held. */
   const answering = (what: Held, answer: () => void): void => {
     const hold = held.get(what);
+
     if (!hold) return answer();
     hold.arrived();
     void hold.released.then(answer);
@@ -393,34 +406,46 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", origin);
+
     if (url.pathname === "/player_api.php") {
       const what = HELD_ACTIONS[url.searchParams.get("action") ?? ""];
+
       return what ? answering(what, () => api(url, response)) : api(url, response);
     }
+
     const logo = /^\/logos\/(\d+)\.(svg|png)$/.exec(url.pathname);
+
     const logoChannel = logo
       ? catalogue.channels.find((channel) => String(channel.streamId) === logo[1])
       : undefined;
+
     if (logoChannel && logo?.[2] === "svg" && options.logoSvg) {
       return void response
         .writeHead(200, { "Content-Type": "image/svg+xml" })
         .end(options.logoSvg(logoChannel));
     }
+
     if (logoChannel && logo?.[2] === "png" && options.logoPng) {
       return void response
         .writeHead(200, { "Content-Type": "image/png" })
         .end(options.logoPng(logoChannel));
     }
+
     if (url.pathname === "/xmltv.php") return answering("guide", () => guide(url, response));
     const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.ts$/.exec(url.pathname);
+
     if (live) return stream(live[1] ?? "", live[2] ?? "", live[3] ?? "", request, response);
+
     const shifted = /^\/timeshift\/([^/]+)\/([^/]+)\/(\d+)\/([\d:-]+)\/(\d+)\.ts$/.exec(
       url.pathname,
     );
+
     if (shifted) return timeshift(shifted, request, response);
     const title = /^\/(movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.(\w+)$/.exec(url.pathname);
+
     if (title) return redirectFile(title, response);
     const file = /^\/files\/(\d+)\/(movie|series)\/(\d+)$/.exec(url.pathname);
+
     if (file)
       return serveFile(
         file[2] === "movie" ? movieFiles : episodeFiles,
@@ -439,15 +464,19 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     ) {
       return json(response, { user_info: { auth: 0 } });
     }
+
     const action = url.searchParams.get("action");
+
     if (
       ["get_vod_categories", "get_series_categories", "get_vod_streams", "get_series"].includes(
         action ?? "",
       )
     )
       titleListCount++;
+
     if (action === null) {
       const now = Math.floor(Date.now() / 1000);
+
       return json(response, {
         user_info: {
           username,
@@ -463,30 +492,38 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         },
       });
     }
+
     if (catalogueFailure !== null && action?.startsWith("get_live")) {
       return void response.writeHead(catalogueFailure).end();
     }
+
     if (titleFailure === "login" && (action === "get_vod_streams" || action === "get_series")) {
       return json(response, { user_info: { auth: 0 } });
     }
+
     if (
       typeof titleFailure === "number" &&
       (action?.startsWith("get_vod") || action?.startsWith("get_series"))
     ) {
       return void response.writeHead(titleFailure).end();
     }
+
     const categoryRows = (categories: FakeTitles["movieCategories"]) =>
       (titleCategoriesEmpty ? [] : categories).map((category) => ({
         category_id: category.id,
         category_name: category.name,
         parent_id: 0,
       }));
+
     const listedNow = selectTitles(titles);
+
     if (action === "get_vod_categories")
       return json(response, categoryRows(listedNow.movieCategories));
+
     if (action === "get_series_categories") {
       return json(response, categoryRows(listedNow.seriesCategories));
     }
+
     if (action === "get_vod_streams") {
       return json(
         response,
@@ -511,6 +548,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
+
     if (action === "get_series") {
       return json(
         response,
@@ -530,13 +568,18 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
+
     if (action === "get_vod_info" || action === "get_series_info") {
       detailCount++;
+
       if (detailFailure !== null) return void response.writeHead(detailFailure).end();
     }
+
     if (action === "get_vod_info") {
       const movie = movieFiles.get(url.searchParams.get("vod_id") ?? "");
+
       if (!movie) return json(response, { info: [], movie_data: [] });
+
       return json(response, {
         info: {
           name: movie.name,
@@ -554,12 +597,15 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         movie_data: { stream_id: movie.id, container_extension: movie.container },
       });
     }
+
     if (action === "get_series_info") {
       // As the lists have it now, with the episodes a panel's update gave it, or as it was listed
       // before it was dropped.
       const asked = (each: FakeSeries) => String(each.id) === url.searchParams.get("series_id");
       const series = listedNow.series.find(asked) ?? titles.series.find(asked);
+
       if (!series) return json(response, { info: [], episodes: [] });
+
       // Panels list seasons incompletely: the last season is missing here.
       return json(response, {
         seasons: series.seasons.slice(0, -1).map((_episodes, index) => ({
@@ -573,6 +619,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
             String(series.seasonNumbers?.[index] ?? index + 1),
             episodes.map((episode, place) => {
               const number = episode.number ?? place + 1;
+
               return {
                 id: String(episode.id),
                 episode_num: number,
@@ -591,6 +638,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         ),
       });
     }
+
     if (action === "get_live_categories") {
       return json(
         response,
@@ -601,6 +649,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
+
     if (action === "get_live_streams") {
       return json(
         response,
@@ -626,35 +675,44 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         })),
       );
     }
+
     json(response, []);
   }
 
   function guide(url: URL, response: ServerResponse): void {
     guideCount++;
+
     if (
       url.searchParams.get("username") !== username ||
       url.searchParams.get("password") !== password
     ) {
       return void response.writeHead(401).end();
     }
+
     if (guideAnswer === "hold") return;
+
     if (typeof guideAnswer === "number") return void response.writeHead(guideAnswer).end();
+
     const document =
       guideAnswer ??
       (options.guideHours
         ? gridGuide(catalogue, Date.now(), options.guideHours, options.guideLengths)
         : fakeGuide(catalogue, Date.now()));
+
     response.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
+
     if (!guidePieceBytes) return void response.end(document);
     const bytes = Buffer.from(document, "utf8");
     const size = guidePieceBytes;
     let offset = 0;
+
     const next = () => {
       if (offset >= bytes.length) return void response.end();
       response.write(bytes.subarray(offset, offset + size));
       offset += size;
       setImmediate(next);
     };
+
     next();
   }
 
@@ -666,11 +724,15 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     response: ServerResponse,
   ): void {
     const channel = channels.get(id);
+
     if (decodeURIComponent(user) !== username || decodeURIComponent(pass) !== password) {
       return void response.writeHead(401).end();
     }
+
     streamCount++;
+
     if (!channel || channel.offline) return void response.writeHead(404).end();
+
     if (slots >= maxConnections) return void response.writeHead(403).end();
 
     slots++;
@@ -690,12 +752,16 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
    */
   function timeshift(match: RegExpExecArray, request: IncomingMessage, response: ServerResponse) {
     const [, user = "", pass = "", minutes = "", start = "", id = ""] = match;
+
     if (decodeURIComponent(user) !== username || decodeURIComponent(pass) !== password) {
       return void response.writeHead(401).end();
     }
+
     archiveAsked.push({ streamId: id, minutes: Number(minutes), start });
     const channel = channels.get(id);
+
     if (!channel?.archiveDays || !channel.fixture) return void response.writeHead(404).end();
+
     if (slots >= maxConnections) return void response.writeHead(403).end();
     slots++;
     let released = false;
@@ -706,11 +772,13 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     });
     response.writeHead(200, { "Content-Type": "video/mp2t" });
     const recording = fixture(channel.fixture);
+
     if (!options.live) return void response.end(recording);
     // A tenth of a second at a time, as `liveStreams` sends it, unless the connection breaks.
     const pieces = chunked(recording, Math.ceil(recording.length / 30));
     const breaks = archiveBreak;
     archiveBreak = null;
+
     const sent = Readable.from(
       (async function* () {
         for (const [index, piece] of pieces.entries()) {
@@ -720,6 +788,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
         }
       })(),
     );
+
     response.on("close", () => sent.destroy());
     sent.pipe(response);
   }
@@ -728,12 +797,14 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   function redirectFile(match: RegExpExecArray, response: ServerResponse): void {
     fileCount++;
     const [, folder, user, pass, id] = match;
+
     if (
       decodeURIComponent(user ?? "") !== username ||
       decodeURIComponent(pass ?? "") !== password
     ) {
       return void response.writeHead(401).end();
     }
+
     const host = fileTurn++ % (options.fileHosts ?? 1);
     response.writeHead(302, { Location: `${origin}/files/${host}/${folder}/${id}` }).end();
   }
@@ -753,19 +824,26 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   ): void {
     fileCount++;
     const title = files.get(id);
+
     if (!title?.fixture) return void response.writeHead(404).end();
+
     if (slots >= maxConnections) return void response.writeHead(403).end();
+
     if (unsettled.has(title)) replace(title, replaced.get(title)?.bytes ?? fixture(title.fixture));
     const other = replaced.get(title);
     const bytes = other?.bytes ?? fixture(title.fixture);
+
     const range = options.wholeFiles
       ? null
       : /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
+
     const start = range ? Number(range[1]) : 0;
     const end = range?.[2] ? Math.min(Number(range[2]), bytes.length - 1) : bytes.length - 1;
+
     if (start >= bytes.length) {
       return void response.writeHead(416, { "Content-Range": `bytes */${bytes.length}` }).end();
     }
+
     slots++;
     filesOpen++;
     mostFilesOpen = Math.max(mostFilesOpen, filesOpen);
@@ -776,6 +854,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       filesOpen--;
       freeSlot();
     });
+
     const answer = () => {
       if (response.destroyed) return;
       response.writeHead(range ? 206 : 200, {
@@ -795,6 +874,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       response.on("close", () => pieces.destroy());
       pieces.pipe(response);
     };
+
     if (range?.[2] && partsHeld) void partsHeld.then(answer);
     else if (range?.[2] && partsWait > 0) setTimeout(answer, partsWait);
     else answer();
@@ -805,6 +885,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     server.listen(0, "127.0.0.1", resolve);
   });
   const address = server.address();
+
   if (!address || typeof address === "string") throw new Error("The fake provider has no address.");
   origin = `http://127.0.0.1:${address.port}`;
 
@@ -817,24 +898,30 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     mostFilesAtOnce: () => mostFilesOpen,
     replaceMovieFile(movieId, file) {
       const movie = movieFiles.get(String(movieId));
+
       if (movie) replace(movie, typeof file === "string" ? fixture(file) : file);
     },
     unsettleMovieFile(movieId, on) {
       const movie = movieFiles.get(String(movieId));
+
       if (!movie) return;
+
       if (on) unsettled.add(movie);
       else unsettled.delete(movie);
     },
     stallMovieFile(movieId, at, ms) {
       const movie = movieFiles.get(String(movieId));
+
       if (movie) stalls.set(movie, { at, ms });
     },
     stallEpisodeFile(episodeId, at, ms) {
       const episode = episodeFiles.get(String(episodeId));
+
       if (episode) stalls.set(episode, { at, ms });
     },
     replaceEpisodeFile(episodeId, file) {
       const episode = episodeFiles.get(String(episodeId));
+
       if (episode) replace(episode, typeof file === "string" ? fixture(file) : file);
     },
     slowFileParts(ms) {
@@ -843,6 +930,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     holdFileParts() {
       const held = Promise.withResolvers<void>();
       partsHeld = held.promise;
+
       return () => {
         partsHeld = null;
         held.resolve();
@@ -881,6 +969,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
       const arrived = Promise.withResolvers<void>();
       const released = Promise.withResolvers<void>();
       held.set(what, { arrived: arrived.resolve, released: released.promise });
+
       return {
         arrived: arrived.promise,
         release() {
@@ -914,21 +1003,28 @@ export function fakeGuide(catalogue: FakeCatalogue, around: number): string {
   const first = Math.floor(around / SLOT_MS) * SLOT_MS - 4 * SLOT_MS;
   const ids = [...new Set(catalogue.channels.flatMap((channel) => channel.guideId ?? []))];
   const parts = ['<?xml version="1.0" encoding="utf-8" ?><tv generator-info-name="fake">'];
+
   for (const id of ids)
     parts.push(`<channel id="${id}"><display-name>${id}</display-name></channel>`);
+
   for (const [index, id] of ids.entries()) {
     const word = WORDS[index % WORDS.length] ?? "Earth";
+
     for (let slot = 0; slot < 52; slot++) {
       const start = first + slot * SLOT_MS;
+
       const description =
         slot % 3 === 0 ? "" : `<desc>Episode ${slot} of ${word} &amp; friends.</desc>`;
+
       parts.push(
         `<programme start="${xmltvTime(start)}" stop="${xmltvTime(start + SLOT_MS)}" channel="${id}">` +
           `<title lang="en">${word} News ${slot}</title>${description}</programme>`,
       );
     }
   }
+
   parts.push("</tv>");
+
   return parts.join("\n");
 }
 
@@ -954,13 +1050,17 @@ function gridGuide(
   const missing = Math.floor(around / hour) * hour - 3 * hour;
   const ids = [...new Set(catalogue.channels.flatMap((channel) => channel.guideId ?? []))];
   const parts = ['<?xml version="1.0" encoding="utf-8" ?><tv generator-info-name="fake">'];
+
   for (const id of ids)
     parts.push(`<channel id="${id}"><display-name>${id}</display-name></channel>`);
+
   for (const [index, id] of ids.entries()) {
     const word = WORDS[index % WORDS.length] ?? "Earth";
+
     for (let slot = 0, start = first; start < last; slot++) {
       const minutes = lengths[(index * 7 + slot * 13) % lengths.length] ?? 30;
       const stop = start + minutes * 60 * 1000;
+
       if (index % 5 !== 4 || stop <= missing || start >= missing + 2 * hour) {
         const show = SHOWS[(index + slot) % SHOWS.length] ?? "Journal";
         const description = slot % 3 === 0 ? "" : `<desc>${word} ${show}, part ${slot}.</desc>`;
@@ -969,16 +1069,20 @@ function gridGuide(
             `<title lang="en">${word} ${show}</title>${description}</programme>`,
         );
       }
+
       start = stop;
     }
   }
+
   parts.push("</tv>");
+
   return parts.join("\n");
 }
 
 /** "20261002140000 +0200" */
 function xmltvTime(time: number): string {
   const local = new Date(time + 2 * 60 * 60 * 1000).toISOString();
+
   return `${local.slice(0, 19).replace(/[-T:]/g, "")} +0200`;
 }
 
@@ -991,8 +1095,10 @@ export function fixture(name: string): Buffer {
 const defaultStreams: StreamSource = (channel, out, signal) => {
   if (channel.fixture) {
     out.end(fixture(channel.fixture));
+
     return;
   }
+
   out.write(EMPTY_PROGRAM);
   const timer = setInterval(() => out.write(NULL_PACKETS), 20);
   signal.addEventListener("abort", () => clearInterval(timer), { once: true });
@@ -1004,21 +1110,26 @@ export const liveStreams: StreamSource = (channel, out, signal) => {
   const recording = fixture(channel.fixture);
   const step = Math.ceil(recording.length / 30);
   let offset = 0;
+
   const timer = setInterval(() => {
     out.write(recording.subarray(offset, offset + step));
     offset += step;
+
     if (offset >= recording.length) clearInterval(timer);
   }, 100);
+
   signal.addEventListener("abort", () => clearInterval(timer), { once: true });
 };
 
 /** Builds a catalogue of roughly `size` channels. The same size always gives the same catalogue. */
 function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
   const random = mulberry32(size);
+
   const pick = (items: readonly string[]): string =>
     items[Math.floor(random() * items.length)] ?? items[0] ?? "";
 
   const categories = [{ id: "1", name: "TEST | Formats and failures" }];
+
   const channels: FakeChannel[] = FIXTURE_CHANNELS.map((test, index) => ({
     streamId: 1000 + index,
     num: index + 1,
@@ -1034,6 +1145,7 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
 
   const groups = REGIONS.flatMap((region) => GENRES.map((genre) => `${region} | ${genre}`));
   const perGroup = Math.max(1, Math.ceil((size - channels.length) / groups.length));
+
   for (const [groupIndex, group] of groups.entries()) {
     const categoryId = String(groupIndex + 2);
     categories.push({ id: categoryId, name: group });
@@ -1049,6 +1161,7 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
       fixture: null,
       guideId: null,
     });
+
     for (let i = 0; i < perGroup && channels.length < size; i++) {
       const style = random();
       const word = pick(WORDS);
@@ -1072,9 +1185,11 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
       });
     }
   }
+
   // One channel in three qualities, as panels list them, of which Full HD is off air.
   const qualities = String(categories.length + 1);
   categories.push({ id: qualities, name: "BE | Kwaliteit" });
+
   for (const [index, quality] of ["FHD", "HD", "SD"].entries()) {
     channels.push({
       streamId: QUALITY_STREAM_IDS + index,
@@ -1087,9 +1202,11 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
       guideId: index === 2 ? null : "kwaliteit1.be",
     });
   }
+
   if (adultChannels) {
     const adult = String(categories.length + 1);
     categories.push({ id: adult, name: "XXX | ADULTS" });
+
     const add = (streamId: number, name: string, categoryId: string, flagged: boolean) =>
       channels.push({
         streamId,
@@ -1102,10 +1219,12 @@ function buildCatalogue(size: number, adultChannels: boolean): FakeCatalogue {
         guideId: flagged ? "afterhours.adult" : null,
         ...defined({ adult: flagged ? true : undefined }),
       });
+
     add(4000, "AFTER HOURS", "2", true);
     add(4001, "LATE SHOW", adult, false);
     add(4002, "NIGHT CLUB", adult, false);
   }
+
   return { categories, channels };
 }
 
@@ -1118,6 +1237,7 @@ interface Stall {
 /** `bytes`, which begin at byte `start` of their file, in pieces, waiting at `stall` on the way. */
 async function* sent(bytes: Buffer, start: number, stall: Stall | undefined) {
   const before = stall ? stall.at - start : 0;
+
   if (!stall || before <= 0 || before >= bytes.length) return yield* chunked(bytes, 16 * 1024);
   yield* chunked(bytes.subarray(0, before), 16 * 1024);
   await new Promise((resolve) => setTimeout(resolve, stall.ms));
@@ -1127,9 +1247,11 @@ async function* sent(bytes: Buffer, start: number, stall: Stall | undefined) {
 /** `bytes` in pieces of at most `size`. */
 function chunked(bytes: Buffer, size: number): Buffer[] {
   const pieces: Buffer[] = [];
+
   for (let offset = 0; offset < bytes.length; offset += size) {
     pieces.push(bytes.subarray(offset, offset + size));
   }
+
   return pieces;
 }
 
@@ -1201,6 +1323,7 @@ function buildTitles(
 ): FakeTitles {
   const random = mulberry32(size + 7);
   const base = TITLES_ADDED;
+
   const movieCategories = [
     { id: "501", name: "TEST | FORMATS" },
     { id: "502", name: "NL | FILMS" },
@@ -1208,6 +1331,7 @@ function buildTitles(
     { id: "504", name: "MULTI | NETFLIX MOVIES" },
     { id: "505", name: "XXX | FOR ADULTS" },
   ];
+
   const movies: FakeTitle[] = TEST_MOVIES.map((test, index) => ({
     id: 90_000 + index,
     name: test.name,
@@ -1221,22 +1345,27 @@ function buildTitles(
       tmdb: test.versionOf === undefined ? undefined : String(90_000 + test.versionOf + 10_000),
     }),
   }));
+
   for (let index = 0; movies.length < size; index++) {
     const id = 91_000 + index;
     // The film a second provider lists under this id: the default's next one, or one of its own.
     const of = second ? index + 1 : index;
     const own = second && index % 2 === 1;
+
     const category = own
       ? movieCategories[1]!
       : (movieCategories[1 + (of % 4)] ?? movieCategories[1]!);
+
     const adult = category.id === "505";
     const word = WORDS[of % WORDS.length] ?? "Earth";
     const language = second ? "EN" : category.id === "504" ? "MULTI" : "NL";
+
     const name = own
       ? `Other Story ${index} (NL)`
       : adult
         ? `Adult Film ${of} (EN)`
         : `${word} Story ${of} (${language})`;
+
     movies.push({
       id,
       name: index % 9 === 0 ? name.toUpperCase() : name,
@@ -1258,10 +1387,12 @@ function buildTitles(
       }),
     });
   }
+
   const seriesCategories = [
     { id: "601", name: "NL | SERIES" },
     { id: "602", name: "BE | KINDER SERIES" },
   ];
+
   const episode = (id: number, fixture: string, container: string): FakeTitle => ({
     id,
     name: "",
@@ -1272,6 +1403,7 @@ function buildTitles(
     container,
     fixture,
   });
+
   if (second) {
     const series: FakeSeries[] = [
       {
@@ -1289,6 +1421,7 @@ function buildTitles(
         tmdb: "90000",
       },
     ];
+
     for (let index = 0; series.length < seriesCount; index++) {
       const id = 80_001 + index;
       series.push({
@@ -1301,8 +1434,10 @@ function buildTitles(
         tmdb: String(id + 20_000),
       });
     }
+
     return { movieCategories, movies, seriesCategories, series };
   }
+
   const series: FakeSeries[] = [
     {
       id: 80_000,
@@ -1348,6 +1483,7 @@ function buildTitles(
       seasons: [[episode(799_990, "title-h264-aac.mp4", "mp4")]],
     },
   ];
+
   for (let index = 0; series.length < seriesCount; index++) {
     const word = WORDS[(index * 7) % WORDS.length] ?? "Earth";
     const id = 80_001 + index;
@@ -1365,6 +1501,7 @@ function buildTitles(
       ],
     });
   }
+
   return { movieCategories, movies, seriesCategories, series };
 }
 
@@ -1415,17 +1552,21 @@ export function measurementTitles(all: FakeTitles, anchor: number): Measurement 
     const counts = { fourK: 0, week: 0, month: 0 };
     let place = 0;
     let older = 0;
+
     const measured = rows.map((row): Row => {
       const step = row.adult || row.name.startsWith("TEST") ? -1 : place++ % 20;
       const named = row.name.replace(/ \([^()]*\)$/, "");
+
       if (step === 0) {
         const tag = counts.fourK++ % 2 === 0 ? "4K" : "UHD";
+
         return {
           ...row,
           name: `${named} ${tag} (MULTI)`,
           added: anchor - 45 * DAY_SECONDS - older++,
         };
       }
+
       if (step === 1) {
         return {
           ...row,
@@ -1433,6 +1574,7 @@ export function measurementTitles(all: FakeTitles, anchor: number): Measurement 
           added: anchor - 2 * DAY_SECONDS - counts.week++,
         };
       }
+
       if (step === 2 || step === 3) {
         return {
           ...row,
@@ -1440,12 +1582,16 @@ export function measurementTitles(all: FakeTitles, anchor: number): Measurement 
           added: anchor - 15 * DAY_SECONDS - counts.month++,
         };
       }
+
       return { ...row, added: anchor - 45 * DAY_SECONDS - older++ };
     });
+
     return { rows: measured, counts };
   }
+
   const movies = measure(all.movies);
   const series = measure(all.series);
+
   return {
     titles: { ...all, movies: movies.rows, series: series.rows },
     anchor,
@@ -1477,28 +1623,35 @@ export function pngLogo(channel: FakeChannel): Buffer {
   const stride = width * 3 + 1;
   // Each row is led by its filter type, 0 for none.
   const rows = Buffer.alloc(stride * height, 255);
+
   for (let y = 0; y < height; y++) {
     rows[y * stride] = 0;
+
     for (let x = 0; x < width; x++) {
       const [cx, cy] = [x + 0.5, y + 0.5];
       const down = Math.abs(cx * height - cy * width) / diagonal;
       const up = Math.abs((width - cx) * height - cy * width) / diagonal;
+
       if (Math.min(down, up) <= half) rows.set(colour, y * stride + 1 + x * 3);
     }
   }
+
   const chunk = (type: string, data: Buffer) => {
     const typed = Buffer.concat([Buffer.from(type, "latin1"), data]);
     const framed = Buffer.alloc(typed.length + 8);
     framed.writeUInt32BE(data.length, 0);
     typed.copy(framed, 4);
     framed.writeUInt32BE(zlibCrc32(typed), typed.length + 4);
+
     return framed;
   };
+
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   // 8 bits per channel, RGB, deflate, no interlacing.
   header.set([8, 2, 0, 0, 0], 8);
+
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -1509,10 +1662,12 @@ export function pngLogo(channel: FakeChannel): Buffer {
 
 const REGIONS = ["UK", "NL", "BE", "DE", "FR", "US", "ES", "IT", "PL", "PT"];
 const GENRES = ["Entertainment", "Sports", "News", "Kids", "Documentary", "Movies", "Music"];
+
 /** The series `longSeries` adds: every episode plays the MP4 clip. */
 function longSeries(): FakeSeries {
   const id = 70_000;
   const added = 1_790_000_001;
+
   return {
     id,
     name: "TEST | Long-running (EN)",
@@ -1549,6 +1704,7 @@ const LONG_STORY =
 
 /** The ffprobe facts panels send about an episode's picture and sound. */
 const DISPOSITION = { default: 1, dub: 0, original: 0, comment: 0, lyrics: 0, forced: 0 };
+
 const PROBED_VIDEO = {
   index: 0,
   codec_name: "h264",
@@ -1584,6 +1740,7 @@ const PROBED_VIDEO = {
   disposition: DISPOSITION,
   tags: { language: "eng", BPS: "2263842", DURATION: "00:42:51.110000000" },
 };
+
 const PROBED_AUDIO = {
   index: 1,
   codec_name: "eac3",
@@ -1638,17 +1795,20 @@ const WORDS = [
   "Signal",
   "Horizon",
 ];
+
 const SUFFIXES = ["", " 1", " 2", " 3", " Plus", " Max", " Xtra", " Live", " 24"];
 const QUALITY = ["", " HD", " FHD", " HD", " 4K", " SD"];
 
 /** Small seeded PRNG so catalogues are reproducible. */
 function mulberry32(seed: number): () => number {
   let state = seed >>> 0;
+
   return () => {
     state = (state + 0x6d2b79f5) >>> 0;
     let t = state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
@@ -1660,9 +1820,11 @@ function json(response: ServerResponse, body: unknown): void {
 /** Seven MPEG-TS null packets, sent every 20 ms to keep an empty program flowing. */
 const NULL_PACKETS = (() => {
   const packets = Buffer.alloc(188 * 7, 0xff);
+
   for (let offset = 0; offset < packets.length; offset += 188) {
     packets.set([0x47, 0x1f, 0xff, 0x10], offset);
   }
+
   return packets;
 })();
 
@@ -1685,6 +1847,7 @@ const EMPTY_PROGRAM = Buffer.concat([
 function psiPacket(pid: number, section: number[]): Buffer {
   const packet = Buffer.alloc(188, 0xff);
   packet.set([0x47, 0x40 | (pid >> 8), pid & 0xff, 0x10, 0x00, ...section, ...u32(crc32(section))]);
+
   return packet;
 }
 
@@ -1699,9 +1862,12 @@ function u32(value: number): number[] {
 /** CRC-32/MPEG-2, the checksum of every PSI section. */
 function crc32(bytes: number[]): number {
   let crc = 0xffffffff;
+
   for (const byte of bytes) {
     crc ^= byte << 24;
+
     for (let bit = 0; bit < 8; bit++) crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1;
   }
+
   return crc >>> 0;
 }

@@ -99,10 +99,13 @@ export interface PreferenceSnapshot {
 const none = () => type("undefined");
 const titleKind = () => type.enumerated(...TITLE_KINDS);
 const decoders = () => type.enumerated(...CODECS).array();
+
 /** An `OwnedId`: what a provider lists, with the subscription that lists it. */
 const owned = () => type({ subscriptionId: "string > 0", id: "string" });
+
 /** A list's or a list channel's id, as the window or the main process made it up. */
 const listId = () => type("string").atLeastLength(1).atMostLength(64);
+
 /** Movies, and series whose every episode counts, by the ids of their versions: a `TitleFilter`. */
 const titleFilter = () => type({ "movies?": owned().array(), "series?": owned().array() });
 
@@ -117,6 +120,7 @@ const loginInput = () =>
     password: "string",
     "name?": "string",
   });
+
 export type LoginInput = IpcInput<"subscription.add">;
 
 /** Identifies one guide-search invocation within a renderer view. Main supplies sender/frame. */
@@ -285,8 +289,11 @@ export const ipcInputs = {
   "reminders.dismiss": () => type({ id: "string > 0" }),
   "profiles.active": none,
   "recordings.list": none,
-  /** What holds a subscription's connections now, as Record shows before it starts. */
-  "recordings.connections": () => type({ subscriptionId: "string > 0" }),
+  /**
+   * What holds a subscription's connections now, as Record shows before it starts, and with
+   * `channel`, whether recording it now would share what plays of it.
+   */
+  "recordings.connections": () => type({ subscriptionId: "string > 0", "channel?": owned() }),
   /**
    * Records the channel from now until `stop`, through `variant`, else the stream chosen for it
    * before or Auto's, as `playback.open` picks. `stopPlaying` first stops what plays of its
@@ -1005,10 +1012,12 @@ export interface IpcOutputs {
 }
 
 export type IpcMethod = keyof IpcOutputs;
+
 /** An HLS cause belongs only to this opaque local proxy path. Null selects no HTTP cause. */
 export type PlaybackFailureSelector = NonNullable<IpcInput<"playback.failure">["selector"]>;
 
 export type IpcInput<M extends IpcMethod> = ReturnType<(typeof ipcInputs)[M]>["infer"];
+
 export type IpcOutput<M extends IpcMethod> = IpcOutputs[M];
 
 /** Methods without input can be called with no argument. */
@@ -1070,6 +1079,12 @@ export interface IpcEvents {
    * channel was found in its pictures. Read them again to know which.
    */
   "playback.tracksChanged": { readonly sessionId: string };
+  /**
+   * While a recording shares a channel session's HLS stream, the player holds one quality: the
+   * variant whose playlist address is `variant`, as the session's multivariant playlist names
+   * it. Null once the player picks its quality itself again.
+   */
+  "playback.fixed": { readonly sessionId: string; readonly variant: string | null };
   /** Where playback goes changed, or what the receiver plays did, or the receivers found. */
   "output.changed": OutputStatus;
   /**
@@ -1083,6 +1098,7 @@ export interface IpcEvents {
    */
   "window.leaveAsked": null;
 }
+
 export type IpcEvent = keyof IpcEvents;
 
 /** The API the preload script exposes as `window.mrStreamer`. */

@@ -54,13 +54,16 @@ function standIn(player: Player = PLAYER) {
   let playing: string | null = null;
   let time = 0;
   let plays = 0;
+
   const state = {
     preferences: { volume: 1, muted: false },
     favourites: [],
     watchlist: { total: 0, entries: [] },
     progress: [],
   };
+
   const actions: string[] = [];
+
   const answers: Record<string, () => unknown> = {
     "subscription.list": () => (removed ? [] : [{ id: "subscription" }]),
     "preferences.get": () => state.preferences,
@@ -69,14 +72,18 @@ function standIn(player: Player = PLAYER) {
     "viewing.progress": () => state.progress,
     "downloads.list": () => ({ items: copies }),
   };
+
   const shownWidth = (id: string) => {
     const progress = copies.find((each) => each.id === id)?.progress;
+
     return progress ? `${Math.round((progress.position / progress.duration) * 100)}%` : null;
   };
+
   // Only what these stages call; the real driver's other members are never reached.
   const page: Partial<Driver["page"]> = {
     evaluate: async <T>(expression: string) => (await shown(expression)) as T,
   };
+
   const driver: Partial<Driver> = {
     actions: [],
     requests: [],
@@ -85,22 +92,29 @@ function standIn(player: Player = PLAYER) {
     async wait(check: () => Promise<boolean>, _timeout?: number, what?: string) {
       for (let tries = 0; tries < 30; tries++) {
         if (await check()) return;
+
         if (playing !== null) time += 1;
       }
+
       throw new Error(`Timed out waiting for ${what}`);
     },
     async click(action: string, element: string) {
       actions.push(action);
+
       if (action === "Play or resume with the saved subtitle") {
         playing = "provider";
         time = 1.5;
+
         return;
       }
+
       if (action === "Confirm removal") {
         removed = true;
         copies = copies.map((each) => ({ ...each, subscription: null }));
       }
+
       const id = /data-download="([^"]+)"/.exec(element)?.[1];
+
       if (!action.startsWith("Watch") || !id) return;
       playing = id;
       const kept = copies.find((each) => each.id === id)?.progress?.position ?? 0;
@@ -108,7 +122,9 @@ function standIn(player: Player = PLAYER) {
     },
     async key(name: string) {
       if (name === "ArrowRight") time += 10;
+
       if (name === "ArrowLeft") time = Math.max(0, time - 10);
+
       if (name !== "Escape" || playing === null) return;
       const left = playing;
       copies = copies.map((each) =>
@@ -126,20 +142,29 @@ function standIn(player: Player = PLAYER) {
       Promise.resolve({ time, width: 640, audio: 1000, paused: false, title: playing !== null }),
     page: page as Driver["page"],
   };
+
   /** What the page answers each expression the stages evaluate in it. */
   async function shown(expression: string): Promise<unknown> {
     if (expression.includes("innerText"))
       return "Remove it from this device? Subscription removed, copy kept";
+
     if (expression.includes("style.width"))
       return shownWidth(/data-download="([^"]+)"/.exec(expression)?.[1] ?? "");
+
     if (expression.includes("subtitle-offset")) return SUBTITLE_TIMING;
     const caption = time >= CUE.start && time < CUE.end ? SUBTITLE_CUE.text : "";
+
     if (expression.includes("currentTime")) return { time, caption };
+
     if (expression.includes("data-subtitle-text")) return caption;
+
     if (expression.includes(".map(")) return ["English 5.1", "Español Commentary"];
+
     return true;
   }
+
   const d = driver as Driver;
+
   return { d, copies, state, actions };
 }
 
@@ -148,6 +173,7 @@ function restart(player: Player) {
   const { d, copies, state } = standIn(player);
   const candidate: Partial<AfterCandidate> = { after: state, copies };
   const upgraded = candidate as AfterCandidate;
+
   return restartCandidate(d, { long: "long-title", formats: [] }, upgraded, {
     cutOff: () => Promise.resolve({}),
     refused: () => [],

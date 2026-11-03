@@ -32,10 +32,13 @@ let changesBegun = 0;
  */
 async function send(client: QueryClient, change: ListChange): Promise<readonly CustomList[]> {
   const turn = ++changesBegun;
+
   try {
     const lists = await change();
+
     if (turn === changesBegun) client.setQueryData(queries.customLists().queryKey, lists);
     else void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
+
     return lists;
   } catch (cause) {
     void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
@@ -65,10 +68,12 @@ export function removeList(client: QueryClient, id: string): ListChange {
     const sent = deletions.get(client) ?? new Map<string, number>();
     deletions.set(client, sent);
     sent.set(id, (sent.get(id) ?? 0) + 1);
+
     try {
       return await call("customLists.remove", { id });
     } catch (cause) {
       const left = (sent.get(id) ?? 1) - 1;
+
       if (left > 0) sent.set(id, left);
       else sent.delete(id);
       throw cause;
@@ -83,18 +88,23 @@ export function removeList(client: QueryClient, id: string): ListChange {
 export function useListChange() {
   const client = useQueryClient();
   const [state, setState] = useState<ChangeState>({ status: "idle" });
+
   /** Sends `change`; answers the lists as stored, or null once it failed, which `state` says. */
   const run = async (change: ListChange): Promise<readonly CustomList[] | null> => {
     setState({ status: "saving" });
+
     try {
       const lists = await send(client, change);
       setState({ status: "idle" });
+
       return lists;
     } catch (cause) {
       setState({ status: "failed", error: appError(cause), change });
+
       return null;
     }
   };
+
   return {
     state,
     run,
@@ -113,17 +123,21 @@ const IDLE: ChangeState = { status: "idle" };
 export function useListChanges() {
   const client = useQueryClient();
   const [failed, setFailed] = useState<Extract<ChangeState, { status: "failed" }> | null>(null);
+
   /** Sends `change`; answers the lists as stored, or null once it failed, which then shows. */
   const run = async (change: ListChange): Promise<readonly CustomList[] | null> => {
     try {
       return await send(client, change);
     } catch (cause) {
       setFailed({ status: "failed", error: appError(cause), change });
+
       return null;
     }
   };
+
   /** Takes down the failure the viewer answered, unless another failed since. */
   const answered = () => setFailed((current) => (current === failed ? null : current));
+
   return {
     state: failed ?? IDLE,
     run,
@@ -139,6 +153,7 @@ export function useListChanges() {
 /** Whether a list shows `channel` among its channels, by the id it shows by. */
 export function holds(list: CustomList, channel: OwnedId): boolean {
   const key = ownedKey(channel);
+
   return list.members.some((each) => each.kind === "listed" && ownedKey(each.channel) === key);
 }
 
@@ -150,11 +165,13 @@ export function holds(list: CustomList, channel: OwnedId): boolean {
  */
 export function useNewList(onMade: (id: string) => void) {
   const change = useListChange();
+
   const [field, setField] = useState<{
     readonly text: string;
     readonly channel: OwnedId | null;
     readonly id: string;
   } | null>(null);
+
   return {
     open: field !== null,
     text: field?.text ?? "",
@@ -173,6 +190,7 @@ export function useNewList(onMade: (id: string) => void) {
     confirm: async (): Promise<string | null> => {
       if (!field || field.text.trim() === "" || change.state.status === "saving") return null;
       const { id, text, channel } = field;
+
       const made = await change.run(() =>
         call("customLists.create", {
           id,
@@ -180,9 +198,11 @@ export function useNewList(onMade: (id: string) => void) {
           ...defined({ channel: channel ?? undefined }),
         }),
       );
+
       if (!made) return null;
       setField(null);
       onMade(id);
+
       return id;
     },
     cancel: () => {

@@ -6,24 +6,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // checked against its installed reducers outside this suite, which CI runs without the iOS install.
 
 const asked = vi.hoisted(() => [] as string[]);
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("expo-router", () => ({
   router: {
     dismiss: (count: number) => asked.push(`dismiss ${count}`),
     push: (href: string) => asked.push(`push ${href}`),
   },
 }));
+
 vi.mock("react-native", () => ({
   Image: () => null,
   Text: () => null,
   View: () => null,
   StyleSheet: { create: <T>(styles: T) => styles },
 }));
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF" } }));
 
 const { openOnTabs, tabStack, tabsAt } = await import("../src/header.tsx");
 
 const TABS = ["(home)", "live", "films", "series"].map((name) => ({ name }));
+
 /** The root stack: the tabs on `tab`, with `over` above them. */
 const root = (tab: string, over: readonly string[] = []) => ({
   index: over.length,
@@ -36,8 +41,10 @@ const root = (tab: string, over: readonly string[] = []) => ({
 /** Opens `screen` from `state` and says what the router was asked. */
 function open(state: Parameters<typeof tabsAt>[0], screen: "settings" | "downloads") {
   const at = tabsAt(state);
+
   if (!at) throw new Error("No tabs");
   openOnTabs(at, screen);
+
   return asked;
 }
 
@@ -68,6 +75,7 @@ describe("the top bar's destinations", () => {
         { name: "(tabs)", state: { index: 1, routes: TABS } },
       ],
     };
+
     expect(tabsAt(twice)).toEqual({ tab: "live", above: 0 });
   });
 
@@ -80,10 +88,12 @@ describe("a tab's own stack", () => {
   it("is found while another tab is selected, and under Search, for Live's iPad and Duo hand-back", () => {
     const live = { key: "live-stack", index: 1, routes: [{ name: "index" }, { name: "schedule" }] };
     const tabs = TABS.map((tab) => (tab.name === "live" ? { ...tab, state: live } : tab));
+
     const state = {
       index: 1,
       routes: [{ name: "(tabs)", state: { index: 2, routes: tabs } }, { name: "search" }],
     };
+
     expect(tabStack(state, "live")).toBe(live);
     expect(tabStack(state, "films")).toBeUndefined();
   });

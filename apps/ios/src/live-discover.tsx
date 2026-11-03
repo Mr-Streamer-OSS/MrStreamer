@@ -33,6 +33,7 @@ export function DiscoverScreen() {
   // Results follow the latest text; typing goes on while an earlier search is drawn.
   const typed = useDeferredValue(query);
   const providers = roster.kind === "ready" ? roster.members : [];
+
   const status =
     catalogue.kind === "failed"
       ? null
@@ -42,9 +43,11 @@ export function DiscoverScreen() {
           retry,
           settings: () => router.push(tabHref("live", "settings")),
         });
+
   // As Live says it: why, and what to do.
   const failure =
     catalogue.kind === "failed" ? failureOf(catalogue.error, catalogue.member.entry.server) : null;
+
   return (
     <Docked status={status}>
       <View style={styles.screen}>
@@ -107,13 +110,16 @@ function missingFrom(library: Library, providers: readonly Member[]) {
   const pending: string[] = [];
   const failed: string[] = [];
   const passwords: string[] = [];
+
   for (const { entry, label, live, needsSecret } of providers) {
     if (library.labels.has(entry.id)) continue;
+
     if (needsSecret) passwords.push(label);
     else if (live.kind === "failed") failed.push(label);
     // Loading, or come and still being worked out.
     else pending.push(label);
   }
+
   const sentences = [
     ...(pending.length > 0
       ? [t("Channels from {providers} are still loading.", { providers: formatList(pending) })]
@@ -125,6 +131,7 @@ function missingFrom(library: Library, providers: readonly Member[]) {
       ? [t("Enter the password for {providers} in Settings.", { providers: formatList(passwords) })]
       : []),
   ];
+
   return { pending: pending.length > 0, text: sentences.join(" ") };
 }
 
@@ -140,18 +147,22 @@ function Results({
 }) {
   const locale = useLocale();
   const inset = useDockInset();
+
   const sections = useMemo(() => {
     const found = searchPlaces(library, query);
     const countries = found.filter((place) => place.kind === "country");
     const categories = found.filter((place) => place.kind === "category");
+
     return [
       ...(countries.length > 0 ? [{ title: t("Countries"), data: countries }] : []),
       ...(categories.length > 0 ? [{ title: t("Categories"), data: categories }] : []),
     ];
     // A new language titles the sections again.
   }, [library, query, locale]);
+
   const missing = missingFrom(library, providers);
   const searched = query.trim();
+
   // Nothing anywhere only once every provider's channels are in.
   if (library.regions.length === 0) {
     return (
@@ -166,8 +177,10 @@ function Results({
       />
     );
   }
+
   if (searched && sections.length === 0) {
     const query = { query: searched };
+
     return (
       <Message
         text={
@@ -180,6 +193,7 @@ function Results({
       />
     );
   }
+
   return (
     <SectionList
       style={styles.screen}
@@ -211,14 +225,18 @@ function Row({ place }: { place: Place }) {
   const { region } = place;
   const name = place.kind === "country" ? region.name : place.shelf.title;
   const count = (place.kind === "country" ? region : place.shelf).channels.length;
+
   const context =
     place.kind === "category" && place.shelf.title !== region.name ? region.name : null;
+
   const line = [context, t("{count} channels", { count })].filter(Boolean).join(" · ");
+
   const open = () => {
     if (place.kind === "category") return router.push(categoryHref(place));
     chooseCountry(region);
     router.back();
   };
+
   return (
     <Pressable
       accessibilityRole="button"

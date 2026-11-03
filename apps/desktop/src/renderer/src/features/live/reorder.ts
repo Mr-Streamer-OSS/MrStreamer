@@ -111,8 +111,10 @@ const STEPS: Readonly<Record<string, number>> = {
 /** Sends a key to the order being made. Every other key of the guide rests meanwhile. */
 export function orderKey(event: KeyboardEvent, order: OrderEditor): void {
   const { draft } = order;
+
   if (!draft) return;
   const by = Object.hasOwn(STEPS, event.key) ? STEPS[event.key] : undefined;
+
   if (by !== undefined) {
     if (event.altKey) order.move(draft.focus.channel, by);
     else order.step(by);
@@ -149,6 +151,7 @@ function stillAsRead(
   if (ordered.kind === "favourites")
     return !!favourites && sameChannels(favourites, ordered.original);
   const now = customLists?.find((each) => each.id === ordered.list.id);
+
   return now?.revision === ordered.list.revision;
 }
 
@@ -164,7 +167,9 @@ function drafted(
   asked: number,
 ): Draft | null {
   const channel = channels.find((each) => sameOwned(each, focus)) ?? channels[0];
+
   if (channels.length < 2 || !channel) return null;
+
   return {
     saved,
     ordered,
@@ -192,6 +197,7 @@ export function useListOrder(
   const favourites = useQuery({ ...queries.viewing(), select: favouriteChannels }).data;
   const customLists = useQuery(queries.customLists()).data;
   const [held, setDraft] = useState<Draft | null>(null);
+
   /** What the list to order is now, as read; undefined while unknown. */
   const ordered: Ordered | undefined =
     list.kind === "favourites"
@@ -199,6 +205,7 @@ export function useListOrder(
       : list.kind === "custom"
         ? (() => {
             const own = customLists?.find((each) => each.id === list.id);
+
             return own && { kind: "custom", list: own };
           })()
         : undefined;
@@ -218,6 +225,7 @@ export function useListOrder(
       held.saved !== saved ||
       ((held.status === "editing" || held.status === "failed") &&
         (!stillAsRead(held.ordered, favourites, customLists) || channels !== held.listed)));
+
   if (obsolete) setDraft(null);
   const draft = obsolete ? null : held;
 
@@ -226,11 +234,14 @@ export function useListOrder(
   const waiting = waits(draft);
   useEffect(() => {
     if (!waiting) return;
+
     const rest = (event: KeyboardEvent) => {
       event.stopImmediatePropagation();
       event.preventDefault();
     };
+
     window.addEventListener("keydown", rest, true);
+
     return () => window.removeEventListener("keydown", rest, true);
   }, [waiting]);
 
@@ -265,7 +276,9 @@ export function useListOrder(
         customLists,
       ),
     );
+
     await client.fetchQuery({ ...listed, staleTime: 0 });
+
     return client.getQueryData(listed.queryKey)?.channels;
   };
 
@@ -278,6 +291,7 @@ export function useListOrder(
    */
   const takeIn = async (from: string, viewing: Viewing) => {
     const later = client.getQueryData(queries.viewing().queryKey)?.sequence ?? 0;
+
     if (!connected(from) || later > viewing.sequence) return;
     // A list that can't be read says so itself, once it shows.
     await read(viewing, client.getQueryData(queries.customLists().queryKey)).catch(() => {});
@@ -293,6 +307,7 @@ export function useListOrder(
     if (!connected(from)) return;
     const held = client.getQueryData(queries.customLists().queryKey);
     await read(client.getQueryData(queries.viewing().queryKey), lists).catch(() => {});
+
     if (connected(from) && client.getQueryData(queries.customLists().queryKey) === held)
       client.setQueryData(queries.customLists().queryKey, lists);
     else void client.invalidateQueries({ queryKey: queries.customLists().queryKey });
@@ -309,12 +324,15 @@ export function useListOrder(
     setDraft({ ...from, status: "saving", commandId });
     const { saved, ordered, order } = from;
     const roster = rosterOf(client);
+
     if (roster !== saved) return setDraft(null);
+
     const failed = (cause: unknown) => {
       const kind = appError(cause).kind;
       const changed = kind === "favourites-changed" || kind === "list-changed";
       answer(commandId, (sent) => ({ ...sent, status: changed ? "changed" : "failed" }));
     };
+
     if (ordered.kind === "favourites") {
       void call("viewing.reorderFavourites", {
         commandId,
@@ -324,15 +342,19 @@ export function useListOrder(
         await takeIn(roster, viewing);
         answer(commandId, () => null);
       }, failed);
+
       return;
     }
+
     // A list names its channels by member: the one each shown channel is, as read.
     const { list } = ordered;
+
     const members = new Map(
       list.members.flatMap((each) =>
         each.kind === "listed" ? [[ownedKey(each.channel), each.member] as const] : [],
       ),
     );
+
     void call("customLists.arrange", {
       list: list.id,
       revision: list.revision,
@@ -353,18 +375,24 @@ export function useListOrder(
     void (async (): Promise<Draft | null> => {
       const { channel, asked } = from.focus;
       const kept = from.ordered;
+
       // Only what the draft orders is read again, then the channels it shows.
       if (kept.kind === "favourites") {
         const viewing = await client.fetchQuery({ ...queries.viewing(), staleTime: 0 });
         const listed = await read(viewing, client.getQueryData(queries.customLists().queryKey));
+
         if (!listed || !connected(from.saved)) return null;
         const ordered = { kind: "favourites", original: viewing.favourites } as const;
+
         return drafted(from.saved, ordered, listed, channel, asked + 1);
       }
+
       const lists = await client.fetchQuery({ ...queries.customLists(), staleTime: 0 });
       const own = lists.find((each) => each.id === kept.list.id);
       const listed = await read(client.getQueryData(queries.viewing().queryKey), lists);
+
       if (!own || !listed || !connected(from.saved)) return null;
+
       return drafted(from.saved, { kind: "custom", list: own }, listed, channel, asked + 1);
     })().then(
       (fresh) => answer(token, () => fresh),
@@ -382,6 +410,7 @@ export function useListOrder(
     select,
     focused: (channel, part) => {
       if (!draft || waiting) return;
+
       if (sameOwned(draft.focus.channel, channel) && draft.focus.part === part) return;
       setDraft({ ...draft, focus: { ...draft.focus, channel, part } });
     },
@@ -389,12 +418,14 @@ export function useListOrder(
       if (!draft) return;
       const at = draft.order.findIndex((channel) => sameOwned(channel, draft.focus.channel));
       const next = draft.order[Math.min(Math.max(at + by, 0), draft.order.length - 1)];
+
       if (next) select(next);
     },
     move: (moved, by, part = "row") => {
       if (!draft || (draft.status !== "editing" && draft.status !== "failed")) return;
       const from = draft.order.findIndex((channel) => sameOwned(channel, moved));
       const channel = draft.order[from];
+
       if (!channel) return;
       const to = Math.min(Math.max(from + by, 0), draft.order.length - 1);
       const order = draft.order.toSpliced(from, 1).toSpliced(to, 0, channel);
@@ -414,6 +445,7 @@ export function useListOrder(
     },
     confirm: () => {
       if (!draft || waiting) return;
+
       if (draft.status === "changed") reload(draft);
       else save(draft);
     },

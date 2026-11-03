@@ -11,14 +11,20 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 // launch that can't read guides.json keeps the guides it names for the next.
 
 const memory = vi.hoisted(() => ({ keychain: new Map<string, string>() }));
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } } }));
+
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+
 vi.mock("react-native", () => ({
   Alert: { alert: () => undefined },
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
 }));
+
 vi.mock("expo-secure-store", () => keychain(() => memory.keychain));
+
 vi.mock("expo-video", () => ({ createVideoPlayer: () => nativePlayer(() => undefined) }));
 
 const { native } = await import("./native-files.ts");
@@ -28,8 +34,10 @@ interface FakeProvider {
   readonly url: string;
   close(): Promise<void>;
 }
+
 /** The panel is typed by Node's own lib, which the app's tsconfig leaves out: imported by name. */
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
+
 const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
   startFakeProvider(options: {
     readonly username: string;
@@ -38,7 +46,9 @@ const { startFakeProvider } = (await import(FAKE_PROVIDER)) as {
     readonly titles: number;
   }): Promise<FakeProvider>;
 };
+
 let panel: FakeProvider;
+
 beforeAll(async () => {
   panel = await startFakeProvider({
     username: "one",
@@ -47,13 +57,16 @@ beforeAll(async () => {
     titles: 1,
   });
 });
+
 afterAll(() => panel.close());
 
 const documents = join(native.root, "documents");
 const guidesPath = join(documents, "guides.json");
 const guidesFile = () => readFileSync(guidesPath, "utf8");
+
 /** The native guide store, kept across launches as its directory on disk is. */
 let store = guideFixture();
+
 /** Writes of guides.json fail while this holds. */
 let refused = false;
 
@@ -65,12 +78,14 @@ async function launch() {
   const { guides } = await import("../src/guide-sources.ts");
   const { guide } = await import("../src/guide.ts");
   await account.restore();
+
   return { ...account, guides, guide };
 }
 
 beforeEach(async () => {
   await background.forceQuit();
   background.reset();
+
   for (const name of readdirSync(native.root))
     rmSync(join(native.root, name), { recursive: true, force: true });
   mkdirSync(documents);
@@ -89,6 +104,7 @@ beforeEach(async () => {
 it("erases a removed provider's guide mappings with its history, finishing at the next launch", async () => {
   const app = await launch();
   const id = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+
   if (!id) throw new Error("The add was cancelled");
   expect(await app.guides.map(`${id}:1`, "news.test")).toBeNull();
   expect(await app.guides.map("other:1", "kept.test")).toBeNull();
@@ -123,7 +139,9 @@ it.each([
 ])("keeps external guides through a launch whose guides.json it %s", async (_, hide) => {
   const app = await launch();
   const provider = await app.add({ server: panel.url, username: "one", password: "one+Pw@1" });
+
   if (!provider) throw new Error("The add was cancelled");
+
   for (const link of ["kept", "removed", "replaced"])
     expect(await app.guides.add(`https://${link}.test/epg.xml`, link)).toBeNull();
   const [kept, removed, replaced] = app.guides.links().map(({ id }) => id);

@@ -71,15 +71,18 @@ const details: SeriesDetails = {
 };
 
 let unmount = () => {};
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
 afterEach(() => {
   unmount();
   vi.useRealTimers();
 });
 
 const text = () => document.body.textContent ?? "";
+
 /** Waits until `check` passes, moving the fake clock so React Query passes the answers on. */
 const until = (check: () => void) =>
   vi.waitFor(
@@ -93,6 +96,7 @@ const until = (check: () => void) =>
 
 it("leaves episode selection alone on other-file progress and updates its own facts, still and action", async () => {
   ipc.reset();
+
   const file: Download = {
     id: "copy",
     title: { kind: "episode", id: "1-1", seriesId: "harbour", season: 1, episode: 1 },
@@ -109,6 +113,7 @@ it("leaves episode selection alone on other-file progress and updates its own fa
     progress: null,
     series: null,
   };
+
   const list = (items: readonly Download[]): DownloadList => ({
     items,
     series: {},
@@ -116,6 +121,7 @@ it("leaves episode selection alone on other-file progress and updates its own fa
     free: null,
     ended: 0,
   });
+
   const other = { ...file, id: "other", title: { kind: "movie" as const, id: "unrelated" } };
   ipc.always("ondemand.titles", [series]);
   ipc.always("ondemand.details", details);
@@ -140,6 +146,7 @@ it("leaves episode selection alone on other-file progress and updates its own fa
     stop();
     view.unmount();
   };
+
   await view.render(
     createElement(
       Profiler,
@@ -179,9 +186,11 @@ it("leaves episode selection alone on other-file progress and updates its own fa
   expect(text()).not.toContain("Downloading");
   await act(async () => ipc.emit("downloads.changed", list([file, other])));
   await until(() => expect(text()).toContain("Downloading 20%"));
+
   const cancel = document.querySelector<HTMLButtonElement>(
     '[aria-label="Cancel download of S1 E1"]',
   );
+
   expect(cancel).not.toBeNull();
   const row = cancel!.parentElement!.parentElement!;
   expect(
@@ -241,6 +250,7 @@ describe("a series' episodes", () => {
       stopSync();
       view.unmount();
     };
+
     await act(async () => listed.resolve([series]));
     await act(async () => progress.resolve([]));
     await act(async () => opened.resolve(details));
@@ -289,6 +299,7 @@ describe("a series' episodes", () => {
     const tab = [...document.body.querySelectorAll("button")].find(
       (button) => button.textContent === "Season 2",
     );
+
     await act(async () => tab?.click());
 
     await until(() => expect(ipc.argsOf("ondemand.season")).toHaveLength(2));
@@ -319,6 +330,7 @@ describe("a series' details", () => {
       stopSync();
       view.unmount();
     };
+
     await act(async () => listed.resolve([series]));
     await act(async () => progress.resolve([]));
 

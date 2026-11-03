@@ -1436,12 +1436,16 @@ export const nl: Translation = {
   "Every connection is in use.": "Alle verbindingen zijn in gebruik.",
   "Uses 1 connection. {used} of {limit} in use now.":
     "Gebruikt 1 verbinding. Nu {used} van {limit} in gebruik.",
+  "Shares the connection playing here.": "Deelt de verbinding van wat hier speelt.",
   "Ends 2 min after the guide time.": "Stopt 2 min na de tijd in de gids.",
   "Stop playing and record": "Stop afspelen en neem op",
   "Start recording": "Opname starten",
   "A recording uses this subscription's connection. Stop it in Recordings to watch.":
     "Een opname gebruikt de verbinding van dit abonnement. Stop hem bij Opnames om te kijken.",
   "Stop recording {title}": "Opname van {title} stoppen",
+  "Stop recording": "Opname stoppen",
+  "{channel} · to {time}": "{channel} · tot {time}",
+  "Quality stays fixed while this records.": "De kwaliteit blijft vast tijdens deze opname.",
   "The provider refused the stream. Another device may be using your connection.":
     "De provider weigerde de stream. Misschien gebruikt een ander apparaat je verbinding.",
   "The channel has no stream right now.": "De zender heeft nu geen stream.",

@@ -32,12 +32,15 @@ import { cn } from "../../lib/utils.ts";
 function useDownload(title: TitleRef) {
   const download = useDownloadOf(title.subscriptionId, title);
   const add = useMutation({ mutationFn: () => call("downloads.add", { title }) });
+
   const remove = useMutation({
     mutationFn: (id: string) => call("downloads.remove", { id }),
   });
+
   const retry = useMutation({ mutationFn: (id: string) => call("downloads.retry", { id }) });
   const resume = useMutation({ mutationFn: (id: string) => call("downloads.resume", { id }) });
   const error = add.error ?? remove.error ?? retry.error ?? resume.error;
+
   return {
     download,
     busy: add.isPending || remove.isPending || retry.isPending || resume.isPending,
@@ -66,6 +69,7 @@ function shortly(failure: DownloadFailure): string {
 /** A movie's Download, beside Play and Watchlist. */
 export function MovieDownload({ title }: { title: TitleRef }) {
   const { download, busy, add, remove, retry, resume, error } = useDownload(title);
+
   return (
     <>
       <DownloadPill faces={<MovieFaces />}>
@@ -169,7 +173,9 @@ function MovieState({
       </Button>
     );
   }
+
   const { status, id } = download;
+
   switch (status.kind) {
     case "queued":
     case "waiting":
@@ -207,6 +213,7 @@ function MovieState({
     case "transferring": {
       const done = transferred(download);
       const percent = done === null ? null : formatPercent(Math.floor(done * 100) / 100);
+
       return (
         <Button
           variant="secondary"
@@ -225,6 +232,7 @@ function MovieState({
         </Button>
       );
     }
+
     case "failed":
       return (
         <Button
@@ -296,12 +304,14 @@ function MovieState({
 export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "episode" }> }) {
   const { download, busy, add, remove, retry, resume, error } = useDownload(title);
   const label = episodeLabel(title.season, title.episode);
+
   const shared = {
     variant: "ghost",
     size: "icon-sm",
     disabled: busy,
     title: error ?? undefined,
   } as const;
+
   if (!download) {
     return (
       <Button
@@ -314,7 +324,9 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
       </Button>
     );
   }
+
   const { status, id } = download;
+
   switch (status.kind) {
     case "complete":
       return (
@@ -359,6 +371,7 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
         </Button>
       );
     }
+
     case "failed":
       return (
         <Button
@@ -391,6 +404,7 @@ export function EpisodeDownload({ title }: { title: Extract<TitleRef, { kind: "e
 export function EpisodeDownloadStatus({ download }: { download: Download | null }) {
   if (!download) return null;
   const { status } = download;
+
   const label =
     status.kind === "complete"
       ? t("Downloaded")
@@ -411,6 +425,7 @@ export function EpisodeDownloadStatus({ download }: { download: Download | null 
                   : t("Downloading {percent}", {
                       percent: formatPercent(Math.floor(transferred(download)! * 100) / 100),
                     });
+
   return (
     <span
       className={

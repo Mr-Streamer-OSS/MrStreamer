@@ -26,6 +26,7 @@ export function RemindersMenu() {
   const shown = reminders.data?.reminders ?? [];
   const coming = shown.filter((each) => each.start > now).length;
   const label = coming > 0 ? t("Reminders, {count} to come", { count: coming }) : t("Reminders");
+
   const footer =
     reminders.data?.notifications === "failed"
       ? t(
@@ -36,6 +37,7 @@ export function RemindersMenu() {
             "This system doesn't show notifications from Mr. Streamer. Reminders still show here while the app is open.",
           )
         : null;
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
@@ -116,29 +118,36 @@ function ReminderRows({
   const leaving = useRef(false);
   useLayoutEffect(() => {
     leaving.current = false;
+
     return () => {
       leaving.current = true;
     };
   }, []);
+
   const handOn = (row: HTMLElement) => {
     if (leaving.current || !row.contains(document.activeElement)) return;
+
     // A going row never gets the render that drops it, so which rows stay comes from the cache,
     // which holds that list before React takes any row out.
     const kept = new Set(
       client.getQueryData(remindersQuery().queryKey)?.reminders.map(({ id }) => id),
     );
+
     const keptCross = (sibling: Element | null, onward: (each: Element) => Element | null) => {
       for (let each = sibling; each; each = onward(each))
         if (kept.has(each.getAttribute("data-reminder") ?? ""))
           return each.querySelector<HTMLButtonElement>("button[data-remove]");
+
       return null;
     };
+
     (
       keptCross(row.nextElementSibling, (each) => each.nextElementSibling) ??
       keptCross(row.previousElementSibling, (each) => each.previousElementSibling) ??
       popup.current
     )?.focus();
   };
+
   if (empty)
     return (
       <div className="px-3 pb-2">
@@ -148,6 +157,7 @@ function ReminderRows({
         </p>
       </div>
     );
+
   return (
     <ul className="max-h-[22rem] overflow-y-auto">
       {reminders.map((reminder) => (
@@ -189,10 +199,12 @@ function ReminderRow({
   // React runs this cleanup as it takes the row out, before the row leaves the page.
   useLayoutEffect(() => {
     const element = row.current;
+
     return () => {
       if (element) going(element);
     };
   }, []);
+
   // The answer moves no keys: the row's going does, whenever that is.
   const removal = useMutation({
     mutationFn: async () => {
@@ -200,8 +212,10 @@ function ReminderRow({
       await client.invalidateQueries({ queryKey: remindersQuery().queryKey });
     },
   });
+
   const dim = reminder.status.kind === "gone" || reminder.start <= now;
   const error = removal.isError ? appError(removal.error) : null;
+
   return (
     <li
       ref={row}

@@ -36,12 +36,14 @@ export function syncRecordings(client: QueryClient): () => void {
     client.setQueryData(recordingsQuery().queryKey, list);
     void client.invalidateQueries({ queryKey: storageQuery().queryKey, exact: true });
   });
+
   const stopSchedules = listen("recordings.schedulesChanged", (list) => {
     const { queryKey } = schedulesQuery();
     void client.cancelQueries({ queryKey, exact: true });
     client.setQueryData(queryKey, list);
     void client.invalidateQueries({ queryKey: [...queryKey, "plan"] });
   });
+
   return () => {
     stopRecordings();
     stopSchedules();
@@ -72,6 +74,7 @@ export async function changeStorage(
     change === "folder"
       ? await call("recordings.chooseFolder")
       : await call("recordings.setLimits", change);
+
   client.setQueryData(storageQuery().queryKey, storage);
 }
 
@@ -80,11 +83,13 @@ export async function changeStorage(
  * (`window.leaveAsked`); Quit there answers with `confirmQuit`.
  */
 export const useQuitAsked = create<{ asked: boolean }>(() => ({ asked: false }));
+
 listen("window.leaveAsked", () => useQuitAsked.setState({ asked: true }));
 
 /** Quits, ending what records and keeping what it captured. */
 export function confirmQuit(): Promise<null> {
   useQuitAsked.setState({ asked: false });
+
   return call("window.quit");
 }
 
@@ -95,6 +100,7 @@ export const isLive = (recording: Recording) =>
 /** The recordings whose time goes on, the one that stops last first. */
 export function useLiveRecordings(): readonly Recording[] {
   const list = useRecordings().data ?? [];
+
   return list.filter(isLive).toSorted((a, b) => b.stop - a.stop);
 }
 
@@ -106,6 +112,7 @@ const GIB = 1024 ** 3;
  */
 export function formatLimit(bytes: number): string {
   const tb = bytes >= 1024 * GIB;
+
   return new Intl.NumberFormat(currentLanguage().locale, {
     style: "unit",
     unit: tb ? "terabyte" : "gigabyte",
@@ -122,12 +129,14 @@ const anyRecording = (list: readonly Recording[]) => list.length > 0;
 export function useAnyRecording(): boolean {
   const recorded = useQuery({ ...recordingsQuery(), select: anyRecording }).data;
   const scheduled = useSchedules().data;
+
   return recorded !== false || scheduled === undefined || scheduled.length > 0;
 }
 
 /** The recording capturing `channel` now, if one does. */
 export function useRecordingOf(channel: OwnedId): Recording | null {
   const { data } = useRecordings();
+
   return (
     data?.find(
       (each) =>
@@ -167,6 +176,7 @@ const MINUTE_MS = 60_000;
  */
 export function coverageStart(recording: Recording): number {
   const { scheduled } = recording;
+
   return scheduled?.late ? (scheduled.owed ?? scheduled.from) : recording.start;
 }
 
@@ -196,22 +206,29 @@ export function coverage(
   const from = coverageStart(recording);
   const minutes = (ms: number) => Math.max(0, Math.floor(ms / MINUTE_MS));
   const planned = Math.max(1, minutes(recording.stop - from));
+
   const share = (at: number) =>
     Math.min(1, Math.max(0, (at - from) / Math.max(1, recording.stop - from)));
+
   if (recording.status.kind === "missed")
     return { captured: 0, planned, bar: { late: 1, reached: 1, gaps: [] } };
   const late = Math.min(planned, minutes(recording.start - from));
   const complete = recording.status.kind === "complete";
   const reached = complete ? recording.stop : Math.min(recording.ended ?? now, recording.stop);
+
   const gaps = (recording.gaps ?? []).flatMap((gap) => {
     const to = Math.min(reached, gap.to ?? now);
+
     return to > gap.from ? [{ from: gap.from, to }] : [];
   });
+
   const lost = gaps.reduce((sum, gap) => sum + gap.to - gap.from, 0);
+
   const captured = Math.min(
     planned - late,
     Math.max(complete ? 1 : 0, minutes(reached - recording.start - lost)),
   );
+
   return {
     captured,
     planned,
@@ -246,10 +263,13 @@ function gapsText(gaps: readonly RecordingGap[]): string | null {
   const settled = gaps.flatMap((gap) =>
     gap.to !== null && gap.to > gap.from ? [{ ...gap, to: gap.to }] : [],
   );
+
   const last = settled.at(-1);
+
   if (!last) return null;
   const lost = settled.reduce((sum, gap) => sum + gap.to - gap.from, 0);
   const one = settled.length === 1;
+
   const missed =
     lost < MINUTE_MS
       ? one
@@ -261,6 +281,7 @@ function gapsText(gaps: readonly RecordingGap[]): string | null {
             to: formatDate(last.to, "time"),
           })
         : t("{minutes} min missed in between.", { minutes: Math.round(lost / MINUTE_MS) });
+
   return `${missed} ${gapText(last.why)}`;
 }
 
@@ -309,6 +330,7 @@ function missText(why: ScheduleMiss): string {
 export function outcome(recording: Recording, now: number): { word: string; reason: string } {
   const { word, reason: why } = ending(recording, now);
   const { scheduled } = recording;
+
   // Whole minutes, rounded down; main calls a start late only after a minute.
   const late =
     scheduled?.late && recording.status.kind !== "missed"
@@ -319,6 +341,7 @@ export function outcome(recording: Recording, now: number): { word: string; reas
           ),
         })} ${missText(scheduled.late)}`
       : null;
+
   // A complete one that started late says that in place of how it ended. Gaps in between say
   // what they missed; an end the app couldn't write down yet says so.
   const reason = [
@@ -329,12 +352,14 @@ export function outcome(recording: Recording, now: number): { word: string; reas
   ]
     .filter(Boolean)
     .join(" ");
+
   return { word, reason };
 }
 
 function ending(recording: Recording, now: number): { word: string; reason: string } {
   const ended = formatDate(recording.ended ?? now, "time");
   const { status } = recording;
+
   switch (status.kind) {
     case "recording":
       return {
@@ -345,8 +370,10 @@ function ending(recording: Recording, now: number): { word: string; reason: stri
       };
     case "paused": {
       const since = recording.gaps?.findLast((gap) => gap.to === null)?.from ?? now;
+
       return { word: t("Paused"), reason: pausedText(status.why, formatDate(since, "time")) };
     }
+
     case "complete":
       return {
         word: t("Complete"),

@@ -32,7 +32,9 @@ async function started(dataDir: string, fetchImpl?: typeof fetch) {
       ),
     ),
   );
+
   const library = await promised(runtime, Library);
+
   return {
     library,
     settings: await promised(runtime, Settings),
@@ -52,17 +54,22 @@ async function connectedLibrary(channels = 300, adultChannels = false) {
   const { library: all, settings, subscriptions, updates } = await started(dataDir);
   const { id: subscriptionId } = await subscriptions.add(demoLogin(provider));
   const own = (id: string) => ({ subscriptionId, id });
+
   const ofOwn = (library: typeof all) => ({
     ...library,
     refresh: () => library.refresh(subscriptionId),
     isStale: (maxAge: number) => library.isStale(subscriptionId, maxAge),
     status: async () => {
       const [status] = await library.status();
+
       if (!status) throw new Error("No subscription is saved");
+
       return status;
     },
   });
+
   const restart = async () => ofOwn((await started(dataDir)).library);
+
   return {
     provider,
     dataDir,
@@ -79,6 +86,7 @@ async function connectedLibrary(channels = 300, adultChannels = false) {
 describe("live library", () => {
   it("keeps duplicate category memberships, unknown references and raw selections through refresh and restart", async () => {
     const provider = await fakeProvider({ channels: 60 });
+
     let channels = [
       { stream_id: 10, name: "First", category_id: "001", category_ids: ["001", 2, "2"] },
       { stream_id: 11, name: "Second", category_id: 2 },
@@ -87,9 +95,12 @@ describe("live library", () => {
       { stream_id: 14, name: "Adult", category_ids: [2, 3] },
       { stream_id: 15, name: "Unnamed category", category_id: 9 },
     ];
+
     const dataDir = await tempDir();
+
     const services = await started(dataDir, async (input, init) => {
       const action = new URL(String(input)).searchParams.get("action");
+
       if (action === "get_live_categories")
         return Response.json([
           { category_id: "001", category_name: "News" },
@@ -97,13 +108,18 @@ describe("live library", () => {
           { category_id: 3, category_name: "XXX" },
           { category_id: 9, category_name: "" },
         ]);
+
       if (action === "get_live_streams") return Response.json(channels);
+
       return fetch(input, init);
     });
+
     const { id: subscriptionId } = await services.subscriptions.add(demoLogin(provider));
     const category = { subscriptionId, id: "001" };
+
     const ids = async (library: typeof services.library) =>
       (await library.channels({ category })).map((channel) => channel.id);
+
     expect(await ids(services.library)).toEqual(["10", "11"]);
     expect(await services.library.categories()).toMatchObject([
       {
@@ -152,6 +168,7 @@ describe("live library", () => {
     const separators = provider.catalogue.channels.filter((channel) =>
       channel.name.startsWith("#####"),
     );
+
     expect(separators.length).toBeGreaterThan(0);
     expect(all.flatMap((channel) => channel.variants)).toHaveLength(
       provider.catalogue.channels.length - separators.length,
@@ -197,12 +214,15 @@ describe("live library", () => {
     const results = await library.channels({ query: "arena" });
 
     expect(results.every((channel) => channel.name.toLowerCase().includes("arena"))).toBe(true);
+
     const firstLater = results.findIndex(
       (channel) => !channel.name.toLowerCase().startsWith("arena"),
     );
+
     const lastStart = results.findLastIndex((channel) =>
       channel.name.toLowerCase().startsWith("arena"),
     );
+
     // The fake provider names some channels "ARENA…" and others "UK: ARENA…".
     expect(lastStart).toBeGreaterThanOrEqual(0);
     expect(firstLater).toBeGreaterThan(lastStart);
@@ -244,6 +264,7 @@ describe("live library", () => {
   it("finds nothing by an id that names another subscription", async () => {
     const { library, own } = await connectedLibrary();
     const [channel] = await library.channels({ category: own("2") });
+
     if (!channel) throw new Error("Category 2 needs a channel");
     const elsewhere = (id: string) => ({ subscriptionId: "another-subscription", id });
 
@@ -415,6 +436,7 @@ describe("live library", () => {
   it("keeps channels by provider id when names and order change", async () => {
     const { provider, library, own } = await connectedLibrary();
     const [first, second] = await library.channels({ category: own("2") });
+
     if (!first || !second) throw new Error("Category 2 needs two channels");
 
     provider.serveChannels((all) =>
@@ -443,6 +465,7 @@ describe("live library", () => {
     const names = ["AFTER HOURS", "LATE SHOW", "NIGHT CLUB"];
     const all = async () => (await library.channels({})).map((channel) => channel.name);
     const channels = [own("4000")];
+
     const adultCategory = async () =>
       (await library.categories()).find((category) => category.name === "XXX | ADULTS");
 
@@ -476,14 +499,18 @@ describe("the channels of several subscriptions", () => {
       await fakeProvider({ channels: 300 }),
       await fakeProvider({ channels: 200 }),
     ];
+
     const dataDir = await tempDir();
     const services = await started(dataDir);
     const a = (await services.subscriptions.add(demoLogin(first))).id;
     const b = (await services.subscriptions.add(demoLogin(second))).id;
+
     const statusOf = async (subscriptionId: string) =>
       (await services.library.status()).find((each) => each.subscriptionId === subscriptionId);
+
     return { ...services, dataDir, first, second, a, b, statusOf };
   }
+
   const of = (subscriptionId: string, id: string) => ({ subscriptionId, id });
 
   it("shows them together, each subscription's in its own order and the subscriptions in theirs", async () => {
@@ -520,6 +547,7 @@ describe("the channels of several subscriptions", () => {
     const { library, a, b } = await two();
 
     const categories = await library.categories();
+
     const entertainment = categories.find(
       (each) => each.group === "United Kingdom" && each.title === "Entertainment",
     );
@@ -541,6 +569,7 @@ describe("the channels of several subscriptions", () => {
 
   it("marks the channels another subscription lists under the same name, and no other", async () => {
     const { library, subscriptions, a, b } = await two();
+
     const named = async (name: string) =>
       (await library.channels({})).filter((each) => each.name === name);
 
@@ -561,14 +590,17 @@ describe("the channels of several subscriptions", () => {
     ]);
     // Marked exactly where the other subscription has a channel that shows under that name.
     const all = await library.channels({});
+
     const titles = (subscriptionId: string) =>
       new Set(
         all.flatMap((each) =>
           each.subscriptionId === subscriptionId ? [each.title.toLowerCase()] : [],
         ),
       );
+
     const others = { [a]: titles(b), [b]: titles(a) };
     expect(all.some((each) => !each.ambiguous)).toBe(true);
+
     for (const each of all) {
       expect([each.name, each.ambiguous ?? false]).toEqual([
         each.name,
@@ -686,8 +718,10 @@ describe("the channels of several subscriptions", () => {
 it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enforced adult policy", async () => {
   const provider = await fakeProvider({ channels: 60 });
   const dataDir = await tempDir();
+
   const services = await started(dataDir, async (input, init) => {
     const action = new URL(String(input)).searchParams.get("action");
+
     if (action === "get_live_categories")
       return Response.json([
         { category_id: "1", category_name: "BE - FR | SPORT NEWS" },
@@ -695,6 +729,7 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
         { category_id: "3", category_name: "BE | VLAANDEREN" },
         { category_id: "4", category_name: "Mystery" },
       ]);
+
     if (action === "get_live_streams")
       return Response.json([
         { stream_id: 10, name: "Studio", category_id: 1 },
@@ -704,25 +739,30 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
         { stream_id: 14, name: "Conflicting", category_ids: [1, 2] },
         { stream_id: 15, name: "Adult", category_id: 1, is_adult: "1" },
       ]);
+
     return fetch(input, init);
   });
+
   const first = await services.subscriptions.add(demoLogin(provider));
   const otherProvider = await fakeProvider({ channels: 60 });
   const second = await services.subscriptions.add(demoLogin(otherProvider));
   await services.library.refresh(first.id);
   await services.library.refresh(second.id);
   const scope = { kind: "all" as const };
+
   const filters = {
     browseTopics: ["sport" as const],
     countries: [],
     languages: [],
     subscriptions: [],
   };
+
   const result = await services.library.browse({
     scope,
     filters: { ...filters, countries: ["Belgium", "United Kingdom"], languages: ["fr"] },
     visibility: "viewer",
   });
+
   expect(result.channels.map((channel) => [channel.subscriptionId, channel.id])).toEqual([
     [first.id, "10"],
     [second.id, "10"],
@@ -737,10 +777,12 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
   expect(
     (await services.library.browse({ scope, filters, visibility: "viewer" })).channels,
   ).toHaveLength(6);
+
   const ordered = [
     { subscriptionId: second.id, id: "11" },
     { subscriptionId: first.id, id: "10" },
   ];
+
   expect(
     (
       await services.library.browse({
@@ -762,10 +804,12 @@ it("browses exact ordered scope with OR/AND facets, uncertain facts and main-enf
     (await services.library.browse({ scope, filters: allFilters, visibility: "ordinary" }))
       .channels,
   ).toHaveLength(10);
+
   const other = await services.library.browse({
     scope,
     filters: { ...filters, browseTopics: ["other"] },
     visibility: "viewer",
   });
+
   expect(other.channels.map((channel) => channel.id)).toEqual(["13", "15", "13", "15"]);
 });

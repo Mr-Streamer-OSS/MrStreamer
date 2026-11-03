@@ -25,24 +25,28 @@ function read(name: string, strict: boolean): unknown {
   for (const file of [fileOf(name), pendingOf(name)]) {
     if (!file.exists) continue;
     let text: string;
+
     try {
       text = file.textSync();
     } catch (cause) {
       if (strict) throw cause;
       continue;
     }
+
     try {
       return JSON.parse(text) as unknown;
     } catch {
       // Not JSON: try the other, then start again.
     }
   }
+
   return null;
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
 export function writeJson(name: string, value: unknown): void {
   const pending = pendingOf(name);
+
   if (!pending.exists) pending.create();
   pending.writeSync(JSON.stringify(value));
   pending.moveSync(fileOf(name), { overwrite: true });

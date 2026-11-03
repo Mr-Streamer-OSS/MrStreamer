@@ -8,6 +8,7 @@ export function fieldMenu({
   editFlags,
 }: Pick<ContextMenuParams, "isEditable" | "editFlags">): MenuItemConstructorOptions[] {
   if (!isEditable) return [];
+
   return [
     { role: "undo", label: t("Undo"), enabled: editFlags.canUndo },
     { role: "redo", label: t("Redo"), enabled: editFlags.canRedo },

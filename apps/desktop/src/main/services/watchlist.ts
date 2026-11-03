@@ -112,12 +112,15 @@ function make() {
     const align = (found: readonly SavedSubscription[], source: SavedSubscription) =>
       Effect.gen(function* () {
         const entries = yield* store.entries([source.key]);
+
         if (entries.length === 0) return true;
         const titles = yield* onDemand.savedFacts(found, source, entries);
+
         // The lists went meanwhile, or the subscription did, or its login was stored anew: what
         // was worked out for it is no longer its own. Check again in the write transaction.
         if (!titles || !(yield* subscriptions.stands(source))) return false;
         yield* store.adopt(source.key, titles, () => subscriptions.standsNow(source));
+
         return true;
       }).pipe(
         Effect.catchTag("Failed", (failed) =>
@@ -132,14 +135,18 @@ function make() {
     const alignTo = (found: readonly SavedSubscription[], lists: readonly TitleListsStatus[]) =>
       Effect.gen(function* () {
         const next = new Map<string, number>();
+
         for (const source of found) {
           const fetchedAt = lists.find((each) => each.subscriptionId === source.id)?.fetchedAt;
+
           // Without lists there is nothing to go by.
           if (fetchedAt === null || fetchedAt === undefined) continue;
+
           if (alignedTo.get(source.id) === fetchedAt || (yield* align(found, source))) {
             next.set(source.id, fetchedAt);
           }
         }
+
         alignedTo = next;
       });
 
@@ -167,6 +174,7 @@ function make() {
       Effect.map(store.entries(found.map((each) => each.key)), (entries) =>
         entries.flatMap(({ account, ...entry }) => {
           const owner = found.find((each) => each.key === account);
+
           return owner ? [{ ...entry, subscriptionId: owner.id }] : [];
         }),
       );
@@ -174,6 +182,7 @@ function make() {
     /** A record as the UI names its entry: with the subscription whose account keeps it. */
     const entryOf = (found: readonly SavedSubscription[], { account, id }: Membership) => {
       const owner = found.find((each) => each.key === account);
+
       return owner ? Effect.succeed({ subscriptionId: owner.id, id }) : Effect.fail(noSubscription);
     };
 
@@ -181,10 +190,13 @@ function make() {
       list: ({ sort, offset, limit, home }: WatchlistQuery) =>
         Effect.gen(function* () {
           const found = yield* saving;
+
           if (found.length === 0) return { total: 0, entries: [] };
           yield* aligned(found);
           const members = yield* membersOf(found);
+
           if (members.length === 0) return { total: 0, entries: [] };
+
           return yield* onDemand.saved(found, {
             members,
             sort,
@@ -198,12 +210,15 @@ function make() {
         Effect.gen(function* () {
           yield* aligned(yield* savingWith(version));
           const title = yield* listed(kind, version);
+
           if (!title) return null;
           // As saved now: the lists may have taken a while.
           const found = yield* saving;
+
           const first = yield* store.find(
             found.map((each) => ({ account: each.key, facts: factsOf(title, each.id) })),
           );
+
           return first && (yield* entryOf(found, first));
         }),
 
@@ -213,28 +228,36 @@ function make() {
           yield* aligned(before);
           const missing = new Failed({ error: { kind: "title-not-found", titleId: version.id } });
           const title = yield* listed(kind, version);
+
           if (!title) return yield* missing;
           const at = yield* Clock.currentTimeMillis;
           // Every subscription the lists gave a version of must keep its source, including at
           // the transaction itself: a roster read may have answered a pre-removal snapshot.
           const found = yield* saving;
+
           const stands = title.versions.every(({ subscriptionId }) => {
             const was = before.find((each) => each.id === subscriptionId);
             const now = found.find((each) => each.id === subscriptionId);
+
             return was !== undefined && sameSource(was, now);
           });
+
           if (!stands) return yield* noSubscription;
+
           const first = yield* store.save({
             listed: found.map((each) => ({ account: each.key, facts: factsOf(title, each.id) })),
             at,
             stands: () =>
               title.versions.every(({ subscriptionId }) => {
                 const source = before.find((each) => each.id === subscriptionId);
+
                 return source !== undefined && subscriptions.standsNow(source);
               }),
           });
+
           if (!first) return yield* missing;
           yield* PubSub.publish(changes, undefined);
+
           return yield* entryOf(found, first);
         }),
 
@@ -244,6 +267,7 @@ function make() {
           // transaction checks the named owner and selects the other accounts still saved.
           const found = yield* saving;
           const owner = found.find((each) => each.id === entry.subscriptionId);
+
           if (!owner) return yield* noSubscription;
           yield* store.remove({
             accounts: () =>

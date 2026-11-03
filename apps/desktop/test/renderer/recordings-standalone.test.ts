@@ -14,6 +14,7 @@ import { player } from "../../src/renderer/src/player/player.ts";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 
 const channel = { subscriptionId: SUBSCRIPTION, id: "11" };
+
 const recorded: Recording = {
   id: "r1",
   channel,
@@ -25,6 +26,7 @@ const recorded: Recording = {
   bytes: 900_000_000,
   status: { kind: "complete" },
 };
+
 const schedule: ScheduledRecording = {
   id: "s1",
   plan: {
@@ -48,6 +50,7 @@ async function until(ready: () => boolean): Promise<void> {
   for (let tries = 0; tries < 100 && !ready(); tries++) {
     await act(settle);
   }
+
   if (!ready()) throw new Error("The window never showed what the test waited for.");
 }
 
@@ -55,6 +58,7 @@ const button = (within: HTMLElement, text: string) =>
   [...within.querySelectorAll("button")].find(
     (each) => each.textContent?.trim() === text || each.getAttribute("aria-label") === text,
   );
+
 const click = (target: HTMLElement | undefined) =>
   act(async () => {
     target?.click();
@@ -62,6 +66,7 @@ const click = (target: HTMLElement | undefined) =>
   });
 
 let unmount = () => {};
+
 beforeEach(() => {
   ipc.reset();
   useUi.setState(useUi.getInitialState(), true);
@@ -76,6 +81,7 @@ beforeEach(() => {
     space: null,
   });
 });
+
 afterEach(() => {
   unmount();
   titlePlayer.close();
@@ -87,6 +93,7 @@ async function app(): Promise<HTMLElement> {
   await view.render(createElement(App));
   unmount = view.unmount;
   await until(() => view.container.querySelector("form") !== null);
+
   return view.container;
 }
 

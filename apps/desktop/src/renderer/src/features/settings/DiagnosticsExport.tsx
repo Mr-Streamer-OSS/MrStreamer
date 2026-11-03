@@ -16,12 +16,14 @@ export function DiagnosticsExport() {
   useEffect(() => {
     if (report) heading.current?.focus();
   }, [report]);
+
   const close = () => {
     preview.reset();
     save.reset();
     setShowText(false);
     opener.current?.focus();
   };
+
   return (
     <>
       <Button

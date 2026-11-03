@@ -34,12 +34,16 @@ export function useChannelQuality(channel: LiveChannel): ChannelQuality {
   // The streams picked are the channel's subscription's.
   const picks = useQuery(queries.subscriptionPreferences(channel.subscriptionId)).data;
   const stream = usePlayer((state) => (sameOwned(state.channel, channel) ? state.stream : null));
+
   const fellBack = usePlayer((state) =>
     sameOwned(state.channel, channel) ? state.fellBack : null,
   );
+
   const phase = usePlayer((state) => (sameOwned(state.channel, channel) ? state.phase : null));
+
   const variant = (id: string | null | undefined) =>
     channel.variants.find((each) => each.id === id);
+
   const chosen = chosenVariant(channel, picks?.channelVariants);
   // Automatic's order, whatever was chosen.
   const automatic = streamsToPlay(channel, { ...preferences, channelVariants: {} });
@@ -47,19 +51,25 @@ export function useChannelQuality(channel: LiveChannel): ChannelQuality {
   const from = variant(fellBack?.from);
   const to = variant(fellBack?.to);
   const notes = new Map<string, string>();
+
   const note = (id: string, said: string | null) => {
     if (said && variant(id)) notes.set(id, said);
   };
+
   if (stream) {
     for (const { variantId, failure } of stream.failed) note(variantId, streamNote(failure));
+
     if (stream.variantId && phase?.kind === "playing") note(stream.variantId, t("Playing"));
     // Only a failure that is a stream's says anything of the streams it didn't get to.
     const failure = phase?.kind === "failed" ? streamNote(phase.problem) : null;
+
     if (failure) {
       if (stream.variantId) note(stream.variantId, failure);
+
       for (const { id } of channel.variants) if (!notes.has(id)) notes.set(id, t("Not tried"));
     }
   }
+
   return {
     chosen,
     automatic: (!chosen && playing) || automatic[0],

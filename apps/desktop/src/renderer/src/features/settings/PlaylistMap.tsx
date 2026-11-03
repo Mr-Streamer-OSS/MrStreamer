@@ -16,6 +16,7 @@ import { cn } from "../../lib/utils.ts";
 import { Row } from "./Rows.tsx";
 
 const PAGE = 50;
+
 const MODES = [
   { mode: "live", label: "Live TV" },
   { mode: "movie", label: "Movies" },
@@ -47,8 +48,10 @@ export function PlaylistMap({
   const offset = paging.query === query ? paging.offset : 0;
   const groups = useQuery(queries.playlistGroups(subscription.id, query, offset, PAGE));
   const [selected, setSelected] = useState<string | null>(null);
+
   const picked =
     groups.data?.groups.find((each) => each.group === selected) ?? groups.data?.groups[0];
+
   const save = useMutation({
     mutationFn: ({ group, mode }: { group: string; mode: PlaylistMode }) =>
       call("playlist.map", { subscriptionId: subscription.id, group, mode }),
@@ -59,7 +62,9 @@ export function PlaylistMap({
       await client.invalidateQueries({ queryKey: ["playlist", subscription.id] });
     },
   });
+
   const failed = save.error ?? groups.error;
+
   return (
     <Sheet onClose={onClose} overSettings>
       <div className="flex h-full min-h-96 flex-col bg-black px-8 pt-7 pb-6 text-white">
@@ -159,18 +164,22 @@ export function PlaylistRows({
     ...queries.playlistGroups(subscription.id, "", 0, 1),
     enabled: !subscription.needsSecret,
   });
+
   const [show, setShow] = useState(false);
   const [offset, setOffset] = useState(0);
+
   const omissions = useQuery({
     ...queries.playlistOmissions(subscription.id, offset, PAGE),
     enabled: show && !subscription.needsSecret,
   });
+
   const total = omissions.data?.total;
   useEffect(() => {
     if (total !== undefined)
       setOffset((current) => Math.min(current, Math.max(0, Math.floor((total - 1) / PAGE) * PAGE)));
   }, [total]);
   const status = groups.data?.status;
+
   return (
     <>
       <Row label={t("Groups")}>

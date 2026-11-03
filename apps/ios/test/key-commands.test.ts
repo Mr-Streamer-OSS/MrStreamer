@@ -24,10 +24,13 @@ vi.mock("expo-router/native-tabs", () => {
     BottomAccessory: () => null,
     Trigger: Object.assign(() => null, { Icon: () => null, Label: () => null }),
   });
+
   return { NativeTabs };
 });
+
 vi.mock("expo-router", async () => {
   const navigation = { dispatch: (action: unknown) => scenario.did.push(action) };
+
   return {
     router: {
       push: (href: unknown) => scenario.did.push(`push ${String(href)}`),
@@ -41,10 +44,13 @@ vi.mock("expo-router", async () => {
     useSegments: () => ["(tabs)", "live"],
   };
 });
+
 vi.mock("expo-file-system", () => import("./native-files.ts"));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("react-native", () => ({
   Settings: { get: () => ["en-US"] },
   Image: () => null,
@@ -52,10 +58,15 @@ vi.mock("react-native", () => ({
   View: () => null,
   StyleSheet: { create: <T>(styles: T) => styles },
 }));
+
 vi.mock("../src/download-status.tsx", () => ({ DownloadStatusButton: () => null }));
+
 vi.mock("../src/ui.tsx", () => ({ colors: { text: "#FFFFFF" } }));
+
 vi.mock("../src/accessory.tsx", () => ({ NowPlaying: () => null }));
+
 vi.mock("../src/tab-bar.ts", () => ({ useVirtualisedScreen: () => false }));
+
 vi.mock("../src/playback.ts", () => ({
   usePlayback: () => ({
     phase: { kind: "idle" },
@@ -65,11 +76,14 @@ vi.mock("../src/playback.ts", () => ({
     aside: false,
   }),
 }));
+
 vi.mock("../src/live-screen.tsx", () => ({
   closeDetail: () => {
     const open = scenario.detailOpen;
+
     if (open) scenario.did.push("close detail");
     scenario.detailOpen = false;
+
     return open;
   },
 }));
@@ -83,6 +97,7 @@ Object.assign(globalThis, {
         },
         addListener: (_event: "command", listener: (event: { id: string }) => void) => {
           scenario.press = listener;
+
           return { remove: () => (scenario.press = null) };
         },
       },
@@ -93,6 +108,7 @@ Object.assign(globalThis, {
 const { default: TabsLayout } = await import("../src/app/(tabs)/_layout.tsx");
 
 const TABS = ["(home)", "live", "films", "series"];
+
 /** The root stack: the tabs on `tab`, Live's stack `live` deep, with `over` above the tabs. */
 function root(tab: string, live = 1, over: readonly string[] = []) {
   const routes = TABS.map((name) =>
@@ -109,6 +125,7 @@ function root(tab: string, live = 1, over: readonly string[] = []) {
         }
       : { name },
   );
+
   return {
     index: over.length,
     routes: [
@@ -119,12 +136,15 @@ function root(tab: string, live = 1, over: readonly string[] = []) {
 }
 
 let view: ReturnType<typeof createRoot>;
+
 async function draw() {
   await React.act(async () => view.render(React.createElement(TabsLayout)));
 }
+
 async function press(id: string) {
   scenario.did = [];
   await React.act(async () => scenario.press?.({ id }));
+
   return scenario.did;
 }
 
@@ -141,6 +161,7 @@ beforeEach(() => {
   });
   view = createRoot(document.createElement("div"));
 });
+
 afterEach(async () => {
   await React.act(async () => view.unmount());
 });
@@ -165,6 +186,7 @@ describe("the tabs' keyboard shortcuts", () => {
   it("titles them in the interface language as soon as Settings changes it", async () => {
     const { chooseLanguage } = await import("../src/language.ts");
     await draw();
+
     try {
       await React.act(async () => void chooseLanguage("fr-FR"));
       expect(scenario.installed.map(({ title }) => title)).toEqual([
@@ -179,6 +201,7 @@ describe("the tabs' keyboard shortcuts", () => {
     } finally {
       await React.act(async () => void chooseLanguage("system"));
     }
+
     expect(scenario.installed[0]?.title).toBe("Home");
   });
 

@@ -22,6 +22,7 @@ const providerKey = {
   titleKind: "series",
   id: "123",
 } satisfies DetailKey;
+
 const provider = {
   kind: "provider",
   at: 100,
@@ -48,6 +49,7 @@ async function started(dir: string) {
       Layer.provide(databaseLayer(dir)),
     ),
   );
+
   return {
     runtime,
     cache: await promised(runtime, DetailCache),
@@ -88,9 +90,11 @@ describe("opened title detail storage", () => {
     const { cache } = await started(dir);
     await cache.remember(providerKey, provider);
     const disk = new DatabaseSync(join(dir, "mrstreamer.db"));
+
     try {
       const healthy = { kind: "season", id: "unaffected", number: 1, language: "en" } as const;
       await cache.remember(healthy, { kind: "season", at: 100, value: null });
+
       for (const payload of [
         "{",
         '{"schema":2,"kind":"provider"}',
@@ -107,12 +111,14 @@ describe("opened title detail storage", () => {
     } finally {
       disk.close();
     }
+
     await cache.remember(providerKey, provider);
     expect(await cache.read(providerKey)).toMatchObject(provider);
   });
 
   it("bounds tiny missing answers and leaves huge uncached details usable by their caller", async () => {
     const { cache } = await started(await tempDir());
+
     for (let id = 0; id < 2050; id++)
       await cache.remember(
         { kind: "season", id: String(id), number: 1, language: "en" },
@@ -133,6 +139,7 @@ describe("opened title detail storage", () => {
   it("persists only parsed display fields, excluding undeclared stream locations and headers", async () => {
     const dir = await tempDir();
     const { cache } = await started(dir);
+
     const input = {
       ...provider,
       url: "private-stream",
@@ -157,12 +164,14 @@ describe("opened title detail storage", () => {
         ],
       },
     };
+
     await cache.remember(providerKey, input);
     const result = await cache.read(providerKey);
     expect(result).toMatchObject({ kind: "provider", value: { episodes: [{ id: "episode" }] } });
     expect(JSON.stringify(result)).not.toContain("private");
     expect(input.value.episodes[0]?.url).toBe("private-episode");
     const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+
     try {
       expect(disk.prepare("select payload from title_detail_cache").get()?.payload).not.toContain(
         "private",
@@ -176,6 +185,7 @@ describe("opened title detail storage", () => {
     const dir = await tempDir();
     const { cache } = await started(dir);
     const cast = [{ name: "Actor", character: "Lead", profile: null, token: "private-cast" }];
+
     const about = {
       original: "Title",
       language: "en",
@@ -188,6 +198,7 @@ describe("opened title detail storage", () => {
       directors: [],
       token: "private-title",
     };
+
     const episode = {
       number: 1,
       name: "Episode",
@@ -200,6 +211,7 @@ describe("opened title detail storage", () => {
       directors: [],
       token: "private-episode",
     };
+
     const titleKey = { kind: "about", titleKind: "series", id: "123", language: "en" } as const;
     const seasonKey = { kind: "season", id: "123", number: 1, language: "en" } as const;
     await cache.remember(titleKey, { kind: "about", at: 100, value: about });
@@ -211,6 +223,7 @@ describe("opened title detail storage", () => {
       value: [{ number: 1, cast: [{ name: "Actor" }] }],
     });
     const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+
     try {
       const rows = disk.prepare("select payload from title_detail_cache").all();
       expect(rows).toHaveLength(2);
@@ -218,12 +231,14 @@ describe("opened title detail storage", () => {
     } finally {
       disk.close();
     }
+
     expect(cast[0]?.token).toBe("private-cast");
   });
 
   it("evicts old records before live payload exceeds 64 MiB", async () => {
     const { cache } = await started(await tempDir());
     const record = { ...provider, value: { ...provider.value, plot: "x".repeat(6 * 1024 * 1024) } };
+
     for (let id = 0; id < 11; id++)
       await cache.remember({ ...providerKey, id: String(id) }, record);
     expect(await cache.read({ ...providerKey, id: "0" })).toBeNull();
@@ -233,15 +248,18 @@ describe("opened title detail storage", () => {
   it("makes room for a new series when the oldest cached details are small", async () => {
     const dir = await tempDir();
     const { cache, runtime } = await started(dir);
+
     for (let id = 0; id < 65; id++)
       await cache.remember(
         { kind: "about", titleKind: "movie", id: String(id), language: "en" },
         { kind: "about", at: 100, value: null },
       );
     const large = { ...provider, value: { ...provider.value, plot: "x".repeat(7 * 1024 * 1024) } };
+
     for (let id = 0; id < 9; id++) await cache.remember({ ...providerKey, id: String(id) }, large);
     const next = { ...provider, value: { ...provider.value, plot: "y".repeat(2 * 1024 * 1024) } };
     const key = { ...providerKey, id: "next" };
+
     for (let attempt = 0; attempt < 4; attempt++) await cache.remember(key, next);
     await runtime.dispose();
     const restarted = await started(dir);
@@ -251,6 +269,7 @@ describe("opened title detail storage", () => {
       next.value.plot.length,
     );
     const disk = new DatabaseSync(join(dir, "mrstreamer.db"), { readOnly: true });
+
     try {
       expect(
         Number(disk.prepare("select sum(bytes) as bytes from title_detail_cache").get()?.bytes),

@@ -26,7 +26,9 @@ const startUpdates = (deps: UpdatesDeps) => promised(runtimeFor(Updates.layer(de
 /** A release the sources found, by tag. */
 function offer(tag: string): Offer {
   const version = parseVersion(tag);
+
   if (!version) throw new Error(`Not a version: ${tag}`);
+
   return {
     version,
     feedUrl: `https://example.test/download/${tag}`,
@@ -48,25 +50,31 @@ function fakeInstaller(
   let installs = 0;
   let failures = options.failures ?? 0;
   let release: (() => void) | null = null;
+
   const installer: Installer = {
     async download(target, onProgress, signal) {
       downloads.push(target);
       onProgress(50);
+
       if (options.hold) {
         await new Promise<void>((resolve, reject) => {
           release = resolve;
+
           if (options.finishesAnyway) return;
           signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
         });
       }
+
       if (failures-- > 0) throw new Error("The download broke off.");
       onProgress(100);
     },
     async install() {
       installs++;
+
       if (options.refuse) throw new Error(options.refuse);
     },
   };
+
   return { installer, downloads, installs: () => installs, release: () => release?.() };
 }
 
@@ -77,12 +85,14 @@ async function updates(
 ) {
   const dataDir = options.dataDir ?? (await tempDir());
   const installer = options.installer ?? fakeInstaller().installer;
+
   const service = await startUpdates({
     dataDir,
     installed,
     discover: async () => offers,
     installer,
   });
+
   return { dataDir, service };
 }
 
@@ -128,6 +138,7 @@ describe("update channels", () => {
     await (await updates("0.3.0-nightly.20261002.14", [], { dataDir })).service.status();
 
     const stableBuild = await updates("0.3.0", [...PUBLISHED, offer("v0.3.0")], { dataDir });
+
     const later = await updates(
       "0.3.0",
       [...PUBLISHED, offer("v0.3.0"), offer("v0.3.1-nightly.20261003.15")],
@@ -167,6 +178,7 @@ describe("update channels", () => {
 
   it("takes a Nightly user who switches to Stable to the newest stable release, older or not", async () => {
     const fake = fakeInstaller();
+
     const { service } = await updates("0.3.0-nightly.20261002.14", PUBLISHED, {
       installer: fake.installer,
     });
@@ -199,15 +211,18 @@ describe("update channels", () => {
 
   it("keeps an update on offer when a later check the user asked for fails", async () => {
     let offline = false;
+
     const service = await startUpdates({
       dataDir: await tempDir(),
       installed: "0.2.0",
       discover: async () => {
         if (offline) throw new DiscoveryFailed({ kind: "offline" }, []);
+
         return PUBLISHED;
       },
       installer: fakeInstaller().installer,
     });
+
     await service.check();
     offline = true;
 
@@ -327,9 +342,11 @@ describe("in-app updates", () => {
 
   it("reports an install the system refuses, and can download it again", async () => {
     const refusal = "The update's signature doesn't match this app.";
+
     const { service } = await updates("0.2.0", PUBLISHED, {
       installer: fakeInstaller({ refuse: refusal }).installer,
     });
+
     await service.check();
     await service.download();
 
@@ -346,15 +363,18 @@ describe("in-app updates", () => {
 
   it("keeps a downloaded update through a check that fails", async () => {
     let fail = false;
+
     const service = await startUpdates({
       dataDir: await tempDir(),
       installed: "0.2.0",
       discover: async () => {
         if (fail) throw new DiscoveryFailed({ kind: "offline" }, []);
+
         return PUBLISHED;
       },
       installer: fakeInstaller().installer,
     });
+
     await service.check();
     await service.download();
     fail = true;
@@ -364,9 +384,11 @@ describe("in-app updates", () => {
 
   it("drops a downloaded nightly when the user switches to Stable, and offers Stable instead", async () => {
     const fake = fakeInstaller();
+
     const { service } = await updates("0.3.0-nightly.20261001.10", PUBLISHED, {
       installer: fake.installer,
     });
+
     await service.check();
     await service.download();
 
@@ -380,9 +402,11 @@ describe("in-app updates", () => {
 
   it("drops a nightly download that finishes after the switch to Stable", async () => {
     const fake = fakeInstaller({ hold: true, finishesAnyway: true });
+
     const { service } = await updates("0.3.0-nightly.20261001.10", PUBLISHED, {
       installer: fake.installer,
     });
+
     await service.check();
     const download = service.download();
     await vi.waitFor(() => expect(fake.downloads).toHaveLength(1));
@@ -415,6 +439,7 @@ describe("a copy the Microsoft Store installed", () => {
   it("leaves updates to the Store, and opens it when asked", async () => {
     const dataDir = await tempDir();
     let opened = 0;
+
     const service = await startUpdates({
       dataDir,
       installed: "0.0.4",
@@ -478,6 +503,7 @@ describe("overlapping checks", () => {
       resolve: (offers: readonly Offer[]) => void;
       reject: (error: Error) => void;
     }[] = [];
+
     return {
       discover: () =>
         new Promise<readonly Offer[]>((resolve, reject) => requests.push({ resolve, reject })),
@@ -486,7 +512,9 @@ describe("overlapping checks", () => {
       request: (index: number) =>
         vi.waitFor(() => {
           const request = requests[index];
+
           if (!request) throw new Error(`No request ${index} yet.`);
+
           return request;
         }),
     };
@@ -497,12 +525,14 @@ describe("overlapping checks", () => {
   async function service(installed: string) {
     const held = heldDiscovery();
     const fake = fakeInstaller();
+
     const updates = await startUpdates({
       dataDir: await tempDir(),
       installed,
       discover: held.discover,
       installer: fake.installer,
     });
+
     return { held, fake, updates };
   }
 
@@ -578,20 +608,25 @@ describe("automatic checks", () => {
     answers: (call: number) => readonly Offer[] | DiscoveryFailed | Promise<readonly Offer[]>,
   ) {
     let calls = 0;
+
     const runtime = runtimeFor(
       Updates.layer({
         dataDir: await tempDir(),
         installed: "0.2.0",
         discover: async () => {
           const answer = await answers(calls++);
+
           if (answer instanceof DiscoveryFailed) throw answer;
+
           return answer;
         },
         installer: fakeInstaller().installer,
         schedule: DEFAULT_SCHEDULE,
       }).pipe(Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" }))),
     );
+
     const service = await promised(runtime, Updates);
+
     /**
      * Moves the clock once the schedule waits for its next check, as only a waiting check moves
      * with it, and lets the check it starts finish.
@@ -605,11 +640,14 @@ describe("automatic checks", () => {
       await runtime.runPromise(TestClock.adjust(ms));
       await new Promise((resolve) => setTimeout(resolve, 20));
     };
+
     /** How long until the planned check, which falls anywhere in the four hours' spread. */
     const untilNext = async () => {
       const planned = (await service.status()).nextCheckAt ?? 0;
+
       return planned - (await runtime.runPromise(Clock.currentTimeMillis));
     };
+
     return { service, pass, untilNext, calls: () => calls };
   }
 
@@ -632,6 +670,7 @@ describe("automatic checks", () => {
     const app = await scheduled((call) =>
       call === 0 ? PUBLISHED : new DiscoveryFailed({ kind: "offline" }, []),
     );
+
     await app.pass(20_000);
     await vi.waitFor(() => expect(app.calls()).toBe(1));
     // Exactly to the next check: going past it could also pass the sooner retry after it.
@@ -658,6 +697,7 @@ describe("automatic checks", () => {
       await vi.waitFor(() => expect(app.calls()).toBe(2));
 
       await app.service.download();
+
       if (ending === "found") late.resolve(PUBLISHED);
       else late.reject(new DiscoveryFailed({ kind: "offline" }, []));
       await vi.waitFor(async () =>
@@ -672,6 +712,7 @@ describe("automatic checks", () => {
     const app = await scheduled(
       () => new DiscoveryFailed({ kind: "busy", until: 20_000 + 3 * HOUR }, []),
     );
+
     await app.pass(20_000);
     expect((await app.service.status()).update).toEqual({ kind: "idle" });
 
@@ -726,13 +767,18 @@ describe("finding releases", () => {
     latest?: () => Response;
   }) {
     const requests: string[] = [];
+
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       requests.push(url);
+
       if (url === FEED_URL) return answer.feed();
+
       if (url.endsWith("/releases/latest")) return answer.latest?.() ?? json({}, 404);
+
       return answer.page?.() ?? json([]);
     });
+
     return { fetchImpl, requests };
   }
 
@@ -780,6 +826,7 @@ describe("finding releases", () => {
           nightly: feedEntry("0.3.0"),
         }),
     });
+
     const service = await startUpdates({
       dataDir: await tempDir(),
       installed: "0.3.0-nightly.20261001.10",
@@ -862,6 +909,7 @@ describe("finding releases", () => {
   it("tells GitHub's limit from a refusal, and leaves GitHub alone until the limit resets", async () => {
     let now = Date.parse("2026-10-01T10:00:00Z");
     const reset = Math.floor(now / 1000) + 1800;
+
     const { fetchImpl, requests } = sources({
       feed: () => json({}, 503),
       page: () =>
@@ -870,6 +918,7 @@ describe("finding releases", () => {
           "x-ratelimit-reset": String(reset),
         }),
     });
+
     const discover = find(fetchImpl, () => now);
 
     const first = await discover(new AbortController().signal).catch((cause: unknown) => cause);
@@ -904,25 +953,32 @@ it("observes one actual shared update check and bounded failures, excluding inst
   const channels: string[] = [];
   let release: (() => void) | undefined;
   let fail = false;
+
   const pending = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   const { installer } = fakeInstaller();
+
   const service = await startUpdates({
     dataDir: await tempDir(),
     installed: "0.2.0",
     installer,
     async discover() {
       await pending;
+
       if (fail) throw new Error("PRIVATE network details");
+
       return [offer("v0.2.1")];
     },
     observeCheck(channel) {
       channels.push(channel);
       starts++;
+
       return (outcome, failure) => outcomes.push({ outcome, ...defined({ failure }) });
     },
   });
+
   const first = service.check();
   const second = service.check();
   await vi.waitFor(() => expect(starts).toBe(1));
@@ -964,6 +1020,7 @@ describe("launch update reminders", () => {
           ...(previousStable && { previousStable: parseVersion(previousStable)! }),
         },
       ]);
+
       const result = await service.setChannel(channel);
       expect(result.reminder, `${installed} on ${channel}`).toEqual(
         eligible ? { version: "0.1.0" } : null,
@@ -974,12 +1031,14 @@ describe("launch update reminders", () => {
   it("counts only actual display and never repeats for a recheck or a newer offer in the process", async () => {
     let releases = [overdue()];
     const dataDir = await tempDir();
+
     const config = {
       installed: "0.0.21",
       dataDir,
       discover: async () => releases,
       installer: fakeInstaller().installer,
     };
+
     const service = await startUpdates(config);
     await service.check();
     expect(await service.showReminder("0.1.0")).toBe(true);
@@ -1002,15 +1061,18 @@ describe("launch update reminders", () => {
 
   it("keeps stale offers downloadable without presenting them as a fresh reminder", async () => {
     let fail = false;
+
     const service = await startUpdates({
       installed: "0.0.21",
       dataDir: await tempDir(),
       installer: fakeInstaller().installer,
       discover: async () => {
         if (fail) throw new Error("offline");
+
         return [overdue()];
       },
     });
+
     await service.check();
     fail = true;
     expect((await service.check()).reminder).toBeNull();
@@ -1025,6 +1087,7 @@ describe("launch update reminders", () => {
         dataDir: await tempDir(),
         ...managed,
       });
+
       expect(await service.showReminder("0.1.0")).toBe(false);
       await service.reminderShown("0.1.0");
       expect((await service.check()).reminder ?? null).toBeNull();
@@ -1035,12 +1098,14 @@ describe("launch update reminders", () => {
 it("never downloads a changed target from the reminder's stale Download button", async () => {
   let releases = [offer("0.0.24")];
   const installer = fakeInstaller();
+
   const service = await startUpdates({
     installed: "0.0.21",
     dataDir: await tempDir(),
     discover: async () => releases,
     installer: installer.installer,
   });
+
   await service.check();
   releases = [offer("0.0.25")];
   await service.check();

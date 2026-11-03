@@ -38,8 +38,10 @@ function open(path: string): DatabaseSync {
   mkdirSync(join(path, ".."), { recursive: true });
   // A second copy of the app may hold the write lock for a moment.
   const db = new DatabaseSync(path, { timeout: 1000 });
+
   try {
     db.exec("pragma journal_mode = wal; pragma synchronous = normal;");
+
     return db;
   } catch (cause) {
     db.close();
@@ -50,9 +52,11 @@ function open(path: string): DatabaseSync {
 /** Runs `run` as one transaction: all of what it writes is kept, or none of it when it throws. */
 export function transaction<A>(db: DatabaseSync, run: () => A): A {
   db.exec("begin immediate");
+
   try {
     const result = run();
     db.exec("commit");
+
     return result;
   } catch (cause) {
     db.exec("rollback");

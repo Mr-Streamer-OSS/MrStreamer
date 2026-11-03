@@ -56,12 +56,15 @@ const driver = (page: Page, base: BaseDriver) => {
           paused: v?.paused ?? true, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0,
           title: document.querySelector('[data-view=title]')?.innerText ?? null };
       })()`);
+
   const listed = () =>
     page.evaluate<Listed[]>(
       "window.mrStreamer.invoke('downloads.list').then(r => r.ok ? r.value.items : [])",
     );
+
   return { ...base, video, listed };
 };
+
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsSeries(
@@ -72,6 +75,7 @@ export async function runDownloadsSeries(
   /** Another connection to the run's profile database, holding its write lock while set. */
   let locked: DatabaseSync | undefined;
   const observed: Record<string, unknown> = { build };
+
   const steps = async ({
     start,
     quit,
@@ -89,25 +93,37 @@ export async function runDownloadsSeries(
 
     const button = (selector: string, words: string) =>
       `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
     const labelled = (label: string) =>
       `document.querySelector(${JSON.stringify(`[aria-label="${label}"]`)})`;
+
     const row = (id: string) => `document.querySelector('[data-download="${id}"]')`;
+
     const inRow = (id: string, words: string) =>
       `[...(${row(id)})?.querySelectorAll('button') ?? []].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
     const formats = ownedProvider.titles.series.find((each) => each.name === "TEST | Formats (NL)");
+
     if (!formats) throw new Error("No Dutch Formats series in the fixture.");
+
     const fileOf = (season: number, number: number) => {
       const file = formats.seasons[season - 1]?.[number - 1];
+
       if (!file) throw new Error(`No file of S${season} E${number}`);
+
       return file;
     };
+
     const idOf = async (d: Driver, season: number, number: number) => {
       const found = (await d.listed()).find(
         (item) => item.title.id === String(fileOf(season, number).id),
       );
+
       if (!found) throw new Error(`No download of S${season} E${number}`);
+
       return found.id;
     };
+
     const standing = async (d: Driver) =>
       (await d.listed()).map((item) => ({
         id: item.id,
@@ -116,6 +132,7 @@ export async function runDownloadsSeries(
         progress: item.progress,
         series: item.series ?? null,
       }));
+
     const shelf = (d: Driver) =>
       d.page.evaluate(`(() => {
         const section = document.querySelector('section[aria-label=${JSON.stringify(t("On this computer"))}]');
@@ -124,19 +141,23 @@ export async function runDownloadsSeries(
               copies: [...child.querySelectorAll('[data-download]')].map((r) => r.dataset.download) }
           : { copy: child.dataset.download ?? null, text: child.innerText });
       })()`);
+
     const openDownloads = async (d: Driver) => {
       await d.click("Open Downloads", button("header button", t("Downloads")));
       await d.wait(() =>
         d.exists(`document.querySelector('h1')?.textContent === ${JSON.stringify(t("Downloads"))}`),
       );
     };
+
     const openSettings = async (d: Driver) => {
       await d.key(",", 188, process.platform === "darwin" ? 4 : 2);
       await d.click("Open Playback settings", button("nav button", t("Playback")));
       await d.wait(() => d.exists(labelled(t("Next episode delay"))));
     };
+
     const closeSettings = async (d: Driver) => {
       await d.key("Escape", 27);
+
       // Escape in the delay field only ends its editing: the bar's Back closes Settings then.
       if (await d.exists(labelled(t("Next episode delay"))))
         await d.click(
@@ -145,25 +166,32 @@ export async function runDownloadsSeries(
         );
       await d.wait(async () => !(await d.exists(labelled(t("Next episode delay")))));
     };
+
     /** Starts `id` from its row, and waits for a moving picture of it. */
     const watch = async (d: Driver, id: string, label: string) => {
       await d.click(label, inRow(id, t("Watch offline")));
       await d.wait(async () => {
         const v = await d.video();
+
         return v.title !== null && !v.paused && v.width > 0 && v.time > 0.3;
       }, 45_000);
     };
+
     /** Reaches the Position scrubber with Tab, as a keyboard viewer does, and seeks to the end. */
     const seekEnd = async (d: Driver) => {
       const focused = () =>
         d.exists("document.activeElement?.matches('input[type=range][aria-label=Position]')");
+
       for (let tabs = 0; tabs < 24 && !(await focused()); tabs++) await d.key("Tab", 9);
+
       if (!(await focused())) throw new Error("Keyboard could not reach the Position scrubber");
       await d.key("End", 35);
     };
+
     const playing = (d: Driver, episode: string) =>
       d.wait(async () => {
         const v = await d.video();
+
         return (
           !!v.title?.includes(episode) &&
           !v.title.includes(t("Finished")) &&
@@ -173,22 +201,28 @@ export async function runDownloadsSeries(
           v.frames > 0
         );
       }, 45_000);
+
     const remaining = async (d: Driver) =>
       new RegExp(t("Plays in {seconds}", { seconds: "(\\d+)" })).exec(await d.text())?.[1] ?? null;
+
     const leave = async (d: Driver) => {
       await d.key("Escape", 27);
       await d.wait(async () => (await d.video()).title === null);
     };
+
     /** What main and the window asked of the network between two moments, but the proxy's own. */
     const during = (from: number, until: number, requestsFrom: number) => {
       const local = (url: string) =>
         /^(mrstreamer:|data:|blob:|file:|devtools:|http:\/\/127\.0\.0\.1:\d+\/(title|source)\/)/.test(
           url,
         );
+
       const main = readLines(networkLog).filter(
         (line) => line.at >= from && line.at <= until && line.kind !== "ipc",
       );
+
       const seen = windowRequests.slice(requestsFrom).filter((request) => request.at <= until);
+
       return {
         main,
         window: seen.filter((request) => !local(request.url)),
@@ -202,6 +236,7 @@ export async function runDownloadsSeries(
     await online.wait(() =>
       online.page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
     );
+
     for (const [index, value] of [ownedProvider.url, "demo", "demo"].entries()) {
       await online.click(
         `Fill Connect field ${index + 1}`,
@@ -209,6 +244,7 @@ export async function runDownloadsSeries(
       );
       await online.page.send("Input.insertText", { text: value });
     }
+
     await online.click("Submit Connect", "document.querySelector('form button[type=submit]')");
     await online.wait(() => online.exists("document.querySelector('header')"));
     injectedFailure("downloads-series");
@@ -252,6 +288,7 @@ export async function runDownloadsSeries(
       "Choose the two-season Dutch version",
       `[...document.querySelectorAll('[role=menuitemradio]')].find(e => e.getAttribute('aria-label')?.includes('Formats (NL)'))`,
     );
+
     const downloadEpisode = async (season: number, number: number) => {
       const episode = episodeLabel(season, number);
       await online.click(
@@ -259,6 +296,7 @@ export async function runDownloadsSeries(
         labelled(t("Download {title}", { title: episode })),
       );
     };
+
     const downloaded = (season: number, number: number) =>
       online.wait(
         () =>
@@ -267,14 +305,17 @@ export async function runDownloadsSeries(
           ),
         60_000,
       );
+
     await online.click("Open season 1", button("[role=dialog] button", "Season 1"));
     await downloadEpisode(1, 2);
     await downloadEpisode(1, 3);
     await downloaded(1, 2);
     await downloaded(1, 3);
+
     if (previous) ownedProvider.stallEpisodeFile(fileOf(2, 2).id, 30_000, 120_000);
     await online.click("Open season 2", button("[role=dialog] button", "Season 2"));
     await downloadEpisode(2, 2);
+
     if (previous)
       await online.wait(
         async () =>
@@ -288,11 +329,13 @@ export async function runDownloadsSeries(
     await online.capture("episodes-downloaded");
     await online.key("Escape", 27);
     await openDownloads(online);
+
     const ids = {
       s1e2: await idOf(online, 1, 2),
       s1e3: await idOf(online, 1, 3),
       s2e2: await idOf(online, 2, 2),
     };
+
     observed["ids"] = ids;
     observed["online"] = { standing: await standing(online), shelf: await shelf(online) };
     await online.capture("downloads-online");
@@ -364,6 +407,7 @@ export async function runDownloadsSeries(
     const afterRestart = await standing(stopped);
     observed["providerStopped"] = { standing: afterRestart, shelf: await shelf(stopped) };
     const keyOf = (id: string) => afterRestart.find((item) => item.id === id)?.series ?? null;
+
     if (
       !keyOf(ids.s1e2) ||
       keyOf(ids.s1e2) !== keyOf(ids.s1e3) ||
@@ -379,6 +423,7 @@ export async function runDownloadsSeries(
         t("{episode} isn't on this computer", { episode: episodeLabel(2, 1) }),
       ),
     );
+
     if (
       legacy !== null &&
       (await stopped.exists(`(${group})?.querySelector('[data-download="${legacy}"]')`))
@@ -401,12 +446,15 @@ export async function runDownloadsSeries(
       (await stopped.text()).includes(t("Finished {episode}", { episode: episodeLabel(1, 2) })),
     );
     await delay((DELAY + 2) * 1000, undefined, { signal: abort.signal });
+
     const autoplayOff = {
       text: await stopped.text(),
       remaining: await remaining(stopped),
       video: await stopped.video(),
     };
+
     observed["autoplayOff"] = autoplayOff;
+
     if (autoplayOff.remaining !== null || !autoplayOff.video.title?.includes(episodeLabel(1, 2)))
       throw new Error(
         `Autoplay off still counted down or moved on: ${JSON.stringify(autoplayOff)}`,
@@ -433,6 +481,7 @@ export async function runDownloadsSeries(
     await delay((DELAY + 2) * 1000, undefined, { signal: abort.signal });
     const whileHeld = { held, after: await remaining(stopped), video: await stopped.video() };
     observed["settingsHold"] = whileHeld;
+
     if (whileHeld.after !== held || !whileHeld.video.title?.includes(episodeLabel(1, 2)))
       throw new Error(`Settings didn't hold the countdown: ${JSON.stringify(whileHeld)}`);
     await stopped.capture("countdown-held-by-settings");
@@ -444,20 +493,25 @@ export async function runDownloadsSeries(
     await stopped.click("Open Settings", labelled(t("Settings")));
     await stopped.click("Open Subscriptions", button("nav button", t("Subscriptions")));
     const subscriptionRow = `[...document.querySelectorAll('li')].find(r => r.querySelector('button')?.textContent.includes(' · '))`;
+
     for (let attempt = 1; ; attempt++) {
       await stopped.click(
         `Open the subscription (attempt ${attempt})`,
         `(${subscriptionRow})?.querySelector('button')`,
       );
+
       const opened = await stopped
         .wait(() => stopped.exists(`(${subscriptionRow})?.querySelector('[role=region]')`), 3000)
         .then(
           () => true,
           () => false,
         );
+
       if (opened) break;
+
       if (attempt === 3) throw new Error("The subscription's row didn't open.");
     }
+
     const [removeBefore, removeAfter] = t("Remove {name}", { name: "\n" }).split("\n");
     await stopped.click(
       "Ask to remove it",
@@ -497,13 +551,16 @@ export async function runDownloadsSeries(
     const gap = t("{episode} isn't on this computer", { episode: episodeLabel(2, 1) });
     await alone.wait(async () => (await alone.text()).includes(gap));
     await delay((DELAY + 2) * 1000, undefined, { signal: abort.signal });
+
     // Main kept the end of S1 E3's own copy: the copy that played was that one.
     const stoppedAtGap = {
       text: await alone.text("[data-view=title]"),
       video: await alone.video(),
       progress: (await standing(alone)).find((item) => item.id === ids.s1e3)?.progress ?? null,
     };
+
     observed["stoppedAtGap"] = stoppedAtGap;
+
     if (
       !stoppedAtGap.video.title?.includes(episodeLabel(1, 3)) ||
       (await remaining(alone)) !== null ||
@@ -520,12 +577,15 @@ export async function runDownloadsSeries(
     await alone.wait(async () => (await remaining(alone)) !== null);
     await alone.click("Cancel the countdown", button("[data-view=title] button", t("Cancel")));
     await delay((DELAY + 2) * 1000, undefined, { signal: abort.signal });
+
     const cancelled = {
       video: await alone.video(),
       remaining: await remaining(alone),
       progress: (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null,
     };
+
     observed["cancelled"] = cancelled;
+
     if (
       cancelled.remaining !== null ||
       !cancelled.video.title?.includes(t("Finished {episode}", { episode: episodeLabel(1, 2) })) ||
@@ -547,6 +607,7 @@ export async function runDownloadsSeries(
     await playing(alone, episodeLabel(1, 3));
     const midPlay = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null;
     observed["nextMidPlay"] = { savedBeforeHandoff: midPlay, video: await alone.video() };
+
     if (!midPlay || midPlay.position < 1.5 || midPlay.position > midPlay.duration - 3)
       throw new Error(`N didn't save where S1 E2 got to first: ${JSON.stringify(midPlay)}`);
     await leave(alone);
@@ -564,17 +625,20 @@ export async function runDownloadsSeries(
           ),
         ) as { progress: { position: number } | null }
       ).progress;
+
     const lock = () => {
       locked = new DatabaseSync(join(profile!, "mrstreamer.db"), { timeout: 5000 });
       locked.exec("begin immediate");
       action("Hold the profile database's write lock from another connection");
     };
+
     const unlock = () => {
       locked?.exec("rollback");
       locked?.close();
       locked = undefined;
       action("Let the profile database's write lock go");
     };
+
     // Every word the player's note says, as the window draws it: an observation only.
     await alone.page.evaluate(`(() => {
       const said = window.__noteSaid = [];
@@ -594,6 +658,7 @@ export async function runDownloadsSeries(
     await alone.key("n", 78);
     // Main gives up on the lock after a second; the next copy would have opened by now.
     await delay(4000, undefined, { signal: abort.signal });
+
     const refusedMidPlay = {
       video: await alone.video(),
       noted: await noted(),
@@ -601,8 +666,10 @@ export async function runDownloadsSeries(
       stored: stored(),
       before,
     };
+
     observed["checkpointRefusedMidPlay"] = refusedMidPlay;
     await alone.capture("checkpoint-refused-mid-play");
+
     if (
       !refusedMidPlay.video.title?.includes(episodeLabel(1, 2)) ||
       refusedMidPlay.video.title.includes(episodeLabel(1, 3)) ||
@@ -616,6 +683,7 @@ export async function runDownloadsSeries(
     await playing(alone, episodeLabel(1, 3));
     const keptMidPlay = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress;
     observed["checkpointKeptMidPlay"] = { progress: keptMidPlay, video: await alone.video() };
+
     if (!keptMidPlay || keptMidPlay.position <= (before?.position ?? 0))
       throw new Error(`N after the lock went didn't save first: ${JSON.stringify(keptMidPlay)}`);
     await leave(alone);
@@ -627,6 +695,7 @@ export async function runDownloadsSeries(
     await alone.wait(async () => (await remaining(alone)) !== null);
     // The countdown's end, main's second on the lock and as long again: nothing goes on.
     await delay((DELAY * 2 + 3) * 1000, undefined, { signal: abort.signal });
+
     const refusedAtEnd = {
       video: await alone.video(),
       remaining: await remaining(alone),
@@ -634,8 +703,10 @@ export async function runDownloadsSeries(
       listed: (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress ?? null,
       stored: stored(),
     };
+
     observed["checkpointRefusedAtEnd"] = refusedAtEnd;
     await alone.capture("checkpoint-refused-at-end");
+
     if (
       refusedAtEnd.remaining !== null ||
       !refusedAtEnd.video.title?.includes(
@@ -654,6 +725,7 @@ export async function runDownloadsSeries(
     await playing(alone, episodeLabel(1, 3));
     const keptAtEnd = (await standing(alone)).find((item) => item.id === ids.s1e2)?.progress;
     observed["checkpointKeptAtEnd"] = { progress: keptAtEnd, video: await alone.video() };
+
     if (!keptAtEnd || keptAtEnd.position < keptAtEnd.duration - 1)
       throw new Error(
         `Next after the lock went didn't save the end first: ${JSON.stringify(keptAtEnd)}`,
@@ -665,17 +737,21 @@ export async function runDownloadsSeries(
     await alone.wait(async () => (await remaining(alone)) !== null);
     const folder = join(profile, "downloads", ids.s1e3);
     const media = (await readdir(folder)).find((name) => name.startsWith("media."));
+
     if (!media) throw new Error("S1 E3's copy has no file to remove.");
     await rm(join(folder, media));
     action("Remove S1 E3's copy file from the run's profile during the countdown");
     const goneNext = t("{episode} isn't on this computer", { episode: episodeLabel(1, 3) });
     await alone.wait(async () => (await alone.text()).includes(goneNext), (DELAY + 10) * 1000);
+
     const missingNext = {
       text: await alone.text("[data-view=title]"),
       video: await alone.video(),
       standing: await standing(alone),
     };
+
     observed["missingNext"] = missingNext;
+
     if (
       !missingNext.video.title?.includes(t("Finished {episode}", { episode: episodeLabel(1, 2) }))
     )
@@ -691,6 +767,7 @@ export async function runDownloadsSeries(
       await delay((DELAY + 2) * 1000, undefined, { signal: abort.signal });
       const legacyEnd = { text: await alone.text("[data-view=title]"), video: await alone.video() };
       observed["legacyEnd"] = legacyEnd;
+
       if (
         (await remaining(alone)) !== null ||
         !legacyEnd.video.title?.includes(episodeLabel(1, 1)) ||
@@ -702,6 +779,7 @@ export async function runDownloadsSeries(
       await alone.click("Back from 0.0.19's copy", button("[data-view=title] button", t("Back")));
       await alone.wait(async () => (await alone.video()).title === null);
     }
+
     observed["offlinePlayback"] = during(offlineFrom, Date.now(), offlineRequests);
     observed["standaloneAfter"] = { standing: await standing(alone) };
     await quit("no subscription");
@@ -714,6 +792,7 @@ export async function runDownloadsSeries(
     const restartRequests = windowRequests.length;
     const restarted = await standing(last);
     observed["restart"] = { standing: restarted, shelf: await shelf(last) };
+
     if (
       restarted.find((item) => item.id === ids.s1e3)?.status !== "missing" ||
       !restarted.find((item) => item.id === ids.s1e2)?.progress
@@ -735,10 +814,12 @@ export async function runDownloadsSeries(
 
     for (const name of ["offlinePlayback", "restartPlayback"]) {
       const seen = observed[name] as ReturnType<typeof during>;
+
       if (seen.main.length > 0 || seen.window.length > 0)
         throw new Error(`${name} reached beyond the app's loopback proxy: ${JSON.stringify(seen)}`);
     }
   };
+
   await ownedRun(
     {
       build,
@@ -783,6 +864,7 @@ export async function runDownloadsSeries(
           });
           locked = undefined;
         }
+
         observed["lockReleased"] = locked === undefined;
       },
       proof: { scenario: "downloads-series", build, previous: previous ?? null },

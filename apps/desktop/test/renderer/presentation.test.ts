@@ -17,7 +17,9 @@ import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.ts
 import type { Title } from "@mrstreamer/contracts/ondemand";
 
 let cleanup = () => {};
+
 beforeEach(() => vi.useFakeTimers());
+
 afterEach(() => {
   cleanup();
   ipc.reset();
@@ -36,6 +38,7 @@ it("keeps a covered page's clock still while Watch advances and refreshes on ret
     act(() => root.unmount());
     container.remove();
   };
+
   const render = (visible: boolean) =>
     act(() =>
       root.render(
@@ -51,6 +54,7 @@ it("keeps a covered page's clock still while Watch advances and refreshes on ret
         ),
       ),
     );
+
   vi.setSystemTime(100_000);
   render(true);
   render(false);
@@ -66,10 +70,12 @@ it("keeps a covered page's clock still while Watch advances and refreshes on ret
 
 it("skips disabled Home title rows even before saved preferences answer, then reads an enabled row", async () => {
   const preferences = ipc.hold("preferences.get");
+
   const saved = {
     ...defaultPreferences,
     homeRows: homeRows(undefined).map((row) => ({ ...row, visible: false })),
   };
+
   ipc.always("subscription.list", [SAVED]);
   ipc.always("library.categories", []);
   ipc.always("library.browse", browseResult([]));
@@ -124,6 +130,7 @@ const film: Title = {
   genres: [],
   versions: [{ subscriptionId: SUBSCRIPTION, id: "film", tags: [] }],
 };
+
 const progress = (id: string) => ({
   title: { kind: "movie" as const, subscriptionId: SUBSCRIPTION, id },
   position: 500,
@@ -146,6 +153,7 @@ async function showContinuingHome() {
     catchupDays: null,
     variants: [{ id, name: `Channel ${id}`, tags: [], quality: null }],
   }));
+
   const viewing = {
     favourites: [channels[1]!],
     recent: [],
@@ -153,6 +161,7 @@ async function showContinuingHome() {
     marked: [],
     sequence: 0,
   };
+
   ipc.prefer({
     homeRows: homeRows(undefined).map((row) => ({ ...row, visible: row.id === "continue" })),
   });
@@ -173,6 +182,7 @@ async function showContinuingHome() {
   const mounted = queryView(client);
   const { container } = mounted;
   cleanup = mounted.unmount;
+
   const render = async (visible: boolean) => {
     await mounted.render(
       createElement(
@@ -204,7 +214,9 @@ async function showContinuingHome() {
     );
     await act(() => vi.advanceTimersByTimeAsync(50));
   };
+
   await render(true);
+
   return { client, container, render, viewing };
 }
 
@@ -221,12 +233,15 @@ it("retains Continue's data, controls and title key beyond GC while covered and 
   await render(false);
   await act(async () => client.invalidateQueries({ queryKey: key }));
   const titleCalls = ipc.argsOf("ondemand.titles").length;
+
   const homePolls = ipc
     .argsOf("guide.listings")
     .filter(({ channels }) => channels.length > 1).length;
+
   const watchPolls = ipc
     .argsOf("guide.listings")
     .filter(({ channels }) => channels.length === 1).length;
+
   expect(homePolls).toBeGreaterThan(0);
   expect(watchPolls).toBeGreaterThan(0);
   await act(() => vi.advanceTimersByTimeAsync(310_000));
@@ -267,10 +282,12 @@ it("retains the existing Continue control when a new play changes its disabled q
   await act(() => vi.advanceTimersByTimeAsync(310_000));
   expect(ipc.argsOf("ondemand.titles")).toHaveLength(titleCalls);
   expect(container.querySelector('button[title="Continuing film"]')).toBe(control);
+
   const key = queries.continuing("movie", [
     film,
     { subscriptionId: SUBSCRIPTION, id: "new" },
   ]).queryKey;
+
   expect(client.getQueryCache().find({ queryKey: key })).toBeDefined();
   const pending = ipc.hold("ondemand.titles");
   await render(true);

@@ -14,6 +14,7 @@ import { tempDir } from "./support.ts";
 import { writeJsonFile } from "../src/main/platform/json-file.ts";
 
 const workers: Worker[] = [];
+
 afterEach(async () => {
   await Promise.all(workers.splice(0).map((worker) => worker.terminate()));
 });
@@ -22,11 +23,13 @@ function start(dir: string, clock?: BigInt64Array) {
   const entry =
     inject("catalogueWorker") ??
     new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url);
+
   const setup: WorkerSetup = {
     metadataPath: join(dir, "metadata.json.gz"),
     userAgent: "test",
     tmdb: null,
   };
+
   // Only the test worker's wall clock changes. Production calls and message shapes stay intact.
   const worker = clock
     ? new Worker(
@@ -37,25 +40,32 @@ function start(dir: string, clock?: BigInt64Array) {
         { eval: true, workerData: { ...setup, clock: clock.buffer } },
       )
     : new Worker(entry, { workerData: setup });
+
   workers.push(worker);
   let sequence = 0;
+
   function call<M extends keyof WorkerCalls>(
     method: M,
     args: WorkerCalls[M]["args"],
   ): Promise<WorkerCalls[M]["result"]> {
     const id = ++sequence;
+
     return new Promise((resolve, reject) => {
       const receive = (reply: WorkerReply) => {
         if (reply.id !== id) return;
         worker.off("message", receive);
+
         if (reply.ok) resolve(reply.value as WorkerCalls[M]["result"]);
         else reject(reply.error);
       };
+
       worker.on("message", receive);
       worker.postMessage({ id, method, args, interfaceLanguage: "en" });
     });
   }
+
   const owner: CatalogueOwner = { subscriptionId: "saved", key: "account", dir };
+
   return {
     call,
     owner,
@@ -80,6 +90,7 @@ function start(dir: string, clock?: BigInt64Array) {
           },
         ],
       };
+
       await call("refresh", {
         ...owner,
         revision,
@@ -95,6 +106,7 @@ function start(dir: string, clock?: BigInt64Array) {
         kind: "movie",
         versions: [{ subscriptionId: owner.subscriptionId, id: "1" }],
       });
+
       return result.map((title) => title.title);
     },
     stop: () => worker.terminate(),
@@ -162,9 +174,11 @@ describe("accepted catalogue persistence", () => {
 });
 
 const DAY = 86_400_000;
+
 const clockAt = (at: number) => {
   const clock = new BigInt64Array(new SharedArrayBuffer(8));
   Atomics.store(clock, 0, BigInt(at));
+
   return { clock, set: (time: number) => Atomics.store(clock, 0, BigInt(time)) };
 };
 
@@ -177,6 +191,7 @@ describe("warmed worker collections", () => {
       addedAt: began - 6 * DAY,
       releaseDate: "2025-01-01",
     });
+
     const list = (id: "new-week" | "new-month" | "recent") =>
       app.call("collection", {
         owners: [app.owner],
@@ -186,6 +201,7 @@ describe("warmed worker collections", () => {
         offset: 0,
         limit: 20,
       });
+
     expect((await list("new-week")).total).toBe(1);
     expect((await list("new-month")).total).toBe(1);
     expect((await list("recent")).total).toBe(1);
@@ -229,9 +245,12 @@ describe("warmed worker collections", () => {
     const time = clockAt(at + 182 * DAY - 1);
     const app = start(dir, time.clock);
     await app.accept("Provider (MULTI)", 1, { tmdbId: "1" });
+
     const search = () =>
       app.call("search", { owners: [app.owner], language: "en", query: "translation" });
+
     await vi.waitFor(async () => expect((await search()).movies).toHaveLength(1));
+
     const page = () =>
       app.call("collection", {
         owners: [app.owner],
@@ -241,10 +260,13 @@ describe("warmed worker collections", () => {
         offset: 0,
         limit: 20,
       });
+
     const rows = () =>
       app.call("rows", { owners: [app.owner], language: "en", kind: "movie", tab: "for-you" });
+
     const tiles = (of: "genres" | "services") =>
       app.call("tiles", { owners: [app.owner], language: "en", kind: "movie", of });
+
     expect((await page()).titles[0]?.title).toBe("Translation");
     expect((await rows()).map((row) => row.id)).toContain("popular");
     expect(await tiles("genres")).toHaveLength(1);

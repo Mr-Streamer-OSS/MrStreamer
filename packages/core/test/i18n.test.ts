@@ -18,6 +18,7 @@ import {
 vi.mock("../src/i18n/nl.ts", async (original) => {
   const { nl } = await original<typeof import("../src/i18n/nl.ts")>();
   const { Settings: _lost, ...rest } = nl;
+
   return { nl: rest };
 });
 
@@ -120,6 +121,7 @@ describe("the interface language", () => {
 /** Values for every placeholder of `key`, and `count` for a message with forms. */
 function valuesFor(key: MessageKey, count: number): Record<string, string | number> {
   const names = [...key.matchAll(/\{(\w+)\}/g)].map((match) => match[1] ?? "");
+
   return Object.fromEntries(names.map((name) => [name, name === "count" ? count : `<${name}>`]));
 }
 
@@ -130,14 +132,17 @@ describe("every message in every language", () => {
 
   it.each(LOCALES)("%s says each one with all of its values in place", (locale) => {
     setLanguage({ locale, formats: locale });
+
     for (const key of keys) {
       for (const count of [1, 2, 5, 1_000_000]) {
         const values = valuesFor(key, count);
         const said = say(locale, key, values);
         expect(said.trim(), `${locale} ${key}`).not.toBe("");
         expect(said, `${locale} ${key}`).not.toMatch(/\{\w+\}/);
+
         // A form for one may say "one" in words; every other names each value.
         if (count === 1) continue;
+
         for (const [name, value] of Object.entries(values)) {
           const shown = typeof value === "number" ? formatNumber(value) : value;
           expect(said, `${locale} ${key} {${name}}`).toContain(shown);
@@ -165,6 +170,7 @@ describe("every message in every language", () => {
           other.test(say(locale, key, { ...valuesFor(key, count), count })),
         ),
     );
+
     expect(elsewhere).toEqual([]);
   });
 });

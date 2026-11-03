@@ -100,19 +100,23 @@ export const queries = {
           const before = client.getQueryData<Viewing>(["viewing"]);
           const roster = rosterOf(client);
           const viewing = await call("viewing.get");
+
           // Invalidation can join a first read. Keep its promise pending until it answers for
           // the same saved sources, including a legitimate lower combined sequence.
           if (rosterOf(client) !== roster) continue;
           viewingReads.set(viewing, { client, before, sequence: viewing.sequence, roster });
+
           return viewing;
         }
       },
       structuralSharing: (previous, next) => {
         if (typeof next === "object" && next !== null) {
           const read = viewingReads.get(next);
+
           if (read) {
             viewingReads.delete(next);
             const cached = read.client.getQueryData<Viewing>(["viewing"]);
+
             if (rosterOf(read.client) !== read.roster) {
               // The sources changed after queryFn returned. Keep existing data and re-read
               // after this commit, including inactive queries. With no cache, this reply is
@@ -125,14 +129,17 @@ export const queries = {
                   )
                   .catch(() => {});
               });
+
               return cached ?? next;
             }
+
             // Removing an account can lower the combined sequence. Only a concurrent cache write
             // can supersede this read, not the record it started with. Equal sequences may carry
             // refreshed canonical channel IDs after a catalogue update.
             if (cached !== read.before && cached && cached.sequence > read.sequence) return cached;
           }
         }
+
         return replaceEqualDeep(previous, next);
       },
       staleTime: Infinity,
@@ -162,6 +169,7 @@ export const queries = {
       queryFn: async ({ signal }) => {
         const result = await call("library.browse", request);
         signal.throwIfAborted();
+
         return result;
       },
       staleTime: Infinity,
@@ -269,6 +277,7 @@ export const queries = {
       queryKey: ["library", "searchGroups"],
       queryFn: async () => {
         const groups = await call("library.searchGroups");
+
         return Object.fromEntries(
           groups.flatMap(({ key, copies }) =>
             copies.map((id, order) => [id, { key, order }] as const),
@@ -367,6 +376,7 @@ export const queries = {
     filters?: TitleFilters,
   ) => {
     const chosen = filters && Object.keys(filters).length ? filters : undefined;
+
     return queryOptions({
       queryKey: [
         "ondemand",
@@ -410,6 +420,7 @@ export const queries = {
   /** Movies or series only, for the field in their tab bar. */
   titleSearchIn: (kind: TitleKind, query: string, filters?: TitleFilters) => {
     const chosen = filters && Object.keys(filters).length ? filters : undefined;
+
     return queryOptions({
       queryKey: ["ondemand", "searchKind", kind, query, ...(chosen ? [chosen] : [])],
       queryFn: () => call("ondemand.searchKind", { kind, query, ...defined({ filters: chosen }) }),
@@ -529,6 +540,7 @@ export const queries = {
 /** Stars or unstars a channel. The favourites list updates as soon as the main process has it. */
 export function useToggleFavourite(): (channel: OwnedId) => void {
   const client = useQueryClient();
+
   return useCallback(
     (channel: OwnedId) => {
       const favourites = client.getQueryData(queries.viewing().queryKey)?.favourites ?? [];
@@ -565,19 +577,24 @@ export async function updateSubscriptionPreferences(
  */
 export function useChooseQuality(): (channel: LiveChannel, variantId: string | null) => void {
   const client = useQueryClient();
+
   return useCallback(
     (channel: LiveChannel, variantId: string | null) => {
       void (async () => {
         const { subscriptionId } = channel;
         const left = await client.fetchQuery(queries.subscriptionPreferences(subscriptionId));
+
         // A choice kept under another of the channel's streams' ids goes too.
         const others = Object.entries(left.channelVariants ?? {}).filter(
           ([id]) => !channel.variants.some((variant) => variant.id === id),
         );
+
         const channelVariants = Object.fromEntries(
           variantId === null ? others : [...others, [channel.id, variantId]],
         );
+
         await updateSubscriptionPreferences(client, subscriptionId, { channelVariants });
+
         if (sameOwned(player.current(), channel)) player.reopen();
       })().catch(() => {});
     },
@@ -597,6 +614,7 @@ export function keepViewing(client: QueryClient, viewing: Viewing, roster: strin
   if (rosterOf(client) !== roster) return;
   const queryKey = queries.viewing().queryKey;
   const cached = client.getQueryData(queryKey);
+
   if (cached && cached.sequence > viewing.sequence) return;
   client.setQueryData(queryKey, viewing);
 }
@@ -617,8 +635,10 @@ export function subscriptionName(subscription: SubscriptionSummary): string {
  */
 export function useSubscriptionNames(): (subscriptionId: string) => string | null {
   const subscriptions = useSubscriptions();
+
   return useMemo(() => {
     const names = new Map(subscriptions.map((each) => [each.id, subscriptionName(each)]));
+
     return (subscriptionId) => names.get(subscriptionId) ?? null;
   }, [subscriptions]);
 }
@@ -632,6 +652,7 @@ export function useSourceOf(): (of: {
   readonly ambiguous?: true;
 }) => string | null {
   const nameOf = useSubscriptionNames();
+
   return useCallback((of) => (of.ambiguous ? nameOf(of.subscriptionId) : null), [nameOf]);
 }
 
@@ -642,6 +663,7 @@ export function useSourceOf(): (of: {
 export function useSearchSubscriptionNames(): (subscriptionId: string) => string | null {
   const several = useSubscriptions().length > 1;
   const nameOf = useSubscriptionNames();
+
   return useCallback(
     (subscriptionId) => (several ? nameOf(subscriptionId) : null),
     [several, nameOf],
@@ -657,6 +679,7 @@ export function useSubscriptionPreferences(
   refetchOnMount?: "always",
 ): ReadonlyMap<string, SubscriptionPreferences> | undefined {
   const subscriptions = useQuery(queries.subscriptions()).data;
+
   return useQueries({
     queries: (subscriptions ?? NO_SUBSCRIPTIONS).map(({ id }) => ({
       ...queries.subscriptionPreferences(id),
@@ -667,11 +690,14 @@ export function useSubscriptionPreferences(
       (results: readonly { readonly data: SubscriptionPreferences | undefined }[]) => {
         if (!subscriptions) return undefined;
         const left = new Map<string, SubscriptionPreferences>();
+
         for (const [at, { data }] of results.entries()) {
           const id = subscriptions[at]?.id;
+
           if (!data || id === undefined) return undefined;
           left.set(id, data);
         }
+
         return left;
       },
       [subscriptions],
@@ -689,17 +715,22 @@ const lastWatched = (viewing: Viewing) => viewing.recent[0];
 export function useLastChannel(): LiveChannel | null {
   const watched = useQuery({ ...queries.viewing(), select: lastWatched }).data;
   const left = useSubscriptionPreferences();
+
   const last = useMemo((): OwnedId | null => {
     if (watched) return watched;
+
     for (const [subscriptionId, { lastChannelId }] of left ?? []) {
       if (lastChannelId !== null) return { subscriptionId, id: lastChannelId };
     }
+
     return null;
   }, [watched, left]);
+
   const { data } = useQuery({
     ...queries.channel(last ?? { subscriptionId: "", id: "" }),
     enabled: last !== null,
   });
+
   return (last !== null && data) || null;
 }
 
@@ -708,6 +739,7 @@ export const favouriteChannels = (viewing: Viewing) => viewing.favourites;
 /** The favourite channels, by `ownedKey`, in their saved order. */
 export function useFavouriteKeys(): ReadonlySet<string> {
   const { data } = useQuery({ ...queries.viewing(), select: favouriteChannels });
+
   return useMemo(() => new Set(data?.map(ownedKey)), [data]);
 }
 
@@ -721,6 +753,7 @@ function useCategories() {
  */
 export function useCategoryMap(): ReadonlyMap<string, Category> {
   const { data } = useCategories();
+
   return useMemo(
     () =>
       new Map(
@@ -740,17 +773,21 @@ export function useCategoryMap(): ReadonlyMap<string, Category> {
 export function syncLibraryUpdates(client: QueryClient): () => void {
   // Favourites and history show by channel, and a new catalogue can join a channel's streams.
   const changed = [["library"], ["playlist"], queries.viewing().queryKey];
+
   return listen("library.updated", () => {
     // Invalidation alone reuses an in-flight first read with no cached data. Its old decision
     // must not become fresh after a catalogue update.
     void client.cancelQueries({ queryKey: queries.searchGroups().queryKey, exact: true });
+
     const underWay = changed.flatMap((queryKey) =>
       client
         .getQueryCache()
         .findAll({ queryKey, fetchStatus: "fetching" })
         .flatMap(({ queryKey, promise }) => (promise ? [{ queryKey, promise }] : [])),
     );
+
     for (const queryKey of changed) void client.invalidateQueries({ queryKey });
+
     // One that invalidation replaced with a new read is cancelled, and that read is current.
     for (const { queryKey, promise } of underWay)
       void promise.then(
@@ -799,13 +836,16 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: queries.details(kind, version).queryKey });
     void client.invalidateQueries({ queryKey: queries.related(kind, version).queryKey });
   });
+
   const stopProgress = listen("ondemand.progress", (metadata) => {
     // Only the progress; the lists' status is whatever the latest full status said. Without a
     // status yet, the first one brings the progress with it.
     client.setQueryData(queries.onDemandStatus().queryKey, (old) => old && { ...old, metadata });
   });
+
   /** Each subscription's lists in use and when they were fetched, as the last update said. */
   let fetched: string | undefined;
+
   const stopLists = listen("ondemand.updated", (status) => {
     // Related titles leave out every title the lists mark for adults, and new lists can mark one
     // that a row read before them still names. With new lists, each such row goes instead of
@@ -818,9 +858,12 @@ export function syncOnDemand(client: QueryClient): () => void {
     const newLists = now !== fetched;
     fetched = now;
     const marked = status.markedForAdults === true;
+
     if (newLists || marked) invalidateDetailsCatalogue();
+
     const dropped = (part: unknown) =>
       part === "related" ? newLists || marked : marked && TITLE_LISTS.has(part);
+
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
     const lists = {
@@ -830,6 +873,7 @@ export function syncOnDemand(client: QueryClient): () => void {
         query.queryKey[1] !== "season" &&
         !dropped(query.queryKey[1]),
     } satisfies QueryFilters;
+
     // Invalidation alone reuses a first read with no cached data. Cancel its old answer before
     // reading the changed catalogue; queries with cached data keep their posters while it loads.
     void client.cancelQueries(lists);
@@ -839,9 +883,11 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["ondemand", "details"], refetchType: "none" });
     // And which versions and marks are a series' own: the lists say what a series is.
     void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
+
     if (newLists || marked)
       forget(client, { queryKey: ["ondemand"], predicate: (query) => dropped(query.queryKey[1]) });
   });
+
   return () => {
     stopDetails();
     stopProgress();
@@ -869,11 +915,14 @@ export function syncGuideUpdates(client: QueryClient): () => void {
 export function syncViewing(client: QueryClient): () => void {
   return listen("viewing.changed", ({ sequence }) => {
     const cached = client.getQueryData(queries.viewing().queryKey);
+
     if (cached && cached.sequence >= sequence) return;
+
     // The prefix covers progress too. A first read under way can still answer an older sequence.
     const pending = client
       .getQueryCache()
       .find({ queryKey: queries.viewing().queryKey, exact: true })?.promise;
+
     void client.invalidateQueries({ queryKey: queries.viewing().queryKey });
     void pending?.then(
       () => {
@@ -907,7 +956,9 @@ export function syncWatchlist(client: QueryClient): () => void {
     });
     void client.invalidateQueries({ queryKey: ["watchlist"] });
   };
+
   const stopChanges = listen("watchlist.changed", read);
+
   const stopLists = listen("ondemand.updated", ({ markedForAdults }) => {
     if (!markedForAdults) return read();
     void client.cancelQueries({
@@ -920,6 +971,7 @@ export function syncWatchlist(client: QueryClient): () => void {
     });
     forget(client, { queryKey: ["watchlist", "list"] });
   });
+
   return () => {
     stopChanges();
     stopLists();
