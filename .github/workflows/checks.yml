@@ -61,7 +61,7 @@ jobs:
         env:
           VALIDATION_SHA: ${{ inputs.sha }}
         run: node .github/scripts/ci-inputs.ts
-      # Check's format-only shortcut: a pull request that selects neither Test nor Website and only
+      # Check's format and documentation-path shortcut: a pull request that selects neither Test nor Website and only
       # adds or edits Markdown and images. Other files, deletions and renames keep the full Check.
       - id: docs
         if: >-
