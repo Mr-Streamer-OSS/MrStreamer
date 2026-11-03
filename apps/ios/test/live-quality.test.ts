@@ -23,6 +23,7 @@ vi.mock("@mrstreamer/core/xtream", async () => ({
   xtreamProvider: () => provider,
 }));
 vi.mock("../src/telemetry/index.ts", () => ({ noteAction: () => undefined }));
+vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-video", () => ({
   createVideoPlayer: () => port,
   VideoView: () => null,

@@ -22,7 +22,9 @@
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
-        }
+        },
+        "NSBonjourServices": ["_googlecast._tcp"],
+        "NSLocalNetworkUsageDescription": "Mr. Streamer uses your local network to reach a provider on it, and to find TVs and play to them when you choose Play on TV."
       }
     },
     "plugins": [
