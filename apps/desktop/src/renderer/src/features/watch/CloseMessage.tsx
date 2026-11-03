@@ -18,7 +18,7 @@ import type { PlayerState } from "../../player/player.ts";
 import type { TitlePlayerState } from "../../player/title-player.ts";
 import type { Note } from "./flash-state.ts";
 
-/** What a closable message is about: a player's failure, a receiver's refusal or a failed note. */
+/** What a closable message is about: a player's failure, a receiver's refusal or a standing note. */
 export type Closable =
   | Extract<PlayerState["phase"], { kind: "failed" }>
   | Extract<TitlePlayerState["phase"], { kind: "failed" }>
