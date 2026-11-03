@@ -3,7 +3,7 @@ import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { isAdultCategory } from "@mrstreamer/core/adult";
 import { normalizeSteps } from "@mrstreamer/core/catalogue/normalize";
-import type { LiveCatalogue } from "@mrstreamer/core/provider";
+import type { LiveCatalogue, Provider } from "@mrstreamer/core/provider";
 import { sha256Hex } from "@mrstreamer/core/sha256";
 import {
   httpsUnavailable,
@@ -156,6 +156,10 @@ async function rowsOf(
 
 export interface SourcesOwner {
   readonly state: Store<Sources>;
+  /** On-demand reads bound to the current sign-in; obsolete answers reject without publishing. */
+  onDemand(
+    id: string,
+  ): Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails"> | null;
   /** Reads the saved sources and signs each in again. Call once, at launch. */
   restore(): Promise<void>;
   /** Checks `input` with its provider, then saves it and lists its channels. */
@@ -171,8 +175,12 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
   /** Settles once restore() listed the saved sources: a connection made before waits for it. */
   let restored!: () => void;
   const ready = new Promise<void>((resolve) => (restored = resolve));
+
   /** Each signed-in source's reader, and its channel reads. */
-  const readers = signIns<CatalogueReader>();
+  const readers = signIns<
+    CatalogueReader &
+      Partial<Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails">>
+  >();
 
   const listed = () => {
     const now = state.get();
@@ -180,7 +188,10 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     return now.kind === "ready" ? now.sources : [];
   };
 
-  function readerOf(authority: Authority): CatalogueReader {
+  function readerOf(
+    authority: Authority,
+  ): CatalogueReader &
+    Partial<Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails">> {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
 
     return authority.kind === "xtream"
@@ -233,6 +244,33 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
 
   return {
     state,
+
+    onDemand(id) {
+      const login = readers.current(id);
+
+      if (!login?.onDemandCatalogue || !login.movieDetails || !login.seriesDetails) return null;
+      const catalogue = login.onDemandCatalogue.bind(login);
+      const movie = login.movieDetails.bind(login);
+      const series = login.seriesDetails.bind(login);
+
+      async function read<T>(list: string, ask: (signal: AbortSignal) => Promise<T>): Promise<T> {
+        if (readers.current(id) !== login) throw new Error("Source changed");
+        const load = readers.begin(id, list);
+
+        if (!load || load.login !== login) throw new Error("Source changed");
+        const result = await ask(load.signal);
+
+        if (!load.stands()) throw new Error("Source changed");
+
+        return result;
+      }
+
+      return {
+        onDemandCatalogue: () => read("on-demand", catalogue),
+        movieDetails: (title) => read(`movie:${title}`, (signal) => movie(title, signal)),
+        seriesDetails: (title) => read(`series:${title}`, (signal) => series(title, signal)),
+      };
+    },
 
     async restore() {
       const parsed = Registry(platform.readJson(REGISTRY) ?? { version: 1, sources: [] });
