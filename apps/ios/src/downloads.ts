@@ -288,7 +288,7 @@ const ready = new Promise<void>((resolve) => (firstReady = resolve));
 let barrier: "pending" | "running" | "done" = "pending";
 /** Whether this process already tried to start a damaged native queue over: once at most. */
 let repairTried = false;
-/** Copies whose file was gone when last looked. */
+/** Copies whose file was gone, or no longer its completed size, when last looked. */
 const missing = new Set<string>();
 /** Unfinished downloads that ended with their subscription since launch. */
 let ended = 0;
@@ -577,11 +577,22 @@ function tellSoon() {
   telling ??= setTimeout(tell, PROGRESS_MS);
 }
 
-/** Looks for copies whose file is gone. */
+/**
+ * Whether copy `record`'s file is on the phone at the size it was completed with. A file whose
+ * size changed reads as missing, as a gone one does; a size the file system doesn't answer, or a
+ * record without one, isn't taken for damage. The same size with other bytes isn't looked for.
+ */
+function intact(record: Stored): boolean {
+  const media = mediaOf(record);
+  if (!media.exists) return false;
+  return record.size === null || media.size === null || media.size === record.size;
+}
+
+/** Looks for copies whose file is gone or changed size. */
 function look() {
   missing.clear();
   for (const record of doc.items) {
-    if (record.state === "complete" && !mediaOf(record).exists) missing.add(record.id);
+    if (record.state === "complete" && !intact(record)) missing.add(record.id);
   }
 }
 
@@ -1861,7 +1872,7 @@ export async function eraseDownloads(
 }
 
 /**
- * How replacing a missing copy ended: queued anew; its file was there after all (`kept`); no
+ * How replacing a missing copy ended: queued anew; its file was there whole after all (`kept`); no
  * missing copy of it, or it was queued again meanwhile by someone else (`unchanged`); or removed,
  * then not queued again as `stands` ended (`stopped`).
  */
@@ -1870,10 +1881,10 @@ export type Replaced =
   | { readonly kind: "kept" | "unchanged" | "stopped" };
 
 /**
- * Downloads a movie or an episode anew whose copy's file is gone: its record goes, with the
- * copy's own progress, then it is queued as `addDownload` queues it, only while `stands` still
- * holds once the removal and the old copy's readers ended. A removal that ended stays. A copy
- * whose file is there after all stays as it is. Rejects, changing nothing, while that copy is
+ * Downloads a movie or an episode anew whose copy's file is gone or changed size: its record and
+ * that file go, with the copy's own progress, then it is queued as `addDownload` queues it, only
+ * while `stands` still holds once the removal and the old copy's readers ended. A removal that
+ * ended stays. A copy whose file is there whole after all stays as it is. Rejects, changing nothing, while that copy is
  * what Watch opens or plays: the player may still read the file, so the viewer stops it first.
  */
 export async function replaceMissingDownload(
@@ -1882,7 +1893,7 @@ export async function replaceMissingDownload(
 ): Promise<Replaced> {
   const record = doc.items.find((each) => sameTitle(each, ref));
   if (record?.state !== "complete") return { kind: "unchanged" };
-  if (mediaOf(record).exists) {
+  if (intact(record)) {
     missing.delete(record.id);
     tell();
     return { kind: "kept" };
@@ -2081,7 +2092,7 @@ const playable = (record: Stored | undefined): record is Stored =>
  * or Stop just saved counts; anything the viewer asks meanwhile, the copy going or its removal
  * being written down, cancels it. Its progress stays with the copy, and goes to its
  * subscription's viewing record too while that subscription is saved (`keepProgress`). A copy
- * whose file is gone fails in Watch as unavailable. Manual Next, and the countdown once an episode
+ * whose file is gone or changed size fails in Watch as unavailable. Manual Next, and the countdown once an episode
  * played to its end, follow only its saved immediate successor while that exact local copy is
  * complete, allowed and on the phone; neither ever streams one that isn't.
  */
@@ -2179,7 +2190,7 @@ function playCopy(id: string, record: Stored) {
       originalLanguage: record.about.originalLanguage,
       open: async () => {
         // A removal written down meanwhile, or done, closes the copy to new readers.
-        if (!playable(find(id)) || !media.exists) {
+        if (!playable(find(id)) || !intact(record)) {
           if (playable(find(id))) missing.add(id);
           tell();
           throw new AppFailure({ kind: "stream", failure: { kind: "unavailable", status: 404 } });
