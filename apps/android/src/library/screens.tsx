@@ -15,8 +15,8 @@ import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { runtime } from "@mrstreamer/core/viewing/continue";
-import { layoutFor } from "../navigation/destinations.ts";
-import { useOpenShared } from "../navigation/open.ts";
+import { layoutFor, type DestinationRoute } from "../navigation/destinations.ts";
+import { destinationIn, useOpenShared } from "../navigation/open.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { IconButton } from "../ui/icon-button.tsx";
 import { Sheet } from "../ui/sheet.tsx";
@@ -81,7 +81,7 @@ function useMargins() {
   return { width, rail, inset: rail ? 24 : 16 };
 }
 
-function openTitle(destination: string, title: Title, requested = false) {
+function openTitle(destination: DestinationRoute, title: Title, requested = false) {
   router.push({
     pathname: `/${destination}/library/details`,
     params: {
@@ -243,6 +243,20 @@ function CollectionLink({
   );
 }
 
+/** Every destination can host a collection; its media kind travels in the route params. */
+export function CollectionScreen({
+  kind = "movie",
+  model,
+}: {
+  kind?: TitleKind;
+  model?: LibraryModel;
+}) {
+  const params = useLocalSearchParams<{ kind?: string }>();
+  const media = params.kind === "series" ? "series" : params.kind === "movie" ? "movie" : kind;
+
+  return <BrowseScreen kind={media} pushed {...(model ? { model } : {})} />;
+}
+
 export function BrowseScreen({
   kind,
   pushed = false,
@@ -280,7 +294,7 @@ export function BrowseScreen({
   }, [pushed, params.tab, visible.length, resolvedTab, tab]);
   const id = pushed ? collectionId(params.collection) : tab === "4k" ? "4k" : "all";
   const result = browseCollection(made, id, choices);
-  const destination = kind === "movie" ? "movies" : "series";
+  const destination = destinationIn(useSegments());
   const collectionTab = pushed || tab === "all" || tab === "4k";
 
   const change = (next: BrowseChoices) =>
@@ -289,7 +303,7 @@ export function BrowseScreen({
   const collection = (collection: string) =>
     router.push({
       pathname: `/${destination}/library/collection`,
-      params: { collection, sort: params.sort ?? "", filters: params.filters ?? "{}" },
+      params: { kind, collection, sort: params.sort ?? "", filters: params.filters ?? "{}" },
     });
 
   const heading = pushed
@@ -1128,13 +1142,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
     seriesPage?: string;
   }>();
 
-  const segments = useSegments();
-
-  const destination = segments.includes("movies")
-    ? "movies"
-    : segments.includes("series")
-      ? "series"
-      : null;
+  const destination = destinationIn(useSegments());
 
   const query = params.query?.trim() ?? "";
   const listed = hasTitles(model);
@@ -1227,9 +1235,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
                   key={title.key}
                   title={title}
                   inset={inset}
-                  onPress={() =>
-                    openTitle(destination ?? (kind === "movie" ? "movies" : "series"), title)
-                  }
+                  onPress={() => openTitle(destination, title)}
                 />
               ))}
               {result.total > result.titles.length ? (

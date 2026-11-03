@@ -1,5 +1,5 @@
-import { BrowseScreen } from "../../../../library/screens.tsx";
+import { CollectionScreen } from "../../../../library/screens.tsx";
 
 export default function Collection() {
-  return <BrowseScreen kind="series" pushed />;
+  return <CollectionScreen kind="series" />;
 }

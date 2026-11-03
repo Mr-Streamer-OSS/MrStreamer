@@ -7,17 +7,39 @@ import { libraryModel } from "../src/library/model.ts";
 import { libraryIntents } from "../src/library/intents.ts";
 import { setLanguage, resolveLanguage } from "@mrstreamer/core/i18n";
 
-const route = vi.hoisted(() => ({ params: {} as Record<string, string>, opened: [] as unknown[] }));
+type Href = { pathname: string; params: Record<string, string> };
+
+const route = vi.hoisted(() => ({
+  params: {} as Record<string, string>,
+  opened: [] as Href[],
+  segments: ["(tabs)", "movies"] as string[],
+  stacks: {} as Record<string, Href[]>,
+  destination: "movies",
+}));
 
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => route.params,
-  useSegments: () => ["(tabs)", "movies"],
+  useSegments: () => route.segments,
   useIsFocused: () => true,
   router: {
     setParams: (next: Record<string, string>) => Object.assign(route.params, next),
-    push: (href: unknown) => route.opened.push(href),
+    push: (href: Href) => {
+      route.opened.push(href);
+      // Group-qualified hrefs select that tab's stack. Each stack retains its own entries.
+      route.destination = href.pathname.split("/")[1]!;
+      (route.stacks[route.destination] ??= []).push(href);
+      route.params = href.params;
+      route.segments = ["(tabs)", route.destination, "library", "details"];
+    },
     navigate: () => {},
-    back: () => {},
+    back: () => {
+      const stack = route.stacks[route.destination]!;
+
+      if (stack.length > 1) stack.pop();
+      const previous = stack.at(-1)!;
+      route.params = previous.params;
+      route.segments = ["(tabs)", route.destination, previous.pathname.split("/").at(-1)!];
+    },
   },
 }));
 
@@ -79,7 +101,7 @@ vi.mock("react-native", async () => {
       h("input", {
         "aria-label": p.accessibilityLabel,
         value: p.value,
-        onChange: (e: { target: { value: string } }) => p.onChangeText?.(e.target.value),
+        onInput: (e: { target: { value: string } }) => p.onChangeText?.(e.target.value),
       }),
     Modal: (p: Props) => (p.visible ? h("dialog", { open: true }, p.children) : null),
     Image: () => null,
@@ -135,6 +157,9 @@ afterEach(() => {
   window.document.body.innerHTML = "";
   route.params = {};
   route.opened = [];
+  route.segments = ["(tabs)", "movies"];
+  route.stacks = {};
+  route.destination = "movies";
   setLanguage(resolveLanguage("en-US", []));
 });
 
@@ -554,3 +579,89 @@ it("keeps open provider details across a catalogue refresh", async () => {
   expect(reads).toBe(1);
   expect(shown.textContent).toContain("Provider story");
 });
+
+it.each(["(live)", "home", "movies", "series"] as const)(
+  "returns from details to paged Search on the %s stack",
+  async (destination) => {
+    const { model } = fixture();
+    await model.refresh();
+    route.destination = destination;
+    route.segments = ["(tabs)", destination, "search"];
+    route.params = {};
+    const search = { pathname: `/${destination}/search`, params: route.params };
+    route.stacks[destination] = [search];
+    const shown = show(createElement(SearchScreen, { model }));
+    const input = shown.querySelector("input")!;
+    act(() => {
+      input.value = "Movie";
+      input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    });
+    act(() => root?.render(createElement(SearchScreen, { model })));
+    press(shown, "Show 20 more movies");
+    press(shown, "Show 20 more series");
+    act(() => root?.render(createElement(SearchScreen, { model })));
+    expect(shown.textContent).toContain("Show 3 more movies");
+    expect(shown.textContent).toContain("Show 3 more series");
+
+    // Both kinds use the same alias even on the opposite media tab.
+    for (const kind of ["movie", "series"] as const) {
+      const title = model.search(kind, "Movie", 2).titles[25]!;
+
+      const buttons = Array.from(shown.querySelectorAll("button")).filter(
+        (b) => b.getAttribute("aria-label") === title.title,
+      );
+
+      act(() => buttons[kind === "movie" ? 0 : 1]!.click());
+      expect(route.opened.at(-1)).toEqual({
+        pathname: `/${destination}/library/details`,
+        params: { kind, title: title.key, requested: "" },
+      });
+      expect(route.destination).toBe(destination);
+      expect(route.stacks[destination]).toHaveLength(2);
+
+      const aliases = {
+        "(live)": () => import("../src/app/(tabs)/(live)/library/details.tsx"),
+        home: () => import("../src/app/(tabs)/home/library/details.tsx"),
+        movies: () => import("../src/app/(tabs)/movies/library/details.tsx"),
+        series: () => import("../src/app/(tabs)/series/library/details.tsx"),
+      };
+
+      const { default: Details } = await aliases[destination]();
+      act(() => root?.render(createElement(Details, { model })));
+      await act(async () => {});
+      expect(shown.textContent).toContain(kind === "series" ? "Season 1" : "Provider story");
+      press(shown, "Back");
+      expect(route.stacks[destination]).toEqual([search]);
+      expect(route.params).toEqual({ query: "Movie", moviesPage: "2", seriesPage: "2" });
+      act(() => root?.render(createElement(SearchScreen, { model })));
+      expect(shown.querySelector("input")?.value).toBe("Movie");
+      expect(shown.textContent).toContain("Show 3 more movies");
+      expect(shown.textContent).toContain("Show 3 more series");
+    }
+  },
+);
+
+it.each(["(live)", "home", "movies"] as const)(
+  "opens a series collection result on the current %s stack with its explicit kind",
+  async (destination) => {
+    const { model } = fixture();
+    await model.refresh();
+    route.segments = ["(tabs)", destination, "library", "collection"];
+    route.params = { kind: "series", collection: "all" };
+
+    const aliases = {
+      "(live)": () => import("../src/app/(tabs)/(live)/library/collection.tsx"),
+      home: () => import("../src/app/(tabs)/home/library/collection.tsx"),
+      movies: () => import("../src/app/(tabs)/movies/library/collection.tsx"),
+    };
+
+    const { default: Collection } = await aliases[destination]();
+    const shown = show(createElement(Collection, { model }));
+    const title = model.made("series").list("all")[0]!;
+    press(shown, title.title);
+    expect(route.opened.at(-1)).toEqual({
+      pathname: `/${destination}/library/details`,
+      params: { kind: "series", title: title.key, requested: "" },
+    });
+  },
+);

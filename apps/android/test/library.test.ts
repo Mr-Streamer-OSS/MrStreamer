@@ -199,7 +199,7 @@ describe("Android library public behavior", () => {
 });
 
 it("protects ambiguous or invalid preference reads", () => {
-  for (const raw of [null, [], "broken"]) {
+  for (const raw of [[], "broken"]) {
     let writes = 0;
 
     const memory = versionMemory({
@@ -284,4 +284,21 @@ it("ignores unknown preference values without blocking valid choices or erasing 
   expect(memory.get("future")).toBeUndefined();
   memory.set("next", "choice");
   expect(saved).toEqual({ valid: "version", future: 42, next: "choice" });
+});
+
+it("persists and restores the first version choice on a fresh install", () => {
+  let saved: unknown = null;
+
+  const storage = {
+    readJson: () => saved,
+    writeJson: (_name: string, value: unknown) => {
+      saved = value;
+    },
+  };
+
+  const memory = versionMemory(storage);
+  expect(memory.get("title")).toBeUndefined();
+  memory.set("title", "version");
+  expect(saved).toEqual({ title: "version" });
+  expect(versionMemory(storage).get("title")).toBe("version");
 });

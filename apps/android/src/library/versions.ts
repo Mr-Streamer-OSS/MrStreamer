@@ -35,8 +35,8 @@ export function versionMemory(storage: {
     // An unreadable file is never an empty preference file.
   }
 
-  // null also means an unreadable file in Android storage, so it cannot authorize a write.
-  const valid = raw !== null && typeof raw === "object" && !Array.isArray(raw);
+  // Storage returns null for a missing or unparseable file: start again on the next save.
+  const valid = raw === null || (typeof raw === "object" && !Array.isArray(raw));
 
   let picks: Record<string, unknown> =
     raw !== null && typeof raw === "object" && !Array.isArray(raw)
