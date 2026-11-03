@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { crc32 } from "node:zlib";
 import { promisify } from "node:util";
@@ -145,6 +155,34 @@ test("exports opaque native-slot PNGs with bound inputs and geometry in every ap
     }
   }
 }, 60000);
+
+test("exports only the supplied slot and lists only it in the manifest", async () => {
+  const { dir, slots } = await inputs();
+  const slot = spec.slots[0]!;
+  await run(dir, { [slot.id]: slots[slot.id]! });
+  expect((await readdir(join(dir, "en-US"))).sort()).toEqual([`${slot.id}.png`, "manifest.json"]);
+  const bytes = await readFile(join(dir, "en-US", `${slot.id}.png`));
+  expect(await sharp(bytes).metadata()).toMatchObject({
+    width: slot.width,
+    height: slot.height,
+    channels: 3,
+    hasAlpha: false,
+  });
+  const manifest = JSON.parse(await readFile(join(dir, "en-US/manifest.json"), "utf8"));
+  expect(manifest.exports).toHaveLength(1);
+  expect(manifest.exports[0]).toMatchObject({
+    slot: slot.id,
+    sha256: hash(bytes),
+    capture: slots[slot.id],
+    frame: "frameless",
+  });
+});
+
+test("refuses an empty slot set before creating an output directory", async () => {
+  const { dir } = await inputs();
+  await expect(run(dir, {})).rejects.toThrow(/slots must contain at least one capture/);
+  await expect(stat(join(dir, "en-US"))).rejects.toMatchObject({ code: "ENOENT" });
+});
 
 test("refuses a layout reference instead of a native-pixel capture", async () => {
   const { dir, slots } = await inputs();

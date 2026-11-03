@@ -124,6 +124,8 @@ knownKeys(config, ["slots"], "input");
 
 const slots = object(config.slots, "slots");
 
+if (Object.keys(slots).length === 0) throw new Error("slots must contain at least one capture");
+
 for (const id of Object.keys(slots)) {
   if (!spec.slots.some((slot) => slot.id === id))
     throw new Error(
@@ -410,7 +412,7 @@ async function frameless(slot: Slot, capture: Buffer, box: Box) {
   };
 }
 
-for (const slot of spec.slots) {
+for (const slot of spec.slots.filter((slot) => Object.hasOwn(slots, slot.id))) {
   const capture = object(slots[slot.id], `${slot.id} capture`);
   knownKeys(capture, ["file", "sha256", "provenance", "frame"], "capture");
   const provenance = object(capture.provenance, `${slot.id} provenance`);

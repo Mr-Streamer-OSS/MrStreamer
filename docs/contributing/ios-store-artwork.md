@@ -31,8 +31,12 @@ Read independently on **3 November 2026**:
   latest OS with full network, Wi-Fi and battery indicators. Secure media rights.
 
 Frame use requires an inspected official pose, explicit cutout geometry and an inspected corner radius, a source
-URL and terms source on HTTPS apple.com hosts without credentials, query or fragment and a non-empty local licence record. No Apple bezel DMG was downloaded
-or inspected for this implementation. A supplied frame is scaled uniformly,
+URL and terms source on HTTPS apple.com hosts without credentials, query or fragment and a non-empty local licence record. The inspected official bezel DMGs bundle
+the Apple Design Resources licence LYL142 (06/21/2023). Section 2A grants use
+"solely for creating mock-ups of user interfaces"; section 2B prohibits other
+artwork or work product except as expressly permitted. Permission for App Store
+marketing composites is not established. Framed exports wait for that permission
+to be confirmed; use the frameless fallback until then. A supplied frame is scaled uniformly,
 never rotated or cropped; the screen fits its cutout. The frameless fallback is a
 square-corner capture with a 1-point #2C2C2E border, without simulated hardware.
 The generator checks geometry and metadata, not the truth of an operator's
@@ -52,7 +56,15 @@ From this checkout, with ffmpeg and rsvg-convert installed:
 node apps/ios/scripts/marketing-fixture.ts --cache-dir .local/marketing-media --port 8795
 ```
 
-Tunnel that port to the allocated simulator host. Build the candidate with
+Tunnel that port to the allocated simulator host. Before `expo prebuild` or a
+native build, build the FFmpeg libraries as required by `apps/ios/README.md`,
+running from `apps/ios` on that host:
+
+```sh
+scripts/build-ffmpeg.sh ios
+```
+
+Then build the candidate with
 `EXPO_PUBLIC_TMDB_KEY=fixture` and
 `EXPO_PUBLIC_TMDB_API=http://127.0.0.1:8795/tmdb/3`. Sign into the loopback fixture
 using the invented login documented in that script. Keep credentials out of the
@@ -80,7 +92,8 @@ its own install; this Node tool resolves Sharp directly from the desktop install
 without adding an iOS dependency. Put inputs, optional frames, licence records and
 exports in this checkout's gitignored `.local/`, creating it first with
 `mkdir -p .local`. Relative input paths resolve
-beside the input JSON. Create one input file per language, with all three slots:
+beside the input JSON. Create one input file per language, with a non-empty
+subset of the spec slots. Only supplied slots are generated and listed in the manifest:
 
 ```json
 {
@@ -100,9 +113,10 @@ beside the input JSON. Create one input file per language, with all three slots:
 }
 ```
 
-Add `duo-inner` and `duo-outer` with their own captures and records. The abbreviated
-example deliberately cannot export. Omit `frame` for the approved frameless
-fallback. To use an inspected official frame, add this object to that slot's
+The example exports only `ipad-13` once its capture and provenance values are
+filled in. Add `duo-inner` and `duo-outer` when their own captures and records are
+available; leave unavailable slots out of the input. Omit `frame` for the approved
+frameless fallback. After permission is confirmed, to use an inspected official frame, add this object to that slot's
 capture record, replacing every example value with the inspected asset's facts:
 
 ```json
@@ -133,17 +147,17 @@ node apps/ios/scripts/store-artwork.ts \
   --output .local/store-candidates-en-US --locale en-US
 ```
 
-Unknown input keys and slot IDs are rejected, including medium iPhone inputs.
+Empty slot sets, unknown input keys and unknown slot IDs are rejected, including medium iPhone inputs.
 Capture filenames in the manifest are relative to the input JSON; frame records
 contain only source/terms URLs, cutout geometry, corner radius, opaque share, hashes and native size.
 
 Supported locale arguments: `en-US`, `nl-NL`, `fr-FR`, `de-DE`, `es-ES`.
 The output parent must already exist and the output directory must be new.
-Validation and rendering of every slot finish before that directory is created.
+Validation and rendering of every supplied slot finish before that directory is created.
 A failed write raises an error; remove only that incomplete candidate directory
 before retrying. Existing candidates are never overwritten.
 
-Each batch contains three opaque RGB PNGs and `manifest.json`, recording output
+Each batch contains one opaque RGB PNG per supplied slot and `manifest.json`, recording output
 hashes, source capture hashes and provenance, frame source/terms and licence hash
 (or `frameless`), layout, screen placement, translated headline and its point
 size, input JSON hash, generator source SHA-256, Node version, Inter hash/licence and
