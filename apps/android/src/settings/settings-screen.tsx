@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
-import { useRef, useState, useSyncExternalStore, type ComponentRef } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from "react";
 import {
   AccessibilityInfo,
   Linking,
@@ -72,6 +72,14 @@ export function SettingsScreen() {
   useInterfaceLanguage();
   const languageUnavailable = useLanguageAvailability();
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const removingIds = useRef(new Set<string>());
   const { show } = useLocalSearchParams<{ show?: string }>();
   const segments: readonly string[] = useSegments();
@@ -128,10 +136,21 @@ export function SettingsScreen() {
 
     if (messages.length) {
       const text = messages.join(" ");
-      const now = sources.state.get();
 
-      if (now.kind === "ready" && now.sources.length === 0)
-        ToastAndroid.show(text, ToastAndroid.LONG);
+      if (!mounted.current) {
+        const important =
+          result.erase === "statistics-not-cleared"
+            ? t("The provider was removed, but its statistics could not be cleared.")
+            : result.erase === "refused"
+              ? t("Couldn't remove the provider.")
+              : result.erase === "partial"
+                ? t("The login is erased, but the provider is still listed.")
+                : t("Playback may still be active.");
+
+        ToastAndroid.show(important, ToastAndroid.LONG);
+
+        return;
+      }
 
       if (result.erase === "removed") notify({ text });
       else notify({ text, action: { label: t("Try again"), run: () => void remove(source) } });
@@ -190,7 +209,10 @@ export function SettingsScreen() {
             value={
               languageUnavailable ? t("Unavailable. Try again.") : languageName(languageChoice())
             }
-            onPress={() => (languageUnavailable ? retryLanguage() : setOpen({ kind: "language" }))}
+            onPress={() => {
+              if (languageUnavailable) retryLanguage();
+              setOpen({ kind: "language" });
+            }}
           />
         </Section>
         <Section name={t("Providers")}>
@@ -240,7 +262,7 @@ export function SettingsScreen() {
               const configure = () => {
                 if (!statistics.configure(choice))
                   notify({
-                    text: t("They can't be saved on this phone right now."),
+                    text: t("Your statistics choice can't be saved on this phone right now."),
                     action: { label: t("Try again"), run: configure },
                   });
               };

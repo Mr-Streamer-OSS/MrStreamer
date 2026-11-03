@@ -1,7 +1,7 @@
 # Android notices
 
 The manifest combines exactly the packages owning sources in Metro's Android release bundle
-and Maven coordinates resolved by Gradle's release runtime classpath, including arrow-only
+plus autolinked Gradle projects in the release report and Maven coordinates resolved by Gradle's release runtime classpath, including arrow-only
 coordinates such as Hermes. Tooling and optional packages appear only if Metro bundles their
 sources. The app and bundled workspace packages use the Android app version and repository
 licence. Settings imports only the small `summary.json`; the licences route loads full notices.
@@ -18,8 +18,12 @@ cd ../../..
 python3 apps/android/scripts/licenses.py .local/android-license-bundle/_expo/static/js/android/*.map
 ```
 
-The generator records the map's source paths in `bundle-sources.json` for reproducible package
-coverage checks against the installed lockfile versions. Review and commit that input, the
+The generator reads every supplied map and records their source paths in `bundle-sources.json`,
+the resolved JavaScript name@version list in `bundle-components.json`, and shipped autolinked
+projects in `native-projects.json`. Coverage tests check these inputs against the Android lockfile
+and Gradle report without an Android install. JavaScript versions come from Metro's pnpm path
+segment, or the lockfile importer for top-level node_modules paths. The summary counts each
+component once; native counts components not already included by JavaScript. Review and commit that input, the
 native report, manifest and summary when dependencies or bundled code change. Bundling and
 dependency resolution do not establish installed Android or runtime qualification.
 

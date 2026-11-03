@@ -190,12 +190,19 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     return now.kind === "ready" ? now.sources : [];
   };
 
+  const authorities = new WeakMap<CatalogueReader, Authority>();
+
   function readerOf(authority: Authority): CatalogueReader & Partial<OnDemandReader> {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
 
-    return authority.kind === "xtream"
-      ? xtreamProvider(authority, { ...options, inTasks })
-      : playlistReader(authority.link, options);
+    const reader =
+      authority.kind === "xtream"
+        ? xtreamProvider(authority, { ...options, inTasks })
+        : playlistReader(authority.link, options);
+
+    authorities.set(reader, authority);
+
+    return reader;
   }
 
   function setChannels(id: string, channels: Channels) {
@@ -362,11 +369,18 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       // login left behind no list names, and the next launch erases it.
       const previous = known ? await platform.credentials.read(saved.id).catch(() => null) : null;
 
-      const undo = () =>
-        (previous
-          ? platform.credentials.write(saved.id, previous)
-          : platform.credentials.remove(saved.id)
+      const undo = () => {
+        const current = readers.current(saved.id);
+        const restore = current && current !== replacing ? authorities.get(current) : previous;
+
+        return (
+          restore
+            ? platform.credentials.write(saved.id, restore)
+            : platform.credentials.remove(saved.id)
         ).catch(() => {});
+      };
+
+      if (signal?.aborted || !replacementStands()) return { kind: "cancelled" };
 
       try {
         await platform.credentials.write(saved.id, authority);
@@ -375,7 +389,8 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       }
 
       if (!replacementStands()) {
-        await platform.credentials.remove(saved.id).catch(() => {});
+        if (listed().some((source) => source.id === saved.id)) await undo();
+        else await platform.credentials.remove(saved.id).catch(() => {});
 
         return { kind: "cancelled" };
       }

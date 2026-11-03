@@ -24,6 +24,7 @@ const scenario = vi.hoisted(() => {
     toasts: [] as string[],
     removeLast: false,
     writes: [] as string[],
+    releaseCalls: 0,
     releaseWait: null as Promise<void> | null,
   };
 });
@@ -143,7 +144,7 @@ vi.mock("../src/player/instance.ts", () => ({
     release: async () => {
       await scenario.releaseWait;
 
-      return scenario.unconfirmed
+      return scenario.unconfirmed && scenario.releaseCalls++ === 0
         ? [
             {
               attempt: "attempt",
@@ -243,6 +244,8 @@ beforeEach(() => {
   scenario.modalBack = null;
   scenario.eraseRefused = false;
   scenario.unconfirmed = false;
+  scenario.releaseCalls = 0;
+  scenario.toasts = [];
 });
 
 afterEach(() => {
@@ -363,28 +366,79 @@ it("reports unavailable language rather than a saved System default and retries 
   );
 });
 
-it("reports last-provider release and statistics failures outside the departing Settings stack", async () => {
-  setLanguage({ locale: "en-US", formats: "en-US" });
-  const { statistics } = await import("../src/telemetry/index.ts");
-  act(() => {
+it.each([
+  [false, true],
+  [true, true],
+  [true, false],
+])(
+  "uses one truthful removal notice surface, settings gone=%s statistics refused=%s",
+  async (gone, statisticsRefused) => {
+    setLanguage({ locale: "en-US", formats: "en-US" });
+    const { statistics } = await import("../src/telemetry/index.ts");
+    const { sources } = await import("../src/bootstrap/sources.ts");
+    sources.state.set({
+      kind: "ready",
+      sources: [
+        {
+          id: "xtream:private-id",
+          kind: "xtream",
+          label: "tv.example.invalid",
+          channels: { kind: "ready", rows: [] },
+        },
+      ],
+    });
     statistics.configure(true);
-  });
-  // Hold an unsent identity so clearing it requires a real write.
-  statistics.consent.replace({
-    choice: "on",
-    installationId: "11111111-1111-4111-8111-111111111111",
-    pending: [],
-  });
-  scenario.refused.add("statistics.json");
-  scenario.removeLast = true;
-  scenario.unconfirmed = true;
+    statistics.consent.replace({
+      choice: "on",
+      installationId: "11111111-1111-4111-8111-111111111111",
+      pending: [],
+    });
+
+    if (statisticsRefused) scenario.refused.add("statistics.json");
+    scenario.removeLast = true;
+    scenario.unconfirmed = true;
+    let finish!: () => void;
+    scenario.releaseWait = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "tv.example.invalid");
+    press(shown, "Remove");
+    press(shown, "Remove");
+
+    if (gone)
+      act(() => {
+        root?.unmount();
+        root = null;
+      });
+    finish();
+    await act(async () => {});
+    scenario.releaseWait = null;
+
+    const short = statisticsRefused
+      ? "The provider was removed, but its statistics could not be cleared."
+      : "Playback may still be active.";
+
+    if (gone) expect(scenario.toasts).toEqual([short]);
+    else {
+      expect(scenario.toasts).toEqual([]);
+      expect(shown.textContent).toContain(short);
+      expect(shown.textContent).toContain("still open after ten seconds");
+    }
+  },
+);
+
+it("repairs an unreadable language file by choosing a valid language", async () => {
+  const { retryLanguage } = await import("../src/settings/language.ts");
+  scenario.files.set("language.json", "broken");
+  act(() => retryLanguage());
+  setLanguage({ locale: "en-US", formats: "en-US" });
   const shown = show(createElement(SettingsScreen));
-  press(shown, "tv.example.invalid");
-  press(shown, "Remove");
-  press(shown, "Remove");
-  await act(async () => {});
-  expect(scenario.toasts.at(-1)).toContain("still open after ten seconds");
-  expect(scenario.toasts.at(-1)).toContain("statistics could not be cleared");
+  expect(shown.textContent).toContain("Unavailable. Try again.");
+  press(shown, "Interface language");
+  press(shown, "English");
+  expect(JSON.parse(scenario.files.get("language.json")!)).toEqual({ choice: "en-US" });
+  expect(shown.textContent).not.toContain("Unavailable. Try again.");
 });
 
 it("seeds the source count at mount and discards only for a later transition to zero", async () => {
@@ -460,7 +514,9 @@ it("offers Try again for a refused Off and retries Off rather than enabling stat
   press(shown, "Share basic usage statistics");
   expect(statistics.consent.get().choice).toBe("on");
   expect(statistics.consent.enabled).toBe(false);
-  expect(shown.textContent).toContain("They can't be saved on this phone right now.");
+  expect(shown.textContent).toContain(
+    "Your statistics choice can't be saved on this phone right now.",
+  );
   scenario.refused.clear();
   press(shown, "Try again");
   expect(statistics.consent.get().choice).toBe("off");

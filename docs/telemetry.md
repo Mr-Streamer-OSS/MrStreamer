@@ -203,7 +203,7 @@ are `os: "android"`, `os_major` (the numeric Android release when available), `a
 `app_build` (the Android version code). Capture disables person profiles and GeoIP.
 
 Android sends `feature_opened` for Live TV and Settings, and `playlist_added` and
-`playlist_removed` when the observed provider count changes. It sends no viewing details,
+`playlist_removed` when the observed provider count changes and remains above zero. The final removal clears statistics without sending a removal event. It sends no viewing details,
 provider addresses, logins, titles or search text. Off cancels delivery and clears the identity
 and outbox. A refused Off remains pending, blocks delivery and is retried before later delivery
 or saves; a separate revocation marker carries that retry across launches when writable.

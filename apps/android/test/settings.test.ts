@@ -37,6 +37,10 @@ it("uses complete Dutch settings copy", () => {
   setLanguage({ locale: "nl-NL", formats: "nl-NL" });
   expect(t("Interface language")).toBe("Taal van de interface");
   expect(t("Diagnostics")).toBe("Diagnostiek");
+  expect(t("Unavailable. Try again.")).toBe("Niet beschikbaar. Probeer het opnieuw.");
+  expect(t("Your statistics choice can't be saved on this phone right now.")).toBe(
+    "Je keuze voor statistieken kan nu niet op deze telefoon worden bewaard.",
+  );
 });
 
 it("diagnostics only include anonymous kinds and counts despite private input", () => {
@@ -222,6 +226,8 @@ it.each(["removed", "partial", "refused"] as const)(
       await waiting;
       events.push("released");
 
+      if (events.filter((event) => event === "release").length > 1) return [];
+
       return [
         {
           attempt: "attempt",
@@ -240,6 +246,12 @@ it.each(["removed", "partial", "refused"] as const)(
         remove: async () => {
           events.push("erase");
 
+          if (erase === "partial")
+            state.set({
+              kind: "ready",
+              sources: [{ ...source, channels: { ...source.channels } }],
+            });
+
           if (erase !== "removed") throw new Error("erase refused");
           state.set({ kind: "ready", sources: [] });
         },
@@ -253,7 +265,7 @@ it.each(["removed", "partial", "refused"] as const)(
     finish();
     expect(await pending).toEqual({
       erase,
-      release: Array.from({ length: 2 }, () => ({
+      release: Array.from({ length: 1 }, () => ({
         attempt: "attempt",
         hold: { kind: "source", sourceId: "source" },
         outcome: "unconfirmed",
@@ -342,7 +354,15 @@ it("releases a play started during removal's wait and deduplicates removal", asy
     await wait;
     playing = false;
 
-    return [];
+    return release.mock.calls.length === 1
+      ? [
+          {
+            attempt: "first",
+            hold: { kind: "source" as const, sourceId: "source" },
+            outcome: "connections-closed" as const,
+          },
+        ]
+      : [];
   });
 
   const remove = vi.fn(async () => {
@@ -504,40 +524,177 @@ it("inventories exactly the release bundle packages and resolved native coordina
   const locked = [...packages.matchAll(/^  '?([^\s']+@[^\s']+)'?:$/gm)].map((match) => match[1]!);
   expect(locked.length).toBeGreaterThan(0);
   const { default: sources } = await import("../licenses/bundle-sources.json");
-  const { dirname, join, resolve } = await import("node:path");
-  const { existsSync } = await import("node:fs");
-  const { fileURLToPath } = await import("node:url");
-  const app = resolve(fileURLToPath(new NodeURL("..", import.meta.url)));
-  const repository = resolve(app, "../..");
   const { default: config } = await import("../app.json");
-  const bundled = new Set<string>();
+  const { default: bundled } = await import("../licenses/bundle-components.json");
+  const { default: projects } = await import("../licenses/native-projects.json");
+  const { default: summary } = await import("../licenses/summary.json");
+  expect(summary.count).toBe(manifest.length);
+  const importer = lock.split("\npackages:\n")[0]!;
+  const resolved = new Set<string>();
 
   for (const source of sources) {
     if (source.startsWith("\0")) continue;
-    let folder = dirname(join(source.startsWith("/packages/") ? repository : app, source));
+    const segment = /\/node_modules\/\.pnpm\/([^/]+)\/node_modules\//.exec(source)?.[1];
+    let key: string;
 
-    while (
-      !existsSync(join(folder, "package.json")) ||
-      !JSON.parse(await readFile(join(folder, "package.json"), "utf8")).name
-    ) {
-      const parent = dirname(folder);
+    if (segment) key = segment.split("_")[0]!.replaceAll("+", "/");
+    else if (source.startsWith("/node_modules/")) {
+      const name = /^\/node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(source)![1]!;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-      if (parent === folder) throw new Error(`No package for ${source}`);
-      folder = parent;
+      const version = new RegExp(
+        `      '?${escaped}'?:\\n        specifier: [^\\n]+\\n        version: ([^\\n(]+)`,
+      ).exec(importer)?.[1];
+
+      expect(version, source).toBeDefined();
+      key = `${name}@${version}`;
+    } else {
+      const workspace = /^\/packages\/([^/]+)\//.exec(source)?.[1];
+      const path = workspace ? `../../../packages/${workspace}/package.json` : "../package.json";
+
+      const metadata = JSON.parse(await readFile(new NodeURL(path, import.meta.url), "utf8")) as {
+        name: string;
+      };
+
+      key = `${metadata.name}@${config.expo.version}`;
     }
 
-    const metadata = JSON.parse(await readFile(join(folder, "package.json"), "utf8")) as {
-      name: string;
-      version?: string;
-    };
-
-    const workspace = folder === app || folder.startsWith(join(repository, "packages") + "/");
-    const key = `${metadata.name}@${workspace ? config.expo.version : metadata.version}`;
-
-    if (!workspace) expect(locked, source).toContain(key);
-    bundled.add(key);
+    if (source.includes("/node_modules/")) expect(locked, source).toContain(key);
+    resolved.add(key);
   }
 
-  expect(bundled.size).toBeGreaterThan(0);
+  expect([...resolved].sort()).toEqual(bundled);
+  const shipped = new Set([...report.matchAll(/--- project :([^\s]+)/g)].map((match) => match[1]!));
+  expect(Object.keys(projects).sort()).toEqual([...shipped].sort());
+
+  for (const key of Object.values(projects))
+    if (!key.startsWith("mrstreamer-android@")) expect(locked).toContain(key);
+
+  for (const key of Object.values(projects)) native.add(key);
+  expect(bundled.length).toBeGreaterThan(0);
   expect([...entries].sort()).toEqual([...new Set([...native, ...bundled])].sort());
 });
+
+it.each(["on", "startup", "clear-refused"] as const)(
+  "finishes pending revocation truthfully: %s",
+  (mode) => {
+    let pending = mode === "startup";
+    let refuseRecord = false;
+
+    const owner = androidAnalytics({
+      load: () => null,
+      save: () => !refuseRecord,
+      revocation: {
+        load: () => pending,
+        save: (value) => {
+          if (mode === "clear-refused" && !value) return false;
+          pending = value;
+
+          return true;
+        },
+      },
+      uuid: () => "11111111-1111-4111-8111-111111111111",
+      build: androidBuild("16", "0.1.0", "1"),
+      transport: null,
+    });
+
+    if (mode === "startup") {
+      expect(pending).toBe(false);
+
+      return;
+    }
+
+    if (mode === "clear-refused") {
+      expect(owner.configure(false)).toBe(true);
+      expect(owner.consent.get().choice).toBe("off");
+
+      return;
+    }
+
+    owner.configure(true);
+    refuseRecord = true;
+    expect(owner.configure(false)).toBe(false);
+    refuseRecord = false;
+    expect(owner.configure(true)).toBe(true);
+    expect(owner.consent.enabled).toBe(true);
+  },
+);
+
+it("does not claim an invalid login was erased when deletion was refused", async () => {
+  const recovery = providerRecovery(
+    {
+      state: store<Sources>({
+        kind: "ready",
+        sources: [
+          {
+            id: "source",
+            kind: "m3u",
+            label: "example.invalid",
+            channels: { kind: "failed", error: { kind: "invalid-login" } },
+          },
+        ],
+      }),
+      restore: async () => {},
+      connect: async () => ({ kind: "cancelled" }),
+      retry: () => {},
+      remove: async () => {
+        throw Error("refused");
+      },
+    },
+    () => true,
+    { release: async () => [] },
+  );
+
+  expect((await recovery.remove("source")).erase).toBe("refused");
+});
+
+it.each([false, true])(
+  "drains a play admitted during the second release, bounded=%s",
+  async (bounded) => {
+    let playing = true;
+    let calls = 0;
+
+    const remove = vi.fn(async () => {
+      expect(playing).toBe(false);
+    });
+
+    const recovery = providerRecovery(
+      {
+        state: store<Sources>({ kind: "ready", sources: [] }),
+        restore: async () => {},
+        connect: async () => ({ kind: "cancelled" }),
+        retry: () => {},
+        remove,
+      },
+      () => true,
+      {
+        release: async () => {
+          calls++;
+
+          if (!playing) return [];
+          playing = bounded || calls < 3;
+
+          return [
+            {
+              attempt: String(calls),
+              hold: { kind: "source", sourceId: "source" },
+              outcome: "connections-closed",
+            },
+          ];
+        },
+      },
+    );
+
+    const result = await recovery.remove("source");
+
+    if (bounded) {
+      expect(result.erase).toBe("refused");
+      expect(remove).not.toHaveBeenCalled();
+      expect(calls).toBeLessThanOrEqual(5);
+    } else {
+      expect(result.erase).toBe("removed");
+      expect(remove).toHaveBeenCalledOnce();
+      expect(result.release).toHaveLength(3);
+    }
+  },
+);

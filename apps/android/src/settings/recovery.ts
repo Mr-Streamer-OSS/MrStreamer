@@ -40,19 +40,35 @@ export function providerRecovery(
       hold.kind === "source" && hold.sourceId === id;
 
     try {
-      release.push(...(await player.release(matches)));
-      // Playback can start while the first release waits for its readers.
-      release.push(...(await player.release(matches)));
+      // Drain holds admitted while an earlier release was waiting, without an endless loop.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const released = await player.release(matches);
+        release.push(...released);
+
+        if (released.length === 0) break;
+
+        if (attempt === 4) return { erase: "refused", release };
+      }
     } catch {
       return { erase: "refused", release };
     }
+
+    const before = listed(id);
 
     try {
       await owner.remove(id);
     } catch {
       const source = listed(id);
 
-      return { erase: source && needsLogin(source) ? "partial" : "refused", release };
+      return {
+        erase:
+          source?.channels !== before?.channels &&
+          source?.channels.kind === "failed" &&
+          source.channels.error.kind === "needs-secret"
+            ? "partial"
+            : "refused",
+        release,
+      };
     }
 
     const now = owner.state.get();

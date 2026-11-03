@@ -58,7 +58,7 @@ export default function ConsentPrompt() {
 
     if (!statistics.configure(share))
       notify({
-        text: t("They can't be saved on this phone right now."),
+        text: t("Your statistics choice can't be saved on this phone right now."),
         action: { label: t("Try again"), run: () => answer(share) },
       });
   };

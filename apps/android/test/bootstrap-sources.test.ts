@@ -652,3 +652,34 @@ it("re-enters a provider with changed account details into the same source", asy
   await restarted.restore();
   expect((await settled(restarted)).map(({ id }) => id)).toEqual([first.id]);
 });
+
+it("keeps the winning login when two re-entries overlap during a credential write", async () => {
+  const phone = newPhone();
+  const owner = launch(phone);
+  await owner.restore();
+  const first = await owner.connect(xtream());
+
+  if (first.kind !== "connected") throw Error("fixture");
+  await settled(owner);
+  let started!: () => void;
+  let finish!: () => void;
+
+  const waiting = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+
+  const asked = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+
+  onTestFinished(() => finish());
+  phone.hold = { started, until: waiting };
+  const stale = owner.connect(xtream(), undefined, first.id);
+  await asked;
+  phone.hold = null;
+  expect(await owner.connect(m3u(), undefined, first.id)).toMatchObject({ kind: "connected" });
+  const winner = phone.sealed.get(first.id);
+  finish();
+  expect(await stale).toEqual({ kind: "cancelled" });
+  expect(phone.sealed.get(first.id)).toEqual(winner);
+});

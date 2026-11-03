@@ -49,10 +49,24 @@ def autolink(command):
 
 # Metro uses app-relative paths for npm modules and repository-relative paths for workspaces.
 # Virtual polyfills have no package owner. Every other source must resolve to a real package.
-source_map = json.loads(Path(sys.argv[1]).read_text())
-sources = sorted(set(source_map['sources']))
+sources = sorted({source for filename in sys.argv[1:] for source in json.loads(Path(filename).read_text())['sources']})
 root = APP.parents[1]
 folders = set()
+js_components = set()
+lock = (APP / 'pnpm-lock.yaml').read_text()
+importers = lock.split('\npackages:\n')[0]
+
+def component_for(source, folder):
+    segment = re.search(r'/node_modules/\.pnpm/([^/]+)/node_modules/', source)
+    if segment:
+        return segment[1].split('_')[0].replace('+', '/')
+    metadata = json.loads((folder / 'package.json').read_text())
+    if '/node_modules/' in source:
+        name = metadata['name']
+        entry = re.search(r'      [\"\']?' + re.escape(name) + r'[\"\']?:\n        specifier: [^\n]+\n        version: ([^\n(]+)', importers)
+        if not entry: raise RuntimeError(f'No lockfile importer for {source}')
+        return name + '@' + entry[1]
+    return metadata['name'] + '@' + json.loads((APP / 'app.json').read_text())['expo']['version']
 for source in sources:
     if source.startswith('\x00'): continue
     path = (root if source.startswith('/packages/') else APP) / source.lstrip('/')
@@ -61,21 +75,38 @@ for source in sources:
         if folder == folder.parent: raise RuntimeError(f'No package for bundled source: {source}')
         folder = folder.parent
     folders.add(folder)
+    js_components.add(component_for(source, folder))
+components = []
+local_repositories = {}
+notice_sources = json.loads((DEST / 'notice-sources.json').read_text())
+# Native Expo modules can supply Maven artefacts even when their JS is not bundled.
+native_projects = {}
+release_report = (DEST / 'releaseRuntimeClasspath.txt').read_text()
+shipped_projects = set(re.findall(r'--- project :([^\s]+)', release_report))
+for module in autolink('resolve')['modules']:
+    for project in module['projects']:
+        folder = Path(project['sourceDir']).parent
+        if project['name'] in shipped_projects:
+            if not (folder / 'package.json').is_file(): folder = APP
+            folders.add(folder)
+            metadata = json.loads((folder / 'package.json').read_text())
+            native_projects[project['name']] = metadata['name'] + '@' + (json.loads((APP / 'app.json').read_text())['expo']['version'] if folder == APP else metadata['version'])
+        local = folder / 'local-maven-repo'
+        if local.is_dir(): local_repositories[local.as_uri() + '/'] = f"https://www.npmjs.com/package/{module['packageName']}"
+for name, dependency in autolink('react-native-config')['dependencies'].items():
+    project = name.removeprefix('@').replace('/', '_')
+    if project not in shipped_projects: continue
+    folder = Path(dependency['root'])
+    folders.add(folder)
+    metadata = json.loads((folder / 'package.json').read_text())
+    native_projects[project] = name + '@' + metadata['version']
+if set(native_projects) != shipped_projects: raise RuntimeError('Unresolved Gradle projects')
 js = {}
 for folder in sorted(folders):
     metadata = json.loads((folder / 'package.json').read_text())
     licence = metadata.get('license', 'See notice')
     if isinstance(licence, dict): licence = licence.get('type', 'See notice')
     js.setdefault(licence, []).append(dict(name=metadata['name'], paths=[str(folder)]))
-components = []
-local_repositories = {}
-notice_sources = json.loads((DEST / 'notice-sources.json').read_text())
-# Native Expo modules can supply Maven artefacts even when their JS is not bundled.
-for module in autolink('resolve')['modules']:
-    for project in module['projects']:
-        folder = Path(project['sourceDir']).parent
-        local = folder / 'local-maven-repo'
-        if local.is_dir(): local_repositories[local.as_uri() + '/'] = f"https://www.npmjs.com/package/{module['packageName']}"
 app_version = json.loads((APP / 'app.json').read_text())['expo']['version']
 for licence, packages in js.items():
     for package in packages:
@@ -126,7 +157,7 @@ for licence, packages in js.items():
                 if value: text = value.decode('utf8', errors='replace')
             if not text: raise RuntimeError(f"No JS notice: {package['name']}")
             components.append(dict(name=package['name'], version=metadata['version'], licence=licence,
-                                   source=(repository_url(repository) if repository else '') or package.get('homepage') or f"https://www.npmjs.com/package/{package['name']}", notice=text))
+                                   source=(repository_url(repository) if repository else '') or metadata.get('homepage') or f"https://www.npmjs.com/package/{package['name']}", notice=text))
 
 coordinates = set()
 for line in (DEST / 'releaseRuntimeClasspath.txt').read_text().splitlines():
@@ -225,6 +256,9 @@ with ThreadPoolExecutor(max_workers=12) as pool:
 unique = {(item['name'], item['version']): item for item in components}
 manifest = sorted(unique.values(), key=lambda item: (item['name'].lower(), item['version']))
 (DEST / 'bundle-sources.json').write_text(json.dumps(sources, indent=2) + '\n')
+(DEST / 'bundle-components.json').write_text(json.dumps(sorted(js_components), indent=2) + '\n')
+(DEST / 'native-projects.json').write_text(json.dumps(native_projects, indent=2) + '\n')
 (DEST / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-(DEST / 'summary.json').write_text(json.dumps({'count': len(manifest), 'native': len(coordinates)}) + '\n')
-print(f"Wrote {len(manifest)} components ({len(coordinates)} native)")
+native_count = len(unique.keys() - {tuple(key.rsplit('@', 1)) for key in js_components})
+(DEST / 'summary.json').write_text(json.dumps({'count': len(manifest), 'native': native_count}) + '\n')
+print(f"Wrote {len(manifest)} components ({native_count} native)")

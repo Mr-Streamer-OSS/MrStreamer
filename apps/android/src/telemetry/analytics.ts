@@ -48,18 +48,18 @@ export function androidAnalytics(ports: {
     revocationPending = true;
   }
 
-  if (revocationPending) consent.configure(false);
+  if (revocationPending) revoke();
 
   function revoke() {
     revocationPending = true;
-    const marked = ports.revocation?.save(true) ?? true;
+    ports.revocation?.save(true);
     const held = consent.configure(false);
 
-    if (!held || !marked) return false;
+    if (!held) return false;
     const cleared = ports.revocation?.save(false) ?? true;
     revocationPending = !cleared;
 
-    return cleared;
+    return true;
   }
 
   let request: AbortController | null = null;
@@ -146,7 +146,8 @@ export function androidAnalytics(ports: {
     consent,
     configure(enabled: boolean) {
       stop();
-      const held = !enabled || revocationPending ? revoke() : consent.configure(true);
+      const revoked = !enabled || revocationPending ? revoke() : true;
+      const held = enabled ? revoked && !revocationPending && consent.configure(true) : revoked;
 
       if (held && enabled) void pump();
 

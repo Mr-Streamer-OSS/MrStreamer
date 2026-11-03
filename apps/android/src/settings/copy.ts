@@ -3,6 +3,10 @@ import { catalogue } from "@mrstreamer/mobile/language";
 /** Settings, its sheets and dialogs, the statistics choice, Diagnostics and Licences. */
 export const t = catalogue(
   {
+    "Couldn't remove the provider.": "Couldn't remove the provider.",
+    "The login is erased, but the provider is still listed.":
+      "The login is erased, but the provider is still listed.",
+    "Playback may still be active.": "Playback may still be active.",
     Settings: "Settings",
     "Removing…": "Removing…",
     "Unavailable. Try again.": "Unavailable. Try again.",
@@ -41,6 +45,8 @@ export const t = catalogue(
       "Counts app use, the screens you open and provider actions.",
     "No viewing history, searches or provider details. Off until you choose to share.":
       "No viewing history, searches or provider details. Off until you choose to share.",
+    "Your statistics choice can't be saved on this phone right now.":
+      "Your statistics choice can't be saved on this phone right now.",
     "They can't be saved on this phone right now.": "They can't be saved on this phone right now.",
     "Privacy policy": "Privacy policy",
     Diagnostics: "Diagnostics",
@@ -64,9 +70,13 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      "Couldn't remove the provider.": "Kon de provider niet verwijderen.",
+      "The login is erased, but the provider is still listed.":
+        "De login is gewist, maar de provider staat nog in de lijst.",
+      "Playback may still be active.": "Het afspelen kan nog actief zijn.",
       Settings: "Instellingen",
       "Removing…": "Verwijderen…",
-      "Unavailable. Try again.": "Niet beschikbaar. Opnieuw proberen.",
+      "Unavailable. Try again.": "Niet beschikbaar. Probeer het opnieuw.",
       General: "Algemeen",
       "Interface language": "Taal van de interface",
       "System default ({language})": "Systeem ({language})",
@@ -104,6 +114,8 @@ export const t = catalogue(
         "Telt het gebruik van de app, de schermen die je opent en provideracties.",
       "No viewing history, searches or provider details. Off until you choose to share.":
         "Geen kijkgeschiedenis, zoekopdrachten of providergegevens. Uit tot je kiest om te delen.",
+      "Your statistics choice can't be saved on this phone right now.":
+        "Je keuze voor statistieken kan nu niet op deze telefoon worden bewaard.",
       "They can't be saved on this phone right now.":
         "Ze kunnen nu niet op deze telefoon worden bewaard.",
       "Privacy policy": "Privacybeleid",

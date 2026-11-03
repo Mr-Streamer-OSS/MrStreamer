@@ -74,6 +74,9 @@ runs:
       with:
         node-version: 24
         cache: pnpm
+        cache-dependency-path: |
+          pnpm-lock.yaml
+          apps/android/pnpm-lock.yaml
     - id: identity
       shell: bash
       env:
@@ -110,7 +113,7 @@ runs:
         if [[ -f apps/android/package.json ]]; then
           export PATH="$PWD/node_modules/.bin:$PATH"
           cd apps/android
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --ignore-scripts
           pnpm exec tsc --noEmit -p .
         fi
     - name: Workflows
