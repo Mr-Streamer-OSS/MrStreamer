@@ -417,8 +417,8 @@ function hlsEngine(
        * Whether this player decodes `level`, as hls.js's capability check says. It is advisory:
        * one that fails or doesn't answer within a second counts as yes.
        */
-      const decodes = (level: (typeof hls.levels)[number]): Promise<boolean> => {
-        if (level.supportedResult) return Promise.resolve(level.supportedResult.supported);
+      async function decodes(level: (typeof hls.levels)[number]): Promise<boolean> {
+        if (level.supportedResult) return level.supportedResult.supported;
         let timer: ReturnType<typeof setTimeout> | undefined;
         return Promise.race([
           hls.getMediaDecodingInfo(level).then(
@@ -429,10 +429,10 @@ function hlsEngine(
             timer = setTimeout(() => resolve(true), 1000);
           }),
         ]).finally(() => clearTimeout(timer));
-      };
+      }
       /**
-       * Holds the level `fixed` names, from the start while nothing loads yet, or else picks as
-       * startup does. The main process sends no other variant meanwhile, so one this player can't
+       * Holds the level `fixed` names, from the start while nothing loads yet, or with null picks
+       * as startup does. The main process sends no other variant meanwhile, so one this player can't
        * decode, or that hls.js left out as such, can't play here: that fails as unsupported, and
        * the player asks for a stream of its own instead, which never shares the recording's.
        */
@@ -447,8 +447,9 @@ function hlsEngine(
         const playable = level !== undefined && (await decodes(level));
         // A later `fix` holds its own.
         if (released || fixed !== variant) return;
-        const index = level ? hls.levels.indexOf(level) : -1;
-        if (!playable || index < 0) {
+        // hls.js may have removed it meanwhile as unsupported.
+        const index = playable ? hls.levels.indexOf(level) : -1;
+        if (index < 0) {
           life.fail({ kind: "unsupported", detail: t("The stream could not be decoded.") });
           return;
         }
@@ -461,12 +462,10 @@ function hlsEngine(
       follow = () =>
         void hold().catch(() => {
           if (released) return;
-          if (fixed === null) {
-            try {
-              return load();
-            } catch {
-              // Fails below.
-            }
+          try {
+            if (fixed === null) return load();
+          } catch {
+            // Fails below.
           }
           life.fail({ kind: "media", detail: t("The stream could not be decoded.") });
         });
