@@ -1,5 +1,13 @@
 package app.mrstreamer.player
 
+import android.app.KeyguardManager
+import android.app.Activity
+import android.content.Context
+import androidx.media3.common.MediaItem
+import androidx.media3.test.utils.TestExoPlayerBuilder
+import org.robolectric.Robolectric
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.Player
@@ -17,6 +25,93 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaTest {
+  @Test fun sessionCannotReplaceMediaOrChangeSpeed() {
+    val owner = PlayerHost.owner(RuntimeEnvironment.getApplication())
+    try {
+      val exposed = PlayerHost.session!!.player
+      exposed.setMediaItem(MediaItem.fromUri("https://example.invalid/file"))
+      assertEquals(0, exposed.mediaItemCount)
+      exposed.setPlaybackSpeed(2f)
+      assertEquals(1f, exposed.playbackParameters.speed)
+    } finally { owner.stopAll() }
+  }
+
+  @Test fun observationsDoNotRefreshControlsAndReplacementDoesNotAnnounceFinalStop() {
+    val context: Context = RuntimeEnvironment.getApplication()
+    val player = TestExoPlayerBuilder(context).build()
+    val owner = PlayerOwner(player)
+    val changes = mutableListOf<String?>()
+    owner.changed = { changes.add(owner.attempt) }
+    fun admit(id: String) = owner.admit(Admission(id, "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+    try {
+      admit("one")
+      changes.clear()
+      owner.reconcile(); owner.reconcile()
+      assertTrue(changes.isEmpty())
+      admit("two")
+      assertFalse(changes.contains(null))
+      owner.stopAll()
+      assertEquals(null, changes.last())
+    } finally { player.release() }
+  }
+
+  @Test fun leavingWatchRequestsNotificationPermissionOnce() {
+    val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    try {
+      owner.admit(Admission("permission", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      PlayerPip.attach(activity)
+      PlayerPip.watch(true); PlayerPip.watch(false)
+      assertArrayEquals(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), shadowOf(activity).lastRequestedPermission.requestedPermissions)
+      assertNotNull(owner.attempt)
+    } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
+  }
+
+  class PipActivity : Activity() {
+    var inPip = false
+    override fun isInPictureInPictureMode() = inPip
+  }
+
+  @Test fun screenLockKeepsPlayingButDismissalAfterModeFlipStops() {
+    val activity = Robolectric.buildActivity(PipActivity::class.java).setup().get()
+    val owner = PlayerHost.owner(activity)
+    val keyguard = shadowOf(activity.getSystemService(KeyguardManager::class.java))
+    try {
+      PlayerPip.attach(activity)
+      owner.admit(Admission("pip", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      activity.inPip = true; PlayerPip.mode(true)
+      keyguard.setKeyguardLocked(true)
+      PlayerPip.stopped(activity)
+      assertEquals("pip", owner.attempt)
+      keyguard.setKeyguardLocked(false)
+      activity.inPip = false
+      PlayerPip.mode(false)
+      assertNull(owner.attempt)
+      owner.admit(Admission("expand", "file:///missing", emptyMap(), "progressive", "file", 0, HoldRef.LocalFile("/missing")))
+      activity.inPip = true; PlayerPip.mode(true)
+      PlayerPip.stopped(activity)
+      PlayerPip.started()
+      activity.inPip = false; PlayerPip.mode(false)
+      assertEquals("expand", owner.attempt)
+      activity.inPip = true; PlayerPip.mode(true)
+      activity.inPip = false; PlayerPip.mode(false)
+      PlayerPip.stopped(activity)
+      assertNull(owner.attempt)
+    } finally { PlayerPip.detach(activity); owner.stopAll(); activity.finish() }
+  }
+
+  @Test fun sessionCustomActionsRespectMode() {
+    fun has(live: Boolean, next: Boolean, action: String) = PlayerHost.sessionCommands(live, next)
+      .contains(androidx.media3.session.SessionCommand(action, android.os.Bundle.EMPTY))
+    assertTrue(has(true, true, "close"))
+    assertFalse(has(true, true, "back"))
+    assertFalse(has(true, true, "next"))
+    assertTrue(has(false, false, "back"))
+    assertTrue(has(false, false, "forward"))
+    assertFalse(has(false, false, "next"))
+    assertTrue(has(false, true, "next"))
+  }
+
   @Test fun unsupportedTrackNeverAppearsSelected() {
     val group = TrackGroup(Format.Builder().setSampleMimeType("audio/aac").setLanguage("nl").build())
     val tracks = Tracks(ImmutableList.of(Tracks.Group(group, false,

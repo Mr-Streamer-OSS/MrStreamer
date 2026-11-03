@@ -14,13 +14,13 @@ export const t = catalogue(
     Off: "Off",
     OK: "OK",
     Cancel: "Cancel",
-    "This phone": "This phone",
+
     "Next episode": "Next episode",
     "Play next": "Play next",
     "Play again": "Play again",
     "Plays in {seconds}": "Plays in {seconds}",
     "Picture in picture": "Picture in picture",
-    "Play from start": "Play from start",
+
     "Can't show here: {tracks}.": "Can't show here: {tracks}.",
     "Can't play here: {tracks}.": "Can't play here: {tracks}.",
     "Couldn't change audio": "Couldn't change audio",
@@ -34,7 +34,7 @@ export const t = catalogue(
     "Couldn't read media preferences": "Couldn't read media preferences",
     "Your saved choices weren't changed. Try again.":
       "Your saved choices weren't changed. Try again.",
-    "Not known yet": "Not known yet",
+
     "Not known yet. Try again in a moment.": "Not known yet. Try again in a moment.",
     "No choices on this channel.": "No choices on this channel.",
     "No subtitles in this file.": "No subtitles in this file.",
@@ -53,13 +53,13 @@ export const t = catalogue(
       Off: "Uit",
       OK: "OK",
       Cancel: "Annuleren",
-      "This phone": "Deze telefoon",
+
       "Next episode": "Volgende aflevering",
       "Play next": "Volgende afspelen",
       "Play again": "Opnieuw afspelen",
       "Plays in {seconds}": "Speelt over {seconds}",
       "Picture in picture": "Beeld-in-beeld",
-      "Play from start": "Vanaf het begin afspelen",
+
       "Can't show here: {tracks}.": "Hier niet te tonen: {tracks}.",
       "Can't play here: {tracks}.": "Hier niet af te spelen: {tracks}.",
       "Couldn't change audio": "Audio kon niet worden gewijzigd",
@@ -74,7 +74,7 @@ export const t = catalogue(
       "Couldn't read media preferences": "Mediavoorkeuren konden niet worden gelezen",
       "Your saved choices weren't changed. Try again.":
         "Je bewaarde keuzes zijn niet gewijzigd. Probeer het opnieuw.",
-      "Not known yet": "Nog niet bekend",
+
       "Not known yet. Try again in a moment.": "Nog niet bekend. Probeer het zo opnieuw.",
       "No choices on this channel.": "Geen keuzes op deze zender.",
       "No subtitles in this file.": "Geen ondertiteling in dit bestand.",

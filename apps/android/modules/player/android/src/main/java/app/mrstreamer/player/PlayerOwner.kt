@@ -114,6 +114,11 @@ class PlayerOwner(
     var failure: Failure? = null
   }
 
+  private var lastControls: List<Any?>? = null
+  private fun notifyChanged() {
+    val controls = listOf(attempt, live, nextAvailable, isPlaying)
+    if (controls != lastControls) { lastControls = controls; changed?.invoke() }
+  }
   var changed: (() -> Unit)? = null
   val automatic: Boolean get() = player.trackSelectionParameters.overrides.values.none { it.type == C.TRACK_TYPE_VIDEO }
   var nextAvailable = false
@@ -184,7 +189,7 @@ class PlayerOwner(
 
   /** Plays [admission], replacing what played before. */
   fun admit(admission: Admission) {
-    val ending = end()
+    val ending = end(notify = false)
     val hold =
       Hold(main) { closed ->
         events?.released(Release(admission.attempt, admission.hold, if (closed) outcomeOf(admission) else "unconfirmed"))
@@ -207,6 +212,7 @@ class PlayerOwner(
       player.clearMediaItems()
       ending?.let(::letGo)
       hold.retire()
+      notifyChanged()
       throw error
     }
     // Only now that its media is no longer the player's can what the last attempt held settle.
@@ -349,7 +355,7 @@ class PlayerOwner(
   }
 
   /** Reports the current attempt's last position as stopped, and returns it for [letGo]. */
-  private fun end(): Current? {
+  private fun end(notify: Boolean = true): Current? {
     val ending = current ?: return null
     if (!ending.stopped) {
       ending.stopped = true
@@ -357,7 +363,7 @@ class PlayerOwner(
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
     current = null
-    changed?.invoke()
+    if (notify) notifyChanged()
     return ending
   }
 
@@ -398,7 +404,7 @@ class PlayerOwner(
         else -> Phase.PAUSED
       }
     events?.observed(observationOf(now.admission, phase, now.failure))
-    changed?.invoke()
+    notifyChanged()
   }
 
   private fun observationOf(admission: Admission, phase: Phase, failure: Failure?) =

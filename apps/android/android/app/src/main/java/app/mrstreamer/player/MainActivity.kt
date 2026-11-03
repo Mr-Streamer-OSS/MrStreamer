@@ -70,6 +70,7 @@ class MainActivity : ReactActivity() {
     super.onPictureInPictureModeChanged(inPip, config)
     app.mrstreamer.player.PlayerPip.mode(inPip)
   }
+  override fun onStart() { super.onStart(); app.mrstreamer.player.PlayerPip.started() }
   override fun onStop() { super.onStop(); app.mrstreamer.player.PlayerPip.stopped(this) }
   override fun onDestroy() { app.mrstreamer.player.PlayerPip.detach(this); super.onDestroy() }
 }

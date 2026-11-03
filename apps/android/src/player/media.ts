@@ -31,6 +31,7 @@ export interface MediaPersistence {
 export interface MediaState {
   readonly tracksKnown: boolean;
   readonly pip: boolean;
+  readonly pipSupported: boolean;
   readonly automatic: boolean;
   readonly next: NextEpisode | null;
   readonly remaining: number | null;
@@ -72,13 +73,16 @@ const choice = (track: Track): Choice => ({
   bitrate: track.bitrate,
 });
 
-const matches = (track: Track, saved: Choice) =>
-  track.supported &&
-  track.language === saved.language &&
-  track.label === saved.label &&
-  track.codec === saved.codec &&
-  track.height === saved.height &&
-  track.bitrate === saved.bitrate;
+function preferred(tracks: readonly Track[], saved: Choice, type: Track["type"]) {
+  const candidates = tracks.filter((t) => t.supported && t.type === type);
+
+  if (type === "video") return candidates.find((t) => t.height === saved.height);
+  const language = candidates.filter((t) => t.language === saved.language);
+  const labels = language.filter((t) => t.label === saved.label);
+  const pool = labels.length ? labels : language;
+
+  return pool.find((t) => t.codec === saved.codec) ?? pool[0];
+}
 
 export function mediaModel(
   owner: PlayerOwner,
@@ -88,6 +92,7 @@ export function mediaModel(
   const state = store<MediaState>({
     tracksKnown: false,
     pip: false,
+    pipSupported: native.pipSupported?.() ?? false,
     automatic: true,
     next: null,
     remaining: null,
@@ -115,10 +120,16 @@ export function mediaModel(
   let attempt: string | undefined;
   let ended = false;
   let timer: ReturnType<typeof setInterval> | undefined;
-  let pending: Request | undefined;
+  const pending = new Map<keyof MediaPreferences, Request>();
+  const confirmations = new Set<Request>();
+  let watching = false;
+  let cancelled: string | undefined;
+  let nextSent: string | undefined;
   const restored = new Set<keyof MediaPreferences>();
 
   function cancelNext() {
+    cancelled = attempt;
+
     if (timer) clearInterval(timer);
     timer = undefined;
     patch({ remaining: null });
@@ -129,12 +140,23 @@ export function mediaModel(
     let next: NextEpisode | undefined;
 
     if (now.kind === "playing" && now.intent.kind === "title" && now.intent.media === "episode") {
-      next = resolver?.({ ...now.intent, media: "episode" });
+      try {
+        next = resolver?.({ ...now.intent, media: "episode" });
+      } catch {
+        next = undefined;
+      }
     }
 
     patch({ next: next ?? null });
 
-    if (now.kind === "playing") void native.setNextAvailable?.(now.attempt, !!next);
+    if (now.kind === "playing") {
+      const signature = `${now.attempt}:${!!next}`;
+
+      if (signature !== nextSent) {
+        nextSent = signature;
+        void native.setNextAvailable?.(now.attempt, !!next);
+      }
+    }
   }
 
   function playNext() {
@@ -161,13 +183,34 @@ export function mediaModel(
   }
 
   /** Saves the pending change the player now reports. A failed read is never overwritten. */
-  function settle() {
-    if (!pending) return;
-    const { key, value } = pending;
-    pending = undefined;
+  function settle(request: Request) {
+    if (!confirmations.has(request) || pending.get(request.key) !== request) return;
+    pending.delete(request.key);
+    confirmations.delete(request);
 
     if (unread) patch({ error: "read" });
-    else persist({ ...(unsaved ?? saved), [key]: value });
+    else persist({ ...(unsaved ?? saved), [request.key]: request.value });
+  }
+
+  function reconcilePending() {
+    const now = owner.state.get();
+
+    if (now.kind !== "playing") return;
+
+    for (const request of pending.values()) {
+      if (request.attempt !== now.attempt) continue;
+
+      const selected =
+        request.key === "speed"
+          ? typeof request.value === "number" && Math.abs(now.speed - request.value) < 0.001
+          : request.value === "automatic"
+            ? state.get().automatic
+            : request.id === null
+              ? !now.tracks.some((t) => t.type === "text" && t.selected)
+              : now.tracks.some((t) => t.id === request.id && t.supported && t.selected);
+
+      if (selected) settle(request);
+    }
   }
 
   owner.state.subscribe(() => {
@@ -185,7 +228,9 @@ export function mediaModel(
       cancelNext();
       attempt = now.attempt;
       ended = false;
-      pending = undefined;
+      pending.clear();
+      confirmations.clear();
+      cancelled = undefined;
       restored.clear();
       patch({ tracksKnown: false, automatic: true });
       nextForCurrent();
@@ -199,10 +244,11 @@ export function mediaModel(
       ended = true;
       nextForCurrent();
 
-      if (state.get().next) {
+      if (watching && cancelled !== attempt && state.get().next) {
+        const deadline = Date.now() + DEFAULT_NEXT_EPISODE_DELAY * 1000;
         patch({ remaining: DEFAULT_NEXT_EPISODE_DELAY });
         timer = setInterval(() => {
-          const remaining = (state.get().remaining ?? 1) - 1;
+          const remaining = Math.ceil((deadline - Date.now()) / 1000);
 
           if (remaining <= 0) playNext();
           else patch({ remaining });
@@ -213,18 +259,8 @@ export function mediaModel(
   native.addListener("onState", (event) => {
     if (event.attempt !== attempt) return;
 
-    void native.setNextAvailable?.(event.attempt, !!state.get().next);
-
     if (event.qualityAutomatic !== undefined) patch({ automatic: event.qualityAutomatic });
-
-    // Speed and Automatic quality are reported here, tracks by onTracks.
-    if (
-      pending?.attempt === attempt &&
-      (pending.key === "speed"
-        ? event.speed === pending.value
-        : pending.key === "quality" && pending.value === "automatic" && event.qualityAutomatic)
-    )
-      settle();
+    reconcilePending();
 
     if (!event.live && event.phase !== "preparing" && saved.speed && !restored.has("speed")) {
       restored.add("speed");
@@ -235,22 +271,13 @@ export function mediaModel(
     if (id !== attempt) return;
     patch({ tracksKnown: true });
 
-    if (pending?.attempt === id && pending.key !== "speed" && pending.value !== "automatic") {
-      const chosen = pending.id;
-
-      const selected =
-        chosen === null
-          ? !tracks.some((t) => t.type === "text" && t.selected)
-          : tracks.some((t) => t.id === chosen && t.supported && t.selected);
-
-      if (selected) settle();
-    }
+    reconcilePending();
 
     // Saved choices apply once per attempt, by identity, to the first tracks that match them.
     for (const key of ["audio", "text", "quality"] as const) {
       const value = saved[key];
 
-      if (!value || restored.has(key) || pending?.key === key) continue;
+      if (!value || restored.has(key) || pending.has(key)) continue;
 
       if (value === "off" || value === "automatic") {
         restored.add(key);
@@ -260,7 +287,7 @@ export function mediaModel(
       }
 
       const type = key === "quality" ? "video" : key;
-      const match = tracks.find((t) => t.type === type && matches(t, value));
+      const match = preferred(tracks, value, type);
 
       if (!match) continue;
       restored.add(key);
@@ -271,7 +298,11 @@ export function mediaModel(
     }
   });
   native.addListener("onMedia", (event) => {
-    if (event.attempt === attempt) patch({ pip: event.pip });
+    if (event.attempt === attempt)
+      patch({
+        pip: event.pip,
+        pipSupported: event.pipSupported ?? native.pipSupported?.() ?? false,
+      });
   });
   native.addListener("onMediaCommand", (event) => {
     if (event.attempt !== attempt) return;
@@ -282,7 +313,7 @@ export function mediaModel(
 
   /** Asks for `request` through `change`; a refusal while its attempt plays is shown. */
   async function ask(request: Request, change: () => Promise<boolean> | undefined) {
-    pending = request;
+    pending.set(request.key, request);
     restored.add(request.key);
     let accepted = false;
 
@@ -292,9 +323,14 @@ export function mediaModel(
       /* Refused below; no selection is invented. */
     }
 
-    if (!accepted && attempt === request.attempt) {
-      if (pending === request) pending = undefined;
-      patch({ error: request.key });
+    if (attempt === request.attempt) {
+      if (!accepted) {
+        if (pending.get(request.key) === request) pending.delete(request.key);
+        patch({ error: request.key });
+      } else {
+        confirmations.add(request);
+        reconcilePending();
+      }
     }
 
     return accepted;
@@ -303,12 +339,22 @@ export function mediaModel(
   async function select(key: "audio" | "text" | "quality", id: string | null) {
     const now = owner.state.get();
 
-    if (now.kind !== "playing") return false;
+    if (now.kind !== "playing") {
+      patch({ error: key });
+
+      return false;
+    }
+
     const type = key === "quality" ? "video" : key;
     const choices = now.tracks.filter((t) => t.type === type && t.supported);
     const track = choices.find((t) => t.id === id);
 
-    if (id !== null && !track) return false;
+    if ((id !== null && !track) || (key === "audio" && !track)) {
+      patch({ error: key });
+
+      return false;
+    }
+
     const { attempt: at } = now;
 
     if (key === "audio")
@@ -322,7 +368,11 @@ export function mediaModel(
       );
 
     // Quality is Live's, and only where the provider offers a real choice.
-    if (!now.live || choices.length < 2) return false;
+    if (!now.live || choices.length < 2) {
+      patch({ error: key });
+
+      return false;
+    }
 
     return ask({ attempt: at, key, id, value: track ? choice(track) : "automatic" }, () =>
       native.setQuality(at, id),
@@ -344,8 +394,11 @@ export function mediaModel(
         !Number.isFinite(value) ||
         value < 0.25 ||
         value > 4
-      )
+      ) {
+        patch({ error: "speed" });
+
         return false;
+      }
 
       return ask({ attempt: now.attempt, key: "speed", value }, () =>
         native.setSpeed(now.attempt, value),
@@ -353,6 +406,8 @@ export function mediaModel(
     },
     enterPip: () => native.enterPip?.() ?? Promise.resolve(false),
     watch(visible) {
+      watching = visible;
+
       if (!visible) cancelNext();
       void native.setWatch?.(visible);
     },

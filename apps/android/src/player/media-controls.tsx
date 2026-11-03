@@ -68,7 +68,9 @@ export function MediaRow({
       {quality ? (
         <TextControl
           icon="hd"
-          label={media.automatic ? t("Automatic") : (variantName(selected(now, "video")) ?? "")}
+          label={
+            media.automatic ? t("Automatic") : variantName(selected(now, "video")) || t("Quality")
+          }
           onPress={() => onOpen("quality")}
         />
       ) : null}

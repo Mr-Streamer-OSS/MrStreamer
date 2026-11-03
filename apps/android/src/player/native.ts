@@ -118,6 +118,7 @@ export interface NativePlayer {
   setText?(attempt: string, trackId: string | null): Promise<boolean>;
   setNextAvailable?(attempt: string, available: boolean): Promise<void>;
   setWatch?(visible: boolean): Promise<void>;
+  pipSupported?(): boolean;
   enterPip?(): Promise<boolean>;
   reconcile?(): Promise<void>;
   stop(attempt: string): Promise<boolean>;
@@ -129,7 +130,7 @@ export interface NativePlayer {
   ): { remove(): void };
   addListener(
     event: "onMedia",
-    listener: Listener<{ attempt: string; pip: boolean }>,
+    listener: Listener<{ attempt: string; pip: boolean; pipSupported?: boolean }>,
   ): { remove(): void };
   addListener(
     event: "onMediaCommand",

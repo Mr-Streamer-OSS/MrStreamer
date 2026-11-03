@@ -7,10 +7,13 @@ catch-up and files support speed. Audio focus and noisy routes use Media3.
 
 The non-exported session service permits playback commands and metadata reads only. Live
 permits play/pause and stop; non-live adds seeking, ten-second jumps and Next when supplied.
-PiP has pause and, for non-live, ten-second jumps. Home entry is armed while Watch is visible
+PiP toggles play/pause and, for non-live, ten-second jumps. Home entry is armed while Watch is visible
 and playing. Dismissal stops the owner; expansion keeps Watch. Activity recreation reattaches
 to the process owner. Playback is not restored after process death. Android draws system
-controls and may show a subset of the session actions.
+controls and may show a subset of the session actions. Android 13+ notification permission is requested
+when playback first leaves Watch; denial keeps playback running without a shade notification.
+Source replacement retains the session service; final stop removes it. Refused background
+service starts leave playback intact.
 
 The designer consumes `player.media.state` with `useStore`, alongside `player.state` for
 reported tracks, speed and playback. `player.media` exposes audio, text, quality, speed,
@@ -20,14 +23,16 @@ retryable. Track preferences match metadata on another source, never old indices
 matches leave the default intact. English/Dutch copy lives in `apps/android/src/player/copy.ts`.
 `apps/android/src/player/media-controls.tsx` draws Watch's row of text controls, the
 countdown, the Audio, Subtitles, Speed and Quality sheets and the refusal dialogs; Watch adds
-the picture-in-picture button. Live's Play from start waits for programme times, which Android
-Live doesn't have yet.
+the picture-in-picture button when Android permits it. Sheets and dialogs close or stay hidden
+in PiP.
 
 `player.media.registerNext` takes a synchronous resolver receiving the full current episode
 PlayIntent, returning `{ intent, label }` or undefined. Its unsubscribe removes the resolver.
-The caller owns version-specific order; the player neither reads Library nor constructs the
-next intent. No result means no Next action or countdown. Ended episodes count down using
-the shared ten-second default. Pause, seek, Back, Close, source replacement and resolver
+`apps/android/src/player/next-episode.ts` adapts Library DetailState in season/episode order,
+requiring an exact container. Library does not expose its last-read details, so this function
+is exported for its future caller; no production resolver is registered. No result means no Next action or countdown. Ended episodes count down using
+the shared ten-second default and a deadline that catches up after suspended timers.
+Only a visible Watch starts a countdown; cancellation remains attached to its attempt. Pause, seek, Back, Close, source replacement and resolver
 registration cancel. Cancel retains manual Play next; a new source resolves its own next item.
 Credentials enter only through the existing source resolver.
 

@@ -18,6 +18,7 @@ import type { Playing, PlayerState } from "../src/player/player.ts";
 const still = vi.hoisted((): MediaState => ({
   tracksKnown: false,
   pip: false,
+  pipSupported: true,
   automatic: true,
   next: null,
   remaining: null,
@@ -495,6 +496,26 @@ describe("Watch's media controls", () => {
 
     media({ automatic: false });
     expect(ticked(shown)).toEqual(["Full HD · Estuary Max FHD"]);
+  });
+
+  it("closes media sheets and suppresses dialogs in PiP, and hides unsupported PiP", () => {
+    player.state.set(playing(episode, { live: false }));
+    const shown = open(episode);
+    press(shown, "Subtitles");
+    media({ pip: true, error: "text" });
+    expect(shown.textContent).not.toContain("Couldn't show subtitles");
+    expect(shown.querySelector("section")).toBeNull();
+    media({ pip: false, error: null, pipSupported: false });
+    expect(shown.querySelector("section")).toBeNull();
+    expect(labels(shown)).not.toContain("Picture in picture");
+  });
+
+  it("names a Live quality with no reported label or height", () => {
+    player.state.set(
+      playing(estuary, { tracks: variants.map((t) => ({ ...t, label: null, height: null })) }),
+    );
+    media({ automatic: false });
+    expect(labels(open(estuary))).toContain("Quality");
   });
 
   it("says a refused change in a dialog that OK closes", () => {

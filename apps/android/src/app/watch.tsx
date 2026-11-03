@@ -111,6 +111,10 @@ export default function Watch() {
 
   const [sheet, setSheet] = useState<MediaSheet | null>(null);
 
+  useEffect(() => {
+    if (media.pip) setSheet(null);
+  }, [media.pip]);
+
   const open = (next: MediaSheet) => {
     // A save or read that failed earlier is tried again as the viewer comes back to choose.
     player.media.retryPreferences();
@@ -146,13 +150,13 @@ export default function Watch() {
           onPress={() => setShown((now) => !now)}
           style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
         />
-        {state.kind === "playing" && state.failure ? (
+        {!media.pip && state.kind === "playing" && state.failure ? (
           <Failed
             failure={state.failure}
             playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
             onRetry={() => player.retry()}
           />
-        ) : loading ? (
+        ) : !media.pip && loading ? (
           <Centre>
             <Text
               accessibilityLiveRegion="polite"
@@ -198,7 +202,7 @@ export default function Watch() {
               >
                 {state.kind === "playing" ? state.intent.title : ""}
               </Text>
-              {state.kind === "playing" ? (
+              {state.kind === "playing" && media.pipSupported ? (
                 <IconButton
                   icon="picture-in-picture"
                   label={mediaT("Picture in picture")}
@@ -234,13 +238,17 @@ export default function Watch() {
             ) : null}
           </>
         ) : null}
-        <MediaSheets
-          open={sheet}
-          now={state.kind === "playing" ? state : null}
-          media={media}
-          onClose={() => setSheet(null)}
-        />
-        <MediaDialog error={media.error} />
+        {!media.pip ? (
+          <>
+            <MediaSheets
+              open={sheet}
+              now={state.kind === "playing" ? state : null}
+              media={media}
+              onClose={() => setSheet(null)}
+            />
+            <MediaDialog error={media.error} />
+          </>
+        ) : null}
       </View>
     </FocusWithin>
   );

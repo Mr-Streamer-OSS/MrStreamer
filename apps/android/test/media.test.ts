@@ -121,6 +121,7 @@ afterEach(() => vi.useRealTimers());
 describe("Android media public contract", () => {
   it("ticks and saves audio only after a supported native selection, and restores its identity on another source", async () => {
     const f = setup();
+    f.owner.media.watch(true);
     f.owner.play(episode);
     await flush();
     f.tracks([audio]);
@@ -133,14 +134,140 @@ describe("Android media public contract", () => {
     expect(f.saved().audio?.language).toBe("nl");
     f.owner.play({ ...episode, sourceId: "other" });
     await flush();
-    f.tracks([{ ...audio, id: "5:1" }]);
+    f.tracks([{ ...audio, id: "5:1", codec: "audio/opus", label: "Nederlands", bitrate: 128000 }]);
     expect(f.native.setAudio).toHaveBeenLastCalledWith(expect.any(String), "5:1");
     expect(await f.owner.media.audio("missing")).toBe(false);
     f.tracks([{ ...audio, supported: false }]);
     expect(await f.owner.media.audio(audio.id)).toBe(false);
   });
+  it("saves concurrent audio and text choices independently, including already observed Off", async () => {
+    const f = setup();
+    f.owner.play(episode);
+    await flush();
+    f.tracks([audio]);
+    await f.owner.media.audio(audio.id);
+    await f.owner.media.text(null);
+    expect(f.saved().text).toBe("off");
+    f.tracks([{ ...audio, selected: true }]);
+    expect(f.saved().audio?.language).toBe("nl");
+    expect(f.saved().text).toBe("off");
+  });
+  it("settles native float speed, reports early refusals and avoids tick command churn", async () => {
+    const f = setup();
+    f.owner.play(episode);
+    await flush();
+    await f.owner.media.speed(1.25);
+    f.observe("playing", { speed: 1.25000001 });
+    expect(f.saved().speed).toBe(1.25);
+    await f.owner.media.audio("missing");
+    expect(f.owner.media.state.get().error).toBe("audio");
+    await f.owner.media.quality(null);
+    expect(f.owner.media.state.get().error).toBe("quality");
+    await f.owner.media.speed(10);
+    expect(f.owner.media.state.get().error).toBe("speed");
+    vi.mocked(f.native.setNextAvailable!).mockClear();
+    f.observe("playing");
+    f.observe("playing");
+    expect(f.native.setNextAvailable).not.toHaveBeenCalled();
+  });
+  it("does not let a resolver exception interrupt playback", async () => {
+    const f = setup();
+    f.owner.media.registerNext(() => {
+      throw new Error("gone");
+    });
+    expect(() => f.owner.play(episode)).not.toThrow();
+    await flush();
+    expect(f.owner.media.state.get().next).toBeNull();
+  });
+  it("keeps late ended events cancelled after leaving Watch and catches up to a deadline", async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    f.owner.media.registerNext(() => next);
+    f.owner.media.watch(true);
+    f.owner.play(episode);
+    await flush();
+    f.owner.media.watch(false);
+    f.observe("ended");
+    expect(f.owner.media.state.get().remaining).toBeNull();
+    f.owner.play({ ...episode, id: "new" });
+    await flush();
+    f.owner.media.watch(true);
+    f.observe("ended");
+    vi.setSystemTime(Date.now() + 20000);
+    vi.advanceTimersByTime(1000);
+    expect(f.owner.state.get()).toMatchObject({ intent: next.intent });
+  });
+  it("restores Live quality by height across different bitrates and codecs", async () => {
+    const f = setup();
+    const live = { kind: "live", sourceId: "test", channelId: "one", title: "Live" } as const;
+    const video = { ...audio, type: "video", height: 1080, bitrate: 2000000 } as const;
+    f.owner.play(live);
+    await flush();
+    f.tracks([video, { ...video, id: "low", height: 720 }]);
+    await f.owner.media.quality(video.id);
+    f.tracks([
+      { ...video, selected: true },
+      { ...video, id: "low", height: 720 },
+    ]);
+    f.owner.play({ ...live, channelId: "two" });
+    await flush();
+    f.tracks([{ ...video, id: "new", codec: "video/hevc", bitrate: 4000000 }]);
+    expect(f.native.setQuality).toHaveBeenLastCalledWith(expect.any(String), "new");
+  });
+
+  it("retains an audio save while a subtitle selection is also awaiting confirmation", async () => {
+    const f = setup();
+    f.owner.play(episode);
+    await flush();
+    const text = { ...audio, id: "text", type: "text" } as const;
+    f.tracks([audio, text]);
+    await f.owner.media.audio(audio.id);
+    await f.owner.media.text(text.id);
+    f.tracks([{ ...audio, selected: true }, text]);
+    expect(f.saved().audio?.language).toBe("nl");
+    f.tracks([
+      { ...audio, selected: true },
+      { ...text, selected: true },
+    ]);
+    expect(f.saved().text).toMatchObject({ language: "nl" });
+  });
+  it.each(["audio", "quality", "speed"] as const)("shows an early %s refusal", async (key) => {
+    const f = setup();
+    f.owner.play(episode);
+    await flush();
+
+    if (key === "audio") await f.owner.media.audio("gone");
+
+    if (key === "quality") await f.owner.media.quality(null);
+
+    if (key === "speed") await f.owner.media.speed(100);
+    expect(f.owner.media.state.get().error).toBe(key);
+  });
+  it("does not resend next availability on position ticks", async () => {
+    const f = setup();
+    f.owner.play(episode);
+    await flush();
+    vi.mocked(f.native.setNextAvailable!).mockClear();
+    f.observe("playing");
+    f.observe("playing");
+    expect(f.native.setNextAvailable).not.toHaveBeenCalled();
+  });
+  it("catches up the countdown when timers resume after its deadline", async () => {
+    vi.useFakeTimers();
+    const f = setup();
+    f.owner.media.registerNext(() => next);
+    f.owner.media.watch(true);
+    f.owner.play(episode);
+    await flush();
+    f.observe("ended");
+    vi.setSystemTime(Date.now() + 20000);
+    vi.advanceTimersByTime(1000);
+    expect(f.owner.state.get()).toMatchObject({ intent: next.intent });
+  });
+
   it("reports a failed save, keeps previous persisted data, and leaves the observed tick truthful", async () => {
     const f = setup(true);
+    f.owner.media.watch(true);
     f.owner.play(episode);
     await flush();
     f.tracks([audio]);
@@ -157,6 +284,7 @@ describe("Android media public contract", () => {
   it("never overwrites preferences after a failed read", async () => {
     const f = setup(false, true);
     expect(f.owner.media.state.get().error).toBe("read");
+    f.owner.media.watch(true);
     f.owner.play(episode);
     await flush();
     f.tracks([audio]);
@@ -189,6 +317,7 @@ describe("Android media public contract", () => {
     const f = setup();
     const resolver = vi.fn(() => next);
     f.owner.media.registerNext(resolver);
+    f.owner.media.watch(true);
     f.owner.play(episode);
     await flush();
     f.observe("ended");
@@ -211,6 +340,7 @@ describe("Android media public contract", () => {
       vi.useFakeTimers();
       const f = setup();
       f.owner.media.registerNext(() => next);
+      f.owner.media.watch(true);
       f.owner.play(episode);
       await flush();
       f.observe("ended");
@@ -259,7 +389,7 @@ describe("Android media public contract", () => {
       { ...audio, type: "video", id: "2:0" },
     ]);
     expect(await f.owner.setQuality(null)).toBe(true);
-    expect(f.saved().quality).toBeUndefined();
+    expect(f.saved().quality).toBe("automatic");
     f.observe("playing", { live: true, qualityAutomatic: true });
     expect(f.saved().quality).toBe("automatic");
   });

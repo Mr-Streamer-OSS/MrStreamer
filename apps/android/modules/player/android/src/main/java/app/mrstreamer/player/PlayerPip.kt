@@ -1,5 +1,9 @@
 package app.mrstreamer.player
 
+import androidx.core.content.ContextCompat
+import android.app.KeyguardManager
+import android.content.pm.PackageManager
+import android.app.AppOpsManager
 import android.app.Activity
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
@@ -19,12 +23,15 @@ object PlayerPip {
   private var activity = WeakReference<Activity>(null)
   private var watch = false
   private var pip = false
+  private var stopped = false
+  private var leavingPip = false
+  private var permissionAsked = false
   private val receiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
       val owner = PlayerHost.existing() ?: return
       if (intent.getStringExtra("attempt") != owner.attempt) return
       when (intent.action) {
-        "app.mrstreamer.player.PAUSE" -> owner.pauseCurrent()
+        "app.mrstreamer.player.PAUSE" -> if (owner.isPlaying) owner.pauseCurrent() else owner.resumeCurrent()
         "app.mrstreamer.player.BACK" -> owner.jump(-10_000)
         "app.mrstreamer.player.FORWARD" -> owner.jump(10_000)
       }
@@ -32,11 +39,11 @@ object PlayerPip {
   }
   fun attach(host: Activity) {
     activity = WeakReference(host)
+    stopped = false
     val filter = IntentFilter().apply {
       addAction("app.mrstreamer.player.PAUSE"); addAction("app.mrstreamer.player.BACK"); addAction("app.mrstreamer.player.FORWARD")
     }
-    if (Build.VERSION.SDK_INT >= 33) host.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-    else host.registerReceiver(receiver, filter)
+    ContextCompat.registerReceiver(host, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
     PlayerHost.existing()?.reconcile()
     refresh()
   }
@@ -44,25 +51,55 @@ object PlayerPip {
     host.unregisterReceiver(receiver)
     if (activity.get() === host) activity.clear()
   }
-  fun watch(enabled: Boolean) { watch = enabled; refresh() }
+  fun watch(enabled: Boolean) { if (watch && !enabled) requestNotifications(); watch = enabled; refresh() }
+  fun requestNotifications() {
+    val host = activity.get() ?: return
+    if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && PlayerHost.existing()?.attempt != null &&
+      host.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+      permissionAsked = true
+      host.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 501)
+    }
+  }
   fun enter(): Boolean {
     val host = activity.get() ?: return false
     if (!supported(host) || !watch || PlayerHost.existing()?.attempt == null) return false
+    requestNotifications()
     return try { host.enterPictureInPictureMode(params(host)) } catch (_: IllegalStateException) { false }
   }
-  fun home() { if (watch && PlayerHost.existing()?.isPlaying == true) enter() }
+  fun home() {
+    requestNotifications()
+    if (Build.VERSION.SDK_INT < 31 && watch && PlayerHost.existing()?.isPlaying == true) enter()
+  }
   fun mode(inPip: Boolean) {
+    val wasPip = pip
     pip = inPip
+    if (wasPip && !inPip) {
+      leavingPip = true
+      // Expansion starts the Activity; dismissal leaves it stopped. Let lifecycle callbacks settle.
+      android.os.Handler(android.os.Looper.getMainLooper()).post {
+        val current = activity.get()
+        if (leavingPip && current != null && dismissed(stopped, false, current.isChangingConfigurations, locked(current))) PlayerHost.existing()?.stopAll()
+        leavingPip = false
+      }
+    }
+    val host = activity.get()
+    if (wasPip && !inPip && host != null && dismissed(stopped, false, host.isChangingConfigurations, locked(host))) PlayerHost.existing()?.stopAll()
     PlayerHost.existing()?.let { owner -> owner.attempt?.let { owner.events?.media(it, inPip) } }
   }
+  fun started() { stopped = false; leavingPip = false }
   fun stopped(host: Activity) {
-    if (host.isInPictureInPictureMode && !host.isChangingConfigurations) {
+    stopped = true
+    if ((pip || leavingPip) && dismissed(true, host.isInPictureInPictureMode, host.isChangingConfigurations, locked(host))) {
       PlayerHost.existing()?.stopAll()
       mode(false)
     }
   }
+  private fun dismissed(stopped: Boolean, inPip: Boolean, changing: Boolean, locked: Boolean) = stopped && !inPip && !changing && !locked
+  private fun locked(host: Activity) = host.getSystemService(KeyguardManager::class.java).isKeyguardLocked
   fun reconcile() { activity.get()?.let { mode(it.isInPictureInPictureMode) } }
-  private fun supported(host: Activity) = host.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+  fun supported(): Boolean = activity.get()?.let(::supported) ?: false
+  private fun supported(host: Activity): Boolean = host.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
+    host.getSystemService(AppOpsManager::class.java).checkOpNoThrow(AppOpsManager.OPSTR_PICTURE_IN_PICTURE, host.applicationInfo.uid, host.packageName) == AppOpsManager.MODE_ALLOWED
   fun refresh() { activity.get()?.let { if (supported(it)) it.setPictureInPictureParams(params(it)) } }
   private fun params(host: Activity): PictureInPictureParams {
     val owner = PlayerHost.existing()
@@ -72,9 +109,9 @@ object PlayerPip {
         PendingIntent.getBroadcast(host, request, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
     }
     val actions = buildList {
-      if (owner?.live == false) add(action("BACK", "Back 10", android.R.drawable.ic_media_rew, 1))
-      add(action("PAUSE", "Pause", android.R.drawable.ic_media_pause, 2))
-      if (owner?.live == false) add(action("FORWARD", "Forward 10", android.R.drawable.ic_media_ff, 3))
+      if (owner?.live == false) add(action("BACK", host.getString(app.mrstreamer.playback.R.string.player_back), android.R.drawable.ic_media_rew, 1))
+      add(action("PAUSE", host.getString(if (owner?.isPlaying == true) app.mrstreamer.playback.R.string.player_pause else app.mrstreamer.playback.R.string.player_play), if (owner?.isPlaying == true) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play, 2))
+      if (owner?.live == false) add(action("FORWARD", host.getString(app.mrstreamer.playback.R.string.player_forward), android.R.drawable.ic_media_ff, 3))
     }
     return PictureInPictureParams.Builder().setActions(actions).apply {
       if (Build.VERSION.SDK_INT >= 31) setAutoEnterEnabled(watch && owner?.isPlaying == true)

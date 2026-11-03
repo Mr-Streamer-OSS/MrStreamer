@@ -43,7 +43,7 @@ class PlayerModule : Module() {
       override fun tracks(attempt: String, tracks: List<Track>) =
         sendEvent("onTracks", mapOf("attempt" to attempt, "tracks" to tracks.map(::mapOf)))
 
-      override fun media(attempt: String, pip: Boolean) = sendEvent("onMedia", mapOf("attempt" to attempt, "pip" to pip))
+      override fun media(attempt: String, pip: Boolean) = sendEvent("onMedia", mapOf("attempt" to attempt, "pip" to pip, "pipSupported" to PlayerPip.supported()))
       override fun mediaCommand(attempt: String, command: String) = sendEvent("onMediaCommand", mapOf("attempt" to attempt, "command" to command))
 
       override fun released(release: Release) =
@@ -83,6 +83,7 @@ class PlayerModule : Module() {
       if (current.attempt == attempt && current.nextAvailable != available) { current.nextAvailable = available; current.changed?.invoke() }
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("setWatch") { enabled: Boolean -> PlayerPip.watch(enabled) }.runOnQueue(Queues.MAIN)
+    Function("pipSupported") { PlayerPip.supported() }
     AsyncFunction("enterPip") { PlayerPip.enter() }.runOnQueue(Queues.MAIN)
     AsyncFunction("reconcile") { owner().reconcile(); PlayerPip.reconcile() }.runOnQueue(Queues.MAIN)
     AsyncFunction("stop") { attempt: String -> owner().stop(attempt) }.runOnQueue(Queues.MAIN)
