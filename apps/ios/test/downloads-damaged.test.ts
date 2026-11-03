@@ -1,5 +1,6 @@
 import {
   memory,
+  native,
   one,
   otherMovie,
   episode,
@@ -74,6 +75,19 @@ describe("damaged downloads", { timeout: 40_000 }, () => {
     expect(memory.played).toEqual([]);
     expect(one.streamRequests()).toBe(streams);
     await app.stop();
+
+    // A size iOS won't read reads as 0: that copy isn't taken for damage, so nothing removes it.
+    const media = mediaFile(whole.id)!;
+    native.sizeOf = (path) => (path === media.path ? 0 : undefined);
+    try {
+      foreground();
+      expect(statusOf(app, whole.id)?.kind).toBe("complete");
+      await expect(app.replaceMissingDownload(movieRef(a, otherMovie().id))).resolves.toEqual({
+        kind: "kept",
+      });
+    } finally {
+      native.sizeOf = null;
+    }
 
     // The whole copy is kept as it is, and still plays.
     await expect(app.replaceMissingDownload(movieRef(a, otherMovie().id))).resolves.toEqual({

@@ -579,13 +579,15 @@ function tellSoon() {
 
 /**
  * Whether copy `record`'s file is on the phone at the size it was completed with. A file whose
- * size changed reads as missing, as a gone one does; a size the file system doesn't answer, or a
- * record without one, isn't taken for damage. The same size with other bytes isn't looked for.
+ * size changed reads as missing, as a gone one does. A record without a size, or a file reading
+ * no bytes, isn't taken for damage: on iOS a size the file system won't read reads as 0, and an
+ * unreadable file isn't a missing one. The same size with other bytes isn't looked for.
  */
 function intact(record: Stored): boolean {
   const media = mediaOf(record);
   if (!media.exists) return false;
-  return record.size === null || media.size === null || media.size === record.size;
+  const size = media.size ?? 0;
+  return record.size === null || size === 0 || size === record.size;
 }
 
 /** Looks for copies whose file is gone or changed size. */
