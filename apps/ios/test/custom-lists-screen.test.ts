@@ -94,8 +94,7 @@ vi.mock("react-native", async () => {
       alert: (title: string, message?: string, buttons?: readonly Button[]) =>
         void scenario.alerts.push({
           title,
-          ...defined({ message: message || undefined }),
-          ...defined({ buttons }),
+          ...defined({ message: message || undefined, buttons }),
         }),
       prompt: (
         title: string,

@@ -238,8 +238,10 @@ function remember(
   const kept: Loaded = {
     subscriptionId,
     fetchedAt,
-    ...defined({ catalogueStamp: catalogueStamp || undefined }),
-    ...defined({ importRevision: importRevision || undefined }),
+    ...defined({
+      catalogueStamp: catalogueStamp || undefined,
+      importRevision: importRevision || undefined,
+    }),
     catalogue,
     movies: catalogue.movies.length,
     series: catalogue.series.length,
@@ -334,8 +336,10 @@ function save(): Promise<void> {
           version: 2,
           key: owner.key,
           fetchedAt,
-          ...defined({ catalogueStamp: kept.catalogueStamp || undefined }),
-          ...defined({ importRevision: kept.importRevision || undefined }),
+          ...defined({
+            catalogueStamp: kept.catalogueStamp || undefined,
+            importRevision: kept.importRevision || undefined,
+          }),
           ...catalogue,
         });
         await removeFile(legacyCachePath(owner));
@@ -510,8 +514,10 @@ function statusOf(found: Loaded | null): WorkerStatus {
     movies: found?.movies ?? 0,
     series: found?.series ?? 0,
     fetchedAt: found?.fetchedAt ?? null,
-    ...defined({ catalogueStamp: found?.catalogueStamp ? found.catalogueStamp : undefined }),
-    ...defined({ importRevision: found?.importRevision ? found.importRevision : undefined }),
+    ...defined({
+      catalogueStamp: found?.catalogueStamp || undefined,
+      importRevision: found?.importRevision || undefined,
+    }),
   };
 }
 

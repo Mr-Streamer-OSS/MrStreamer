@@ -96,8 +96,6 @@ function make(dataDir: string, secrets: Secrets) {
                         ? null
                         : secrets.seal(JSON.stringify(SubDL().assert(credentials.subdl)))
                       : undefined,
-                }),
-                ...defined({
                   opensubtitles:
                     credentials.opensubtitles !== undefined
                       ? credentials.opensubtitles === null

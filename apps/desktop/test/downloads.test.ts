@@ -65,8 +65,7 @@ async function app(
       ffprobe: "ffprobe",
       downloads: {
         fetch: pictures,
-        ...defined({ disk }),
-        ...defined({ observeTransfer }),
+        ...defined({ disk, observeTransfer }),
       },
     }),
   );

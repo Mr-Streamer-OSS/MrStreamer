@@ -213,8 +213,10 @@ export class Analytics {
         ...base,
         enabled,
         pending: enabled ? base.pending : [],
-        ...defined({ summaries: enabled && summaries ? summaries : undefined }),
-        ...defined({ lifecycle: enabled && lifecycle ? lifecycle : undefined }),
+        ...defined({
+          summaries: enabled && summaries ? summaries : undefined,
+          lifecycle: enabled && lifecycle ? lifecycle : undefined,
+        }),
       });
       // The consent commit is independent of both the bounded caller and later recovery.
       // Publication reads current owners, so queued choices cannot replay an obsolete value.
@@ -400,8 +402,7 @@ export class Analytics {
       watchMs: 0,
       checkpointMs: 0,
       summary: null,
-      ...defined({ remoteControl }),
-      ...defined({ intent }),
+      ...defined({ remoteControl, intent }),
     };
     return token;
   }
@@ -1023,8 +1024,6 @@ export class Analytics {
                   ),
                 }
               : undefined,
-          }),
-          ...defined({
             lifecycle: record.lifecycle
               ? {
                   ...record.lifecycle,
@@ -1301,8 +1300,8 @@ function bounded(record: AnalyticsRecord): AnalyticsRecord {
   const result = {
     ...record,
     pending,
-    ...defined({ summaries: block ? { ...block, pending: summaries } : undefined }),
     ...defined({
+      summaries: block ? { ...block, pending: summaries } : undefined,
       lifecycle: record.lifecycle
         ? {
             ...record.lifecycle,

@@ -267,10 +267,12 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
             identity: external.identity,
             sealedAddress: external.sealedAddress,
             document: { file: external.document.file, fetchedAt: external.document.fetchedAt },
-            ...defined({ failure: external.failure ?? undefined }),
-            ...defined({ source: external.source || undefined }),
-            // 0.0.12 needs it to read the address at all.
-            ...defined({ since: external.since ?? undefined }),
+            ...defined({
+              failure: external.failure ?? undefined,
+              source: external.source || undefined,
+              // 0.0.12 needs it to read the address at all.
+              since: external.since ?? undefined,
+            }),
           },
           mappings: Object.fromEntries(
             Object.entries(mappings).map(([channelId, { guideId, name, source }]) => [
@@ -307,8 +309,7 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
             ...source,
             ...defined({ label: label ?? undefined }),
             document: document && { file: document.file, fetchedAt: document.fetchedAt },
-            ...defined({ failure: failure ?? undefined }),
-            ...defined({ movedFrom: movedFrom ?? undefined }),
+            ...defined({ failure: failure ?? undefined, movedFrom: movedFrom ?? undefined }),
           })),
         };
         await replaceFile(sourcesPath(store), JSON.stringify(file));

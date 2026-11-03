@@ -601,8 +601,8 @@ export async function openSession(
                 // Generic: a title, a line under it and a picture.
                 metadataType: 0,
                 title: media.metadata.title,
-                ...defined({ subtitle: media.metadata.subtitle ?? undefined }),
                 ...defined({
+                  subtitle: media.metadata.subtitle ?? undefined,
                   images:
                     media.metadata.artworkUrl === null
                       ? undefined

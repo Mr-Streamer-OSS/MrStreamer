@@ -397,8 +397,7 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
     const videoDelivery = delivered("x-title-video");
     const audioDelivery = delivered("x-title-audio");
     delivery = {
-      ...defined({ video: videoDelivery }),
-      ...defined({ audio: audioDelivery }),
+      ...defined({ video: videoDelivery, audio: audioDelivery }),
     };
     const pictureStart = Number(response.headers.get("x-start")) || 0;
 

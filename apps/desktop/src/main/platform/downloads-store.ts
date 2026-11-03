@@ -200,8 +200,10 @@ function readRecord(record: unknown): StoredDownload | null {
     const kept = series === undefined ? null : SeriesKept()(series);
     return {
       ...rest,
-      ...defined({ failure: failure ? failureOf(failure) : undefined }),
-      ...defined({ series: kept && !(kept instanceof type.errors) ? kept : undefined }),
+      ...defined({
+        failure: failure ? failureOf(failure) : undefined,
+        series: kept && !(kept instanceof type.errors) ? kept : undefined,
+      }),
     };
   } catch {
     return null;

@@ -200,8 +200,8 @@ const provider = await startFakeProvider({
   password: PASSWORD,
   second,
   channelOf: tracksChannel,
-  ...defined({ logoPng: pngLogos ? pngLogo : undefined }),
   ...defined({
+    logoPng: pngLogos ? pngLogo : undefined,
     titlesOf: browsing ? (built: FakeTitles) => browseTitles(built, second) : undefined,
   }),
 });

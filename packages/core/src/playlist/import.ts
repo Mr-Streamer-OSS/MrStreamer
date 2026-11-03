@@ -186,8 +186,10 @@ function classifiedPlaylist(
       container,
       kind: mode === "movie" ? "movie" : "episode",
       headers: {
-        ...defined({ "User-Agent": entry.userAgent || undefined }),
-        ...defined({ Referer: entry.referrer || undefined }),
+        ...defined({
+          "User-Agent": entry.userAgent || undefined,
+          Referer: entry.referrer || undefined,
+        }),
       },
     });
     if (mode === "movie") {

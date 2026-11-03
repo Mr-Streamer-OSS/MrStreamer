@@ -279,9 +279,7 @@ export class FakeCastReceiver {
 
   private framed(payload: object, sourceId: string | undefined, to: CastFields): Buffer {
     const body = this.encode(payload, {
-      ...defined({ sourceId }),
-      ...defined({ destinationId: to.sourceId }),
-      ...defined({ namespace: to.namespace }),
+      ...defined({ sourceId, destinationId: to.sourceId, namespace: to.namespace }),
     });
     const header = Buffer.alloc(4);
     header.writeUInt32BE(body.length);

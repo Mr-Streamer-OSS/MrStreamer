@@ -398,8 +398,7 @@ function ofOriginal({
   return {
     lastChannelId,
     lastCategoryId,
-    ...defined({ titleVersions }),
-    ...defined({ channelVariants }),
+    ...defined({ titleVersions, channelVariants }),
   };
 }
 

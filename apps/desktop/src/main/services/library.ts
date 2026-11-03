@@ -874,10 +874,9 @@ function search(channels: readonly LiveChannel[], query: string): readonly LiveC
   ).slice(0, SEARCH_LIMIT);
   const copies = groups.flatMap((group) => group.copies);
   const selected = new Set(copies.map(ownedKey));
-  const matched = ranked.flatMap((entry) => {
-    const channel = entry.channel;
-    return selected.has(ownedKey(channel)) ? [channel] : [];
-  });
+  const matched = ranked.flatMap(({ channel }) =>
+    selected.has(ownedKey(channel)) ? [channel] : [],
+  );
   const matchedKeys = new Set(matched.map(ownedKey));
   return stampSearchGroups(
     [...matched, ...copies.filter((channel) => !matchedKeys.has(ownedKey(channel)))],

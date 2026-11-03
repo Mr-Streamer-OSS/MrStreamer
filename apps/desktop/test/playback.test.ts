@@ -130,7 +130,7 @@ function streamIds(body: Buffer): { type: string; id: number; language?: string 
   ).streams.map((stream) => ({
     type: stream.codec_type,
     id: Number(stream.id),
-    ...defined({ language: stream.tags?.language ? stream.tags.language : undefined }),
+    ...defined({ language: stream.tags?.language || undefined }),
   }));
 }
 

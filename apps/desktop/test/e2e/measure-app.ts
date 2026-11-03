@@ -292,8 +292,10 @@ try {
           environment: environment({
             executable,
             electron,
-            ...defined({ appDirectory: appDirectory || undefined }),
-            ...defined({ revision: options.revision || undefined }),
+            ...defined({
+              appDirectory: appDirectory || undefined,
+              revision: options.revision || undefined,
+            }),
           }),
           calibration,
           workload: { subscriptions: SUBSCRIPTIONS, channelsPerSubscription: 13000 },
@@ -549,8 +551,10 @@ try {
         environment: environment({
           executable,
           electron,
-          ...defined({ revision: options.revision || undefined }),
-          ...defined({ appDirectory: appDirectory || undefined }),
+          ...defined({
+            revision: options.revision || undefined,
+            appDirectory: appDirectory || undefined,
+          }),
         }),
         workload: {
           runs: RUNS,

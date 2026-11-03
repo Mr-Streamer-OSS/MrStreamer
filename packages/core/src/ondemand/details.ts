@@ -69,8 +69,8 @@ export function seriesDetails(
       duration: episode.duration,
       stillUrl: episode.stillUrl,
       airDate: episode.airDate,
-      ...defined({ exactVersion: sourceOrder ? (true as const) : undefined }),
       ...defined({
+        exactVersion: sourceOrder ? (true as const) : undefined,
         versions:
           sourceOrder && versions.length > 1
             ? versions.map((file) => ({

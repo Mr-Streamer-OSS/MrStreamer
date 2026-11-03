@@ -1548,8 +1548,7 @@ function livePlan(channel: Channel, asked?: string, past?: ArchiveWindow): Plan 
           },
           url: stream.url,
           container: stream.format === "hls" ? "m3u8" : "ts",
-          ...defined({ headers: stream.headers }),
-          ...defined({ start: stream.start }),
+          ...defined({ headers: stream.headers, start: stream.start }),
         };
       },
     }),

@@ -73,8 +73,10 @@ export function playlistCatalogue(entries: Iterable<PlaylistEntry>): PlaylistCat
       url: entry.url,
       format,
       headers: {
-        ...defined({ "User-Agent": entry.userAgent || undefined }),
-        ...defined({ Referer: entry.referrer || undefined }),
+        ...defined({
+          "User-Agent": entry.userAgent || undefined,
+          Referer: entry.referrer || undefined,
+        }),
       },
       ...defined({ catchup: catchup ?? undefined }),
     });

@@ -1043,8 +1043,7 @@ function make(deps: OutputDeps) {
           if (!connection?.volume) return Effect.void;
           return told(() =>
             connection.setVolume({
-              ...defined({ level: volume.level }),
-              ...defined({ muted: volume.muted }),
+              ...defined({ level: volume.level, muted: volume.muted }),
             }),
           );
         }),

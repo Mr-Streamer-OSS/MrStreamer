@@ -126,8 +126,11 @@ async function watchlistApp({ withTmdb = false }: { withTmdb?: boolean } = {}) {
     const runtime = runtimeFor(
       mainLayer({
         ...config,
-        ...defined({ secrets: locked ? refusing : undefined }),
-        ...defined({ tmdbKey: tmdb ? "test-key" : undefined, tmdbApi: tmdb?.url }),
+        ...defined({
+          secrets: locked ? refusing : undefined,
+          tmdbKey: tmdb ? "test-key" : undefined,
+          tmdbApi: tmdb?.url,
+        }),
       }),
     );
     dispose = () => runtime.dispose();

@@ -474,8 +474,10 @@ async function start(channel: LiveChannel, repair = false, preview = false): Pro
       }),
       decoders: [...decoders],
       repair,
-      ...defined({ audio: sound.audio ?? undefined }),
-      ...defined({ audioLanguage: sound.audioLanguage ?? undefined }),
+      ...defined({
+        audio: sound.audio ?? undefined,
+        audioLanguage: sound.audioLanguage ?? undefined,
+      }),
       // Said so the main process refuses it when a receiver took playback since this began.
       ...defined({ preview: preview || undefined }),
     });
@@ -618,8 +620,8 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
       ...defined({ measurement: measurement ?? undefined }),
       channel: ownedId(channel),
       name: channel.title,
-      ...defined({ audio: audioId ?? undefined }),
       ...defined({
+        audio: audioId ?? undefined,
         audioLanguage: preferred && preferred !== ORIGINAL_SOUND ? preferred : undefined,
       }),
     });

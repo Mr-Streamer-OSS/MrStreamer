@@ -49,8 +49,10 @@ async function playlistHost() {
     const { pathname } = new URL(request.url ?? "/", "http://host");
     asked.push({
       path: pathname,
-      ...defined({ userAgent: request.headers["user-agent"] || undefined }),
-      ...defined({ referer: request.headers.referer || undefined }),
+      ...defined({
+        userAgent: request.headers["user-agent"] || undefined,
+        referer: request.headers.referer || undefined,
+      }),
     });
     const body = routes.get(pathname);
     if (body === undefined) return response.writeHead(404).end();

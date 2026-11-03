@@ -384,8 +384,7 @@ export const queries = {
           id,
           offset,
           limit,
-          ...defined({ sort }),
-          ...defined({ filters: chosen }),
+          ...defined({ sort, filters: chosen }),
         }),
       staleTime: Infinity,
       // Keep a sort/page transition smooth, without presenting old matches under new filters.
@@ -469,8 +468,10 @@ export const queries = {
       ],
       queryFn: () =>
         call("viewing.progress", {
-          ...defined({ movies: titles.movies ? titles.movies.map(ownedId) : undefined }),
-          ...defined({ series: titles.series ? titles.series.map(ownedId) : undefined }),
+          ...defined({
+            movies: titles.movies ? titles.movies.map(ownedId) : undefined,
+            series: titles.series ? titles.series.map(ownedId) : undefined,
+          }),
         }),
       staleTime: Infinity,
     }),

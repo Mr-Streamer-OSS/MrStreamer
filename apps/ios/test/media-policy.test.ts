@@ -41,8 +41,7 @@ const named = (language: string | null, facts: Facts) => ({
   label: facts.label ?? language ?? "Unknown",
   isDefault: facts.isDefault ?? false,
   isPlayable: facts.isPlayable ?? true,
-  ...defined({ language: language ?? undefined }),
-  ...defined({ name: facts.name }),
+  ...defined({ language: language ?? undefined, name: facts.name }),
 });
 
 const sound = (id: string, language: string | null, facts: Facts = {}): ObservedAudioTrack => ({

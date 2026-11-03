@@ -485,9 +485,9 @@ const titleCopy = (title: ProviderTitle, art: Art) =>
     categoryIds: [...title.categoryIds],
     adult: title.adult,
     container: title.container,
-    ...defined({ tmdbId: title.tmdbId }),
-    ...defined({ metadata: title.metadata }),
     ...defined({
+      tmdbId: title.tmdbId,
+      metadata: title.metadata,
       episodeFiles: title.episodeFiles === undefined ? undefined : [...title.episodeFiles],
     }),
   }) satisfies ProviderTitle;
