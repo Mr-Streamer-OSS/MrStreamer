@@ -840,7 +840,7 @@ function GuideGrid({
 }: {
   library: Library;
   channels: readonly Channel[];
-  /** The country shown, which keeps its own scroll position. */
+  /** The country shown, which keeps its own scroll position. A new one remounts the grid (Live's key). */
   scope: string;
   header: ReactNode;
 }) {
@@ -915,7 +915,8 @@ function GuideGrid({
     [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
 
-  // Restore only on mount; replaying native scroll events can override navigation's inset changes.
+  // Read once, on mount: native applies a changed contentOffset again on any render, which put back
+  // an offset recorded while a push or pop changed the insets and left the grid 54 points low.
   const [saved] = useState(() => gridScroll.get(scope));
 
   return (
