@@ -293,12 +293,9 @@ function mpegtsEngine(
     const packet = PrivatePacket(raw);
 
     if (packet instanceof type.errors) return;
-    const { pid, data, pts, nearest_pts } = packet;
-    const at = typeof pts === "number" ? pts : nearest_pts;
+    const at = packet.pts ?? packet.nearest_pts;
 
-    if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
-      privateData(pid, data, at / 1000);
-    }
+    if (at !== undefined) privateData(packet.pid, packet.data, at / 1000);
   });
   player.attachMediaElement(video);
   player.load();

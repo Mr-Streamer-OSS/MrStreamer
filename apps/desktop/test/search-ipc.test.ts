@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent, WebContents } from "electron";
@@ -10,10 +11,7 @@ const boundary = vi.hoisted(
   () =>
     new Map<
       string,
-      (
-        event: IpcMainInvokeEvent,
-        input: import("@mrstreamer/contracts/json").Json | undefined,
-      ) => Promise<Result<unknown>>
+      (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>
     >(),
 );
 
@@ -21,10 +19,7 @@ vi.mock("electron", () => ({
   ipcMain: {
     handle: (
       method: string,
-      handler: (
-        event: IpcMainInvokeEvent,
-        input: import("@mrstreamer/contracts/json").Json | undefined,
-      ) => Promise<Result<unknown>>,
+      handler: (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>,
     ) => boundary.set(method, handler),
   },
 }));
@@ -38,11 +33,7 @@ function sender(id: number) {
   }) as WebContents;
 }
 
-function invoke(
-  method: IpcMethod,
-  from: WebContents,
-  input: import("@mrstreamer/contracts/json").Json | undefined,
-) {
+function invoke(method: IpcMethod, from: WebContents, input: Json | undefined) {
   return boundary.get(method)!(
     { sender: from, senderFrame: from.mainFrame } as IpcMainInvokeEvent,
     input,

@@ -50,12 +50,12 @@ export interface FakeChannel {
 }
 
 /** A timeshift request that reached the provider: the minutes and start in its address. */
-export interface ArchiveRequest {
+export type ArchiveRequest = {
   readonly streamId: string;
   readonly minutes: number;
   /** As the address writes it, on the panel's clock: "2026-10-13:14-00". */
   readonly start: string;
-}
+};
 
 interface FakeCatalogue {
   readonly categories: readonly { readonly id: string; readonly name: string }[];

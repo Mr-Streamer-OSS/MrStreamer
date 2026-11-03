@@ -3,6 +3,7 @@
 // providers/xtream.ts.
 import { type, type Type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { Json } from "@mrstreamer/contracts/json";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
@@ -229,39 +230,16 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
     map: (row: Type<R>["infer"]) => A[],
   ) =>
     request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
-      const body: unknown = JSON.parse(await response.text());
+      const body: Json = JSON.parse(await response.text());
 
-      const auth = AuthBody()(body);
+      if (isRejectedLogin(body)) throw new AppFailure({ kind: "invalid-login" });
 
-      if (!(auth instanceof type.errors)) {
-        const info = fields(auth.user_info);
+      // A malformed row is skipped on its own.
+      const mapping = mapSteps(rows(body), (raw) => {
+        const row = schema(raw);
 
-        if (info && !isTruthy(info.auth)) throw new AppFailure({ kind: "invalid-login" });
-      }
-
-      // Panels may key a list by index. A malformed row is skipped independently.
-      const rows: readonly unknown[] = Array.isArray(body)
-        ? body
-        : body && typeof body === "object" && !("user_info" in body)
-          ? Object.values(body)
-          : [];
-
-      function* mapRows(): Steps<A[]> {
-        const due = pacer();
-        const mapped: A[] = [];
-
-        for (const raw of rows) {
-          if (due()) yield;
-
-          const row = schema(raw);
-
-          if (!(row instanceof type.errors)) mapped.push(...map(row));
-        }
-
-        return mapped;
-      }
-
-      const mapping = mapRows();
+        return row instanceof type.errors ? [] : map(row);
+      });
 
       if (!options.inTasks) return finish(mapping);
       const mapped = await options.inTasks(mapping, () => !signal?.aborted);
@@ -851,6 +829,45 @@ function accountState(status: string | null | undefined): AccountState {
     default:
       return "unknown";
   }
+}
+
+/**
+ * Some panels answer catalogue actions with a login failure instead of an HTTP error. `body` is
+ * usually the whole list, so this checks it without copying it.
+ */
+function isRejectedLogin(body: Json): boolean {
+  const parsed = AuthBody()(body);
+
+  if (parsed instanceof type.errors) return false;
+  const info = fields(parsed.user_info);
+
+  return info !== undefined && !isTruthy(info.auth);
+}
+
+/** Every row `map` reads, in order, pausing between slices of them. */
+function* mapSteps<A>(
+  raw: readonly (Json | undefined)[],
+  map: (raw: Json | undefined) => A[],
+): Steps<A[]> {
+  const due = pacer();
+  const mapped: A[] = [];
+
+  for (const row of raw) {
+    if (due()) yield;
+
+    for (const each of map(row)) mapped.push(each);
+  }
+
+  return mapped;
+}
+
+function rows(body: Json): readonly (Json | undefined)[] {
+  if (Array.isArray(body)) return body;
+
+  // A few panels return an object keyed by index instead of an array.
+  if (body && typeof body === "object" && !("user_info" in body)) return Object.values(body);
+
+  return [];
 }
 
 function isTruthy(value: string | number | boolean | null | undefined): boolean {

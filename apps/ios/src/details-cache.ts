@@ -469,9 +469,7 @@ export function readTitle(
       (record) => {
         const same = record.subscriptionId === id && record.kind === kind && record.id === titleId;
 
-        if (!same) throw new Error("Title identity differs");
-
-        return { at: record.at, listedAt: record.listedAt, value: record.value };
+        return same ? { at: record.at, listedAt: record.listedAt, value: record.value } : null;
       },
       MAX_AGE,
       stands,
@@ -604,11 +602,7 @@ export function readFiles(
     const record = await load(
       new File(subscriptionFolder(id), FILES_NAME),
       Records.files(),
-      (record) => {
-        if (record.subscriptionId !== id) throw new Error("Subscription identity differs");
-
-        return record;
-      },
+      (record) => (record.subscriptionId === id ? record : null),
       MAX_AGE,
       stands,
     );

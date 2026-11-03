@@ -1,5 +1,5 @@
 import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -251,19 +251,17 @@ const Legacy = lazy(() => type({ url: "string", resumeData: "string" }));
 /** A field read on its own: absent, as this build writes it, or present and unreadable. */
 type Field<A> = A | undefined | "bad";
 
-const transferOf = (record: Stored): Field<Transfer> => {
-  if (record.transfer === undefined) return undefined;
-  const parsed = Transfer()(record.transfer);
+function fieldOf<A>(parse: Type<A>, value: Json | undefined): Field<Type<A>["infer"]> {
+  if (value === undefined) return undefined;
+  const parsed = parse(value);
 
   return parsed instanceof type.errors ? "bad" : parsed;
-};
+}
 
-const removalOf = (record: Stored): Field<Infer<typeof Removal>> => {
-  if (record.removal === undefined) return undefined;
-  const parsed = Removal()(record.removal);
+const transferOf = (record: Stored): Field<Transfer> => fieldOf(Transfer(), record.transfer);
 
-  return parsed instanceof type.errors ? "bad" : parsed;
-};
+const removalOf = (record: Stored): Field<Infer<typeof Removal>> =>
+  fieldOf(Removal(), record.removal);
 
 /** Its authorization, when it reads. */
 const boundOf = (record: Stored): Transfer | null => {

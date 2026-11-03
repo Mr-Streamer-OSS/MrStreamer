@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Record now through the built window, against the fake provider's one connection. A playable
 // channel previews in Live TV, so Record says the recording shares the connection playing here,
 // and starts it on Watch's own provider request while Watch plays on. Recordings, which stops the
@@ -96,8 +97,8 @@ const named = (selector: string, text: string, within = "document") =>
 
 const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
 
-const expect = (value: boolean, message: string, seen?: string) => {
-  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${seen}`}`);
+const expect = (value: boolean, message: string, seen?: Json) => {
+  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 
 /** The recordings as the main process lists them, read without changing anything. */
@@ -178,18 +179,14 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   // The keys go on from Recording, which took Record's place.
   await d.wait(() => d.evaluate<boolean>(`document.activeElement === ${recordingButton}`));
   const first = await listed(d);
-  expect(
-    first.length === 1 && first[0]!.status.kind === "recording",
-    "Not recording",
-    JSON.stringify(first),
-  );
+  expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
   // Watch plays on, and the provider was asked for nothing more.
   await playsOn(d);
   const shared = fixture.streams();
   expect(
     shared.requests === before.requests && shared.active === 1,
     "Recording asked the provider for another stream",
-    JSON.stringify(shared),
+    shared,
   );
   d.observed["recording"] = { list: first, streams: shared };
   await d.capture("live-recording");
@@ -201,12 +198,8 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   // A few seconds of it, to play back.
   await new Promise((resolve) => setTimeout(resolve, 8_000));
   const grown = await listed(d);
-  expect(grown[0]!.bytes > bytes, "The recording stopped with Watch", JSON.stringify(grown));
-  expect(
-    fixture.streams().active === 1,
-    "Watch's stop ended the recording",
-    JSON.stringify(fixture.streams()),
-  );
+  expect(grown[0]!.bytes > bytes, "The recording stopped with Watch", grown);
+  expect(fixture.streams().active === 1, "Watch's stop ended the recording", fixture.streams());
   d.observed["watchStopped"] = { list: grown, streams: fixture.streams() };
   await d.capture("recordings-now");
 
@@ -217,7 +210,7 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   expect(
     fixture.streams().requests === before.requests,
     "Watch asked the provider again",
-    JSON.stringify(fixture.streams()),
+    fixture.streams(),
   );
   // The recording stops from the strip's Recording, by keyboard: Watch plays on.
   const RECORDING = "document.querySelector('[role=dialog][aria-label=Recording]')";
@@ -236,11 +229,7 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
   await d.wait(async () => (await listed(d))[0]?.status.kind === "stopped");
   await playsOn(d);
   const after = fixture.streams();
-  expect(
-    after.requests === before.requests && after.active === 1,
-    "Watch stopped too",
-    JSON.stringify(after),
-  );
+  expect(after.requests === before.requests && after.active === 1, "Watch stopped too", after);
   d.observed["stopped"] = { list: await listed(d), streams: after };
   await d.capture("watch-after-recording");
 
@@ -284,7 +273,7 @@ export async function recordingsScenario(d: Driver, fixture: RecordingFixture) {
     return { time: v.currentTime, width: v.videoWidth, audio: v.webkitAudioDecodedByteCount }; })()`,
   );
 
-  expect(playing.width > 0 && playing.audio > 0, "No picture or sound", JSON.stringify(playing));
+  expect(playing.width > 0 && playing.audio > 0, "No picture or sound", playing);
   d.observed["playing"] = playing;
   await d.capture("recording-playing");
   await d.click("Leave the recording", named("header button", "Back"));
@@ -366,17 +355,13 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
   const recordingButton = named("button", "Recording");
   await d.wait(() => d.exists(recordingButton), 60_000);
   const first = await listed(d);
-  expect(
-    first.length === 1 && first[0]!.status.kind === "recording",
-    "Not recording",
-    JSON.stringify(first),
-  );
+  expect(first.length === 1 && first[0]!.status.kind === "recording", "Not recording", first);
   // Watch plays on through two segments more, as the recording grows.
   await playsOn(d);
   await playsOn(d);
   await playsOn(d);
   const grown = await listed(d);
-  expect(grown[0]!.bytes > 0, "The recording took nothing", JSON.stringify(grown));
+  expect(grown[0]!.bytes > 0, "The recording took nothing", grown);
   d.observed["hlsRecording"] = { list: grown, segments: segmentsSent(fixture) };
   await d.capture(shot("live-recording"));
 
@@ -399,12 +384,12 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
         .filter((path) => path.endsWith(".m3u8")),
     };
     await d.capture(shot("fixed"));
-    const streams = new Set(segmentsSent(fixture, shared).map((each) => each.split(" ")[0]));
-    expect(
-      streams.size === 1,
-      "More than one quality was sent while both read",
-      JSON.stringify([...streams]),
+
+    const streams = new Set(
+      segmentsSent(fixture, shared).map((each) => each.split(" ")[0] ?? each),
     );
+
+    expect(streams.size === 1, "More than one quality was sent while both read", [...streams]);
   } else {
     expect(
       !(await d.evaluate<boolean>(`${RECORDING}.innerText.includes(${JSON.stringify(FIXED)})`)),
@@ -427,6 +412,6 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
 
   // The host sent each segment once, Watch and the recording reading the same ones.
   const sent = segmentsSent(fixture);
-  expect(sent.length > 4, "Too few segments were sent", JSON.stringify(sent));
-  expect(new Set(sent).size === sent.length, "A segment was sent twice", JSON.stringify(sent));
+  expect(sent.length > 4, "Too few segments were sent", sent);
+  expect(new Set(sent).size === sent.length, "A segment was sent twice", sent);
 }

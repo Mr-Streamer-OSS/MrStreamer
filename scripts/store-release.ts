@@ -434,7 +434,7 @@ export function verifyPackage(
 
   if (!existsSync(`${path}.json`)) throw new Error("The artifact holds no record of the package.");
   // Records written by PowerShell, before packageRecord wrote them, may start with a byte order mark.
-  const record: unknown = JSON.parse(readFileSync(`${path}.json`, "utf8").replace(/^\uFEFF/, ""));
+  const record: Json = JSON.parse(readFileSync(`${path}.json`, "utf8").replace(/^\uFEFF/, ""));
   const recorded = isRecord(record) ? record : {};
   differs("The record's release", recorded["version"], release.version);
   differs("The record's commit", recorded["commit"], release.commit);
@@ -457,10 +457,8 @@ export function verifyPackage(
 }
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
-export function isRecord(value: unknown): value is JsonObject {
-  return (
-    typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value)
-  );
+export function isRecord(value: Json | undefined): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** The release file `release` wrote, with the package once `verify` added it. */

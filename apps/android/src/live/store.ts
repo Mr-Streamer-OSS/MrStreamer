@@ -64,6 +64,7 @@ export function listsOwner(
   }
 
   function save(next: readonly ChannelList[]) {
+    // Plain copies, as the lists' interfaces aren't JSON types.
     platform.writeJson("live-lists.json", {
       version: 1,
       lists: next.map((list) => ({
@@ -71,13 +72,7 @@ export function listsOwner(
         entries: list.entries.map((entry) => ({ ...entry })),
       })),
     });
-    state.set({
-      kind: "ready",
-      lists: next.map((list) => ({
-        ...list,
-        entries: list.entries.map((entry) => ({ ...entry })),
-      })),
-    });
+    state.set({ kind: "ready", lists: next });
   }
 
   function named(name: string, except?: string) {

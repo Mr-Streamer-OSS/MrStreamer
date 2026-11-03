@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Who the main process answers: the current main frame of the window it trusts. Every method
 // checks that before reading its input, so a call from another frame of that window, from a frame
 // that has since gone, or from another window changes nothing. Custom lists here are the app's own
@@ -19,10 +20,7 @@ const boundary = vi.hoisted(
   () =>
     new Map<
       string,
-      (
-        event: IpcMainInvokeEvent,
-        input: import("@mrstreamer/contracts/json").Json | undefined,
-      ) => Promise<Result<unknown>>
+      (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>
     >(),
 );
 
@@ -30,10 +28,7 @@ vi.mock("electron", () => ({
   ipcMain: {
     handle: (
       method: string,
-      handler: (
-        event: IpcMainInvokeEvent,
-        input: import("@mrstreamer/contracts/json").Json | undefined,
-      ) => Promise<Result<unknown>>,
+      handler: (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>,
     ) => boundary.set(method, handler),
   },
 }));
@@ -90,7 +85,7 @@ async function start() {
   const call = (
     method: IpcMethod,
     senderFrame: WebFrameMain | null,
-    input?: import("@mrstreamer/contracts/json").Json,
+    input?: Json,
     sender = window,
   ) => boundary.get(method)!({ sender, senderFrame } as IpcMainInvokeEvent, input);
 
@@ -103,7 +98,7 @@ const search = { view: "palette", id: "first" };
 const methods: {
   name: string;
   method: IpcMethod;
-  input: import("@mrstreamer/contracts/json").Json | undefined;
+  input: Json | undefined;
   noted: string | null;
 }[] = [
   {

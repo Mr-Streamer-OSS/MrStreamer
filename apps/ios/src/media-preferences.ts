@@ -51,8 +51,8 @@ let writable = true;
 let checkpointed = false;
 let cached: Store<MediaPreferences> | undefined;
 
-const record = (value: unknown): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
+const record = (value: Json | undefined): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const knownLanguage = (value: Json | undefined) =>
   TITLE_LANGUAGES.find(({ code }) => code === value)?.code;
@@ -60,7 +60,7 @@ const knownLanguage = (value: Json | undefined) =>
 /** Each subscription's chosen stream per channel, by channel id: what core's chosenVariant reads. */
 type ChannelPicks = Readonly<Record<string, Readonly<Record<string, string>>>>;
 
-const isChannelPicks = (value: unknown): value is ChannelPicks =>
+const isChannelPicks = (value: Json | undefined): value is ChannelPicks =>
   record(value) &&
   Object.values(value).every(
     (channels) =>

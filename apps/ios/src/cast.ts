@@ -608,8 +608,8 @@ function fromBase64(text: string): Uint8Array {
   return out.subarray(0, at);
 }
 
-const isRecord = (value: unknown): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
+const isRecord = (value: Json | undefined): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): JsonObject {

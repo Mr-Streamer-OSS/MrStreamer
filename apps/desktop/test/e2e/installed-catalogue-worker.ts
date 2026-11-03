@@ -1,4 +1,4 @@
-import { JsonValue, type Json } from "../../../../packages/contracts/src/json.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { defined } from "@mrstreamer/core/defined";
@@ -53,8 +53,8 @@ export interface ProbeOptions {
 
 const installed = new WeakSet<MainTransport>();
 
-const object = (value: unknown): value is Record<string, Json | undefined> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && JsonValue.allows(value);
+const object = (value: Json | undefined): value is Record<string, Json | undefined> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 function errorText(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
@@ -381,7 +381,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     if (params.sessionId !== sessionId || !active) return;
 
     if (typeof params.message !== "string") throw new Error("Malformed worker message");
-    const message: unknown = JSON.parse(params.message);
+    const message: Json = JSON.parse(params.message);
 
     if (!object(message)) throw new Error("Worker message must be an object");
     record("worker-message", message);

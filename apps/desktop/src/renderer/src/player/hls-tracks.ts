@@ -688,5 +688,5 @@ function captionChannel(name: string | undefined): number | null {
   return channel ? Number(channel) : null;
 }
 
-/** The cues hls.js parsed, which it types loosely, as lines; whatever isn't a cue is left out. */
+/** A cue as hls.js parses it, which it types loosely: a row of another shape is left out. */
 const ParsedCue = type({ startTime: "number", endTime: "number", text: "string" });

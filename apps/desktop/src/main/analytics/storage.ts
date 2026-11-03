@@ -42,7 +42,6 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
  * the record schema deletes its undeclared counts: neither is ever sent. Consent, identity, the
  * observation ledger and other queued events keep their UUIDs, timestamps and attempts.
  */
-
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
 
@@ -80,8 +79,8 @@ export function analyticsStore(dataDir: string) {
               };
 
         migrated = current !== parsed;
-        // Future optional diagnostic literals cannot discard valid consent or legacy work.
 
+        // New optional diagnostic literals cannot invalidate otherwise valid consent or legacy work.
         const queue = type({
           pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
         })(current);
