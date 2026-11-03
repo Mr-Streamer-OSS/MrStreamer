@@ -1,8 +1,9 @@
 packages:
   - apps/*
   - packages/*
-  # The iOS app keeps its own install and lockfile, so React Native never enters the desktop's.
+  # The mobile apps keep their own installs and lockfiles, so React Native never enters the desktop's.
   - "!apps/ios"
+  - "!apps/android"
 allowBuilds:
   electron: true
   electron-winstaller: false

@@ -10,3 +10,5 @@ apps/ios/src/licences.json
 apps/ios/ios/
 apps/ios/.expo/
 apps/ios/build/
+apps/android/android/
+apps/android/.expo/
