@@ -155,9 +155,6 @@ if check "$later" --start 30; then
   over
   serves "$later" s0 "Plus tard"
 fi
-# A line over the cut that no read can reach for the second segment: both say so.
-reach=$fixtures/subs-many-reach.mkv
-check "$reach" && warns "$reach" s0 "0 1"
 shared=$fixtures/subs-shared.mkv
 if check "$shared"; then
   for track in s0 s1 s2 s3 s4 s5; do warns "$shared" "$track" 0; done

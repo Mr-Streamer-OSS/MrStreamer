@@ -789,8 +789,9 @@ format, as ones that can't show here: the first 16, then how many more. Track nu
 come from the file's Tracks: from its first 256 KB, as opening read them, else from where its
 SeekHead says, 1 MB at most. A file whose Tracks can't be read that way has its text tracks named as
 ones that can't show, their encoding unknown. A line whose text is over 64 KB shows, at its time,
-"This line is too large to show."; a track whose lines outgrow 4 MB, or a title's 16 MB together,
-shows "These subtitles are too large to show." over the picture, which plays on.
+"This line is too large to show."; a segment whose lines of a track outgrow 4 MB, or 16 MB with
+the title's other tracks, shows "These subtitles are too large to show." over the picture, which
+plays on, and the segments around it show their lines, whichever was asked for first.
 
 | Where it plays                                 | Shows                                                              | Can't show                                                                                |
 | ---------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
@@ -803,11 +804,12 @@ shows "These subtitles are too large to show." over the picture, which plays on.
 forced, ASS and WebVTT tracks, and copies whose index lists none of them, whose tracks are out of
 number order, with a track zlib, bzip2, header-stripping, twice or encrypted encoded, with Tracks
 past the first 256 KB or none it can find, with a damaged index, with a 111 KB drawing, a 70 KB
-line, a 1 MB packet or 4 MB of lines, and with one or 20 DVB tracks; `check.c` asks each subtitle
-segment of a title just opened, as after a seek, for `subs.mkv` also with its reads failing from
-each one on, and `verify.py` checks every segment's lines against ffmpeg's own reading of the
-source. `subtitle-check.sh <out>` runs them all with what each must show, and fails on any miss.
-Whether AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
+line, a 1 MB packet, 4 MB of lines alone, before a later line or in six tracks past 16 MB, and with
+one or 20 DVB tracks; `check.c` asks each subtitle segment of a title just opened, as after a seek,
+for `subs.mkv` and the file with the later line also with its reads failing from each one on, and
+`verify.py` checks every segment's lines against ffmpeg's own reading of the source.
+`subtitle-check.sh <out>` runs them all with what each must show, and fails on any miss. Whether
+AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
 Matroska title's picture included, is still to be seen on the simulator and a phone.
 
 ### Online subtitles

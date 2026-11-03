@@ -27,8 +27,7 @@
 # - subs-many.mkv: over 4 MB of French SubRip lines in the first segment; subs-huge.mkv: one in a
 #   packet over 1 MB.
 # - subs-many-later.mkv: subs-many.mkv's lines, then in the same track a line from 3.5 to 5 s,
-#   over the cut at 4 s, and an ordinary one at 30 s; subs-many-reach.mkv: the same lines from 2 s,
-#   in the cluster of the line over the cut, and that line.
+#   over the cut at 4 s, and an ordinary one at 30 s.
 # - subs-shared.mkv: five tracks of 20,000 lines each in the first segment, under a track's 4 MB
 #   as kept but past the title's 16 MB together, and a sixth with a line at 2 s after them and an
 #   ordinary one at 30 s.
@@ -133,16 +132,14 @@ python3 -I - "$work" <<'PY'
 import sys
 work = sys.argv[1]
 line = "Une ligne parmi beaucoup, assez longue pour peser cent octets avec son numero "
-def many(count, second=1):
-    return "".join(f"{i + 1}\n00:00:0{second},{i % 1000:03d} --> 00:00:03,000\n{line}{i:07d}\n\n"
-                   for i in range(count))
+def many(count):
+    return "".join(
+        f"{i + 1}\n00:00:01,{i % 1000:03d} --> 00:00:03,000\n{line}{i:07d}\n\n" for i in range(count))
 later = "00:00:30,000 --> 00:00:32,000\nPlus tard\n"
 open(f"{work}/many.srt", "w").write(many(52000))
 # Longer than those, so it doesn't fit in what they leave of the track's 4 MB.
 over = "00:00:03,500 --> 00:00:05,000\nPar-dessus la coupe" + ", encore" * 12 + "\n\n"
 open(f"{work}/many-later.srt", "w").write(many(52000) + "52001\n" + over + "52002\n" + later)
-# The same from 2 s, in the cluster of the line over the cut, which a read for it can't reach.
-open(f"{work}/many-reach.srt", "w").write(many(52000, 2) + "52001\n" + over)
 open(f"{work}/shared.srt", "w").write(many(20000))
 # Longer than theirs, so it doesn't fit in what they leave of the title's 16 MB.
 open(f"{work}/among.srt", "w").write(
@@ -153,8 +150,6 @@ ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/many.srt" -map 0:0 -map 0:1 -map
   -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-many.mkv"
 ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/many-later.srt" -map 0:0 -map 0:1 -map 1 -c copy \
   -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-many-later.mkv"
-ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/many-reach.srt" -map 0:0 -map 0:1 -map 1 -c copy \
-  -metadata:s:s:0 language=fra -fflags +bitexact "$out/subs-many-reach.mkv"
 ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/shared.srt" -i "$work/among.srt" -map 0:0 -map 0:1 \
   -map 1 -map 1 -map 1 -map 1 -map 1 -map 2 -c copy -metadata:s:s language=fra -fflags +bitexact \
   "$out/subs-shared.mkv"

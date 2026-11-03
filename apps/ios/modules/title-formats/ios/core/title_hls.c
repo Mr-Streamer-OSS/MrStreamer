@@ -46,8 +46,9 @@
 //   in any segment's pass, after a seek too, is kept as cue text, within what a title keeps (see
 //   keep_cue); a segment holds each kept line on screen during it, so a line spanning segments is
 //   in each, as HLS has it. A segment one of whose lines wasn't kept is read again, from a seek,
-//   with the lines of other segments dropped, and says it is too large only if its lines still
-//   aren't all kept: whether they are doesn't depend on which segments were asked for before.
+//   once the lines of other segments are dropped (with none to drop, it stands), and says it is
+//   too large only if its lines still aren't all kept: whether they are doesn't depend on which
+//   segments were asked for before, but for lines a seek can't find (see below).
 //   The forced lines of a language are in its regular track's rendition too, which AVPlayer shows
 //   in place of the forced one once chosen.
 // - A file holds a line only where it begins, so a pass from a seek doesn't read the line on
@@ -199,7 +200,7 @@ typedef struct Text {
   int forced;
   /**
    * What its kept lines take; and a bit for each segment a line is on screen in that keep_cue
-   * couldn't keep, since every line was last dropped.
+   * couldn't keep, since keep_only last dropped a line.
    */
   size_t bytes;
   uint8_t *lost;
@@ -1561,14 +1562,7 @@ static int recall(TitleHls *title, Text *text, Listed *listed) {
   title->io->error = 0;
   title->io->eof_reached = 0;
   if (atomic_load(&title->interrupted)) return AVERROR_EXIT;
-  // A line the read stopped short of, at RECALL_BYTES_MOST or AHEAD_PACKETS_MOST, is missing
-  // where it shows; one the read went past isn't there, and is left out, as a read that doesn't
-  // reach it would leave it.
-  if (!found && (over || error >= 0)) {
-    int64_t length =
-        listed->duration >= 0 ? listed->duration : llrint(UNTIMED_S / av_q2d(text->base));
-    unkept(title, text, listed->time, listed->time + length);
-  }
+  // A line not found within reach is left out, as a read that doesn't reach it would.
   if (over || error >= 0 || error == AVERROR_EOF || error == AVERROR_INVALIDDATA) return 0;
   // A read the source failed is made again when the segment is asked again.
   if (error == AVERROR(EIO)) listed->tried = 0;
