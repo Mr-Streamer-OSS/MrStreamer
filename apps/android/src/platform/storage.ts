@@ -2,9 +2,9 @@ import { File, Paths } from "expo-file-system";
 
 // Whole JSON files in the app's private files folder, which Android deletes with the app and,
 // with backups off (app.json), never restores elsewhere. A write goes to a file beside it first,
-// then takes its place, so a write cut short by the app being killed leaves the last whole file;
-// one cut short before the move finishes leaves the new file under the temporary name, which a
-// read takes instead. Secrets never go here: see credentials.ts.
+// then takes its place, so a write cut short by the app being killed leaves the last whole file,
+// which a read takes; the file under the temporary name is read only when that one is missing or
+// not JSON. Secrets never go here: see credentials.ts.
 
 const fileOf = (name: string) => new File(Paths.document, name);
 const pendingOf = (name: string) => new File(Paths.document, `${name}.next`);
