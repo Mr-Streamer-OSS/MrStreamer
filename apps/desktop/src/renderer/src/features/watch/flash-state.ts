@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** A standing playback note, dismissible when it reports a failure. */
-interface Note {
+export interface Note {
   readonly text: string;
   readonly failed: boolean;
 }

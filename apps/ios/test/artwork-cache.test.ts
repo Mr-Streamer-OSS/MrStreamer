@@ -1,4 +1,4 @@
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { basename, join } from "node:path";
@@ -111,7 +111,7 @@ async function launch() {
   const React = await import("react");
 
   const { createRoot } = (await import(REACT_DOM)) as {
-    createRoot(container: object): { render(node: unknown): void; unmount(): void };
+    createRoot(container: Element): { render(node: unknown): void; unmount(): void };
   };
 
   const { ChannelLogo } = await import("../src/ui.tsx");

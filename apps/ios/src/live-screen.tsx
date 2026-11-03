@@ -145,8 +145,11 @@ interface Detail {
 
 const detail = store<Detail | null>(null);
 
+/** A route's params, as navigation's own state holds them. */
+type RouteParams = NonNullable<ReturnType<typeof tabStack>>["routes"][number]["params"];
+
 /** A route's parameter, when it is the text its route gave. */
-const text = (params: object | undefined, name: string) => {
+const text = (params: RouteParams, name: string) => {
   // Navigation keeps its params as plain serializable objects, so each one is an own value.
   const value: unknown = params && Object.getOwnPropertyDescriptor(params, name)?.value;
 
@@ -242,7 +245,7 @@ function useHandover(split: boolean) {
     if (!atRoot) return;
     const day = shown.day === null ? {} : { day: String(shown.day) };
 
-    const push = (name: string, params: object) =>
+    const push = (name: string, params: Readonly<Record<string, string>>) =>
       navigation.dispatch({ type: "PUSH", payload: { name, params }, target });
 
     if (shown.alone) {

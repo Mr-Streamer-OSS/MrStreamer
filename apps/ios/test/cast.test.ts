@@ -1,5 +1,6 @@
 import { nativePlayer } from "./native-player.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Payload } from "../src/cast.ts";
 
 // Play on TV through the open sender: what the TV is told, what the phone keeps, and how the
 // stream's readers and the provider's connection are let go of. The native Cast module is a
@@ -35,7 +36,7 @@ const settle = async () => {
 interface Sent {
   readonly to: string;
   readonly namespace: string;
-  readonly payload: Record<string, unknown>;
+  readonly payload: Payload;
 }
 
 /** Reads one protobuf CastMessage frame, as a TV would. */
@@ -72,7 +73,7 @@ function readFrames(bytes: Buffer): Sent[] {
     out.push({
       to: fields.get(3)!,
       namespace: fields.get(4)!,
-      payload: JSON.parse(fields.get(6)!) as Record<string, unknown>,
+      payload: JSON.parse(fields.get(6)!) as Payload,
     });
   }
 
@@ -80,7 +81,7 @@ function readFrames(bytes: Buffer): Sent[] {
 }
 
 /** A frame from the TV. */
-function frame(from: string, namespace: string, payload: object): string {
+function frame(from: string, namespace: string, payload: Payload): string {
   const text = (field: number, value: string) => {
     const bytes = Buffer.from(value);
 
@@ -123,7 +124,7 @@ let tvState = "PLAYING";
 const listeners = new Map<string, (event: never) => void>();
 const emit = (event: string, payload: unknown) => listeners.get(event)?.(payload as never);
 
-const tvSays = (channel: string, from: string, namespace: string, payload: object) =>
+const tvSays = (channel: string, from: string, namespace: string, payload: Payload) =>
   emit("onData", { channel, data: frame(from, namespace, payload) });
 
 function answerAsTv(channel: string, message: Sent) {

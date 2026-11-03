@@ -121,6 +121,12 @@ const AddedEntry = lazy(() => type({ id: FOLDER, key: "string", "name?": "string
 const Registry = lazy(() => type({ version: "1", subscriptions: "object[]" }));
 
 /**
+ * One of the registry's entries as the file holds it, unparsed: each is read on its own, and one
+ * this build can't read is kept as it is.
+ */
+type RegistryEntry = Infer<typeof Registry>["subscriptions"][number];
+
+/**
  * A saved subscription as other services know it, whether or not its password or link can be
  * read: its lists loaded before still show.
  */
@@ -391,7 +397,7 @@ function make(deps: SubscriptionDeps) {
       ]);
 
       const roster: Saved[] = [];
-      const entries: object[] = [];
+      const entries: RegistryEntry[] = [];
       const accounts = new Set(stored ? [keyOf(stored)] : []);
       /** The folders an entry names, read or not: none of those is a leftover. */
       const named = new Set<string>();
@@ -415,7 +421,7 @@ function make(deps: SubscriptionDeps) {
       const keepAdded = async (
         entry: Infer<typeof AddedEntry>,
         login: StoredSubscription,
-        listed: object | null,
+        listed: RegistryEntry | null,
       ) => {
         const key = keyOf(login);
 
@@ -1014,7 +1020,7 @@ function sealedOf(stored: StoredSubscription): string {
  * -1 without one. A registry that is missing or can't be read has none.
  */
 async function readRegistry(path: string): Promise<{
-  readonly entries: readonly object[];
+  readonly entries: readonly RegistryEntry[];
   readonly at: number;
   readonly original: Infer<typeof OriginalEntry> | null;
 }> {

@@ -7,6 +7,7 @@
 // counts the connection as broken once nothing arrived for a while.
 import { connect } from "node:tls";
 import { ReceiverFailed } from "../adapter.ts";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import { NAMESPACE, PLATFORM, SENDER, readPlatformMessage } from "./messages.ts";
 
 /** The protocol's limit on one frame's message. */
@@ -25,6 +26,9 @@ const MAX_DEPTH = 16;
 
 /** Milliseconds a closed connection gets to send what was written before it is cut. */
 const LINGER = 1000;
+
+/** What a message on a namespace carries: a JSON object that names its type. */
+export type Payload = JsonObject & { readonly type: string };
 
 export interface CastMessage {
   readonly sourceId: string;
@@ -282,7 +286,7 @@ export interface Channel {
    * Sends `payload` as JSON on `namespace`. Throws a RangeError for a message over the protocol's
    * limit; does nothing once the channel closed.
    */
-  send(destinationId: string, namespace: string, payload: object): void;
+  send(destinationId: string, namespace: string, payload: Payload): void;
   /** Closes the connection once what was sent has gone out. `broken` isn't told. */
   close(): void;
 }
