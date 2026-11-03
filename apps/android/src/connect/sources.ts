@@ -37,6 +37,9 @@ export interface CatalogueReader {
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
 }
 
+/** A signed-in Xtream source's movie and series reads; M3U playlists have none. */
+export type OnDemandReader = Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails">;
+
 /** A channel as the catalogue shows it, named as the desktop app names it. */
 export interface ChannelRow {
   /** Unique across sources: the source's id, then the channel's. */
@@ -157,9 +160,7 @@ async function rowsOf(
 export interface SourcesOwner {
   readonly state: Store<Sources>;
   /** On-demand reads bound to the current sign-in; obsolete answers reject without publishing. */
-  onDemand(
-    id: string,
-  ): Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails"> | null;
+  onDemand(id: string): OnDemandReader | null;
   /** Reads the saved sources and signs each in again. Call once, at launch. */
   restore(): Promise<void>;
   /** Checks `input` with its provider, then saves it and lists its channels. */
@@ -177,10 +178,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
   const ready = new Promise<void>((resolve) => (restored = resolve));
 
   /** Each signed-in source's reader, and its channel reads. */
-  const readers = signIns<
-    CatalogueReader &
-      Partial<Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails">>
-  >();
+  const readers = signIns<CatalogueReader & Partial<OnDemandReader>>();
 
   const listed = () => {
     const now = state.get();
@@ -188,10 +186,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
     return now.kind === "ready" ? now.sources : [];
   };
 
-  function readerOf(
-    authority: Authority,
-  ): CatalogueReader &
-    Partial<Pick<Provider, "onDemandCatalogue" | "movieDetails" | "seriesDetails">> {
+  function readerOf(authority: Authority): CatalogueReader & Partial<OnDemandReader> {
     const options = { userAgent: platform.userAgent, fetch: platform.fetch };
 
     return authority.kind === "xtream"

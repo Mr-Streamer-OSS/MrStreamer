@@ -185,16 +185,17 @@ it("shows seasons and translated copy, and only exposes actions while their owne
   await act(async () => {});
   expect(shown.textContent).toContain("Specials");
   expect(shown.textContent).toContain("Season 1");
-  expect(shown.querySelector('button[aria-label="Play"]')).toBeNull();
-  expect(shown.querySelector('button[aria-label="Download"]')).toBeNull();
+  const button = (label: string) => shown.querySelector(`button[aria-label="${label}"]`);
+  expect(libraryIntents.state.get()).toEqual({});
+  expect(button("Play")).toBeNull();
+  expect(button("Download")).toBeNull();
   const intents: unknown[] = [];
-  let stop = () => {};
+  let stopPlay = () => {};
+  let stopDownload = () => {};
 
   act(() => {
-    stop = libraryIntents.register({
-      play: (intent) => intents.push(intent),
-      download: (intent) => intents.push(intent),
-    });
+    stopPlay = libraryIntents.register({ play: (intent) => intents.push(intent) });
+    stopDownload = libraryIntents.register({ download: (intent) => intents.push(intent) });
   });
   press(shown, "Play");
   press(shown, "Download");
@@ -205,13 +206,20 @@ it("shows seasons and translated copy, and only exposes actions while their owne
         kind: "episode",
         episodeId: "first",
         sourceId: "source",
+        titleKey: title.key,
         titleId: title.id,
+        version: expect.objectContaining({ id: title.id }),
       }),
     }),
     expect.objectContaining({ action: "download" }),
   ]);
-  act(() => stop());
-  expect(shown.querySelector('button[aria-label="Play"]')).toBeNull();
+  // Each owner's stop removes only its own action.
+  act(() => stopPlay());
+  expect(button("Play")).toBeNull();
+  expect(button("Download")).not.toBeNull();
+  act(() => stopDownload());
+  expect(libraryIntents.state.get()).toEqual({});
+  expect(button("Download")).toBeNull();
   act(() => setLanguage(resolveLanguage("nl-NL", [])));
   expect(shown.textContent).toContain("Seizoen 1");
 });

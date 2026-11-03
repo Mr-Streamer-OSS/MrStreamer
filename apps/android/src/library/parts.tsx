@@ -12,7 +12,7 @@ import { colors } from "../ui/theme.ts";
 
 /** Lines inside a sheet, and the outline of a secondary button. */
 export const sheetLine = "#262626";
-export const outline = "#3A3A3A";
+const outline = "#3A3A3A";
 
 /** What a title's name sits on while its artwork is missing. */
 const placeholder = "#1C1C1C";
@@ -308,19 +308,17 @@ export function FilledButton({
   label,
   icon,
   onPress,
-  grow = true,
 }: {
   label: string;
   icon?: IconName;
   onPress: () => void;
-  grow?: boolean;
 }) {
   return (
     <Press
       label={label}
       onPress={onPress}
       style={{
-        flexGrow: grow ? 1 : 0,
+        flexGrow: 1,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
@@ -337,7 +335,7 @@ export function FilledButton({
   );
 }
 
-/** An outlined 48dp button; without `label` text, a square icon button named by `label`. */
+/** An outlined 48dp button; `iconOnly` makes it a square icon button named by `label`. */
 export function OutlinedButton({
   label,
   icon,

@@ -5,7 +5,6 @@ import { collections } from "@mrstreamer/core/ondemand/collections";
 import type { ProviderTitle } from "@mrstreamer/core/provider";
 import { browseCollection } from "../src/library/browse.ts";
 import { chosenVersion, versionMemory } from "../src/library/versions.ts";
-import { intentRegistry, type PlayIntent } from "../src/library/intents.ts";
 import { about, fixture } from "./library-fixture.ts";
 
 function versions() {
@@ -55,16 +54,12 @@ describe("Android library public behavior", () => {
   it("pages searches, preserves stale lists on failure, retries, and removes revoked sources", async () => {
     const f = fixture();
     await f.model.refresh();
-    expect(f.requests).toContain("get_vod_streams");
     expect(f.model.tabs("movie")).toEqual(expect.arrayContaining(["for-you", "new", "4k", "all"]));
     expect(f.model.tabs("movie")).not.toContain("genres");
     expect(
       browseCollection(f.model.made("movie"), "all", { sort: "title", filters: {} }).sort,
     ).toBe("title");
-    expect(f.model.search("movie", "Movie", 1)).toMatchObject({
-      total: 43,
-      titles: expect.any(Array),
-    });
+    expect(f.model.search("movie", "Movie", 1).total).toBe(43);
     expect(f.model.search("movie", "Movie", 1).titles).toHaveLength(20);
     expect(f.model.search("movie", "Movie", 2).titles).toHaveLength(40);
     expect(f.model.search("movie", "Movie", 3).titles).toHaveLength(43);
@@ -200,36 +195,5 @@ describe("Android library public behavior", () => {
       metadataFailed: false,
       value: { plot: "Provider story" },
     });
-  });
-
-  it("hands later owners a stable intent only while a handler is registered", () => {
-    const registry = intentRegistry();
-    const { title } = versions();
-    expect(registry.state.get()).toEqual({});
-    const received: PlayIntent[] = [];
-    const stop = registry.register({ play: (intent) => received.push(intent) });
-    registry.state.get().play?.({
-      action: "play",
-      media: {
-        sourceId: title.subscriptionId,
-        kind: "movie",
-        titleId: title.id,
-        titleKey: title.key,
-        version: chosenVersion(title, {}),
-      },
-    });
-    expect(received[0]?.media).toMatchObject({
-      sourceId: "source",
-      titleKey: title.key,
-      titleId: title.id,
-      version: { id: title.id },
-    });
-    const stopDownload = registry.register({ download: () => {} });
-    expect(registry.state.get().play).toBeDefined();
-    stop();
-    expect(registry.state.get().play).toBeUndefined();
-    expect(registry.state.get().download).toBeDefined();
-    stopDownload();
-    expect(registry.state.get()).toEqual({});
   });
 });

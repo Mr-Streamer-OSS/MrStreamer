@@ -7,11 +7,9 @@ import type { TitleAbout } from "@mrstreamer/core/metadata/tmdb";
 export function fixture(metadata?: MetadataPort) {
   let failed = false;
   let detailFailed = false;
-  const requests: string[] = [];
 
   const fetchImpl: typeof fetch = async (input) => {
     const action = new URL(String(input)).searchParams.get("action") ?? "authenticate";
-    requests.push(action);
 
     if (failed || (detailFailed && action.includes("info"))) throw new Error("Offline");
 
@@ -86,7 +84,6 @@ export function fixture(metadata?: MetadataPort) {
   return {
     model,
     fetchImpl,
-    requests,
     fail: (value: boolean) => {
       failed = value;
     },

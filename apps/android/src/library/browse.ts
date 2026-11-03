@@ -9,8 +9,6 @@ export interface BrowseChoices {
   readonly filters: TitleFilters;
 }
 
-export const DEFAULT_BROWSE: BrowseChoices = { filters: {} };
-
 // Without file facts, core falls back to each listed version's declared tags. Provider language
 // labels never become observed audio/subtitles: only the tracks playback found in a file do
 // (titles.ts `filterFilesOf`), and core counts them for the one file they were found in.

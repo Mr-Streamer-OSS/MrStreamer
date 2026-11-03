@@ -58,12 +58,12 @@ const sorts = {
   title: "Title",
 } as const;
 
+/** Tab labels, but 4K, which reads the same in every language. */
 const tabs = {
   "for-you": "For you",
   new: "New",
   genres: "Genres",
   services: "Services",
-  "4k": "4K",
   all: "All",
 } as const;
 
@@ -90,6 +90,11 @@ function openTitle(destination: string, title: Title, requested = false) {
       requested: requested ? ownedKey(title) : "",
     },
   });
+}
+
+/** Whether any source lists a movie or a series. */
+function hasTitles(model: LibraryModel) {
+  return model.made("movie").size("all") + model.made("series").size("all") > 0;
 }
 
 /**
@@ -125,9 +130,8 @@ function ListRecovery({ model, empty }: { model: LibraryModel; empty: string }) 
 function StaleStatus({ model }: { model: LibraryModel }) {
   const state = useStore(model.state);
   const open = useOpenShared();
-  const listed = model.made("movie").size("all") + model.made("series").size("all") > 0;
 
-  if (!listed || !state.failures.length) return null;
+  if (!hasTitles(model) || !state.failures.length) return null;
 
   return (
     <StatusLine
@@ -370,7 +374,7 @@ export function BrowseScreen({
         <TextTabs
           tabs={visible.map((value) => ({
             value,
-            label: value === "4k" ? "4K" : t(tabs[value as Exclude<keyof typeof tabs, "4k">]),
+            label: value === "4k" ? "4K" : t(tabs[value]),
           }))}
           selected={tab}
           onSelect={(value) => router.setParams({ tab: value })}
@@ -647,8 +651,7 @@ function mediaOf(title: Title, episode?: Episode): MediaIdentity {
 
 /** A movie's Play and Download, each only while its later owner handles it. */
 function MovieActions({ title }: { title: Title }) {
-  const handlers = useStore(libraryIntents.state);
-  const { play, download } = handlers;
+  const { play, download } = useStore(libraryIntents.state);
 
   if (!play && !download) return null;
   const media = mediaOf(title);
@@ -823,6 +826,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     : (groups.find((g) => g.versions.some((v) => ownedKey(v) === ownedKey(version!)))?.label ??
       t("Version"));
 
+  const multiSource = new Set(title.versions.map((v) => v.subscriptionId)).size > 1;
   const numberedSeasons = seasons.filter((s) => s.number > 0).length;
 
   const facts = [
@@ -976,9 +980,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
                     group.quality,
                     group.label,
                     group.versions.length > 1 ? formatNumber(at + 1) : "",
-                    new Set(title.versions.map((v) => v.subscriptionId)).size > 1
-                      ? v.subscriptionId
-                      : "",
+                    multiSource ? v.subscriptionId : "",
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -1063,7 +1065,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
       : null;
 
   const query = params.query?.trim() ?? "";
-  const listed = model.made("movie").size("all") + model.made("series").size("all") > 0;
+  const listed = hasTitles(model);
   const setQuery = (query: string) => router.setParams({ query, moviesPage: "1", seriesPage: "1" });
 
   const results = query
@@ -1072,7 +1074,13 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
         const parsed = Number(params[pageKey]);
         const pages = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
 
-        return { kind, pageKey, pages, result: model.search(kind, query, pages) };
+        const result = model.search(kind, query, pages);
+
+        const more = t(kind === "movie" ? "Show {count} more movies" : "Show {count} more series", {
+          count: Math.min(20, result.total - result.titles.length),
+        });
+
+        return { kind, pageKey, pages, result, more };
       })
     : [];
 
@@ -1122,7 +1130,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         >
-          {found.map(({ kind, pageKey, pages, result }, at) => (
+          {found.map(({ kind, pageKey, pages, result, more }, at) => (
             <View key={kind}>
               <View
                 style={{
@@ -1154,10 +1162,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
               ))}
               {result.total > result.titles.length ? (
                 <Press
-                  label={t(
-                    kind === "movie" ? "Show {count} more movies" : "Show {count} more series",
-                    { count: Math.min(20, result.total - result.titles.length) },
-                  )}
+                  label={more}
                   onPress={() => router.setParams({ [pageKey]: String(pages + 1) })}
                   style={{
                     justifyContent: "center",
@@ -1167,11 +1172,7 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
                     borderColor: colors.hairline,
                   }}
                 >
-                  <Text style={{ ...typeScale.label, fontSize: 15 }}>
-                    {t(kind === "movie" ? "Show {count} more movies" : "Show {count} more series", {
-                      count: Math.min(20, result.total - result.titles.length),
-                    })}
-                  </Text>
+                  <Text style={{ ...typeScale.label, fontSize: 15 }}>{more}</Text>
                 </Press>
               ) : null}
             </View>

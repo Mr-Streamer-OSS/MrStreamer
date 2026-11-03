@@ -50,7 +50,6 @@ export function libraryModel(options: {
   const detailReads = new Map<string, number>();
   const now = options.now ?? Date.now;
   let generation = 0;
-  const sources = () => options.sources();
 
   let indexed: ReturnType<typeof indexCatalogue> | undefined;
   let indexedLists: readonly { subscriptionId: string; catalogue: OnDemandCatalogue }[] = [];
@@ -58,7 +57,7 @@ export function libraryModel(options: {
   function catalogue() {
     const language = options.language();
 
-    const lists = sources().flatMap((s) => {
+    const lists = options.sources().flatMap((s) => {
       const catalogue = kept.get(s.id);
 
       return catalogue ? [{ subscriptionId: s.id, catalogue }] : [];
@@ -103,7 +102,7 @@ export function libraryModel(options: {
     async refresh() {
       const run = ++generation;
       state.set((s) => ({ ...s, loading: true }));
-      const active = sources();
+      const active = options.sources();
 
       for (const id of kept.keys()) if (!active.some((s) => s.id === id)) kept.delete(id);
 
@@ -112,7 +111,7 @@ export function libraryModel(options: {
           try {
             const result = await source.catalogue();
 
-            if (run === generation && sources().some((s) => s.id === source.id))
+            if (run === generation && options.sources().some((s) => s.id === source.id))
               kept.set(source.id, result);
 
             return null;
@@ -129,17 +128,20 @@ export function libraryModel(options: {
           revision: s.revision + 1,
         }));
     },
+    /** The browse tabs that have titles, in their order. */
     tabs(kind: TitleKind) {
       const c = made(kind);
 
-      return [
-        ...(collectionRows(c, "for-you", null).length ? ["for-you"] : []),
-        ...(collectionRows(c, "new", null).length ? ["new"] : []),
-        ...(c.genres().length ? ["genres"] : []),
-        ...(c.services().length ? ["services"] : []),
-        ...(c.size("4k") ? ["4k"] : []),
-        ...(c.size("all") ? ["all"] : []),
-      ];
+      return (
+        [
+          ["for-you", collectionRows(c, "for-you", null).length > 0],
+          ["new", collectionRows(c, "new", null).length > 0],
+          ["genres", c.genres().length > 0],
+          ["services", c.services().length > 0],
+          ["4k", c.size("4k") > 0],
+          ["all", c.size("all") > 0],
+        ] as const
+      ).flatMap(([tab, shown]) => (shown ? [tab] : []));
     },
     title(kind: TitleKind, key: string) {
       return kindOf(catalogue(), kind).titles.find((t) => t.key === key);
@@ -155,12 +157,15 @@ export function libraryModel(options: {
       let providerFailed = false;
 
       try {
-        const source = sources().find((s) => s.id === title.subscriptionId);
+        const source = options.sources().find((s) => s.id === title.subscriptionId);
 
         if (!source) throw new Error("Source removed");
         const value = await source.details(title.kind, title.id);
 
-        if (detailReads.get(key) !== read || !sources().some((s) => s.id === title.subscriptionId))
+        if (
+          detailReads.get(key) !== read ||
+          !options.sources().some((s) => s.id === title.subscriptionId)
+        )
           throw new Error("Source changed");
         provided.set(key, value);
       } catch {
