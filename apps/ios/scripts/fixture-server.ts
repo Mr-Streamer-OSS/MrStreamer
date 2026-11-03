@@ -17,9 +17,10 @@
 // a directory, keeps each piece it makes for later sessions to copy rather than encode again.
 //
 // Every channel is a live loop: the TEST channels loop their recording from
-// apps/desktop/test/fixtures, codecs as they are, so the ones AVPlayer can't decode fail as they
-// would; every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg, light
-// for even ids and dark for odd ones, apart from "BE | KWALITEIT 1": its HD stream is a heavier
+// apps/desktop/test/fixtures, picture and every sound track, codecs as they are, so the ones
+// AVPlayer can't decode fail as they would, without the DVB subtitles and teletext HLS can't carry
+// (`recording`); every other channel loops a 720p H.264 + AAC test picture made here with ffmpeg,
+// light for even ids and dark for odd ones, apart from "BE | KWALITEIT 1": its HD stream is a heavier
 // 720p picture (about 2.6 Mbit/s) and its SD one a light 360p one (about 0.57 Mbit/s), so a paced
 // link (`/live-link`) carries one and not the other. Each request is logged without the login, to
 // .local/ios-fixture/requests.jsonl. Stream 7999, "TEST | Live sound and subtitles (EN/NL)",
@@ -192,13 +193,20 @@ const past = maker.make("past", [
 const dark = picture("dark", "0x050505");
 const recordings = new Map<string, Media>();
 
-/** A TEST channel's recording, its streams copied as they are, their sound silenced. */
+/**
+ * A TEST channel's recording, its picture and every sound track copied as they are, their sound
+ * silenced. Its DVB subtitles and teletext stay out: ffmpeg's HLS muxer writes subtitles only as
+ * WebVTT, and AVPlayer reads neither from MPEG-TS. Captions in the picture go with it.
+ */
 function recording(file: string): Media {
   let found = recordings.get(file);
 
   if (!found) {
     const clip = join(fixtures, file);
-    found = maker.make(file.replace(/\W/g, "-"), ["-i", clip, "-c", "copy", ...silencing(clip)]);
+    const streams = ["-map", "0:v", "-map", "0:a?"];
+    found = maker.make(file.replace(/\W/g, "-"), [
+      ...["-i", clip, ...streams, "-c", "copy", ...silencing(clip)],
+    ]);
     recordings.set(file, found);
   }
 
