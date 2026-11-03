@@ -762,7 +762,10 @@ Titles are tried whatever their file type: a version that fails says so in Watch
 details, and the version menu marks it and offers the others. Matroska (`.mkv`) goes through a
 format session; everything else goes to AVPlayer as it is, as does a `.mkv` that turns out to be
 another container. A session plays an H.264 or HEVC picture with AAC-LC, HE-AAC, AC-3, E-AC-3 or
-MP3 sound, with its sound tracks to choose from, starting where the title stopped. A track that
+MP3 sound, with its sound tracks to choose from, starting where the title stopped. With no
+other playable sound family, it also offers fixed-block FLAC, mono or stereo, 16 or 24 bits, at
+44.1 or 48 kHz. Other FLAC variants fail with a reason. FLAC has no silence: invalid interior
+frames or changes in frame length stop the session with a gap message. A track that
 ends early, pauses or starts late is silent there. One whose frames this can't make silent, such as
 HE-AAC or E-AC-3 over 5.1, stops there with a message when chosen, and Try again goes on with the
 main sound. A track AVPlayer doesn't play in HLS, such as AAC Main, or one that starts more than

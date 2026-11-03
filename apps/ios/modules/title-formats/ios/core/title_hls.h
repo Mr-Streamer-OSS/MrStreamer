@@ -4,7 +4,8 @@
 // Nothing is decoded; where a sound track has no packets, frames of silence fill in.
 //
 // The picture is one rendition and each sound track AVPlayer plays (AAC-LC, HE-AAC, AC-3,
-// E-AC-3, MP3) another, listed as the stream's audio choices. Each text subtitle track (SubRip,
+// E-AC-3, MP3, or fixed-block mono/stereo 16/24-bit 44.1/48 kHz FLAC without another playable
+// sound family) another, listed as the stream's audio choices. Each text subtitle track (SubRip,
 // ASS or SSA, WebVTT) is a WebVTT rendition, listed as its subtitle choices; the other subtitle
 // tracks, such as PGS or DVD pictures, aren't served, and `title_hls_unshown` names them.
 //
