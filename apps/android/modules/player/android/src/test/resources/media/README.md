@@ -4,7 +4,8 @@ MPEG-TS files are named `.m2ts` (188-byte packets all the same) so TypeScript to
 
 Four seconds of ffmpeg's `testsrc2` picture at 160x90 and 10 fps with silent sound (two seconds
 in the Matroska file, which ends with its subtitle), made here for these tests, so nothing in them
-is anyone else's. `hls-ladder` is one at 320x180 and 160x90. Remake them with:
+is anyone else's. `hls-ladder` is one at 320x180 and 160x90; `hls/event.m3u8` is `hls/index.m3u8` without its
+end, as a timeshift panel serves a recording. Remake them with:
 
 ```sh
 V="-f lavfi -i testsrc2=size=160x90:rate=10:duration=4"
@@ -22,5 +23,6 @@ ffmpeg $q $V $A -t 4 -c:v libvpx-vp9 -g 10 -b:v 50k -c:a libopus -b:a 24k -short
 ffmpeg $q $V $A -t 4 -c:v libx265 -x265-params log-level=error -g 10 -pix_fmt yuv420p10le -tag:v hvc1 -c:a eac3 -b:a 96k -shortest -fflags +bitexact hevc10-eac3.mp4
 ffmpeg $q $V $A -t 4 -c:v libx264 -g 10 -pix_fmt yuv420p -c:a aac -b:a 32k -shortest -f hls -hls_time 2 -hls_list_size 0 -hls_segment_type mpegts -hls_segment_filename 'hls/segment%d.m2ts' hls/index.m3u8
 (cd hls-ladder && ffmpeg $q -f lavfi -i testsrc2=size=320x180:rate=10:duration=4 $A -t 4 -filter_complex "[0:v]split=2[a][b];[b]scale=160:90[c]" -map "[a]" -map "[c]" -map 1:a -map 1:a -c:v libx264 -g 10 -pix_fmt yuv420p -b:v:0 120k -b:v:1 40k -c:a aac -b:a 32k -shortest -f hls -hls_time 2 -hls_list_size 0 -hls_segment_type mpegts -var_stream_map "v:0,a:0 v:1,a:1" -master_pl_name index.m3u8 -hls_segment_filename 'v%v/segment%d.m2ts' 'v%v/index.m3u8')
+grep -v EXT-X-ENDLIST hls/index.m3u8 > hls/event.m3u8
 printf 'This is not a stream.\n%.0s' $(seq 1 200) > not-media.bin
 ```

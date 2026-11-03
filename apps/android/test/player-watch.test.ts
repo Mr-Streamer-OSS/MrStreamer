@@ -18,11 +18,14 @@ const scenario = vi.hoisted(() => ({
 
 vi.mock("react-native", async () => {
   const { createElement: h } = await import("react");
+
   type Props = { children?: ReactNode; accessibilityLabel?: string; onPress?: () => void };
+
   const view =
     (tag: string) =>
     ({ children, accessibilityLabel, onPress }: Props) =>
       h(tag, { "aria-label": accessibilityLabel, onClick: onPress }, children);
+
   return {
     View: view("div"),
     Text: view("span"),
@@ -34,12 +37,16 @@ vi.mock("react-native", async () => {
     },
   };
 });
+
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
+
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
+
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => scenario.params,
+  useIsFocused: () => true,
   usePathname: () => "/watch",
   router: {
     canGoBack: () => true,
@@ -48,19 +55,23 @@ vi.mock("expo-router", () => ({
     push: () => scenario.asked.push("push"),
   },
 }));
+
 vi.mock("../src/player/surface.ts", () => ({ PlayerSurface: () => null }));
+
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
   const state = store<PlayerState>({ kind: "idle" });
+
   return {
     player: {
       state,
       play(intent: PlayIntent) {
         scenario.played.push(intent);
         state.set(playing(intent));
+
         return "attempt";
       },
-      async retry() {
+      retry() {
         scenario.retries++;
       },
     },
@@ -68,12 +79,17 @@ vi.mock("../src/player/instance.ts", async () => {
 });
 
 const window = new Window();
+
 Object.assign(globalThis, { window, document: window.document });
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const REACT_DOM = "react-dom/client";
+
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: object): { render(node: unknown): void; unmount(): void };
 };
+
 const { default: Watch } = await import("../src/app/watch.tsx");
 const { player } = await import("../src/player/instance.ts");
 const { watchHref } = await import("../src/player/intent.ts");
@@ -84,6 +100,7 @@ const estuary: PlayIntent = {
   channelId: "estuary",
   title: "Estuary Max",
 };
+
 const harbour: PlayIntent = { ...estuary, channelId: "harbour", title: "Harbour HD" };
 
 function playing(intent: PlayIntent, change: Partial<Playing> = {}): Playing {
@@ -114,6 +131,7 @@ function open(intent: PlayIntent | null) {
   window.document.body.append(container);
   root = createRoot(container);
   act(() => root?.render(createElement(Watch)));
+
   return container;
 }
 
@@ -152,6 +170,15 @@ describe("Watch", () => {
     expect(scenario.played).toEqual([]);
   });
 
+  it("leaves when what it showed is stopped from elsewhere", () => {
+    player.state.set(playing(estuary));
+    open(estuary);
+    expect(scenario.asked).toEqual([]);
+
+    act(() => player.state.set({ kind: "idle" }));
+    expect(scenario.asked).toEqual(["back"]);
+  });
+
   it("says why a stream was refused, and Try again tries it again", () => {
     player.state.set(
       playing(estuary, {
@@ -166,10 +193,13 @@ describe("Watch", () => {
     expect(shown.textContent).toContain(
       "If another device is watching on this subscription, stop it there first.",
     );
+
     const retry = Array.from(shown.querySelectorAll("button")).find((button) =>
       button.textContent?.includes("Try again"),
     );
-    act(() => (retry as unknown as { click(): void }).click());
+
+    if (!(retry instanceof window.HTMLButtonElement)) throw new Error("No Try again");
+    act(() => retry.click());
     expect(scenario.retries).toBe(1);
     expect(scenario.played).toEqual([]);
   });

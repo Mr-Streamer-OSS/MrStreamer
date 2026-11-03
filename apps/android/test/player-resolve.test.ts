@@ -24,10 +24,12 @@ function credentials(authorities: Record<string, Authority>): Credentials {
 function serving(body: string) {
   const asked: string[] = [];
   let pulled = 0;
+
   const fetchImpl: typeof fetch = async (input) => {
     asked.push(String(input));
     const bytes = new TextEncoder().encode(body);
     let at = 0;
+
     const stream = new ReadableStream<Uint8Array>({
       pull(controller) {
         if (at >= bytes.length) return controller.close();
@@ -37,9 +39,11 @@ function serving(body: string) {
         controller.enqueue(piece);
       },
     });
-    // React Native's types know no stream body; the tests' fetch takes one.
-    return new Response(stream as unknown as Blob);
+
+    // React Native's types take no stream for a body; the tests' fetch has one all the same.
+    return Object.defineProperty(new Response(null), "body", { value: stream });
   };
+
   return { fetchImpl, asked, pulled: () => pulled };
 }
 
@@ -74,6 +78,7 @@ describe("player addresses", () => {
       userAgent: "MrStreamer-Android/0.1.0",
       now: () => NOW,
     });
+
   const signal = new AbortController().signal;
 
   it("plays an Xtream channel, recording and movie from the protected login", async () => {
@@ -136,6 +141,7 @@ describe("player addresses", () => {
 
   it("refuses a recording outside the days the channel keeps, and a source with no login", async () => {
     const resolve = resolveWith(xtream);
+
     const old: PlayIntent = {
       kind: "catch-up",
       sourceId: "source",
@@ -144,6 +150,7 @@ describe("player addresses", () => {
       window: { start: NOW - 4 * 24 * HOUR, end: NOW - 4 * 24 * HOUR + HOUR },
       days: 3,
     };
+
     await expect(resolve(old, signal)).rejects.toMatchObject({
       error: { kind: "catch-up", reason: "outside", days: 3 },
     });
@@ -154,10 +161,12 @@ describe("player addresses", () => {
 
   it("finds every channel a playlist's catalogue lists, by the id it lists it under", async () => {
     const link = "https://lists.example/tv.m3u?token=abc";
+
     const catalogue = await playlistReader(link, {
       userAgent: "test",
       fetch: serving(PLAYLIST).fetchImpl,
     }).liveCatalogue();
+
     const ids = catalogue.channels.slice(0, 4).map((channel) => channel.id);
     expect(ids).toEqual(["news.uk", "Cartoons", "Cartoons|Cartoons", "Archive"]);
 
@@ -169,6 +178,7 @@ describe("player addresses", () => {
         ),
       ),
     );
+
     expect(found.map(({ url, format }) => [url, format])).toEqual([
       ["https://cdn.example/news/index.m3u8", "hls"],
       ["http://cdn.example/cartoons.ts", "mpegts"],
@@ -197,6 +207,7 @@ describe("player addresses", () => {
     ).rejects.toMatchObject({ error: { kind: "channel-not-found", channelId: "Gone" } });
 
     const start = NOW - HOUR;
+
     const recording = await resolveWith({ kind: "m3u", link }, serving(PLAYLIST).fetchImpl)(
       {
         kind: "catch-up",
@@ -208,6 +219,7 @@ describe("player addresses", () => {
       },
       signal,
     );
+
     expect(recording).toMatchObject({
       url: `http://cdn.example/archive.ts?utc=${start / 1000}&lutc=${NOW / 1000}`,
       mode: "archive",

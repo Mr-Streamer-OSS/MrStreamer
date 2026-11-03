@@ -1,7 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { t } from "@mrstreamer/core/i18n";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
@@ -32,6 +32,7 @@ import { colors } from "../ui/theme.ts";
 
 /** Paper A's secondary text over the picture, a step brighter than over black. */
 const DIM = "#D0D0D0";
+
 /** Behind the round controls over the picture. */
 const CONTROL = "rgba(0, 0, 0, 0.5)";
 const HIDE_AFTER_MS = 4000;
@@ -42,28 +43,37 @@ export default function Watch() {
   const intent = useMemo(() => linkedIntent(play), [play]);
   useEffect(() => {
     const now = player.state.get();
+
     if (intent) {
       if (now.kind === "idle" || intentKey(now.intent) !== intentKey(intent)) player.play(intent);
     } else if (now.kind === "idle") leave();
   }, [intent]);
 
   const state = useStore(player.state);
-  // Stopped from elsewhere (the mini player's Close, a notification): nothing is left to watch.
+  // Stopped from elsewhere (a notification, Remove): nothing is left to watch. Only the showing
+  // Watch leaves, so a screen opened over it is never the one taken away.
+  const focused = useIsFocused();
   const played = useRef(false);
   useEffect(() => {
     if (state.kind === "playing") played.current = true;
-    else if (played.current) leave();
-  }, [state.kind]);
+    else if (played.current && focused) leave();
+  }, [state.kind, focused]);
   const insets = useSafeAreaInsets();
   const reader = useScreenReader();
   const [shown, setShown] = useState(true);
   // Each touch of a control starts the wait to hide them again.
   const [touched, setTouched] = useState(0);
-  const touch = () => setTouched((count) => count + 1);
+
+  const touch = () => {
+    setShown(true);
+    setTouched((count) => count + 1);
+  };
+
   const phase = state.kind === "playing" ? state.phase : null;
   useEffect(() => {
     if (!shown || phase !== "playing") return;
     const timer = setTimeout(() => setShown(false), HIDE_AFTER_MS);
+
     return () => clearTimeout(timer);
   }, [shown, phase, touched]);
   // A finger on the seek bar keeps the controls up until it lifts.
@@ -86,7 +96,7 @@ export default function Watch() {
         <Failed
           failure={state.failure}
           playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
-          onRetry={() => void player.retry()}
+          onRetry={() => player.retry()}
         />
       ) : loading ? (
         <Centre>
@@ -119,6 +129,7 @@ export default function Watch() {
             <IconButton icon="arrow-back" label={t("Back")} onPress={leave} />
             <Text
               accessibilityRole="header"
+              pointerEvents="none"
               numberOfLines={1}
               style={{
                 flex: 1,
@@ -175,8 +186,10 @@ function useScreenReader() {
   useEffect(() => {
     void AccessibilityInfo.isScreenReaderEnabled().then(setEnabled);
     const change = AccessibilityInfo.addEventListener("screenReaderChanged", setEnabled);
+
     return () => change.remove();
   }, []);
+
   return enabled;
 }
 
@@ -204,15 +217,18 @@ function Centre({ children }: { children: ReactNode }) {
 /** Play or pause between the 10 s jumps, which show only where the media seeks. */
 function Transport({ now, onTouch }: { now: Playing; onTouch: () => void }) {
   const control = playPause(now);
+
   // Each press starts the wait to hide the controls again.
   const press = (run: () => void) => () => {
     onTouch();
     run();
   };
+
   const jump = (by: number) => {
     const to = Math.max(0, now.positionMs + by);
     void player.seek(now.durationMs === null ? to : Math.min(to, now.durationMs));
   };
+
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 48 }}>
       {now.seekable ? (
@@ -249,6 +265,7 @@ function Round({
   onPress: () => void;
 }) {
   const { focused, handlers } = useKeyboardFocus();
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -286,8 +303,10 @@ function Progress({
   onHold: (held: boolean) => void;
 }) {
   const duration = now.seekable && now.durationMs ? now.durationMs : null;
+
   return (
     <View
+      pointerEvents="box-none"
       style={{
         minHeight: 48,
         flexDirection: "row",
@@ -339,16 +358,23 @@ function SeekBar({
   const [dragging, setDragging] = useState<number | null>(null);
   // The bar's left edge on screen, from where the finger first touched it.
   const origin = useRef(0);
+  // Gone mid-drag (the attempt failed or was replaced): the controls may hide again.
+  useEffect(() => () => onHold(false), [onHold]);
+
   const at = (event: GestureResponderEvent) =>
     width > 0
       ? Math.min(1, Math.max(0, (event.nativeEvent.pageX - origin.current) / width)) * durationMs
       : 0;
+
   const position = dragging ?? Math.min(now.positionMs, durationMs);
+
   const seek = (to: number) => {
     onTouch();
     void player.seek(Math.min(durationMs, Math.max(0, to)));
   };
+
   const time = { color: DIM, fontSize: 14, lineHeight: 18, fontVariant: ["tabular-nums"] } as const;
+
   return (
     <>
       <Text importantForAccessibility="no" style={time}>
@@ -410,6 +436,7 @@ function clock(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   const [h, m, s] = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
   const pad = (n: number) => String(n).padStart(2, "0");
+
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
@@ -425,6 +452,7 @@ function Failed({
 }) {
   const { headline, detail } = describePlayback(failure, playlist);
   const { focused, handlers } = useKeyboardFocus();
+
   return (
     <Centre>
       <View style={{ maxWidth: 480, alignItems: "center", gap: 8 }}>
@@ -516,6 +544,7 @@ function describeNative(failure: NativeFailure, playlist: boolean): Described {
       };
     case "http": {
       const status = failure.status ?? 0;
+
       if (status === 429)
         return {
           headline: t("Provider is limiting requests"),
@@ -523,6 +552,7 @@ function describeNative(failure: NativeFailure, playlist: boolean): Described {
             "The provider answered that it gets too many requests. Wait a moment before trying again.",
           ),
         };
+
       // As the desktop words it (features/watch/problems.ts): a check only for 401 and 403.
       if ([401, 403, 458, 509].includes(status))
         return {
@@ -534,13 +564,16 @@ function describeNative(failure: NativeFailure, playlist: boolean): Described {
                 ? t("Some playlist channels only play in certain countries.")
                 : t("If another device is watching on this subscription, stop it there first."),
         };
+
       if (status === 404 || status === 410)
         return { headline: t("No stream right now"), detail: null };
+
       return {
         headline: t("Provider error"),
         detail: t("The provider answered with HTTP {status}.", { status: String(status) }),
       };
     }
+
     case "file-missing":
       return { headline: t("Not available"), detail: null };
     case "format":

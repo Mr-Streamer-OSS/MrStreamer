@@ -16,6 +16,7 @@ export const player: PlayerOwner = playerOwner(
     fetch: (input, init) => {
       const headers = new Headers(init?.headers);
       headers.set("Cache-Control", "no-store");
+
       return fetch(input, { ...init, headers, credentials: "omit" });
     },
     userAgent: USER_AGENT,
@@ -27,6 +28,7 @@ export const player: PlayerOwner = playerOwner(
 // login the app no longer keeps.
 sources.state.subscribe(() => {
   const now = sources.state.get();
+
   if (now.kind !== "ready") return;
   const saved = new Set(now.sources.map((source) => source.id));
   void player.release((hold) => hold.kind === "source" && !saved.has(hold.sourceId));

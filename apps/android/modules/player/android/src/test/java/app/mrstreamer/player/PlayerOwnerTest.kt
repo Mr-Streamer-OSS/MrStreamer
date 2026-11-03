@@ -1,14 +1,21 @@
 package app.mrstreamer.player
 
 import android.content.Context
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.test.utils.FakeRenderer
 import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.WebServerDispatcher
 import androidx.media3.test.utils.robolectric.RobolectricUtil
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -18,12 +25,14 @@ import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLooper
 
 // PlayerOwner's public behaviour over a real ExoPlayer reading real files (src/test/resources/media,
 // made with ffmpeg as its README says). Robolectric has no decoders: the fake renderers accept every
@@ -69,7 +78,7 @@ class PlayerOwnerTest {
   private fun owner(build: (TestExoPlayerBuilder) -> TestExoPlayerBuilder = { it }): PlayerOwner {
     val player = build(TestExoPlayerBuilder(context)).build()
     players += player
-    return PlayerOwner(context, player, recorder)
+    return PlayerOwner(player, recorder)
   }
 
   /** The fixture as a file of its own, as a download would be. */
@@ -217,6 +226,74 @@ class PlayerOwnerTest {
     assertFalse(owner.setQuality("b", low.id))
     assertTrue(owner.setQuality("a", null))
     until { recorder.tracks.getValue("a").first { it.id == high.id }.selected }
+  }
+
+  @Test
+  fun keepsARecordingsPlaceWhenItsPlaylistHasNoEnd() {
+    fixture("hls/segment0.m2ts")
+    fixture("hls/segment1.m2ts")
+    val event = fixture("hls/event.m3u8")
+    val owner = owner()
+    owner.admit(
+      Admission("a", event.toURI().toString(), emptyMap(), "hls", "archive", 0, HoldRef.LocalFile(event.path)),
+    )
+    untilPhase("a", Phase.PLAYING)
+    assertTrue(owner.pause("a"))
+    assertTrue(owner.seek("a", 3_000))
+    until { recorder.of("a").last().positionMs >= 3_000 }
+    assertTrue(owner.resume("a"))
+    until { recorder.of("a").last().phase == Phase.PLAYING }
+    val playing = recorder.of("a").last()
+    assertTrue(playing.positionMs >= 3_000)
+    assertFalse(playing.live)
+    assertTrue(playing.durationMs != null)
+    assertTrue(owner.setSpeed("a", 1.5f))
+  }
+
+  @Test
+  fun playsAFileWhoseNameHoldsUrlCharacters() {
+    val odd = File(context.cacheDir, "Ep #1 ?100%.mp4")
+    fixture("h264-aac.mp4").copyTo(odd, overwrite = true)
+    val owner = owner()
+    owner.admit(file("a", odd))
+    untilPhase("a", Phase.PLAYING)
+  }
+
+  @Test
+  fun readsOnlyTheAddressesAnAttemptMay() {
+    fun admission(url: String, hold: HoldRef = HoldRef.Source("x")) =
+      Admission("a", url, emptyMap(), "hls", "live", 0, hold)
+    val https = admission("https://tv.example/live.m3u8")
+    val http = admission("http://tv.example/live.m3u8")
+    val file = admission("file:///data/a.m3u8", HoldRef.LocalFile("/data/a.m3u8"))
+    assertTrue(PlayerOwner.allows(https, Uri.parse("https://cdn.example/1.ts")))
+    assertFalse(PlayerOwner.allows(https, Uri.parse("http://cdn.example/1.ts")))
+    assertTrue(PlayerOwner.allows(http, Uri.parse("http://cdn.example/1.ts")))
+    assertTrue(PlayerOwner.allows(http, Uri.parse("https://cdn.example/1.ts")))
+    assertFalse(PlayerOwner.allows(http, Uri.parse("file:///data/user/0/app/files/secret")))
+    assertFalse(PlayerOwner.allows(https, Uri.parse("content://media/1")))
+    assertTrue(PlayerOwner.allows(file, Uri.parse("file:///data/1.ts")))
+    assertFalse(PlayerOwner.allows(file, Uri.parse("https://cdn.example/1.ts")))
+  }
+
+  @Test
+  fun aReleasedHoldSettlesOnceAndOpensNothingMore() {
+    val settled = mutableListOf<Boolean>()
+    val hold = Hold(Handler(Looper.getMainLooper())) { settled += it }
+    val source = fixture("h264-aac.mp4")
+    val reader = hold.factory(DataSource.Factory { FileDataSource() }) { true }.createDataSource()
+    reader.open(DataSpec(Uri.fromFile(source)))
+    hold.retire()
+    ShadowLooper.idleMainLooper()
+    assertEquals(emptyList<Boolean>(), settled)
+    reader.close()
+    until { settled.isNotEmpty() }
+    hold.timeOut()
+    ShadowLooper.idleMainLooper()
+    assertEquals(listOf(true), settled)
+    val late = hold.factory(DataSource.Factory { FileDataSource() }) { true }.createDataSource()
+    assertThrows(IOException::class.java) { late.open(DataSpec(Uri.fromFile(source))) }
+    late.close()
   }
 
   @Test

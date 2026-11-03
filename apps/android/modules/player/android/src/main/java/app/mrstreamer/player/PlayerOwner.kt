@@ -1,6 +1,5 @@
 package app.mrstreamer.player
 
-import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -13,7 +12,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -104,7 +102,6 @@ interface PlayerEvents {
  */
 @UnstableApi
 class PlayerOwner(
-  private val context: Context,
   private val player: ExoPlayer,
   var events: PlayerEvents? = null,
 ) {
@@ -182,6 +179,29 @@ class PlayerOwner(
       observe(Failure("file-missing", "ERROR_CODE_IO_FILE_NOT_FOUND"))
       return
     }
+    try {
+      prepare(admission, hold, local)
+    } catch (error: RuntimeException) {
+      // Nothing of the new attempt plays, and nothing of the old one may linger unreleased.
+      current = null
+      player.stop()
+      player.clearMediaItems()
+      ending?.let(::letGo)
+      hold.retire()
+      throw error
+    }
+    // Only now that its media is no longer the player's can what the last attempt held settle.
+    ending?.let(::letGo)
+    player.setPlaybackSpeed(1f)
+    player.trackSelectionParameters =
+      player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+    player.playWhenReady = true
+    player.prepare()
+    observe()
+  }
+
+  /** Gives the player [admission]'s media, read through [hold]. */
+  private fun prepare(admission: Admission, hold: Hold, local: HoldRef.LocalFile?) {
     val http =
       DefaultHttpDataSource.Factory()
         // An http address may move to https; an https one never moves to http, where its login
@@ -205,27 +225,19 @@ class PlayerOwner(
           },
         )
         .build()
-    // A file reads only files: a downloaded playlist naming an address can't stream through it.
-    val upstream = if (local != null) FileDataSource.Factory() else DefaultDataSource.Factory(context, http)
-    val source = DefaultMediaSourceFactory(hold.factory(upstream), extractors).createMediaSource(item)
+    // A file reads only files and a source only its provider's addresses (see [allows]).
+    val upstream = if (local != null) FileDataSource.Factory() else http
+    val source =
+      DefaultMediaSourceFactory(hold.factory(upstream) { allows(admission, it) }, extractors).createMediaSource(item)
     if (admission.mode == "live") player.setMediaSource(source) else player.setMediaSource(source, admission.startMs)
-    // Only now that its media is no longer the player's can what the last attempt held settle.
-    ending?.let(::letGo)
-    player.setPlaybackSpeed(1f)
-    player.trackSelectionParameters =
-      player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
-    player.playWhenReady = true
-    player.prepare()
-    observe()
   }
 
   fun pause(attempt: String) = command(attempt, ::ownsCurrentItem) { player.pause() }
 
-  /** Plays on; a live stream that can't be seeked rejoins its live edge, a failed one tries again. */
+  /** Plays on; Live rejoins its live edge, an ended title starts again, a failed one tries again. */
   fun resume(attempt: String) =
     command(attempt, ::ownsCurrentItem) {
-      val live = current?.admission?.mode == "live"
-      if (live || player.isCurrentMediaItemLive) player.seekToDefaultPosition()
+      if (current?.admission?.mode == "live") player.seekToDefaultPosition()
       else if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
       if (player.playbackState == Player.STATE_IDLE) player.prepare()
       player.play()
@@ -235,7 +247,7 @@ class PlayerOwner(
     command(attempt, { ownsCurrentItem() && seekable() }) { player.seekTo(positionMs.coerceAtLeast(0)) }
 
   fun setSpeed(attempt: String, speed: Float) =
-    command(attempt, { current?.admission?.mode != "live" && !player.isCurrentMediaItemLive && speed in 0.25f..4f }) {
+    command(attempt, { current?.admission?.mode != "live" && speed in 0.25f..4f }) {
       player.setPlaybackSpeed(speed)
     }
 
@@ -268,6 +280,11 @@ class PlayerOwner(
       player.clearMediaItems()
       ending?.let(::letGo)
     }
+
+  /** Plays on whatever plays, as a media button asks: nothing when nothing does. */
+  fun resumeCurrent() {
+    current?.let { resume(it.admission.attempt) }
+  }
 
   /** Ends whatever plays, as when the app's JS goes away. */
   fun stopAll() {
@@ -356,7 +373,7 @@ class PlayerOwner(
       attempt = admission.attempt,
       phase = phase,
       positionMs = player.currentPosition.coerceAtLeast(0),
-      durationMs = player.duration.takeIf { it != C.TIME_UNSET && !player.isCurrentMediaItemLive },
+      durationMs = player.duration.takeIf { it != C.TIME_UNSET && admission.mode != "live" },
       bufferedMs = player.totalBufferedDuration,
       // A recording is never live, whatever its playlist says: Live and catch-up stay apart.
       live = admission.mode == "live",
@@ -414,9 +431,24 @@ class PlayerOwner(
         }
       }
 
+    /**
+     * Whether [admission] may read [uri]: a file only files; a source only http and https, and
+     * once its address is https, never http, where a login in the address would travel in the
+     * clear (as core's providerFetch holds the app's other requests). Every address a playlist
+     * names (variants, segments, keys) is checked as it opens; redirects are held to the same by
+     * refusing cross-protocol ones from https (see [prepare]).
+     */
+    fun allows(admission: Admission, uri: Uri): Boolean {
+      val scheme = uri.scheme?.lowercase()
+      if (admission.hold is HoldRef.LocalFile) return scheme == "file"
+      val secure = Uri.parse(admission.url).scheme.equals("https", ignoreCase = true)
+      return scheme == "https" || (scheme == "http" && !secure)
+    }
+
     /** [error] as JS reads it. Media3's messages can quote the address, so none is passed on. */
     fun failureOf(error: PlaybackException): Failure {
       val code = error.errorCodeName
+      if (generateSequence(error.cause) { it.cause }.any { it is Hold.Refused }) return Failure("cleartext", code)
       val kind =
         when (error.errorCode) {
           PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,

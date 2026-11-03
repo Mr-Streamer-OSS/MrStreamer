@@ -33,6 +33,7 @@ export interface ResolvePlatform {
 const PLAYLIST_TIMEOUT_MS = 90_000;
 const PLAYLIST_BYTES = 64 * 1024 * 1024;
 const PLAYLIST_ENTRIES = 100_000;
+
 /** What a playlist host answers a link it no longer serves with. */
 const REFUSED: ReadonlySet<number> = new Set([401, 403, 404, 410]);
 
@@ -65,8 +66,10 @@ function playlistLogin(link: string): ProviderLogin {
   const url = new URL(link);
   const secrets = [decoded(url.username), decoded(url.password)];
   const uncertain: string[] = [];
+
   for (const [name, value] of url.searchParams)
     (LOGIN_NAMES.has(name.toLowerCase()) ? secrets : uncertain).push(value);
+
   return { secrets: secrets.filter(Boolean), uncertain };
 }
 
@@ -86,6 +89,7 @@ const asListed = (entry: PlaylistEntry): PlaylistEntry => ({
     ...Object.fromEntries(
       (["tvg-id", "tvg-name", "group-title"] as const).flatMap((name) => {
         const value = entry.attributes[name];
+
         return value === undefined ? [] : [[name, eachGroup(value)]];
       }),
     ),
@@ -104,10 +108,13 @@ async function playlistStream(
   signal: AbortSignal,
 ): Promise<PlaylistStream> {
   const origin = new URL(link).origin;
+
   const unreachable = (detail: string) =>
     new AppFailure({ kind: "unreachable", server: origin, detail });
+
   const timeout = AbortSignal.timeout(PLAYLIST_TIMEOUT_MS);
   let response: Response;
+
   try {
     response = await providerFetch(platform.fetch, playlistLogin(link))(link, {
       headers: { "User-Agent": platform.userAgent },
@@ -117,8 +124,10 @@ async function playlistStream(
     if (signal.aborted || cause instanceof AppFailure) throw cause;
     throw unreachable(describeNetworkError(cause));
   }
+
   if (!response.ok || !response.body) {
     void response.body?.cancel().catch(() => {});
+
     if (REFUSED.has(response.status))
       throw new AppFailure({
         kind: "incomplete-login",
@@ -127,46 +136,59 @@ async function playlistStream(
       });
     throw new AppFailure({ kind: "provider-error", status: response.status });
   }
+
   const pieces = response.body.getReader();
   const decoder = new TextDecoder();
   const reader = m3uReader();
   const entries: PlaylistEntry[] = [];
   let bytes = 0;
+
   // An entry names the channel only when the id starts with its tvg-id, else its name, else the
   // "Channel <n>" one without either gets: the catalogue is worked out again only after such an
   // entry, not after every piece read.
   const couldName = (entry: PlaylistEntry) => {
     const base = entry.attributes["tvg-id"] || entry.name || entry.attributes["tvg-name"];
+
     return channelId.startsWith(base || "Channel ");
   };
+
   const found = (read: readonly PlaylistEntry[]) => {
     const more = read.map(asListed);
     entries.push(...more);
+
     if (entries.length > PLAYLIST_ENTRIES)
       throw new AppFailure({
         kind: "unexpected",
         detail: "This playlist has more than 100,000 entries, more than the phone reads.",
       });
+
     return more.some(couldName) ? playlistCatalogue(entries).streams.get(channelId) : undefined;
   };
+
   try {
     for (;;) {
       const { done, value } = await pieces.read();
+
       if (!done) {
         bytes += value.byteLength;
+
         if (bytes > PLAYLIST_BYTES)
           throw new AppFailure({
             kind: "unexpected",
             detail: "This playlist is larger than 64 MB, more than the phone reads.",
           });
       }
+
       const stream = done
         ? found([...reader.push(decoder.decode()), ...reader.end()])
         : found(reader.push(decoder.decode(value, { stream: true })));
+
       if (stream) return stream;
-      if (done) break;
+
       if (reader.playlist === false)
         throw unreachable("The address answered, but not with a playlist.");
+
+      if (done) break;
     }
   } catch (cause) {
     if (signal.aborted || cause instanceof AppFailure) throw cause;
@@ -174,6 +196,7 @@ async function playlistStream(
   } finally {
     void pieces.cancel().catch(() => {});
   }
+
   throw new AppFailure({ kind: "channel-not-found", channelId });
 }
 
@@ -190,7 +213,9 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
         path: intent.path,
       };
     }
+
     const { sourceId } = intent;
+
     if (
       intent.kind === "catch-up" &&
       !archiveHolds(intent.days, intent.window.start, platform.now())
@@ -198,6 +223,7 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
       throw new AppFailure({ kind: "catch-up", reason: "outside", days: intent.days });
     const authority = await platform.credentials.read(sourceId);
     signal.throwIfAborted();
+
     if (!authority) throw new AppFailure({ kind: "needs-secret", subscriptionId: sourceId });
 
     const request = (
@@ -213,6 +239,7 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
       startMs,
       sourceId,
     });
+
     /** A recording starting at `start` plays from the intent's `from`, else its window's start. */
     const archiveStartMs = (start: number) =>
       intent.kind === "catch-up" ? Math.max(0, (intent.from ?? intent.window.start) - start) : 0;
@@ -222,17 +249,23 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
         userAgent: platform.userAgent,
         fetch: platform.fetch,
       });
+
       switch (intent.kind) {
         case "live": {
           const stream = await provider.liveStream(intent.channelId, signal);
+
           return request(stream, stream.format, "live");
         }
+
         case "catch-up": {
           const stream = await provider.archiveStream(intent.channelId, intent.window, signal);
+
           return request(stream, stream.format, "archive", archiveStartMs(stream.start));
         }
+
         case "title": {
           const file = await provider.titleFile(intent.media, intent.id, intent.container, signal);
+
           return request(file, "progressive", "title", intent.resumeAt);
         }
       }
@@ -242,11 +275,15 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
     if (intent.kind === "title")
       throw new AppFailure({ kind: "title-not-found", titleId: intent.id });
     const stream = await playlistStream(authority.link, intent.channelId, platform, signal);
+
     if (intent.kind === "live") return request(stream, stream.format, "live");
+
     const archive = stream.catchup
       ? archiveAddress(stream.catchup, intent.window, platform.now())
       : null;
+
     if (!archive) throw new AppFailure({ kind: "catch-up", reason: "none" });
+
     return request(
       { url: archive.url, headers: stream.headers },
       stream.format,

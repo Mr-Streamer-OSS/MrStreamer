@@ -51,10 +51,15 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
     main.post { onSettled(closed) }
   }
 
-  /** Readers for the attempt's media, each counted while open. */
-  fun factory(upstream: DataSource.Factory) = DataSource.Factory { Counted(upstream.createDataSource()) }
+  /** An address the attempt may not read: see [PlayerOwner.allows]. */
+  class Refused : IOException("The player refused an address")
 
-  private inner class Counted(private val upstream: DataSource) : DataSource {
+  /** Readers for the attempt's media, each counted while open, opening only what [allowed] takes. */
+  fun factory(upstream: DataSource.Factory, allowed: (Uri) -> Boolean) =
+    DataSource.Factory { Counted(upstream.createDataSource(), allowed) }
+
+  private inner class Counted(private val upstream: DataSource, private val allowed: (Uri) -> Boolean) :
+    DataSource {
     private var counted = false
 
     override fun addTransferListener(transferListener: TransferListener) =
@@ -62,6 +67,7 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
 
     // DataSource's contract calls close() even when open() throws, so a failed open is counted too.
     override fun open(dataSpec: DataSpec): Long {
+      if (!allowed(dataSpec.uri)) throw Refused()
       if (!counted) {
         if (!opened()) throw IOException("The attempt was released")
         counted = true

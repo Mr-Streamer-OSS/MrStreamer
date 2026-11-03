@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Looper
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -37,32 +38,35 @@ object PlayerHost {
         )
         .setHandleAudioBecomingNoisy(true)
         .build()
-    session = MediaSession.Builder(app, player).setId("player").setCallback(OwnerCommands).build()
-    return PlayerOwner(app, player).also { owner = it }
+    val made = PlayerOwner(player)
+    session = MediaSession.Builder(app, OwnerPlayer(player, made)).setId("player").setCallback(OwnerCommands).build()
+    return made.also { owner = it }
+  }
+
+  /** Play from a media button or system control goes through the owner, as Watch's does. */
+  private class OwnerPlayer(player: Player, private val owner: PlayerOwner) : ForwardingPlayer(player) {
+    override fun play() = owner.resumeCurrent()
   }
 
   /**
-   * Media buttons and system controls may play, pause and seek; what ends or changes an attempt
-   * (stop, prepare, a new item) stays with [PlayerOwner], which reports and releases it.
+   * Media buttons and system controls may play and pause. What ends, changes or moves an attempt
+   * (stop, prepare, a new item, seeking, speed, repeat) stays with [PlayerOwner], whose rules (Live
+   * never seeks) a controller would otherwise go around.
    */
   private object OwnerCommands : MediaSession.Callback {
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo) =
-      MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-        .setAvailablePlayerCommands(
-          MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-            .removeAll(
-              Player.COMMAND_STOP,
-              Player.COMMAND_PREPARE,
-              Player.COMMAND_SET_MEDIA_ITEM,
-              Player.COMMAND_CHANGE_MEDIA_ITEMS,
-              Player.COMMAND_SEEK_TO_NEXT,
-              Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-              Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-              Player.COMMAND_SET_SPEED_AND_PITCH,
-              Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS,
-            )
-            .build(),
-        )
-        .build()
+      MediaSession.ConnectionResult.accept(
+        MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS,
+        Player.Commands.Builder()
+          .addAll(
+            Player.COMMAND_PLAY_PAUSE,
+            Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+            Player.COMMAND_GET_TIMELINE,
+            Player.COMMAND_GET_METADATA,
+            Player.COMMAND_GET_AUDIO_ATTRIBUTES,
+            Player.COMMAND_GET_TRACKS,
+          )
+          .build(),
+      )
   }
 }

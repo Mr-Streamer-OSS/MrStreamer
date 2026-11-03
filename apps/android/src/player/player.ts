@@ -68,10 +68,11 @@ export interface PlayerOwner {
   setQuality(trackId: string | null): Promise<boolean>;
   stop(): Promise<void>;
   /**
-   * Tries a failed attempt again: the native player prepares it again where it was, and an intent
-   * whose address couldn't be worked out is played afresh.
+   * Tries a failed attempt again as a new one, its address worked out afresh (a login changed
+   * since is used) from where it was: a title, file or recording from the position it reached.
+   * Nothing when nothing failed.
    */
-  retry(): Promise<void>;
+  retry(): void;
   /**
    * Calls `listener` as each attempt pauses, stops, is replaced or ends, once per change: where
    * history saves it to continue from. Returns the unsubscribe.
@@ -102,16 +103,35 @@ const failureOf = (cause: unknown): AppError =>
 
 interface Admitted {
   readonly intent: PlayIntent;
-  /** The phase it last settled in, so an unchanged one isn't reported twice. */
-  settled: NativePhase | null;
+  /** Where its media's position 0 is in the intent: what a retry continues from. */
+  readonly startMs: number;
+  /** The phase and position it last settled at, so an unchanged settle isn't reported twice. */
+  settled: string | null;
   readonly released: Promise<Release>;
   readonly settle: (release: Release) => void;
 }
 
-function admittedOf(intent: PlayIntent): Admitted {
+function admittedOf(intent: PlayIntent, startMs: number): Admitted {
   let settle!: (release: Release) => void;
   const released = new Promise<Release>((resolve) => (settle = resolve));
-  return { intent, settled: null, released, settle };
+
+  return { intent, startMs, settled: null, released, settle };
+}
+
+/**
+ * `intent` again from `positionMs` into the media an attempt of it played, which started at
+ * `startMs` into the intent: a recording's media can begin before the moment it was asked from.
+ */
+function continued(intent: PlayIntent, positionMs: number, startMs: number): PlayIntent {
+  switch (intent.kind) {
+    case "live":
+      return intent;
+    case "catch-up":
+      return { ...intent, from: (intent.from ?? intent.window.start) - startMs + positionMs };
+    case "title":
+    case "file":
+      return { ...intent, resumeAt: positionMs };
+  }
 }
 
 export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner {
@@ -125,26 +145,34 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
 
   const playing = () => {
     const now = state.get();
+
     return now.kind === "playing" ? now : null;
   };
+
   const update = (attempt: string, change: (now: Playing) => Playing) =>
     state.set((now) => (now.kind === "playing" && now.attempt === attempt ? change(now) : now));
 
   native.addListener("onState", (observation: Observation) => {
     const entry = admitted.get(observation.attempt);
+
     if (!entry) return;
     const { phase } = observation;
     const settles = phase === "paused" || phase === "stopped" || phase === "ended";
-    if (settles && entry.settled !== phase) {
-      const settled = {
+    const key = settles ? `${phase}@${observation.positionMs}` : null;
+
+    if (settles && entry.settled !== key) {
+      entry.settled = key;
+
+      const settled: Settled = {
         intent: entry.intent,
         phase,
         positionMs: observation.positionMs,
         durationMs: observation.durationMs,
       };
+
       for (const listener of settledListeners) listener(settled);
-    }
-    entry.settled = settles ? phase : null;
+    } else entry.settled = key;
+
     if (phase === "stopped") return;
     update(observation.attempt, (now) => ({
       ...now,
@@ -172,11 +200,13 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
     resolving = null;
     const now = playing();
     state.set({ kind: "idle" });
+
     if (now && admitted.has(now.attempt)) await native.stop(now.attempt);
   }
 
   const command = async (run: (attempt: string) => Promise<boolean>) => {
     const now = playing();
+
     return now && admitted.has(now.attempt) ? run(now.attempt) : false;
   };
 
@@ -189,6 +219,7 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       const controller = new AbortController();
       resolving = controller;
       const attempt = `${++attempts}-${Date.now().toString(36)}`;
+
       // What played stops now, not once the new address is worked out: a failure to reach the
       // new one must not leave the old one playing under it.
       if (before && admitted.has(before.attempt)) void native.stop(before.attempt);
@@ -206,17 +237,19 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
         failure: null,
         tracks: [],
       });
+
       const failed = (cause: unknown) =>
         update(attempt, (now) => ({
           ...now,
           phase: "failed",
           failure: { kind: "resolve", error: failureOf(cause) },
         }));
+
       resolve(intent, controller.signal).then(
         (request) => {
           if (resolving !== controller) return;
           resolving = null;
-          admitted.set(attempt, admittedOf(intent));
+          admitted.set(attempt, admittedOf(intent, request.startMs));
           native.admit({ ...request, attempt }).catch((cause: unknown) => {
             // Whatever the native player opened before it failed is unknown: say so.
             admitted
@@ -232,6 +265,7 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
           failed(cause);
         },
       );
+
       return attempt;
     },
 
@@ -242,14 +276,23 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
     setQuality: (trackId) => command((attempt) => native.setQuality(attempt, trackId)),
     stop: end,
 
-    async retry() {
+    retry() {
       const now = playing();
-      if (now?.failure?.kind === "native" && (await native.resume(now.attempt))) return;
-      if (now) owner.play(now.intent);
+
+      if (!now?.failure) return;
+      const entry = admitted.get(now.attempt);
+
+      // A failure before anything played starts the intent as it was asked.
+      owner.play(
+        entry && now.positionMs > 0
+          ? continued(now.intent, now.positionMs, entry.startMs)
+          : now.intent,
+      );
     },
 
     onSettled(listener) {
       settledListeners.add(listener);
+
       return () => settledListeners.delete(listener);
     },
 
@@ -257,11 +300,14 @@ export function playerOwner(native: NativePlayer, resolve: Resolve): PlayerOwner
       // Taken before stopping: a release reported while the stop is under way is still counted.
       const holding = [...admitted.values()].filter((entry) => matches(holdOf(entry.intent)));
       const now = playing();
+
       if (now && matches(holdOf(now.intent))) await end();
+
       return Promise.all(holding.map((entry) => entry.released));
     },
 
     capabilities: () => native.capabilities(),
   };
+
   return owner;
 }

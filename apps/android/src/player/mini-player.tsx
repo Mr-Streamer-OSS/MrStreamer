@@ -14,10 +14,13 @@ import { PlayerSurface } from "./surface.ts";
 
 /** Paper A's live marker, on Watch and here. */
 export const LIVE_RED = "#FF5A4E";
+
 /** Paper A's mini player sits one step above the true black behind it. */
 const RAISED = "#0A0A0A";
+
 /** Paper A: the mini player is 64dp tall, its hairline included. */
 const HEIGHT = 64;
+
 /**
  * The phone navigation bar's height over the system's own (src/ui/navigation-bar.tsx: 79dp items
  * and their hairline), which the mini player sits on. Android's largest text still fits in 79dp.
@@ -35,7 +38,7 @@ export function playPause(now: Playing): { icon: IconName; label: string; run: (
     case "ended":
       return { icon: "replay", label: t("Play again"), run: () => void player.resume() };
     case "failed":
-      return { icon: "refresh", label: t("Try again"), run: () => void player.retry() };
+      return { icon: "refresh", label: t("Try again"), run: () => player.retry() };
     default:
       return { icon: "pause", label: t("Pause"), run: () => void player.pause() };
   }
@@ -53,8 +56,10 @@ export function MiniPlayer() {
   const insets = useSafeAreaInsets();
   const rail = layoutFor(useWindowDimensions().width) === "rail";
   const { focused, handlers } = useKeyboardFocus();
+
   if (state.kind === "idle" || onWatch) return null;
   const control = playPause(state);
+
   const status =
     state.phase === "failed"
       ? t("Didn't start")
@@ -63,6 +68,7 @@ export function MiniPlayer() {
         : state.live
           ? "Live"
           : null;
+
   return (
     <View
       style={{

@@ -70,7 +70,11 @@ export function intentKey(intent: PlayIntent): string {
   }
 }
 
-const window = type({ start: "number", end: "number" }).narrow((each) => each.start < each.end);
+/** A link's number: JSON can spell infinity (1e999), which no position or time is. */
+const finite = type("number").narrow((value) => Number.isFinite(value));
+const atLeastZero = finite.narrow((value) => value >= 0);
+const window = type({ start: finite, end: finite }).narrow((each) => each.start < each.end);
+
 /** An intent a link can carry: not a file, which only the app itself names. */
 const Linked = type({
   kind: "'live'",
@@ -85,7 +89,7 @@ const Linked = type({
     title: "string",
     window,
     days: "number.integer > 0",
-    "from?": "number >= 0",
+    "from?": atLeastZero,
   })
   .or({
     kind: "'title'",
@@ -94,7 +98,7 @@ const Linked = type({
     id: "string",
     container: "string",
     title: "string",
-    "resumeAt?": "number >= 0",
+    "resumeAt?": atLeastZero,
   });
 
 /**
@@ -113,11 +117,14 @@ export const watchHref = (intent: PlayIntent) =>
 export function linkedIntent(param: string | string[] | undefined): PlayIntent | null {
   if (typeof param !== "string") return null;
   let value: unknown;
+
   try {
     value = JSON.parse(param);
   } catch {
     return null;
   }
+
   const parsed = Linked(value);
+
   return parsed instanceof type.errors ? null : parsed;
 }
