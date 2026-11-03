@@ -61,7 +61,8 @@ function downloadStatus({
  * transfer is, dotted while its total is unknown, and a dim track while waiting, queued or
  * paused; retries left add a badge. It changes only when the status does.
  */
-function HeaderGlyph({ mark }: { mark: number | "unknown" | "failed" | undefined }) {
+function HeaderGlyph({ status }: { status: ReturnType<typeof downloadStatus> }) {
+  const mark = status?.mark;
   if (typeof mark === "number")
     return (
       <>
@@ -123,7 +124,7 @@ export function DownloadStatusButton({
       testID={testID}
     >
       {ring ? (
-        <HeaderGlyph mark={status?.mark} />
+        <HeaderGlyph status={status} />
       ) : (
         <>
           <SymbolView
@@ -153,15 +154,7 @@ const styles = StyleSheet.create({
   },
   progress: { color: "#FFFFFF", fontSize: 11, fontWeight: "600" },
   slot: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
-  over: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  over: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
   // A white disc at the ring's top right, edged in the header glass's colour so it parts from it.
   badge: {
     position: "absolute",
