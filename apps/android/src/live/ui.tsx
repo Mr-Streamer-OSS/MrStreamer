@@ -14,8 +14,7 @@ import { colors } from "../ui/theme.ts";
 import { useLocale } from "./catalogue.ts";
 import { Dialog, FitSheet, RAISED_RULE, RED, SheetRow, TextButton, useGaps } from "./chrome.tsx";
 import { t } from "./copy.ts";
-import { identity, playIntent, resolve, same, type Entry, type Resolution } from "./model.ts";
-import { intentHandlers } from "./intents.ts";
+import { playIntent, resolve, same, type Entry, type Resolution } from "./model.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
 
@@ -161,7 +160,6 @@ export function Channel({
 }) {
   useLocale();
   const state = useStore(sources.state);
-  const handlers = useStore(intentHandlers);
   const saved = useStore(lists.state);
   const found = resolve(entry, state);
   const { focused, handlers: focus } = useKeyboardFocus();
@@ -202,7 +200,6 @@ export function Channel({
 
   const title = found.row.title;
   const now = t("No programme information");
-  const schedule = !!handlers.schedule;
   const favourite = t(starred ? "Remove from Favourites" : "Add to Favourites");
 
   const play = () => {
@@ -221,13 +218,6 @@ export function Channel({
     }
   };
 
-  const scheduleNow = () => {
-    const current = resolve(entry, sources.state.get());
-
-    if (current.kind === "listed")
-      intentHandlers.get().schedule?.({ ...identity(current.row), kind: "schedule" });
-  };
-
   return (
     <Pressable
       accessible
@@ -236,18 +226,15 @@ export function Channel({
       // Android's click label: TalkBack says "Double-tap to play" for a playable row.
       accessibilityActions={[
         { name: "activate", label: t("Play") },
-        { name: "star", label: favourite },
+        ...(saved.kind === "ready" ? [{ name: "star", label: favourite }] : []),
         { name: "lists", label: t("Lists") },
-        ...(schedule ? [{ name: "schedule", label: t("Schedule") }] : []),
       ]}
       onAccessibilityAction={({ nativeEvent }) => {
         if (nativeEvent.actionName === "activate") play();
 
-        if (nativeEvent.actionName === "star") star();
+        if (nativeEvent.actionName === "star" && saved.kind === "ready") star();
 
         if (nativeEvent.actionName === "lists") onLists(entry);
-
-        if (nativeEvent.actionName === "schedule") scheduleNow();
       }}
       onPress={play}
       onLongPress={() => onLists(entry)}
@@ -264,14 +251,16 @@ export function Channel({
     >
       <Badge title={title} />
       <Lines title={title} detail={now} />
-      <View importantForAccessibility="no-hide-descendants">
-        <IconButton
-          icon={starred ? "star" : "star-border"}
-          label={favourite}
-          color={starred ? colors.text : colors.secondary}
-          onPress={star}
-        />
-      </View>
+      {saved.kind === "ready" ? (
+        <View importantForAccessibility="no-hide-descendants">
+          <IconButton
+            icon={starred ? "star" : "star-border"}
+            label={favourite}
+            color={starred ? colors.text : colors.secondary}
+            onPress={star}
+          />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -523,7 +512,7 @@ export function NameDialog({
           cursorColor={colors.text}
           selectionColor={colors.focus}
           style={{
-            height: 56,
+            minHeight: 56,
             paddingHorizontal: 14,
             borderWidth: 2,
             borderRadius: 4,

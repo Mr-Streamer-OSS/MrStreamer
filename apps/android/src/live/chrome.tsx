@@ -1,6 +1,14 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { ReactNode } from "react";
-import { Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import {
   SafeAreaInsetsContext,
   SafeAreaProvider,
@@ -8,10 +16,10 @@ import {
   type EdgeInsets,
 } from "react-native-safe-area-context";
 import { formatList } from "@mrstreamer/core/i18n";
+import { describeFailure } from "../connect/failure.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { layoutFor, type NavigationLayout } from "../navigation/destinations.ts";
 import { footOverlay } from "../navigation/screen.tsx";
-import { useOpenShared } from "../navigation/open.ts";
 import { useStore } from "../platform/store.ts";
 import { useKeyboardFocus } from "../ui/focus.ts";
 import { IconButton, type IconName } from "../ui/icon-button.tsx";
@@ -215,7 +223,10 @@ export function Dialog({
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 24 }}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        style={{ flex: 1, justifyContent: "center", paddingHorizontal: 24 }}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("Cancel")}
@@ -227,6 +238,7 @@ export function Dialog({
           accessibilityViewIsModal
           style={{
             width: "100%",
+            maxHeight: "90%",
             maxWidth: 560,
             alignSelf: "center",
             paddingTop: 24,
@@ -236,37 +248,41 @@ export function Dialog({
             backgroundColor: colors.surface,
           }}
         >
-          <Text
-            accessibilityRole="header"
-            style={{
-              color: colors.text,
-              fontSize: 22,
-              lineHeight: 28,
-              fontWeight: "700",
-              letterSpacing: -0.22,
-            }}
-          >
-            {title}
-          </Text>
-          {body ? (
-            <Text style={{ paddingTop: 12, color: colors.secondary, fontSize: 14, lineHeight: 20 }}>
-              {body}
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+            <Text
+              accessibilityRole="header"
+              style={{
+                color: colors.text,
+                fontSize: 22,
+                lineHeight: 28,
+                fontWeight: "700",
+                letterSpacing: -0.22,
+              }}
+            >
+              {title}
             </Text>
-          ) : null}
-          {children}
-          <View
-            style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
-              justifyContent: "flex-end",
-              gap: 8,
-              paddingTop: 16,
-            }}
-          >
-            {actions}
-          </View>
+            {body ? (
+              <Text
+                style={{ paddingTop: 12, color: colors.secondary, fontSize: 14, lineHeight: 20 }}
+              >
+                {body}
+              </Text>
+            ) : null}
+            {children}
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+                gap: 8,
+                paddingTop: 16,
+              }}
+            >
+              {actions}
+            </View>
+          </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -486,18 +502,29 @@ function retryFailed() {
   if (state.kind !== "ready") return;
 
   for (const source of state.sources) {
-    if (source.channels.kind === "failed") sources.retry(source.id);
+    if (source.channels.kind === "failed" && source.channels.error.kind !== "needs-secret")
+      sources.retry(source.id);
   }
 }
 
 /**
  * The providers' status line under a screen's rows: "Loading channels from {providers}." with a
- * still sync icon, or "Couldn't load channels from {providers}." with Retry and Settings. Nothing
- * while every provider has loaded. Still: no spinner, no animation.
+ * still sync icon, or "Couldn't load channels from {providers}." with Retry when possible.
+ * Nothing while every provider has loaded. Still: no spinner, no animation.
  */
 export function StatusLine() {
   const { loading, failed } = useGaps();
-  const open = useOpenShared();
+  const large = useLargeText();
+  const state = useStore(sources.state);
+
+  const failures =
+    state.kind === "ready"
+      ? state.sources.filter((source) => source.channels.kind === "failed")
+      : [];
+
+  const retryable = failures.some(
+    (source) => source.channels.kind === "failed" && source.channels.error.kind !== "needs-secret",
+  );
 
   if (!loading && !failed) return null;
 
@@ -515,6 +542,7 @@ export function StatusLine() {
         <View
           style={{
             flexDirection: "row",
+            flexWrap: "wrap",
             alignItems: "center",
             gap: 12,
             minHeight: 56,
@@ -530,16 +558,25 @@ export function StatusLine() {
             color={RED}
           />
           <Text style={{ flex: 1, color: colors.text, fontSize: 14, lineHeight: 18 }}>
-            {failed}
+            {[
+              failed,
+              ...failures.flatMap((source) =>
+                source.channels.kind === "failed" && source.channels.error.kind === "needs-secret"
+                  ? [`${source.label}: ${describeFailure(source.channels.error)}`]
+                  : [],
+              ),
+            ].join(" ")}
           </Text>
-          <TextButton label={t("Retry")} onPress={retryFailed} />
-          <TextButton label={t("Settings")} onPress={() => open("settings")} />
+          <View style={{ width: large ? "100%" : undefined, alignItems: "flex-start" }}>
+            {retryable ? <TextButton label={t("Retry")} onPress={retryFailed} /> : null}
+          </View>
         </View>
       ) : null}
       {loading ? (
         <View
           style={{
             flexDirection: "row",
+            flexWrap: "wrap",
             alignItems: "center",
             gap: 12,
             minHeight: 56,

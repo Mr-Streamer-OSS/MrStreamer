@@ -1,9 +1,10 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import type { ChannelRow, Sources } from "../connect/sources.ts";
+import { CatalogueScreen } from "../connect/catalogue-screen.tsx";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
 import type { NavigationLayout } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
@@ -62,10 +63,14 @@ function Channels({
   entries,
   still,
   empty,
+  header,
+  footer,
 }: {
   entries: readonly Entry[];
   still: boolean;
   empty?: ReactNode;
+  header?: ReactNode;
+  footer?: (onLists: (entry: Entry) => void) => ReactNode;
 }) {
   const [held, setHeld] = useState<Entry | null>(null);
 
@@ -76,7 +81,13 @@ function Channels({
         data={entries}
         keyExtractor={keyOf}
         renderItem={({ item }) => <Channel entry={item} onLists={setHeld} />}
-        ListFooterComponent={still ? <StillRows /> : undefined}
+        ListHeaderComponent={<>{header}</>}
+        ListFooterComponent={
+          <>
+            {still ? <StillRows /> : null}
+            {footer?.(setHeld)}
+          </>
+        }
         ListEmptyComponent={still ? undefined : <>{empty}</>}
       />
       <ListsSheet entry={held} onClose={() => setHeld(null)} />
@@ -209,7 +220,7 @@ function Chip({ icon, label, onPress }: { icon: IconName; label: string; onPress
 }
 
 /**
- * Live's top: on phones the shared top app bar, then Favourites, each list and Find as rows;
+ * Live's top: on phones the shared top app bar; shortcuts scroll with the channels;
  * beside the rail one 56dp header with them as its shortcuts.
  */
 function LiveTop({
@@ -220,6 +231,7 @@ function LiveTop({
   layout: NavigationLayout;
   framed: ReturnType<typeof useFrame>["framed"];
   shortcuts: readonly {
+    id: string;
     icon: IconName;
     label: string;
     count?: string | undefined;
@@ -230,9 +242,6 @@ function LiveTop({
     return (
       <>
         <TopAppBar title={t("Live")} layout={layout} insets={framed} />
-        {shortcuts.map((shortcut) => (
-          <NavRow key={shortcut.label} size="shortcut" {...shortcut} />
-        ))}
       </>
     );
 
@@ -267,7 +276,7 @@ function LiveTop({
         contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", gap: 24 }}
       >
         {shortcuts.map((shortcut) => (
-          <Chip key={shortcut.label} {...shortcut} />
+          <Chip key={shortcut.id} {...shortcut} />
         ))}
       </ScrollView>
     </View>
@@ -288,18 +297,20 @@ export function LiveScreen() {
   const [tab, setTab] = useState<Tab>("All");
   const [choosing, setChoosing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [managing, setManaging] = useState(false);
   const view = discover(state);
   const gaps = useGaps();
   const loading = view.restoring || view.loading.length > 0;
   const chosen = country ? view.countries.find((group) => group.name === country) : undefined;
-  const rows = country ? (chosen?.rows ?? []) : view.rows;
-  const inCountry = new Set(rows);
-  const all = saved.kind === "ready" ? saved.lists : [];
+  const rows = useMemo(() => (country ? (chosen?.rows ?? []) : view.rows), [country, chosen, view]);
+  const inCountry = useMemo(() => new Set(rows), [rows]);
+  const all = saved.lists;
   const favourites = all.find((list) => list.id === FAVOURITES);
 
   const shortcuts = [
     ...[...(favourites ? [favourites] : []), ...all.filter((list) => list.id !== FAVOURITES)].map(
       (list) => ({
+        id: list.id,
         icon: (list.id === FAVOURITES ? "star" : "list") as IconName,
         label: list.id === FAVOURITES ? t("Favourites") : list.name,
         count: opens(list, state, loading),
@@ -307,11 +318,32 @@ export function LiveScreen() {
       }),
     ),
     {
+      id: "find",
       icon: "search" as const,
       label: t("Find countries or categories"),
       onPress: () => router.push(`${root}/find`),
     },
+    {
+      id: "providers",
+      icon: "dns" as const,
+      label: t("Providers"),
+      onPress: () => setManaging(true),
+    },
   ];
+
+  const header = (
+    <>
+      {layout === "bar"
+        ? shortcuts.map((shortcut) => <NavRow key={shortcut.id} size="shortcut" {...shortcut} />)
+        : null}
+      {saved.kind === "failed" ? (
+        <Empty
+          title={t("Couldn't read your lists.")}
+          action={<TextButton label={t("Try again")} onPress={lists.read} />}
+        />
+      ) : null}
+    </>
+  );
 
   const empty =
     state.kind === "ready" && state.sources.length === 0 ? (
@@ -319,9 +351,9 @@ export function LiveScreen() {
         title={t("No live channels")}
         action={<TextButton label={t("Add provider")} onPress={() => setAdding(true)} />}
       />
-    ) : country && !chosen ? (
+    ) : loading || gaps.failed ? null : country && !chosen ? (
       <Empty title={t("{name} isn't listed any more.", { name: country })} />
-    ) : gaps.failed ? null : (
+    ) : (
       <Empty title={t("Your providers list no channels.")} />
     );
 
@@ -332,7 +364,7 @@ export function LiveScreen() {
   const forYou = (favourites?.entries ?? []).filter((entry) => {
     const found = resolve(entry, state);
 
-    return found.kind === "listed" && inCountry.has(found.row);
+    return !country || (found.kind === "listed" && inCountry.has(found.row));
   });
 
   return (
@@ -340,16 +372,49 @@ export function LiveScreen() {
       <Body>
         <Tabs tab={tab} onTab={setTab} country={country} onCountry={() => setChoosing(true)} />
         {tab === "All" ? (
-          <Channels entries={rows.map(identity)} still={loading} empty={empty} />
+          <Channels header={header} entries={rows.map(identity)} still={loading} empty={empty} />
         ) : tab === "For you" ? (
           <Channels
-            entries={forYou}
-            still={false}
-            empty={<Empty title={t("No favourites yet.")} body={t("Star a channel in Live.")} />}
+            header={
+              <>
+                {header}
+                <SheetTitle>{t("Favourites")}</SheetTitle>
+              </>
+            }
+            entries={saved.kind === "ready" ? forYou : []}
+            still={loading}
+            empty={
+              saved.kind !== "ready" ? null : !favourites?.entries.length ? (
+                <Empty title={t("No favourites yet.")} body={t("Star a channel in Live.")} />
+              ) : loading || gaps.failed ? null : (
+                <Empty title={t("No favourites in this country.")} />
+              )
+            }
+            footer={(onLists) =>
+              categories.slice(0, 4).map((group) => (
+                <View key={group.name}>
+                  <NavRow
+                    icon="label-outline"
+                    label={group.name}
+                    count={count(group.rows.length)}
+                    onPress={() =>
+                      router.push({
+                        pathname: `${root}/category`,
+                        params: { name: group.name, country },
+                      })
+                    }
+                  />
+                  {group.rows.slice(0, 6).map((row) => (
+                    <Channel key={row.key} entry={identity(row)} onLists={onLists} />
+                  ))}
+                </View>
+              ))
+            }
           />
         ) : (
           <FlatList
             style={{ flex: 1 }}
+            ListHeaderComponent={header}
             data={categories}
             keyExtractor={(group) => group.name}
             renderItem={({ item }) => (
@@ -382,6 +447,17 @@ export function LiveScreen() {
         }}
         onClose={() => setChoosing(false)}
       />
+      <Sheet
+        visible={managing && !adding}
+        label={t("Providers")}
+        onClose={() => setManaging(false)}
+      >
+        <CatalogueScreen
+          owner={sources}
+          sources={state.kind === "ready" ? state.sources : []}
+          onAdd={() => setAdding(true)}
+        />
+      </Sheet>
       <Sheet visible={adding} label={t("Add provider")} onClose={() => setAdding(false)}>
         <ConnectScreen
           owner={sources}
@@ -507,7 +583,7 @@ export function FindScreen() {
           layout={layout}
           framed={framed}
           rule
-          leading={{ icon: "arrow-back", label: "Back", onPress: () => router.back() }}
+          leading={{ icon: "arrow-back", label: t("Back"), onPress: () => router.back() }}
           title={field}
           trailing={
             query ? (
@@ -565,7 +641,11 @@ export function CategoryScreen() {
           />
         ) : (
           <View style={{ flex: 1 }}>
-            {loading ? <StillRows /> : <Empty title={t("This category isn't listed any more.")} />}
+            {loading ? (
+              <StillRows />
+            ) : view.failed.length ? null : (
+              <Empty title={t("This category isn't listed any more.")} />
+            )}
           </View>
         )}
         <StatusLine />

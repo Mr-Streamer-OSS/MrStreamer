@@ -1,3 +1,4 @@
+import { setLanguage } from "@mrstreamer/core/i18n";
 import { describe, expect, it } from "vitest";
 import type { ChannelRow, Sources } from "../src/connect/sources.ts";
 import { draftOf, identity, playIntent, remove, resolve, step } from "../src/live/model.ts";
@@ -132,9 +133,12 @@ describe("Live lists public behavior", () => {
     const id = s.owner.create("Second");
     const count = s.writes.length;
 
-    for (const name of [" cafe ", "x".repeat(61)]) {
-      expect(() => s.owner.create(name)).toThrow();
-      expect(() => s.owner.rename(id, name)).toThrow();
+    for (const [name, error] of [
+      [" cafe ", "name-taken"],
+      ["x".repeat(61), "name-length"],
+    ] as const) {
+      expect(() => s.owner.create(name)).toThrow(error);
+      expect(() => s.owner.rename(id, name)).toThrow(error);
     }
 
     expect(s.writes).toHaveLength(count);
@@ -202,4 +206,19 @@ it("plays only a current unambiguous channel identity, with its current title", 
   expect(playIntent(entry, catalogue([row, row]))).toBeNull();
   expect(playIntent(entry, { kind: "restoring" })).toBeNull();
   expect(playIntent({ ...entry, sourceId: "removed" }, catalogue())).toBeNull();
+});
+
+it("reserves the visible Dutch Favourites name for create and rename", () => {
+  const s = setup();
+  const id = s.owner.create("Custom");
+  const count = s.writes.length;
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+
+  try {
+    expect(() => s.owner.create(" favorieten ")).toThrow("name-taken");
+    expect(() => s.owner.rename(id, "Favorieten")).toThrow("name-taken");
+    expect(s.writes).toHaveLength(count);
+  } finally {
+    setLanguage({ locale: "en-US", formats: "en-US" });
+  }
 });

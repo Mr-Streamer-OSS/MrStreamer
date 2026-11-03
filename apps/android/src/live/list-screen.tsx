@@ -198,10 +198,10 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
     <Bar
       layout={layout}
       framed={framed}
-      leading={{ icon: "arrow-back", label: "Back", onPress: () => router.back() }}
+      leading={{ icon: "arrow-back", label: t("Back"), onPress: () => router.back() }}
       title={name}
       trailing={
-        list?.entries.length ? (
+        list && (!favourites || list.entries.length > 0) ? (
           <TextButton
             label={t("Edit")}
             onPress={() => {
@@ -244,10 +244,17 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
                 large={large}
                 listName={favourites ? undefined : name}
                 onMove={(offset) => {
-                  const index = draft.entries.indexOf(entry);
-                  setDraft(step(draft, index, offset, shown));
+                  setDraft((current) =>
+                    current
+                      ? step(current, current.entries.indexOf(entry), offset, shown)
+                      : current,
+                  );
                 }}
-                onRemove={() => setDraft(remove(draft, draft.entries.indexOf(entry)))}
+                onRemove={() =>
+                  setDraft((current) =>
+                    current ? remove(current, current.entries.indexOf(entry)) : current,
+                  )
+                }
               />
             ))
           ) : (

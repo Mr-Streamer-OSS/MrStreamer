@@ -1,4 +1,3 @@
-import { categoryBrowseTopics } from "@mrstreamer/core/catalogue/browse";
 import {
   leadingFlag,
   regionForCode,
@@ -14,7 +13,19 @@ export interface Group {
 }
 
 /** Only loaded rows contribute counts. Loading and failed providers remain separate, even with results. */
+const cache = new WeakMap<Sources, ReturnType<typeof collect>>();
+
 export function discover(sources: Sources) {
+  const cached = cache.get(sources);
+
+  if (cached) return cached;
+  const view = collect(sources);
+  cache.set(sources, view);
+
+  return view;
+}
+
+function collect(sources: Sources) {
   const rows: ChannelRow[] = [];
   const loading: string[] = [];
   const failed: string[] = [];
@@ -63,7 +74,6 @@ export function discover(sources: Sources) {
     restoring: sources.kind === "restoring",
     countries: groups(countries),
     categories: groups(categories),
-    topics: [...new Set([...categories.keys()].flatMap(categoryBrowseTopics))],
   };
 }
 

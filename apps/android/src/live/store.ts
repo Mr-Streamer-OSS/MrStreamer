@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import { normalize } from "@mrstreamer/core/text";
 import type { Sources } from "../connect/sources.ts";
+import { t } from "./copy.ts";
 import { store } from "../platform/store.ts";
 import {
   keyOf,
@@ -71,7 +72,10 @@ export function listsOwner(
 
     if (!trimmed || trimmed.length > CUSTOM_LIST_NAME_MAX) throw new Error("name-length");
 
-    if (lists().some((list) => list.id !== except && normalize(list.name) === normalize(trimmed)))
+    if (
+      normalize(trimmed) === normalize(t("Favourites")) ||
+      lists().some((list) => list.id !== except && normalize(list.name) === normalize(trimmed))
+    )
       throw new Error("name-taken");
 
     return trimmed;

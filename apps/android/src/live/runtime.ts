@@ -8,12 +8,22 @@ export const lists = listsOwner(
     readJson(name) {
       const value = readJson(name);
 
-      // The storage helper returns null for both absent and unreadable files. Only absence
-      // starts an empty list; a damaged existing file must remain retryable, never overwritten.
-      if (
-        value === null &&
-        [name, `${name}.next`].some((path) => new File(Paths.document, path).exists)
-      ) {
+      // A damaged main file must remain retryable. An unfinished first write has no
+      // main file and only empty or malformed pending JSON, so it can start again.
+      if (value !== null) return value;
+
+      if (new File(Paths.document, name).exists) throw new Error("read");
+      const pending = new File(Paths.document, `${name}.next`);
+
+      if (pending.exists) {
+        const text = pending.textSync(); // A failed filesystem read remains a failure.
+
+        try {
+          JSON.parse(text);
+        } catch {
+          return null;
+        }
+
         throw new Error("read");
       }
 
