@@ -64,6 +64,36 @@ function string(value: unknown, label: string): string {
   return value;
 }
 
+/** Keep provenance labels free of paths, URLs and login-like values. */
+function plainLabel(value: unknown, label: string): string {
+  const text = string(value, label);
+
+  if (/[/\\@?~]/.test(text)) throw new Error(`${label} must be a plain label`);
+
+  return text;
+}
+
+/** Official provenance URLs cannot carry credentials, queries or fragments. */
+function appleUrl(value: unknown, label: string): string {
+  const text = string(value, label);
+  const url = URL.canParse(text) ? new URL(text) : undefined;
+
+  if (
+    !url ||
+    url.protocol !== "https:" ||
+    !(url.hostname === "apple.com" || url.hostname.endsWith(".apple.com")) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    text.includes("?") ||
+    text.includes("#")
+  )
+    throw new Error(`${label} must be an https Apple URL without credentials, query or fragment`);
+
+  return text;
+}
+
 function integer(value: unknown, label: string, minimum = 0): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum)
     throw new Error(`${label} must be an integer >= ${minimum}`);
@@ -95,7 +125,9 @@ const slots = object(config.slots, "slots");
 
 for (const id of Object.keys(slots)) {
   if (!spec.slots.some((slot) => slot.id === id))
-    throw new Error(`Unknown slot: ${id}; the medium iPhone slot is outside this generator`);
+    throw new Error(
+      `Unknown slot: ${id}; valid slots: ${spec.slots.map((slot) => slot.id).join(", ")}; the medium iPhone slot is outside this generator`,
+    );
 }
 
 const output = insideLocal(resolve(values.output));
@@ -211,16 +243,14 @@ function uprightPng(info: Metadata, bytes: Buffer) {
  */
 async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
   const supplied = object(value, "frame");
-  knownKeys(supplied, ["file", "source", "termsSource", "licenceFile", "cutout"], "frame");
+  knownKeys(
+    supplied,
+    ["file", "source", "termsSource", "licenceFile", "cutout", "cornerRadius"],
+    "frame",
+  );
 
-  const frameSource = string(supplied.source, "frame.source");
-
-  if (!frameSource.startsWith("https://developer.apple.com/"))
-    throw new Error("frame.source must be an Apple Developer URL");
-  const termsSource = string(supplied.termsSource, "frame.termsSource");
-
-  if (!URL.canParse(termsSource) || new URL(termsSource).protocol !== "https:")
-    throw new Error("frame.termsSource must be an https URL");
+  const frameSource = appleUrl(supplied.source, "frame.source");
+  const termsSource = appleUrl(supplied.termsSource, "frame.termsSource");
 
   const licence = await inputFile(
     resolve(dirname(input.file), string(supplied.licenceFile, "frame.licenceFile")),
@@ -239,6 +269,10 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
   const top = integer(cutout.top, "cutout.top");
   const width = integer(cutout.width, "cutout.width", 1);
   const height = integer(cutout.height, "cutout.height", 1);
+  const cornerRadius = integer(supplied.cornerRadius, "frame.cornerRadius");
+
+  if (cornerRadius > Math.min(width, height) / 2 || Math.min(width, height) <= 4)
+    throw new Error("frame cornerRadius must fit the cutout with a 2 px anti-alias band");
 
   if (
     left + width > info.width ||
@@ -249,9 +283,8 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
       "frame cutout must fit the frame and match the capture aspect ratio without rotation",
     );
 
-  // Permit rounded corners within 5% of the opening's shorter side. Every other
-  // opening pixel, including its centre and straight edges, must reveal the capture.
-  const inset = Math.floor(Math.min(width, height) * 0.05);
+  // Inspect pixel centres in the rounded opening inset by 2 px, ignoring its anti-alias band.
+  const radius = Math.max(0, cornerRadius - 2);
 
   const alpha = await sharp(image.bytes)
     .extract({ left, top, width, height })
@@ -259,14 +292,27 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
     .raw()
     .toBuffer();
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const corner = (x < inset || x >= width - inset) && (y < inset || y >= height - inset);
+  let inspected = 0;
+  let opaque = 0;
 
-      if (!corner && alpha[y * width + x] !== 0)
-        throw new Error("frame cutout must be transparent outside the rounded corner inset");
+  for (let y = 2; y < height - 2; y++) {
+    for (let x = 2; x < width - 2; x++) {
+      const dx = Math.max(2 + radius - (x + 0.5), x + 0.5 - (width - 2 - radius), 0);
+      const dy = Math.max(2 + radius - (y + 0.5), y + 0.5 - (height - 2 - radius), 0);
+
+      if (dx * dx + dy * dy > radius * radius) continue;
+      inspected++;
+
+      if (alpha[y * width + x] !== 0) opaque++;
     }
   }
+
+  const opaqueShare = opaque / inspected;
+
+  if (opaqueShare > 0.01)
+    throw new Error(
+      `frame cutout opaque share ${(opaqueShare * 100).toFixed(2)}%; at most 1% is allowed inside the inset rounded opening`,
+    );
 
   const resized = await sharp(image.bytes)
     .resize({ ...box, fit: "inside", withoutEnlargement: true })
@@ -314,6 +360,8 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
       source: frameSource,
       termsSource,
       cutout: { left, top, width, height },
+      cornerRadius,
+      opaqueShare,
       sha256: hash(image.bytes),
       licenceSha256: hash(licence.bytes),
       nativeWidth: info.width,
@@ -371,8 +419,8 @@ for (const slot of spec.slots) {
 
   if (!/^[a-f0-9]{40}$/.test(appCommit))
     throw new Error("provenance.appCommit must be a full Git SHA");
-  const device = string(provenance.device, "provenance.device");
-  const os = string(provenance.os, "provenance.os");
+  const device = plainLabel(provenance.device, "provenance.device");
+  const os = plainLabel(provenance.os, "provenance.os");
   const provider = string(provenance.provider, "provenance.provider");
   const capturedAt = string(provenance.capturedAt, "provenance.capturedAt");
 
@@ -470,7 +518,7 @@ for (const slot of spec.slots) {
     bytes: bytes.length,
     sha256: hash(bytes),
     capture: {
-      file: relative(dirname(input.file), source.file),
+      file: relative(dirname(input.file), source.file).replaceAll("\\", "/"),
       sha256: hash(source.bytes),
       provenance: {
         appCommit,
@@ -490,6 +538,8 @@ for (const slot of spec.slots) {
   });
 }
 
+const generatorSha256 = hash(await readFile(fileURLToPath(import.meta.url)));
+
 // Validate and render the entire batch first; never overwrite an existing candidate set.
 await mkdir(output);
 
@@ -506,7 +556,7 @@ await writeFile(
       spec,
       sources: {
         inputSha256: hash(input.bytes),
-        generatorSha256: hash(await readFile(fileURLToPath(import.meta.url))),
+        generatorSha256,
         node: process.version,
         font: {
           file: relative(root, fontPath),

@@ -71,6 +71,7 @@ afterEach(async () => {
 
 test("exports opaque native-slot PNGs with bound inputs and geometry in every app language", async () => {
   const { dir, slots } = await inputs();
+  const headlinePixels = new Map<string, Buffer[]>();
 
   for (const locale of Object.keys(spec.slots[0]!.headlines)) {
     await run(dir, slots, locale);
@@ -109,6 +110,10 @@ test("exports opaque native-slot PNGs with bound inputs and geometry in every ap
         .toBuffer();
 
       expect(ink.includes(255)).toBe(true);
+      const previous = headlinePixels.get(slot.id) ?? [];
+
+      for (const other of previous) expect(ink.equals(other)).toBe(false);
+      headlinePixels.set(slot.id, [...previous, ink]);
 
       // Descenders can extend below the CSS line box; the lower half of the gap stays black.
       const gapHeight = Math.floor((column.gap * slot.scale) / 2);
@@ -131,10 +136,12 @@ test("exports opaque native-slot PNGs with bound inputs and geometry in every ap
 
     if (locale === "en-US") {
       await run(dir, slots, locale, "repeat");
-      const repeated = JSON.parse(await readFile(join(dir, "repeat/manifest.json"), "utf8"));
-      expect(repeated.exports.map((entry: { sha256: string }) => entry.sha256)).toEqual(
-        manifest.exports.map((entry: { sha256: string }) => entry.sha256),
-      );
+
+      for (const file of ["manifest.json", ...spec.slots.map((slot) => `${slot.id}.png`)]) {
+        expect(await readFile(join(dir, "repeat", file))).toEqual(
+          await readFile(join(dir, locale, file)),
+        );
+      }
     }
   }
 }, 60000);
@@ -163,40 +170,33 @@ test("refuses missing provenance before creating an output directory", async () 
 test("places a local frame at its cutout without losing the captured screen", async () => {
   const { dir, slots } = await inputs();
 
-  const frame = await sharp({
-    create: { width: 2752, height: 2064, channels: 4, background: "#00000000" },
-  })
-    .extend({ top: 40, bottom: 40, left: 40, right: 40, background: "#abcdef" })
-    .png()
-    .toBuffer();
-
-  await writeFile(join(dir, "frame.png"), frame);
-  await writeFile(join(dir, "terms.txt"), "Synthetic test frame only, not Apple artwork.");
-  slots["ipad-13"] = {
-    ...slots["ipad-13"],
-    frame: {
-      file: "frame.png",
-      source: "https://developer.apple.com/design/resources/",
-      termsSource: "https://developer.apple.com/app-store/marketing/guidelines/",
-      licenceFile: "terms.txt",
-      cutout: { left: 40, top: 40, width: 2752, height: 2064 },
-    },
-  };
+  const slot = spec.slots[1]!;
+  const frame = await withFrame(dir, slots, slot.id);
+  slots[slot.id]!.file = join(dir, `${slot.id}.png`);
   await run(dir, slots);
   const manifest = JSON.parse(await readFile(join(dir, "en-US/manifest.json"), "utf8"));
-  const entry = manifest.exports[0];
+  const entry = manifest.exports[1];
+  expect(entry.capture).toEqual({
+    file: `${slot.id}.png`,
+    sha256: slots[slot.id]!.sha256,
+    provenance: slots[slot.id]!.provenance,
+  });
   expect(entry.frame).toEqual({
     source: "https://developer.apple.com/design/resources/",
     termsSource: "https://developer.apple.com/app-store/marketing/guidelines/",
-    cutout: { left: 40, top: 40, width: 2752, height: 2064 },
+    cutout: { left: 40, top: 40, width: slot.width, height: slot.height },
+    cornerRadius: 165,
+    opaqueShare: expect.any(Number),
     sha256: hash(frame),
     licenceSha256: hash(await readFile(join(dir, "terms.txt"))),
-    nativeWidth: 2832,
-    nativeHeight: 2144,
+    nativeWidth: slot.width + 80,
+    nativeHeight: slot.height + 80,
   });
+  expect(entry.frame.opaqueShare).toBeGreaterThan(0);
+  expect(entry.frame.opaqueShare).toBeLessThanOrEqual(0.01);
   const { geometry, screenGeometry } = entry;
 
-  const pixel = await sharp(join(dir, "en-US/ipad-13.png"))
+  const pixel = await sharp(join(dir, `en-US/${slot.id}.png`))
     .extract({
       left: geometry.left + screenGeometry.left + Math.floor(screenGeometry.width / 2),
       top: geometry.top + screenGeometry.top + Math.floor(screenGeometry.height / 2),
@@ -209,20 +209,44 @@ test("places a local frame at its cutout without losing the captured screen", as
   expect([...pixel]).toEqual([0x12, 0x56, 0x78]);
 });
 
-async function withFrame(dir: string, slots: Record<string, Capture>, background = "#00000000") {
-  const bytes = await sharp({ create: { width: 2832, height: 2144, channels: 4, background } })
+async function withFrame(
+  dir: string,
+  slots: Record<string, Capture>,
+  slotId = "ipad-13",
+  openingOpacity = 0,
+) {
+  const slot = spec.slots.find((candidate) => candidate.id === slotId)!;
+  const width = slot.width + 80;
+  const height = slot.height + 80;
+
+  // Synthetic geometry only: a rounded, anti-aliased opening and a small opaque island.
+  const bytes = await sharp(
+    Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <mask id="opening">
+        <rect width="${width}" height="${height}" fill="white"/>
+        <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="165" fill="black"/>
+      </mask>
+      <rect width="${width}" height="${height}" fill="#abcdef" mask="url(#opening)"/>
+      <rect x="40" y="40" width="${slot.width}" height="${slot.height}" rx="165" fill="white" opacity="${openingOpacity}"/>
+      <rect x="${width / 2 - 75}" y="60" width="150" height="40" rx="20" fill="#abcdef"/>
+    </svg>`),
+  )
     .png()
     .toBuffer();
 
   await writeFile(join(dir, "frame.png"), bytes);
   await writeFile(join(dir, "terms.txt"), "Synthetic frame licence record.");
-  slots["ipad-13"]!.frame = {
+  slots[slotId]!.frame = {
     file: "frame.png",
     source: "https://developer.apple.com/design/resources/",
     termsSource: "https://developer.apple.com/app-store/marketing/guidelines/",
     licenceFile: "terms.txt",
-    cutout: { left: 40, top: 40, width: 2752, height: 2064 },
+    cutout: { left: 40, top: 40, width: slot.width, height: slot.height },
+    cornerRadius: 165,
   };
+
+  return bytes;
 }
 
 test.each(["capture", "provenance", "frame", "cutout"])(
@@ -247,55 +271,65 @@ test.each(["capture", "provenance", "frame", "cutout"])(
   },
 );
 
-test("normalizes an absolute capture path to a path relative to the input", async () => {
+test("rejects a mostly opaque frame opening and names its opaque share", async () => {
   const { dir, slots } = await inputs();
-  slots["ipad-13"]!.file = join(dir, "ipad-13.png");
-  await run(dir, slots);
-  const manifest = JSON.parse(await readFile(join(dir, "en-US/manifest.json"), "utf8"));
-  expect(manifest.exports[0].capture.file).toBe("ipad-13.png");
-  expect(manifest.exports[0].capture).not.toHaveProperty("frame");
+  await withFrame(dir, slots, "ipad-13", 0.9);
+  await expect(run(dir, slots)).rejects.toThrow(/opaque share 100.00%.*at most 1%/);
+  await expect(stat(join(dir, "en-US"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-test.each(["opaque", "obstructed"])("rejects a frame with an %s opening", async (kind) => {
-  const { dir, slots } = await inputs();
-  await withFrame(dir, slots, kind === "opaque" ? "#abcdef" : "#00000000");
-
-  if (kind === "obstructed") {
-    const bytes = await sharp(join(dir, "frame.png"))
-      .composite([
-        {
-          input: await sharp({ create: { width: 1, height: 1, channels: 4, background: "white" } })
-            .png()
-            .toBuffer(),
-          left: 1400,
-          top: 1000,
-        },
-      ])
-      .png()
-      .toBuffer();
-
-    await writeFile(join(dir, "frame.png"), bytes);
-  }
-
-  await expect(run(dir, slots)).rejects.toThrow(/cutout must be transparent/);
-});
-
-test.each(["terms", "licence", "slot"])("rejects invalid %s input", async (kind) => {
+test.each([
+  {
+    mutate: async (_dir: string, slots: Record<string, Capture>) => {
+      slots["ipad-13"]!.frame!.termsSource = "http://developer.apple.com/terms/";
+    },
+    error: /termsSource must be an https Apple URL/,
+  },
+  {
+    mutate: async (dir: string) => {
+      await writeFile(join(dir, "terms.txt"), " ");
+    },
+    error: /licence.*non-empty/,
+  },
+  {
+    mutate: async (_dir: string, slots: Record<string, Capture>) => {
+      slots["iphone-medium"] = slots["ipad-13"]!;
+    },
+    error: /valid slots: ipad-13, duo-inner, duo-outer;.*medium iPhone/,
+  },
+  {
+    mutate: async (_dir: string, slots: Record<string, Capture>) => {
+      slots["ipad-13"]!.provenance!.device = "https://private.invalid/stream?login=secret";
+    },
+    error: /device must be a plain label/,
+  },
+  {
+    mutate: async (_dir: string, slots: Record<string, Capture>) => {
+      slots["ipad-13"]!.frame!.termsSource = "https://login:secret@developer.apple.com/terms/";
+    },
+    error: /termsSource must be an https Apple URL/,
+  },
+])("rejects invalid input: $error", async ({ mutate, error }) => {
   const { dir, slots } = await inputs();
   await withFrame(dir, slots);
+  await mutate(dir, slots);
+  await expect(run(dir, slots)).rejects.toThrow(error);
+});
 
-  if (kind === "terms") slots["ipad-13"]!.frame!.termsSource = "not a URL";
-
-  if (kind === "licence") await writeFile(join(dir, "terms.txt"), " ");
-
-  if (kind === "slot") slots["iphone-medium"] = slots["ipad-13"]!;
-  await expect(run(dir, slots)).rejects.toThrow(
-    kind === "terms"
-      ? /termsSource must be an https URL/
-      : kind === "licence"
-        ? /licence.*non-empty/
-        : /medium iPhone slot is outside this generator/,
-  );
+test("rejects unknown top-level input fields", async () => {
+  const { dir, slots } = await inputs();
+  const file = join(dir, "inputs.json");
+  await writeFile(file, JSON.stringify({ slots, note: "private operator notes" }));
+  await expect(
+    exec(process.execPath, [
+      "apps/ios/scripts/store-artwork.ts",
+      "--input",
+      file,
+      "--output",
+      join(dir, "unknown"),
+    ]),
+  ).rejects.toThrow(/input: unknown key note/);
+  await expect(stat(join(dir, "unknown"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 // A genuine two-frame APNG: the default IDAT frame and a second identical fdAT frame.

@@ -30,8 +30,8 @@ Read independently on **3 November 2026**:
   the product, keep relative scale correct and show the running app on the
   latest OS with full network, Wi-Fi and battery indicators. Secure media rights.
 
-Frame use requires an inspected official pose, explicit cutout geometry, a source
-URL, an HTTPS terms source and a non-empty local licence record. No Apple bezel DMG was downloaded
+Frame use requires an inspected official pose, explicit cutout geometry and an inspected corner radius, a source
+URL and terms source on HTTPS apple.com hosts without credentials, query or fragment and a non-empty local licence record. No Apple bezel DMG was downloaded
 or inspected for this implementation. A supplied frame is scaled uniformly,
 never rotated or cropped; the screen fits its cutout. The frameless fallback is a
 square-corner capture with a 1-point #2C2C2E border, without simulated hardware.
@@ -67,7 +67,7 @@ Wi-Fi and battery. Capture the full screen at native pixels, without resizing:
 
 Capture each language with the matching app interface language. Record the full
 built app commit, device/simulator identity, OS and timezone-qualified capture
-instant. Bind that record to the original capture's SHA-256. A 1x layout reference,
+instant. Device and OS are plain labels without `://`, `/`, `\`, `@`, `?` or `~`. Bind that record to the original capture's SHA-256. A 1x layout reference,
 a Paper placeholder or a screenshot of another app cannot qualify, and native
 size alone does not prove a capture: source acceptance inspects the actual view
 and its provenance. The tool downsizes the full capture for composition;
@@ -112,17 +112,19 @@ capture record, replacing every example value with the inspected asset's facts:
     "source": "https://developer.apple.com/design/resources/",
     "termsSource": "https://developer.apple.com/app-store/marketing/guidelines/",
     "licenceFile": "frames/licence-record.txt",
-    "cutout": { "left": 100, "top": 100, "width": 2752, "height": 2064 }
+    "cutout": { "left": 100, "top": 100, "width": 2752, "height": 2064 },
+    "cornerRadius": 0
   }
 }
 ```
 
-`cutout` is in the original frame PNG's pixels. Record the actual bundled terms,
+`cutout` and the required `cornerRadius` are in the original frame PNG's pixels,
+measured from the inspected asset; zero means square corners. Record the actual bundled terms,
 permitted use and pose in the licence record. Keep raw frames local; do not commit
 or redistribute them. The PNG must have transparency and the cutout's aspect
 ratio must match the capture within 0.5% for integer-pixel rounding. The generator
-requires a transparent opening, except within a 5% inset at each rounded
-corner. It does not paint a bezel or repair the supplied frame's screen opening.
+requires at least 99% fully transparent pixels inside the rounded cutout shrunk
+by a 2 px anti-alias band, and records the nontransparent (opaque) share in the manifest. It does not paint a bezel or repair the supplied frame's screen opening.
 Captures and frames must be static PNGs; animated PNGs are rejected.
 
 ```sh
@@ -133,7 +135,7 @@ node apps/ios/scripts/store-artwork.ts \
 
 Unknown input keys and slot IDs are rejected, including medium iPhone inputs.
 Capture filenames in the manifest are relative to the input JSON; frame records
-contain only source/terms URLs, cutout geometry, hashes and native size.
+contain only source/terms URLs, cutout geometry, corner radius, opaque share, hashes and native size.
 
 Supported locale arguments: `en-US`, `nl-NL`, `fr-FR`, `de-DE`, `es-ES`.
 The output parent must already exist and the output directory must be new.
