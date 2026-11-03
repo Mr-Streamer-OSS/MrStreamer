@@ -223,6 +223,7 @@ class PlayerOwnerTest {
     until { recorder.tracks.getValue("a").filter { it.selected }.map { it.id }.containsAll(listOf(low.id)) &&
       recorder.tracks.getValue("a").none { it.id == high.id && it.selected } }
     assertFalse(owner.setQuality("a", "99:0"))
+    assertFalse(owner.setQuality("a", "${low.id}:junk"))
     assertFalse(owner.setQuality("b", low.id))
     assertTrue(owner.setQuality("a", null))
     until { recorder.tracks.getValue("a").first { it.id == high.id }.selected }

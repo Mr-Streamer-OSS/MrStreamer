@@ -259,7 +259,8 @@ class PlayerOwner(
           player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
       }
     }
-    val (groupIndex, trackIndex) = trackId.split(":").mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 } ?: return false
+    val (groupIndex, trackIndex) =
+      TRACK_ID.matchEntire(trackId)?.destructured?.let { (group, track) -> group.toInt() to track.toInt() } ?: return false
     val group = player.currentTracks.groups.getOrNull(groupIndex) ?: return false
     val valid = group.type == C.TRACK_TYPE_VIDEO && trackIndex in 0 until group.length && group.isTrackSupported(trackIndex)
     return command(attempt, { valid }) {
@@ -399,6 +400,8 @@ class PlayerOwner(
     if (admission.hold is HoldRef.LocalFile) "file-closed" else "connections-closed"
 
   companion object {
+    /** A [Track.id]: "<group>:<track>", nothing else. */
+    private val TRACK_ID = Regex("""(\d{1,4}):(\d{1,4})""")
     const val TICK_MS = 1_000L
     const val RELEASE_TIMEOUT_MS = 10_000L
     const val CONNECT_TIMEOUT_MS = 10_000
