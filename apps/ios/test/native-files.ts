@@ -44,6 +44,12 @@ interface Native {
    */
   held: (() => void)[] | null;
   /**
+   * While a list, each of a stream lease's two five-second waits for a download's request to end,
+   * paused and then cancelled, is kept here: a request that hasn't ended by then runs out of time
+   * only when the test runs it. Null: it runs out after five seconds.
+   */
+  leaseDeadlines: (() => void)[] | null;
+  /**
    * Asked as a file's asynchronous read, write or move starts, with the file's path: a promise
    * it answers holds the operation until it settles, as a busy disk would, and one that never
    * settles stands for the app stopping there. Null: each goes ahead at once.
@@ -74,6 +80,7 @@ export const native: Native = ((
   open: 0,
   pauseMs: 0,
   held: null,
+  leaseDeadlines: null,
   gate: null,
   sync: null,
   undeletable: null,

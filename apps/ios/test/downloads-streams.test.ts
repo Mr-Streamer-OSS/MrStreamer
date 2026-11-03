@@ -275,15 +275,18 @@ describe("downloads", { timeout: 30_000 }, () => {
     one.stallMovieFile(otherMovie().id, 1, 60_000);
     const film = await app.addDownload(movieRef(a));
     await until(() => receivedOf(app, film.id) === 20_000, "the transfer to stall");
-    // URLSession ends neither the request it is asked to pause nor, after, to cancel.
+    // URLSession ends neither the request it is asked to pause nor, after, to cancel. Each of the
+    // stream's waits for it passes once the test sees it begin, not five seconds later.
     native.held = [];
+    const deadlines: (() => void)[] = [];
+    native.leaseDeadlines = deadlines;
     const asked = one.fileRequests();
     playFilm(app, a, otherMovie().id);
-    await until(
-      () => app.playbackState.get().phase.kind === "failed",
-      "the stream to fail",
-      15_000,
-    );
+    await until(() => deadlines.length === 1, "the wait for the paused request");
+    deadlines[0]!();
+    await until(() => deadlines.length === 2, "the wait for the cancelled request");
+    deadlines[1]!();
+    await until(() => app.playbackState.get().phase.kind === "failed", "the stream to fail");
     expect(app.playbackState.get().phase).toMatchObject({
       error: expect.stringContaining("A download still holds the provider's connection."),
     });
@@ -292,6 +295,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     // The request ends at last; Try again takes the connection, though the queue had it again.
     const held = native.held;
     native.held = null;
+    native.leaseDeadlines = null;
     for (const ending of held) ending();
     await until(() => statusOf(app, film.id)?.kind !== "transferring", "the transfer to end");
     app.playback.retry();
