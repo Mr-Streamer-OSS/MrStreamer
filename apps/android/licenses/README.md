@@ -37,3 +37,7 @@ and pinned upstream notices added after publication for standard-navigation and 
 
 For obsolete OSI MIT licence links, the full SPDX MIT text accompanies copyright headers
 retained from the published source archive. Licence templates do not replace bundled notices.
+
+Run `python3 apps/android/scripts/test_licenses.py` from the repository root to verify that an
+unresolvable notice exits non-zero and preserves all existing generated outputs. The fixture
+uses a temporary checkout and empty Expo discovery; it needs neither an Android install nor network access.

@@ -554,9 +554,13 @@ it("keeps the last listed channels through repeated failed and in-flight retries
   });
 });
 
-it.each(["remove", "replace", "partial-remove"] as const)(
-  "drops retained channels on %s and ignores the old retry's late completion",
-  async (action) => {
+it.each(
+  ["remove", "replace", "partial-remove"].flatMap((action) =>
+    ["success", "failure"].map((completion) => ({ action, completion })),
+  ),
+)(
+  "drops retained channels on $action and ignores the old retry's late $completion",
+  async ({ action, completion }) => {
     const phone = newPhone();
     let mode: "normal" | "held" | "fail" = "normal";
     let release = () => {};
@@ -584,6 +588,8 @@ it.each(["remove", "replace", "partial-remove"] as const)(
 
       try {
         await held;
+
+        if (completion === "failure") throw new TypeError("late network failure");
 
         return await fetch(input);
       } finally {

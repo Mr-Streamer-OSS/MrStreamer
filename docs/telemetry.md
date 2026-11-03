@@ -207,5 +207,6 @@ Android sends `feature_opened` for Live TV and Settings, and `playlist_added` an
 provider addresses, logins, titles or search text. Off cancels delivery and clears the identity
 and outbox. A refused Off remains pending, blocks delivery and is retried before later delivery
 or saves; a separate revocation marker carries that retry across launches when writable.
+When storage refuses both the statistics record and the revocation marker, Off holds for the session only.
 Unreadable storage never grants consent. Removing the last provider clears identity and outbox
 without changing the saved choice.

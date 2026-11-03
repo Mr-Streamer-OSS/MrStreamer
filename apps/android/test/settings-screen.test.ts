@@ -25,6 +25,11 @@ const scenario = vi.hoisted(() => {
     removeLast: false,
     writes: [] as string[],
     releaseCalls: 0,
+    shareRefused: false,
+    destination: "(live)",
+    retries: [] as string[],
+    connections: [] as unknown[],
+    saveRefused: false,
     releaseWait: null as Promise<void> | null,
   };
 });
@@ -50,6 +55,7 @@ vi.mock("react-native", async () => {
     children?: ReactNode;
     accessibilityLabel?: string;
     accessibilityRole?: string;
+    accessibilityHint?: string;
     accessibilityState?: { checked?: boolean };
     onPress?: () => void;
     ref?: unknown;
@@ -61,6 +67,7 @@ vi.mock("react-native", async () => {
       children,
       accessibilityLabel,
       accessibilityRole,
+      accessibilityHint,
       accessibilityState,
       onPress,
       ref,
@@ -71,6 +78,7 @@ vi.mock("react-native", async () => {
           ref,
           "aria-label": accessibilityLabel,
           role: accessibilityRole,
+          "data-hint": accessibilityHint,
           "aria-checked": accessibilityState?.checked,
           onClick: onPress,
         },
@@ -78,6 +86,33 @@ vi.mock("react-native", async () => {
       );
 
   return {
+    TextInput: ({
+      accessibilityLabel,
+      value,
+      onChangeText,
+    }: {
+      accessibilityLabel: string;
+      value: string;
+      onChangeText: (text: string) => void;
+    }) =>
+      h("input", {
+        "aria-label": accessibilityLabel,
+        value,
+        onInput: (event: { currentTarget: { value: string } }) =>
+          onChangeText(event.currentTarget.value),
+      }),
+    FlatList: ({
+      data,
+      renderItem,
+    }: {
+      data: readonly unknown[];
+      renderItem: (row: { item: unknown; index: number }) => ReactNode;
+    }) =>
+      h(
+        "div",
+        null,
+        data.map((item, index) => h("div", { key: index }, renderItem({ item, index }))),
+      ),
     ToastAndroid: { LONG: 1, show: (text: string) => scenario.toasts.push(text) },
     View: view("div"),
     ScrollView: view("div"),
@@ -102,6 +137,7 @@ vi.mock("react-native", async () => {
     Platform: { OS: "android", Version: 36, constants: { Release: "16" } },
     Share: {
       share: async (content: unknown) => {
+        if (scenario.shareRefused) throw new Error("share refused");
         scenario.shared.push(content);
 
         return { action: "sharedAction" };
@@ -111,6 +147,22 @@ vi.mock("react-native", async () => {
     useWindowDimensions: () => ({ width: 412, height: 915 }),
   };
 });
+
+vi.mock("../src/bootstrap/polyfills.ts", () => ({}));
+
+vi.mock("expo-router/entry", () => ({}));
+
+vi.mock("expo-router/js-tabs", async () => {
+  const { createElement: h } = await import("react");
+
+  return {
+    Tabs: Object.assign(({ children }: { children: ReactNode }) => h("div", null, children), {
+      Screen: ({ options }: { options: { title: string } }) => h("span", null, options.title),
+    }),
+  };
+});
+
+vi.mock("../src/player/surface.ts", () => ({ PlayerSurface: () => null }));
 
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 
@@ -128,34 +180,40 @@ vi.mock("react-native-safe-area-context", async () => {
 vi.mock("expo-router", () => ({
   router: {
     setParams: (params: Record<string, string | undefined>) =>
-      void scenario.asked.push(`params ${JSON.stringify(params)}`),
+      void (Object.assign(scenario.params, params),
+      scenario.asked.push(`params ${JSON.stringify(params)}`)),
     push: (href: string) => void scenario.asked.push(`push ${href}`),
     navigate: (href: string) => void scenario.asked.push(`navigate ${href}`),
     back: () => void scenario.asked.push("back"),
   },
   useLocalSearchParams: () => scenario.params,
-  useSegments: () => ["(tabs)", "(live)", "settings"],
+  useSegments: () => ["(tabs)", scenario.destination, "settings"],
   usePathname: () => "/settings",
   useIsFocused: () => true,
 }));
 
-vi.mock("../src/player/instance.ts", () => ({
-  player: {
-    release: async () => {
-      await scenario.releaseWait;
+vi.mock("../src/player/instance.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
 
-      return scenario.unconfirmed && scenario.releaseCalls++ === 0
-        ? [
-            {
-              attempt: "attempt",
-              hold: { kind: "source", sourceId: "xtream:private-id" },
-              outcome: "unconfirmed",
-            },
-          ]
-        : [];
+  return {
+    player: {
+      state: store({ kind: "playing", phase: "paused", live: false, intent: { title: "Fixture" } }),
+      release: async () => {
+        await scenario.releaseWait;
+
+        return scenario.unconfirmed && scenario.releaseCalls++ === 0
+          ? [
+              {
+                attempt: "attempt",
+                hold: { kind: "source", sourceId: "xtream:private-id" },
+                outcome: "unconfirmed",
+              },
+            ]
+          : [];
+      },
     },
-  },
-}));
+  };
+});
 
 vi.mock("expo-constants", () => ({
   default: { expoConfig: { version: "0.1.0", android: { versionCode: 1 } } },
@@ -178,8 +236,16 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
         ],
       }),
       restore: async () => {},
-      connect: async () => ({ kind: "cancelled" }),
-      retry: () => {},
+      connect: async (input: unknown, _signal?: AbortSignal, id?: string) => {
+        scenario.connections.push({ input, id });
+
+        return scenario.saveRefused
+          ? { kind: "failed", error: { kind: "keychain-refused" }, http: null }
+          : { kind: "connected", id: id ?? "new-source" };
+      },
+      retry: (id: string) => {
+        scenario.retries.push(id);
+      },
       remove: async () => {
         if (scenario.eraseRefused) throw new Error("erase refused");
 
@@ -207,7 +273,7 @@ const { createRoot } = (await import(REACT_DOM)) as {
 const { currentLanguage, setLanguage } = await import("@mrstreamer/core/i18n");
 
 // Loaded first, as the app's entry (index.ts) loads it: the language it applied as it loaded.
-await import("../src/settings/language.ts");
+await import("../index.ts");
 
 const launchedIn = currentLanguage().locale;
 const { SettingsScreen } = await import("../src/settings/settings-screen.tsx");
@@ -237,6 +303,10 @@ const buttons = (container: ReturnType<typeof show>) =>
   );
 
 beforeEach(() => {
+  scenario.shareRefused = false;
+  scenario.saveRefused = false;
+  scenario.connections = [];
+  scenario.retries = [];
   scenario.refused.clear();
   scenario.params = {};
   scenario.asked = [];
@@ -246,6 +316,9 @@ beforeEach(() => {
   scenario.unconfirmed = false;
   scenario.releaseCalls = 0;
   scenario.toasts = [];
+  scenario.removeLast = false;
+  scenario.releaseWait = null;
+  scenario.destination = "(live)";
 });
 
 afterEach(() => {
@@ -253,7 +326,46 @@ afterEach(() => {
   window.document.body.innerHTML = "";
 });
 
+it("mounts the Android first-choice prompt in the tabs and remembers the answer after remount", async () => {
+  const { default: Layout } = await import("../src/app/(tabs)/_layout.tsx");
+  const shown = show(createElement(Layout));
+  await act(async () => {});
+  expect(shown.textContent).toContain("Start");
+  act(() => setLanguage({ locale: "en-US", formats: "en-US" }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("Share usage statistics?");
+  expect(buttons(shown)).toEqual(["Don't share", "Share"]);
+  act(() => scenario.modalBack?.());
+  expect(shown.textContent).toContain("Share usage statistics?");
+  press(shown, "Don't share");
+  expect(shown.querySelector("dialog")).toBeNull();
+  expect(JSON.parse(scenario.files.get("statistics.json")!)).toEqual({
+    choice: "off",
+    installationId: null,
+    pending: [],
+  });
+  act(() => root?.unmount());
+  root = null;
+  // Recreate the consent owner from the saved record, as a new process does.
+  const { androidAnalytics } = await import("../src/telemetry/analytics.ts");
+  const { androidBuild } = await import("../src/telemetry/model.ts");
+
+  const fresh = androidAnalytics({
+    load: () => JSON.parse(scenario.files.get("statistics.json")!),
+    save: () => true,
+    uuid: () => "unused",
+    build: androidBuild("16", "0.1.0", "1"),
+    transport: null,
+  });
+
+  expect(fresh.consent.get().choice).toBe("off");
+  const remounted = show(createElement(Layout));
+  await act(async () => {});
+  expect(remounted.textContent).not.toContain("Share usage statistics?");
+});
+
 it("opens in the saved language, and keeps it on screen with Try again when a change can't be saved", async () => {
+  setLanguage({ locale: launchedIn, formats: launchedIn });
   expect(launchedIn).toBe("nl-NL");
   const shown = show(createElement(SettingsScreen));
   const row = () => shown.querySelector('button[aria-label="Taal van de interface"]');
@@ -275,25 +387,6 @@ it("opens in the saved language, and keeps it on screen with Try again when a ch
   );
   expect(shown.textContent).not.toContain("Couldn't save the language");
   expect(JSON.parse(scenario.files.get("language.json") ?? "")).toEqual({ choice: "en-US" });
-});
-
-it("asks for the statistics choice until it is answered, not closing for Back or the scrim", () => {
-  setLanguage({ locale: "en-US", formats: "en-US" });
-  const shown = show(createElement(ConsentPrompt));
-  expect(shown.textContent).toContain("Share usage statistics?");
-  // Its two answers are the dialog's only controls: the scrim is no button.
-  expect(buttons(shown)).toEqual(["Don't share", "Share"]);
-
-  act(() => scenario.modalBack?.());
-  expect(shown.textContent).toContain("Share usage statistics?");
-
-  press(shown, "Don't share");
-  expect(shown.querySelector("dialog")).toBeNull();
-  expect(JSON.parse(scenario.files.get("statistics.json") ?? "")).toEqual({
-    choice: "off",
-    installationId: null,
-    pending: [],
-  });
 });
 
 it("counts the generated licence manifest, and shares only the diagnostics text, with no provider's address", async () => {
@@ -521,4 +614,253 @@ it("offers Try again for a refused Off and retries Off rather than enabling stat
   press(shown, "Try again");
   expect(statistics.consent.get().choice).toBe("off");
   expect(statistics.consent.enabled).toBe(false);
+});
+
+function fill(container: ReturnType<typeof show>, label: string, value: string) {
+  const input = container.querySelector(`input[aria-label="${label}"]`);
+
+  if (!(input instanceof window.HTMLInputElement)) throw Error(`No field ${label}`);
+  act(() => {
+    input.value = value;
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+  });
+}
+
+it.each([
+  ["xtream", "invalid-login", "Enter password"],
+  ["m3u", "needs-secret", "Enter playlist link"],
+] as const)(
+  "re-enters %s %s through Settings with the same source id and keeps a refused form open",
+  async (kind, error, action) => {
+    const { sources } = await import("../src/bootstrap/sources.ts");
+    sources.state.set({
+      kind: "ready",
+      sources: [
+        {
+          id: "recover-id",
+          kind,
+          label: "recover.example.invalid",
+          channels: {
+            kind: "failed",
+            error:
+              error === "needs-secret"
+                ? { kind: error, subscriptionId: "recover-id" }
+                : { kind: error },
+          },
+        },
+      ],
+    });
+    setLanguage({ locale: "en-US", formats: "en-US" });
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "recover.example.invalid");
+    press(shown, action);
+    fill(shown, "Server or M3U link", "https://changed.example.invalid/list.m3u");
+    fill(shown, "Username", "changed-user");
+    fill(shown, "Password", "changed-password");
+    scenario.saveRefused = true;
+    press(shown, "Connect");
+    await act(async () => {});
+    expect(shown.textContent).toContain("Nothing was saved.");
+    expect(shown.querySelector('input[aria-label="Password"]')).not.toBeNull();
+    scenario.saveRefused = false;
+    press(shown, "Connect");
+    await act(async () => {});
+    expect(scenario.connections).toEqual(
+      Array(2).fill({
+        id: "recover-id",
+        input: {
+          server: "https://changed.example.invalid/list.m3u",
+          username: "changed-user",
+          password: "changed-password",
+        },
+      }),
+    );
+    expect(shown.querySelector("dialog")).toBeNull();
+  },
+);
+
+it("dispatches Retry and Reload channels for the retained provider, adds a provider and retries removal", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  setLanguage({ locale: "en-US", formats: "en-US" });
+
+  const retained = [
+    {
+      key: "recover-id:1",
+      sourceId: "recover-id",
+      title: "Retained channel",
+      number: null,
+      category: null,
+    },
+  ];
+
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "recover-id",
+        kind: "m3u",
+        label: "recover.example.invalid",
+        channels: {
+          kind: "failed",
+          error: { kind: "unreachable", server: "", detail: "offline" },
+          channels: retained,
+        },
+      },
+    ],
+  });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "recover.example.invalid");
+  press(shown, "Retry");
+  expect(scenario.retries).toEqual(["recover-id"]);
+  expect(shown.textContent).toContain("offline");
+  expect(sources.state.get()).toMatchObject({ sources: [{ channels: { channels: retained } }] });
+  act(() =>
+    sources.state.set({
+      kind: "ready",
+      sources: [
+        {
+          id: "recover-id",
+          kind: "m3u",
+          label: "recover.example.invalid",
+          channels: { kind: "ready", rows: retained },
+        },
+      ],
+    }),
+  );
+  press(shown, "recover.example.invalid");
+  press(shown, "Reload channels");
+  expect(scenario.retries).toEqual(["recover-id", "recover-id"]);
+  expect(sources.state.get()).toMatchObject({ sources: [{ channels: { rows: retained } }] });
+  press(shown, "Add provider");
+  fill(shown, "Server or M3U link", "https://new.example.invalid/list.m3u");
+  press(shown, "Connect");
+  await act(async () => {});
+  expect(scenario.connections).toEqual([
+    {
+      id: undefined,
+      input: { server: "https://new.example.invalid/list.m3u", username: "", password: "" },
+    },
+  ]);
+  expect(shown.querySelector("dialog")).toBeNull();
+  scenario.eraseRefused = true;
+  press(shown, "recover.example.invalid");
+  press(shown, "Remove");
+  press(shown, "Remove");
+  await act(async () => {});
+  expect(shown.textContent).toContain("Its login is still saved.");
+  scenario.eraseRefused = false;
+  scenario.removeLast = true;
+  press(shown, "Try again");
+  await act(async () => {});
+  expect(sources.state.get()).toMatchObject({ sources: [] });
+});
+
+it("shows a rejected system Share as a failure", async () => {
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  scenario.params = { show: "diagnostics" };
+  scenario.shareRefused = true;
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Share");
+  await act(async () => {});
+  expect(shown.textContent).toContain("Couldn't share diagnostics. Try again.");
+});
+
+it.each(["home", "(live)", "movies", "series"])(
+  "opens a full licence from Settings on %s and clears selection on close",
+  async (destination) => {
+    scenario.destination = destination;
+    setLanguage({ locale: "en-US", formats: "en-US" });
+    const { LicencesScreen } = await import("../src/settings/licences-screen.tsx");
+    const { default: manifest } = await import("../licenses/manifest.json");
+    const first = manifest[0]!;
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "Licences");
+    expect(scenario.asked).toContain(
+      `push ${destination === "(live)" ? "" : `/${destination}`}/licences`,
+    );
+    act(() => root?.render(createElement(LicencesScreen)));
+    press(shown, first.name);
+    expect(scenario.params.licence).toBe("0");
+    act(() => root?.render(createElement(LicencesScreen)));
+
+    for (const text of [
+      first.licence,
+      first.version,
+      first.source.replace(/^https?:\/\//, ""),
+      first.notice,
+    ])
+      expect(shown.textContent).toContain(text);
+    press(shown, "Back");
+    expect(scenario.params.licence).toBeUndefined();
+    act(() => root?.render(createElement(LicencesScreen)));
+    expect(shown.textContent).not.toContain(first.notice);
+  },
+);
+
+it("updates mounted navigation, top bar, sheet and mini-player labels between English and Dutch", async () => {
+  const { DestinationBar } = await import("../src/navigation/destination-bar.tsx");
+  const { NavigationBar } = await import("../src/ui/navigation-bar.tsx");
+  const { TopAppBar } = await import("../src/ui/top-app-bar.tsx");
+  const { Sheet } = await import("../src/ui/sheet.tsx");
+  const { MiniPlayer } = await import("../src/player/mini-player.tsx");
+  const { DESTINATIONS } = await import("../src/navigation/destinations.ts");
+  const insets = { top: 0, bottom: 0, left: 0, right: 0 };
+
+  const node = () =>
+    createElement(
+      "div",
+      null,
+      createElement(DestinationBar, {
+        layout: "bar",
+        descriptors: {},
+        state: { index: 0, routes: DESTINATIONS.map(({ route }) => ({ name: route, key: route })) },
+        emitter: {
+          emit: () => {
+            throw new Error("This rendering test does not navigate tabs.");
+          },
+        },
+        navigateToTab: () => {},
+        insets,
+      }),
+      createElement(NavigationBar, {
+        destinations: DESTINATIONS,
+        selected: "home",
+        onSelect: () => {},
+        insets,
+      }),
+      createElement(TopAppBar, { title: "Fixture", layout: "bar", insets }),
+      createElement(Sheet, {
+        label: "Fixture",
+        visible: true,
+        onClose: () => {},
+        children: "Fixture",
+      }),
+      createElement(MiniPlayer),
+    );
+
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  const shown = show(node());
+
+  for (const [locale, home, movies, settings, search, close, hint] of [
+    ["nl-NL", "Start", "Films", "Instellingen", "Zoeken", "Fixture sluiten", "Opent de speler"],
+    ["en-US", "Home", "Movies", "Settings", "Search", "Close Fixture", "Opens the player"],
+  ] as const) {
+    act(() => {
+      setLanguage({ locale, formats: locale });
+      root?.render(node());
+    });
+    expect(
+      Array.from(
+        shown.querySelectorAll(`button[aria-label="${home}"]`),
+        (button) => button.textContent,
+      ),
+    ).toEqual([home, home]);
+    expect(shown.querySelectorAll(`button[aria-label="${movies}"]`)).toHaveLength(2);
+
+    for (const label of [settings, search, close])
+      expect(shown.querySelector(`button[aria-label="${label}"]`)).not.toBeNull();
+    expect(shown.querySelector('button[aria-label="Fixture"]')?.getAttribute("data-hint")).toBe(
+      hint,
+    );
+  }
 });
