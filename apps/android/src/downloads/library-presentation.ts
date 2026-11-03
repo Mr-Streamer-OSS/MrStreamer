@@ -1,5 +1,6 @@
 import type { DownloadPresentation, MediaIdentity } from "../library/intents.ts";
 import type { DownloadRow } from "./state.ts";
+import { rowStatus } from "./presentation.ts";
 import { t } from "./copy.ts";
 
 type Message = Parameters<typeof t>[0];
@@ -7,7 +8,7 @@ type Message = Parameters<typeof t>[0];
 type LibraryAction = "pause" | "resume" | "retry" | "open";
 
 const labels = {
-  open: "Downloads",
+  open: "Play offline",
   retry: "Retry",
   resume: "Resume",
   pause: "Pause",
@@ -19,15 +20,7 @@ function presented(row: DownloadRow): [string, LibraryAction, DownloadPresentati
     case "complete":
       return [t("Downloaded"), "open", "done"];
     case "failed":
-      return [
-        t(
-          row.reason === "missing"
-            ? "File missing"
-            : "The download couldn't go on from where it stopped.",
-        ),
-        "retry",
-        "retry",
-      ];
+      return [rowStatus(row, false).text ?? t("File missing"), "retry", "retry"];
     case "paused":
       return [t("Paused"), "resume", "empty"];
     case "queued":

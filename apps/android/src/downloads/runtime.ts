@@ -1,11 +1,13 @@
 import { router } from "expo-router";
 import { requireNativeModule } from "expo";
-import { AppState } from "react-native";
+import { AppState, PermissionsAndroid, Platform } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
 import { libraryDownload } from "./library-presentation.ts";
 import { libraryDownloads, libraryIntents, type DownloadIntent } from "../library/intents.ts";
 import { player } from "../player/instance.ts";
+import { store } from "../platform/store.ts";
+import { t } from "./copy.ts";
 import { downloadState, type TransferPort, type DownloadRow, type Action } from "./state.ts";
 
 let owner: ReturnType<typeof createRuntime> | undefined;
@@ -13,6 +15,25 @@ let owner: ReturnType<typeof createRuntime> | undefined;
 function createRuntime() {
   const native = requireNativeModule<TransferPort>("Transfers");
   const model = downloadState(native);
+
+  let askedNotifications = false;
+  const tapErrors = new Map<string, () => Promise<void>>();
+  const identity = (media: DownloadIntent["media"]) => JSON.stringify(media);
+  const presentation = store(0);
+
+  function tapAction(media: DownloadIntent["media"], operation: () => Promise<void>) {
+    void model.change(async () => {
+      try {
+        await operation();
+        tapErrors.delete(identity(media));
+      } catch {
+        tapErrors.set(identity(media), operation);
+        throw new Error("write");
+      } finally {
+        presentation.set((value) => value + 1);
+      }
+    }, identity(media));
+  }
 
   async function enqueue({ media }: DownloadIntent) {
     const title = library().title(media.kind === "movie" ? "movie" : "series", media.titleKey);
@@ -45,6 +66,13 @@ function createRuntime() {
 
     if (!source) throw new Error("source");
 
+    if (Platform.OS === "android" && Number(Platform.Version) >= 33 && !askedNotifications) {
+      askedNotifications = true;
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    }
+
+    await syncPlayer();
+
     const copyId = await native.enqueue(
       JSON.stringify({
         key: JSON.stringify([media.sourceId, media.kind, id, container]),
@@ -72,53 +100,113 @@ function createRuntime() {
   }
 
   const refresh = () => void model.refresh();
-  let held: string | undefined;
+  const held = new Set<string>();
+  let authority = Promise.resolve();
 
-  async function syncPlayer() {
-    const state = player.state.get();
+  function syncPlayer() {
+    authority = authority
+      .catch(() => {})
+      .then(async () => {
+        const state = player.state.get();
 
-    const next =
-      state.kind === "playing" && state.intent.kind !== "file" ? state.intent.sourceId : undefined;
+        // Paused playback can still hold its provider connection open.
+        const next =
+          state.kind === "playing" &&
+          state.intent.kind !== "file" &&
+          state.phase !== "failed" &&
+          state.phase !== "ended" &&
+          !state.failure
+            ? state.intent.sourceId
+            : undefined;
 
-    if (held === next) return;
-    const previous = held;
-    held = next;
+        if (next && !held.has(next)) {
+          await native.blockSource(next, true);
+          held.add(next);
+        }
 
-    if (next) await native.blockSource(next, true);
+        for (const previous of held) {
+          if (previous === next) continue;
 
-    if (previous) {
-      const released = await player.release(
-        (hold) => hold.kind === "source" && hold.sourceId === previous,
-      );
+          const released = await player.release(
+            (hold) => hold.kind === "source" && hold.sourceId === previous,
+          );
 
-      if (released.some((entry) => entry.outcome === "unconfirmed")) return;
-      await native.blockSource(previous, false);
-    }
+          if (released.some((entry) => entry.outcome === "unconfirmed")) continue;
+          await native.blockSource(previous, false);
+          held.delete(previous);
+        }
+      });
 
-    refresh();
+    return authority;
   }
 
   const removing = new Set<string>();
   let stop: (() => void) | undefined;
+  let leases = 0;
+  let visible = 0;
+  let restored = false;
+
+  function lease(screen: boolean) {
+    leases++;
+
+    if (screen) visible++;
+    let released = false;
+
+    return () => {
+      if (released) return;
+      released = true;
+
+      if (screen) visible--;
+
+      if (--leases === 0) stop?.();
+    };
+  }
 
   return {
     ...model,
     native,
-    start() {
-      if (stop) return () => {};
+    start(screen = false) {
+      if (stop) return lease(screen);
 
       const unregister = libraryIntents.register({
-        download: (intent) => void model.change(() => enqueue(intent)),
+        download: (intent) => tapAction(intent.media, () => enqueue(intent)),
       });
 
       const unregisterPresentation = libraryDownloads.register({
-        snapshot: model.state.get,
-        subscribe: model.state.subscribe,
-        read: (media) =>
-          libraryDownload(model.state.get().rows, media, (row, action) => {
-            if (action === "open") router.push("/offline");
-            else void model.change(() => native.command(row.id, action));
-          }),
+        snapshot: () => `${JSON.stringify(model.state.get())}:${presentation.get()}`,
+        subscribe: (listener) => {
+          const first = model.state.subscribe(listener);
+          const second = presentation.subscribe(listener);
+
+          return () => {
+            first();
+            second();
+          };
+        },
+        read: (media) => {
+          const shown = libraryDownload(model.state.get().rows, media, (row, action) => {
+            tapAction(media, async () => {
+              if (action === "open") {
+                await downloads().playCopy(row);
+                router.push("/offline/play");
+              } else await native.command(row.id, action);
+            });
+          });
+
+          if (!tapErrors.has(identity(media))) return shown;
+
+          return {
+            text: t("Couldn't save that change."),
+            label: t("Try again"),
+            icon: "retry",
+            progress: 0,
+            activate: () => {
+              const retry = tapErrors.get(identity(media));
+
+              if (retry) tapAction(media, retry);
+            },
+          };
+        },
       });
 
       const unsubscribe = player.state.subscribe(() => void syncPlayer().catch(() => {}));
@@ -128,16 +216,20 @@ function createRuntime() {
       });
 
       const timer = setInterval(() => {
-        if (AppState.currentState === "active") refresh();
+        void syncPlayer().catch(() => {});
+
+        if (
+          AppState.currentState === "active" &&
+          (visible > 0 ||
+            model.state.get().rows.some((row) => row.state === "queued" || row.state === "running"))
+        )
+          refresh();
       }, 1500);
 
       void model
-        .refresh(true)
+        .refresh(!restored)
         .then(async () => {
-          const state = sources.state.get();
-
-          if (state.kind === "ready")
-            for (const source of state.sources) await native.blockSource(source.id, false);
+          restored = true;
           await syncPlayer();
         })
         .catch(() => {});
@@ -150,7 +242,7 @@ function createRuntime() {
         stop = undefined;
       };
 
-      return () => stop?.();
+      return lease(screen);
     },
     async playCopy(row: DownloadRow) {
       if (removing.has(row.id)) throw new Error("removing");
@@ -160,38 +252,46 @@ function createRuntime() {
       player.play({ kind: "file", path, title: row.title });
     },
     async command(row: DownloadRow, action: Action) {
-      if (removing.has(row.id)) return "closing" as const;
+      if (removing.has(row.id)) return null;
       removing.add(row.id);
 
+      let refusal: "playing" | "closing" | null = null;
+
       try {
-        if (action === "remove" || action === "cancel") {
-          const path = await native.filePath(row.id);
+        await model.change(async () => {
+          // Retry repeats the reader checks too, because playback may have changed.
+          if (action === "remove" || action === "cancel") {
+            const path = await native.filePath(row.id);
 
-          if (path) {
-            const current = player.state.get();
+            if (path) {
+              const current = player.state.get();
 
-            if (
-              current.kind === "playing" &&
-              current.intent.kind === "file" &&
-              current.intent.path === path
-            )
-              return "playing" as const;
+              if (
+                current.kind === "playing" &&
+                current.intent.kind === "file" &&
+                current.intent.path === path
+              ) {
+                refusal = "playing";
 
-            const release = await player.release(
-              (hold) => hold.kind === "file" && hold.path === path,
-            );
+                return;
+              }
 
-            if (release.some((r) => r.outcome !== "file-closed")) return "closing" as const;
+              const release = await player.release(
+                (hold) => hold.kind === "file" && hold.path === path,
+              );
+
+              if (release.some((r) => r.outcome !== "file-closed")) {
+                refusal = "closing";
+
+                return;
+              }
+            }
           }
-        }
 
-        await model.change(() => native.command(row.id, action));
+          await native.command(row.id, action);
+        }, `${row.id}:${action}`);
 
-        return null;
-      } catch {
-        model.state.set((old) => ({ ...old, error: "write" }));
-
-        return null;
+        return refusal;
       } finally {
         removing.delete(row.id);
       }
@@ -199,7 +299,9 @@ function createRuntime() {
   };
 }
 
-/** Called by the app owner at launch; cleanup unregisters only this owner's handlers. */
+/** Media calls runtime.ts startDownloads at cold launch, outside provider guards.
+ * Each registration owns an idempotent lease; the last release stops subscriptions.
+ */
 export function startDownloads() {
   return downloads().start();
 }

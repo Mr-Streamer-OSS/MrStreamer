@@ -41,6 +41,23 @@ class Ledger(context: Context) {
     for (file in listOf(media(id, true), media(id), artwork(id))) check(!file.exists() || file.delete())
   }
 
+  /** Recover either side of promotion before replacing the previous process attempt. */
+  fun recover(row: JSONObject) {
+    val id = row.getString("id")
+    val total = row.optLong("total")
+    if (row.optString("state") in listOf("running", "queued") &&
+        row.optString("attempt").isNotEmpty() && total > 0) {
+      val mediaFile = media(id)
+      val part = media(id, true)
+      if (mediaFile.isFile && mediaFile.canRead() && mediaFile.length() == total ||
+          part.isFile && part.canRead() && part.length() == total && part.renameTo(mediaFile)) {
+        row.put("state", "complete").put("bytes", total).put("reason", "")
+      }
+    }
+    val mediaFile = media(id)
+    reconcile(row, mediaFile.length(), mediaFile.isFile && mediaFile.canRead())
+  }
+
   companion object {
     // All workers and bridge calls share this lock, including across new Ledger instances.
     val lock = Any()
@@ -66,6 +83,7 @@ class Ledger(context: Context) {
     }
 
     fun reconcile(row: JSONObject, length: Long, readable: Boolean) {
+      row.put("blocked", false) // Holds belong to the process, never to durable work.
       if (row.getString("state") == "complete" &&
         (!readable || length <= 0 || length != row.optLong("total"))) {
         row.put("state", "failed").put("reason", "missing")

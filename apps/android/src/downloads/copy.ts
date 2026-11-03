@@ -3,6 +3,14 @@ import { catalogue } from "@mrstreamer/mobile/language";
 // Downloads' own messages. Wherever iOS says the same thing, the text and its Dutch follow
 // apps/ios/src/i18n/downloads.ts.
 const english = {
+  "This provider returned a playlist, not a downloadable file.":
+    "This provider returned a playlist, not a downloadable file.",
+  "This provider returned a document, not a video file.":
+    "This provider returned a document, not a video file.",
+  "The provider did not report the file size. This file cannot be checked for completion.":
+    "The provider did not report the file size. This file cannot be checked for completion.",
+  "The file could not be removed. Try removing it again.":
+    "The file could not be removed. Try removing it again.",
   Downloads: "Downloads",
   Downloaded: "Downloaded",
   Downloading: "Downloading",
@@ -61,6 +69,14 @@ const english = {
 } as const;
 
 const dutch = {
+  "This provider returned a playlist, not a downloadable file.":
+    "Deze provider gaf een afspeellijst terug, geen downloadbaar bestand.",
+  "This provider returned a document, not a video file.":
+    "Deze provider gaf een document terug, geen videobestand.",
+  "The provider did not report the file size. This file cannot be checked for completion.":
+    "De provider gaf geen bestandsgrootte door. Deze download kan niet op volledigheid worden gecontroleerd.",
+  "The file could not be removed. Try removing it again.":
+    "Het bestand kon niet worden verwijderd. Probeer het opnieuw.",
   Downloads: "Downloads",
   Downloaded: "Gedownload",
   Downloading: "Downloaden",

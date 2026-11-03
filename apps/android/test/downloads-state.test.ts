@@ -90,3 +90,56 @@ it("keeps optional title facts and accepts ledgers created before facts were sav
   expect(model.state.get().error).toBeNull();
   expect(model.state.get().rows).toEqual([old, facts]);
 });
+
+it("keeps mutation failure across polls, retries the action and avoids unchanged publications", async () => {
+  const model = downloadState(port(async () => JSON.stringify({ rows: [], free: 10 })));
+  await model.refresh();
+  const listener = vi.fn();
+  const unsubscribe = model.state.subscribe(listener);
+  await model.refresh();
+  expect(listener).not.toHaveBeenCalled();
+  let broken = true;
+
+  const operation = vi.fn(async () => {
+    if (broken) throw new Error("write");
+  });
+
+  await model.change(operation);
+  await model.refresh();
+  expect(model.state.get().error).toBe("write");
+  await model.change(async () => {});
+  expect(model.state.get().error).toBe("write");
+  broken = false;
+  await model.retry();
+  expect(operation).toHaveBeenCalledTimes(2);
+  expect(model.state.get().error).toBeNull();
+  unsubscribe();
+});
+
+it("accepts the row shape written by native add without exposing native authority", async () => {
+  const row = {
+    id: "id",
+    key: "key",
+    sourceId: "source",
+    sourceLabel: "Source",
+    title: "Title",
+    kind: "movie",
+    mediaId: "one",
+    container: "mkv",
+    state: "queued",
+    bytes: 0,
+    total: 0,
+    reason: "",
+    blocked: false,
+    binding: "native-only",
+    attempt: "native-only",
+    etag: "native-only",
+    modified: "native-only",
+  };
+
+  const model = downloadState(port(async () => JSON.stringify({ rows: [row], free: 10 })));
+  await model.refresh();
+  expect(model.state.get().error).toBeNull();
+  expect(model.state.get().rows[0]).not.toHaveProperty("binding");
+  expect(model.state.get().rows[0]).not.toHaveProperty("attempt");
+});

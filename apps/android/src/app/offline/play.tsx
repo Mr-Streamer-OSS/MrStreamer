@@ -1,6 +1,7 @@
 import { downloads } from "../../downloads/runtime.ts";
 import { t } from "../../downloads/copy.ts";
 import { useSyncExternalStore } from "react";
+import { Alert } from "react-native";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import { Dialog, RED, TextButton } from "../../live/chrome.tsx";
 import { player } from "../../player/instance.ts";
@@ -17,14 +18,31 @@ export default function OfflinePlay() {
   const state = useStore(player.state);
 
   const failed =
-    state.kind === "playing" && state.intent.kind === "file" && state.failure ? state.intent : null;
+    state.kind === "playing" &&
+    state.intent.kind === "file" &&
+    (state.failure?.kind === "resolve" ||
+      (state.failure?.kind === "native" && state.failure.failure.kind === "file-missing"))
+      ? state.intent
+      : null;
 
   async function remove(path: string) {
     await player.stop();
     const owner = downloads();
 
     for (const row of owner.state.get().rows) {
-      if ((await owner.native.filePath(row.id)) === path) await owner.command(row, "remove");
+      if ((await owner.native.filePath(row.id)) === path) {
+        const refusal = await owner.command(row, "remove");
+
+        if (refusal)
+          Alert.alert(
+            t("Couldn't remove {name}", { name: row.title }),
+            t(
+              refusal === "playing"
+                ? "Stop playing this copy first."
+                : "The old copy is still closing. Try again.",
+            ),
+          );
+      }
     }
   }
 

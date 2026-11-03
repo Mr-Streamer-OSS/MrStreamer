@@ -19,18 +19,36 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
       val row = synchronized(Ledger.lock) {
         val rows = ledger.read()
         rows.firstOrNull { it.getString("state") in listOf("queued", "running") && !it.optBoolean("blocked") }?.also {
-          Ledger.attempt(it)
-          it.put("state", "running")
+          ledger.recover(it)
+          if (it.getString("state") != "complete") {
+            Ledger.attempt(it)
+            it.put("state", "running")
+          }
           ledger.save(rows)
         }
       } ?: return Result.success()
+      if (row.getString("state") == "complete") continue
       val id = row.getString("id")
       val attempt = row.getString("attempt")
       try {
-        setForegroundAsync(notification(id, row.getString("title"))).get()
+        val title = row.getString("title") + if (row.has("season") && row.has("episode"))
+          " S${row.getInt("season")} E${row.getInt("episode")}" else ""
+        setForegroundAsync(notification(id, title)).get()
+      } catch (_: Exception) {
+        update(id, attempt) { it.put("state", "queued").put("reason", "continued") }
+        return Result.retry()
+      }
+      try {
         transfer(row, attempt)
       } catch (cause: Exception) {
-        update(id, attempt) { it.put("state", if (isStopped) "queued" else "failed").put("reason", if (isStopped) "continued" else if (cause.message == "disk" || ledger.root.usableSpace < RESERVE) "disk" else if (cause.message == "credentials") "credentials" else "interrupted") }
+        val reason = when {
+          cause.message in listOf("disk", "credentials", "playlist", "document", "length", "http") -> cause.message!!
+          ledger.root.usableSpace < RESERVE -> "disk"
+          else -> "continued"
+        }
+        val retry = isStopped || reason == "continued"
+        update(id, attempt) { it.put("state", if (retry) "queued" else "failed").put("reason", reason) }
+        if (retry) return Result.retry()
       }
       if (isStopped) return Result.retry()
     }
@@ -47,9 +65,10 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
   }
 
   private fun authority(row: JSONObject): JSONObject {
-    val secret = Credentials.read(context, row.getString("sourceId")) ?: error("credentials")
+    val secret = try { Credentials.read(context, row.getString("sourceId")) ?: error("credentials") }
+      catch (_: Exception) { error("credentials") }
     check(Transfers.fingerprint(secret) == row.getString("binding")) { "credentials" }
-    return JSONObject(secret).also { check(it.getString("kind") == "xtream") }
+    return JSONObject(secret).also { check(it.getString("kind") == "xtream") { "credentials" } }
   }
 
   private fun transfer(row: JSONObject, attempt: String) {
@@ -75,6 +94,14 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
         val modified = connection.getHeaderField("Last-Modified") ?: ""
         val range = connection.getHeaderField("Content-Range")
         val total = if (status == 206) range?.substringAfterLast('/')?.toLongOrNull() ?: -1 else connection.contentLengthLong
+        check(status != 401 && status != 403) { "credentials" }
+        if (status == 429 || status >= 500) error("network")
+        check(status == 200 || status == 206) { "http" }
+        val mime = (connection.contentType ?: "").substringBefore(';').trim().lowercase(java.util.Locale.ROOT)
+        check(row.getString("container").lowercase(java.util.Locale.ROOT) !in listOf("m3u", "m3u8", "mpd") &&
+          mime !in listOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl", "application/dash+xml")) { "playlist" }
+        check(!mime.startsWith("text/") && !mime.contains("html") && !mime.contains("json") && !mime.contains("xml")) { "document" }
+        check(total > 0) { "length" }
         if (offset > 0 && !Ledger.resumes(offset, status, range, etag, modified,
             row.optString("etag"), row.optString("modified"), total, row.optLong("total"))) {
           check(!restarted)
@@ -87,10 +114,10 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
         }
         check(status == 200 || (offset > 0 && status == 206))
         check(total > 0 && total >= offset)
-        check(total - offset + RESERVE <= ledger.root.usableSpace) { "disk" }
+        check(total - offset <= (ledger.root.usableSpace - RESERVE).coerceAtLeast(0)) { "disk" }
         if (!update(id, attempt) { it.put("state", "running").put("total", total).put("etag", etag).put("modified", modified) }) return
         connection.inputStream.use { input ->
-          // Each write checks its fence while holding the same lock as cancel and removal.
+          // Open under the unlink lock; stale writers hold only the unlinked file descriptor.
           val stream = synchronized(Ledger.lock) {
             val current = ledger.read().firstOrNull { it.getString("id") == id } ?: return
             if (current.getString("attempt") != attempt) return
@@ -104,32 +131,36 @@ class TransferWorker(private val context: Context, params: WorkerParameters) : W
               if (isStopped) error("stopped")
               val count = input.read(buffer)
               if (count < 0) break
-              synchronized(Ledger.lock) {
-                authority(row)
-                val current = ledger.read().firstOrNull { it.getString("id") == id } ?: return
-                if (current.getString("attempt") != attempt) return
-                if (current.optBoolean("blocked")) {
-                  update(id, attempt) { it.put("state", "queued") }
-                  return
+              check(ledger.root.usableSpace >= RESERVE + count) { "disk" }
+              check(bytes + count <= total) { "http" }
+              output.write(buffer, 0, count)
+              bytes += count
+              if (bytes - saved >= 4 * 1024 * 1024) {
+                output.fd.sync()
+                synchronized(Ledger.lock) {
+                  authority(row)
+                  val current = ledger.read().firstOrNull { it.getString("id") == id } ?: return
+                  if (current.getString("attempt") != attempt) return
+                  if (current.optBoolean("blocked")) {
+                    update(id, attempt) { it.put("state", "queued").put("bytes", bytes) }
+                    return
+                  }
+                  if (!update(id, attempt) { it.put("bytes", bytes) }) return
                 }
-                check(ledger.root.usableSpace >= RESERVE + count) { "disk" }
-                check(bytes + count <= total)
-                output.write(buffer, 0, count)
-                bytes += count
-                if (bytes - saved >= 1024 * 1024) {
-                  output.fd.sync()
-                  update(id, attempt) { it.put("bytes", bytes) }
-                  saved = bytes
-                }
+                saved = bytes
               }
             }
             output.fd.sync()
-            check(bytes == total)
+            if (bytes != total) error("network")
           }
         }
         synchronized(Ledger.lock) {
           authority(row)
           update(id, attempt) {
+            if (it.optBoolean("blocked")) {
+              it.put("state", "queued").put("bytes", total)
+              return@update
+            }
             check(ledger.media(id, true).length() == total)
             check(ledger.media(id, true).renameTo(ledger.media(id)))
             check(Ledger.finish(it, attempt, total, total))

@@ -4,19 +4,26 @@ const mocks = vi.hoisted(() => ({
   playerState: { kind: "playing", intent: { kind: "file", path: "/private/copy", title: "Copy" } },
   release: vi.fn(),
   command: vi.fn(),
+  subscribe: vi.fn(() => vi.fn()),
+  blockSource: vi.fn(async () => {}),
+  restore: vi.fn(async () => JSON.stringify({ rows: [], free: 1 })),
 }));
 
 vi.mock("expo", () => ({
   requireNativeModule: () => ({
     filePath: async () => "/private/copy",
     command: mocks.command,
+    restore: mocks.restore,
+    blockSource: mocks.blockSource,
     snapshot: async () => JSON.stringify({ rows: [], free: 1 }),
   }),
 }));
 
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
 
-vi.mock("react-native", () => ({ AppState: {} }));
+vi.mock("react-native", () => ({
+  AppState: { addEventListener: () => ({ remove: vi.fn() }), currentState: "active" },
+}));
 
 vi.mock("../src/bootstrap/sources.ts", () => ({ sources: {} }));
 
@@ -24,7 +31,7 @@ vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
 
 vi.mock("../src/player/instance.ts", () => ({
   player: {
-    state: { get: () => mocks.playerState },
+    state: { get: () => mocks.playerState, subscribe: mocks.subscribe },
     release: mocks.release,
   },
 }));
@@ -60,4 +67,25 @@ it("refuses deletion while playing or closing, then removes only after confirmed
   mocks.release.mockResolvedValueOnce([{ outcome: "file-closed" }]);
   expect(await owner.command(row, "remove")).toBeNull();
   expect(mocks.command).toHaveBeenCalledExactlyOnceWith("copy", "remove");
+});
+
+it("keeps registration alive until the last lease and ignores a stale cleanup", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const owner = downloads();
+    const first = owner.start();
+    const second = owner.start(true);
+    const { libraryIntents } = await import("../src/library/intents.ts");
+    first();
+    expect(libraryIntents.state.get().download).toBeTypeOf("function");
+    second();
+    expect(libraryIntents.state.get().download).toBeUndefined();
+    const third = owner.start();
+    first();
+    expect(libraryIntents.state.get().download).toBeTypeOf("function");
+    third();
+  } finally {
+    vi.useRealTimers();
+  }
 });

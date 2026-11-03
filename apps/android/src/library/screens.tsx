@@ -721,8 +721,10 @@ function MovieActions({
 }) {
   const { play, download } = useStore(libraryIntents.state);
 
-  if (!play && !download) return null;
   const media = mediaOf(title, undefined, titleId);
+  const saved = useDownloadPresentation(media);
+
+  if (!play && !download && !saved) return null;
 
   return (
     <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
@@ -742,7 +744,16 @@ function MovieActions({
           }
         />
       ) : null}
-      {download ? (
+      {saved ? (
+        <View style={{ gap: 4 }}>
+          <OutlinedButton
+            label={saved.label}
+            icon={saved.icon === "done" ? "play-arrow" : "download"}
+            onPress={saved.activate}
+          />
+          <Text style={{ color: colors.secondary }}>{saved.text}</Text>
+        </View>
+      ) : download ? (
         <OutlinedButton
           label={t("Download")}
           icon="download"
@@ -815,9 +826,15 @@ function EpisodeRow({
       ) : null}
       {saved ? (
         <Press
-          label={saved.label}
+          label={`${saved.label}, S${episode.season} E${episode.number}, ${episode.title}`}
           onPress={saved.activate}
-          style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center" }}
+          style={{
+            minWidth: 48,
+            paddingHorizontal: 8,
+            height: 48,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
         >
           {saved.icon === "stop" || saved.icon === "empty" ? (
             <View
@@ -837,8 +854,10 @@ function EpisodeRow({
             >
               {saved.icon === "stop" ? <Icon name="stop" size={16} /> : null}
             </View>
+          ) : saved.icon === "done" ? (
+            <Text style={{ color: colors.text }}>{saved.label}</Text>
           ) : (
-            <Icon name={saved.icon === "done" ? "check" : "refresh"} />
+            <Icon name="refresh" />
           )}
         </Press>
       ) : download ? (

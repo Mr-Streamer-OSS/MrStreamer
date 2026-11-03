@@ -24,11 +24,13 @@ class TransferHttpTest {
 
   @Test fun followsRelativeRedirectAndReturnsFinalRangeResponseButCapsLoops() {
     ServerSocket(0).use { server ->
-      server.soTimeout = 5000
+      server.soTimeout = 1000
       val executor = Executors.newSingleThreadExecutor()
-      executor.submit {
-        repeat(8) { request ->
+      val responses = java.util.concurrent.atomic.AtomicInteger()
+      val serving = executor.submit {
+        repeat(9) { request ->
           server.accept().use { socket ->
+            responses.incrementAndGet()
             val input = socket.getInputStream().bufferedReader()
             while (!input.readLine().isNullOrEmpty()) { }
             val response = if (request == 1) "206 Partial Content\r\nContent-Range: bytes 8-15/16\r\nETag: version\r\nContent-Length: 0"
@@ -45,7 +47,11 @@ class TransferHttpTest {
           assertEquals("bytes 8-15/16", final.getHeaderField("Content-Range"))
           assertEquals("version", final.getHeaderField("ETag"))
         } finally { final.disconnect() }
+        val started = System.nanoTime()
         assertEquals("network", assertThrows(IllegalStateException::class.java) { TransferHttp.open(address) }.message)
+        assertEquals(8, responses.get())
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 900)
+        assertFalse(serving.isDone) // The ninth response remains available if the cap is removed.
       } finally {
         server.close()
         executor.shutdownNow()

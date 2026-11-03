@@ -38,7 +38,7 @@ const line = (...parts: (string | null)[]) => parts.filter(Boolean).join(" · ")
 
 /**
  * A row's state line. After a restart it says what reconciliation found: it went on (the row
- * simply continues), it started again because the provider's file changed, it couldn't go on, or
+ * simply continues), it restarted after a representation or credential change, it couldn't go on, or
  * its file is missing. Only native's checked completion is a copy; nothing else reads as one.
  */
 export function rowStatus(row: DownloadRow, providerRemoved: boolean): RowStatus {
@@ -55,11 +55,19 @@ export function rowStatus(row: DownloadRow, providerRemoved: boolean): RowStatus
         text: t(
           row.reason === "missing"
             ? "File missing"
-            : row.reason === "disk"
-              ? "Disk full. Free some space, then retry."
-              : row.reason === "credentials"
-                ? "The provider login changed or is unavailable."
-                : "The download couldn't go on from where it stopped.",
+            : row.reason === "playlist"
+              ? "This provider returned a playlist, not a downloadable file."
+              : row.reason === "document"
+                ? "This provider returned a document, not a video file."
+                : row.reason === "length"
+                  ? "The provider did not report the file size. This file cannot be checked for completion."
+                  : row.reason === "remove"
+                    ? "The file could not be removed. Try removing it again."
+                    : row.reason === "disk"
+                      ? "Disk full. Free some space, then retry."
+                      : row.reason === "credentials"
+                        ? "The provider login changed or is unavailable."
+                        : "The download couldn't go on from where it stopped.",
         ),
         failed: true,
         progress: null,
@@ -88,7 +96,7 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
     case "complete":
       return "play";
     case "failed":
-      return row.reason === "missing" ? "delete" : "retry";
+      return row.reason === "missing" ? "delete" : row.reason === "remove" ? "remove" : "retry";
     case "paused":
       return "resume";
     case "queued":

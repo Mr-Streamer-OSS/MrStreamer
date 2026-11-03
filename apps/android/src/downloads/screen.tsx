@@ -64,7 +64,7 @@ export default function DownloadsScreen() {
   const beside = useWindowDimensions().width >= BESIDE;
   const insets = useSafeAreaInsets();
   const [overlay, setOverlay] = useState<Overlay | null>(null);
-  useEffect(() => owner.start(), [owner]);
+  useEffect(() => owner.start(true), [owner]);
 
   const close = () => setOverlay(null);
 
@@ -113,7 +113,7 @@ export default function DownloadsScreen() {
 
   const queue = state.rows.filter((r) => !isCopy(r));
   const copies = state.rows.filter(isCopy);
-  const used = state.rows.reduce((sum, r) => sum + r.bytes, 0);
+  const used = state.rows.reduce((sum, r) => sum + (r.reason === "missing" ? 0 : r.bytes), 0);
   const sideBySide = beside && queue.length > 0;
   // The row as it stands now, while its sheet or dialog shows.
   const shown = overlay && (state.rows.find((r) => r.id === overlay.row.id) ?? overlay.row);
@@ -183,11 +183,7 @@ export default function DownloadsScreen() {
       <Text style={{ ...small, flex: 1, color: RED }}>
         {t(state.error === "read" ? "Couldn't read downloads." : "Couldn't save that change.")}
       </Text>
-      <TextButton
-        label={t("Try again")}
-        strong
-        onPress={() => void owner.refresh(state.error === "read")}
-      />
+      <TextButton label={t("Try again")} strong onPress={() => void owner.retry()} />
     </View>
   ) : null;
 
@@ -303,7 +299,7 @@ function Row({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={[row.title, status.text].filter(Boolean).join(", ")}
+      accessibilityLabel={[row.title, facts, status.text].filter(Boolean).join(", ")}
       onPress={onMore}
       onLongPress={onMore}
       {...handlers}
@@ -364,7 +360,7 @@ function Row({
       </View>
       {trailing ? (
         <Press
-          label={t(choices[trailing].label)}
+          label={[t(choices[trailing].label), row.title, facts].filter(Boolean).join(", ")}
           onPress={() => onChoose(trailing)}
           style={{
             width: 48,
@@ -400,7 +396,7 @@ function OverlayView({
   onConfirm: (choice: "cancel" | "delete") => void;
 }) {
   const { row } = overlay;
-  const name = row.title;
+  const name = [row.title, rowFacts(row)].filter(Boolean).join(" · ");
 
   const action = (label: string, onPress: () => void, red = false, strong = red): ReactNode => (
     <TextButton

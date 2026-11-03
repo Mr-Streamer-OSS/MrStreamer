@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { store } from "../platform/store.ts";
 
 const Row = type({
+  "+": "delete",
   id: "string",
   key: "string",
   sourceId: "string",
@@ -60,6 +61,13 @@ export function downloadState(port: TransferPort) {
   });
 
   let serial = Promise.resolve();
+  let failedAction: (() => Promise<void>) | undefined;
+  let writeFailed = false;
+  let failedKey: unknown;
+
+  function publish(next: DownloadState) {
+    if (JSON.stringify(state.get()) !== JSON.stringify(next)) state.set(next);
+  }
 
   function run(operation: () => Promise<void>) {
     const next = serial.then(operation);
@@ -73,31 +81,43 @@ export function downloadState(port: TransferPort) {
       const parsed = Snapshot(JSON.parse(await (restore ? port.restore() : port.snapshot())));
 
       if (parsed instanceof type.errors) throw new Error("snapshot");
-      state.set({
+      publish({
         ...parsed,
         notifications: parsed.notifications ?? false,
         loading: false,
-        error: null,
+        error: writeFailed ? "write" : null,
       });
     } catch {
       state.set((old) => ({ ...old, loading: false, error: "read" }));
     }
   }
 
+  function change(operation: () => Promise<void>, key: unknown = operation) {
+    return run(async () => {
+      try {
+        await operation();
+
+        if (!failedAction || failedKey === key) {
+          failedAction = undefined;
+          writeFailed = false;
+        }
+      } catch {
+        failedAction = operation;
+        failedKey = key;
+        writeFailed = true;
+        state.set((old) => ({ ...old, error: "write" }));
+
+        return;
+      }
+
+      await read(false);
+    });
+  }
+
   return {
     state,
+    retry: () => (failedAction ? change(failedAction, failedKey) : run(() => read(true))),
     refresh: (restore = false) => run(() => read(restore)),
-    change: (operation: () => Promise<void>) =>
-      run(async () => {
-        try {
-          await operation();
-        } catch {
-          state.set((old) => ({ ...old, error: "write" }));
-
-          return;
-        }
-
-        await read(false);
-      }),
+    change,
   };
 }
