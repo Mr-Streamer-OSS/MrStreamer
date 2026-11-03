@@ -76,7 +76,9 @@ export function useSchedule(key: string, day: Day) {
   const [read, setRead] = useState<Read | null>(null);
   const [busy, setBusy] = useState(false);
   const shown = useRef(read);
-  shown.current = read;
+  useEffect(() => {
+    shown.current = read;
+  }, [read]);
   const work = useRef<AbortController | null>(null);
 
   const load = useCallback(
@@ -169,26 +171,27 @@ export function useSchedule(key: string, day: Day) {
 export function useProgramme(key: string, start: number, detail?: string) {
   const revision = useListingRevision();
   const [attempt, retry] = useState(0);
-  const [failed, setFailed] = useState(false);
   const id = `${key} ${start} ${detail ?? ""}`;
-  const [read, setRead] = useState<{ id: string; value: Programme | null } | null>(null);
+  const [read, setRead] = useState<{ id: string; value: Programme | null; failed: boolean } | null>(
+    null,
+  );
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
-    setFailed(false);
     void (async () => {
       const byToken = detail ? await guide.programme(detail, { signal }) : null;
       const value = byToken ?? (await guide.programmeAt(key, start, { signal }));
 
       if (value === undefined) throw new Error("unavailable");
-      setFailed(false);
 
-      if (!signal.aborted) setRead({ id, value });
+      if (!signal.aborted) setRead({ id, value, failed: false });
     })().catch(() => {
-      if (!signal.aborted) {
-        setFailed(true);
-        setRead((before) => (before?.id === id ? before : { id, value: null }));
-      }
+      if (!signal.aborted)
+        setRead((before) => ({
+          id,
+          value: before?.id === id ? before.value : null,
+          failed: true,
+        }));
     });
 
     return () => controller.abort();
@@ -198,7 +201,7 @@ export function useProgramme(key: string, start: number, detail?: string) {
   return {
     pending: current === null,
     value: current?.value ?? null,
-    failed,
+    failed: current?.failed ?? false,
     retry: () => retry((value) => value + 1),
     status: guide.programmeStatus(key, start, detail),
   };

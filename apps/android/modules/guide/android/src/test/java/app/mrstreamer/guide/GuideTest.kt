@@ -24,6 +24,18 @@ class GuideTest {
   private fun refused(code: String, work: () -> Unit) {
     try { work(); fail("Expected refusal $code") } catch (e: GuideFailure) { assertEquals(code, e.code) }
   }
+  @Test fun invalidProviderHeadersAreHttpFailures() = fixture { root ->
+    val owner = GuideOwner(root)
+    val lease = owner.attach("source", 1)["lease"] as String
+    for ((index, headers) in listOf(mapOf("bad\nname" to "value"), mapOf("X-Guide" to "bad\rvalue")).withIndex()) {
+      val job = "invalid-header-$index"
+      assertTrue(owner.begin(lease, job))
+      val answer = owner.prepare(lease, job, "http://127.0.0.1:1/guide", headers, emptyList(), emptyList(), 0, 0, 86400000).get(20, java.util.concurrent.TimeUnit.SECONDS)
+      assertEquals("failed", answer["kind"])
+      assertEquals("http", answer["error"])
+      owner.cancel(job)
+    }
+  }
   @Test fun hostileXmlAndBounds() = fixture { root ->
     val file = File(root, "guide.xml"); val job = GuideJob("lease")
     for (xml in listOf("<!DOCTYPE tv [<!ENTITY a 'boom'>]><tv>&a;</tv>")) {

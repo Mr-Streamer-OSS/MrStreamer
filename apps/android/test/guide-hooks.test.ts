@@ -92,3 +92,66 @@ it("shows unknown programme reads as failed and retries rather than declaring ab
     await act(async () => root.unmount());
   }
 });
+
+it("keeps a programme failure visible during retry until the replacement read settles", async () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  let finish!: (value: { title: string }) => void;
+  service.programmeAt.mockRejectedValueOnce(new Error("disk"));
+  function Programme() {
+    const read = useProgramme("source:1", 1);
+    return createElement(
+      "button",
+      { onClick: read.retry },
+      read.failed ? "Failed" : read.pending ? "Loading" : (read.value?.title ?? "Absent"),
+    );
+  }
+  try {
+    await act(async () => root.render(createElement(Programme)));
+    expect(container.textContent).toBe("Failed");
+    service.programmeAt.mockReturnValueOnce(
+      new Promise<{ title: string }>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await act(async () => container.querySelector("button")!.click());
+    expect(container.textContent).toBe("Failed");
+    await act(async () => finish({ title: "News" }));
+    expect(container.textContent).toBe("News");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("ignores an older programme response after the selected programme fails", async () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  let finish!: (value: { title: string }) => void;
+  service.programmeAt.mockReturnValueOnce(
+    new Promise<{ title: string }>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  function Programme({ start }: { start: number }) {
+    const read = useProgramme("source:1", start);
+    return createElement(
+      "span",
+      null,
+      read.failed ? "Failed" : read.pending ? "Loading" : (read.value?.title ?? "Absent"),
+    );
+  }
+  try {
+    await act(async () => root.render(createElement(Programme, { start: 1 })));
+    expect(container.textContent).toBe("Loading");
+    service.programmeAt.mockRejectedValueOnce(new Error("disk"));
+    await act(async () => root.render(createElement(Programme, { start: 2 })));
+    expect(container.textContent).toBe("Failed");
+    await act(async () => finish({ title: "Old news" }));
+    expect(container.textContent).toBe("Failed");
+    service.programmeAt.mockResolvedValueOnce({ title: "New news" });
+    await act(async () => root.render(createElement(Programme, { start: 3 })));
+    expect(container.textContent).toBe("New news");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

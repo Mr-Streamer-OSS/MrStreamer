@@ -86,14 +86,27 @@ export interface MapInput {
 
 /** How Map channels names channel `key`, from its catalogue once read. */
 export function describe(key: string, input: Omit<MapInput, "mappings">): Omit<Mappable, "mapped"> {
-  const sourceId =
-    [...new Set([...input.channels.keys(), ...input.providers.keys()])]
-      .sort((a, b) => b.length - a.length)
-      .find((id) => key.startsWith(`${id}:`)) ?? key.slice(0, key.lastIndexOf(":"));
+  const ids = sourceIds(input);
+  const listed = [...input.channels.values()].flat().find((channel) => channel.key === key);
+
+  return describeFrom(key, input, ids, listed);
+}
+
+const sourceIds = (input: Omit<MapInput, "mappings">) =>
+  [...new Set([...input.channels.keys(), ...input.providers.keys()])].sort(
+    (a, b) => b.length - a.length,
+  );
+
+function describeFrom(
+  key: string,
+  input: Omit<MapInput, "mappings">,
+  ids: readonly string[],
+  listed?: GuideChannel,
+): Omit<Mappable, "mapped"> {
+  const sourceId = ids.find((id) => key.startsWith(`${id}:`)) ?? key.slice(0, key.lastIndexOf(":"));
 
   const channelId = key.slice(sourceId.length + 1);
   const read = input.channels.get(sourceId);
-  const listed = read?.find((channel) => channel.key === key);
 
   if (listed)
     return {
@@ -123,6 +136,10 @@ export function describe(key: string, input: Omit<MapInput, "mappings">): Omit<M
  * channel listed, each whose name or mapped id holds `query`. Empty sections are left out.
  */
 export function mapSections(input: MapInput, query: string) {
+  const ids = sourceIds(input);
+  const channels = new Map(
+    [...input.channels.values()].flat().map((channel) => [channel.key, channel]),
+  );
   const words = query.trim().toLocaleLowerCase();
 
   const found = ({ title, mapped }: Mappable) =>
@@ -131,14 +148,14 @@ export function mapSections(input: MapInput, query: string) {
     !!mapped?.toLocaleLowerCase().includes(words);
 
   const mapped = [...input.mappings].flatMap(([key, id]) => {
-    const row = { ...describe(key, input), mapped: id };
+    const row = { ...describeFrom(key, input, ids, channels.get(key)), mapped: id };
 
     return found(row) ? [row] : [];
   });
 
-  const others = [...input.channels.values()].flat().flatMap((channel) => {
+  const others = [...channels.values()].flatMap((channel) => {
     if (input.mappings.has(channel.key)) return [];
-    const row = { ...describe(channel.key, input), mapped: null };
+    const row = { ...describeFrom(channel.key, input, ids, channel), mapped: null };
 
     return found(row) ? [row] : [];
   });

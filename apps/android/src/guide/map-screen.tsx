@@ -2,7 +2,7 @@ import { catalogueFailures, retryGuideChannels } from "./runtime.ts";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import { formatDate, t as sharedT } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   ScrollView,
@@ -48,7 +48,7 @@ export function MapScreen() {
   const selected = identity.sourceId && identity.channelId ? channelKey(identity) : null;
 
   const [query, setQuery] = useState("");
-  const sections = mapSections(input, query);
+  const sections = useMemo(() => mapSections(input, query), [input, query, locale]);
   const ready = state.kind === "ready" ? state.sources : [];
   const failedCatalogue = useStore(catalogueFailures);
 

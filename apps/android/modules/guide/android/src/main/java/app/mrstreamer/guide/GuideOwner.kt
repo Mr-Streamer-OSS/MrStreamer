@@ -119,9 +119,12 @@ class GuideOwner(root: File) {
           .authenticator(okhttp3.Authenticator.NONE).proxyAuthenticator(okhttp3.Authenticator.NONE)
           .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
           .callTimeout(180, java.util.concurrent.TimeUnit.SECONDS).build()
-        val request = okhttp3.Request.Builder().url(address)
-        headers.forEach { (key, value) -> request.header(key, value) }
-        request.header("Accept-Encoding", "identity").header("Cache-Control", "no-store")
+        val request = try {
+          okhttp3.Request.Builder().url(address).apply {
+            headers.forEach { (key, value) -> header(key, value) }
+            header("Accept-Encoding", "identity").header("Cache-Control", "no-store")
+          }
+        } catch (_: IllegalArgumentException) { throw GuideFailure("http") }
         val call = client.newCall(request.build()); job.connection = call
         try {
           job.check()

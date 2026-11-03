@@ -8,6 +8,11 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
+private val SPACES = Regex("\\s+")
+private val TV = listOf("tv")
+private val TITLE = listOf("tv", "programme", "title")
+private val DESC = listOf("tv", "programme", "desc")
+
 fun guideTime(value: String?): Long? = try {
   val text = value?.trim() ?: ""
   val match = Regex("^([0-9]{8}(?:[0-9]{2}){0,3})(?:\\s*([+-][0-9]{2}:?[0-9]{2}|Z))?$").matchEntire(text)
@@ -170,15 +175,15 @@ fun readXml(file: File, job: GuideJob, login: List<String>, uncertain: List<Stri
           }
           XmlPullParser.TEXT, XmlPullParser.CDSECT -> text.append(parser.text)
           XmlPullParser.END_TAG -> {
-            val value = text.toString().trim().replace(Regex("\\s+"), " ")
-            if (stack == listOf("tv", "programme", "title") && title == null) title = clipped(value, 300)
-            if (stack == listOf("tv", "programme", "desc") && description == null) description = clipped(value, 2000)
+            val value = text.toString().trim().replace(SPACES, " ")
+            if (stack == TITLE && title == null) title = clipped(value, 300)
+            if (stack == DESC && description == null) description = clipped(value, 2000)
             val s = start; val t = title
             if (parser.name == "programme" && channel.isNotEmpty() && channel.toByteArray().size <= 512 && s != null && !t.isNullOrEmpty() && (stop == null || stop!! - s >= 60000)) {
               if (listOf(channel, t, description ?: "").any { secret(it, passwords, patterns) }) throw GuideFailure("xml")
               insert(channel, s, stop, t, description)
             }
-            if (stack == listOf("tv")) closed = true
+            if (stack == TV) closed = true
             stack.removeAt(stack.lastIndex); text.setLength(0)
           }
         }

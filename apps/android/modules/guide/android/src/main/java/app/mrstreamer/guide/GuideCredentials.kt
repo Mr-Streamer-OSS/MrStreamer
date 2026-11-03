@@ -62,18 +62,6 @@ object GuideCredentials {
     check(filesOf(context, setOf(nameOf(id))).isEmpty()) { "A credential could not be removed." }
   }
 
-  /**
-   * Removes every authority whose id isn't in [ids]: those a list of sources no longer names,
-   * as after a launch that found it damaged, or an app killed between saving a login and listing it.
-   */
-  @JvmStatic
-  fun retain(context: Context, ids: Collection<String>) = synchronized(this) {
-    val kept = ids.map(::nameOf).toSet()
-    val others = folder(context).listFiles().orEmpty().filter { it.name.substringBefore('.') !in kept }
-    for (file in others) file.delete()
-    check(others.none(File::exists)) { "A credential could not be removed." }
-  }
-
   /** The files of the ids named [names], with any AtomicFile side files of theirs. */
   private fun filesOf(context: Context, names: Set<String>): List<File> =
     folder(context).listFiles().orEmpty().filter { it.name.substringBefore('.') in names }
