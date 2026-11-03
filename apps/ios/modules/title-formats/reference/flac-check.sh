@@ -29,7 +29,7 @@ for start in 0 7.3; do
     reason= segments=
     case $name in
       tiny-block) reason="Its FLAC sound has frames too short to time." ;;
-      invalid-lead|alternating-lead) reason='Its FLAC sound has too many invalid frames in a row.' ;;
+      invalid-lead|alternating-lead) reason='Its FLAC sound has too many invalid frames.' ;;
       track-rate|track-channels) reason='Its FLAC sound has conflicting format details.' ;;
       resume-corrupt) reason="Its FLAC sound has frames this can't play." ;;
       surround) reason='Its FLAC sound has more than two channels.' ;;

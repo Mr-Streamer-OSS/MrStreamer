@@ -2066,7 +2066,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     title->io->eof_reached = 0;
     if ((error = recall_before(title, index)) < 0 || (error = reach(title, index, &title->ahead)) < 0) {
       say(detail, detail_size, error == FLAC_LIMIT
-          ? "Its FLAC sound has too many invalid frames in a row."
+          ? "Its FLAC sound has too many invalid frames."
           : "The file couldn't be read at this point.");
       return failure(title, error);
     }
@@ -2092,7 +2092,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
     if (error < 0) {
       result = failure(title, error);
       say(detail, detail_size, error == FLAC_LIMIT
-          ? "Its FLAC sound has too many invalid frames in a row."
+          ? "Its FLAC sound has too many invalid frames."
           : "The file couldn't be read at this point.");
       goto end;
     }
@@ -2397,7 +2397,7 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   if ((error = read_lead(title)) < 0) {
     result = failure(title, error);
     say(detail, detail_size, error == FLAC_LIMIT
-          ? "Its FLAC sound has too many invalid frames in a row."
+          ? "Its FLAC sound has too many invalid frames."
           : "The file couldn't be read at its start.");
     goto fail;
   }
@@ -2420,7 +2420,7 @@ TitleHlsResult title_hls_open(const TitleHlsSource *source, double start, TitleH
   if ((error = sample(title, segment_at(title, title->start))) < 0) {
     result = failure(title, error);
     say(detail, detail_size, error == FLAC_LIMIT
-          ? "Its FLAC sound has too many invalid frames in a row."
+          ? "Its FLAC sound has too many invalid frames."
           : "The file couldn't be read where it starts playing.");
     goto fail;
   }
@@ -2661,7 +2661,7 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
   else av_bprint_finalize(&text, NULL);
   if (error < 0) {
     say(detail, detail_size, error == FLAC_LIMIT
-          ? "Its FLAC sound has too many invalid frames in a row."
+          ? "Its FLAC sound has too many invalid frames."
           : "The file couldn't be read at this point.");
     return failure(title, error);
   }
