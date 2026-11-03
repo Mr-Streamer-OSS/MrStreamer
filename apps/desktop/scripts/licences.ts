@@ -17,7 +17,7 @@ import type { Type } from "arktype";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
-import { type, type ArkErrors } from "arktype";
+import { type } from "arktype";
 import type { NoticeManifest } from "@mrstreamer/contracts/licences";
 import type { Plugin } from "vite";
 

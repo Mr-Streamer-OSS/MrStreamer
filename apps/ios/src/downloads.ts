@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -250,7 +251,7 @@ const Legacy = lazy(() => type({ url: "string", resumeData: "string" }));
 /** A field read on its own: absent, as this build writes it, or present and unreadable. */
 type Field<A> = A | undefined | "bad";
 
-function fieldOf<A>(parse: (value: unknown) => A | type.errors, value: unknown): Field<A> {
+function fieldOf<A>(parse: Type<A>, value: unknown): Field<A> {
   if (value === undefined) return undefined;
   const parsed = parse(value);
 

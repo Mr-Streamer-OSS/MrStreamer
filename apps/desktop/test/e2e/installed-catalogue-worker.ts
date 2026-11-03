@@ -55,15 +55,15 @@ const installed = new WeakSet<MainTransport>();
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function errorText(value: unknown): string {
-  if (value instanceof Error) return value.message;
+function errorText(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
 
-  if (typeof value === "string") return value;
+  if (typeof cause === "string") return cause;
 
   try {
-    return JSON.stringify(value) ?? String(value);
+    return JSON.stringify(cause) ?? String(cause);
   } catch {
-    return String(value);
+    return String(cause);
   }
 }
 

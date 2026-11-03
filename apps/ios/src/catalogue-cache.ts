@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type {
   LiveCatalogue,
@@ -7,7 +8,7 @@ import type {
   ProviderTitle,
 } from "@mrstreamer/core/provider";
 import { pacer, type Steps } from "@mrstreamer/core/steps";
-import { type, type ArkErrors } from "arktype";
+import { type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { inTasks } from "./library.ts";
 import {
@@ -156,10 +157,7 @@ const Envelopes = lazy(() => ({
 }));
 
 /** Each of `list` as `row` checks it, a slice at a time; null at the first that doesn't check. */
-function* rows<R>(
-  list: readonly unknown[],
-  row: (data: unknown) => R | ArkErrors,
-): Steps<R[] | null> {
+function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<R[] | null> {
   const due = pacer();
   const checked: R[] = [];
 

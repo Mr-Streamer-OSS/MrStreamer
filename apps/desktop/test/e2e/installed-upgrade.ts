@@ -1566,8 +1566,8 @@ export interface Leftovers {
  * step here, leaves the rest as it was for the workflow to upload. `failed` is the run's own
  * failure, or the first step's; `kept` names what is still on disk.
  */
-export async function cleanUp(failure: unknown, left: Leftovers) {
-  let failed = failure;
+export async function cleanUp(cause: unknown, left: Leftovers) {
+  let failed = cause;
   const steps: Record<string, unknown> = {};
 
   const attempt = async (what: string, action: () => unknown) => {

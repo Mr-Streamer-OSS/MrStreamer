@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 
@@ -93,7 +94,7 @@ const AuthorizationView = lazy(() =>
 export type AuthorizationView = Infer<typeof AuthorizationView>;
 
 /** Receipts that read, and how many didn't: one bad entry hides no other. */
-function readable<T>(parse: (value: unknown) => T | type.errors, values: unknown): T[] {
+function readable<T>(parse: Type<T>, values: unknown): T[] {
   return (Array.isArray(values) ? values : []).flatMap((value) => {
     const parsed = parse(value);
 
@@ -300,7 +301,7 @@ function bounded<A>(work: Promise<A>, ms = 6_000): Promise<A> {
   ]).finally(() => clearTimeout(timer));
 }
 
-function parsed<T>(parse: (value: unknown) => T | type.errors, value: unknown): T {
+function parsed<T>(parse: Type<T>, value: unknown): T {
   const result = parse(value);
 
   if (result instanceof type.errors) throw refused("corrupt");

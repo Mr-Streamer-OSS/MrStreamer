@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { PlaylistMapping } from "@mrstreamer/contracts/playlist";
@@ -154,7 +155,7 @@ export function readRegistry(): RegistryFile | null {
 }
 
 /** The entries of `list` that `schema` reads, and those it doesn't, as they are. */
-function readable<A>(list: unknown, schema: (value: unknown) => A | type.errors) {
+function readable<A>(list: unknown, schema: Type<A>) {
   const read: A[] = [];
   const unread: unknown[] = [];
 

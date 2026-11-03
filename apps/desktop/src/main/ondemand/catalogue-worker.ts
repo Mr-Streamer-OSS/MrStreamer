@@ -1086,7 +1086,11 @@ const handlers: {
 
 parentPort?.on("message", (request: WorkerRequest) => {
   setLanguage(request.interfaceLanguage);
-  const handler = handlers[request.method] as (args: unknown) => Promise<unknown>;
+
+  const handler = handlers[request.method] as (
+    args: WorkerCalls[WorkerRequest["method"]]["args"],
+  ) => Promise<unknown>;
+
   handler(request.args).then(
     (value) => parentPort?.postMessage({ id: request.id, ok: true, value }),
     (cause: unknown) =>
