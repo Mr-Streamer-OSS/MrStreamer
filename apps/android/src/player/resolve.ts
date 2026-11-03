@@ -172,7 +172,10 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
       };
     }
     const { sourceId } = intent;
-    if (intent.kind === "catch-up" && !archiveHolds(intent.days, intent.window.start, platform.now()))
+    if (
+      intent.kind === "catch-up" &&
+      !archiveHolds(intent.days, intent.window.start, platform.now())
+    )
       throw new AppFailure({ kind: "catch-up", reason: "outside", days: intent.days });
     const authority = await platform.credentials.read(sourceId);
     signal.throwIfAborted();
@@ -221,7 +224,8 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
     }
 
     // A playlist link lists its channels; its movies and series aren't read on Android yet.
-    if (intent.kind === "title") throw new AppFailure({ kind: "title-not-found", titleId: intent.id });
+    if (intent.kind === "title")
+      throw new AppFailure({ kind: "title-not-found", titleId: intent.id });
     const stream = await playlistStream(authority.link, intent.channelId, platform, signal);
     if (intent.kind === "live") {
       return {

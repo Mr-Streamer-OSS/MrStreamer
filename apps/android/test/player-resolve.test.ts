@@ -28,17 +28,17 @@ function serving(body: string) {
     asked.push(String(input));
     const bytes = new TextEncoder().encode(body);
     let at = 0;
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (at >= bytes.length) return controller.close();
-          const piece = bytes.slice(at, at + 64);
-          at += piece.length;
-          pulled += piece.length;
-          controller.enqueue(piece);
-        },
-      }),
-    );
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (at >= bytes.length) return controller.close();
+        const piece = bytes.slice(at, at + 64);
+        at += piece.length;
+        pulled += piece.length;
+        controller.enqueue(piece);
+      },
+    });
+    // React Native's types know no stream body; the tests' fetch takes one.
+    return new Response(stream as unknown as Blob);
   };
   return { fetchImpl, asked, pulled: () => pulled };
 }
@@ -232,7 +232,12 @@ describe("player addresses", () => {
   it("plays a file on this phone from where it was left", async () => {
     await expect(
       resolveWith(xtream)(
-        { kind: "file", path: "/data/files/Downloads/A film.mkv", title: "A film", resumeAt: 5_000 },
+        {
+          kind: "file",
+          path: "/data/files/Downloads/A film.mkv",
+          title: "A film",
+          resumeAt: 5_000,
+        },
         signal,
       ),
     ).resolves.toEqual({

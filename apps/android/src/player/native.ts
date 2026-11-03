@@ -32,13 +32,7 @@ export interface Admission {
 }
 
 export type NativePhase =
-  | "preparing"
-  | "buffering"
-  | "playing"
-  | "paused"
-  | "ended"
-  | "failed"
-  | "stopped";
+  "preparing" | "buffering" | "playing" | "paused" | "ended" | "failed" | "stopped";
 
 /**
  * Why playback failed: `network` (unreachable or timed out), `http` (the provider answered
@@ -103,7 +97,9 @@ export interface Release {
 /** What this phone declares it decodes, by MIME type, and the containers the player reads. */
 export interface Capabilities {
   readonly containers: readonly string[];
-  readonly decoders: Readonly<Record<string, { readonly decoder: boolean; readonly hardware: boolean }>>;
+  readonly decoders: Readonly<
+    Record<string, { readonly decoder: boolean; readonly hardware: boolean }>
+  >;
 }
 
 type Listener<T> = (event: T) => void;

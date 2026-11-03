@@ -1,13 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { PlayIntent } from "../src/player/intent.ts";
-import type {
-  Admission,
-  NativePlayer,
-  Observation,
-  Release,
-  Track,
-} from "../src/player/native.ts";
+import type { Admission, NativePlayer, Observation, Release, Track } from "../src/player/native.ts";
 import { playerOwner, type Settled } from "../src/player/player.ts";
 import type { Resolve, StreamRequest } from "../src/player/resolve.ts";
 
@@ -38,11 +32,10 @@ const request = (url = SECRET_URL): StreamRequest => ({
 });
 
 function fakeNative() {
-  const listeners = {
-    onState: new Set<(event: Observation) => void>(),
-    onTracks: new Set<(event: { attempt: string; tracks: readonly Track[] }) => void>(),
-    onReleased: new Set<(event: Release) => void>(),
-  };
+  const listeners = new Map<string, Set<(event: never) => void>>();
+  function emit<T>(event: string, value: T) {
+    for (const listener of listeners.get(event) ?? []) (listener as (event: T) => void)(value);
+  }
   const admitted: Admission[] = [];
   const calls: string[] = [];
   /** The attempt the native player plays: commands for any other answer false, as natively. */
@@ -68,38 +61,39 @@ function fakeNative() {
       return true;
     },
     capabilities: () => ({ containers: [], decoders: {} }),
-    addListener: ((event: keyof typeof listeners, listener: (value: never) => void) => {
-      listeners[event].add(listener);
-      return { remove: () => listeners[event].delete(listener) };
+    addListener: ((event: string, listener: (event: never) => void) => {
+      const set = listeners.get(event) ?? new Set();
+      listeners.set(event, set.add(listener));
+      return { remove: () => set.delete(listener) };
     }) as NativePlayer["addListener"],
   };
   const observe = (attempt: string, change: Partial<Observation> = {}) => {
-    for (const listener of listeners.onState)
-      listener({
-        attempt,
-        phase: "playing",
-        positionMs: 0,
-        durationMs: null,
-        bufferedMs: 0,
-        live: true,
-        seekable: false,
-        speed: 1,
-        failure: null,
-        ...change,
-      });
+    emit<Observation>("onState", {
+      attempt,
+      phase: "playing",
+      positionMs: 0,
+      durationMs: null,
+      bufferedMs: 0,
+      live: true,
+      seekable: false,
+      speed: 1,
+      failure: null,
+      ...change,
+    });
   };
-  const release = (event: Release) => {
-    for (const listener of listeners.onReleased) listener(event);
-  };
-  const tracks = (attempt: string, list: readonly Track[]) => {
-    for (const listener of listeners.onTracks) listener({ attempt, tracks: list });
-  };
+  const release = (event: Release) => emit("onReleased", event);
+  const tracks = (attempt: string, list: readonly Track[]) =>
+    emit("onTracks", { attempt, tracks: list });
   return { module, admitted, calls, observe, release, tracks };
 }
 
 /** A resolver whose answers the test gives, in the order intents were asked. */
 function heldResolve() {
-  const pending: { intent: PlayIntent; signal: AbortSignal; answer: PromiseWithResolvers<StreamRequest> }[] = [];
+  const pending: {
+    intent: PlayIntent;
+    signal: AbortSignal;
+    answer: PromiseWithResolvers<StreamRequest>;
+  }[] = [];
   const resolve: Resolve = (intent, signal) => {
     const answer = Promise.withResolvers<StreamRequest>();
     pending.push({ intent, signal, answer });
@@ -167,7 +161,10 @@ describe("player", () => {
     expect(native.admitted.map((each) => each.attempt)).toEqual([first, third]);
     expect(second).not.toBe(third);
 
-    native.observe(first, { phase: "failed", failure: { kind: "network", code: "x", status: null } });
+    native.observe(first, {
+      phase: "failed",
+      failure: { kind: "network", code: "x", status: null },
+    });
     expect(owner.state.get()).toMatchObject({ attempt: third, phase: "resolving", failure: null });
 
     // Commands go to the attempt that plays now.
@@ -218,7 +215,12 @@ describe("player", () => {
       resumeAt: 60_000,
     };
     const owner = playerOwner(native.module, {
-      resolve: async () => ({ ...request(), mode: "title", format: "progressive", startMs: 60_000 }),
+      resolve: async () => ({
+        ...request(),
+        mode: "title",
+        format: "progressive",
+        startMs: 60_000,
+      }),
       onSettled: (each) => settled.push(each),
     });
     const attempt = owner.play(title);

@@ -225,7 +225,9 @@ class PlayerOwner(
     command(attempt, { ownsCurrentItem() && player.isCurrentMediaItemSeekable }) { player.seekTo(positionMs.coerceAtLeast(0)) }
 
   fun setSpeed(attempt: String, speed: Float) =
-    command(attempt, { !player.isCurrentMediaItemLive && speed in 0.25f..4f }) { player.setPlaybackSpeed(speed) }
+    command(attempt, { current?.admission?.mode != "live" && !player.isCurrentMediaItemLive && speed in 0.25f..4f }) {
+      player.setPlaybackSpeed(speed)
+    }
 
   /** Plays the video track [trackId] from [tracks], or chooses by itself again for null. */
   fun setQuality(attempt: String, trackId: String?): Boolean {

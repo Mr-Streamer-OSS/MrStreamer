@@ -18,14 +18,17 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 // PlayerOwner's public behaviour over a real ExoPlayer reading real files (src/test/resources/media,
 // made with ffmpeg as its README says). Robolectric has no decoders: the fake renderers accept every
 // picture and sound track, so these prove reading, attempt identity, commands and release, and
 // leave decoding to a device (Capabilities and each attempt's reported tracks say what it decodes).
 
+// Android 14's Robolectric runs on the JDK 17 the Mac mini builds with; 15 and later need 21.
 @UnstableApi
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class PlayerOwnerTest {
   private val context: Context = RuntimeEnvironment.getApplication()
   private val recorder = Recorder()
@@ -148,7 +151,10 @@ class PlayerOwnerTest {
     val server = MockWebServer().also { servers += it }
     server.dispatcher =
       WebServerDispatcher.forResources(
-        listOf(WebServerDispatcher.Resource.Builder().setPath("/live/7.ts").setData(bytes).build()),
+        // A live stream names no length: it goes on until the viewer stops it.
+        listOf(
+          WebServerDispatcher.Resource.Builder().setPath("/live/7.ts").setData(bytes).resolvesToUnknownLength(true).build(),
+        ),
       )
     val owner = owner()
     owner.admit(
@@ -222,7 +228,8 @@ class PlayerOwnerTest {
         "hevc-ac3-eac3-srt.mkv" to listOf("video/hevc", "audio/ac3", "audio/eac3", "text"),
         "vp9-opus.webm" to listOf("video/x-vnd.on2.vp9", "audio/opus"),
         "hevc10-eac3.mp4" to listOf("video/hevc", "audio/eac3"),
-        "hls/index.m3u8" to listOf("video/avc", "audio/mp4a-latm"),
+        // An HLS stream that doesn't say it has no captions may carry them in its picture.
+        "hls/index.m3u8" to listOf("video/avc", "audio/mp4a-latm", "text"),
       )
     fixture("hls/segment0.ts")
     fixture("hls/segment1.ts")
@@ -237,7 +244,7 @@ class PlayerOwnerTest {
       owner.stop(name)
     }
     val languages = recorder.tracks.getValue("hevc-ac3-eac3-srt.mkv").map { it.language }
-    assertEquals(listOf(null, "eng", "deu", "nld"), languages)
+    assertEquals(listOf(null, "en", "de", "nl"), languages)
 
     val owner = owner()
     owner.admit(file("not-media", fixture("not-media.bin")))

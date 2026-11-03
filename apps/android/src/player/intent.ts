@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import type { ArchiveWindow } from "@mrstreamer/contracts/playback";
 
 /**
@@ -61,4 +62,56 @@ export function intentKey(intent: PlayIntent): string {
     case "file":
       return JSON.stringify([intent.kind, intent.path]);
   }
+}
+
+const window = type({ start: "number", end: "number" });
+/** An intent a link can carry: not a file, which only the app itself names. */
+const Linked = type({
+  kind: "'live'",
+  sourceId: "string",
+  channelId: "string",
+  title: "string",
+})
+  .or({
+    kind: "'catch-up'",
+    sourceId: "string",
+    channelId: "string",
+    title: "string",
+    window,
+    days: "number",
+    "from?": "number",
+  })
+  .or({
+    kind: "'title'",
+    sourceId: "string",
+    media: "'movie' | 'episode'",
+    id: "string",
+    container: "string",
+    title: "string",
+    "resumeAt?": "number",
+  });
+
+/**
+ * Watch's route for `intent`, which the caller plays first: what plays sits in the route's params,
+ * so a Watch opened again finds it. A file's path stays out of the route.
+ */
+export const watchHref = (intent: PlayIntent) =>
+  intent.kind === "file"
+    ? ({ pathname: "/watch" } as const)
+    : ({ pathname: "/watch", params: { play: JSON.stringify(intent) } } as const);
+
+/**
+ * The intent in Watch's `play` param, or null when there is none or it isn't one a link can carry.
+ * Files are played by the app's own screens only: a link never names a path.
+ */
+export function linkedIntent(param: string | string[] | undefined): PlayIntent | null {
+  if (typeof param !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(param);
+  } catch {
+    return null;
+  }
+  const parsed = Linked(value);
+  return parsed instanceof type.errors ? null : parsed;
 }
