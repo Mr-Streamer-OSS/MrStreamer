@@ -125,18 +125,15 @@ function valuesFor(key: MessageKey, count: number): Record<string, string | numb
 
 describe("every message in every language", () => {
   const keys = Object.keys(en) as MessageKey[];
+  // Every key's placeholders are its parameters; a cast stands in for the typed call.
+  const say = translate as (locale: string, key: string, values: object) => string;
 
   it.each(LOCALES)("%s says each one with all of its values in place", (locale) => {
     setLanguage({ locale, formats: locale });
     for (const key of keys) {
       for (const count of [1, 2, 5, 1_000_000]) {
         const values = valuesFor(key, count);
-        // Every key's placeholders are its parameters; a cast stands in for the typed call.
-        const said = (translate as (l: string, k: string, v: object) => string)(
-          locale,
-          key,
-          values,
-        );
+        const said = say(locale, key, values);
         expect(said.trim(), `${locale} ${key}`).not.toBe("");
         expect(said, `${locale} ${key}`).not.toMatch(/\{\w+\}/);
         // A form for one may say "one" in words; every other names each value.
@@ -147,6 +144,28 @@ describe("every message in every language", () => {
         }
       }
     }
+  });
+
+  // A language names a thing with one word everywhere in core's catalogue, which desktop shows.
+  // New messages kept bringing in a second word for the same thing, so each one a review caught is
+  // held to its established word here. Search terms list other words on purpose, so they are left
+  // out.
+  it.each([
+    { locale: "de-DE", word: "Abonnement", other: /\bAbos?\b/ },
+    { locale: "de-DE", word: "Programmführer", other: /\bGuide\b/ },
+    { locale: "es-ES", word: "equipo", other: /\bordenador/i },
+    { locale: "nl-NL", word: "provider", other: /\baanbieder/i },
+  ])("$locale says $word, not $other", ({ locale, other }) => {
+    const elsewhere = keys.filter(
+      (key) =>
+        !key.startsWith("settings.search.") &&
+        // Every form a counted message has, Spanish's many among them, also where its key names no
+        // count.
+        [1, 2, 5, 1_000_000].some((count) =>
+          other.test(say(locale, key, { ...valuesFor(key, count), count })),
+        ),
+    );
+    expect(elsewhere).toEqual([]);
   });
 });
 
