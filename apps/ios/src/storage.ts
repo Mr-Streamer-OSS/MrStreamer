@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { Title } from "@mrstreamer/contracts/ondemand";
@@ -32,7 +33,7 @@ const State = lazy(() =>
      * then `kind:tmdbId`, the id of that subscription's version. Read through `TitleVersions`,
      * so a shape this build doesn't know counts as no pick and never loses the rest of the file.
      */
-    "titleVersions?": "unknown",
+    "titleVersions?": JsonValue,
   }),
 );
 

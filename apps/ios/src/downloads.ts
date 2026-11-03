@@ -1,3 +1,4 @@
+import { JsonValue, type Json, type JsonObject } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -191,11 +192,11 @@ const Stored = lazy(() =>
     /** How far the copy was watched here. */
     progress: type({ position: "number", duration: "number", at: "number" }).or("null"),
     /** Optional ordering added by this build; an unreadable edge never hides a playable copy. */
-    "continuation?": "unknown",
+    "continuation?": JsonValue,
     /** Its native authorization (`Transfer`), read on its own: a bad one holds back only it. */
-    "transfer?": "unknown",
+    "transfer?": JsonValue,
     /** Why it is being removed (`Removal`), read on its own: a bad one holds back only it. */
-    "removal?": "unknown",
+    "removal?": JsonValue,
   }),
 );
 
@@ -231,7 +232,7 @@ type StoredFailure = NonNullable<Stored["failure"]>;
 const Document = lazy(() =>
   type({
     version: "1",
-    items: "object[]",
+    items: JsonValue.and("object").array(),
     /** Ids whose resume data still has to go: launch removes it. */
     forgetting: "string[]",
   }),
@@ -241,7 +242,7 @@ interface Doc {
   readonly items: readonly Stored[];
   readonly forgetting: readonly string[];
   /** Entries this build can't read, kept as they are with their folders. */
-  readonly unreadable: readonly object[];
+  readonly unreadable: readonly (JsonObject | readonly Json[])[];
 }
 
 /** What an earlier build kept in `download:<id>`: the address its resume data was made for. */
@@ -1319,7 +1320,7 @@ function load() {
   const parsed = read === null ? null : Document()(read);
   const valid = parsed !== null && !(parsed instanceof type.errors);
   const items: Stored[] = [];
-  const unreadable: object[] = [];
+  const unreadable: (JsonObject | readonly Json[])[] = [];
 
   for (const item of valid ? parsed.items : []) {
     const record = Stored()(item);

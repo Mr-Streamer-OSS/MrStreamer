@@ -157,7 +157,7 @@ export function readRegistry(): RegistryFile | null {
 
 /** The entries of `list` that `schema` reads, and those it doesn't, as they are. */
 function readable<A>(list: Json | undefined, schema: Type<A>) {
-  const read: A[] = [];
+  const read: Type<A>["infer"][] = [];
   const unread: Json[] = [];
 
   for (const each of Array.isArray(list) ? list : []) {

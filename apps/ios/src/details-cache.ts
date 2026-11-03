@@ -586,7 +586,7 @@ function keepable(file: SavedFile, now: number, login: SourceLogin): boolean {
     file.subtitles.length <= FILE_TRACKS &&
     age <= MAX_AGE &&
     age >= -MAX_AHEAD &&
-    !holds(file, known)
+    !holds({ ...file }, known)
   );
 }
 

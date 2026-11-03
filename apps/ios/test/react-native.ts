@@ -42,9 +42,9 @@ const FlatList = <T>({
   data: readonly T[];
   renderItem: (info: { item: T; index: number }) => ReactNode;
   keyExtractor?: (item: T, index: number) => string;
-  ListHeaderComponent?: unknown;
-  ListFooterComponent?: unknown;
-  ListEmptyComponent?: unknown;
+  ListHeaderComponent?: React.ReactElement | React.ComponentType;
+  ListFooterComponent?: React.ReactElement | React.ComponentType;
+  ListEmptyComponent?: React.ReactElement | React.ComponentType;
   testID?: string;
 }) =>
   createElement(
@@ -80,9 +80,9 @@ const SectionList = <T, S extends { data: readonly T[] }>({
   keyExtractor?: (item: T, index: number) => string;
   renderSectionHeader?: (info: { section: S }) => ReactNode;
   renderSectionFooter?: (info: { section: S }) => ReactNode;
-  ListHeaderComponent?: unknown;
-  ListFooterComponent?: unknown;
-  ListEmptyComponent?: unknown;
+  ListHeaderComponent?: React.ReactElement | React.ComponentType;
+  ListFooterComponent?: React.ReactElement | React.ComponentType;
+  ListEmptyComponent?: React.ReactElement | React.ComponentType;
   testID?: string;
 }) =>
   createElement(

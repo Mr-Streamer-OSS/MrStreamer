@@ -1,3 +1,4 @@
+import { JsonValue, type Json } from "@mrstreamer/contracts/json";
 // reminders.json in the data folder: the programme reminders, which only services/reminders.ts
 // reads and writes. Version 1 keeps each saved subscription's reminders under its id:
 //
@@ -21,7 +22,7 @@ const VERSION = 1;
 export interface RemindersFile {
   readonly reminders: readonly KeptReminder[];
   /** Entries this build can't read, as the file holds them, by their subscription's id. */
-  readonly unread: ReadonlyMap<string, readonly unknown[]>;
+  readonly unread: ReadonlyMap<string, readonly Json[]>;
 }
 
 /** reminders.json as read: what it holds, or why none of it can be used. */
@@ -30,7 +31,7 @@ export type ReadReminders =
   | { readonly kind: "refused"; readonly reason: "unreadable" | "newer" };
 
 const Head = lazy(() =>
-  type({ version: "number.integer", "subscriptions?": { "[string]": "unknown[]" } }),
+  type({ version: "number.integer", "subscriptions?": { "[string]": JsonValue.array() } }),
 );
 
 /** One reminder as stored, without the subscription it is kept under. */
@@ -77,7 +78,7 @@ export async function readReminders(path: string): Promise<ReadReminders> {
 
   if (head.version > VERSION) return { kind: "refused", reason: "newer" };
   const reminders: KeptReminder[] = [];
-  const unread = new Map<string, unknown[]>();
+  const unread = new Map<string, Json[]>();
 
   for (const [subscriptionId, entries] of Object.entries(head.subscriptions ?? {})) {
     for (const entry of entries) {
@@ -94,7 +95,7 @@ export async function readReminders(path: string): Promise<ReadReminders> {
 
 /** Writes `file` to `path` whole, or leaves the file before it as it was. */
 export async function writeReminders(path: string, file: RemindersFile): Promise<void> {
-  const subscriptions = new Map<string, unknown[]>();
+  const subscriptions = new Map<string, Json[]>();
 
   for (const { subscriptionId, ...entry } of file.reminders)
     subscriptions.set(subscriptionId, [...(subscriptions.get(subscriptionId) ?? []), entry]);

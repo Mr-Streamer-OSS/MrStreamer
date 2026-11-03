@@ -43,7 +43,7 @@ export const cases: readonly ProofCase[] = [
 
       return {
         sameInChunks: JSON.stringify(whole) === JSON.stringify(chunked),
-        entries: plain(whole),
+        entries: plain(JSON.stringify(whole)),
       };
     },
   },
@@ -53,7 +53,7 @@ export const cases: readonly ProofCase[] = [
     run: () => {
       const { categories, channels } = playlistCatalogue(readPlaylist(64));
 
-      return plain({ categories, channels });
+      return plain(JSON.stringify({ categories, channels }));
     },
   },
   {
@@ -73,7 +73,9 @@ export const cases: readonly ProofCase[] = [
 
       const { catalogue, status } = importPlaylist(entries, mapping);
 
-      return plain({ groups, movies: catalogue.movies.map(({ id }) => id), status });
+      return plain(
+        JSON.stringify({ groups, movies: catalogue.movies.map(({ id }) => id), status }),
+      );
     },
   },
 ];

@@ -30,8 +30,12 @@ vi.mock("expo-router/native-tabs", () => {
 
 vi.mock("expo-router", async () => {
   const navigation = {
-    dispatch: (action: import("@react-navigation/native").NavigationAction) =>
-      scenario.did.push(action),
+    dispatch: (action: {
+      readonly type: string;
+      readonly payload?: object;
+      readonly source?: string;
+      readonly target?: string;
+    }) => scenario.did.push(action),
   };
 
   return {

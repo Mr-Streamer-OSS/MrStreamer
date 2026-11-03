@@ -64,8 +64,20 @@ export function listsOwner(
   }
 
   function save(next: readonly ChannelList[]) {
-    platform.writeJson("live-lists.json", { version: 1, lists: next });
-    state.set({ kind: "ready", lists: next });
+    platform.writeJson("live-lists.json", {
+      version: 1,
+      lists: next.map((list) => ({
+        ...list,
+        entries: list.entries.map((entry) => ({ ...entry })),
+      })),
+    });
+    state.set({
+      kind: "ready",
+      lists: next.map((list) => ({
+        ...list,
+        entries: list.entries.map((entry) => ({ ...entry })),
+      })),
+    });
   }
 
   function named(name: string, except?: string) {

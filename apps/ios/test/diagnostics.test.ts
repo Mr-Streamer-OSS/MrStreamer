@@ -390,7 +390,12 @@ const catalogue: OnDemandCatalogue = {
 };
 
 /** The film's facts as details answer them, with where TMDB's part stands. */
-const facts = (about: AboutStanding) => ({
+const facts = (about: AboutStanding): import("../src/titles.ts").ShownDetails => ({
+  title: byIds(indexCatalogue([{ subscriptionId: "a", catalogue }], "en"), "movie", [
+    { subscriptionId: "a", id: "1" },
+  ])[0]!,
+  originalTitle: null,
+  releaseDate: null,
   kind: "movie",
   plot: "A linguist is recruited.",
   directors: [],

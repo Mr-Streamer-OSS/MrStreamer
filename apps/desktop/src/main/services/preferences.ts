@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -46,7 +47,7 @@ import { defined } from "@mrstreamer/core/defined";
 const Stored = lazy(() =>
   Preferences().merge(SubscriptionPreferences()).merge({
     /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
-    "nextEpisodeDelaySeconds?": "unknown",
+    "nextEpisodeDelaySeconds?": JsonValue,
     "favouriteChannelIds?": "string[]",
     "recentChannelIds?": "string[]",
     /**
@@ -54,7 +55,7 @@ const Stored = lazy(() =>
      * a later release adds doesn't make this one drop the file. System default when absent.
      */
     "interfaceLanguage?": "string",
-    "rememberedLiveBrowse?": "unknown",
+    "rememberedLiveBrowse?": JsonValue,
   }),
 );
 

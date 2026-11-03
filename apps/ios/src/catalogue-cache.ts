@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type {
@@ -157,9 +158,9 @@ const Envelopes = lazy(() => ({
 }));
 
 /** Each of `list` as `row` checks it, a slice at a time; null at the first that doesn't check. */
-function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<R[] | null> {
+function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<Type<R>["infer"][] | null> {
   const due = pacer();
-  const checked: R[] = [];
+  const checked: Type<R>["infer"][] = [];
 
   for (const each of list) {
     if (due()) yield;
@@ -204,7 +205,7 @@ function* checked(
 
     if (!channels) return "invalid";
 
-    return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
+    return { kind: "live", catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
   }
 
   const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
@@ -221,7 +222,7 @@ function* checked(
   if (!series) return "invalid";
   const catalogue = { movieCategories, movies, seriesCategories, series };
 
-  return { kind, catalogue, fetchedAt: head.fetchedAt };
+  return { kind: "titles", catalogue, fetchedAt: head.fetchedAt };
 }
 
 /** The last operation on each list's files, settled or not, by file name. */
@@ -511,7 +512,7 @@ function* textOf(
 }
 
 /** `list` copied by `copy`, a slice at a time; false at the first copy whose text holds `login`. */
-function* copies<A, B extends object>(
+function* copies<A, B extends Json>(
   list: readonly A[],
   copy: (each: A) => B,
   login: Login,

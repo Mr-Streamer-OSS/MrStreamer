@@ -232,7 +232,7 @@ function useHandover(split: boolean) {
     if (programme && programme.name !== "programme") return;
     detail.set({
       channel,
-      day: dayOf(text(schedule.params, "day")),
+      day: dayOf(text(schedule.params, "day") ?? undefined),
       programme: text(programme?.params, "detail"),
     });
     navigation.dispatch({ type: "POP_TO_TOP", target });

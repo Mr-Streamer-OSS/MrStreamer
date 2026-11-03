@@ -40,8 +40,8 @@ async function alongside<A>(work: () => Promise<A>): Promise<{ result: A; tasks:
  */
 function panelRows(count: number, offset: number) {
   const tags = ["EN", "NL", "4K", "MULTI"];
-  const movies: unknown[] = [];
-  const series: unknown[] = [];
+  const movies: (Record<string, string | number | { id: number }> | null)[] = [];
+  const series: (Record<string, string | number> | string)[] = [];
 
   for (let at = 0; at < count; at++) {
     const film = Math.floor((at + offset) / 3);
@@ -142,12 +142,11 @@ describe("movie and series lists read and indexed in tasks", () => {
         row:
           | ReturnType<typeof panelRows>["movies"][number]
           | ReturnType<typeof panelRows>["series"][number],
-      ) => ({
-        ...row,
-        tmdb: "42",
-        is_adult: 0,
-        category_id: "films",
-      });
+      ) => {
+        const fields = typeof row === "object" && row !== null ? row : {};
+
+        return { ...fields, tmdb: "42", is_adult: 0, category_id: "films" };
+      };
 
       return { movies: rows.movies.slice(0, count).map(film), series: rows.series.map(film) };
     };

@@ -416,7 +416,12 @@ afterEach(() => {
 });
 
 /** A film's facts as the details owner answers them, with `plot`. */
-const factsOf = (plot: string) => ({
+const factsOf = (plot: string): import("../src/titles.ts").ShownDetails => ({
+  title: byIds(indexCatalogue([{ subscriptionId: "a", catalogue }], "en"), "movie", [
+    { subscriptionId: "a", id: "1" },
+  ])[0]!,
+  originalTitle: null,
+  releaseDate: null,
   kind: "movie",
   plot,
   directors: [],

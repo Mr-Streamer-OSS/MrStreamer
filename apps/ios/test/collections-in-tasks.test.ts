@@ -87,8 +87,10 @@ vi.mock("../src/account.ts", async () => {
     readingSaved: () => false,
     onReadingSaved: () => () => undefined,
     onSavable: () => () => undefined,
-    savable: (id: string, source: import("../src/sources.ts").Source) =>
-      edges.sources.get(id) === source,
+    savable: (
+      id: string,
+      source: { provider: { titleFile: (kind: string, id: string) => unknown } },
+    ) => edges.sources.get(id) === source,
   };
 });
 
@@ -319,7 +321,7 @@ const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
 
 interface FakeProvider {
   readonly url: string;
-  readonly titles: unknown;
+  readonly titles: import("../../desktop/test/fake-provider.ts").FakeTitles;
   serveTitles(
     select: (
       all: import("../../desktop/test/fake-provider.ts").FakeTitles,
@@ -337,7 +339,7 @@ const { startFakeProvider, measurementTitles } = (await import(FAKE_PROVIDER)) a
   measurementTitles(
     all: import("../../desktop/test/fake-provider.ts").FakeTitles,
     anchor: number,
-  ): { readonly titles: unknown };
+  ): { readonly titles: import("../../desktop/test/fake-provider.ts").FakeTitles };
 };
 
 /**

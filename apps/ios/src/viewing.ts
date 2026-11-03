@@ -1,4 +1,4 @@
-import { JsonValue } from "@mrstreamer/contracts/json";
+import { JsonValue, type Json } from "@mrstreamer/contracts/json";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { Title, TitleDetails, TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -97,7 +97,7 @@ export const useViewing = () => useStore(viewing);
 export const currentViewing = () => viewing.get();
 
 /** viewing.json as this launch read it. */
-const read = JsonValue.assert(readJson(FILE));
+const read = readJson(FILE);
 
 function snapshot(): ViewingSnapshot | null {
   return read && typeof read === "object" && "version" in read && read.version === 1
@@ -108,7 +108,7 @@ function snapshot(): ViewingSnapshot | null {
 /** The favourites' memory as read: another build's, or one not to trust, is only carried. */
 const kept = readMembership(
   read && typeof read === "object" && "favouriteMembership" in read
-    ? read.favouriteMembership
+    ? JsonValue.assert(read.favouriteMembership)
     : undefined,
 );
 
@@ -119,7 +119,7 @@ const remembers = kept.kind !== "kept";
  * The memory this build can't read, written back as it is, until a provider's history is erased:
  * that write leaves it out, as it can't tell what of it was that provider's.
  */
-let carried: unknown = kept.kind === "kept" ? kept.value : undefined;
+let carried: Json | undefined = kept.kind === "kept" ? kept.value : undefined;
 
 /** Set while a provider's history is erased, for that write alone. */
 let erasing = false;

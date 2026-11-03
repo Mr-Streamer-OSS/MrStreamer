@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json";
 import type { UsageObservers } from "../analytics/observers.ts";
 // The saved subscriptions: each validated with its provider and stored with a sealed password or,
 // for a playlist, a sealed link. Every one of them shows in the app at once; none is "the active
@@ -118,7 +119,7 @@ const OriginalEntry = lazy(() =>
 const AddedEntry = lazy(() => type({ id: FOLDER, key: "string", "name?": "string" }));
 
 /** subscriptions.json. Entries are read one by one, so one this build can't read costs no other. */
-const Registry = lazy(() => type({ version: "1", subscriptions: "object[]" }));
+const Registry = lazy(() => type({ version: "1", subscriptions: JsonValue.and("object").array() }));
 
 /**
  * One of the registry's entries as the file holds it, unparsed: each is read on its own, and one
@@ -495,7 +496,9 @@ function make(deps: SubscriptionDeps) {
         ? at
         : entries.findIndex((raw, each) => each !== at && "id" in raw && raw.id === of.id);
 
-      const { name: _name, ...kept }: { name?: unknown } = entries[index] ?? {};
+      const kept = Object.fromEntries(
+        Object.entries(entries[index] ?? {}).filter(([key]) => key !== "name"),
+      );
 
       const entry = saved && {
         ...kept,

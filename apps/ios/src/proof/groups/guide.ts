@@ -15,7 +15,7 @@ export const cases: readonly ProofCase[] = [
 
       reader.push(new TextEncoder().encode('<tv><channel id="a.test"></channel></tv>'));
 
-      return { channels: names, ending: plain(reader.end()) };
+      return { channels: names, ending: plain(JSON.stringify(reader.end())) };
     },
   },
 ];

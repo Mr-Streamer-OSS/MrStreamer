@@ -86,8 +86,12 @@ vi.mock("expo-router", async () => {
   state.focusContext = createContext(true);
 
   const navigation = {
-    dispatch: (action: import("@react-navigation/native").NavigationAction) =>
-      state.did.push(action),
+    dispatch: (action: {
+      readonly type: string;
+      readonly payload?: object;
+      readonly source?: string;
+      readonly target?: string;
+    }) => state.did.push(action),
   };
 
   return {
@@ -249,9 +253,9 @@ vi.mock("react-native", async () => {
     }: {
       data: readonly T[];
       renderItem: (info: { item: T; index: number }) => React.ReactNode;
-      ListHeaderComponent?: unknown;
-      ListFooterComponent?: unknown;
-      ListEmptyComponent?: unknown;
+      ListHeaderComponent?: React.ReactElement | React.ComponentType;
+      ListFooterComponent?: React.ReactElement | React.ComponentType;
+      ListEmptyComponent?: React.ReactElement | React.ComponentType;
       testID?: string;
       onViewableItemsChanged?: (info: {
         viewableItems: { item: T; isViewable: boolean }[];

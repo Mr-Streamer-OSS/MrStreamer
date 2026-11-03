@@ -1,3 +1,8 @@
+import type { KeptReminder } from "@mrstreamer/core/reminders/rules";
+import type { SavedTitle } from "@mrstreamer/core/ondemand/watchlist";
+import type { ViewingSnapshot } from "@mrstreamer/core/viewing/memory-store";
+import type { MembershipFile } from "./viewing-membership.ts";
+import type { Json } from "@mrstreamer/contracts/json";
 import { File, Paths } from "expo-file-system";
 
 // Whole JSON files in the app's Documents folder, which iOS deletes with the app. A write goes to
@@ -44,7 +49,17 @@ function read(name: string, strict: boolean): unknown {
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
-export function writeJson(name: string, value: unknown): void {
+export function writeJson(
+  name: string,
+  value:
+    | Json
+    | { readonly version: number; readonly reminders: readonly KeptReminder[] }
+    | {
+        readonly version: number;
+        readonly accounts: Readonly<Record<string, readonly SavedTitle[]>>;
+      }
+    | (ViewingSnapshot & { readonly favouriteMembership?: MembershipFile | Json | undefined }),
+): void {
   const pending = pendingOf(name);
 
   if (!pending.exists) pending.create();
