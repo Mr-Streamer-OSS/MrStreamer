@@ -412,6 +412,41 @@ describe("Android sources", () => {
     expect(rowCount(playlistSource)).toBeGreaterThan(0);
   });
 
+  it.each([
+    ["Try again", (owner: SourcesOwner, id: string) => void owner.retry(id)],
+    ["the same login connected again", (owner: SourcesOwner) => void owner.connect(xtream())],
+  ])("drops a channel list answered late, after %s", async (_, again) => {
+    // The first channel list asked for answers only when released, and then fails.
+    let answerFirst = () => {};
+    const firstHeld = new Promise<void>((resolve) => (answerFirst = resolve));
+    let failedLate = () => {};
+    const lateFailure = new Promise<void>((resolve) => (failedLate = resolve));
+    let asked = 0;
+    const held: typeof fetch = async (input, init) => {
+      if (String(input).includes("get_live_streams") && asked++ === 0) {
+        await firstHeld;
+        failedLate();
+        throw new TypeError("Network request failed");
+      }
+      return fetch(input, init);
+    };
+    const owner = launch(newPhone(), held);
+    await owner.restore();
+    const connected = await owner.connect(xtream());
+    if (connected.kind !== "connected") throw new Error("not connected");
+    await expect.poll(() => asked).toBe(1);
+
+    again(owner, connected.id);
+    await expect.poll(() => rowCount(listed(owner)[0])).toBeGreaterThan(0);
+    answerFirst();
+    await lateFailure;
+    // The failure reaches the owner within the microtasks that follow it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(listed(owner)).toHaveLength(1);
+    expect(listed(owner)[0]?.channels.kind).toBe("ready");
+  });
+
   it("keeps a source it erased but couldn't forget listed, and removes it on a second try", async () => {
     const phone = newPhone();
     const owner = launch(phone);

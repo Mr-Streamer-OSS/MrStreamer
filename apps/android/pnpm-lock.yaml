@@ -44,6 +44,9 @@ importers:
       '@mrstreamer/core':
         specifier: link:../../packages/core
         version: link:../../packages/core
+      '@mrstreamer/mobile':
+        specifier: link:../../packages/mobile
+        version: link:../../packages/mobile
       arktype:
         specifier: 2.2.9
         version: 2.2.9

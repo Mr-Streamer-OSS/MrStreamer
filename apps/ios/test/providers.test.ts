@@ -745,6 +745,33 @@ describe("everything together", () => {
     expect(channelsReady(app, 2)).toBe(true);
   });
 
+  it.each([
+    ["Reload", (app: App, id: string) => void app.reloadChannels(id)],
+    ["a new password", (app: App, id: string) => void app.update(id, { password: TWO.password })],
+  ])("drops a channel list answered late, after %s", async (_, again) => {
+    const { app, b } = await twoProviders();
+    memory.holdChannels = true;
+    app.reloadChannels(b);
+    await until(() => memory.heldChannels.length === 1, "the first reload's request");
+    memory.holdChannels = false;
+
+    again(app, b);
+    await until(() => {
+      const now = member(app, b)?.live;
+      return now?.kind === "ready";
+    }, "the later list");
+    const shown = member(app, b)?.live;
+    // The first request now fails, after the list that replaced it showed.
+    two.failCatalogue(503);
+    for (const go of memory.heldChannels.splice(0)) go();
+    await settle();
+    await settle();
+
+    expect(member(app, b)?.live).toBe(shown);
+    const now = app.currentCatalogue();
+    expect(now.kind === "ready" && now.failing).toEqual([]);
+  });
+
   it("counts a change of channel, not the first one or the same one again", async () => {
     const { app, a, b } = await twoProviders();
     const [first, second] = channels(app).filter((each) => each.subscriptionId === a);

@@ -63,6 +63,7 @@ import {
 } from "./playlist.ts";
 import { keychainSecrets } from "./secrets.ts";
 import {
+  beginLoad,
   currentSource,
   dropSource,
   loginOf,
@@ -292,8 +293,6 @@ const entriesOf = () => [
   ...(file.demo.kind === "active" && !demoReserved() ? [demoEntry] : []),
 ];
 
-/** Loads under way, by `kind|id`. */
-const loads = new Map<string, AbortController>();
 let revisions = 0;
 
 /** By id: the revision when its saved lists were last deleted; no list of an older login is saved. */
@@ -586,8 +585,6 @@ async function recoverLogin(id: string, before: Source | undefined): Promise<voi
   if (password) return signIn(entry, password, "again");
   dropSource(id);
   stopReading(id);
-
-  for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
   const error: AppError = { kind: "needs-secret", subscriptionId: id };
 
   const settled = <A>(now: Loadable<A>): Loadable<A> =>
@@ -650,17 +647,13 @@ function follow<A extends Record<keyof A, readonly unknown[]>>(
   set: (change: (now: Loadable<A>) => Loadable<A>) => void,
   landed: (value: A, source: Source, fetchedAt: number) => void,
 ) {
-  const source = currentSource(id);
+  const load = beginLoad(id, kind);
 
-  if (!source) return;
-  const key = `${kind}|${id}`;
-  loads.get(key)?.abort();
-  const controller = new AbortController();
-  loads.set(key, controller);
+  if (!load) return;
+  const { login: source, signal, stands } = load;
   set((now) => ({ kind: "loading", last: lastOf(now) }));
   const started = Date.now();
-  const stands = () => !controller.signal.aborted && currentSource(id) === source;
-  read(source.provider, controller.signal).then(
+  read(source.provider, signal).then(
     async (answer) => {
       if (!stands()) return;
       const fetchedAt = Date.now();
@@ -1154,7 +1147,6 @@ async function eraseDemo(): Promise<DemoErase> {
         () => false,
       ) ?? Promise.resolve(true);
 
-    for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${DEMO_ID}`)?.abort();
     dropSource(DEMO_ID);
     const savedGone = dropSaved(DEMO_ID).catch(() => false);
 
@@ -1575,8 +1567,6 @@ export function remove(id: string, { keepHistory }: { keepHistory: boolean }): P
     if (!entry) return;
     await fenceDownloads(id);
     commit(withoutSubscription(registry, entry, keepHistory));
-
-    for (const kind of ["live", "titles"] as const) loads.get(`${kind}|${id}`)?.abort();
     dropSource(id);
     // After any write of them under way. What the disk refuses goes at the next launch, or before
     // the account added again takes the id back.

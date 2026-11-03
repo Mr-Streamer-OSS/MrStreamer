@@ -1,0 +1,13 @@
+{
+  "name": "@mrstreamer/mobile",
+  "private": true,
+  "type": "module",
+  "description": "Behavior the iOS and Android apps share, behind each app's own storage, secrets and screens. It runs on Hermes: no Node, React Native or app imports.",
+  "license": "GPL-3.0-only",
+  "exports": {
+    "./accounts/*": "./accounts/*.ts"
+  },
+  "dependencies": {
+    "@mrstreamer/contracts": "workspace:*"
+  }
+}

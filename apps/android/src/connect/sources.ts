@@ -11,6 +11,7 @@ import {
   xtreamProvider,
   type ParsedLogin,
 } from "@mrstreamer/core/xtream";
+import { signIns } from "@mrstreamer/mobile/accounts/sign-ins";
 import type { Authority, Credentials } from "../platform/credentials.ts";
 import { store, type Store } from "../platform/store.ts";
 import { inTasks } from "../platform/tasks.ts";
@@ -25,7 +26,10 @@ import { playlistReader } from "./playlist.ts";
 // channels; a source whose authority can't be read stays listed as needing its login again, and an
 // authority no listed source names (a damaged list, a connect cut short) is erased. remove() erases
 // the source's authority, then stops its reads and forgets it; a refused erase keeps it listed so
-// nothing claims a deletion that didn't happen.
+// nothing claims a deletion that didn't happen. Which reader each source is signed in with, and
+// whether a channel list's answer still counts, is kept as the iOS app keeps it
+// (@mrstreamer/mobile/accounts/sign-ins): an answer for a login replaced, removed or read again
+// since is dropped.
 
 /** What a source answers for: checking its login and listing its channels. */
 export interface CatalogueReader {
@@ -167,9 +171,8 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
   /** Settles once restore() listed the saved sources: a connection made before waits for it. */
   let restored!: () => void;
   const ready = new Promise<void>((resolve) => (restored = resolve));
-  /** Each signed-in source's reader, and the controller of the read under way. */
-  const readers = new Map<string, CatalogueReader>();
-  const reads = new Map<string, AbortController>();
+  /** Each signed-in source's reader, and its channel reads. */
+  const readers = signIns<CatalogueReader>();
 
   const listed = () => {
     const now = state.get();
@@ -203,24 +206,20 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
    * answer of any read begun before.
    */
   function load(id: string, checked = false) {
-    const reader = readers.get(id);
+    const read = readers.begin(id, "live");
 
-    if (!reader) return;
-    reads.get(id)?.abort();
-    const controller = new AbortController();
-    reads.set(id, controller);
+    if (!read) return;
+    const { login: reader, signal, stands } = read;
     setChannels(id, { kind: "loading" });
-    const { signal } = controller;
     (checked ? Promise.resolve() : reader.authenticate(signal))
       .then(() => reader.liveCatalogue(signal))
-      .then((catalogue) => rowsOf(id, catalogue, () => reads.get(id) === controller))
+      .then((catalogue) => rowsOf(id, catalogue, stands))
       .then(
         (rows) => {
-          if (rows && reads.get(id) === controller) setChannels(id, { kind: "ready", rows });
+          if (rows && stands()) setChannels(id, { kind: "ready", rows });
         },
         (cause: unknown) => {
-          if (reads.get(id) === controller)
-            setChannels(id, { kind: "failed", error: failureOf(cause) });
+          if (stands()) setChannels(id, { kind: "failed", error: failureOf(cause) });
         },
       );
   }
@@ -344,9 +343,7 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
 
     async remove(id) {
       await platform.credentials.remove(id);
-      reads.get(id)?.abort();
-      reads.delete(id);
-      readers.delete(id);
+      readers.drop(id);
       const others = listed().filter((source) => source.id !== id);
 
       try {

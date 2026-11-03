@@ -14,6 +14,10 @@ packages/core        @mrstreamer/core: rules that run without Electron, React or
                      the M3U playlist reader, text folding, and the subtitle decoders: DVB, PGS,
                      teletext, CEA-608.
                      Depends on contracts.
+packages/mobile      @mrstreamer/mobile: behavior only the iOS and Android apps share, behind each
+                     app's own storage and secrets: which login each saved source is signed in
+                     with, and which list answers still count. Runs on Hermes. Depends on
+                     contracts; the desktop doesn't depend on it.
 apps/desktop         The app, package name mrstreamer
   src/main           Electron main process
     handlers         Typed domain adapters from renderer IPC to resolved service capabilities
