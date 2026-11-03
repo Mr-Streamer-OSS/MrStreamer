@@ -837,14 +837,14 @@
       ]
     },
     {
-      "id": "expo-file-system@58.0.9",
+      "id": "expo-file-system@58.0.13",
       "name": "expo-file-system",
       "licence": "MIT",
-      "source": "https://registry.npmjs.org/expo-file-system/-/expo-file-system-58.0.9.tgz",
+      "source": "https://registry.npmjs.org/expo-file-system/-/expo-file-system-58.0.13.tgz",
       "facts": [
         {
           "label": "Version",
-          "value": "58.0.9"
+          "value": "58.0.13"
         },
         {
           "label": "In the app",
@@ -852,7 +852,7 @@
         },
         {
           "label": "Changed by",
-          "value": "apps/ios/patches/expo-file-system@58.0.9.patch"
+          "value": "apps/ios/patches/expo-file-system@58.0.13.patch"
         }
       ],
       "notices": [

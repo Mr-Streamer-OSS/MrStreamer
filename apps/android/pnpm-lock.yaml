@@ -24,8 +24,8 @@ importers:
         specifier: 7.3.15
         version: 7.3.15
       '@formatjs/intl-getcanonicallocales':
-        specifier: 3.2.12
-        version: 3.2.12
+        specifier: 3.3.0
+        version: 3.3.0
       '@formatjs/intl-listformat':
         specifier: 8.3.15
         version: 8.3.15
@@ -66,8 +66,8 @@ importers:
         specifier: 58.0.11
         version: 58.0.11(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(supports-color@8.1.1)
       expo-file-system:
-        specifier: 58.0.9
-        version: 58.0.9(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))
+        specifier: 58.0.13
+        version: 58.0.13(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))
       expo-linking:
         specifier: 58.0.12
         version: 58.0.12(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)
@@ -693,6 +693,9 @@ packages:
 
   '@formatjs/intl-getcanonicallocales@3.2.12':
     resolution: {integrity: sha512-THqQLTJUH2z2A7oE1guW8VzpGpsGFxwWZ+l8cI8Bk75xUU8DxtJoLfKl+5a6fYK26GeDWDWE0UbDhE5SwcLoFg==}
+
+  '@formatjs/intl-getcanonicallocales@3.3.0':
+    resolution: {integrity: sha512-ndj9jw/LHAftSe34D/A6+lj3Y7GHVfPEZ6FZP2wjd8/beYeh3d1sjlSpZSBlzegSKS3U3mUEIzLCpI0+jKNT6w==}
 
   '@formatjs/intl-listformat@8.3.15':
     resolution: {integrity: sha512-dZEUYngBoAWLgYXvoBX3P6jIk5cg2rva7p5ZJTTn4lsCx/9abUKoPI2Wf59twxl5jgw1SDQMR1MBzJ7oiHwffw==}
@@ -1452,8 +1455,8 @@ packages:
       expo: '*'
       react-native: '*'
 
-  expo-file-system@58.0.9:
-    resolution: {integrity: sha512-JT0km3Wa+wDz/7Rli8ifreoMnmk68ulf/uaWzRA26xm/4K+jGTY+cDhnboRmpmXUCBkED6uqxWmNoXjaVU9VUw==}
+  expo-file-system@58.0.13:
+    resolution: {integrity: sha512-+/1aFErkawyky5UdWI06zYeO2DeHUnfaWnYHeiI8M8Z/sB6L66gI3WUxqtvUvKJoaM0Ti1CximD3x3JwteLYIg==}
     peerDependencies:
       expo: '*'
       react-native: '*'
@@ -3484,6 +3487,8 @@ snapshots:
 
   '@formatjs/intl-getcanonicallocales@3.2.12': {}
 
+  '@formatjs/intl-getcanonicallocales@3.3.0': {}
+
   '@formatjs/intl-listformat@8.3.15':
     dependencies:
       '@formatjs/intl-localematcher': 0.9.0
@@ -4249,7 +4254,7 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-file-system@58.0.9(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1)):
+  expo-file-system@58.0.13(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1)):
     dependencies:
       expo: 58.0.9(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@58.0.14)(expo-router@58.0.18)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)
       react-native: 0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1)
@@ -4381,7 +4386,7 @@ snapshots:
       babel-preset-expo: 58.0.23(@babel/core@7.29.7(supports-color@8.1.1))(@babel/runtime@7.29.10)(expo@58.0.9)(react-refresh@0.14.2)(supports-color@8.1.1)
       expo-asset: 58.0.19(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)(supports-color@8.1.1)
       expo-constants: 58.0.14(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(supports-color@8.1.1)
-      expo-file-system: 58.0.9(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))
+      expo-file-system: 58.0.13(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))
       expo-font: 58.0.11(expo@58.0.9)(react-native@0.88.0-rc.4(patch_hash=a93e046771a3ab9188f8f497a4d9922be224914051678391d5de0581db7fb25c)(@types/react@19.3.0)(react@19.3.0)(supports-color@8.1.1))(react@19.3.0)
       expo-keep-awake: 58.0.3(expo@58.0.9)(react@19.3.0)
       expo-modules-autolinking: 58.0.16(supports-color@8.1.1)
