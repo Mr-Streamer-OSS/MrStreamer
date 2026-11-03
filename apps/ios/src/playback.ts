@@ -1819,6 +1819,8 @@ async function attachTv(owned: NonNullable<typeof current>, resource: Resource, 
       (status) => onTvStatus(owned, resource, status),
       resource.controller.signal,
     );
+    // A Pause pressed while the LOAD was on its way, after it left playing.
+    if (pauseOnStart === "viewer" || pauseOnStart === "viewer-applied") tv.loaded.pause();
   } catch (cause) {
     if (!attemptStands(owned, resource)) return;
     if (cause instanceof TvRefused) {
@@ -2010,7 +2012,8 @@ export async function playOnTv(tv: Tv): Promise<string | null> {
   if (state.get().pip) endPictureInPicture?.();
   state.set((s) => ({ ...s, tv: { kind: "on", tv }, pip: false }));
   const playing = current?.resource;
-  replay(from, false);
+  // A Pause of the viewer's, even one pressed while the TV connected, holds on the TV too.
+  replay(from, held?.by === "viewer");
   if (before) void closeAfter(before, playing?.settlement);
   return null;
 }

@@ -252,10 +252,10 @@ export interface Relay {
   revoke(): Promise<void>;
 }
 
-/** The file extension `url`'s path ends in, else `fallback`. */
 /** The relay's most segment routes per token (`CastRelay.routesKept`). */
 const ROUTES_KEPT = 100_000;
 
+/** The file extension `url`'s path ends in, else `fallback`. */
 const extension = (url: string, fallback: string) =>
   /\.([a-z0-9]{2,4})$/i.exec(url.replace(/[?#].*$/, ""))?.[1]?.toLowerCase() ?? fallback;
 
@@ -582,6 +582,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     id: number | null;
     status: (status: TvStatus) => void;
     readonly requests: Set<number>;
+    /** It finished or failed: the TV then has no media to name, which ends nothing more. */
+    over: boolean;
   } | null = null;
   const volume = store<Volume | null>(null);
   let heard = Date.now();
@@ -669,14 +671,18 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     }
     // Asked, the TV no longer names this load's media: it went unannounced, as the TV's remote
     // or another sender stopping it leaves an empty answer.
-    if (own && ids.length === 0) return media.status({ state: "stopped", time: 0, duration: null });
+    if (own && ids.length === 0 && !media.over) {
+      return media.status({ state: "stopped", time: 0, duration: null });
+    }
     for (const status of statuses) {
       if (!isRecord(status) || !media) continue;
       const id = numberOr(status["mediaSessionId"], null);
       if (id !== media.id) continue;
       const info = isRecord(status["media"]) ? status["media"] : {};
+      const state = stateOf(status["playerState"], status["idleReason"]);
+      if (state === "ended" || state === "failed") media.over = true;
       media.status({
-        state: stateOf(status["playerState"], status["idleReason"]),
+        state,
         time: Math.max(0, numberOr(status["currentTime"], 0)),
         duration: numberOr(info["duration"], null),
       });
@@ -797,7 +803,12 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     lost,
     close,
     async load(loaded, status, signal) {
-      const mine: NonNullable<typeof media> = { id: null, status, requests: new Set() };
+      const mine: NonNullable<typeof media> = {
+        id: null,
+        status,
+        requests: new Set(),
+        over: false,
+      };
       media = mine;
       const asked = ask(to, NAMESPACE.media, {
         type: "LOAD",

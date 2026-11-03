@@ -312,6 +312,17 @@ describe("Play on TV", () => {
     });
   });
 
+  it("pauses the TV for a Pause pressed while it connected", async () => {
+    void play(title("m1"), file("mp4"), options);
+    await settle();
+    const connecting = playOnTv(tv);
+    togglePause();
+    await connecting;
+    await relayCloses();
+    const kinds = sent.map((each) => each.payload["type"]);
+    expect(kinds.includes("PAUSE") || loads()[0]?.payload["autoplay"] === false).toBe(true);
+  });
+
   it("Stop stops the TV's media before the relay goes, and returns the lease only once it closed", async () => {
     void play(title("m1"), file("mp4"), options);
     await settle();
@@ -525,6 +536,24 @@ describe("Play on TV", () => {
     await relayCloses();
     expect(playbackState.get().tv).toEqual({ kind: "ended", tv, why: "stopped" });
     expect(events.some((each) => each.startsWith("release"))).toBe(true);
+  });
+
+  it("takes a TV with nothing to name after a title finished as finished, not stopped", async () => {
+    const ended = vi.fn();
+    void play(title("m1"), file("mp4"), { ...options, ended });
+    await settle();
+    await playOnTv(tv);
+    await relayCloses();
+    tvSays(channel, "t1", MEDIA, {
+      type: "MEDIA_STATUS",
+      status: [{ mediaSessionId: 1, playerState: "IDLE", idleReason: "FINISHED" }],
+    });
+    tvState = "GONE";
+    await new Promise((done) => setTimeout(done, 1100));
+    await settle();
+    expect(ended).toHaveBeenCalledOnce();
+    expect(playbackState.get().tv).toEqual({ kind: "on", tv });
+    expect(playbackState.get().phase.kind).toBe("paused");
   });
 
   it("keeps where the title got to when the TV fails it", async () => {
