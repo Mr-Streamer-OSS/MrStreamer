@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
@@ -97,29 +98,42 @@ function run(command: "ffmpeg" | "ffprobe", args: readonly string[], label: stri
   return result.stdout;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const ProbeNumber = type("number | string").pipe((value) => {
+  const number = Number(value);
 
-function object(value: unknown): Record<string, unknown> {
-  if (!isObject(value)) throw new Error("Invalid probe object");
+  if (!Number.isFinite(number)) throw new Error("Missing probe number");
+
+  return number;
+});
+
+const Probe = type({
+  streams: type({
+    codec_type: "string",
+    codec_name: "string",
+    index: ProbeNumber,
+    "width?": ProbeNumber,
+    "height?": ProbeNumber,
+    "r_frame_rate?": "string",
+    "nb_read_frames?": ProbeNumber,
+    "sample_rate?": ProbeNumber,
+    "channels?": ProbeNumber,
+  }).array(),
+  packets: type({
+    stream_index: ProbeNumber,
+    pts_time: ProbeNumber,
+    duration_time: ProbeNumber,
+    data_hash: "string",
+    flags: "string",
+  }).array(),
+});
+
+function text(value: string | undefined): string {
+  if (value === undefined) throw new Error("Missing probe text");
 
   return value;
 }
 
-function list(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error("Missing probe list");
-
-  return value;
-}
-
-function text(value: unknown): string {
-  if (typeof value !== "string") throw new Error("Missing probe text");
-
-  return value;
-}
-
-function numeric(value: unknown): number {
+function numeric(value: number | undefined): number {
   const n =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
 
@@ -128,7 +142,7 @@ function numeric(value: unknown): number {
   return n;
 }
 
-const ticks = (value: unknown) => Math.round(numeric(value) * 90000);
+const ticks = (value: number) => Math.round(numeric(value) * 90000);
 
 function probe(path: string, label: string) {
   const raw: unknown = JSON.parse(
@@ -152,16 +166,15 @@ function probe(path: string, label: string) {
     ),
   );
 
-  const result = object(raw);
-  const streams = list(result.streams).map(object);
+  const result = Probe.assert(raw);
+  const streams = result.streams;
   const video = streams.find((s) => s.codec_type === "video");
   const audio = streams.find((s) => s.codec_type === "audio");
 
   if (!video || !audio || streams.length !== 2)
     throw new Error("Expected one video and one audio stream");
 
-  const packets = list(result.packets).map((p) => {
-    const row = object(p);
+  const packets = result.packets.map((row) => {
 
     return {
       stream: numeric(row.stream_index),
@@ -213,8 +226,8 @@ function firstVideoNals(path: string, label: string): Uint8Array[] {
     ),
   );
 
-  const packet = list(object(raw).packets)[0];
-  const dump = text(object(packet).data);
+  const packet = type({ packets: type({ data: "string" }).array() }).assert(raw).packets[0];
+  const dump = text(packet?.data);
 
   const hex = dump
     .split("\n")

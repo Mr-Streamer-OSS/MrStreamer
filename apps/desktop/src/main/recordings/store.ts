@@ -22,7 +22,7 @@
 // A file this build can't make sense of, or one a later version wrote as newer, is never written
 // over: nothing of it is used, and nothing records until it can be read.
 import { readFile } from "node:fs/promises";
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import {
   DEFAULT_KEEP_FREE,
@@ -110,10 +110,7 @@ const Storage = lazy(() =>
  * read, as one a newer version wrote.
  */
 export async function readStorage(path: string): Promise<KeptStorage | null> {
-  const read = await readOurs(path, (data) => {
-    const parsed = Storage()(data);
-
-    if (parsed instanceof type.errors) return null;
+  const read = await readOurs(path, Storage(), (parsed) => {
     const { version, ...kept } = parsed;
 
     return { version, items: [kept] };
@@ -166,9 +163,10 @@ export type Read<A> =
   { readonly kind: "read"; readonly items: readonly A[] } | { readonly kind: "refused" };
 
 /** Reads one of our files at `path` through `parse`. A file that isn't there holds nothing. */
-async function readOurs<A>(
+async function readOurs<S, A>(
   path: string,
-  parse: (data: unknown) => { readonly version: number; readonly items: readonly A[] } | null,
+  schema: Type<S>,
+  parse: (data: Type<S>["infer"]) => { readonly version: number; readonly items: readonly A[] },
 ): Promise<Read<A>> {
   let text: string;
 
@@ -182,9 +180,12 @@ async function readOurs<A>(
   }
 
   try {
-    const parsed = parse(JSON.parse(text));
+    const data = schema(JSON.parse(text));
 
-    if (!parsed || parsed.version !== VERSION) return { kind: "refused" };
+    if (data instanceof type.errors) return { kind: "refused" };
+    const parsed = parse(data);
+
+    if (parsed.version !== VERSION) return { kind: "refused" };
 
     return { kind: "read", items: parsed.items };
   } catch {
@@ -194,24 +195,12 @@ async function readOurs<A>(
 
 /** Reads recordings.json at `path`. */
 export function readRecordings(path: string): Promise<Read<StoredRecording>> {
-  return readOurs(path, (data) => {
-    const parsed = File()(data);
-
-    return parsed instanceof type.errors
-      ? null
-      : { version: parsed.version, items: parsed.recordings };
-  });
+  return readOurs(path, File(), (parsed) => ({ version: parsed.version, items: parsed.recordings }));
 }
 
 /** Reads schedules.json at `path`. */
 export function readSchedules(path: string): Promise<Read<KeptSchedule>> {
-  return readOurs(path, (data) => {
-    const parsed = Schedules()(data);
-
-    return parsed instanceof type.errors
-      ? null
-      : { version: parsed.version, items: parsed.schedules };
-  });
+  return readOurs(path, Schedules(), (parsed) => ({ version: parsed.version, items: parsed.schedules }));
 }
 
 export function writeSchedules(path: string, schedules: readonly KeptSchedule[]): Promise<void> {

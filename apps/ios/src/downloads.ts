@@ -1,4 +1,3 @@
-import type { Type } from "arktype";
 import { type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -251,17 +250,19 @@ const Legacy = lazy(() => type({ url: "string", resumeData: "string" }));
 /** A field read on its own: absent, as this build writes it, or present and unreadable. */
 type Field<A> = A | undefined | "bad";
 
-function fieldOf<A>(parse: Type<A>, value: unknown): Field<A> {
-  if (value === undefined) return undefined;
-  const parsed = parse(value);
+const transferOf = (record: Stored): Field<Transfer> => {
+  if (record.transfer === undefined) return undefined;
+  const parsed = Transfer()(record.transfer);
 
   return parsed instanceof type.errors ? "bad" : parsed;
-}
+};
 
-const transferOf = (record: Stored): Field<Transfer> => fieldOf(Transfer(), record.transfer);
+const removalOf = (record: Stored): Field<Infer<typeof Removal>> => {
+  if (record.removal === undefined) return undefined;
+  const parsed = Removal()(record.removal);
 
-const removalOf = (record: Stored): Field<Infer<typeof Removal>> =>
-  fieldOf(Removal(), record.removal);
+  return parsed instanceof type.errors ? "bad" : parsed;
+};
 
 /** Its authorization, when it reads. */
 const boundOf = (record: Stored): Transfer | null => {

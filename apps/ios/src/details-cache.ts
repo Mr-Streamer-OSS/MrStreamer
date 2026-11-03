@@ -3,7 +3,7 @@ import type { TitleKind } from "@mrstreamer/contracts/ondemand";
 import { TMDB_EXPIRE_MS } from "@mrstreamer/core/metadata/policy";
 import type { EpisodeAbout, TitleAbout } from "@mrstreamer/core/metadata/tmdb";
 import type { ProviderDetails } from "@mrstreamer/core/provider";
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { holds, loginFrom, safeUrl, URL_LENGTH, type SourceLogin } from "./login-safety.ts";
 import { defined } from "@mrstreamer/core/defined";
@@ -276,9 +276,10 @@ function discard(file: File): boolean {
  * The record in `file` as `check` takes it, or null when there is none or it doesn't check out,
  * which deletes it. Null too, leaving it, once `stands` fails while it is read.
  */
-async function load<R extends { readonly at: number }>(
+async function load<S, R extends { readonly at: number }>(
   file: File,
-  check: (json: unknown) => R | null,
+  schema: Type<S>,
+  check: (record: Type<S>["infer"]) => R | null,
   maxAge: number,
   stands: () => boolean,
 ): Promise<R | null> {
@@ -289,7 +290,8 @@ async function load<R extends { readonly at: number }>(
     const json: unknown = JSON.parse(await file.text());
 
     if (!stands()) return null;
-    const record = check(json);
+    const checked = schema(json);
+    const record = checked instanceof type.errors ? null : check(checked);
     const age = record ? Date.now() - record.at : NaN;
 
     if (!record || !(age <= maxAge && age >= -MAX_AHEAD)) throw new TypeError();
@@ -463,13 +465,12 @@ export function readTitle(
   return queued(`provider|${id}`, null, () =>
     load(
       new File(subscriptionFolder(id), titleName(kind, titleId)),
-      (json) => {
-        const record = Records.title()(json);
-
-        if (record instanceof type.errors) return null;
+      Records.title(), (record) => {
         const same = record.subscriptionId === id && record.kind === kind && record.id === titleId;
 
-        return same ? { at: record.at, listedAt: record.listedAt, value: record.value } : null;
+        if (!same) throw new Error("Title identity differs");
+
+        return { at: record.at, listedAt: record.listedAt, value: record.value };
       },
       MAX_AGE,
       stands,
@@ -516,11 +517,7 @@ export function readAbout(kind: TitleKind, tmdbId: string, language: string) {
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
-      (json): Saved<TitleAbout | null> | null => {
-        const record = Records.about()(json);
-
-        return record instanceof type.errors ? null : { at: record.at, value: record.value };
-      },
+      Records.about(), (record): Saved<TitleAbout | null> => ({ at: record.at, value: record.value }),
       TMDB_EXPIRE_MS,
       always,
     ),
@@ -548,11 +545,7 @@ export function readSeason(tmdbId: string, season: number, language: string) {
   return queued(name, null, () =>
     load(
       new File(tmdbFolder(), name),
-      (json): Saved<readonly EpisodeAbout[] | null> | null => {
-        const record = Records.season()(json);
-
-        return record instanceof type.errors ? null : { at: record.at, value: record.value };
-      },
+      Records.season(), (record): Saved<readonly EpisodeAbout[] | null> => ({ at: record.at, value: record.value }),
       TMDB_EXPIRE_MS,
       always,
     ),
@@ -607,10 +600,10 @@ export function readFiles(
   return queued(`provider|${id}`, null, async () => {
     const record = await load(
       new File(subscriptionFolder(id), FILES_NAME),
-      (json) => {
-        const parsed = Records.files()(json);
+      Records.files(), (record) => {
+        if (record.subscriptionId !== id) throw new Error("Subscription identity differs");
 
-        return parsed instanceof type.errors || parsed.subscriptionId !== id ? null : parsed;
+        return record;
       },
       MAX_AGE,
       stands,
