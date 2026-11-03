@@ -25,13 +25,11 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const framed = { ...insets, ...(layout === "bar" ? { bottom: 0 } : { left: 0 }) };
   return (
-    <SafeAreaInsetsContext.Provider value={framed}>
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <TopAppBar title={title} layout={layout} pushed={pushed} />
-        <SafeAreaInsetsContext.Provider value={{ ...framed, top: 0 }}>
-          {children}
-        </SafeAreaInsetsContext.Provider>
-      </View>
-    </SafeAreaInsetsContext.Provider>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <TopAppBar title={title} layout={layout} pushed={pushed} insets={framed} />
+      <SafeAreaInsetsContext.Provider value={{ ...framed, top: 0 }}>
+        {children}
+      </SafeAreaInsetsContext.Provider>
+    </View>
   );
 }

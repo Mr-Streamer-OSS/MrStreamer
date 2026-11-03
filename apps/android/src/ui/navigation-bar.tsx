@@ -1,14 +1,14 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Pressable, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
-import type { Destination, Destinations, SharedScreen } from "../navigation/destinations.ts";
+import type { Destination, DestinationRoute, SharedScreen } from "../navigation/destinations.ts";
 import { IconButton } from "./icon-button.tsx";
 import { colors } from "./theme.ts";
 
 interface Props {
-  destinations: Destinations;
-  selected: Destination["route"];
-  onSelect: (route: Destination["route"]) => void;
+  destinations: readonly Destination[];
+  selected: DestinationRoute;
+  onSelect: (route: DestinationRoute) => void;
   insets: EdgeInsets;
 }
 

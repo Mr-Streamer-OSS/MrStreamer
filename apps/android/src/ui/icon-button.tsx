@@ -6,8 +6,8 @@ import { colors } from "./theme.ts";
 export type IconName = ComponentProps<typeof MaterialIcons>["name"];
 
 /**
- * An icon-only button, named for TalkBack by `label`: a 24dp icon centred in a target of at least
- * 48dp, which the rail widens to its own 56dp slots.
+ * An icon-only button, named for TalkBack by `label`: a 24dp icon centred in a 48dp target, which
+ * the rail widens to its own 56dp slots.
  */
 export function IconButton({
   icon,
@@ -30,8 +30,8 @@ export function IconButton({
       accessibilityLabel={label}
       onPress={onPress}
       style={{
-        width: Math.max(width, 48),
-        height: Math.max(height, 48),
+        width,
+        height,
         flexShrink: 0,
         alignItems: "center",
         justifyContent: "center",

@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { EdgeInsets } from "react-native-safe-area-context";
 import type { NavigationLayout } from "../navigation/destinations.ts";
 import { useOpenShared } from "../navigation/open.ts";
 import { IconButton } from "./icon-button.tsx";
@@ -16,12 +16,14 @@ export function TopAppBar({
   title,
   layout,
   pushed,
+  insets,
 }: {
   title: string;
   layout: NavigationLayout;
   pushed: boolean;
+  /** The screen's insets, but the side the rail already covers. */
+  insets: EdgeInsets;
 }) {
-  const insets = useSafeAreaInsets();
   const open = useOpenShared();
   const bar = layout === "bar";
   const margin = bar ? 16 : 24;

@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { NavigationBar, NavigationRail } from "../ui/navigation-bar.tsx";
 import {
@@ -7,7 +8,6 @@ import {
   type DestinationRoute,
   type NavigationLayout,
 } from "./destinations.ts";
-import { router } from "expo-router";
 
 /**
  * The tabs' bar or rail. Selecting another destination shows its stack as it was left; selecting

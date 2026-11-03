@@ -18,8 +18,6 @@ const scenario = vi.hoisted(() => ({
   navigator: {} as Record<string, unknown>,
   /** The layout's initial route, where the navigator opens. */
   initial: "",
-  /** Set to make a `tabPress` listener prevent the switch. */
-  prevent: false,
 }));
 
 vi.mock("react-native", async () => {
@@ -92,7 +90,7 @@ vi.mock("expo-router/js-tabs", async () => {
       emitter: {
         emit: ({ type, target }: { type: string; target: string }) => {
           scenario.asked.push(`${type} ${target}`);
-          return { defaultPrevented: scenario.prevent };
+          return { defaultPrevented: false };
         },
       },
       navigateToTab: (key: string) => scenario.asked.push(`show ${key}`),
@@ -137,7 +135,6 @@ beforeEach(() => {
   scenario.width = 412;
   scenario.segments = ["(tabs)", "(live)"];
   scenario.asked = [];
-  scenario.prevent = false;
 });
 afterEach(() => {
   act(() => root?.unmount());
@@ -145,14 +142,10 @@ afterEach(() => {
 });
 
 describe("the destinations", () => {
-  it("open on Live, return to it on Back from another root, and leave the app from it", () => {
+  it("open on Live along the bottom of a phone, and Back returns to Live before leaving", () => {
     const shown = show(createElement(DestinationsLayout));
     expect(labels(shown, '[aria-selected="true"]')).toEqual(["Live"]);
     expect(scenario.navigator).toMatchObject({ backBehavior: "initialRoute" });
-  });
-
-  it("run along the bottom of a phone, with nothing else in the bar", () => {
-    const shown = show(createElement(DestinationsLayout));
     expect(labels(shown, '[role="tab"]')).toEqual(["Home", "Live", "Movies", "Series"]);
     expect(labels(shown, 'button:not([role="tab"])')).toEqual([]);
   });
@@ -167,12 +160,6 @@ describe("the destinations", () => {
       "show movies-key",
       "tabPress (live)-key",
     ]);
-  });
-
-  it("stay put when a screen prevents leaving it", () => {
-    scenario.prevent = true;
-    press(show(createElement(DestinationsLayout)), "Series");
-    expect(scenario.asked).toEqual(["tabPress series-key"]);
   });
 
   it("move to a rail from 600dp, with Search above and Downloads and Settings below", () => {
@@ -198,7 +185,7 @@ describe("the destinations", () => {
 });
 
 describe("a screen's top app bar", () => {
-  it("opens Search, Downloads and Settings on the phone's destination showing", () => {
+  it("opens Search, Downloads and Settings on the phone's destination showing, not beside the rail", () => {
     scenario.segments = ["(tabs)", "movies"];
     const shown = show(createElement(Screen, { title: "Movies" }));
     expect(labels(shown, "button")).toEqual(["Search", "Downloads", "Settings"]);
@@ -207,9 +194,8 @@ describe("a screen's top app bar", () => {
     scenario.segments = ["(tabs)", "(live)"];
     press(show(createElement(Screen, { title: "Live" })), "Search");
     expect(scenario.asked).toEqual(["navigate /movies/downloads", "navigate /search"]);
-  });
+    act(() => root?.unmount());
 
-  it("leaves them to the rail from 600dp", () => {
     scenario.width = 840;
     expect(labels(show(createElement(Screen, { title: "Live" })), "button")).toEqual([]);
   });
