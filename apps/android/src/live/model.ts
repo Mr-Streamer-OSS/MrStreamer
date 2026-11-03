@@ -29,6 +29,9 @@ export type Resolution =
 export const same = (a: Identity, b: Identity) =>
   a.sourceId === b.sourceId && a.channelId === b.channelId;
 
+/** One string per identity, for React keys and duplicate checks. */
+export const keyOf = (entry: Identity) => JSON.stringify([entry.sourceId, entry.channelId]);
+
 /** ChannelRow keys are sourceId + ':' + the provider id, which may itself contain colons. */
 export function identity(row: ChannelRow): Entry {
   const prefix = `${row.sourceId}:`;
@@ -76,19 +79,10 @@ export const draftOf = (list: ChannelList, sources: Sources): Draft => ({
   entries: [...list.entries],
 });
 
-export function move(draft: Draft, index: number, offset: -1 | 1): Draft {
-  const entries = [...draft.entries];
-  const other = index + offset;
-
-  if (index < 0 || other < 0 || index >= entries.length || other >= entries.length) return draft;
-  [entries[index], entries[other]] = [entries[other]!, entries[index]!];
-
-  return { ...draft, entries };
-}
-
 /**
  * Moves the entry at `index` past its nearest neighbour that `shown` keeps, so an entry an edit
- * screen doesn't show (Favourites' channels still loading) keeps its place. Unchanged at an end.
+ * screen doesn't show (Favourites' channels still loading) keeps its place. Unchanged at an end; `() => true`
+ * moves it one place.
  */
 export function step(
   draft: Draft,
@@ -97,14 +91,15 @@ export function step(
   shown: (entry: Entry) => boolean,
 ): Draft {
   let other = index + offset;
+  let next = draft.entries[other];
 
-  while (other >= 0 && other < draft.entries.length && !shown(draft.entries[other]!))
-    other += offset;
+  while (next && !shown(next)) next = draft.entries[(other += offset)];
+  const current = draft.entries[index];
 
-  if (index < 0 || index >= draft.entries.length || other < 0 || other >= draft.entries.length)
-    return draft;
+  if (!current || !next) return draft;
   const entries = [...draft.entries];
-  [entries[index], entries[other]] = [entries[other]!, entries[index]!];
+  entries[index] = next;
+  entries[other] = current;
 
   return { ...draft, entries };
 }

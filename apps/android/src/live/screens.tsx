@@ -28,7 +28,7 @@ import {
 } from "./chrome.tsx";
 import { t } from "./copy.ts";
 import { discover, findGroups, type Group } from "./discovery.ts";
-import { identity, resolve, type ChannelList, type Entry } from "./model.ts";
+import { identity, keyOf, resolve, type ChannelList, type Entry } from "./model.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
 import { Channel, Empty, GapRows, ListsSheet, NavRow, StillRows } from "./ui.tsx";
@@ -74,7 +74,7 @@ function Channels({
       <FlatList
         style={{ flex: 1 }}
         data={entries}
-        keyExtractor={(entry) => JSON.stringify([entry.sourceId, entry.channelId])}
+        keyExtractor={keyOf}
         renderItem={({ item }) => <Channel entry={item} onLists={setHeld} />}
         ListFooterComponent={still ? <StillRows /> : undefined}
         ListEmptyComponent={still ? undefined : <>{empty}</>}
@@ -563,13 +563,9 @@ export function CategoryScreen() {
             entries={group.rows.filter((row) => allowed.has(row)).map(identity)}
             still={loading}
           />
-        ) : loading ? (
-          <View style={{ flex: 1 }}>
-            <StillRows />
-          </View>
         ) : (
           <View style={{ flex: 1 }}>
-            <Empty title={t("This category isn't listed any more.")} />
+            {loading ? <StillRows /> : <Empty title={t("This category isn't listed any more.")} />}
           </View>
         )}
         <StatusLine />

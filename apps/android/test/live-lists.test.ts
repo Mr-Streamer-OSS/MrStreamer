@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChannelRow, Sources } from "../src/connect/sources.ts";
-import { draftOf, identity, move, playIntent, remove, resolve, step } from "../src/live/model.ts";
+import { draftOf, identity, playIntent, remove, resolve, step } from "../src/live/model.ts";
 import { FAVOURITES, listsOwner } from "../src/live/store.ts";
 import { discover, findGroups } from "../src/live/discovery.ts";
 
@@ -13,6 +13,8 @@ const row: ChannelRow = {
 };
 
 const other: ChannelRow = { ...row, key: "source:2", title: "Music" };
+
+const everyEntry = () => true;
 
 function catalogue(rows: readonly ChannelRow[] = [row, other]): Sources {
   return {
@@ -69,27 +71,24 @@ function setup() {
 }
 
 describe("Live lists public behavior", () => {
-  it("refuses a stale draft without writing or moving anything", () => {
+  it("refuses a stale draft, or one whose identity became ambiguous, without writing or moving anything", () => {
     const s = setup();
-    const draft = move(draftOf(s.list(), s.providers()), 0, 1);
+    const draft = step(draftOf(s.list(), s.providers()), 0, 1, everyEntry);
     s.owner.member(FAVOURITES, identity(other), false);
     const before = s.list();
     const count = s.writes.length;
     expect(() => s.owner.commit(draft)).toThrow("stale");
     expect(s.writes).toHaveLength(count);
     expect(s.list()).toEqual(before);
-  });
-  it("refuses editing when the provider identity becomes ambiguous", () => {
-    const s = setup();
-    const draft = draftOf(s.list(), s.providers());
+
+    const current = draftOf(s.list(), s.providers());
     s.change(catalogue([row, row, other]));
-    const count = s.writes.length;
-    expect(() => s.owner.commit(draft)).toThrow("stale");
+    expect(() => s.owner.commit(current)).toThrow("stale");
     expect(s.writes).toHaveLength(count);
   });
   it("keeps a failed write's draft for retry and saves removal and order together", () => {
     const s = setup();
-    const draft = remove(move(draftOf(s.list(), s.providers()), 0, 1), 1);
+    const draft = remove(step(draftOf(s.list(), s.providers()), 0, 1, everyEntry), 1);
     const before = s.list();
     s.refuse(true);
     expect(() => s.owner.commit(draft)).toThrow("disk");

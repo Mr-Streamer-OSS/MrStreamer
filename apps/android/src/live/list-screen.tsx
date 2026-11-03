@@ -23,7 +23,7 @@ import {
   useLargeText,
 } from "./chrome.tsx";
 import { t } from "./copy.ts";
-import { draftOf, remove, resolve, same, step, type Draft, type Entry } from "./model.ts";
+import { draftOf, keyOf, remove, resolve, same, step, type Draft, type Entry } from "./model.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
 import {
@@ -97,6 +97,13 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
   const focused = useIsFocused();
   const editing = draft !== null;
 
+  /** The list as stored now, for actions that run after this render. */
+  const stored = () => {
+    const now = lists.state.get();
+
+    return now.kind === "ready" ? now.lists.find((each) => each.id === id) : undefined;
+  };
+
   const close = () => {
     setDraft(null);
     setFailed(null);
@@ -136,8 +143,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
   /** Takes a channel its provider no longer lists out of the list, at once. */
   const removeNow = (entry: Entry) => {
     const attempt = () => {
-      const now = lists.state.get();
-      const current = now.kind === "ready" ? now.lists.find((each) => each.id === id) : undefined;
+      const current = stored();
 
       if (!current) return;
       const start = draftOf(current, sources.state.get());
@@ -171,8 +177,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
   /** After a refused save: Edit starts again from the list as it is now. */
   const restart = () => {
     setDialog(null);
-    const now = lists.state.get();
-    const current = now.kind === "ready" ? now.lists.find((each) => each.id === id) : undefined;
+    const current = stored();
     setDraft(current ? draftOf(current, sources.state.get()) : null);
   };
 
@@ -232,7 +237,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
           ) : editing ? (
             rows.map((entry, position) => (
               <EditRow
-                key={JSON.stringify([entry.sourceId, entry.channelId])}
+                key={keyOf(entry)}
                 entry={entry}
                 position={position}
                 count={rows.length}
@@ -248,7 +253,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
           ) : (
             rows.map((entry) => (
               <Channel
-                key={JSON.stringify([entry.sourceId, entry.channelId])}
+                key={keyOf(entry)}
                 entry={entry}
                 onLists={setHeld}
                 onRemove={removeNow}

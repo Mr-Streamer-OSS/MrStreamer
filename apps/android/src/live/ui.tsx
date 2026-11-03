@@ -19,18 +19,12 @@ import { intentHandlers } from "./intents.ts";
 import { lists } from "./runtime.ts";
 import { FAVOURITES } from "./store.ts";
 
-/** Says why a change to a list was refused, in a platform alert. */
-export function failure(cause: unknown, name: string) {
+/** Says why adding a channel to a list, or taking it out, was refused, in a platform alert. */
+function failure(cause: unknown, name: string) {
   const code = cause instanceof Error ? cause.message : "";
   Alert.alert(
     t("{name} wasn't changed", { name }),
-    code === "name-taken"
-      ? t("There's already a list called {name}.", { name })
-      : code === "name-length"
-        ? t("A list's name has 1 to {max} characters.", { max: CUSTOM_LIST_NAME_MAX })
-        : code.startsWith("identity")
-          ? t("Nothing was moved.")
-          : t("Couldn't save {name}", { name }),
+    code.startsWith("identity") ? t("Nothing was moved.") : t("Couldn't save {name}", { name }),
   );
 }
 
@@ -43,7 +37,7 @@ export function providerOf(sourceId: string, state: Sources): string | undefined
 }
 
 /** Why a saved channel doesn't show, after its provider's name: "Kade TV: channels didn't load". */
-export function whyNot(resolution: Exclude<Resolution["kind"], "listed">, provider?: string) {
+function whyNot(resolution: Exclude<Resolution["kind"], "listed">, provider?: string) {
   if (resolution === "removed" || !provider) return t("Its provider was removed.");
 
   if (resolution === "ambiguous")

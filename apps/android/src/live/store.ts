@@ -3,7 +3,15 @@ import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import { normalize } from "@mrstreamer/core/text";
 import type { Sources } from "../connect/sources.ts";
 import { store } from "../platform/store.ts";
-import { resolve, same, snapshot, type ChannelList, type Draft, type Entry } from "./model.ts";
+import {
+  keyOf,
+  resolve,
+  same,
+  snapshot,
+  type ChannelList,
+  type Draft,
+  type Entry,
+} from "./model.ts";
 
 const File = type({
   version: "1",
@@ -120,8 +128,7 @@ export function listsOwner(
         if (
           snapshot(list, sources()) !== draft.snapshot ||
           draft.entries.some((entry) => !list.entries.some((each) => same(each, entry))) ||
-          new Set(draft.entries.map((entry) => JSON.stringify([entry.sourceId, entry.channelId])))
-            .size !== draft.entries.length
+          new Set(draft.entries.map(keyOf)).size !== draft.entries.length
         )
           throw new Error("stale");
 
@@ -130,5 +137,3 @@ export function listsOwner(
     },
   };
 }
-
-export type ListsOwner = ReturnType<typeof listsOwner>;

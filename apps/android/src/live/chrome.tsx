@@ -480,7 +480,7 @@ export function useGaps() {
 }
 
 /** Retries every provider whose channels failed. */
-export function retryFailed() {
+function retryFailed() {
   const state = sources.state.get();
 
   if (state.kind !== "ready") return;
