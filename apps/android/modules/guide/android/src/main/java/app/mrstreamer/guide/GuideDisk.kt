@@ -14,6 +14,7 @@ class GuideDisk(val root: File) {
       throw GuideFailure("disk")
   }
   fun copy(input: InputStream, target: File, cap: Long, job: GuideJob) {
+    val used = root.walkTopDown().filter { it.isFile && it != target }.sumOf { it.length() }
     target.outputStream().use { out ->
       val buffer = ByteArray(32768)
       var count = 0L
@@ -23,7 +24,8 @@ class GuideDisk(val root: File) {
         if (n < 0) break
         count += n
         if (count > cap) throw GuideFailure("body")
-        check(n.toLong()); out.write(buffer, 0, n)
+        if (used + count > GuideBudget.DISK || StatFs(root.path).availableBytes - n < GuideBudget.FREE) throw GuideFailure("disk")
+        out.write(buffer, 0, n)
       }
       out.fd.sync()
     }

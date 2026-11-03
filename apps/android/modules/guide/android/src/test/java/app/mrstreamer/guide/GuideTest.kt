@@ -26,7 +26,7 @@ class GuideTest {
   }
   @Test fun hostileXmlAndBounds() = fixture { root ->
     val file = File(root, "guide.xml"); val job = GuideJob("lease")
-    for (xml in listOf("<!DOCTYPE tv SYSTEM 'file:///forbidden'><tv/>", "<!DOCTYPE tv [<!ENTITY a 'boom'>]><tv>&a;</tv>")) {
+    for (xml in listOf("<!DOCTYPE tv [<!ENTITY a 'boom'>]><tv>&a;</tv>")) {
       file.writeText(xml); refused("xml") { readXml(file, job, emptyList(), emptyList()) { _, _, _, _, _ -> fail() } }
     }
     file.writeText("<tv><programme>${"x".repeat(GuideBudget.TOKEN + 1)}</programme></tv>")
@@ -61,11 +61,97 @@ class GuideTest {
       assertEquals(11, (next["rows"] as List<*>).size); assertEquals(false, next["more"])
     }
   }
+  private val xml = "<tv><programme channel='BBCOne.uk' start='20261103120000 +0000' stop='20261103130000 +0000'><title>News</title></programme></tv>"
+  private fun prepared(owner: GuideOwner, lease: String, job: String, root: File): String {
+    // Serve a real local XML file through the public HTTP ingestion path.
+    val source = File(root, "fixture.xml").apply { writeText(xml) }
+    val server = java.net.ServerSocket(0)
+    val thread = Thread {
+      server.accept().use { socket ->
+        val reader = socket.getInputStream().bufferedReader()
+        while (!reader.readLine().isNullOrEmpty()) { }
+        val bytes = source.readBytes()
+        socket.getOutputStream().apply {
+          write("HTTP/1.1 200 OK\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray()); write(bytes); flush()
+        }
+      }
+    }.apply { start() }
+    try {
+      assertTrue(owner.begin(lease, job))
+      val at = guideTime("20261103120000 +0000")!!
+      val answer = owner.prepare(lease, job, "http://127.0.0.1:${server.localPort}", emptyMap(), emptyList(), emptyList(), at, at - 86400000, at + 86400000).get(20, java.util.concurrent.TimeUnit.SECONDS)
+      assertEquals("ok", answer["kind"])
+      return (answer["value"] as Map<*, *>)["id"] as String
+    } finally { server.close(); thread.join(2000); source.delete() }
+  }
+  @Test fun externalHeadersAndBomAreAcceptedWithoutResolvingIdentifiers() = fixture { root ->
+    for (header in listOf("<!DOCTYPE tv SYSTEM 'file:///forbidden'>", "<!DOCTYPE tv PUBLIC 'xmltv' 'https://invalid.test/xmltv.dtd'>", "\uFEFF")) {
+      val file = File(root, "guide.xml").apply { writeText(header + xml) }
+      var count = 0
+      readXml(file, GuideJob("lease"), emptyList(), emptyList()) { _, _, _, _, _ -> count++ }
+      assertEquals(1, count)
+    }
+    for (header in listOf("<!DOCTYPE tv [<!ENTITY x 'secret'>]>", "<!DOCTYPE other SYSTEM 'x'>", "<!DOCTYPE tv SYSTEM 'x'><!DOCTYPE tv SYSTEM 'y'>")) {
+      val file = File(root, "guide.xml").apply { writeText(header + xml) }
+      refused("xml") { readXml(file, GuideJob("lease"), emptyList(), emptyList()) { _, _, _, _, _ -> fail() } }
+    }
+  }
+  @Test fun xmltvDatePrecisionAndOffsetsAreStrict() {
+    val expected = guideTime("20261103000000 +0000")
+    for (value in listOf("20261103", "2026110300", "202611030000", "20261103000000", "202611030100+0100", "202611030100 +01:00", "202611030000Z")) assertEquals(value, expected, guideTime(value))
+    for (value in listOf("20260230", "202611032400", "202611030000 +1260", "202611030")) assertNull(value, guideTime(value))
+  }
+  @Test fun utf8IdsAndWholeSecrets() = fixture { root ->
+    val file = File(root, "guide.xml")
+    for (id in listOf("BBCOne.uk", "x".repeat(200), "界".repeat(170))) {
+      file.writeText(xml.replace("BBCOne.uk", id)); var count = 0
+      readXml(file, GuideJob("lease"), listOf("uk"), listOf("uk")) { channel, _, _, _, _ -> assertEquals(id, channel); count++ }
+      assertEquals(1, count)
+    }
+    file.writeText(xml.replace("News", "name%20%73%65%63%72%65%74%oops"))
+    refused("xml") { readXml(file, GuideJob("lease"), listOf("name"), listOf("secret")) { _, _, _, _, _ -> fail() } }
+  }
+  @Test fun pastDayAndLastProgrammeStillRead() = fixture { root ->
+    val at = guideTime("20261103120000 +0000")!!
+    val file = File(root, "guide.xml").apply { writeText(xml) }
+    val db = File(root, "guide.db"); val disk = GuideDisk(root); val job = GuideJob("lease")
+    GuideIndex(db, job, disk, true).use { it.ingest(file, emptyList(), emptyList(), at, at - 86400000, at + 86400000) }
+    GuideIndex(db, job, disk).use {
+      assertEquals(1, (it.query(listOf("BBCOne.uk"), at + 86400000, "day", at, at + 86400000, -1)["rows"] as List<*>).size)
+      assertEquals(1, (it.query(listOf("BBCOne.uk"), at + 86400000, "detail", 0, 0, at)["rows"] as List<*>).size)
+      assertNull(it.query(listOf("BBCOne.uk"), at + 86400000, "listing", 0, 0, -1)["guideId"])
+    }
+  }
+  @Test fun repeatedPublicationsRetireOldDatabasesAndRevocationKeepsLastGood() = fixture { root ->
+    val owner = GuideOwner(root); val lease = owner.attach("source", 1)["lease"] as String
+    var good = ""
+    repeat(4) { n ->
+      good = prepared(owner, lease, "ingest$n", root)
+      assertEquals("ok", owner.publish(lease, "ingest$n", good)["kind"])
+      owner.cancel("ingest$n")
+      assertEquals(1, root.walkTopDown().count { it.extension == "db" })
+    }
+    val candidate = prepared(owner, lease, "revoked", root)
+    owner.revoke("source")
+    assertEquals("changed", owner.publish(lease, "revoked", candidate)["kind"])
+    assertEquals(good, (owner.attach("source", 2)["generation"] as Map<*, *>)["id"])
+    val folder = root.listFiles()!!.single { it.isDirectory }
+    assertEquals(good, org.json.JSONObject(File(folder, "current.json").readText()).getString("id"))
+    owner.cancel("revoked")
+  }
+  @Test fun prefixRetentionIsSelectiveAndDamagedReceiptsAreIsolated() = fixture { root ->
+    val owner = GuideOwner(root)
+    owner.attach("xtream:removed", 1); owner.attach("custom:kept", 1); owner.attach("xtream:live", 1)
+    owner.restore(listOf("xtream:live"), listOf("custom:"))
+    assertEquals(2, root.listFiles()!!.count { it.isDirectory })
+    val broken = root.listFiles()!!.first { File(it, "owner").readText() == "custom:kept" }
+    File(broken, "current.json").writeText("damaged")
+    val restored = GuideOwner(root).restore(listOf("xtream:live", "custom:kept"), emptyList())
+    assertEquals(listOf("xtream:live"), restored.map { it["subscriptionId"] })
+  }
   @Test fun revokedAndInterruptedGenerationsCannotReplaceLastGood() = fixture { root ->
     val owner = GuideOwner(root)
-    val activation = owner.attach("source", 1); val lease = activation["lease"] as String
-    assertTrue(owner.begin(lease, "ingest")); owner.revoke("source")
-    assertEquals("changed", owner.publish(lease, "ingest", "missing")["kind"])
+    owner.attach("source", 1)
     val folder = root.listFiles()!!.single()
     val id = java.util.UUID.randomUUID().toString()
     File(folder, "$id.db").writeText("last good")

@@ -1,5 +1,6 @@
 import { AppState } from "react-native";
 import { useSyncExternalStore } from "react";
+import { store } from "../platform/store.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { nativeCredentials } from "../platform/credentials.ts";
 import { inTasks } from "../platform/tasks.ts";
@@ -110,6 +111,9 @@ export function* partSteps(subscriptionId: string, catalogue: LiveCatalogue): St
   return { subscriptionId, byId, guideIds };
 }
 
+export const catalogueFailures = store<ReadonlySet<string>>(new Set());
+export let retryGuideChannels = () => {};
+
 let started: Promise<void> | undefined;
 
 /** Call from a guide-owning screen once. It observes the public source store without changing
@@ -196,9 +200,19 @@ export function startGuide(): Promise<void> {
           const catalogue = await reader.liveCatalogue(controller.signal);
           const part = await inTasks(partSteps(source.id, catalogue), wanted);
 
-          if (part && wanted()) guide.setPart(part);
+          if (part && wanted()) {
+            guide.setPart(part);
+            catalogueFailures.set(
+              new Set([...catalogueFailures.get()].filter((id) => id !== source.id)),
+            );
+          }
         })().catch(async () => {
-          if (!wanted() || origins.has(source.id)) return;
+          if (!wanted()) return;
+          pending.delete(source.id);
+          observed.delete(source.id);
+          catalogueFailures.set(new Set([...catalogueFailures.get(), source.id]));
+
+          if (origins.has(source.id)) return;
           origins.set(source.id, {
             revision: ++revision,
             login: [],
@@ -213,11 +227,15 @@ export function startGuide(): Promise<void> {
       }
     };
 
+    retryGuideChannels = sync;
     sources.state.subscribe(sync);
     sync();
-    AppState.addEventListener("change", (state) =>
-      state === "active" ? guide.foreground() : guide.background(),
-    );
+    AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        sync();
+        guide.foreground();
+      } else guide.background();
+    });
   })());
 }
 

@@ -22,20 +22,25 @@ export const sealedLinks: SecretStore = {
 const loginNames =
   /^(username|user|password|pass|pwd|login|token|access_token|auth|key|apikey|api_key|secret)$/i;
 
+function decode(value: string): string {
+  // URLSearchParams decodes valid escapes even when another escape is malformed.
+  return new URLSearchParams(`v=${value.replaceAll("+", "%2B")}`).get("v") ?? "";
+}
+
 export function playlistSecrets(link: string): string[] {
   const url = new URL(link);
 
   const username =
     [
-      decodeURIComponent(url.username),
+      decode(url.username),
       ...[...url.searchParams].flatMap(([key, value]) =>
         /^(username|user|login)$/i.test(key) ? [value] : [],
       ),
     ].find(Boolean) ?? "";
 
   const secrets = [
-    decodeURIComponent(url.username),
-    decodeURIComponent(url.password),
+    decode(url.username),
+    decode(url.password),
     ...[...url.searchParams].flatMap(([key, value]) => (loginNames.test(key) ? [value] : [])),
   ].filter(Boolean);
 
@@ -50,6 +55,6 @@ export function playlistSecrets(link: string): string[] {
 
 export function playlistUncertain(link: string): string[] {
   return [...new URL(link).searchParams].flatMap(([key, value]) =>
-    !loginNames.test(key) && value ? [value] : [],
+    !loginNames.test(key) && !/^(type|output)$/i.test(key) && value ? [value] : [],
   );
 }

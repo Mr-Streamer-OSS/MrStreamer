@@ -186,6 +186,9 @@ export function createGuides(
     name: string | null,
     replacing?: string,
   ): Promise<GuideRefusal | null> => {
+    if (link.length > 8192) return "address";
+
+    if (name && name.length > 200) return "name";
     const url = URL.parse(link.trim());
 
     if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "address";
@@ -307,6 +310,7 @@ export function createGuides(
      */
     replace: (id: string, link: string) =>
       serially(async (): Promise<GuideRefusal | null> => {
+        if (link.length > 8192) return "address";
         const old = saved.guides.find((each) => each.id === id);
 
         if (!old) return null;

@@ -90,3 +90,24 @@ describe("Android guide screens", () => {
     ).toEqual([{ text: "Guide unavailable" }]);
   });
 });
+
+it.each(["xtream:abc123", "m3u:abc123"])("maps the catalogue for %s", (sourceId) => {
+  const key = `${sourceId}:1`;
+
+  const sections = mapSections(
+    {
+      channels: new Map([[sourceId, [{ id: "1", key, title: "News" }]]]),
+      mappings: new Map(),
+      providers: new Map([[sourceId, "Provider"]]),
+      categories: new Map(),
+    },
+    "",
+  );
+
+  expect(sections[0]?.data[0]).toMatchObject({
+    sourceId,
+    channelId: "1",
+    title: "News",
+    listed: true,
+  });
+});

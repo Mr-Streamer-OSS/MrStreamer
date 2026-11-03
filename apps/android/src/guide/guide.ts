@@ -59,6 +59,7 @@ export interface ScheduleItem extends Omit<Programme, "description"> {
 export interface DayPage {
   readonly programmes: readonly ScheduleItem[];
   readonly cursor: string | null;
+  readonly guide?: string;
 }
 
 /** A programme `search` found, on channel `key` (`Channel.key`). */
@@ -360,7 +361,11 @@ export function createGuide(
 
     if (entry.refresh) return entry.refresh;
 
-    if (!explicit && now() - entry.failedAt < 15 * 60_000) return;
+    if (
+      !explicit &&
+      now() - entry.failedAt < (status(key).availability === "none" ? FRESH : 15 * 60_000)
+    )
+      return;
     const source = entry.source;
     const lease = entry.activation.lease;
     const job = id();
@@ -415,6 +420,7 @@ export function createGuide(
           if (!stands(key, entry)) return;
           entry.generation = null;
           invalidate(entry);
+          entry.failedAt = now();
           update(key, { availability: "none" });
 
           return;
@@ -558,7 +564,12 @@ export function createGuide(
         day.until,
         value.start,
       ),
-    );
+    ).then((answer) => {
+      if (answer === null && !signal?.aborted && validToken(value))
+        throw new GuideFault("unavailable");
+
+      return answer;
+    });
   }
 
   /**
@@ -614,6 +625,9 @@ export function createGuide(
   }
 
   const tick = () => {
+    for (const key of new Set([...parts.keys(), ...state.get().keys()]))
+      if (!entries.has(key) && originOf(key)) void service.attach(key);
+
     for (const key of entries.keys()) {
       update(key);
 
@@ -1063,11 +1077,25 @@ export function createGuide(
 
       return {
         programmes,
+        guide: captured.owner,
         cursor:
           answer.more && last
             ? token({ ...captured, ids, start: last.start, day, on: day.from })
             : null,
       };
+    },
+    /** The status of the guide that minted a programme token, including custom guides. */
+    programmeStatus(key: string, start: number, detail?: string): GuideStatus | null {
+      const byDetail = detail ? tokens.get(detail) : undefined;
+
+      const captured =
+        byDetail && validToken(byDetail)
+          ? byDetail
+          : [...tokens.values()].find(
+              (value) => value.key === key && value.start === start && validToken(value),
+            );
+
+      return captured && validToken(captured) ? status(captured.owner) : null;
     },
     async programme(
       detail: string,
@@ -1105,7 +1133,11 @@ export function createGuide(
         // `ask` answers null for a read aborted, or withdrawn meanwhile.
         if (!answer) return undefined;
 
-        if (answer.guideId) return answer.rows[0] ?? null;
+        if (answer.guideId) {
+          token({ ...captured, start, on: localDay(start).from });
+
+          return answer.rows[0] ?? null;
+        }
       }
 
       return undefined;

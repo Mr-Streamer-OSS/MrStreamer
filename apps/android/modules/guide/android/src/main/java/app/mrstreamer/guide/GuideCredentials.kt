@@ -12,24 +12,15 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * Each saved source's authority (its server and login, or its playlist link), sealed with an
- * AES-GCM key the Android Keystore holds and never exports, one file per source id under
- * `noBackupFilesDir/credentials`. Nothing here is backed up or moved to another device, and
- * Android deletes it with the app. A sealed file names its id inside the seal, so one source's
- * file can't stand in for another's. Writes go through [AtomicFile]: a file is whole or absent.
- *
- * Native workers (downloads, guide refreshes, reminders) call [read] with the source id and get
- * the same JSON the app wrote, without a JS runtime: see apps/android/README.md for its shape.
- * Every failure throws; callers treat any of them as "the secret is unavailable, ask again".
- */
+/** Custom guide links sealed with an Android Keystore AES-GCM key in noBackupFilesDir.
+ * Atomic writes preserve the previous link when saving fails. */
 object GuideCredentials {
   private const val KEY_ALIAS = "app.mrstreamer.guide.links"
   private const val TRANSFORMATION = "AES/GCM/NoPadding"
   private const val IV_BYTES = 12
   private const val TAG_BITS = 128
 
-  /** The authority saved for [id], or null when none is. */
+  /** The guide link saved for [id], or null when none is. */
   @JvmStatic
   fun read(context: Context, id: String): String? = synchronized(this) {
     val sealed =

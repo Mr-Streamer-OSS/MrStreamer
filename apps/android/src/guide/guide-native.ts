@@ -62,7 +62,7 @@ type Prepared =
   | { readonly kind: "redirect"; readonly location: string }
   | { readonly kind: "candidate"; readonly id: string };
 
-/** Private Expo port. Ingest bytes and rows never cross this boundary. */
+/** Private Expo port. Only bounded query pages cross into JS; ingest bytes stay native. */
 export interface GuideNative {
   /**
    * Activates `ids` and erases every other saved guide, but those whose id starts with one of

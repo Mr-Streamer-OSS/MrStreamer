@@ -1,3 +1,4 @@
+import { defined } from "@mrstreamer/core/defined";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { sources } from "../bootstrap/sources.ts";
@@ -56,6 +57,7 @@ interface Read {
   /** Pages shown, so a read again after a change reads as many. */
   readonly pages: number;
   readonly failed: boolean;
+  readonly guide?: string;
 }
 
 /**
@@ -93,12 +95,15 @@ export function useSchedule(key: string, day: Day) {
         let pages = more && before ? before.pages : 0;
         const count = more ? 1 : (before?.pages ?? 1);
 
+        let answering: string | undefined;
+
         for (let index = 0; index < count; index++) {
           const page = await guide.schedule(key, { from: day.from, until: day.until }, cursor, {
             signal: controller.signal,
           });
 
           if (controller.signal.aborted) return;
+          answering = page.guide;
           programmes.push(...page.programmes);
           pages++;
           cursor = page.cursor ?? undefined;
@@ -109,7 +114,15 @@ export function useSchedule(key: string, day: Day) {
         // A day's programmes don't vanish: an empty answer where rows showed is a refused read.
         if (!more && programmes.length === 0 && before?.programmes.length)
           setRead({ ...before, failed: true });
-        else setRead({ id, programmes, cursor: cursor ?? null, pages, failed: false });
+        else
+          setRead({
+            id,
+            programmes,
+            cursor: cursor ?? null,
+            pages,
+            failed: false,
+            ...defined({ guide: answering }),
+          });
       } catch {
         if (!controller.signal.aborted)
           setRead({
@@ -118,6 +131,7 @@ export function useSchedule(key: string, day: Day) {
             cursor: before?.cursor ?? null,
             pages: before?.pages ?? 1,
             failed: true,
+            ...defined({ guide: before?.guide }),
           });
       } finally {
         if (work.current === controller) {
@@ -137,6 +151,8 @@ export function useSchedule(key: string, day: Day) {
   const current = read?.id === id ? read : null;
 
   return {
+    status: current?.guide ? guide.status(current.guide) : null,
+    retry: () => void load(false),
     programmes: current?.programmes ?? [],
     more: current?.cursor ? () => void load(true) : null,
     /** Nothing read yet for this channel and day. */
@@ -152,6 +168,8 @@ export function useSchedule(key: string, day: Day) {
  */
 export function useProgramme(key: string, start: number, detail?: string) {
   const revision = useListingRevision();
+  const [attempt, retry] = useState(0);
+  const [failed, setFailed] = useState(false);
   const id = `${key} ${start} ${detail ?? ""}`;
   const [read, setRead] = useState<{ id: string; value: Programme | null } | null>(null);
   useEffect(() => {
@@ -159,16 +177,28 @@ export function useProgramme(key: string, start: number, detail?: string) {
     const signal = controller.signal;
     void (async () => {
       const byToken = detail ? await guide.programme(detail, { signal }) : null;
-      const value = byToken ?? (await guide.programmeAt(key, start, { signal })) ?? null;
+      const value = byToken ?? (await guide.programmeAt(key, start, { signal }));
+
+      if (value === undefined) throw new Error("unavailable");
+      setFailed(false);
 
       if (!signal.aborted) setRead({ id, value });
     })().catch(() => {
-      if (!signal.aborted) setRead((before) => (before?.id === id ? before : { id, value: null }));
+      if (!signal.aborted) {
+        setFailed(true);
+        setRead((before) => (before?.id === id ? before : { id, value: null }));
+      }
     });
 
     return () => controller.abort();
-  }, [id, key, start, detail, revision]);
+  }, [id, key, start, detail, revision, attempt]);
   const current = read?.id === id ? read : null;
 
-  return { pending: current === null, value: current?.value ?? null };
+  return {
+    pending: current === null,
+    value: current?.value ?? null,
+    failed,
+    retry: () => retry((value) => value + 1),
+    status: guide.programmeStatus(key, start, detail),
+  };
 }

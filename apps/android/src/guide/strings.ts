@@ -15,6 +15,7 @@ const english = {
   "No programme information for this day": "No programme information for this day",
   "Show more": "Show more",
   "Couldn't update schedule": "Couldn't update schedule",
+  "Couldn't load programme": "Couldn't load programme",
   "Loading programme…": "Loading programme…",
   "Programme unavailable. Go Back and choose it again.":
     "Programme unavailable. Go Back and choose it again.",
@@ -108,6 +109,7 @@ const dutch = {
   "No programme information for this day": "Geen programma-informatie voor deze dag",
   "Show more": "Meer tonen",
   "Couldn't update schedule": "Zendschema kon niet worden bijgewerkt",
+  "Couldn't load programme": "Programma kon niet worden geladen",
   "Loading programme…": "Programma laden…",
   "Programme unavailable. Go Back and choose it again.":
     "Programma niet beschikbaar. Ga terug en kies het opnieuw.",

@@ -84,15 +84,14 @@ export interface MapInput {
   readonly categories: ReadonlyMap<string, string | null>;
 }
 
-const split = (key: string) => {
-  const at = key.indexOf(":");
-
-  return { sourceId: key.slice(0, at), channelId: key.slice(at + 1) };
-};
-
 /** How Map channels names channel `key`, from its catalogue once read. */
 export function describe(key: string, input: Omit<MapInput, "mappings">): Omit<Mappable, "mapped"> {
-  const { sourceId, channelId } = split(key);
+  const sourceId =
+    [...new Set([...input.channels.keys(), ...input.providers.keys()])]
+      .sort((a, b) => b.length - a.length)
+      .find((id) => key.startsWith(`${id}:`)) ?? key.slice(0, key.lastIndexOf(":"));
+
+  const channelId = key.slice(sourceId.length + 1);
   const read = input.channels.get(sourceId);
   const listed = read?.find((channel) => channel.key === key);
 

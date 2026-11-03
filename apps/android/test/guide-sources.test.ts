@@ -98,3 +98,10 @@ it("clears overrides to automatic and refuses damaged registry replacement", asy
   expect(await damaged.add("https://guide.test/xml")).toBe("saving");
   expect(write).not.toHaveBeenCalled();
 });
+
+it("refuses oversized names and links before writing sealed storage", async () => {
+  const { guides, secrets } = setup();
+  expect(await guides.add("https://fixture.test/guide", "n".repeat(201))).toBe("name");
+  expect(await guides.add(`https://fixture.test/${"x".repeat(8192)}`)).toBe("address");
+  expect(secrets.size).toBe(0);
+});

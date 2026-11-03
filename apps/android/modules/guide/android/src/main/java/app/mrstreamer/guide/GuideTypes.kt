@@ -3,7 +3,7 @@ package app.mrstreamer.guide
 import android.os.SystemClock
 import okhttp3.Call
 
-// Phone refusals mirror iOS, all below core/guide/limits.ts's desktop ceilings.
+// Phone resource ceilings stay below the desktop guide limits.
 object GuideBudget {
   const val BODY = 32L * 1024 * 1024
   const val PLAIN = 64L * 1024 * 1024

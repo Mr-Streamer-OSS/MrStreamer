@@ -325,6 +325,7 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
       <Field
         icon="link"
         label={t("XMLTV link")}
+        maxLength={8192}
         value={link}
         onChangeText={edit(setLink)}
         // A link can hold a key: masked, and nothing for autofill to offer or keep.
@@ -342,6 +343,7 @@ function LinkForm({ replacing, onDone }: { replacing: GuideLink | null; onDone: 
         <Field
           icon="label-outline"
           label={sharedT("Name")}
+          maxLength={200}
           hint={t("Optional")}
           value={name}
           onChangeText={edit(setName)}

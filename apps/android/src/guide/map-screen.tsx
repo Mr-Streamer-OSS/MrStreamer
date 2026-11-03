@@ -1,3 +1,4 @@
+import { catalogueFailures, retryGuideChannels } from "./runtime.ts";
 import type { Listing } from "@mrstreamer/contracts/guide";
 import { formatDate, t as sharedT } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
@@ -49,7 +50,12 @@ export function MapScreen() {
   const [query, setQuery] = useState("");
   const sections = mapSections(input, query);
   const ready = state.kind === "ready" ? state.sources : [];
-  const failed = ready.filter((source) => source.channels.kind === "failed");
+  const failedCatalogue = useStore(catalogueFailures);
+
+  const failed = ready.filter(
+    (source) => source.channels.kind === "failed" || failedCatalogue.has(source.id),
+  );
+
   const count = [...input.channels.values()].reduce((sum, list) => sum + list.length, 0);
 
   // A catalogue read but not yet given to the guide still loads; a failed one says so above.
@@ -60,7 +66,8 @@ export function MapScreen() {
         source.channels.kind === "loading" ||
         (source.channels.kind === "ready" &&
           source.channels.rows.length > 0 &&
-          !input.channels.has(source.id)),
+          !input.channels.has(source.id) &&
+          !failedCatalogue.has(source.id)),
     );
 
   const close = () => router.setParams({ source: undefined, channel: undefined });
@@ -107,7 +114,10 @@ export function MapScreen() {
                   <Button
                     label={sharedT("Try again")}
                     icon="refresh"
-                    onPress={() => failed.forEach((source) => sources.retry(source.id))}
+                    onPress={() => {
+                      failed.forEach((source) => sources.retry(source.id));
+                      retryGuideChannels();
+                    }}
                   />
                 </View>
               </View>

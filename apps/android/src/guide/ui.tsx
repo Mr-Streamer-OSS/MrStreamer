@@ -3,6 +3,7 @@ import { t as sharedT } from "@mrstreamer/core/i18n";
 import { useState, type ReactNode } from "react";
 import {
   Modal,
+  ScrollView,
   Pressable,
   Text,
   TextInput,
@@ -348,36 +349,39 @@ function SheetBody({
       >
         <View style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.handle }} />
       </View>
-      <Text
-        accessibilityRole="header"
-        style={[text.heading, { paddingHorizontal: 24, paddingBottom: 12 }]}
-      >
-        {title}
-      </Text>
-      {actions.map((action) => {
-        const color = action.destructive ? guideColors.failure : colors.text;
+      <ScrollView>
+        <Text
+          numberOfLines={3}
+          accessibilityRole="header"
+          style={[text.heading, { paddingHorizontal: 24, paddingBottom: 12 }]}
+        >
+          {title}
+        </Text>
+        {actions.map((action) => {
+          const color = action.destructive ? guideColors.failure : colors.text;
 
-        return (
-          <Press
-            key={action.label}
-            accessibilityLabel={action.label}
-            onPress={() => {
-              onClose();
-              action.run();
-            }}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 16,
-              minHeight: 56,
-              paddingHorizontal: 24,
-            }}
-          >
-            <Icon name={action.icon} color={color} />
-            <Text style={[text.title, { color, flexShrink: 1 }]}>{action.label}</Text>
-          </Press>
-        );
-      })}
+          return (
+            <Press
+              key={action.label}
+              accessibilityLabel={action.label}
+              onPress={() => {
+                onClose();
+                action.run();
+              }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 16,
+                minHeight: 56,
+                paddingHorizontal: 24,
+              }}
+            >
+              <Icon name={action.icon} color={color} />
+              <Text style={[text.title, { color, flexShrink: 1 }]}>{action.label}</Text>
+            </Press>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }

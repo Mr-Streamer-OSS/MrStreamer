@@ -8,7 +8,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.Future
+import java.util.concurrent.CompletableFuture
 
 /** A short state lock fences every publication against cancellation and revocation. Network,
  * parsing and queries run on separate workers; published databases are immutable. */
@@ -19,12 +19,18 @@ class GuideOwner(root: File) {
   private data class Candidate(val lease: String, val job: String, val generation: Map<String, Any?>, val file: File)
   private val entries = mutableMapOf<String, Entry>()
   private val jobs = mutableMapOf<String, GuideJob>()
+  private val activeReads = mutableMapOf<File, Int>()
+  private val retired = mutableSetOf<File>()
   private val candidates = mutableMapOf<String, Candidate>()
   private val ingest = Executors.newSingleThreadExecutor()
   private val readers = Executors.newFixedThreadPool(2)
   private fun folder(id: String): File {
     val name = MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).joinToString("") { "%02x".format(it) }
-    return File(disk.root, name).apply { if (!exists() && !mkdirs()) throw GuideFailure("disk") }
+    return File(disk.root, name).apply {
+      if (!exists() && !mkdirs()) throw GuideFailure("disk")
+      val metadata = File(this, "owner")
+      if (!metadata.exists()) metadata.writeText(id)
+    }
   }
   private fun file(entry: Entry, generation: String) = File(folder(entry.id), "$generation.db")
   private fun receipt(id: String): Map<String, Any?>? {
@@ -40,8 +46,8 @@ class GuideOwner(root: File) {
       val current = AtomicFile(File(dir, "current.json"))
       val retained = try { JSONObject(String(current.readFully(), Charsets.UTF_8)).getString("id") }
         catch (_: java.io.FileNotFoundException) { null }
-        catch (_: Exception) { throw GuideFailure("disk") }
-      dir.listFiles()?.filter { it.name !in setOf("current.json", "$retained.db") }?.forEach {
+        catch (_: Exception) { return@forEach }
+      dir.listFiles()?.filter { it.name !in setOf("owner", "current.json", "$retained.db") }?.forEach {
         if (!it.delete()) throw GuideFailure("disk")
       }
     }
@@ -59,8 +65,13 @@ class GuideOwner(root: File) {
     background(); entries.clear()
     // Folder names are hashed, so persisted owner names live only in non-secret metadata.
     val retain = ids.map { folder(it).name }.toSet()
-    if (kept.isEmpty()) disk.root.listFiles()?.filter { it.isDirectory && it.name !in retain }?.forEach { if (!it.deleteRecursively()) throw GuideFailure("disk") }
-    ids.map { id -> mapOf("subscriptionId" to id, "activation" to attach(id, 0)) }
+    disk.root.listFiles()?.filter { dir ->
+      dir.isDirectory && dir.name !in retain && !runCatching {
+        val owner = File(dir, "owner").readText()
+        kept.any { owner.startsWith(it) }
+      }.getOrDefault(false)
+    }?.forEach { if (!it.deleteRecursively()) throw GuideFailure("disk") }
+    ids.mapNotNull { id -> runCatching { mapOf("subscriptionId" to id, "activation" to attach(id, 0)) }.getOrNull() }
   }
   fun revoke(id: String) = synchronized(lock) {
     val lease = entries.remove(id)?.lease
@@ -75,25 +86,27 @@ class GuideOwner(root: File) {
     jobs.remove(id)?.cancel()
     candidates.filterValues { it.job == id }.keys.toList().forEach { candidates.remove(it)?.file?.delete() }
   }
-  fun forget(id: String): Boolean {
+  fun forget(id: String): CompletableFuture<Boolean> {
     revoke(id)
     // Serialize erasure behind any ingest that still has this owner's candidate open.
-    return ingest.submit<Boolean> { synchronized(lock) { if (entries.containsKey(id)) false else folder(id).deleteRecursively() } }.get()
+    return CompletableFuture.supplyAsync({ synchronized(lock) { if (entries.containsKey(id)) false else folder(id).deleteRecursively() } }, ingest)
   }
   private fun job(lease: String, id: String): Pair<Entry, GuideJob> = synchronized(lock) {
     val entry = entries.values.firstOrNull { it.lease == lease } ?: throw GuideFailure("changed")
     val job = jobs[id]?.takeIf { it.lease == lease } ?: throw GuideFailure("cancelled")
-    job.check(); entry to job
+    if (job.cancelled) throw GuideFailure("cancelled")
+    entry to job
   }
-  fun prepare(lease: String, id: String, address: String, headers: Map<String, String>, login: List<String>, uncertain: List<String>, now: Long, from: Long, until: Long): Future<Map<String, Any?>> = ingest.submit<Map<String, Any?>> {
+  fun prepare(lease: String, id: String, address: String, headers: Map<String, String>, login: List<String>, uncertain: List<String>, now: Long, from: Long, until: Long): CompletableFuture<Map<String, Any?>> = CompletableFuture.supplyAsync({
     result {
       val (entry, job) = job(lease, id)
+      job.deadline = android.os.SystemClock.elapsedRealtime() + 180000
       val generation = UUID.randomUUID().toString()
       val folder = folder(entry.id)
       val spool = File(folder, "$generation.wire"); val plain = File(folder, "$generation.xml"); val database = File(folder, "$generation.db")
       var keep = false
       try {
-        val url = URL(address)
+        val url = try { URL(address) } catch (_: Exception) { throw GuideFailure("redirect") }
         if (url.protocol !in listOf("http", "https")) throw GuideFailure("redirect")
         val client = okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
           .cookieJar(okhttp3.CookieJar.NO_COOKIES).cache(null)
@@ -135,7 +148,7 @@ class GuideOwner(root: File) {
         if (!keep) { database.delete(); File(database.path + "-journal").delete() }
       }
     }
-  }
+  }, ingest)
   fun publish(lease: String, id: String, candidateId: String): Map<String, Any?> = result {
     synchronized(lock) {
       val (entry, job) = job(lease, id)
@@ -145,17 +158,33 @@ class GuideOwner(root: File) {
       val stream = atomic.startWrite()
       try { stream.write(JSONObject(candidate.generation).toString().toByteArray()); job.check(); atomic.finishWrite(stream) }
       catch (e: Exception) { atomic.failWrite(stream); throw e }
+      val old = entry.generation?.get("id") as? String
       entry.generation = candidate.generation; candidates.remove(candidateId)
+      if (old != null && old != candidateId) {
+        val previous = file(entry, old)
+        if ((activeReads[previous] ?: 0) == 0) previous.delete() else retired.add(previous)
+      }
       candidate.generation
     }
   }
-  fun read(lease: String, generation: String, id: String, action: (GuideIndex) -> Map<String, Any?>): Future<Map<String, Any?>> = readers.submit<Map<String, Any?>> {
+  fun read(lease: String, generation: String, id: String, action: (GuideIndex) -> Map<String, Any?>): CompletableFuture<Map<String, Any?>> = CompletableFuture.supplyAsync({
     result {
       val (entry, job) = job(lease, id)
-      if (entry.generation?.get("id") != generation) throw GuideFailure("changed")
-      job.deadline = minOf(job.deadline, android.os.SystemClock.elapsedRealtime() + 2000)
-      val value = GuideIndex(file(entry, generation), job, disk).use(action)
-      synchronized(lock) { if (job(lease, id).first.generation?.get("id") != generation) throw GuideFailure("changed"); value }
+      val database = synchronized(lock) {
+        if (entry.generation?.get("id") != generation) throw GuideFailure("changed")
+        file(entry, generation).also { activeReads[it] = (activeReads[it] ?: 0) + 1 }
+      }
+      try {
+        job.deadline = android.os.SystemClock.elapsedRealtime() + 2000
+        val value = GuideIndex(database, job, disk).use(action)
+        synchronized(lock) { if (job(lease, id).first.generation?.get("id") != generation) throw GuideFailure("changed"); value }
+      } finally {
+        synchronized(lock) {
+          val count = (activeReads[database] ?: 1) - 1
+          if (count == 0) { activeReads.remove(database); if (retired.remove(database)) database.delete() }
+          else activeReads[database] = count
+        }
+      }
     }
-  }
+  }, readers)
 }

@@ -40,6 +40,43 @@ async function setup() {
 }
 
 describe("Android guide public service", () => {
+  it("refuses failed and busy reads instead of reporting an empty day or falling through", async () => {
+    const { owner, native, control, key } = await setup();
+    control.query = async () => ({ kind: "failed", error: "time" });
+    await expect(owner.schedule(key, localDay(at))).rejects.toThrow();
+    await expect(owner.programmeAt(key, programme.start)).rejects.toThrow();
+    vi.spyOn(native, "begin").mockReturnValue(false);
+    await expect(owner.schedule(key, localDay(at))).rejects.toThrow();
+  });
+  it("names the custom guide that answered a schedule and programme", async () => {
+    const { owner, native, control, key } = await setup();
+
+    const custom = {
+      revision: 1,
+      login: [],
+      provider: { liveGuideRequest: async () => ({ kind: "none" as const }) },
+    };
+
+    owner.configure(new Map([["custom:one", custom]]), new Map());
+    control.activations.set("custom:one", {
+      lease: "custom",
+      generation: { id: "custom-db", fetchedAt: at, until: at + 86400000 },
+    });
+    await owner.attach("custom:one");
+    vi.spyOn(native, "query").mockImplementation(async (lease) => ({
+      kind: "ok",
+      value:
+        lease === "offline"
+          ? { guideId: null, rows: [], more: false }
+          : { guideId: "news.tv", rows: [programme], more: false },
+    }));
+    const page = await owner.schedule(key, localDay(at));
+    expect(page.guide).toBe("custom:one");
+    expect(owner.programmeStatus(key, programme.start, page.programmes[0]!.detail)).toEqual(
+      owner.status("custom:one"),
+    );
+  });
+
   it("reads colon-containing source identities, schedule details and stable programme identity", async () => {
     const { owner, key } = await setup();
     const page = await owner.schedule(key, localDay(at));
@@ -136,6 +173,53 @@ describe("Android guide public service", () => {
         () => false,
       ),
     ).toEqual({ kind: "cancelled" });
+  });
+  it("retries a failed provider attach on foreground", async () => {
+    const { native, control } = guideFixture();
+
+    const source: GuideOrigin = {
+      revision: 1,
+      login: [],
+      provider: { liveGuideRequest: async () => ({ kind: "none" }) },
+    };
+
+    control.activations.set("source", {
+      lease: "good",
+      generation: { id: "good", fetchedAt: at, until: at + 86400000 },
+    });
+    const attach = vi.spyOn(native, "attach").mockRejectedValueOnce(new Error("disk"));
+
+    const owner = createGuide(
+      () => native,
+      () => at,
+      () => source,
+    );
+
+    await owner.attach("source");
+    expect(owner.status("source").error).toBe("unavailable");
+    owner.foreground();
+    await vi.waitFor(() => expect(owner.status("source").availability).toBe("available"));
+    expect(attach).toHaveBeenCalledTimes(2);
+  });
+  it("backs off authoritative playlists without a guide", async () => {
+    let clock = at;
+    const { native } = guideFixture();
+    const request = vi.fn(async () => ({ kind: "none" as const }));
+    const source: GuideOrigin = { revision: 1, login: [], provider: { liveGuideRequest: request } };
+
+    const owner = createGuide(
+      () => native,
+      () => clock,
+      () => source,
+    );
+
+    await owner.attach("source");
+    await owner.refresh("source");
+    const calls = request.mock.calls.length;
+    clock += 60000;
+    owner.foreground();
+    await Promise.resolve();
+    expect(request).toHaveBeenCalledTimes(calls);
   });
   it("builds destination-local routes from stable identities", () => {
     const channel = { sourceId: "xtream:fixture", channelId: "one/two" };

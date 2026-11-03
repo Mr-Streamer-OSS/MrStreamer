@@ -3,18 +3,25 @@ package app.mrstreamer.guide
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
 import java.io.File
-import java.net.URLDecoder
+import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 fun guideTime(value: String?): Long? = try {
   val text = value?.trim() ?: ""
-  val match = Regex("^(\\d{14})(?:\\s+([+-]\\d{4}|Z))?$").matchEntire(text)
+  val match = Regex("^([0-9]{8}(?:[0-9]{2}){0,3})(?:\\s*([+-][0-9]{2}:?[0-9]{2}|Z))?$").matchEntire(text)
   if (match == null) null else {
-    val zone = match.groupValues[2].ifEmpty { "+0000" }
-    LocalDateTime.parse(match.groupValues[1], DateTimeFormatter.ofPattern("uuuuMMddHHmmss").withResolverStyle(java.time.format.ResolverStyle.STRICT))
-      .toInstant(ZoneOffset.of(zone)).toEpochMilli()
+    val digits = match.groupValues[1].padEnd(14, '0')
+    val zone = match.groupValues[2].ifEmpty { "Z" }
+    val offset = if (zone == "Z") 0 else {
+      val parts = zone.replace(":", "")
+      val hours = parts.substring(1, 3).toInt(); val minutes = parts.substring(3, 5).toInt()
+      require(hours <= 23 && minutes < 60)
+      (hours * 60 + minutes) * 60 * if (parts[0] == '-') -1 else 1
+    }
+    LocalDateTime.parse(digits, DateTimeFormatter.ofPattern("uuuuMMddHHmmss").withResolverStyle(java.time.format.ResolverStyle.STRICT))
+      .toInstant(ZoneOffset.UTC).toEpochMilli() - offset * 1000L
   }
 } catch (_: Exception) { null }
 
@@ -22,6 +29,7 @@ fun guideTime(value: String?): Long? = try {
 fun preflight(file: File, job: GuideJob) {
   var token = 0; var text = 0; var depth = 0; var element = 0
   var inTag = false; var quote = 0; var total = 0L
+  var rootSeen = false; var external = false
   val tag = StringBuilder()
   file.inputStream().buffered().use { input ->
     while (true) {
@@ -45,8 +53,14 @@ fun preflight(file: File, job: GuideJob) {
         else if (b == 62) {
           val s = tag.toString()
           if (s.startsWith("?xml") && Regex("encoding\\s*=\\s*['\"](?!utf-8['\"])", RegexOption.IGNORE_CASE).containsMatchIn(s)) throw GuideFailure("xml")
-          if (s.startsWith("!")) throw GuideFailure("xml") // No DTD, entity or declaration reaches the parser.
-          if (!s.startsWith("?")) {
+          if (s.startsWith("!")) {
+            val literal = "(?:\"[^\"]+\"|'[^']+')"
+            val declaration = Regex("!DOCTYPE[\\t\\r\\n ]+tv[\\t\\r\\n ]+(?:SYSTEM[\\t\\r\\n ]+$literal|PUBLIC[\\t\\r\\n ]+$literal[\\t\\r\\n ]+$literal)[\\t\\r\\n ]*>")
+            if (rootSeen || external || depth != 0 || !declaration.matches(s)) throw GuideFailure("xml")
+            external = true
+          }
+          if (!s.startsWith("?") && !s.startsWith("!")) {
+            rootSeen = true
             if (s.startsWith("/")) depth--
             else if (!s.endsWith("/>")) { depth++; if (depth == 2) element = token }
             if (depth > GuideBudget.DEPTH) throw GuideFailure("depth")
@@ -61,11 +75,23 @@ fun preflight(file: File, job: GuideJob) {
   if (inTag || depth != 0) throw GuideFailure("xml")
 }
 
+private fun whole(text: String, value: String) = Regex("(?<![\\p{L}\\p{N}._~\\-])${Regex.escape(value)}(?![\\p{L}\\p{N}._~\\-])").containsMatchIn(text)
+private fun unescaped(text: String): String {
+  val bytes = text.toByteArray(); val out = ByteArrayOutputStream(); var at = 0
+  while (at < bytes.size) {
+    val high = if (at + 2 < bytes.size) bytes[at + 1].toInt().toChar().digitToIntOrNull(16) else null
+    val low = if (at + 2 < bytes.size) bytes[at + 2].toInt().toChar().digitToIntOrNull(16) else null
+    if (bytes[at] == 37.toByte() && high != null && low != null) { out.write(high * 16 + low); at += 3 }
+    else { out.write(bytes[at].toInt()); at++ }
+  }
+  return out.toByteArray().toString(Charsets.UTF_8)
+}
+private fun clipped(text: String, limit: Int) = text.take(text.offsetByCodePoints(0, minOf(limit, text.codePointCount(0, text.length))))
 private fun secret(text: String, login: List<String>, uncertain: List<String>): Boolean {
   var forms = setOf(text)
   repeat(5) {
-    if (forms.any { value -> (login.firstOrNull()?.let { it.isNotEmpty() && value == it } == true) || login.drop(1).filter { it.isNotEmpty() }.any { value.contains(it) } || uncertain.filter { it.isNotEmpty() }.any { Regex("(?<![\\p{L}\\p{N}_])${Regex.escape(it)}(?![\\p{L}\\p{N}_])").containsMatchIn(value) } }) return true
-    val next = forms.flatMap { value -> listOf(value, runCatching { URLDecoder.decode(value.replace("+", "%2B"), "UTF-8") }.getOrDefault(value), runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)) }.toSet()
+    if (forms.any { value -> (login.firstOrNull()?.let { it.isNotEmpty() && whole(value, it) } == true) || login.drop(1).filter { it.isNotEmpty() }.any { value.contains(it) } || uncertain.filter { it.isNotEmpty() }.any { whole(value, it) } }) return true
+    val next = forms.flatMap { value -> listOf(value, unescaped(value), unescaped(value.replace("+", " "))) }.toSet()
     if (next == forms) return false
     forms = next
   }
@@ -83,8 +109,36 @@ fun readXml(file: File, job: GuideJob, login: List<String>, uncertain: List<Stri
   var title: String? = null; var description: String? = null
   val text = StringBuilder()
   try {
-    file.inputStream().reader(Charsets.UTF_8).use { input ->
-      parser.setInput(input)
+    file.inputStream().reader(Charsets.UTF_8).buffered().use { input ->
+      // Preflight validates the only permitted declaration. Remove it before parser input so
+      // the XML implementation never sees an external identifier.
+      val filtered = object : java.io.Reader() {
+        var first = true
+        override fun close() = input.close()
+        override fun read(buffer: CharArray, offset: Int, length: Int): Int {
+          if (length == 0) return 0
+          var c = input.read()
+          if (first) { first = false; if (c == 0xFEFF) c = input.read() }
+          if (c < 0) return -1
+          if (c == '<'.code) {
+            input.mark(10)
+            val head = CharArray(8); val n = input.read(head)
+            input.reset()
+            if (n == 8 && String(head) == "!DOCTYPE") {
+              var quote = 0
+              while (true) {
+                val next = input.read(); if (next < 0) throw GuideFailure("xml")
+                if (quote != 0) { if (next == quote) quote = 0 }
+                else if (next == 34 || next == 39) quote = next
+                else if (next == '>'.code) break
+              }
+              c = ' '.code
+            }
+          }
+          buffer[offset] = c.toChar(); return 1
+        }
+      }
+      parser.setInput(filtered)
       while (true) {
         job.check()
         when (parser.nextToken()) {
@@ -105,7 +159,7 @@ fun readXml(file: File, job: GuideJob, login: List<String>, uncertain: List<Stri
               title = null; description = null
             }
             val id = if (name == "channel") parser.getAttributeValue(null, "id") else if (name == "programme") channel else null
-            if (id != null && id.isNotEmpty() && id.length <= 128) {
+            if (id != null && id.isNotEmpty() && id.toByteArray().size <= 512) {
               ids.add(id); if (ids.size > GuideBudget.CHANNELS) throw GuideFailure("rows")
             }
             stack.add(name); text.setLength(0)
@@ -113,10 +167,10 @@ fun readXml(file: File, job: GuideJob, login: List<String>, uncertain: List<Stri
           XmlPullParser.TEXT, XmlPullParser.CDSECT -> text.append(parser.text)
           XmlPullParser.END_TAG -> {
             val value = text.toString().trim().replace(Regex("\\s+"), " ")
-            if (stack == listOf("tv", "programme", "title") && title == null) title = value.take(300)
-            if (stack == listOf("tv", "programme", "desc") && description == null) description = value.take(2000)
+            if (stack == listOf("tv", "programme", "title") && title == null) title = clipped(value, 300)
+            if (stack == listOf("tv", "programme", "desc") && description == null) description = clipped(value, 2000)
             val s = start; val t = title
-            if (parser.name == "programme" && channel.isNotEmpty() && channel.length <= 128 && s != null && !t.isNullOrEmpty() && (stop == null || stop!! - s >= 60000)) {
+            if (parser.name == "programme" && channel.isNotEmpty() && channel.toByteArray().size <= 512 && s != null && !t.isNullOrEmpty() && (stop == null || stop!! - s >= 60000)) {
               if (listOf(channel, t, description ?: "").any { secret(it, login, uncertain) }) throw GuideFailure("xml")
               insert(channel, s, stop, t, description)
             }

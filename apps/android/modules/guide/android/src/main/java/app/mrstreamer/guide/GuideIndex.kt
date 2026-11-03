@@ -29,7 +29,9 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
           job.check(); stmt.clearBindings(); stmt.bindString(1, channel); stmt.bindLong(2, start)
           if (stop != null) stmt.bindLong(3, stop)
           stmt.bindString(4, title); if (description != null) stmt.bindString(5, description)
-          stmt.executeInsert()
+          try { stmt.executeInsert() }
+          catch (_: android.database.sqlite.SQLiteFullException) { throw GuideFailure("body") }
+          catch (_: android.database.sqlite.SQLiteException) { throw GuideFailure("disk") }
         }
       }
       db.setTransactionSuccessful()
@@ -79,7 +81,9 @@ class GuideIndex(file: File, private val job: GuideJob, private val disk: GuideD
     if (mode == "day" && (until <= from || until - from > 26 * 3600000L)) throw GuideFailure("time")
     val selected = ids.firstOrNull { id ->
       job.check()
-      db.rawQuery("SELECT 1 FROM programmes WHERE channel=? AND stop>? LIMIT 1", arrayOf(id, at.toString())).use { it.moveToFirst() }
+      val condition = when (mode) { "detail" -> "start=?"; "day" -> "stop>? AND start<?"; else -> "stop>?" }
+      val args = when (mode) { "detail" -> arrayOf(id, after.toString()); "day" -> arrayOf(id, from.toString(), until.toString()); else -> arrayOf(id, at.toString()) }
+      db.rawQuery("SELECT 1 FROM programmes WHERE channel=? AND $condition LIMIT 1", args).use { it.moveToFirst() }
     } ?: return mapOf("guideId" to null, "rows" to emptyList<Any>(), "more" to false)
     val condition = when (mode) { "listing" -> "stop>? ORDER BY start LIMIT 2"; "detail" -> "start=? LIMIT 1"; else -> "stop>? AND start<? AND start>? ORDER BY start LIMIT 129" }
     val args = mutableListOf(selected, (if (mode == "listing") at else if (mode == "detail") after else from).toString())

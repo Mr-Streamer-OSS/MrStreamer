@@ -14,7 +14,7 @@ import { localDay, type GuideStatus, type ScheduleItem } from "./guide.ts";
 import { useGuideStart, useListingRevision, useProgramme, useSchedule } from "./hooks.ts";
 import { dayLabel, programmeRange, progressOf, timeLeft } from "./present.ts";
 import { BESIDE, channelKey, param, programmeHref, type ChannelIdentity } from "./routes.ts";
-import { guide, useGuideStatus } from "./runtime.ts";
+import { catalogueFailures, retryGuideChannels, guide, useGuideStatus } from "./runtime.ts";
 import { t } from "./strings.ts";
 import { Button, OutOfDate, Press, Progress, Still, guideColors, text } from "./ui.tsx";
 
@@ -104,7 +104,7 @@ export function ScheduleScreen() {
           onProgramme={open}
         />
       ) : (
-        <Still text={missing ? t("Channel unavailable") : t("Loading channels…")} />
+        <ChannelState sourceId={identity.sourceId} missing={missing} />
       )}
     </Screen>
   );
@@ -202,7 +202,7 @@ function Schedule({
               </Press>
             )}
           </View>
-          {outOfDate(guide.status(identity.sourceId)) ? (
+          {schedule.status && outOfDate(schedule.status) ? (
             <OutOfDate
               label={t("Guide may be out of date")}
               style={{ paddingHorizontal: 16, borderBottomWidth: 1, borderColor: colors.hairline }}
@@ -258,13 +258,16 @@ function Schedule({
               </Text>
             </Press>
           ) : null}
-          {schedule.failed && schedule.programmes.length > 0 ? (
-            <Text
-              accessibilityLiveRegion="polite"
-              style={[text.secondary, { paddingHorizontal: 16, paddingVertical: 12 }]}
-            >
-              {t("Couldn't update schedule")}
-            </Text>
+          {schedule.failed ? (
+            <View>
+              <Button label={sharedT("Try again")} onPress={schedule.retry} />
+              <Text
+                accessibilityLiveRegion="polite"
+                style={[text.secondary, { paddingHorizontal: 16, paddingVertical: 12 }]}
+              >
+                {t("Couldn't update schedule")}
+              </Text>
+            </View>
           ) : null}
         </>
       }
@@ -307,7 +310,7 @@ function ProgrammeRow({
         }}
       >
         <Text
-          style={{ width: 44, color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "700" }}
+          style={{ width: 72, color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "700" }}
         >
           {time}
         </Text>
@@ -339,7 +342,7 @@ function ProgrammeRow({
         backgroundColor: selected ? guideColors.current : undefined,
       }}
     >
-      <Text style={[text.secondary, { width: 44 }]}>{time}</Text>
+      <Text style={[text.secondary, { width: 72 }]}>{time}</Text>
       <Text
         style={{
           flex: 1,
@@ -352,6 +355,19 @@ function ProgrammeRow({
         {item.title}
       </Text>
     </Press>
+  );
+}
+
+function ChannelState({ sourceId, missing }: { sourceId: string; missing: boolean }) {
+  const failed = useStore(catalogueFailures).has(sourceId);
+
+  return failed ? (
+    <View style={{ padding: 16, gap: 12 }}>
+      <Text style={text.heading}>{t("Couldn't load channels")}</Text>
+      <Button label={sharedT("Try again")} onPress={retryGuideChannels} />
+    </View>
+  ) : (
+    <Still text={missing ? t("Channel unavailable") : t("Loading channels…")} />
   );
 }
 
@@ -383,13 +399,7 @@ export function ProgrammeScreen() {
           pane={false}
         />
       ) : (
-        <Still
-          text={
-            missing || start === null
-              ? t("Programme unavailable. Go Back and choose it again.")
-              : t("Loading channels…")
-          }
-        />
+        <ChannelState sourceId={identity.sourceId} missing={missing || start === null} />
       )}
     </Screen>
   );
@@ -412,7 +422,7 @@ function ProgrammeDetails({
   pane: boolean;
 }) {
   const key = channelKey(identity);
-  const { pending, value } = useProgramme(key, start, detail);
+  const { pending, value, failed, retry, status } = useProgramme(key, start, detail);
   const insets = useSafeAreaInsets();
   const inset = pane ? 24 : 16;
   const now = Date.now();
@@ -441,12 +451,15 @@ function ProgrammeDetails({
           </>
         ) : (
           <Text accessibilityLiveRegion="polite" style={[text.heading, { paddingTop: 16 }]}>
-            {pending
-              ? t("Loading programme…")
-              : t("Programme unavailable. Go Back and choose it again.")}
+            {failed
+              ? t("Couldn't load programme")
+              : pending
+                ? t("Loading programme…")
+                : t("Programme unavailable. Go Back and choose it again.")}
           </Text>
         )}
       </View>
+      {failed ? <Button label={sharedT("Try again")} onPress={retry} /> : null}
       {value?.description ? (
         <Text
           style={{
@@ -460,7 +473,7 @@ function ProgrammeDetails({
           {value.description}
         </Text>
       ) : null}
-      {outOfDate(guide.status(identity.sourceId)) ? (
+      {status && outOfDate(status) ? (
         <OutOfDate
           label={t("Guide may be out of date")}
           style={{ paddingTop: 20, paddingHorizontal: inset }}
