@@ -43,6 +43,7 @@ vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 const params = vi.hoisted(() => ({ id: "custom", country: "" }));
 
 vi.mock("expo-router", () => ({
+  useSegments: () => ["(tabs)", "(live)"],
   useLocalSearchParams: () => params,
   useIsFocused: () => true,
   router: { back() {}, push: vi.fn() },
