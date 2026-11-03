@@ -11,6 +11,8 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import {
   playChannel,
@@ -919,6 +921,12 @@ function GuideGrid({
   // automatic header inset is applied. Never replay an inset change recorded during a push/pop.
   const saved = useRef(gridScroll.get(scope));
   const list = useRef<FlatList<Channel>>(null);
+  const navigation = useNavigation();
+  // End events include the final position missed by throttled scroll samples, including
+  // accessibility scrolling. Ignore the synthetic end event when a covered screen detaches.
+  const remember = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (navigation.isFocused()) gridScroll.set(scope, nativeEvent.contentOffset.y);
+  };
 
   return (
     <FlatList
@@ -1023,13 +1031,9 @@ function GuideGrid({
         list.current?.scrollToOffset({ offset: saved.current, animated: false });
         saved.current = undefined;
       }}
-      onScroll={({ nativeEvent }) => {
-        // Fabric marks user drags and momentum, excluding layout and navigation inset changes.
-        if ("responderIgnoreScroll" in nativeEvent && nativeEvent.responderIgnoreScroll === false) {
-          gridScroll.set(scope, nativeEvent.contentOffset.y);
-        }
-      }}
-      scrollEventThrottle={100}
+      onScrollEndDrag={remember}
+      onMomentumScrollEnd={remember}
+      onScrollToTop={remember}
       onViewableItemsChanged={onVisible}
       viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}
       initialNumToRender={12}
