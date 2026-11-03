@@ -1426,7 +1426,7 @@ export const es: Translation = {
   "Less than a minute missed at {time}.": "Se perdió menos de un minuto a las {time}.",
   "Less than a minute missed in between.": "Se perdió menos de un minuto entremedias.",
   "Paused at {time} while Mr. Streamer was closed or the computer slept.":
-    "En pausa desde las {time}: Mr. Streamer estaba cerrado o el ordenador en reposo.",
+    "En pausa desde las {time}: Mr. Streamer estaba cerrado o el equipo en reposo.",
   "Paused at {time}. Every connection is in use.":
     "En pausa desde las {time}. Todas las conexiones están en uso.",
   "Paused at {time}. The stream stopped. Trying again.":
@@ -1561,7 +1561,7 @@ export const es: Translation = {
   "Scheduled anyway, it starts as soon as one is free and records the rest until {time}. Nothing is stopped for it.":
     "Programado de todos modos, empieza en cuanto se libere una y graba el resto hasta las {time}. No se detiene nada por ello.",
   "Records while Mr. Streamer is open and the computer is awake.":
-    "Graba mientras Mr. Streamer esté abierto y el ordenador no esté en reposo.",
+    "Graba mientras Mr. Streamer esté abierto y el equipo no esté en reposo.",
   "Schedule anyway": "Programar de todos modos",
   Schedule: "Programar",
   Scheduled: "Programada",
@@ -1577,7 +1577,7 @@ export const es: Translation = {
     "Todas las conexiones estarán en uso, por {holders}.",
   "Every connection is in use, by {holders}.": "Todas las conexiones están en uso, por {holders}.",
   "Mr. Streamer wasn't open, or the computer slept.":
-    "Mr. Streamer no estaba abierto, o el ordenador estaba en reposo.",
+    "Mr. Streamer no estaba abierto, o el equipo estaba en reposo.",
   "Every connection was in use.": "Todas las conexiones estaban en uso.",
   "The stream couldn't be opened.": "No se pudo abrir la emisión.",
   "Started {minutes} min late.": "Empezó {minutes} min tarde.",
@@ -1591,7 +1591,7 @@ export const es: Translation = {
   "Remove {title}": "Quitar {title}",
   "{start} to {end}, with padding": "{start} a {end}, con margen",
   "Edit {title}": "Editar {title}",
-  "It couldn't be written to this computer.": "No se pudo guardar en este ordenador.",
+  "It couldn't be written to this computer.": "No se pudo guardar en este equipo.",
   "Trying again": "Reintentando",
   "The guide listed another programme then, or the channel was gone.":
     "La guía mostraba otro programa a esa hora, o el canal ya no estaba.",
