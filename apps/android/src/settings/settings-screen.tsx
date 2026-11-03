@@ -7,12 +7,13 @@ import {
   Pressable,
   ScrollView,
   Text,
+  ToastAndroid,
   useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { currentLanguage, formatNumber, t as coreText } from "@mrstreamer/core/i18n";
-import type { LanguageChoice } from "@mrstreamer/mobile/language/resolve";
+import type { LanguageChoice } from "@mrstreamer/mobile/language";
 import { sources } from "../bootstrap/sources.ts";
 import { monogram } from "../connect/catalogue-screen.tsx";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
@@ -21,15 +22,20 @@ import type { ConnectedSource } from "../connect/sources.ts";
 import { layoutFor } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { useStore } from "../platform/store.ts";
-import { player } from "../player/instance.ts";
 import { statistics } from "../telemetry/index.ts";
 import { Sheet } from "../ui/sheet.tsx";
 import { colors } from "../ui/theme.ts";
 import { build } from "./build.ts";
 import { t } from "./copy.ts";
 import { DiagnosticsPane } from "./diagnostics-pane.tsx";
-import { chooseLanguage, languageChoice, useInterfaceLanguage } from "./language.ts";
-import licences from "../../licenses/manifest.json";
+import {
+  chooseLanguage,
+  languageChoice,
+  useInterfaceLanguage,
+  useLanguageAvailability,
+  retryLanguage,
+} from "./language.ts";
+import licenceSummary from "../../licenses/summary.json";
 import { onStack } from "./paths.ts";
 import {
   Dialog,
@@ -42,14 +48,13 @@ import {
   SwitchRow,
   useSnackbar,
 } from "./parts.tsx";
-import { needsLogin, providerRecovery } from "./recovery.ts";
+import { recovery } from "./recovery-owner.ts";
+import { needsLogin } from "./recovery.ts";
 
 const PRIVACY_POLICY = "https://mrstreamer.app/privacy";
 
 /** From 840dp Diagnostics shows beside the list, as `Screen` places a detail pane. */
 const BESIDE = 840;
-
-const recovery = providerRecovery(sources, () => statistics.discard(), player);
 
 type Open =
   | { readonly kind: "language" }
@@ -66,6 +71,9 @@ type Open =
  */
 export function SettingsScreen() {
   useInterfaceLanguage();
+  const languageUnavailable = useLanguageAvailability();
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  const removingIds = useRef(new Set<string>());
   const { show } = useLocalSearchParams<{ show?: string }>();
   const segments: readonly string[] = useSegments();
   const state = useStore(sources.state);
@@ -91,7 +99,12 @@ export function SettingsScreen() {
   }
 
   async function remove(source: ConnectedSource) {
+    if (removingIds.current.has(source.id)) return;
+    removingIds.current.add(source.id);
+    setBusy(new Set(removingIds.current));
     const result = await recovery.remove(source.id);
+    removingIds.current.delete(source.id);
+    setBusy(new Set(removingIds.current));
 
     const messages: string[] = [];
 
@@ -116,6 +129,10 @@ export function SettingsScreen() {
 
     if (messages.length) {
       const text = messages.join(" ");
+      const now = sources.state.get();
+
+      if (now.kind === "ready" && now.sources.length === 0)
+        ToastAndroid.show(text, ToastAndroid.LONG);
 
       if (result.erase === "removed") notify({ text });
       else notify({ text, action: { label: t("Try again"), run: () => void remove(source) } });
@@ -171,8 +188,10 @@ export function SettingsScreen() {
         <Section name={t("General")} first>
           <Row
             label={t("Interface language")}
-            value={languageName(languageChoice())}
-            onPress={() => setOpen({ kind: "language" })}
+            value={
+              languageUnavailable ? t("Unavailable. Try again.") : languageName(languageChoice())
+            }
+            onPress={() => (languageUnavailable ? retryLanguage() : setOpen({ kind: "language" }))}
           />
         </Section>
         <Section name={t("Providers")}>
@@ -180,7 +199,10 @@ export function SettingsScreen() {
             <ProviderRow
               key={source.id}
               source={source}
-              onPress={() => setOpen({ kind: "actions", id: source.id })}
+              busy={busy.has(source.id)}
+              onPress={() => {
+                if (!busy.has(source.id)) setOpen({ kind: "actions", id: source.id });
+              }}
             />
           ))}
           <Pressed
@@ -213,7 +235,19 @@ export function SettingsScreen() {
           <SwitchRow
             label={t("Share basic usage statistics")}
             on={statisticsOn}
-            onChange={(on) => void statistics.configure(on)}
+            onChange={(on) => {
+              const choice = statistics.consent.pendingRevocation ? false : on;
+
+              const configure = () => {
+                if (!statistics.configure(choice))
+                  notify({
+                    text: t("They can't be saved on this phone right now."),
+                    action: { label: t("Try again"), run: configure },
+                  });
+              };
+
+              configure();
+            }}
           />
           <Note>
             {t("Counts app use, the screens you open and provider actions.")}{" "}
@@ -242,13 +276,13 @@ export function SettingsScreen() {
           <Row label={t("Version")} value={`${build.version} (${build.code})`} />
           <Row
             label={t("Licences")}
-            value={formatNumber(licences.length)}
+            value={formatNumber(licenceSummary.count)}
             trailing="next"
             onPress={() => router.push(onStack(segments, "licences"))}
           />
         </Section>
       </ScrollView>
-      {snackbar}
+      {folded ? null : snackbar}
       <Sheet
         visible={open?.kind === "language"}
         label={t("Interface language")}
@@ -278,7 +312,16 @@ export function SettingsScreen() {
         label={asked?.label ?? t("Add provider")}
         onClose={close}
       >
-        <ConnectScreen owner={sources} title={asked?.label} onDone={close} onConnected={close} />
+        <ConnectScreen
+          owner={
+            asked
+              ? { ...sources, connect: (input, signal) => sources.connect(input, signal, asked.id) }
+              : sources
+          }
+          title={asked?.label}
+          onDone={close}
+          onConnected={close}
+        />
       </Sheet>
       <Dialog
         visible={removing !== null}
@@ -317,7 +360,15 @@ function languageName(choice: LanguageChoice): string {
 }
 
 /** A source: its badge, name and status, red when it failed; it opens the source's actions. */
-function ProviderRow({ source, onPress }: { source: ConnectedSource; onPress: () => void }) {
+function ProviderRow({
+  source,
+  onPress,
+  busy,
+}: {
+  source: ConnectedSource;
+  onPress: () => void;
+  busy: boolean;
+}) {
   const status = statusOf(source);
 
   return (
@@ -345,7 +396,11 @@ function ProviderRow({ source, onPress }: { source: ConnectedSource; onPress: ()
         >
           {source.label}
         </Text>
-        <Status source={source} />
+        {busy ? (
+          <Text style={{ color: colors.secondary }}>{t("Removing…")}</Text>
+        ) : (
+          <Status source={source} />
+        )}
       </View>
     </Pressed>
   );

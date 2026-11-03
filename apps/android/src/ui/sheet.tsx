@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { t } from "../navigation/copy.ts";
-import { Modal, Pressable, View } from "react-native";
+import { Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "./theme.ts";
 
@@ -68,7 +68,7 @@ export function Sheet({
               style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: colors.handle }}
             />
           </View>
-          {children}
+          {fit ? <ScrollView style={{ flexShrink: 1 }}>{children}</ScrollView> : children}
         </View>
       </SafeAreaProvider>
     </Modal>

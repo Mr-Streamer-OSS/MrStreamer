@@ -6,8 +6,7 @@ import {
   type Plural,
 } from "@mrstreamer/core/i18n";
 
-// Android feature text, one catalogue per feature area (onboarding.ts, navigation.ts,
-// settings.ts, failures.ts), so a later area adds its own file without touching these. Each is
+// Android feature text, one catalogue per feature area (<area>/copy.ts), so a later area adds its own file without touching these. Each is
 // keyed by its English text, as core's catalogue is, in the language core's `setLanguage` made the
 // active one (the Android language owner sets it at launch and on change):
 //

@@ -9,7 +9,11 @@ export interface RemovalResult {
 
 /** This phone no longer has the source's login, so it needs its password or link again. */
 export function needsLogin(source: ConnectedSource): boolean {
-  return source.channels.kind === "failed" && source.channels.error.kind === "needs-secret";
+  return (
+    source.channels.kind === "failed" &&
+    (source.channels.error.kind === "needs-secret" ||
+      source.channels.error.kind === "invalid-login")
+  );
 }
 
 /**
@@ -27,26 +31,50 @@ export function providerRecovery(
     return now.kind === "ready" ? now.sources.find((each) => each.id === id) : undefined;
   };
 
+  const pending = new Map<string, Promise<RemovalResult>>();
+
+  async function remove(id: string): Promise<RemovalResult> {
+    const release: Release[] = [];
+
+    const matches: Parameters<PlayerOwner["release"]>[0] = (hold) =>
+      hold.kind === "source" && hold.sourceId === id;
+
+    try {
+      release.push(...(await player.release(matches)));
+      // Playback can start while the first release waits for its readers.
+      release.push(...(await player.release(matches)));
+    } catch {
+      return { erase: "refused", release };
+    }
+
+    try {
+      await owner.remove(id);
+    } catch {
+      const source = listed(id);
+
+      return { erase: source && needsLogin(source) ? "partial" : "refused", release };
+    }
+
+    const now = owner.state.get();
+
+    if (now.kind === "ready" && now.sources.length === 0 && !discardStatistics())
+      return { erase: "statistics-not-cleared", release };
+
+    return { erase: "removed", release };
+  }
+
   return {
-    async remove(id: string): Promise<RemovalResult> {
-      const release = await player.release(
-        (hold) => hold.kind === "source" && hold.sourceId === id,
-      );
+    get isRemoving() {
+      return pending.size > 0;
+    },
+    remove(id: string): Promise<RemovalResult> {
+      const active = pending.get(id);
 
-      try {
-        await owner.remove(id);
-      } catch {
-        const source = listed(id);
+      if (active) return active;
+      const work = remove(id).finally(() => pending.delete(id));
+      pending.set(id, work);
 
-        return { erase: source && needsLogin(source) ? "partial" : "refused", release };
-      }
-
-      const now = owner.state.get();
-
-      if (now.kind === "ready" && now.sources.length === 0 && !discardStatistics())
-        return { erase: "statistics-not-cleared", release };
-
-      return { erase: "removed", release };
+      return work;
     },
   };
 }

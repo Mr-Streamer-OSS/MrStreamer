@@ -1,6 +1,15 @@
+import { currentLanguage } from "@mrstreamer/core/i18n";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useEffect, useState, type ComponentRef, type ReactNode, type Ref } from "react";
-import { AccessibilityInfo, Modal, Pressable, Text, View } from "react-native";
+import {
+  AccessibilityInfo,
+  Modal,
+  Pressable,
+  ScrollView,
+  useWindowDimensions,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useKeyboardFocus } from "../ui/focus.ts";
 import type { IconName } from "../ui/icon-button.tsx";
@@ -35,7 +44,7 @@ export function Section({
             letterSpacing: 0.72,
           }}
         >
-          {name.toLocaleUpperCase()}
+          {name.toLocaleUpperCase(currentLanguage().locale)}
         </Text>
       </View>
       {children}
@@ -401,6 +410,8 @@ export function Dialog({
   onDismiss?: () => void;
   children: ReactNode;
 }) {
+  const { height, fontScale } = useWindowDimensions();
+
   return (
     <Modal
       visible={visible}
@@ -426,6 +437,7 @@ export function Dialog({
           style={{
             width: "100%",
             maxWidth: 560,
+            maxHeight: height * 0.88,
             alignSelf: "center",
             gap: 16,
             paddingTop: 24,
@@ -435,22 +447,24 @@ export function Dialog({
             backgroundColor: colors.surface,
           }}
         >
-          <Text
-            accessibilityRole="header"
-            style={{
-              color: colors.text,
-              fontSize: 22,
-              lineHeight: 28,
-              fontWeight: "700",
-              letterSpacing: -0.22,
-            }}
-          >
-            {title}
-          </Text>
-          <View style={{ gap: 12 }}>{children}</View>
+          <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 16 }}>
+            <Text
+              accessibilityRole="header"
+              style={{
+                color: colors.text,
+                fontSize: 22,
+                lineHeight: 28,
+                fontWeight: "700",
+                letterSpacing: -0.22,
+              }}
+            >
+              {title}
+            </Text>
+            <View style={{ gap: 12 }}>{children}</View>
+          </ScrollView>
           <View
             style={
-              stacked
+              stacked || fontScale > 1.3
                 ? { alignItems: "flex-end", paddingTop: 8 }
                 : { flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingTop: 8 }
             }

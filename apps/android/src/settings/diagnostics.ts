@@ -1,4 +1,4 @@
-import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
+import { formatNumber } from "@mrstreamer/core/i18n";
 import type { Sources } from "../connect/sources.ts";
 
 const checked = (value: string, pattern: RegExp) => (pattern.test(value) ? value : "unknown");
@@ -35,7 +35,7 @@ export function diagnosticsText(input: {
         : []),
     ]),
     "",
-    `Made ${formatDate(input.now, "date")}, ${formatDate(input.now, "time")}`,
+    `Made ${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(input.now)}`,
     "",
     "Addresses, logins, provider and title names, viewing history and file paths are left out.",
     "",

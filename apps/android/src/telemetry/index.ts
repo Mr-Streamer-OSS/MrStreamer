@@ -9,6 +9,16 @@ const files = preferences();
 export const statistics = androidAnalytics({
   load: () => files.read("statistics.json"),
   save: (record) => files.write("statistics.json", record),
+  revocation: {
+    load: () => {
+      const value = files.read("statistics-revocation.json");
+
+      if (value !== null && typeof value !== "boolean") throw new Error("Revocation unavailable");
+
+      return value === true;
+    },
+    save: (pending) => files.write("statistics-revocation.json", pending),
+  },
   uuid: () =>
     "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (letter) => {
       const random = Math.floor(Math.random() * 16);

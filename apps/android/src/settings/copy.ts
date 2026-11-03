@@ -1,9 +1,11 @@
-import { catalogue } from "@mrstreamer/mobile/language/catalogue";
+import { catalogue } from "@mrstreamer/mobile/language";
 
 /** Settings, its sheets and dialogs, the statistics choice, Diagnostics and Licences. */
 export const t = catalogue(
   {
     Settings: "Settings",
+    "Removing…": "Removing…",
+    "Unavailable. Try again.": "Unavailable. Try again.",
     General: "General",
     "Interface language": "Interface language",
     "System default ({language})": "System default ({language})",
@@ -63,6 +65,8 @@ export const t = catalogue(
   {
     "nl-NL": {
       Settings: "Instellingen",
+      "Removing…": "Verwijderen…",
+      "Unavailable. Try again.": "Niet beschikbaar. Opnieuw proberen.",
       General: "Algemeen",
       "Interface language": "Taal van de interface",
       "System default ({language})": "Systeem ({language})",

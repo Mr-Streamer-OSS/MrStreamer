@@ -1,3 +1,4 @@
+import { currentLanguage } from "@mrstreamer/core/i18n";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
 import { useRef, type ComponentRef } from "react";
@@ -196,7 +197,7 @@ function LicencePane({
             letterSpacing: 0.72,
           }}
         >
-          {t("Notice").toLocaleUpperCase()}
+          {t("Notice").toLocaleUpperCase(currentLanguage().locale)}
         </Text>
         <Text selectable style={{ color: colors.text, fontSize: 14, lineHeight: 20 }}>
           {component.notice}

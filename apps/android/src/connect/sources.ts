@@ -167,8 +167,8 @@ export interface SourcesOwner {
   onDemand(id: string): OnDemandReader | null;
   /** Reads the saved sources and signs each in again. Call once, at launch. */
   restore(): Promise<void>;
-  /** Checks `input` with its provider, then saves it and lists its channels. */
-  connect(input: LoginInput, signal?: AbortSignal): Promise<Connected>;
+  /** Checks and saves `input`, then lists its channels. `replaceId` re-enters a listed source. */
+  connect(input: LoginInput, signal?: AbortSignal, replaceId?: string): Promise<Connected>;
   /** Checks a source's login and lists its channels again. */
   retry(id: string): void;
   /** Erases the source's authority, then stops its reads and forgets it. Throws when refused. */
@@ -319,7 +319,14 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
       for (const source of restoredSources) load(source.id);
     },
 
-    async connect(input, signal) {
+    async connect(input, signal, replaceId) {
+      const replacing = replaceId ? readers.current(replaceId) : undefined;
+
+      const replacementStands = () =>
+        !replaceId ||
+        (listed().some((source) => source.id === replaceId) &&
+          readers.current(replaceId) === replacing);
+
       let parsed: ParsedLogin;
 
       try {
@@ -345,10 +352,11 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
         return { kind: "failed", error, http };
       }
 
-      const saved = savedOf(authority);
+      const identity = savedOf(authority);
+      const saved = replaceId ? { ...identity, id: replaceId } : identity;
       await ready;
 
-      if (signal?.aborted) return { kind: "cancelled" };
+      if (signal?.aborted || !replacementStands()) return { kind: "cancelled" };
       const known = listed().some((source) => source.id === saved.id);
       // What a cancel or a refused list puts back: the login this source had, or none. A new
       // login left behind no list names, and the next launch erases it.
@@ -364,6 +372,12 @@ export function sourcesOwner(platform: SourcesPlatform): SourcesOwner {
         await platform.credentials.write(saved.id, authority);
       } catch (cause) {
         return { kind: "failed", error: failureOf(cause), http: null };
+      }
+
+      if (!replacementStands()) {
+        await platform.credentials.remove(saved.id).catch(() => {});
+
+        return { kind: "cancelled" };
       }
 
       if (signal?.aborted) {

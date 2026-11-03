@@ -633,3 +633,22 @@ it.each(["remove", "replace", "partial-remove"] as const)(
     expect(listed(owner).filter((source) => source.id === connected.id)).toEqual(current);
   },
 );
+
+it("re-enters a provider with changed account details into the same source", async () => {
+  const phone = newPhone();
+  const owner = launch(phone);
+  await owner.restore();
+  const first = await owner.connect(xtream());
+
+  if (first.kind !== "connected") throw Error("fixture did not connect");
+  await settled(owner);
+  const replaced = await owner.connect(m3u(), undefined, first.id);
+  expect(replaced).toEqual({ kind: "connected", id: first.id });
+  const rows = await settled(owner);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.id).toBe(first.id);
+  expect(phone.sealed.size).toBe(1);
+  const restarted = launch(phone);
+  await restarted.restore();
+  expect((await settled(restarted)).map(({ id }) => id)).toEqual([first.id]);
+});

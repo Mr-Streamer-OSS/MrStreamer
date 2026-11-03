@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import tarfile
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -20,7 +21,12 @@ CACHE = APP.parents[1] / '.local' / 'licence-inputs'
 CACHE.mkdir(parents=True, exist_ok=True)
 
 def fetch(url):
-    key = hashlib.sha256(url.encode()).hexdigest()
+    if url.startswith('file:'):
+        try:
+            with urllib.request.urlopen(url) as answer: return answer.read()
+        except Exception: return None
+    inputs = (DEST / 'notice-sources.json').read_bytes() + (APP / 'pnpm-lock.yaml').read_bytes() + (DEST / 'releaseRuntimeClasspath.txt').read_bytes()
+    key = hashlib.sha256(url.encode() + hashlib.sha256(inputs).digest()).hexdigest()
     path = CACHE / key
     if path.exists(): return path.read_bytes()
     try:
@@ -30,40 +36,45 @@ def fetch(url):
     return value
 
 def repository_url(value):
-    value = value.removeprefix('git+').replace('ssh://git@github.com/', 'https://github.com/').replace('git@github.com:', 'https://github.com/').removesuffix('.git')
+    value = value.removeprefix('git+').replace('git://', 'https://').replace('ssh://git@github.com/', 'https://github.com/').replace('git@github.com:', 'https://github.com/').removesuffix('.git')
     if '://' not in value: value = 'https://github.com/' + value.removeprefix('github:')
     return value
 
 def notices(folder):
     return '\n\n'.join(path.read_text(errors='replace') for path in sorted(folder.rglob("*"))
-                       if path.is_file() and re.match(r'^(licen[cs]e|notice|copying|copyright)([.\-_]|$)', path.name, re.I))
-
-# Metro's release source map identifies shipped JS; CLI/build-only packages are not in the app.
-bundle = CACHE / 'bundle'
-subprocess.run(['pnpm', 'exec', 'expo', 'export', '--platform', 'android', '--source-maps', '--output-dir', str(bundle)], cwd=APP, env={**os.environ, 'CI': '1'}, check=True, stdout=subprocess.DEVNULL)
-runtime = set()
-for source_map in bundle.rglob('*.map'):
-    for source in json.loads(source_map.read_text()).get('sources', []):
-        match = re.search(r'node_modules/(?:\.pnpm/[^/]+/node_modules/)?(@[^/]+/[^/]+|[^/]+)', source)
-        if not match: continue
-        relative = source[match.start():match.end()]
-        package_json = APP / relative / 'package.json'
-        if not package_json.exists(): raise RuntimeError(f'Unresolved bundle package: {relative}')
-        metadata = json.loads(package_json.read_text())
-        runtime.add((metadata['name'], metadata['version']))
+                       if path.is_file() and re.match(r'^(licen[cs]e|unlicen[cs]e|notice|copying|copyright)([.\-_]|$)', path.name, re.I))
 
 def autolink(command):
     output = subprocess.check_output(['pnpm', 'exec', 'expo-modules-autolinking', command, '--platform', 'android', '--json'], cwd=APP).decode()
     return json.loads(output[output.index('{'):])
 
 expo_modules = autolink('resolve')['modules']
-rn_modules = autolink('react-native-config')['dependencies']
-for module in expo_modules:
-    runtime.add((module['packageName'], module['packageVersion']))
-for module in rn_modules.values():
-    metadata = json.loads((Path(module['root']) / 'package.json').read_text())
-    runtime.add((metadata['name'], metadata['version']))
-js = json.loads(subprocess.check_output(['pnpm', 'licenses', 'list', '--prod', '--json'], cwd=APP))
+js = json.loads(subprocess.check_output(['pnpm', 'licenses', 'list', '--json'], cwd=APP))
+# Include all locked versions, including tooling and optional packages for other hosts.
+installed = set()
+for packages in js.values():
+    for package in packages:
+        for folder in package['paths']:
+            metadata = json.loads((Path(folder) / 'package.json').read_text())
+            installed.add(f"{metadata['name']}@{metadata['version']}")
+locked = (APP / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
+for key in re.findall(r"^  '?([^\s']+@[^\s']+)'?:$", locked, re.M):
+    if key in installed: continue
+    name, version = key.rsplit('@', 1)
+    folder = CACHE / 'packages' / hashlib.sha256(key.encode()).hexdigest()
+    if not (folder / 'package/package.json').exists():
+        published = fetch(f'https://registry.npmjs.org/{name}/{version}')
+        if not published: raise RuntimeError(f'Metadata unavailable: {key}')
+        metadata = json.loads(published)
+        archive = fetch(metadata['dist']['tarball'])
+        if not archive: raise RuntimeError(f'Package unavailable: {key}')
+        folder.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as contents:
+            contents.extractall(folder, filter='data')
+    metadata = json.loads((folder / 'package/package.json').read_text())
+    licence = metadata.get('license', 'See notice')
+    if isinstance(licence, dict): licence = licence.get('type', 'See notice')
+    js.setdefault(licence, []).append(dict(name=name, paths=[str(folder / 'package')]))
 known = {package['name'] for packages in js.values() for package in packages}
 for module in expo_modules:
     # Repository-native modules share the app's licence notice below; Maven dependencies remain individual entries.
@@ -82,10 +93,9 @@ for licence, packages in js.items():
         for folder in package['paths']:
             folder = Path(folder)
             metadata = json.loads((folder / 'package.json').read_text())
-            if (metadata['name'], metadata['version']) not in runtime: continue
             text = notices(folder)
             if not text:
-                text = '\n\n'.join(p.read_text(errors='replace') for p in sorted(folder.rglob('*')) if p.is_file() and re.search(r'(^|[.\-_])(licen[cs]e|notice)([.\-_]|$)', p.name, re.I))
+                text = '\n\n'.join(p.read_text(errors='replace') for p in sorted(folder.rglob('*')) if p.is_file() and re.search(r'(^|[.\-_])(licen[cs]e|unlicen[cs]e|notice)([.\-_]|$)', p.name, re.I))
             repository = metadata.get('repository', '')
             if isinstance(repository, dict): repository = repository.get('url', '')
             if not repository:
@@ -106,7 +116,7 @@ for licence, packages in js.items():
                     head = json.loads(published).get('gitHead') if published else None
                     tags = [head, f"{package['name']}@{metadata['version']}", f"v{metadata['version']}", metadata['version']]
                     for tag in filter(None, tags):
-                        for filename in ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'license.md', 'LICENCE', 'LICENSE-MIT', 'README.md']:
+                        for filename in ['LICENSE', 'LICENSE.md', 'LICENSE.txt', 'license', 'license.md', 'LICENCE', 'LICENSE-MIT', 'UNLICENSE', 'README.md']:
                             value = fetch(f'https://raw.githubusercontent.com/{location}/{tag}/{filename}')
                             if value:
                                 candidate = value.decode('utf8', errors='replace')
@@ -125,13 +135,13 @@ for licence, packages in js.items():
 coordinates = set()
 for line in (DEST / 'releaseRuntimeClasspath.txt').read_text().splitlines():
     if '(c)' in line: continue
-    match = re.search(r'--- ([\w.-]+):([\w.-]+):([^\s]+)(?: -> ([^\s]+))?', line)
+    match = re.search(r'--- ([\w.-]+):([\w.-]+)(?::([^\s]+))?(?: -> ([^\s]+))?', line)
     if not match: continue
     group, name, version, resolved = match.groups()
     if resolved:
         if ':' in resolved: group, name, version = resolved.split(':')
         else: version = resolved
-    coordinates.add((group, name, version))
+    if version: coordinates.add((group, name, version))
 
 NS = {'m': 'http://maven.apache.org/POM/4.0.0'}
 def parse_pom(raw):
@@ -170,7 +180,7 @@ def native(coordinate):
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 for entry in sorted(archive.namelist()):
-                    if re.search(r'(^|/)(licen[cs]e|notice|copying|copyright)([.\-_]|$)', entry, re.I) and not entry.endswith('/'):
+                    if re.search(r'(^|/)(licen[cs]e|unlicen[cs]e|notice|copying|copyright)([.\-_]|$)', entry, re.I) and not entry.endswith('/'):
                         texts.append(archive.read(entry).decode('utf8', errors='replace'))
                     elif entry.endswith(('.java', '.kt', '.h', '.cpp', '.c')):
                         header = archive.read(entry)[:12000].decode('utf8', errors='replace')
@@ -200,9 +210,13 @@ def native(coordinate):
                 # HTML is not a notice. Apache publishes the full plain text alongside the page.
                 if '<html' in text.lower() or '<!doctype' in text.lower():
                     if 'apache.org/licenses/LICENSE-2.0' in url:
-                        text = fetch('https://www.apache.org/licenses/LICENSE-2.0.txt').decode()
+                        plain = fetch('https://www.apache.org/licenses/LICENSE-2.0.txt')
+                        if not plain: continue
+                        text = plain.decode()
                     elif 'opensource.org' in url and 'mit' in url.lower():
-                        text = fetch('https://spdx.org/licenses/MIT.txt').decode()
+                        plain = fetch('https://spdx.org/licenses/MIT.txt')
+                        if not plain: continue
+                        text = plain.decode()
                     else: continue
                 texts.append(text)
     if not texts: raise RuntimeError(f'Full notice unavailable: {coordinate}')
@@ -222,4 +236,5 @@ for folder in [APP, root / 'packages/contracts', root / 'packages/core', root / 
 unique = {(item['name'], item['version']): item for item in components}
 manifest = sorted(unique.values(), key=lambda item: (item['name'].lower(), item['version']))
 (DEST / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-print(f"Wrote {len(manifest)} components")
+(DEST / 'summary.json').write_text(json.dumps({'count': len(manifest), 'native': len(coordinates)}) + '\n')
+print(f"Wrote {len(manifest)} components ({len(coordinates)} native)")

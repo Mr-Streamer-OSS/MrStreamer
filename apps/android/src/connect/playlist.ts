@@ -1,3 +1,4 @@
+import { t } from "./playlist-copy.ts";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { importPlaylist, safeName } from "@mrstreamer/core/playlist/import";
 import { m3uReader, type PlaylistEntry } from "@mrstreamer/core/playlist/m3u";
@@ -90,8 +91,9 @@ export function playlistReader(
       if (REFUSED.has(response.status))
         throw new AppFailure({
           kind: "incomplete-login",
-          detail:
+          detail: t(
             "Your provider refused this playlist link. Check it, or get a new one from your provider.",
+          ),
         });
       throw new AppFailure({ kind: "provider-error", status: response.status });
     }
@@ -99,18 +101,18 @@ export function playlistReader(
     return { body: response.body, size: bodySize(response) };
   }
 
-  const notAPlaylist = () => unreachable("The address answered, but not with a playlist.");
+  const notAPlaylist = () => unreachable(t("The address answered, but not with a playlist."));
 
   const tooLarge = () =>
     new AppFailure({
       kind: "unexpected",
-      detail: "This playlist is larger than 64 MB, more than the phone reads.",
+      detail: t("This playlist is larger than 64 MB, more than the phone reads."),
     });
 
   const tooMany = () =>
     new AppFailure({
       kind: "unexpected",
-      detail: "This playlist has more than 100,000 entries, more than the phone reads.",
+      detail: t("This playlist has more than 100,000 entries, more than the phone reads."),
     });
 
   /** Reads `body` through the M3U reader until `enough` says so or it ends. */
@@ -163,7 +165,9 @@ export function playlistReader(
       if (!playlist)
         throw new AppFailure({
           kind: "incomplete-login",
-          detail: "This address isn't a playlist. A server address needs a username and password.",
+          detail: t(
+            "This address isn't a playlist. A server address needs a username and password.",
+          ),
         });
     },
 

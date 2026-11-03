@@ -13,6 +13,7 @@ import type { CaptureTransport } from "./transport.ts";
 export function androidAnalytics(ports: {
   readonly load: () => unknown;
   readonly save: (record: ConsentRecord<CaptureEvent>) => boolean;
+  readonly revocation?: { load(): boolean; save(pending: boolean): boolean };
   readonly uuid: () => string;
   readonly build: AndroidBuild;
   readonly transport: CaptureTransport | null;
@@ -39,12 +40,36 @@ export function androidAnalytics(ports: {
     save: ports.save,
   });
 
+  let revocationPending = false;
+
+  try {
+    revocationPending = ports.revocation?.load() ?? false;
+  } catch {
+    revocationPending = true;
+  }
+
+  if (revocationPending) consent.configure(false);
+
+  function revoke() {
+    revocationPending = true;
+    const marked = ports.revocation?.save(true) ?? true;
+    const held = consent.configure(false);
+
+    if (!held || !marked) return false;
+    const cleared = ports.revocation?.save(false) ?? true;
+    revocationPending = !cleared;
+
+    return cleared;
+  }
+
   let request: AbortController | null = null;
   let generation = 0;
   let lastMinute = -Infinity;
   let count = 0;
 
   async function pump() {
+    if (revocationPending && !revoke()) return;
+
     if (request || !consent.enabled || !ports.transport) return;
     const event = consent.get().pending[0];
 
@@ -121,7 +146,7 @@ export function androidAnalytics(ports: {
     consent,
     configure(enabled: boolean) {
       stop();
-      const held = consent.configure(enabled);
+      const held = !enabled || revocationPending ? revoke() : consent.configure(true);
 
       if (held && enabled) void pump();
 
@@ -129,6 +154,8 @@ export function androidAnalytics(ports: {
     },
     discard() {
       stop();
+
+      if (revocationPending) return revoke();
 
       return consent.discard();
     },
