@@ -20,6 +20,7 @@ import { generateKeyPairSync, randomUUID, sign, X509Certificate } from "node:cry
 import { createServer, type Server, type TLSSocket } from "node:tls";
 import { fileURLToPath } from "node:url";
 import protobuf from "protobufjs";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import type { Receiver } from "@mrstreamer/contracts/output";
 import type { CastDiscovery } from "../src/main/receivers/cast/discovery.ts";
 import { defined } from "@mrstreamer/core/defined";
@@ -48,19 +49,19 @@ export interface CastFields {
 
 /** A message a sender sent: its fields as protobufjs read them, and its payload's JSON. */
 export interface Received extends CastFields {
-  readonly payload: Record<string, unknown>;
+  readonly payload: JsonObject;
 }
 
 /** The media the receiver holds, as its MEDIA_STATUS lists it. */
-export interface FakeMedia {
+export type FakeMedia = {
   mediaSessionId: number;
   playerState: "IDLE" | "BUFFERING" | "PLAYING" | "PAUSED";
   idleReason?: "FINISHED" | "CANCELLED" | "INTERRUPTED" | "ERROR";
   currentTime: number;
   activeTrackIds: number[];
   /** The LOAD's media, with the duration and tracks the receiver read from it. */
-  media: Record<string, unknown>;
-}
+  media: JsonObject;
+};
 
 /** DER: a tag, the length, the contents. */
 function der(tag: number, ...parts: Uint8Array[]): Buffer {
@@ -150,12 +151,12 @@ export class FakeCastReceiver {
   }
 
   /** The payloads of the `type` messages senders sent. */
-  requests(type: string): Record<string, unknown>[] {
+  requests(type: string): JsonObject[] {
     return this.received.map((message) => message.payload).filter((body) => body.type === type);
   }
 
   /** `payload` as a CastMessage's bytes, from the media app to every sender unless `fields` say. */
-  encode(payload: object, fields: CastFields = {}): Uint8Array {
+  encode(payload: JsonObject, fields: CastFields = {}): Uint8Array {
     return CastMessage.encode({
       protocolVersion: 0,
       sourceId: this.app?.transportId ?? "receiver-0",
@@ -168,7 +169,7 @@ export class FakeCastReceiver {
   }
 
   /** Sends `payload` to every sender, with any CastMessage fields a test wants on it. */
-  send(payload: object, fields: CastFields = {}): void {
+  send(payload: JsonObject, fields: CastFields = {}): void {
     this.frame(this.encode(payload, fields));
   }
 
@@ -263,7 +264,7 @@ export class FakeCastReceiver {
   /** Reads one frame as protobufjs does, and holds the sender to the schema, byte for byte. */
   private read(socket: TLSSocket, body: Buffer): void {
     let fields: CastFields;
-    let payload: Record<string, unknown>;
+    let payload: JsonObject;
 
     try {
       const message = CastMessage.decode(body);
@@ -281,7 +282,7 @@ export class FakeCastReceiver {
 
     if (this.silent) return;
 
-    const answer = (reply: object) =>
+    const answer = (reply: JsonObject) =>
       socket.write(
         this.framed({ ...reply, requestId: payload.requestId }, fields.destinationId, fields),
       );
@@ -295,7 +296,7 @@ export class FakeCastReceiver {
     }
   }
 
-  private framed(payload: object, sourceId: string | undefined, to: CastFields): Buffer {
+  private framed(payload: JsonObject, sourceId: string | undefined, to: CastFields): Buffer {
     const body = this.encode(payload, {
       ...defined({ sourceId, destinationId: to.sourceId, namespace: to.namespace }),
     });
@@ -306,7 +307,7 @@ export class FakeCastReceiver {
     return Buffer.concat([header, body]);
   }
 
-  private onReceiver(payload: Record<string, unknown>, answer: (body: object) => void): void {
+  private onReceiver(payload: JsonObject, answer: (body: JsonObject) => void): void {
     switch (payload.type) {
       case "LAUNCH":
         if (this.answers.launch === "ignore") return;
@@ -340,7 +341,7 @@ export class FakeCastReceiver {
     }
   }
 
-  private onMedia(payload: Record<string, unknown>, answer: (body: object) => void): void {
+  private onMedia(payload: JsonObject, answer: (body: JsonObject) => void): void {
     if (payload.type === "GET_STATUS") return answer(this.mediaStatus());
 
     if (payload.type === "LOAD") {
@@ -357,7 +358,7 @@ export class FakeCastReceiver {
         playerState: payload.autoplay === false ? "PAUSED" : "BUFFERING",
         currentTime: typeof payload.currentTime === "number" ? payload.currentTime : 0,
         activeTrackIds: [],
-        media: { ...(payload.media as object), duration: this.duration, tracks: this.tracks },
+        media: { ...(payload.media as JsonObject), duration: this.duration, tracks: this.tracks },
       };
 
       return answer(this.mediaStatus());

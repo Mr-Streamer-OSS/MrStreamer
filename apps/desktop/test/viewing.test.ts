@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
@@ -188,7 +189,7 @@ async function viewingApp(options: FakeProviderOptions = {}) {
 
       for (const each of await service.list()) await service.remove(each.id);
     },
-    writePreferences: async (file: object) => {
+    writePreferences: async (file: JsonObject) => {
       await mkdir(dataDir, { recursive: true });
       await writeFile(join(dataDir, "preferences.json"), JSON.stringify(file));
     },

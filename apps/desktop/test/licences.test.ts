@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { collectNotices } from "../scripts/licences.ts";
+import type { JsonObject } from "@mrstreamer/contracts/json";
+import { collectNotices, type readConfig } from "../scripts/licences.ts";
 import { Licences } from "../src/main/services/licences.ts";
 import { promised, runtimeFor, tempDir } from "./support.ts";
 
@@ -13,8 +14,11 @@ const APACHE =
 const GPL =
   "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n\nTERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION";
 
+/** What licences.config.json holds, as the script reads it. */
+type LicencesConfig = Awaited<ReturnType<typeof readConfig>>;
+
 /** A package in the fake app's node_modules, with its package.json and other files. */
-function installed(name: string, json: object, files: Record<string, string> = {}) {
+function installed(name: string, json: JsonObject, files: Record<string, string> = {}) {
   return Object.fromEntries([
     [`node_modules/${name}/package.json`, JSON.stringify({ name, version: "1.0.0", ...json })],
     ...Object.entries(files).map(([file, text]) => [`node_modules/${name}/${file}`, text]),
@@ -22,7 +26,10 @@ function installed(name: string, json: object, files: Record<string, string> = {
 }
 
 /** A fake app folder with `files`, and a licences.config.json that adds nothing unless told to. */
-async function app(files: Record<string, string>, config: object = {}): Promise<string> {
+async function app(
+  files: Record<string, string>,
+  config: Partial<LicencesConfig> = {},
+): Promise<string> {
   const root = await tempDir();
 
   const all = {
@@ -362,12 +369,16 @@ describe("collecting notices", () => {
       sha256: "0".repeat(64),
     });
 
-    const both = [download("codec-1.tar.xz"), download("patches-1.zip")];
-    const build = (config: object) => app(files, { components: [codec], ...config });
+    const codecSource = download("codec-1.tar.xz");
+    const both = [codecSource, download("patches-1.zip")];
+
+    const build = (config: Partial<LicencesConfig>) =>
+      app(files, { components: [codec], ...config });
+
     const version = { app: "1.2.3" };
 
     // A link in a notice's text counts like its source.
-    expect(await problems(await build({ sources: [both[0]] }), [], version)).toMatch(
+    expect(await problems(await build({ sources: [codecSource] }), [], version)).toMatch(
       /Codec@1 links patches-1\.zip on the release, which doesn't attach it/,
     );
     expect(
@@ -378,7 +389,7 @@ describe("collecting notices", () => {
     ).toMatch(/Old@1 links codec-1\.tar\.xz on release v0\.0\.1, not on v1\.2\.3/);
     // A branch can move, so a repository is pinned by commit.
     const branch = { file: "patches-1.tar.gz", git: "https://example.com/patches", commit: "main" };
-    expect(await problems(await build({ sources: [both[0], branch] }), [], version)).toMatch(
+    expect(await problems(await build({ sources: [codecSource, branch] }), [], version)).toMatch(
       /patches-1\.tar\.gz needs a full commit hash/,
     );
 

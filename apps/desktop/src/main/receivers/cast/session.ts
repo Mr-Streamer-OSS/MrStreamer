@@ -13,7 +13,7 @@ import {
   type ReceiverMedia,
   type TransportState,
 } from "../adapter.ts";
-import { openChannel, type CastMessage, type Channel } from "./channel.ts";
+import { openChannel, type CastMessage, type Channel, type Payload } from "./channel.ts";
 import type { CastEndpoint } from "./discovery.ts";
 import {
   NAMESPACE,
@@ -211,7 +211,7 @@ export async function openSession(
   const request = (
     destinationId: string,
     namespace: string,
-    body: object,
+    body: Payload,
     deadline = timings.request,
     requestId = nextRequest++,
   ) =>
@@ -246,7 +246,7 @@ export async function openSession(
   };
 
   /** A request to the receiver itself. Rejects unless it answers with its status. */
-  const ask = async (body: object, deadline?: number): Promise<void> => {
+  const ask = async (body: Payload, deadline?: number): Promise<void> => {
     const answer = await request(PLATFORM, NAMESPACE.receiver, body, deadline);
 
     if (answer.type !== "RECEIVER_STATUS") {
@@ -279,7 +279,7 @@ export async function openSession(
   };
 
   /** A request about the media of `current`, which the receiver named. */
-  const mediaRequest = async (current: Load, body: object): Promise<void> => {
+  const mediaRequest = async (current: Load, body: Payload): Promise<void> => {
     if (!app || current.mediaSessionId === null) return;
 
     const answer = await request(app.transportId, NAMESPACE.media, {
@@ -530,7 +530,7 @@ export async function openSession(
   }
 
   /** Runs a command on the load of `generation`, unless the receiver no longer has it. */
-  const command = async (generation: number, body: object): Promise<void> => {
+  const command = async (generation: number, body: Payload): Promise<void> => {
     if (closed) throw unreachable();
     const current = load;
 

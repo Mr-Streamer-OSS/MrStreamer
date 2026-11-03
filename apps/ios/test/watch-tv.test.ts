@@ -2,6 +2,7 @@ import { createRoot, window } from "./dom.ts";
 import { nativePlayer } from "./native-player.ts";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Tv } from "../src/cast.ts";
 import type { Playing } from "../src/playback.ts";
 import { keychain } from "./keychain.ts";
 
@@ -116,7 +117,9 @@ const movie: Playing = {
 };
 
 const livingRoom = { id: "tv1", name: "Living Room TV", model: "Sony TV" };
-const browse = (event: object) => act(() => native.listeners.get("onBrowse")?.(event as never));
+
+const browse = (event: { state: "searching" | "denied" | "failed"; tvs: Tv[] }) =>
+  act(() => native.listeners.get("onBrowse")?.(event as never));
 
 let container = window.document.createElement("div");
 let unmount = () => {};

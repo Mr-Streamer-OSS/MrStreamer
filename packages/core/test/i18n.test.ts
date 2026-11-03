@@ -127,8 +127,13 @@ function valuesFor(key: MessageKey, count: number): Record<string, string | numb
 
 describe("every message in every language", () => {
   const keys = Object.keys(en) as MessageKey[];
+
   // Every key's placeholders are its parameters; a cast stands in for the typed call.
-  const say = translate as (locale: string, key: string, values: object) => string;
+  const say = translate as (
+    locale: string,
+    key: string,
+    values: Readonly<Record<string, string | number>>,
+  ) => string;
 
   it.each(LOCALES)("%s says each one with all of its values in place", (locale) => {
     setLanguage({ locale, formats: locale });

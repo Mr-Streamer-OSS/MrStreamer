@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { finish } from "@mrstreamer/core/steps";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Catalogue, Member } from "../src/account.ts";
+import type { Catalogue, Member, playChannel } from "../src/account.ts";
 import type { Query, Result } from "../src/guide-native.ts";
 import type { createGuide } from "../src/guide.ts";
 import { dayLabel, localDay, programmeRange } from "../src/guide-ui.tsx";
@@ -83,7 +83,7 @@ vi.mock("../src/account.ts", () => ({
     return () => void scenario.catalogueChanged.delete(listener);
   },
   useCatalogue: () => scenario.catalogue,
-  playChannel: (channel: Channel, _place: string, options: object) =>
+  playChannel: (channel: Channel, _place: string, options: Parameters<typeof playChannel>[2]) =>
     scenario.played.push({ play: channel.key, ...options }),
 }));
 

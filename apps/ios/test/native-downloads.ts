@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AuthorizationView, OutcomeV2, ReceiptV2 } from "../src/download-task.ts";
+import type { AuthorizationView, OutcomeV2, Progress, ReceiptV2 } from "../src/download-task.ts";
 import { native } from "./native-files.ts";
 
 // A stand-in for modules/background-downloads, the app's native scheduler of one background
@@ -301,7 +301,13 @@ export const background: Background = ((
   globalThis as { mrstreamerBackground?: Background }
 ).mrstreamerBackground ??= initial());
 
-function emit(event: "progress" | "receipt", body: object) {
+/** What the native module sends on each event: progress as version 2 reports it, with its attempt. */
+type Events = {
+  readonly progress: Progress & { readonly version: 2; readonly attempt: string };
+  readonly receipt: ReceiptV2;
+};
+
+function emit<Event extends keyof Events>(event: Event, body: Events[Event]) {
   for (const listener of background.listeners.get(event) ?? []) listener(body as never);
 }
 

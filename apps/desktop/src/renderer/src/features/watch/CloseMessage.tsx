@@ -23,8 +23,11 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Whether the viewer closed the message about `failure`; false while there is none. */
-export function useClosed(failure: object | null): boolean {
+/**
+ * Whether the viewer closed the message about `failure`; false while there is none. Any player's
+ * failure is known by its own value, so each keeps its type here.
+ */
+export function useClosed<Failure extends object>(failure: Failure | null): boolean {
   return useSyncExternalStore(subscribe, () => failure !== null && closed.has(failure));
 }
 

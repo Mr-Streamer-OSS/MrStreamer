@@ -3,6 +3,7 @@
 import { mkdtemp, rm, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { JsonObject } from "@mrstreamer/contracts/json";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   diagnosticsExporter,
@@ -29,7 +30,7 @@ const context: DiagnosticsContext = {
   checked: { at: 1791378000000, failure: "busy" },
 };
 
-const entry = (extra: object = {}) =>
+const entry = (extra: JsonObject = {}) =>
   JSON.stringify({ at: "2026-10-07T12:00:00.000Z", op: "start", ms: 30, outcome: "ok", ...extra }) +
   "\n";
 

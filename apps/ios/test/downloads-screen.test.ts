@@ -42,7 +42,7 @@ vi.mock("react-native", async () => {
 
       const children =
         typeof props.children === "function"
-          ? (props.children as (state: object) => React.ReactNode)({ pressed: false })
+          ? (props.children as (state: { pressed: boolean }) => React.ReactNode)({ pressed: false })
           : props.children;
 
       return createElement("div", null, children as React.ReactNode);

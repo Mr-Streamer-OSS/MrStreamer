@@ -1,4 +1,4 @@
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -145,7 +145,14 @@ vi.mock("../src/platform/store.ts", () => ({ useStore: () => scenario.sources })
 vi.mock("expo-router/js-tabs", async () => {
   const { Children, isValidElement } = await import("react");
 
-  type Bar = (props: object) => ReactElement;
+  /** What this navigator hands its bar: the parts of the tab bar's props the destination bar reads. */
+  type Bar = (props: {
+    state: { index: number; routes: { key: string; name: string }[] };
+    descriptors: Record<string, never>;
+    insets: { top: number; bottom: number; left: number; right: number };
+    emitter: { emit: (event: { type: string; target: string }) => { defaultPrevented: boolean } };
+    navigateToTab: (key: string) => void;
+  }) => ReactElement;
 
   const Screen: (props: { name: string }) => null = () => null;
 
@@ -192,7 +199,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: Element): { render(node: unknown): void; unmount(): void };
 };
 
 const { default: RootLayout } = await import("../src/app/_layout.tsx");
