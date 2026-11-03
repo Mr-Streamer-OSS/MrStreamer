@@ -1,4 +1,4 @@
-import { Window } from "happy-dom";
+import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayIntent } from "../src/player/intent.ts";
@@ -108,7 +108,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: object): { render(node: unknown): void; unmount(): void };
+  createRoot(container: Element): { render(node: unknown): void; unmount(): void };
 };
 
 const { default: Watch } = await import("../src/app/watch.tsx");
