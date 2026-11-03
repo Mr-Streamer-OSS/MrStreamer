@@ -132,13 +132,15 @@ import sys
 work = sys.argv[1]
 line = "Une ligne parmi beaucoup, assez longue pour peser cent octets avec son numero "
 def many(count):
-    return "".join(f"{i + 1}\n00:00:01,{i % 1000:03d} --> 00:00:03,000\n{line}{i:07d}\n\n" for i in range(count))
-later = "\n00:00:30,000 --> 00:00:32,000\nPlus tard\n"
+    return "".join(
+        f"{i + 1}\n00:00:01,{i % 1000:03d} --> 00:00:03,000\n{line}{i:07d}\n\n" for i in range(count))
+later = "00:00:30,000 --> 00:00:32,000\nPlus tard\n"
 open(f"{work}/many.srt", "w").write(many(52000))
-open(f"{work}/many-later.srt", "w").write(many(52000) + "52001" + later)
+open(f"{work}/many-later.srt", "w").write(many(52000) + "52001\n" + later)
 open(f"{work}/shared.srt", "w").write(many(20000))
 # Longer than theirs, so it doesn't fit in what they leave of the title's 16 MB.
-open(f"{work}/among.srt", "w").write("1\n00:00:02,000 --> 00:00:02,500\n" + "Parmi elles. " * 20 + "\n\n2" + later)
+open(f"{work}/among.srt", "w").write(
+    "1\n00:00:02,000 --> 00:00:02,500\n" + "Parmi elles. " * 20 + "\n\n2\n" + later)
 open(f"{work}/huge.srt", "w").write("1\n00:00:21,000 --> 00:00:23,000\n" + "y" * 1_100_000 + "\n")
 PY
 ffmpeg -v error -y -i "$out/subs.mkv" -i "$work/many.srt" -map 0:0 -map 0:1 -map 1 -c copy \

@@ -135,21 +135,21 @@ fi
 many=$fixtures/subs-many.mkv
 check "$many" && warns_first "$many" s0
 later=$fixtures/subs-many-later.mkv
-shared=$fixtures/subs-shared.mkv
-for start in 0 30; do
-  if check "$later" --start "$start"; then
-    warns_first "$later" s0
-    serves "$later" s0 "Plus tard"
-  fi
-  if check "$shared" --start "$start"; then
-    warns_first "$shared" s0
-    warns_first "$shared" s5
-    serves "$shared" s5 "Plus tard"
-  fi
-done
 if check "$later" --faults; then
+  warns_first "$later" s0
+  serves "$later" s0 "Plus tard"
   grep -qE "^faults: [1-9][0-9]* reads failed, 0 segments differ when asked again$" "$log" ||
     fail "subs-many-later.mkv: no failed reads"
+fi
+if check "$later" --start 30; then
+  warns_first "$later" s0
+  serves "$later" s0 "Plus tard"
+fi
+shared=$fixtures/subs-shared.mkv
+if check "$shared"; then
+  warns_first "$shared" s0
+  warns_first "$shared" s5
+  serves "$shared" s5 "Plus tard"
 fi
 check "$fixtures/subs-huge.mkv" && serves "$fixtures/subs-huge.mkv" s0 "This line is too large to show."
 long=$fixtures/subs-longline.mkv

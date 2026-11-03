@@ -2394,7 +2394,7 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
                                        size_t detail_size) {
   title->texts[track].wanted = 1;
   int error = 0, lost = 0;
-  for (int again = 0; again < 2 && error >= 0 && (again == 0 || lost); again++) {
+  for (int again = 0; again < 2; again++) {
     if (again) forget_lines(title);
     if (!passed(title, index)) {
       Made *made = NULL;
@@ -2406,6 +2406,7 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
     lost = 0;
     for (int t = 0; t < title->text_count; t++)
       lost |= folds(title, track, t) && title->texts[t].lost[index / 8] >> (index % 8) & 1;
+    if (error < 0 || !lost) break;
   }
   // A line that couldn't be kept would be missing: the segment says so instead, over the
   // picture, which plays on.
