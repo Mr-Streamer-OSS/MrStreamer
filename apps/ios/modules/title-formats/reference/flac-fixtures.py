@@ -173,6 +173,14 @@ for name, source in [('invalid-lead', 'lead-source'), ('late-corrupt', 'late-sou
         b[p+n//2] ^= 1
     (out / (name + '.mkv')).write_bytes(b)
 
+# Keep the seek into the later segment clear of the earlier corrupt stretch. Matroska's
+# rounded block times otherwise put the first FLAC frame just after that keyframe.
+b = bytearray((out / 'recall-source.mkv').read_bytes())
+for p, n in flac_frames(b):
+    stamp = int.from_bytes(b[p-3:p-1], 'big', signed=True)
+    b[p-3:p-1] = (stamp-2).to_bytes(2, 'big', signed=True)
+(out / 'recall-source.mkv').write_bytes(b)
+
 # Keep valid packets between rejected runs: the budget covers the whole operation.
 for name, source, selected in [
     ('alternating-lead', 'lead-source', [i for i in range(1500) if i % 500 != 0]),

@@ -2660,7 +2660,9 @@ static TitleHlsResult subtitle_segment(TitleHls *title, int track, int index, co
   if (error >= 0) error = av_bprint_finalize(&text, &title->text);
   else av_bprint_finalize(&text, NULL);
   if (error < 0) {
-    say(detail, detail_size, "The file couldn't be read at this point.");
+    say(detail, detail_size, error == FLAC_LIMIT
+          ? "Its FLAC sound has too many invalid frames in a row."
+          : "The file couldn't be read at this point.");
     return failure(title, error);
   }
   *data = (const uint8_t *)title->text;

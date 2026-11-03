@@ -62,7 +62,8 @@ for start in 0 7.3; do
     fi
   done
 done
-# Exercise a failed indexed recall twice, then retry after repairing only the frame bytes.
+# Prepare the later picture segment, fail indexed recall twice, then compare repaired text
+# with a fresh good session. No later segment read may mask a swallowed recall failure.
 ff=$here/../../../vendor/ffmpeg/reference/prefix
 core=${FLAC_CHECK_CORE:-$here/../ios/core/title_hls.c}
 cc -std=c11 -O1 -g -fsanitize=address,undefined -I"$ff/include" \
