@@ -32,7 +32,7 @@
     "@mrstreamer/core": "workspace:*",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-query": "5.105.0",
-    "@tanstack/react-virtual": "3.14.22",
+    "@tanstack/react-virtual": "3.14.24",
     "@types/dns-packet": "5.6.5",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
