@@ -107,30 +107,35 @@ function ListRecovery({ model, empty }: { model: LibraryModel; empty: string }) 
 
   if (state.loading) return <Recovery message={t("Loading…")} />;
 
+  const failures = state.failures.filter((label) => !state.needsLogin.includes(label));
+
   if (state.failures.length)
     return (
-      <Recovery
-        icon="cloud-off"
-        message={
-          state.needsLogin.length
-            ? t("Restore the login for {providers} in Settings.", {
-                providers: formatList(state.needsLogin),
-              })
-            : t("Couldn't load movies and series from {providers}.", {
-                providers: formatList(state.failures),
-              })
-        }
-        action={
-          <>
-            <OutlinedButton
-              label={t("Try again")}
-              icon="refresh"
-              onPress={() => void model.refresh()}
-            />
-            <TextButton label={t("Settings")} onPress={() => open("settings")} />
-          </>
-        }
-      />
+      <>
+        {state.needsLogin.length ? (
+          <Recovery
+            message={t("Restore the login for {providers} in Settings.", {
+              providers: formatList(state.needsLogin),
+            })}
+            action={<TextButton label={t("Settings")} onPress={() => open("settings")} />}
+          />
+        ) : null}
+        {failures.length ? (
+          <Recovery
+            icon="cloud-off"
+            message={t("Couldn't load movies and series from {providers}.", {
+              providers: formatList(failures),
+            })}
+            action={
+              <OutlinedButton
+                label={t("Try again")}
+                icon="refresh"
+                onPress={() => void model.refresh()}
+              />
+            }
+          />
+        ) : null}
+      </>
     );
 
   return <Recovery message={empty} />;
@@ -143,24 +148,27 @@ function StaleStatus({ model }: { model: LibraryModel }) {
 
   if (!hasTitles(model) || !state.failures.length) return null;
 
+  const failures = state.failures.filter((label) => !state.needsLogin.includes(label));
+
   return (
-    <StatusLine
-      message={
-        state.needsLogin.length
-          ? t("Restore the login for {providers} in Settings.", {
-              providers: formatList(state.needsLogin),
-            })
-          : `${t("Couldn't update movies and series from {providers}.", {
-              providers: formatList(state.failures),
-            })} ${t("Showing the last list.")}`
-      }
-      actions={
-        <>
-          <TextButton label={t("Settings")} onPress={() => open("settings")} />
-          <TextButton label={t("Retry")} onPress={() => void model.refresh()} />
-        </>
-      }
-    />
+    <>
+      {state.needsLogin.length ? (
+        <StatusLine
+          message={t("Restore the login for {providers} in Settings.", {
+            providers: formatList(state.needsLogin),
+          })}
+          actions={<TextButton label={t("Settings")} onPress={() => open("settings")} />}
+        />
+      ) : null}
+      {failures.length ? (
+        <StatusLine
+          message={`${t("Couldn't update movies and series from {providers}.", {
+            providers: formatList(failures),
+          })} ${t("Showing the last list.")}`}
+          actions={<TextButton label={t("Retry")} onPress={() => void model.refresh()} />}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -828,8 +836,8 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     season?: string;
   }>();
 
-  const kind = params.kind === "series" ? "series" : "movie";
-  const title = model.title(kind, params.title ?? "");
+  const kind = params.kind === "series" || params.kind === "movie" ? params.kind : undefined;
+  const title = kind ? model.title(kind, params.title ?? "") : undefined;
   const [menu, setMenu] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -846,6 +854,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
 
   const key = `${title?.key}:${version ? ownedKey(version) : ""}`;
   const locale = useLocale();
+  const reader = version ? model.reader(version.subscriptionId) : undefined;
   useEffect(() => {
     let current = true;
 
@@ -861,7 +870,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     return () => {
       current = false;
     };
-  }, [model, key, attempt, locale]);
+  }, [model, key, reader, attempt, locale]);
   const details = answer?.key === key ? answer.state : null;
   const shown = title && version ? { ...title, ...version } : undefined;
   const value = details?.value;
@@ -895,7 +904,13 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     return (
       <Screen title={t("Title")} pushed>
         <Recovery
-          message={t(list.loading ? "Loading…" : "The provider no longer lists this title.")}
+          message={t(
+            !kind
+              ? "This title isn't available"
+              : list.loading
+                ? "Loading…"
+                : "The provider no longer lists this title.",
+          )}
         />
       </Screen>
     );

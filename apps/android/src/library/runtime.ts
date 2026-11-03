@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { store } from "../platform/store.ts";
 import { currentLanguage } from "@mrstreamer/core/i18n";
 import { sources } from "../bootstrap/sources.ts";
-import { libraryModel, type MetadataPort } from "./model.ts";
+import { libraryModel, type MetadataPort, type LibrarySource } from "./model.ts";
 
 const revision = store(0);
 
@@ -31,7 +31,7 @@ export function library() {
 
       return state.kind !== "ready"
         ? []
-        : state.sources.flatMap((source) => {
+        : state.sources.flatMap<LibrarySource>((source) => {
             if (source.kind === "m3u") return [];
             const reader = sources.onDemand(source.id);
 
@@ -40,6 +40,7 @@ export function library() {
                   {
                     id: source.id,
                     label: source.label,
+                    reader,
                     catalogue: () => reader.onDemandCatalogue(),
                     details: (kind: "movie" | "series", id: string) =>
                       kind === "movie" ? reader.movieDetails(id) : reader.seriesDetails(id),
@@ -97,5 +98,14 @@ export function library() {
 export function useLibraryModel(injected?: ReturnType<typeof libraryModel>) {
   useSyncExternalStore(revision.subscribe, revision.get);
 
-  return injected ?? library();
+  const active = injected ?? library();
+  useSyncExternalStore(
+    active.metadata?.subscribe ?? noSubscription,
+    active.metadata?.revision ?? noRevision,
+  );
+
+  return active;
 }
+
+const noSubscription = () => () => {};
+const noRevision = () => 0;

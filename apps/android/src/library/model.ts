@@ -16,14 +16,20 @@ export interface LibrarySource {
   readonly id: string;
   readonly label: string;
   readonly needsLogin?: boolean;
+  /** Stable identity of the signed-in reader, independent of catalogue updates. */
+  readonly reader?: object;
   catalogue(): Promise<OnDemandCatalogue>;
   details(kind: TitleKind, id: string): Promise<ProviderDetails>;
 }
 
-/** Settings supplies this only with consent and access. No port means no network and no retry. */
+/**
+ * Settings supplies this only with consent and access. No port means no network and no retry.
+ * Publish every facts change through subscribe and advance revision before notifying listeners.
+ */
 export interface MetadataPort {
   readonly facts?: Pick<ReturnType<typeof metadataStore>, "get" | "name" | "services">;
-  revision?(): number;
+  revision(): number;
+  subscribe(listener: () => void): () => void;
   about(kind: TitleKind, id: string, language: string): Promise<TitleAbout | null>;
 }
 
@@ -52,7 +58,12 @@ export function libraryModel(options: {
   const kept = new Map<string, OnDemandCatalogue>();
   const abouts = new Map<string, { at: number; value: TitleAbout | null }>();
   const provided = new Map<string, ProviderDetails>();
-  const detailReads = new Map<string, number>();
+
+  const pending = new Map<
+    string,
+    { reader: object | undefined; value: Promise<ProviderDetails> }
+  >();
+
   const now = options.now ?? Date.now;
   let generation = 0;
 
@@ -96,10 +107,11 @@ export function libraryModel(options: {
 
   function made(kind: TitleKind) {
     const index = catalogue();
-    const revision = options.metadata?.revision?.() ?? 0;
+    const revision = options.metadata?.revision() ?? 0;
     const cached = madeCache.get(kind);
 
-    if (cached?.index === index && cached.revision === revision) return cached.value;
+    if (cached?.index === index && cached.revision === revision && cached.value.validAt(now()))
+      return cached.value;
     const language = options.language();
     const facts = options.metadata?.facts;
     const tmdbKind = kind === "movie" ? "movie" : "tv";
@@ -121,6 +133,10 @@ export function libraryModel(options: {
 
   return {
     state,
+    metadata: options.metadata,
+    reader(id: string) {
+      return options.sources().find((s) => s.id === id)?.reader;
+    },
     made,
     sourceLabel(id: string) {
       return options.sources().find((source) => source.id === id)?.label;
@@ -179,22 +195,30 @@ export function libraryModel(options: {
     async details(title: Title, onUpdate?: (state: DetailState) => void): Promise<DetailState> {
       const language = options.language();
       const key = `${title.kind}:${title.subscriptionId}:${title.id}`;
-      const read = (detailReads.get(key) ?? 0) + 1;
-      detailReads.set(key, read);
+      const source = options.sources().find((s) => s.id === title.subscriptionId);
+
+      const stands = () =>
+        options.sources().some((s) => s.id === title.subscriptionId && s.reader === source?.reader);
+
       let providerFailed = false;
 
       try {
-        const source = options.sources().find((s) => s.id === title.subscriptionId);
-
         if (!source) throw new Error("Source removed");
-        const value = await source.details(title.kind, title.id);
+        let read = pending.get(key);
 
-        if (
-          detailReads.get(key) !== read ||
-          !options.sources().some((s) => s.id === title.subscriptionId)
-        )
-          throw new Error("Source changed");
-        provided.set(key, value);
+        if (!read || read.reader !== source.reader) {
+          read = { reader: source.reader, value: source.details(title.kind, title.id) };
+          pending.set(key, read);
+        }
+
+        try {
+          const value = await read.value;
+
+          if (!stands()) throw new Error("Source changed");
+          provided.set(key, value);
+        } finally {
+          if (pending.get(key) === read) pending.delete(key);
+        }
       } catch {
         providerFailed = true;
       }
@@ -234,24 +258,19 @@ export function libraryModel(options: {
           value:
             title.kind === "movie"
               ? movieDetails(title, facts, about)
-              : seriesDetails(
-                  title,
-                  providerFailed ? { ...facts, episodes: [], seasons: [] } : facts,
-                  about,
-                  language,
-                ),
+              : seriesDetails(title, facts, about, language),
           providerFailed,
           metadataFailed,
         };
       };
 
-      if (detailReads.get(key) === read) onUpdate?.(result());
+      if (stands()) onUpdate?.(result());
 
       if (options.metadata && title.tmdbId) {
         try {
           const value = await options.metadata.about(title.kind, title.tmdbId, language);
 
-          if (detailReads.get(key) === read) abouts.set(aboutKey, { at: now(), value });
+          if (stands()) abouts.set(aboutKey, { at: now(), value });
         } catch {
           metadataFailed = true;
         }

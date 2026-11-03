@@ -35,9 +35,6 @@ export function versionMemory(storage: {
     // An unreadable file is never an empty preference file.
   }
 
-  // Storage returns null for a missing or unparseable file: start again on the next save.
-  const valid = raw === null || (typeof raw === "object" && !Array.isArray(raw));
-
   let picks: Record<string, unknown> =
     raw !== null && typeof raw === "object" && !Array.isArray(raw)
       ? Object.fromEntries(Object.entries(raw))
@@ -46,8 +43,12 @@ export function versionMemory(storage: {
   return {
     get: (key: string) => (typeof picks[key] === "string" ? picks[key] : undefined),
     set(key: string, version: string | null) {
-      if (!valid) throw new Error("Couldn't save version");
-      const next = { ...picks };
+      // Reread before saving: null starts again; an unreadable file remains retryable.
+      const saved = storage.readJson(file);
+
+      if (saved !== null && (typeof saved !== "object" || Array.isArray(saved)))
+        throw new Error("Couldn't save version");
+      const next: Record<string, unknown> = saved === null ? {} : { ...saved };
 
       if (version === null) delete next[key];
       else next[key] = version;

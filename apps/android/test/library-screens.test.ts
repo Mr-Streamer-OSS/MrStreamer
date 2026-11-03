@@ -456,7 +456,7 @@ it("shows provider facts before slow TMDB and does not reload details on list re
         },
       },
     ],
-    metadata: { about: () => held },
+    metadata: { revision: () => 0, subscribe: () => () => {}, about: () => held },
   });
 
   await model.refresh();
@@ -665,3 +665,138 @@ it.each(["(live)", "home", "movies"] as const)(
     });
   },
 );
+
+it("rereads open details after the source reader changes", async () => {
+  const { source } = fixture();
+  let reader = {};
+  let plot = "First login";
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      {
+        ...source,
+        reader,
+        details: async (...args) => ({
+          ...(await source.details(...args)),
+          plot,
+        }),
+      },
+    ],
+  });
+
+  await model.refresh();
+  route.params = { kind: "movie", title: model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("First login");
+  reader = {};
+  plot = "Replacement login";
+  await act(async () => {
+    await model.refresh();
+  });
+  expect(shown.textContent).toContain("Replacement login");
+});
+
+it("rerenders collections when the metadata port publishes new facts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+  const signal = store(0);
+  const { source } = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [source],
+    metadata: {
+      revision: signal.get,
+      subscribe: signal.subscribe,
+      about: async () => null,
+      facts: {
+        get: () => null,
+        name: () => null,
+        services: () =>
+          signal.get() ? [{ id: 1, name: "New service", priority: 1, ids: new Set(["10"]) }] : [],
+      },
+    },
+  });
+
+  await model.refresh();
+  route.params = { tab: "services" };
+  const shown = show(createElement(BrowseScreen, { kind: "movie", model }));
+  expect(shown.textContent).not.toContain("New service");
+  act(() => signal.set(1));
+  expect(shown.textContent).toContain("New service");
+});
+
+it.each([false, true])(
+  "shows both login and network recovery with stale lists %s",
+  async (stale) => {
+    const { source } = fixture();
+    let failed = false;
+
+    const model = libraryModel({
+      language: () => "en",
+      sources: () => [
+        {
+          ...source,
+          id: "lost",
+          label: "Lost login",
+          needsLogin: true,
+          catalogue: async () => {
+            throw new Error("Login");
+          },
+        },
+        {
+          ...source,
+          label: "Offline provider",
+          catalogue: () => {
+            if (failed) throw new Error("Offline");
+
+            return source.catalogue();
+          },
+        },
+      ],
+    });
+
+    if (stale) await model.refresh();
+    failed = true;
+    await model.refresh();
+    const shown = show(createElement(BrowseScreen, { kind: "movie", model }));
+    expect(shown.textContent).toContain("Restore the login for Lost login in Settings.");
+    expect(shown.textContent).toContain(
+      stale
+        ? "Couldn't update movies and series from Offline provider."
+        : "Couldn't load movies and series from Offline provider.",
+    );
+    expect(shown.querySelector('button[aria-label="Settings"]')).not.toBeNull();
+    expect(
+      shown.querySelector(`button[aria-label="${stale ? "Retry" : "Try again"}"]`),
+    ).not.toBeNull();
+  },
+);
+
+it("pushes a collection with its media kind", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  route.params = { tab: "new" };
+  const shown = show(createElement(BrowseScreen, { kind: "series", model: f.model }));
+
+  const button = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.includes("New this week"),
+  )!;
+
+  act(() => button.click());
+  expect(route.opened[0]).toMatchObject({
+    pathname: "/movies/library/collection",
+    params: { kind: "series" },
+  });
+});
+
+it("does not guess a movie when a details route omits its kind", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  route.params = { title: f.model.made("movie").list("all")[0]!.key };
+  const shown = show(createElement(DetailsScreen, { model: f.model }));
+  await act(async () => {});
+  expect(shown.textContent).toContain("This title isn't available");
+  expect(shown.textContent).not.toContain("Provider story");
+});
