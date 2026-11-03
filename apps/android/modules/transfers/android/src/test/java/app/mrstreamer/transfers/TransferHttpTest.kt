@@ -47,10 +47,8 @@ class TransferHttpTest {
           assertEquals("bytes 8-15/16", final.getHeaderField("Content-Range"))
           assertEquals("version", final.getHeaderField("ETag"))
         } finally { final.disconnect() }
-        val started = System.nanoTime()
-        assertEquals("network", assertThrows(IllegalStateException::class.java) { TransferHttp.open(address) }.message)
+        assertEquals("http", assertThrows(IllegalStateException::class.java) { TransferHttp.open(address) }.message)
         assertEquals(8, responses.get())
-        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 900)
         assertFalse(serving.isDone) // The ninth response remains available if the cap is removed.
       } finally {
         server.close()

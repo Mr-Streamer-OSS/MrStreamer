@@ -5,10 +5,11 @@ import { t } from "./copy.ts";
 
 type Message = Parameters<typeof t>[0];
 
-type LibraryAction = "pause" | "resume" | "retry" | "open";
+type LibraryAction = "pause" | "resume" | "retry" | "open" | "remove";
 
 const labels = {
   open: "Play offline",
+  remove: "Retry",
   retry: "Retry",
   resume: "Resume",
   pause: "Pause",
@@ -20,7 +21,11 @@ function presented(row: DownloadRow): [string, LibraryAction, DownloadPresentati
     case "complete":
       return [t("Downloaded"), "open", "done"];
     case "failed":
-      return [rowStatus(row, false).text ?? t("File missing"), "retry", "retry"];
+      return [
+        rowStatus(row, false).text ?? t("File missing"),
+        row.reason === "remove" ? "remove" : "retry",
+        "retry",
+      ];
     case "paused":
       return [t("Paused"), "resume", "empty"];
     case "queued":

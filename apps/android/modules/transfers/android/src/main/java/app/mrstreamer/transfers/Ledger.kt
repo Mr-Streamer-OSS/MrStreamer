@@ -21,11 +21,14 @@ class Ledger(context: Context) {
     mutableListOf()
   }
 
-  fun save(rows: List<JSONObject>) {
+  fun save(rows: List<JSONObject>) = synchronized(lock) {
+    rows.forEach { it.remove("blocked") }
     val stream = file.startWrite()
     try {
       stream.write(JSONArray(rows).toString().toByteArray())
       file.finishWrite(stream)
+      fences.clear()
+      rows.filter { it.optString("state") == "running" }.forEach { fences[it.getString("id")] = it.getString("attempt") }
     } catch (cause: Throwable) { file.failWrite(stream); throw cause }
   }
 
@@ -61,6 +64,8 @@ class Ledger(context: Context) {
   companion object {
     // All workers and bridge calls share this lock, including across new Ledger instances.
     val lock = Any()
+    private val fences = mutableMapOf<String, String>()
+    fun current(id: String, attempt: String): Boolean = synchronized(lock) { fences[id] == attempt }
     fun attempt(row: JSONObject): String = UUID.randomUUID().toString().also { row.put("attempt", it) }
 
     /** A resumed response must name exactly the same representation and offset. */
@@ -83,12 +88,13 @@ class Ledger(context: Context) {
     }
 
     fun reconcile(row: JSONObject, length: Long, readable: Boolean) {
-      row.put("blocked", false) // Holds belong to the process, never to durable work.
+      row.remove("blocked") // Holds belong to the process, never to durable work.
       if (row.getString("state") == "complete" &&
         (!readable || length <= 0 || length != row.optLong("total"))) {
         row.put("state", "failed").put("reason", "missing")
       } else if (row.getString("state") in listOf("running", "queued")) {
-        row.put("state", "queued").put("reason", "continued")
+        row.put("state", "queued")
+        if (row.optString("reason") != "changed") row.put("reason", "continued")
         attempt(row) // Any late completion belongs to the previous process.
       }
     }

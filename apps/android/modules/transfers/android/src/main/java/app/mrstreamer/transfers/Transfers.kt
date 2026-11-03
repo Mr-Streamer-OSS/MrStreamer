@@ -16,6 +16,7 @@ object Transfers {
   private val blockedSources = mutableSetOf<String>()
 
   @JvmStatic
+  @Synchronized
   fun fingerprint(secret: String): String {
     val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     val alias = "transfers-binding"
@@ -28,11 +29,18 @@ object Transfers {
       .joinToString("") { "%02x".format(it) }
   }
 
+  fun isBlocked(source: String): Boolean = synchronized(Ledger.lock) { source in blockedSources }
+
+  fun clearAuthority() = synchronized(Ledger.lock) { blockedSources.clear() }
+
   fun block(context: Context, source: String, blocked: Boolean) = synchronized(Ledger.lock) {
     if (blocked) blockedSources.add(source) else blockedSources.remove(source)
     val ledger = Ledger(context)
     val rows = ledger.read()
-    rows.filter { it.getString("sourceId") == source }.forEach { it.put("blocked", blocked) }
+    if (blocked) rows.filter { it.getString("sourceId") == source && it.optString("state") == "running" }.forEach {
+      it.put("state", "queued")
+      Ledger.attempt(it)
+    }
     ledger.save(rows)
     kick(context)
   }
@@ -41,7 +49,8 @@ object Transfers {
     val work = OneTimeWorkRequestBuilder<TransferWorker>()
       .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, java.util.concurrent.TimeUnit.SECONDS)
       .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-    WorkManager.getInstance(context).enqueueUniqueWork("downloads", ExistingWorkPolicy.APPEND_OR_REPLACE, work)
+    WorkManager.getInstance(context).enqueueUniqueWork("downloads", if (WorkManager.getInstance(context).getWorkInfosForUniqueWork("downloads").get()
+      .any { it.state == WorkInfo.State.RUNNING }) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE, work)
   }
 
   fun snapshot(context: Context, reconcile: Boolean): String = synchronized(Ledger.lock) {
@@ -50,7 +59,6 @@ object Transfers {
     if (reconcile) {
       for (row in rows) {
         ledger.recover(row)
-        row.put("blocked", row.getString("sourceId") in blockedSources)
       }
       for (row in rows.filter { it.getString("state") == "removing" }) {
         try { ledger.discard(row.getString("id")) }
@@ -58,9 +66,10 @@ object Transfers {
       }
       rows.removeAll { it.getString("state") == "removing" }
       ledger.save(rows)
-    }
+    } else if (rows.any { it.has("blocked") }) ledger.save(rows)
     val publicRows = rows.map { row -> JSONObject(row.toString()).apply {
-      for (field in listOf("binding", "attempt", "etag", "modified")) remove(field)
+      for (field in listOf("binding", "attempt", "etag", "modified", "retries")) remove(field)
+      put("blocked", isBlocked(getString("sourceId")))
     } }
     JSONObject().put("rows", org.json.JSONArray(publicRows)).put("free", ledger.root.usableSpace).put("notifications", context.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled()).toString()
   }
@@ -75,7 +84,6 @@ object Transfers {
     }
     val secret = Credentials.read(context, row.getString("sourceId")) ?: error("credentials")
     row.put("id", UUID.randomUUID().toString()).put("state", "queued")
-      .put("blocked", row.getString("sourceId") in blockedSources)
       .put("binding", fingerprint(secret)).put("bytes", 0).put("total", 0).put("reason", "")
     Ledger.attempt(row)
     rows.add(row)
@@ -104,7 +112,7 @@ object Transfers {
           row.put("binding", binding).put("bytes", 0).put("reason", "changed")
         }
         if (row.optString("reason") == "missing") row.put("bytes", 0).put("total", 0)
-        row.put("state", "queued").put("blocked", row.getString("sourceId") in blockedSources)
+        row.put("state", "queued").put("retries", 0)
         Ledger.attempt(row)
       }
       "up", "down" -> {

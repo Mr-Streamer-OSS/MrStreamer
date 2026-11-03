@@ -48,6 +48,7 @@ class TransferWorkerTest {
   private val executor = Executors.newSingleThreadExecutor()
 
   @Before fun prepare() {
+    Transfers.clearAuthority()
     ledger.root.deleteRecursively()
     DownloadCredentialShadow.authority = JSONObject().put("kind", "xtream").toString()
     WorkManagerTestInitHelper.initializeTestWorkManager(context,
@@ -58,6 +59,8 @@ class TransferWorkerTest {
     androidx.work.WorkManager.getInstance(context).cancelAllWork().result.get()
     executor.shutdownNow()
     executor.awaitTermination(5, TimeUnit.SECONDS)
+    Transfers.clearAuthority()
+    ledger.save(emptyList())
     ledger.root.deleteRecursively()
     DownloadCredentialShadow.authority = null
   }
@@ -122,6 +125,54 @@ class TransferWorkerTest {
     assertEquals("0123456789abcdef", ledger.media(row.getString("id")).readText())
   }
 
+  @Test fun invalidResumeRepliesRestartBeforeValidation() {
+    for (reply in listOf("416 Range Not Satisfiable", "206 Partial Content")) {
+      val row = row().put("total", 16).put("bytes", 8).put("etag", "old")
+      ledger.media(row.getString("id"), true).writeText("oldbytes")
+      ledger.save(listOf(row))
+      serve(2, { index, headers ->
+        if (index == 0) {
+          assertEquals("bytes=8-", headers["range"])
+          answer(reply, "Content-Length: 0", "")
+        } else { assertFalse(headers.containsKey("range")); answer() }
+      }) { work() }
+      assertEquals("complete", ledger.read().single().getString("state"))
+      assertEquals("0123456789abcdef", ledger.media(row.getString("id")).readText())
+    }
+  }
+
+  @Test fun sniffsDocumentsAndPlaylistsRegardlessOfMime() {
+    for (mime in listOf("", "application/octet-stream", "video/mp4")) {
+      for ((body, reason) in listOf(
+        "\uFEFF  #EXTM3U\nentry" to "playlist", "  <!DOCTYPE html>" to "document",
+        "<html>error</html>" to "document", "<?xml version='1.0'?>" to "document",
+        " {error:true}" to "document", " [error]" to "document")) {
+        val row = row()
+        ledger.save(listOf(row))
+        val headers = "Content-Length: "+body.toByteArray().size + if (mime.isEmpty()) "" else "\r\nContent-Type: $mime"
+        serve(response = { _, _ -> answer(headers = headers, body = body) }) { work() }
+        assertEquals(reason, ledger.read().single().getString("reason"))
+        assertFalse(ledger.media(row.getString("id"), true).exists())
+      }
+    }
+  }
+
+  @Test fun transientRetriesAreBoundedAndDoNotHoldTheNextRow() {
+    val failing = row()
+    val next = row()
+    ledger.save(listOf(failing, next))
+    repeat(5) { pass ->
+      serve(if (pass == 0) 2 else 1, { index, _ ->
+        if (index == 0) answer("503 Unavailable", "Content-Length: 0", "") else answer()
+      }) {
+        assertEquals(if (pass < 4) ListenableWorker.Result.retry() else ListenableWorker.Result.success(), work())
+      }
+      assertEquals("complete", ledger.read().last().getString("state"))
+    }
+    assertEquals("failed", ledger.read().first().getString("state"))
+    assertEquals("continued", ledger.read().first().getString("reason"))
+  }
+
   @Test fun aFencedWriterCannotPromote() {
     val row = row()
     ledger.save(listOf(row))
@@ -158,12 +209,11 @@ class TransferWorkerTest {
     for (partial in listOf(false, true)) {
       val row = row().put("state", "running").put("total", 16).put("blocked", true)
       ledger.media(row.getString("id"), partial).writeText("0123456789abcdef")
-      ledger.save(listOf(row))
-      Transfers.snapshot(context, true)
+      java.io.File(ledger.root, "ledger.json").writeText(org.json.JSONArray(listOf(row)).toString())
       assertEquals(ListenableWorker.Result.success(), work())
       val restored = ledger.read().single()
       assertEquals("complete", restored.getString("state"))
-      assertFalse(restored.getBoolean("blocked"))
+      assertFalse(restored.optBoolean("blocked"))
       assertEquals(16, restored.getInt("bytes"))
     }
   }
@@ -175,7 +225,7 @@ class TransferWorkerTest {
     val rows = ledger.read().apply { add(complete) }
     ledger.save(rows)
     val last = Transfers.add(context, row().toString())
-    assertTrue(ledger.read().last().getBoolean("blocked"))
+    assertTrue(Transfers.isBlocked("test-source"))
     Transfers.command(context, last, "pause")
     assertEquals("paused", ledger.read().last().getString("state"))
     Transfers.command(context, last, "up")

@@ -10,7 +10,7 @@ object TransferHttp {
 
   fun open(address: String, headers: Map<String, String> = emptyMap()): HttpURLConnection = try {
     follow(URL(address), headers)
-  } catch (_: Exception) { error("network") }
+  } catch (cause: Exception) { fail(cause) }
 
   /** Cross-origin hops retain only transfer protocol headers, never caller credentials. */
   fun redirectHeaders(from: URL, to: URL, headers: Map<String, String>): Map<String, String> =
@@ -24,7 +24,7 @@ object TransferHttp {
     var address = initial
     var headers = initialHeaders
     for (hop in 0..5) {
-      check(address.protocol in listOf("http", "https") && address.userInfo == null) { "network" }
+      check(address.protocol in listOf("http", "https") && address.userInfo == null) { "http" }
       val connection = address.openConnection() as HttpURLConnection
       try {
         connection.connectTimeout = 20000
@@ -32,16 +32,21 @@ object TransferHttp {
         connection.instanceFollowRedirects = false
         headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
         if (connection.responseCode !in redirects) return connection
-        check(hop < 5) { "network" }
-        val target = URL(address, connection.getHeaderField("Location") ?: error("network"))
+        check(hop < 5) { "http" }
+        val target = URL(address, connection.getHeaderField("Location") ?: error("http"))
         headers = redirectHeaders(address, target, headers)
         address = target
-      } catch (_: Exception) {
+      } catch (cause: Exception) {
         connection.disconnect()
-        error("network")
+        fail(cause)
       }
       connection.disconnect()
     }
-    error("network")
+    error("http")
+  }
+
+  private fun fail(cause: Exception): Nothing {
+    val transient = cause is java.io.IOException && cause !is java.net.MalformedURLException && cause !is java.net.ProtocolException
+    error(if (transient || cause.message == "network") "network" else "http")
   }
 }

@@ -1,6 +1,6 @@
 import { router } from "expo-router";
 import { requireNativeModule } from "expo";
-import { AppState, PermissionsAndroid, Platform } from "react-native";
+import { Alert, AppState, PermissionsAndroid, Platform } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
 import { libraryDownload } from "./library-presentation.ts";
@@ -102,15 +102,20 @@ function createRuntime() {
   const refresh = () => void model.refresh();
   const held = new Set<string>();
   let authority = Promise.resolve();
+  const unconfirmed = new Set<string>();
+  let revision = 0;
 
-  function syncPlayer() {
+  function syncPlayer(active = true) {
+    const pass = ++revision;
     authority = authority
       .catch(() => {})
       .then(async () => {
+        if (pass !== revision) return;
         const state = player.state.get();
 
         // Paused playback can still hold its provider connection open.
         const next =
+          active &&
           state.kind === "playing" &&
           state.intent.kind !== "file" &&
           state.phase !== "failed" &&
@@ -122,18 +127,28 @@ function createRuntime() {
         if (next && !held.has(next)) {
           await native.blockSource(next, true);
           held.add(next);
+
+          if (pass !== revision) return;
         }
 
         for (const previous of held) {
-          if (previous === next) continue;
+          if (pass !== revision) return;
+
+          if (previous === next || unconfirmed.has(previous)) continue;
 
           const released = await player.release(
             (hold) => hold.kind === "source" && hold.sourceId === previous,
           );
 
-          if (released.some((entry) => entry.outcome === "unconfirmed")) continue;
+          if (released.some((entry) => entry.outcome === "unconfirmed")) unconfirmed.add(previous);
+
+          if (pass !== revision) return;
+
+          if (unconfirmed.has(previous)) continue;
           await native.blockSource(previous, false);
           held.delete(previous);
+
+          if (pass !== revision) return;
         }
       });
 
@@ -187,9 +202,24 @@ function createRuntime() {
           const shown = libraryDownload(model.state.get().rows, media, (row, action) => {
             tapAction(media, async () => {
               if (action === "open") {
-                await downloads().playCopy(row);
-                router.push("/offline/play");
-              } else await native.command(row.id, action);
+                try {
+                  await downloads().playCopy(row);
+                  router.push("/offline/play");
+                } catch {
+                  // playCopy refreshes the native missing-file state before refusing.
+                }
+              } else {
+                const reason = await downloads().command(row, action);
+
+                if (reason)
+                  Alert.alert(
+                    t(
+                      reason === "playing"
+                        ? "Stop playing this copy first."
+                        : "The old copy is still closing. Try again.",
+                    ),
+                  );
+              }
             });
           });
 
@@ -229,8 +259,13 @@ function createRuntime() {
       void model
         .refresh(!restored)
         .then(async () => {
+          if (!restored) {
+            held.clear();
+            unconfirmed.clear();
+          }
+
           restored = true;
-          await syncPlayer();
+          await syncPlayer(!!stop);
         })
         .catch(() => {});
       stop = () => {
@@ -240,13 +275,21 @@ function createRuntime() {
         app.remove();
         clearInterval(timer);
         stop = undefined;
+        void syncPlayer(false).catch(() => {});
       };
 
       return lease(screen);
     },
     async playCopy(row: DownloadRow) {
       if (removing.has(row.id)) throw new Error("removing");
-      const path = await native.path(row.id);
+      let path: string;
+
+      try {
+        path = await native.path(row.id);
+      } catch (cause) {
+        await model.refresh();
+        throw cause;
+      }
 
       if (removing.has(row.id)) throw new Error("removing");
       player.play({ kind: "file", path, title: row.title });
@@ -258,38 +301,53 @@ function createRuntime() {
       let refusal: "playing" | "closing" | null = null;
 
       try {
-        await model.change(async () => {
-          // Retry repeats the reader checks too, because playback may have changed.
-          if (action === "remove" || action === "cancel") {
-            const path = await native.filePath(row.id);
+        await model.change(
+          async () => {
+            // Retry repeats the reader checks too, because playback may have changed.
+            if (action === "remove" || action === "cancel") {
+              const path = await native.filePath(row.id);
 
-            if (path) {
-              const current = player.state.get();
+              if (path) {
+                const current = player.state.get();
 
-              if (
-                current.kind === "playing" &&
-                current.intent.kind === "file" &&
-                current.intent.path === path
-              ) {
-                refusal = "playing";
+                if (
+                  current.kind === "playing" &&
+                  current.intent.kind === "file" &&
+                  current.intent.path === path
+                ) {
+                  refusal = "playing";
 
-                return;
-              }
+                  return;
+                }
 
-              const release = await player.release(
-                (hold) => hold.kind === "file" && hold.path === path,
-              );
+                const release = await player.release(
+                  (hold) => hold.kind === "file" && hold.path === path,
+                );
 
-              if (release.some((r) => r.outcome !== "file-closed")) {
-                refusal = "closing";
+                if (release.some((r) => r.outcome !== "file-closed")) {
+                  refusal = "closing";
 
-                return;
+                  return;
+                }
               }
             }
-          }
 
-          await native.command(row.id, action);
-        }, `${row.id}:${action}`);
+            await native.command(row.id, action);
+          },
+          `${row.id}:${action}`,
+          async () => {
+            const reason = await downloads().command(row, action);
+
+            if (reason)
+              Alert.alert(
+                t(
+                  reason === "playing"
+                    ? "Stop playing this copy first."
+                    : "The old copy is still closing. Try again.",
+                ),
+              );
+          },
+        );
 
         return refusal;
       } finally {
@@ -299,7 +357,7 @@ function createRuntime() {
   };
 }
 
-/** Media calls runtime.ts startDownloads at cold launch, outside provider guards.
+/** Media must call startDownloads at cold launch, outside provider guards; that wiring is pending.
  * Each registration owns an idempotent lease; the last release stops subscriptions.
  */
 export function startDownloads() {

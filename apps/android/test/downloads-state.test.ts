@@ -143,3 +143,15 @@ it("accepts the row shape written by native add without exposing native authorit
   expect(model.state.get().rows[0]).not.toHaveProperty("binding");
   expect(model.state.get().rows[0]).not.toHaveProperty("attempt");
 });
+
+it("restores process authority once and uses snapshots for later read retries", async () => {
+  const native = port(async () => JSON.stringify({ rows: [], free: 1 }));
+  const restore = vi.spyOn(native, "restore");
+  const snapshot = vi.spyOn(native, "snapshot");
+  const model = downloadState(native);
+  await model.refresh(true);
+  await model.refresh(true);
+  await model.retry();
+  expect(restore).toHaveBeenCalledOnce();
+  expect(snapshot).toHaveBeenCalledTimes(2);
+});

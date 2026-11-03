@@ -64,6 +64,7 @@ export function downloadState(port: TransferPort) {
   let failedAction: (() => Promise<void>) | undefined;
   let writeFailed = false;
   let failedKey: unknown;
+  let restored = false;
 
   function publish(next: DownloadState) {
     if (JSON.stringify(state.get()) !== JSON.stringify(next)) state.set(next);
@@ -78,9 +79,13 @@ export function downloadState(port: TransferPort) {
 
   async function read(restore: boolean) {
     try {
-      const parsed = Snapshot(JSON.parse(await (restore ? port.restore() : port.snapshot())));
+      const parsed = Snapshot(
+        JSON.parse(await (restore && !restored ? port.restore() : port.snapshot())),
+      );
 
       if (parsed instanceof type.errors) throw new Error("snapshot");
+
+      if (restore) restored = true;
       publish({
         ...parsed,
         notifications: parsed.notifications ?? false,
@@ -92,7 +97,11 @@ export function downloadState(port: TransferPort) {
     }
   }
 
-  function change(operation: () => Promise<void>, key: unknown = operation) {
+  function change(
+    operation: () => Promise<void>,
+    key: unknown = operation,
+    retry?: () => Promise<void>,
+  ) {
     return run(async () => {
       try {
         await operation();
@@ -102,7 +111,7 @@ export function downloadState(port: TransferPort) {
           writeFailed = false;
         }
       } catch {
-        failedAction = operation;
+        failedAction = retry ?? (() => change(operation, key));
         failedKey = key;
         writeFailed = true;
         state.set((old) => ({ ...old, error: "write" }));
@@ -116,7 +125,7 @@ export function downloadState(port: TransferPort) {
 
   return {
     state,
-    retry: () => (failedAction ? change(failedAction, failedKey) : run(() => read(true))),
+    retry: () => (failedAction ? failedAction() : run(() => read(true))),
     refresh: (restore = false) => run(() => read(restore)),
     change,
   };

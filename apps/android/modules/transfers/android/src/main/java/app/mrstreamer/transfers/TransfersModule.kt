@@ -12,14 +12,15 @@ class TransfersModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("Transfers")
-    AsyncFunction("restore") Coroutine {
+    AsyncFunction("restore") Coroutine { ->
       withContext(Dispatchers.IO) {
         val manager = androidx.work.WorkManager.getInstance(context)
         synchronized(Ledger.lock) {
           val running = manager.getWorkInfosForUniqueWork("downloads").get()
             .any { it.state == androidx.work.WorkInfo.State.RUNNING }
+          Transfers.clearAuthority()
           val result = Transfers.snapshot(context, !running)
-          if (!running) Transfers.kick(context)
+          Transfers.kick(context)
           result
         }
       }
@@ -62,9 +63,14 @@ class TransfersModule : Module() {
     AsyncFunction("path") { id: String ->
       synchronized(Ledger.lock) {
         val ledger = Ledger(context)
-        val row = ledger.read().first { it.getString("id") == id }
+        val rows = ledger.read()
+        val row = rows.first { it.getString("id") == id }
         val file = ledger.media(id)
-        check(row.getString("state") == "complete" && file.canRead() && file.length() > 0 && file.length() == row.getLong("total")) { "missing" }
+        if (row.getString("state") != "complete" || !file.canRead() || file.length() <= 0 || file.length() != row.getLong("total")) {
+          ledger.recover(row)
+          ledger.save(rows)
+          error("missing")
+        }
         file.absolutePath
       }
     }

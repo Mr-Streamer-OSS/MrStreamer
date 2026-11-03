@@ -157,3 +157,25 @@ it("keeps the successor presentation adapter when an older registration cleans u
   second();
   expect(registry.state.get()).toBeUndefined();
 });
+
+it("retries a failed removal as removal rather than downloading again", () => {
+  const saved = row("one", { state: "failed", reason: "remove" });
+  const act = vi.fn();
+  libraryDownload(
+    [saved],
+    {
+      sourceId: saved.sourceId,
+      titleKey: "movie",
+      titleId: saved.mediaId,
+      kind: "movie",
+      version: {
+        subscriptionId: saved.sourceId,
+        id: saved.mediaId,
+        tags: [],
+        container: saved.container,
+      },
+    },
+    act,
+  )?.activate();
+  expect(act).toHaveBeenCalledWith(saved, "remove");
+});
