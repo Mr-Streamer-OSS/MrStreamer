@@ -1006,7 +1006,9 @@ function make(deps: RecordingsDeps) {
                 url,
                 format,
                 headers: headers ?? {},
-                shared: key,
+                // What another reads but can't share with it, as an HLS quality it can't read,
+                // it asks the provider for itself.
+                shared: key !== null && (shared || !captures.taken(key)) ? key : null,
                 variant: key === null ? null : captures.joins(key),
               })),
               fileOf(record),

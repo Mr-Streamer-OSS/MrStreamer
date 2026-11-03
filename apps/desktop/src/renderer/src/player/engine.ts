@@ -453,9 +453,8 @@ function hlsEngine(
     fix(variant) {
       fixed = variant;
       if (released || !listed) return;
-      const held = heldLevel();
-      // One it doesn't list is still the only one the main process sends meanwhile.
-      if (variant === null || held >= 0) hls.loadLevel = held;
+      // One it doesn't list is still the only one the main process sends meanwhile: it picks.
+      hls.loadLevel = heldLevel();
     },
     info() {
       const level = hls.levels[hls.currentLevel];

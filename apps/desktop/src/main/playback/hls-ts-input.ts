@@ -196,6 +196,8 @@ export interface Variant {
    * a separate rendition, and no session key in the playlist.
    */
   readonly recordable: boolean;
+  /** Whether it has subtitles in a rendition of their own, which this reader leaves out. */
+  readonly subtitles: boolean;
 }
 
 /** The variants of the multivariant playlist `text`, read from `base`, in its order. */
@@ -211,15 +213,15 @@ export function variantsOf(text: string, base: string): readonly Variant[] {
     const uri = lines[index + 1];
     if (!uri || uri.startsWith("#")) malformed();
     const height = Number(attrs.get("RESOLUTION")?.split("x")[1]) || 0;
-    const separateSound = renditions.some(
-      (r) => r.get("TYPE") === "AUDIO" && r.has("URI") && r.get("GROUP-ID") === attrs.get("AUDIO"),
-    );
+    const separate = (type: string, group: string | undefined) =>
+      renditions.some((r) => r.get("TYPE") === type && r.has("URI") && r.get("GROUP-ID") === group);
     return [
       {
         address: addressOf(uri, base),
         height,
         bandwidth: Number(attrs.get("BANDWIDTH")) || Infinity,
-        recordable: height <= 1080 && !separateSound && !keyed,
+        recordable: height <= 1080 && !separate("AUDIO", attrs.get("AUDIO")) && !keyed,
+        subtitles: separate("SUBTITLES", attrs.get("SUBTITLES")),
       },
     ];
   });

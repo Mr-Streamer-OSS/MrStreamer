@@ -164,6 +164,11 @@ export class LiveCaptures extends Context.Service<
     /** Whether something reads `key` now, so reading it too asks the provider nothing more. */
     reading(key: string): boolean;
     /**
+     * Whether something reads `key` now, though reading it too might not share it: an HLS stream
+     * held to a variant a recording can't read.
+     */
+    taken(key: string): boolean;
+    /**
      * The variant of the multivariant HLS stream `key` a reader joining it now holds, as its
      * playlist names it; null for any other stream, or one nothing reads.
      */
@@ -431,6 +436,10 @@ function make(options: LiveCapturesOptions) {
       reading: (key: string) => {
         const entry = entries.get(key);
         return entry?.kind === "open" || entry?.kind === "opening" || hls.reading(key);
+      },
+      taken: (key: string) => {
+        const entry = entries.get(key);
+        return entry?.kind === "open" || entry?.kind === "opening" || hls.taken(key);
       },
       joins: hls.joins,
       fixed: hls.fixed,

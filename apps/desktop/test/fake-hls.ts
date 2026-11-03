@@ -13,8 +13,9 @@ export async function startFakeHls(
     /** A playlist's address sends on to the same one under a token, as a panel's session. */
     readonly tokens?: boolean;
     /**
-     * A channel "qualities" too, whose multivariant playlist offers H.264 and AAC in these of
-     * 1080, 720 and 2160 lines, as `qualities-hd`, `qualities-sd` and `qualities-uhd`.
+     * A channel "qualities" too, whose multivariant playlist offers H.264 in these of 1080, 720
+     * and 2160 lines, as `qualities-hd`, `qualities-sd` and `qualities-uhd`: 720's sound is MP3,
+     * the others' AAC.
      */
     readonly qualities?: readonly ("hd" | "sd" | "uhd")[];
   } = {},
@@ -130,7 +131,7 @@ export async function startFakeHls(
                   ]
                     .filter(([variant]) => options.qualities?.includes(variant))
                     .flatMap(([variant, size, bandwidth]) => [
-                      `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${size},CODECS="avc1.640028,mp4a.40.2"`,
+                      `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${size},CODECS="avc1.640028,${variant === "sd" ? "mp4a.40.34" : "mp4a.40.2"}"`,
                       `qualities-${variant}.m3u8`,
                     ]),
                   "",
@@ -143,11 +144,14 @@ export async function startFakeHls(
     if (!segment) return response.writeHead(404).end();
     const kind = segment[1];
     const body = fixture(
-      kind === "compatible" || kind?.startsWith("qualities")
-        ? "h264-aac.mpegts"
-        : kind === "ac3"
-          ? "h264-ac3.mpegts"
-          : `hls-epoch-${Number(segment[2]) % 2}.mpegts`,
+      // 720 lines sound as MP3, so a recording tells which quality it has.
+      kind === "qualities-sd"
+        ? "h264-mp3.mpegts"
+        : kind === "compatible" || kind?.startsWith("qualities")
+          ? "h264-aac.mpegts"
+          : kind === "ac3"
+            ? "h264-ac3.mpegts"
+            : `hls-epoch-${Number(segment[2]) % 2}.mpegts`,
     );
     bytes += body.length;
     if (stalls.has(path)) {

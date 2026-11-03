@@ -1563,14 +1563,15 @@ describe.skipIf(!hasTools)("recordings", () => {
     const [done] = await recordings.list();
     expect(done?.status).toEqual({ kind: "stopped" });
     const file = await fileOf(dataDir, done!);
-    expect(probe(file.path)).toEqual(["h264", "aac"]);
+    expect(probe(file.path)).toEqual(["h264", "mp3"]);
     expect(decodes(file.path)).toBe(true);
   }, 30_000);
 
   it("holds Watch joining a recording of an HLS channel to the recorded quality, and shares none it can't record", async () => {
     const host = await startFakeHls({ live: { segmentMs: 1000 }, qualities: ["hd", "sd", "uhd"] });
     onTestFinished(() => host.close());
-    const { recordings, subscriptions, library, playback, runtime } = await app(await tempDir());
+    const dataDir = await tempDir();
+    const { recordings, subscriptions, library, playback, runtime } = await app(dataDir);
     const held = heldQualities(runtime);
     const { id: subscriptionId } = await subscriptions.add({
       server: host.link,
@@ -1598,6 +1599,9 @@ describe.skipIf(!hasTools)("recordings", () => {
     await player.reaches(2);
     expect(host.requests().filter((path) => path.includes("qualities-sd"))).toEqual([]);
     await recordings.stop(answer.recording.id);
+    // It recorded 1080, whose sound is AAC, not 720's MP3.
+    const [done] = await until(recordings.list, ([first]) => first?.status.kind === "stopped");
+    expect(probe((await fileOf(dataDir, done!)).path)).toEqual(["h264", "aac"]);
     expect((await until(held, (each) => each.length > 1)).at(-1)).toEqual({
       sessionId: watching.sessionId,
       variant: null,

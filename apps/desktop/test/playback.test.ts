@@ -1342,6 +1342,75 @@ describe("live captures", () => {
     await captures.idle("again");
     expect(captures.fixed("watch")).toBeNull();
     expect(await read("watch", "hd.m3u8?token=1")).toBe(media("hd"));
+
+    // In 2160 lines, more than a recording takes, it is no stream to join, and a recording that
+    // joins anyway holds Watch to the quality it reads instead.
+    await read("watch", "uhd.m3u8?token=1");
+    expect(captures.reading(key)).toBe(false);
+    expect(captures.taken(key)).toBe(true);
+    expect(captures.joins(key)).toBeNull();
+    await read("record", "master.m3u8");
+    expect(captures.fixed("watch")).toBeNull();
+    expect(await read("record", "sd.m3u8?token=1")).toBe(media("sd"));
+    expect(captures.fixed("watch")).toBe(variant("sd"));
+    await captures.idle("record");
+    await captures.idle("watch");
+  });
+
+  it("tells HLS variants apart by their query, and keeps the one held when asked for its variants again", async () => {
+    const { captures, source } = await capturing();
+    const key = captureKey({ ...source, format: "hls", url: "http://provider/master.m3u8" });
+    let token = 1;
+    const asked: string[] = [];
+    const master = () =>
+      [
+        "#EXTM3U",
+        '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English",URI="subs.m3u8"',
+        ...["hd", "sd"].flatMap((quality) => [
+          "#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720",
+          `leaf.m3u8?quality=${quality}&token=${token}`,
+        ]),
+        '#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720,SUBTITLES="s"',
+        `leaf.m3u8?quality=subtitled&token=${token}`,
+        "",
+      ].join("\n");
+    const read = async (owner: string, name: string) => {
+      const answer = await captures.resource(
+        key,
+        owner,
+        new URL(name, "http://provider/").href,
+        (address) => {
+          const quality = new URL(address).searchParams.get("quality");
+          asked.push(quality ?? "master");
+          return Promise.resolve(
+            new Response(
+              quality ? `#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\n${quality}.ts\n` : master(),
+            ),
+          );
+        },
+        new AbortController().signal,
+      );
+      return answer.text();
+    };
+    const sd = "http://provider/leaf.m3u8?quality=sd&token=1";
+
+    await read("watch", "master.m3u8");
+    expect(await read("watch", "leaf.m3u8?quality=sd&token=1&_HLS_msn=3")).toContain("sd.ts");
+    expect(captures.joins(key)).toBe(sd);
+    await read("record", "master.m3u8");
+    expect(captures.fixed("watch")).toBe(sd);
+    expect(await read("record", "leaf.m3u8?quality=hd&token=1")).toContain("sd.ts");
+    // Asked for again, under new tokens: the variant held stays.
+    token = 2;
+    expect(await read("watch", "master.m3u8")).toContain("token=2");
+    expect(captures.fixed("watch")).toBe(sd);
+    expect(captures.fixed("record")).toBe(sd);
+    expect(asked).not.toContain("hd");
+    await captures.idle("record");
+
+    // Its subtitles in a rendition of their own, a recording would leave out: no stream to join.
+    await read("watch", "leaf.m3u8?quality=subtitled&token=1");
+    expect(captures.reading(key)).toBe(false);
     await captures.idle("watch");
   });
 });
