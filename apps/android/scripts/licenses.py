@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate notices from pnpm's production install and the committed Gradle runtime report.
+"""Regenerate notices from Metro release sources and the Gradle runtime report.
 Uses only published POM metadata, artefact notices and licence URLs. Missing notices fail closed.
 """
 from concurrent.futures import ThreadPoolExecutor
@@ -7,10 +7,9 @@ from pathlib import Path
 import hashlib
 import io
 import json
-import os
 import re
 import subprocess
-import tarfile
+import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -48,43 +47,36 @@ def autolink(command):
     output = subprocess.check_output(['pnpm', 'exec', 'expo-modules-autolinking', command, '--platform', 'android', '--json'], cwd=APP).decode()
     return json.loads(output[output.index('{'):])
 
-expo_modules = autolink('resolve')['modules']
-js = json.loads(subprocess.check_output(['pnpm', 'licenses', 'list', '--json'], cwd=APP))
-# Include all locked versions, including tooling and optional packages for other hosts.
-installed = set()
-for packages in js.values():
-    for package in packages:
-        for folder in package['paths']:
-            metadata = json.loads((Path(folder) / 'package.json').read_text())
-            installed.add(f"{metadata['name']}@{metadata['version']}")
-locked = (APP / 'pnpm-lock.yaml').read_text().split('\npackages:\n')[1].split('\nsnapshots:\n')[0]
-for key in re.findall(r"^  '?([^\s']+@[^\s']+)'?:$", locked, re.M):
-    if key in installed: continue
-    name, version = key.rsplit('@', 1)
-    folder = CACHE / 'packages' / hashlib.sha256(key.encode()).hexdigest()
-    if not (folder / 'package/package.json').exists():
-        published = fetch(f'https://registry.npmjs.org/{name}/{version}')
-        if not published: raise RuntimeError(f'Metadata unavailable: {key}')
-        metadata = json.loads(published)
-        archive = fetch(metadata['dist']['tarball'])
-        if not archive: raise RuntimeError(f'Package unavailable: {key}')
-        folder.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as contents:
-            contents.extractall(folder, filter='data')
-    metadata = json.loads((folder / 'package/package.json').read_text())
+# Metro uses app-relative paths for npm modules and repository-relative paths for workspaces.
+# Virtual polyfills have no package owner. Every other source must resolve to a real package.
+source_map = json.loads(Path(sys.argv[1]).read_text())
+sources = sorted(set(source_map['sources']))
+root = APP.parents[1]
+folders = set()
+for source in sources:
+    if source.startswith('\x00'): continue
+    path = (root if source.startswith('/packages/') else APP) / source.lstrip('/')
+    folder = path.parent
+    while not (folder / 'package.json').is_file() or not json.loads((folder / 'package.json').read_text()).get('name'):
+        if folder == folder.parent: raise RuntimeError(f'No package for bundled source: {source}')
+        folder = folder.parent
+    folders.add(folder)
+js = {}
+for folder in sorted(folders):
+    metadata = json.loads((folder / 'package.json').read_text())
     licence = metadata.get('license', 'See notice')
     if isinstance(licence, dict): licence = licence.get('type', 'See notice')
-    js.setdefault(licence, []).append(dict(name=name, paths=[str(folder / 'package')]))
-known = {package['name'] for packages in js.values() for package in packages}
-for module in expo_modules:
-    # Repository-native modules share the app's licence notice below; Maven dependencies remain individual entries.
-    if module['packageName'] in known or module['packageName'] in {'credentials', 'player'}: continue
-    folder = Path(module['projects'][0]['sourceDir']).parent
-    metadata = json.loads((folder / 'package.json').read_text())
-    js.setdefault(metadata['license'], []).append(dict(name=metadata['name'], paths=[str(folder)]))
+    js.setdefault(licence, []).append(dict(name=metadata['name'], paths=[str(folder)]))
 components = []
 local_repositories = {}
 notice_sources = json.loads((DEST / 'notice-sources.json').read_text())
+# Native Expo modules can supply Maven artefacts even when their JS is not bundled.
+for module in autolink('resolve')['modules']:
+    for project in module['projects']:
+        folder = Path(project['sourceDir']).parent
+        local = folder / 'local-maven-repo'
+        if local.is_dir(): local_repositories[local.as_uri() + '/'] = f"https://www.npmjs.com/package/{module['packageName']}"
+app_version = json.loads((APP / 'app.json').read_text())['expo']['version']
 for licence, packages in js.items():
     for package in packages:
         for folder in package['paths']:
@@ -93,6 +85,10 @@ for licence, packages in js.items():
         for folder in package['paths']:
             folder = Path(folder)
             metadata = json.loads((folder / 'package.json').read_text())
+            if folder == APP or folder.is_relative_to(root / 'packages'):
+                components.append(dict(name=metadata['name'], version=app_version, licence=licence,
+                                       source='https://git.cafe/mr-streamer-oss/mrstreamer', notice=(root / 'LICENSE').read_text()))
+                continue
             text = notices(folder)
             if not text:
                 text = '\n\n'.join(p.read_text(errors='replace') for p in sorted(folder.rglob('*')) if p.is_file() and re.search(r'(^|[.\-_])(licen[cs]e|unlicen[cs]e|notice)([.\-_]|$)', p.name, re.I))
@@ -226,15 +222,9 @@ def native(coordinate):
 
 with ThreadPoolExecutor(max_workers=12) as pool:
     components.extend(pool.map(native, sorted(coordinates)))
-# The app and its portable workspace packages are built from this repository under GPL-3.0.
-root = APP.parents[1]
-app_version = json.loads((APP / 'app.json').read_text())['expo']['version']
-for folder in [APP, root / 'packages/contracts', root / 'packages/core', root / 'packages/mobile']:
-    metadata = json.loads((folder / 'package.json').read_text())
-    components.append(dict(name=metadata['name'], version=app_version, licence=metadata['license'],
-                           source='https://git.cafe/mr-streamer-oss/mrstreamer', notice=(root / 'LICENSE').read_text()))
 unique = {(item['name'], item['version']): item for item in components}
 manifest = sorted(unique.values(), key=lambda item: (item['name'].lower(), item['version']))
+(DEST / 'bundle-sources.json').write_text(json.dumps(sources, indent=2) + '\n')
 (DEST / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
 (DEST / 'summary.json').write_text(json.dumps({'count': len(manifest), 'native': len(coordinates)}) + '\n')
 print(f"Wrote {len(manifest)} components ({len(coordinates)} native)")

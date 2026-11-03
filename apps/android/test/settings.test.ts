@@ -468,7 +468,7 @@ it("sends the exact capture JSON and maps HTTP statuses", async () => {
   }
 });
 
-it("inventories every resolved native coordinate and every locked package version", async () => {
+it("inventories exactly the release bundle packages and resolved native coordinates", async () => {
   const { readFile } = await import("node:fs/promises");
   const { default: manifest } = await import("../licenses/manifest.json");
   const entries = new Set(manifest.map(({ name, version }) => `${name}@${version}`));
@@ -503,5 +503,41 @@ it("inventories every resolved native coordinate and every locked package versio
   const packages = lock.split("\npackages:\n")[1]?.split("\nsnapshots:\n")[0] ?? "";
   const locked = [...packages.matchAll(/^  '?([^\s']+@[^\s']+)'?:$/gm)].map((match) => match[1]!);
   expect(locked.length).toBeGreaterThan(0);
-  expect(locked.filter((key) => !entries.has(key))).toEqual([]);
+  const { default: sources } = await import("../licenses/bundle-sources.json");
+  const { dirname, join, resolve } = await import("node:path");
+  const { existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const app = resolve(fileURLToPath(new NodeURL("..", import.meta.url)));
+  const repository = resolve(app, "../..");
+  const { default: config } = await import("../app.json");
+  const bundled = new Set<string>();
+
+  for (const source of sources) {
+    if (source.startsWith("\0")) continue;
+    let folder = dirname(join(source.startsWith("/packages/") ? repository : app, source));
+
+    while (
+      !existsSync(join(folder, "package.json")) ||
+      !JSON.parse(await readFile(join(folder, "package.json"), "utf8")).name
+    ) {
+      const parent = dirname(folder);
+
+      if (parent === folder) throw new Error(`No package for ${source}`);
+      folder = parent;
+    }
+
+    const metadata = JSON.parse(await readFile(join(folder, "package.json"), "utf8")) as {
+      name: string;
+      version?: string;
+    };
+
+    const workspace = folder === app || folder.startsWith(join(repository, "packages") + "/");
+    const key = `${metadata.name}@${workspace ? config.expo.version : metadata.version}`;
+
+    if (!workspace) expect(locked, source).toContain(key);
+    bundled.add(key);
+  }
+
+  expect(bundled.size).toBeGreaterThan(0);
+  expect([...entries].sort()).toEqual([...new Set([...native, ...bundled])].sort());
 });

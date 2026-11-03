@@ -1,4 +1,4 @@
-import { catalogue } from "@mrstreamer/mobile/language/catalogue";
+import { catalogue } from "@mrstreamer/mobile/language";
 
 /** The destinations, the top app bar, the rail and sheets. */
 export const t = catalogue(

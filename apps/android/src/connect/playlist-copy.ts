@@ -12,7 +12,6 @@ export const t = catalogue(
       "This playlist has more than 100,000 entries, more than the phone reads.",
     "This address isn't a playlist. A server address needs a username and password.":
       "This address isn't a playlist. A server address needs a username and password.",
-    "Opens the player": "Opens the player",
   },
   {
     "nl-NL": {
@@ -26,7 +25,6 @@ export const t = catalogue(
         "Deze afspeellijst bevat meer dan 100.000 items, meer dan de telefoon leest.",
       "This address isn't a playlist. A server address needs a username and password.":
         "Dit adres is geen afspeellijst. Een serveradres heeft een gebruikersnaam en wachtwoord nodig.",
-      "Opens the player": "Opent de speler",
     },
   },
 );

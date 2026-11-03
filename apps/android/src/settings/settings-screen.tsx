@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { currentLanguage, formatNumber, t as coreText } from "@mrstreamer/core/i18n";
 import type { LanguageChoice } from "@mrstreamer/mobile/language";
 import { sources } from "../bootstrap/sources.ts";
-import { monogram } from "../connect/catalogue-screen.tsx";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
 import { describeFailure } from "../connect/failure.ts";
 import type { ConnectedSource } from "../connect/sources.ts";
@@ -511,4 +510,13 @@ function LanguagePicker({
       ))}
     </View>
   );
+}
+
+/** Up to two initials for a provider's badge: "Harbour HD" is "HH", a one-word "Nova" is "NO". */
+function monogram(title: string): string {
+  const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const [first, second] = words.map((word) => Array.from(word));
+  const letters = second ? [first?.[0], second[0]] : (first ?? []).slice(0, 2);
+
+  return letters.join("").toLocaleUpperCase();
 }
