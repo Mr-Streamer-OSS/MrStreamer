@@ -59,11 +59,21 @@ const english = {
   Specials: "Specials",
   "Season {number}": "Season {number}",
   "Couldn't load details.": "Couldn't load details.",
-  "Couldn't load movies and series.": "Couldn't load movies and series.",
-  "Couldn't update movies and series from {provider}. Showing the last list.":
-    "Couldn't update movies and series from {provider}. Showing the last list.",
-  "Couldn't update TMDB. Showing saved details.": "Couldn't update TMDB. Showing saved details.",
+  "Couldn't load movies and series from {providers}.":
+    "Couldn't load movies and series from {providers}.",
+  "Couldn't update movies and series from {providers}.":
+    "Couldn't update movies and series from {providers}.",
+  "Showing the last list.": "Showing the last list.",
+  Retry: "Retry",
+  Settings: "Settings",
+  "TMDB isn't answering.": "TMDB isn't answering.",
   "Couldn't save version.": "Couldn't save version.",
+  Movie: "Movie",
+  "{shown} of {count}": "{shown} of {count}",
+  "{count} seasons": { one: "{count} season", other: "{count} seasons" },
+  "Directed by {names}": "Directed by {names}",
+  "With {names}": "With {names}",
+  Clear: "Clear",
 } as const;
 
 const dutch = {
@@ -125,12 +135,21 @@ const dutch = {
   Specials: "Specials",
   "Season {number}": "Seizoen {number}",
   "Couldn't load details.": "Details konden niet worden geladen.",
-  "Couldn't load movies and series.": "Films en series konden niet worden geladen.",
-  "Couldn't update movies and series from {provider}. Showing the last list.":
-    "Films en series van {provider} konden niet worden bijgewerkt. De vorige lijst wordt getoond.",
-  "Couldn't update TMDB. Showing saved details.":
-    "TMDB kon niet worden bijgewerkt. Opgeslagen details worden getoond.",
+  "Couldn't load movies and series from {providers}.":
+    "Films en series van {providers} konden niet worden geladen.",
+  "Couldn't update movies and series from {providers}.":
+    "Films en series van {providers} konden niet worden bijgewerkt.",
+  "Showing the last list.": "De laatste lijst wordt getoond.",
+  Retry: "Opnieuw",
+  Settings: "Instellingen",
+  "TMDB isn't answering.": "TMDB antwoordt niet.",
   "Couldn't save version.": "Versie kon niet worden opgeslagen.",
+  Movie: "Film",
+  "{shown} of {count}": "{shown} van {count}",
+  "{count} seasons": { one: "{count} seizoen", other: "{count} seizoenen" },
+  "Directed by {names}": "Regie: {names}",
+  "With {names}": "Met {names}",
+  Clear: "Wissen",
 } as const;
 
 export const t = catalogue(english, { "nl-NL": dutch });

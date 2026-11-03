@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { FlatList, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   COLLECTION_SORTS,
@@ -9,12 +9,16 @@ import {
   type Episode,
 } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
-import { formatNumber, formatDate } from "@mrstreamer/core/i18n";
+import { formatDecimal, formatList, formatNumber } from "@mrstreamer/core/i18n";
 import { collectionRows } from "@mrstreamer/core/ondemand/collections";
 import { versionOptions } from "@mrstreamer/core/ondemand/version-options";
 import { TITLE_LANGUAGES } from "@mrstreamer/core/ondemand/languages";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
+import { runtime } from "@mrstreamer/core/viewing/continue";
+import { layoutFor } from "../navigation/destinations.ts";
+import { useOpenShared } from "../navigation/open.ts";
 import { Screen } from "../navigation/screen.tsx";
+import { IconButton } from "../ui/icon-button.tsx";
 import { Sheet } from "../ui/sheet.tsx";
 import { colors } from "../ui/theme.ts";
 import { useStore } from "../platform/store.ts";
@@ -24,11 +28,28 @@ import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
 import { libraryIntents, type MediaIdentity } from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
+import {
+  Artwork,
+  CountRow,
+  CountSummary,
+  FilledButton,
+  Icon,
+  OutlinedButton,
+  Poster,
+  Press,
+  RadioRow,
+  Recovery,
+  RowAction,
+  SheetHeading,
+  sheetLine,
+  StatusLine,
+  TextButton,
+  TextTabs,
+  typeScale,
+} from "./parts.tsx";
 import { useLibraryModel } from "./runtime.ts";
 import { collectionId, routeChoices } from "./route.ts";
 import { chosenVersion, versionMemory } from "./versions.ts";
-
-const text = { color: colors.text, fontSize: 16 };
 
 const sorts = {
   added: "Recently added",
@@ -46,70 +67,18 @@ const tabs = {
   all: "All",
 } as const;
 
+/** From 840dp wide (Material's expanded class) a series' title column sits beside its episodes. */
+const BESIDE = 840;
+
 let memory: ReturnType<typeof versionMemory> | undefined;
 const savedVersions = () => (memory ??= versionMemory(storage));
 
-export function Copy({ children }: { children: ReactNode }) {
-  return <Text style={text}>{children}</Text>;
-}
+/** Phones keep Paper A's 16dp margins; beside the rail, from 600dp, they are 24dp. */
+function useMargins() {
+  const { width } = useWindowDimensions();
+  const rail = layoutFor(width) === "rail";
 
-export function Choice({
-  label,
-  onPress,
-  selected,
-  radio = false,
-}: {
-  label: string;
-  onPress(): void;
-  selected?: boolean;
-  radio?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole={radio ? "radio" : "button"}
-      accessibilityState={radio ? { checked: Boolean(selected) } : { selected: Boolean(selected) }}
-      onPress={onPress}
-      style={{ minHeight: 48, padding: 12, justifyContent: "center" }}
-    >
-      <Copy>
-        {selected ? "• " : ""}
-        {label}
-      </Copy>
-    </Pressable>
-  );
-}
-
-function Body({ children }: { children: ReactNode }) {
-  const insets = useSafeAreaInsets();
-
-  return (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 16 }}>
-      {children}
-    </ScrollView>
-  );
-}
-
-function Failure({ model }: { model: LibraryModel }) {
-  const state = useStore(model.state);
-
-  return (
-    <View accessibilityLiveRegion="polite">
-      {state.loading ? <Copy>{t("Loading…")}</Copy> : null}
-      {state.failures.map((provider) => (
-        <Copy key={provider}>
-          {model.made("movie").size("all") + model.made("series").size("all") > 0
-            ? t("Couldn't update movies and series from {provider}. Showing the last list.", {
-                provider,
-              })
-            : t("Couldn't load movies and series.")}
-        </Copy>
-      ))}
-      {state.failures.length ? (
-        <Choice label={t("Try again")} onPress={() => void model.refresh()} />
-      ) : null}
-    </View>
-  );
+  return { width, rail, inset: rail ? 24 : 16 };
 }
 
 function openTitle(destination: string, title: Title, requested = false) {
@@ -123,22 +92,135 @@ function openTitle(destination: string, title: Title, requested = false) {
   });
 }
 
-function TitleRows({
+/**
+ * The state of the lists when a screen has nothing to show: still text while they load, the
+ * providers that failed with Try again, or that there is nothing.
+ */
+function ListRecovery({ model, empty }: { model: LibraryModel; empty: string }) {
+  const state = useStore(model.state);
+
+  if (state.loading) return <Recovery message={t("Loading…")} />;
+
+  if (state.failures.length)
+    return (
+      <Recovery
+        icon="cloud-off"
+        message={t("Couldn't load movies and series from {providers}.", {
+          providers: formatList(state.failures),
+        })}
+        action={
+          <OutlinedButton
+            label={t("Try again")}
+            icon="refresh"
+            onPress={() => void model.refresh()}
+          />
+        }
+      />
+    );
+
+  return <Recovery message={empty} />;
+}
+
+/** Docked above the navigation bar while an update failed and the last list still shows. */
+function StaleStatus({ model }: { model: LibraryModel }) {
+  const state = useStore(model.state);
+  const open = useOpenShared();
+  const listed = model.made("movie").size("all") + model.made("series").size("all") > 0;
+
+  if (!listed || !state.failures.length) return null;
+
+  return (
+    <StatusLine
+      message={`${t("Couldn't update movies and series from {providers}.", {
+        providers: formatList(state.failures),
+      })} ${t("Showing the last list.")}`}
+      actions={
+        <>
+          <TextButton label={t("Settings")} onPress={() => open("settings")} />
+          <TextButton label={t("Retry")} onPress={() => void model.refresh()} />
+        </>
+      }
+    />
+  );
+}
+
+/**
+ * A collection's posters in rows that fill the width: 120dp posters with 10dp gaps on phones,
+ * 132dp with 12dp beside the rail, as many to a row as fit, never fewer than two.
+ */
+function PosterGrid({
   titles,
-  destination,
-  requested = false,
+  onOpen,
 }: {
   titles: readonly Title[];
-  destination: string;
-  requested?: boolean;
+  onOpen: (title: Title) => void;
 }) {
-  return titles.map((title) => (
-    <Choice
-      key={title.key}
-      label={title.title}
-      onPress={() => openTitle(destination, title, requested)}
+  const { width, rail, inset } = useMargins();
+  const insets = useSafeAreaInsets();
+  const [measured, setMeasured] = useState(0);
+  const space = (measured || width - (rail ? 88 : 0)) - inset * 2;
+  const gap = rail ? 12 : 10;
+  const columns = Math.max(2, Math.floor((space + gap) / ((rail ? 132 : 120) + gap)));
+  const poster = Math.floor((space - gap * (columns - 1)) / columns);
+  const rows: Title[][] = [];
+
+  for (let at = 0; at < titles.length; at += columns) rows.push(titles.slice(at, at + columns));
+
+  return (
+    <FlatList
+      data={rows}
+      keyExtractor={(row) => row[0]!.key}
+      onLayout={(event) => setMeasured(event.nativeEvent.layout.width)}
+      contentContainerStyle={{
+        gap: rail ? 16 : 14,
+        paddingHorizontal: inset,
+        paddingTop: rail ? 20 : 16,
+        paddingBottom: insets.bottom + 16,
+      }}
+      renderItem={({ item }) => (
+        <View style={{ flexDirection: "row", gap }}>
+          {item.map((title) => (
+            <Poster key={title.key} title={title} width={poster} onPress={() => onOpen(title)} />
+          ))}
+        </View>
+      )}
     />
-  ));
+  );
+}
+
+/** A row that opens a genre's or a service's collection, with its count in a right lane. */
+function CollectionLink({
+  name,
+  count,
+  inset,
+  onPress,
+}: {
+  name: string;
+  count: number;
+  inset: number;
+  onPress: () => void;
+}) {
+  return (
+    <Press
+      label={`${name} · ${formatNumber(count)}`}
+      onPress={onPress}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        minHeight: 56,
+        paddingLeft: inset,
+        paddingRight: 4,
+      }}
+    >
+      <Text style={{ ...typeScale.body, flex: 1 }}>{name}</Text>
+      <Text style={{ ...typeScale.meta, minWidth: 48, textAlign: "right" }}>
+        {formatNumber(count)}
+      </Text>
+      <View style={{ width: 48, alignItems: "center" }}>
+        <Icon name="chevron-right" color={colors.secondary} />
+      </View>
+    </Press>
+  );
 }
 
 export function BrowseScreen({
@@ -153,6 +235,9 @@ export function BrowseScreen({
   const model = useLibraryModel(injected);
   useLocale();
   useStore(model.state);
+  const { rail, inset } = useMargins();
+  const insets = useSafeAreaInsets();
+  const [sheet, setSheet] = useState(false);
 
   const params = useLocalSearchParams<{
     tab?: string;
@@ -169,6 +254,7 @@ export function BrowseScreen({
   const id = pushed ? collectionId(params.collection) : tab === "4k" ? "4k" : "all";
   const result = browseCollection(made, id, choices);
   const destination = kind === "movie" ? "movies" : "series";
+  const collectionTab = pushed || tab === "all" || tab === "4k";
 
   const change = (next: BrowseChoices) =>
     router.setParams({ sort: next.sort ?? "", filters: JSON.stringify(next.filters) });
@@ -183,87 +269,238 @@ export function BrowseScreen({
     ? (made.name(id) ?? t("Collection"))
     : t(kind === "movie" ? "Movies" : "Series");
 
-  return (
-    <Screen title={heading} pushed={pushed}>
-      <Body>
-        {!pushed ? (
-          <View accessibilityRole="tablist" style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            {visible.map((value) => (
-              <Choice
-                key={value}
-                label={value === "4k" ? "4K" : t(tabs[value as Exclude<keyof typeof tabs, "4k">])}
-                selected={tab === value}
-                onPress={() => router.setParams({ tab: value })}
-              />
-            ))}
-          </View>
-        ) : null}
-        <Failure model={model} />
-        {pushed || tab === "all" || tab === "4k" ? (
-          <>
-            <BrowseControls kind={kind} choices={choices} result={result} onChange={change} />
-            <TitleRows
-              titles={result.titles}
-              destination={destination}
-              requested={id === "4k" || Object.keys(choices.filters).length > 0}
-            />
-            {!result.titles.length ? (
-              <>
-                <Copy>{t(result.total ? "No titles match these filters." : "Nothing here.")}</Copy>
-                {result.total ? (
-                  <Choice label={t("Reset")} onPress={() => change({ filters: {} })} />
-                ) : null}
-              </>
-            ) : null}
-          </>
-        ) : tab === "genres" ? (
-          made
+  const summary = {
+    count: t(kind === "movie" ? "{shown} of {count} movies" : "{shown} of {count} series", {
+      shown: result.titles.length,
+      count: result.total,
+    }),
+    label: t("Sort & filter"),
+    active: Boolean(choices.sort || Object.keys(choices.filters).length),
+    onPress: () => setSheet(true),
+  };
+
+  const counted = collectionTab && result.total > 0;
+  const open = (title: Title, requested = false) => openTitle(destination, title, requested);
+
+  const body = !made.size("all") ? (
+    <ListRecovery model={model} empty={t("Nothing here.")} />
+  ) : collectionTab ? (
+    result.titles.length ? (
+      <PosterGrid
+        titles={result.titles}
+        onOpen={(title) => open(title, id === "4k" || Object.keys(choices.filters).length > 0)}
+      />
+    ) : result.total ? (
+      <Recovery
+        icon="filter-list"
+        message={t("No titles match these filters.")}
+        action={<OutlinedButton label={t("Reset")} onPress={() => change({ filters: {} })} />}
+      />
+    ) : (
+      <Recovery message={t("Nothing here.")} />
+    )
+  ) : (
+    <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+      {tab === "genres"
+        ? made
             .genres()
             .map((genre) => (
-              <Choice
+              <CollectionLink
                 key={genre.name}
-                label={`${genre.name} · ${formatNumber(genre.count)}`}
+                name={genre.name}
+                count={genre.count}
+                inset={inset}
                 onPress={() => collection(`genre:${genre.name}`)}
               />
             ))
-        ) : tab === "services" ? (
-          made
-            .services()
-            .map((service) => (
-              <Choice
-                key={service.id}
-                label={`${service.name} · ${formatNumber(service.count)}`}
-                onPress={() => collection(`service:${service.id}`)}
-              />
-            ))
-        ) : (
-          collectionRows(made, tab === "new" ? "new" : "for-you", null).map((row) => (
-            <View key={row.id}>
-              <Choice
-                label={`${row.name} · ${t("All")} · ${formatNumber(row.total)}`}
-                onPress={() => collection(row.id)}
-              />
-              <TitleRows titles={row.titles} destination={destination} />
-            </View>
-          ))
-        )}
-      </Body>
+        : tab === "services"
+          ? made
+              .services()
+              .map((service) => (
+                <CollectionLink
+                  key={service.id}
+                  name={service.name}
+                  count={service.count}
+                  inset={inset}
+                  onPress={() => collection(`service:${service.id}`)}
+                />
+              ))
+          : collectionRows(made, tab === "new" ? "new" : "for-you", null).map((row, at) => (
+              <View key={row.id} style={{ paddingTop: at ? 12 : 16 }}>
+                <Press
+                  label={`${row.name} · ${t("All")} · ${formatNumber(row.total)}`}
+                  onPress={() => collection(row.id)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    minHeight: 48,
+                    paddingLeft: inset,
+                    paddingRight: 4,
+                  }}
+                >
+                  <Text accessibilityRole="header" style={{ ...typeScale.section, flex: 1 }}>
+                    {row.name}
+                  </Text>
+                  <View style={{ width: 48, alignItems: "center" }}>
+                    <Icon name="chevron-right" color={colors.secondary} />
+                  </View>
+                </Press>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ gap: rail ? 12 : 10, paddingHorizontal: inset }}
+                >
+                  {row.titles.map((title) => (
+                    <Poster
+                      key={title.key}
+                      title={title}
+                      width={rail ? 132 : 120}
+                      onPress={() => open(title)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            ))}
+    </ScrollView>
+  );
+
+  return (
+    <Screen title={heading} pushed={pushed}>
+      {!pushed && visible.length ? (
+        <TextTabs
+          tabs={visible.map((value) => ({
+            value,
+            label: value === "4k" ? "4K" : t(tabs[value as Exclude<keyof typeof tabs, "4k">]),
+          }))}
+          selected={tab}
+          onSelect={(value) => router.setParams({ tab: value })}
+          inset={rail ? 12 : 4}
+          trailing={rail && counted ? <CountSummary {...summary} /> : undefined}
+        />
+      ) : null}
+      {counted && (pushed || !rail) ? <CountRow inset={inset} {...summary} /> : null}
+      {body}
+      <StaleStatus model={model} />
+      {collectionTab ? (
+        <FilterSheet
+          kind={kind}
+          visible={sheet}
+          count={summary.count}
+          choices={choices}
+          result={result}
+          onChange={change}
+          onClose={() => setSheet(false)}
+        />
+      ) : null}
     </Screen>
   );
 }
 
-export function BrowseControls({
+/** A group of a sheet's radio rows under its heading, with a line above when `divided`. */
+function SheetSection({
+  heading,
+  spaced = false,
+  divided = false,
+  children,
+}: {
+  heading: string;
+  spaced?: boolean;
+  divided?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View
+      accessibilityRole="radiogroup"
+      style={{ paddingBottom: 8, borderTopWidth: divided ? 1 : 0, borderColor: sheetLine }}
+    >
+      <SheetHeading first={!spaced}>{heading}</SheetHeading>
+      {children}
+    </View>
+  );
+}
+
+/** A sheet's fixed footer, padding the system's navigation bar under it. */
+function SheetFooter({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 24,
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 4,
+        borderTopWidth: 1,
+        borderColor: sheetLine,
+        backgroundColor: colors.surface,
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** A sheet's rows under its title, scrolling clear of the system's navigation bar. */
+function SheetScroll({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <ScrollView
+      style={{ flex: 1, borderTopWidth: 1, borderColor: sheetLine }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 8 }}
+    >
+      {children}
+    </ScrollView>
+  );
+}
+
+/** A sheet's title, and on its right the count it would show. */
+function SheetTitle({ title, count }: { title: string; count?: string }) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        columnGap: 12,
+        paddingHorizontal: 24,
+        paddingTop: 4,
+        paddingBottom: 12,
+      }}
+    >
+      <Text accessibilityRole="header" style={typeScale.title}>
+        {title}
+      </Text>
+      {count ? <Text style={typeScale.meta}>{count}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * Sort & filter: radio rows with their counts, Reset and "Show N" in a fixed footer. Beside the
+ * rail it splits into Sort and Quality on the left, the languages on the right.
+ */
+function FilterSheet({
   kind,
+  visible,
+  count,
   choices,
   result,
   onChange,
+  onClose,
 }: {
   kind: TitleKind;
+  visible: boolean;
+  count: string;
   choices: BrowseChoices;
   result: BrowsedCollection;
   onChange(next: BrowseChoices): void;
+  onClose(): void;
 }) {
-  const [open, setOpen] = useState(false);
+  const { rail: columns } = useMargins();
   const update = (filters: BrowseChoices["filters"]) => onChange({ ...choices, filters });
 
   const language = (value: string) =>
@@ -273,129 +510,226 @@ export function BrowseControls({
   const quality = (value: string) =>
     ({ "4k": "4K", "full-hd": "Full HD", hd: "HD", sd: "SD" })[value] ?? t("Unknown");
 
-  return (
-    <View>
-      <Copy>
-        {t(kind === "movie" ? "{shown} of {count} movies" : "{shown} of {count} series", {
-          shown: result.titles.length,
-          count: result.total,
-        })}
-      </Copy>
-      <Choice
-        label={t("Sort & filter")}
-        selected={Boolean(choices.sort || Object.keys(choices.filters).length)}
-        onPress={() => setOpen(true)}
+  const sort = (
+    <SheetSection heading={t("Sort")}>
+      {COLLECTION_SORTS.map((value) => (
+        <RadioRow
+          key={value}
+          label={t(sorts[value])}
+          selected={result.sort === value}
+          onPress={() => onChange({ ...choices, sort: value })}
+        />
+      ))}
+    </SheetSection>
+  );
+
+  const qualities = (
+    <SheetSection heading={t("Quality")} spaced={columns} divided={!columns}>
+      <RadioRow
+        label={t("Any quality")}
+        selected={!choices.filters.quality}
+        onPress={() => {
+          const { quality: _, ...rest } = choices.filters;
+          update(rest);
+        }}
       />
-      <Sheet visible={open} label={t("Sort & filter")} onClose={() => setOpen(false)}>
-        <Body>
-          <Copy>{t("Sort")}</Copy>
-          {COLLECTION_SORTS.map((sort) => (
-            <Choice
-              key={sort}
-              label={t(sorts[sort])}
-              radio
-              selected={result.sort === sort}
-              onPress={() => onChange({ ...choices, sort })}
-            />
-          ))}
-          <Copy>{t("Quality")}</Copy>
-          <Choice
-            label={t("Any quality")}
-            radio
-            selected={!choices.filters.quality}
-            onPress={() => {
-              const { quality: _, ...rest } = choices.filters;
-              update(rest);
-            }}
-          />
-          {result.qualities.map(({ value, count }) => (
-            <Choice
-              key={value}
-              label={`${quality(value)} · ${formatNumber(count)}`}
-              radio
-              selected={choices.filters.quality === value}
-              onPress={() => update({ ...choices.filters, quality: value })}
-            />
-          ))}
-          <Copy>{t("File language")}</Copy>
-          <Copy>{t("Quality and language are provider name hints, not verified tracks.")}</Copy>
-          <Choice
-            label={t("Any file language")}
-            radio
-            selected={!choices.filters.language}
-            onPress={() => {
-              const { language: _, ...rest } = choices.filters;
-              update(rest);
-            }}
-          />
-          {result.languages.map(({ value, count }) => (
-            <Choice
-              key={value}
-              label={`${language(value)} · ${formatNumber(count)}`}
-              radio
-              selected={choices.filters.language === value}
-              onPress={() => update({ ...choices.filters, language: value })}
-            />
-          ))}
-          <Copy>{t("Known audio/subtitles")}</Copy>
-          <Choice
-            label={t("Any known track")}
-            radio
-            selected={!choices.filters.verified}
-            onPress={() => {
-              const { verified: _, ...rest } = choices.filters;
-              update(rest);
-            }}
-          />
-          {result.verified.map(({ value, count }) => (
-            <Choice
-              key={`${value.kind}:${value.language}`}
-              label={`${t(value.kind === "audio" ? "Audio: {language}" : "Subtitles: {language}", { language: languageName(value.language) ?? t("Unknown") })} · ${formatNumber(count)}`}
-              radio
-              selected={
-                choices.filters.verified?.kind === value.kind &&
-                choices.filters.verified.language === value.language
-              }
-              onPress={() => update({ ...choices.filters, verified: value })}
-            />
-          ))}
-        </Body>
-        <Choice label={t("Reset")} onPress={() => onChange({ filters: {} })} />
-        <Choice
+      {result.qualities.map(({ value, count }) => (
+        <RadioRow
+          key={value}
+          label={quality(value)}
+          count={count}
+          selected={choices.filters.quality === value}
+          onPress={() => update({ ...choices.filters, quality: value })}
+        />
+      ))}
+    </SheetSection>
+  );
+
+  const languages = (
+    <SheetSection heading={t("File language")} divided={!columns}>
+      <Text style={{ ...typeScale.small, paddingHorizontal: 24, paddingBottom: 4 }}>
+        {t("Quality and language are provider name hints, not verified tracks.")}
+      </Text>
+      <RadioRow
+        label={t("Any file language")}
+        selected={!choices.filters.language}
+        onPress={() => {
+          const { language: _, ...rest } = choices.filters;
+          update(rest);
+        }}
+      />
+      {result.languages.map(({ value, count }) => (
+        <RadioRow
+          key={value}
+          label={language(value)}
+          count={count}
+          selected={choices.filters.language === value}
+          onPress={() => update({ ...choices.filters, language: value })}
+        />
+      ))}
+    </SheetSection>
+  );
+
+  const tracks = (
+    <SheetSection heading={t("Known audio/subtitles")} spaced={columns} divided={!columns}>
+      <RadioRow
+        label={t("Any known track")}
+        selected={!choices.filters.verified}
+        onPress={() => {
+          const { verified: _, ...rest } = choices.filters;
+          update(rest);
+        }}
+      />
+      {result.verified.map(({ value, count }) => (
+        <RadioRow
+          key={`${value.kind}:${value.language}`}
+          label={t(value.kind === "audio" ? "Audio: {language}" : "Subtitles: {language}", {
+            language: languageName(value.language) ?? t("Unknown"),
+          })}
+          count={count}
+          selected={
+            choices.filters.verified?.kind === value.kind &&
+            choices.filters.verified.language === value.language
+          }
+          onPress={() => update({ ...choices.filters, verified: value })}
+        />
+      ))}
+    </SheetSection>
+  );
+
+  return (
+    <Sheet visible={visible} label={t("Sort & filter")} onClose={onClose}>
+      <SheetTitle title={t("Sort & filter")} count={count} />
+      <ScrollView style={{ flex: 1, borderTopWidth: 1, borderColor: sheetLine }}>
+        {columns ? (
+          <View style={{ flexDirection: "row" }}>
+            <View style={{ width: 280, borderRightWidth: 1, borderColor: sheetLine }}>
+              {sort}
+              {qualities}
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              {languages}
+              {tracks}
+            </View>
+          </View>
+        ) : (
+          <>
+            {sort}
+            {qualities}
+            {languages}
+            {tracks}
+          </>
+        )}
+      </ScrollView>
+      <SheetFooter>
+        <TextButton label={t("Reset")} size={15} onPress={() => onChange({ filters: {} })} />
+        <FilledButton
           label={t(kind === "movie" ? "Show {count} movies" : "Show {count} series", {
             count: result.titles.length,
           })}
-          onPress={() => setOpen(false)}
+          onPress={onClose}
         />
-      </Sheet>
-    </View>
+      </SheetFooter>
+    </Sheet>
   );
 }
 
-function Actions({ title, episode }: { title: Title; episode?: Episode }) {
-  const handlers = useStore(libraryIntents.state);
-
-  if (title.kind === "series" && !episode) return null;
-
-  const media: MediaIdentity = {
+/** The identity a Play or Download intent carries, for a movie or one of a series' episodes. */
+function mediaOf(title: Title, episode?: Episode): MediaIdentity {
+  return {
     sourceId: title.subscriptionId,
     titleKey: title.key,
     titleId: title.id,
     version: chosenVersion(title, {}),
     ...(episode ? { kind: "episode", episodeId: episode.id } : { kind: "movie" }),
   };
+}
+
+/** A movie's Play and Download, each only while its later owner handles it. */
+function MovieActions({ title }: { title: Title }) {
+  const handlers = useStore(libraryIntents.state);
+  const { play, download } = handlers;
+
+  if (!play && !download) return null;
+  const media = mediaOf(title);
 
   return (
-    <View>
-      {handlers.play ? (
-        <Choice label={t("Play")} onPress={() => handlers.play?.({ action: "play", media })} />
-      ) : null}
-      {handlers.download ? (
-        <Choice
-          label={t("Download")}
-          onPress={() => handlers.download?.({ action: "download", media })}
+    <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
+      {play ? (
+        <FilledButton
+          label={t("Play")}
+          icon="play-arrow"
+          onPress={() => play({ action: "play", media })}
         />
       ) : null}
+      {download ? (
+        <OutlinedButton
+          label={t("Download")}
+          icon="download"
+          iconOnly
+          onPress={() => download({ action: "download", media })}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/** An episode's row: its still, number and name, length, and the actions its owners handle. */
+function EpisodeRow({ title, episode, wide }: { title: Title; episode: Episode; wide: boolean }) {
+  const { play, download } = useStore(libraryIntents.state);
+  const media = () => mediaOf(title, episode);
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: wide ? 16 : 12,
+        minHeight: wide ? 112 : 88,
+        paddingVertical: 8,
+        paddingLeft: wide ? 24 : 16,
+        paddingRight: wide ? 12 : 4,
+      }}
+    >
+      <Artwork url={episode.stillUrl} width={wide ? 160 : 112} height={wide ? 90 : 63} radius={8} />
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text style={typeScale.row}>
+          {formatNumber(episode.number)}. {episode.title}
+        </Text>
+        {episode.duration ? <Text style={typeScale.small}>{runtime(episode.duration)}</Text> : null}
+        {wide && episode.plot ? (
+          <Text numberOfLines={2} style={typeScale.small}>
+            {episode.plot}
+          </Text>
+        ) : null}
+      </View>
+      {play ? (
+        <RowAction
+          icon="play-arrow"
+          label={t("Play")}
+          onPress={() => play({ action: "play", media: media() })}
+        />
+      ) : null}
+      {download ? (
+        <RowAction
+          icon="download"
+          label={t("Download")}
+          onPress={() => download({ action: "download", media: media() })}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/** A details line that something failed, with Try again in its trailing lane. */
+function DetailNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 8, minHeight: 48 }}
+    >
+      <Text style={{ ...typeScale.small, flex: 1 }}>{message}</Text>
+      {onRetry ? <TextButton label={t("Try again")} onPress={onRetry} /> : null}
     </View>
   );
 }
@@ -403,6 +737,8 @@ function Actions({ title, episode }: { title: Title; episode?: Episode }) {
 export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   const model = useLibraryModel(injected);
   const list = useStore(model.state);
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
 
   const params = useLocalSearchParams<{
     kind?: string;
@@ -447,6 +783,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   const value = details?.value;
   const seasons = value?.kind === "series" ? value.seasons : [];
   const selectedSeason = seasons.find((s) => String(s.number) === params.season) ?? seasons[0];
+  const beside = kind === "series" && width >= BESIDE;
 
   const groups = title
     ? versionOptions(
@@ -469,104 +806,238 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     }
   };
 
-  return (
-    <Screen title={title?.title ?? t("Title")} pushed>
-      <Body>
-        {!title ? (
-          <Copy>{t(list.loading ? "Loading…" : "The provider no longer lists this title.")}</Copy>
-        ) : (
-          <>
-            <Copy>{title.title}</Copy>
-            {title.year ? <Copy>{formatNumber(title.year)}</Copy> : null}
-            {title.rating !== null ? (
-              <Copy>
-                {t("Rating")}: {formatNumber(title.rating)}
-              </Copy>
-            ) : null}
-            <Choice
-              label={`${t("Version")}: ${manual === null || (!manual && !params.requested && !savedVersions().get(title.key)) ? t("Automatic") : (groups.find((g) => g.versions.some((v) => ownedKey(v) === ownedKey(version!)))?.label ?? t("Version"))}`}
-              onPress={() => setMenu(true)}
+  if (!title)
+    return (
+      <Screen title={t("Title")} pushed>
+        <Recovery
+          message={t(list.loading ? "Loading…" : "The provider no longer lists this title.")}
+        />
+      </Screen>
+    );
+
+  const automatic =
+    manual === null || (!manual && !params.requested && !savedVersions().get(title.key));
+
+  const versionLabel = automatic
+    ? t("Automatic")
+    : (groups.find((g) => g.versions.some((v) => ownedKey(v) === ownedKey(version!)))?.label ??
+      t("Version"));
+
+  const numberedSeasons = seasons.filter((s) => s.number > 0).length;
+
+  const facts = [
+    title.year ? formatNumber(title.year) : null,
+    kind === "movie" && value?.duration ? runtime(value.duration) : null,
+    numberedSeasons ? t("{count} seasons", { count: numberedSeasons }) : null,
+    (value?.genres.length ? value.genres : title.genres).join(", ") || null,
+    title.rating !== null ? formatDecimal(title.rating, 1) : null,
+  ].filter(Boolean);
+
+  const backdrop = value?.backdropUrl ?? title.backdropUrl;
+
+  const header = (
+    <>
+      {backdrop ? <Artwork url={backdrop} height={beside ? 220 : 190} radius={12} /> : null}
+      {facts.length ? (
+        <Text style={{ ...typeScale.meta, paddingTop: backdrop ? 12 : 4 }}>
+          {facts.join(" · ")}
+        </Text>
+      ) : null}
+      <Press
+        label={`${t("Version")}: ${versionLabel}`}
+        onPress={() => setMenu(true)}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 16,
+          minHeight: 56,
+          marginTop: 8,
+          borderTopWidth: 1,
+          borderBottomWidth: 1,
+          borderColor: colors.hairline,
+        }}
+      >
+        <Icon name="layers" color={colors.secondary} />
+        <View style={{ flex: 1, minWidth: 0, paddingVertical: 6 }}>
+          <Text style={{ ...typeScale.small, fontSize: 12, lineHeight: 16 }}>{t("Version")}</Text>
+          <Text style={typeScale.row}>{versionLabel}</Text>
+        </View>
+        <Icon name="arrow-drop-down" />
+      </Press>
+      {shown && kind === "movie" ? <MovieActions title={shown} /> : null}
+      {!details ? <DetailNotice message={t("Loading…")} /> : null}
+      {details?.providerFailed ? (
+        <DetailNotice
+          message={t("Couldn't load details.")}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      ) : null}
+      {details?.metadataFailed ? (
+        <DetailNotice
+          message={t("TMDB isn't answering.")}
+          onRetry={() => setAttempt((n) => n + 1)}
+        />
+      ) : null}
+      {value?.plot ? (
+        <Text style={{ ...typeScale.meta, color: colors.text, lineHeight: 21, paddingTop: 16 }}>
+          {value.plot}
+        </Text>
+      ) : null}
+      {value?.directors.length ? (
+        <Text style={{ ...typeScale.meta, lineHeight: 20, paddingTop: 12 }}>
+          {t("Directed by {names}", { names: formatList(value.directors) })}
+        </Text>
+      ) : null}
+      {value?.cast.length ? (
+        <Text
+          style={{ ...typeScale.meta, lineHeight: 20, paddingTop: value.directors.length ? 0 : 12 }}
+        >
+          {t("With {names}", { names: formatList(value.cast.map((p) => p.name)) })}
+        </Text>
+      ) : null}
+    </>
+  );
+
+  const episodes = seasons.length ? (
+    <>
+      <TextTabs
+        tabs={seasons.map((s) => ({
+          value: String(s.number),
+          label: s.number === 0 ? t("Specials") : t("Season {number}", { number: s.number }),
+        }))}
+        selected={selectedSeason ? String(selectedSeason.number) : undefined}
+        onSelect={(season) => router.setParams({ season })}
+        inset={beside ? 12 : 4}
+      />
+      {shown
+        ? selectedSeason?.episodes.map((episode) => (
+            <EpisodeRow
+              key={`${episode.subscriptionId}:${episode.id}`}
+              title={shown}
+              episode={episode}
+              wide={beside}
             />
-            <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
-              <Body>
-                <Choice
-                  label={t("Automatic")}
-                  radio
-                  selected={
-                    manual === null ||
-                    (!manual && !params.requested && !savedVersions().get(title.key))
-                  }
-                  onPress={() => pick(null)}
+          ))
+        : null}
+    </>
+  ) : null;
+
+  return (
+    <Screen title={title.title} pushed>
+      {beside ? (
+        <View style={{ flex: 1, flexDirection: "row" }}>
+          <ScrollView
+            style={{ width: 440, flexGrow: 0 }}
+            contentContainerStyle={{
+              paddingHorizontal: 24,
+              paddingTop: 4,
+              paddingBottom: insets.bottom + 16,
+            }}
+          >
+            {header}
+          </ScrollView>
+          <ScrollView
+            style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.hairline }}
+            contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+          >
+            {episodes}
+          </ScrollView>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+          <View
+            style={{
+              width: "100%",
+              maxWidth: 640,
+              paddingHorizontal: width >= 600 ? 24 : 16,
+              paddingTop: 4,
+            }}
+          >
+            {header}
+          </View>
+          {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
+        </ScrollView>
+      )}
+      <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
+        <SheetTitle title={t("Version")} />
+        <SheetScroll>
+          <View accessibilityRole="radiogroup">
+            <RadioRow
+              label={t("Automatic")}
+              height={56}
+              selected={automatic}
+              onPress={() => pick(null)}
+            />
+            {groups.flatMap((group) =>
+              group.versions.map((v, at) => (
+                <RadioRow
+                  key={ownedKey(v)}
+                  label={[
+                    group.quality,
+                    group.label,
+                    group.versions.length > 1 ? formatNumber(at + 1) : "",
+                    new Set(title.versions.map((v) => v.subscriptionId)).size > 1
+                      ? v.subscriptionId
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  height={56}
+                  selected={ownedKey(v) === ownedKey(version!)}
+                  onPress={() => pick(ownedKey(v))}
                 />
-                {groups.flatMap((group) =>
-                  group.versions.map((v, at) => (
-                    <Choice
-                      key={ownedKey(v)}
-                      label={[
-                        group.quality,
-                        group.label,
-                        group.versions.length > 1 ? formatNumber(at + 1) : "",
-                        new Set(title.versions.map((v) => v.subscriptionId)).size > 1
-                          ? v.subscriptionId
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      radio
-                      selected={ownedKey(v) === ownedKey(version!)}
-                      onPress={() => pick(ownedKey(v))}
-                    />
-                  )),
-                )}
-                {saveFailed ? <Copy>{t("Couldn't save version.")}</Copy> : null}
-              </Body>
-            </Sheet>
-            {!details ? <Copy>{t("Loading…")}</Copy> : null}
-            {details?.providerFailed ? <Copy>{t("Couldn't load details.")}</Copy> : null}
-            {details?.metadataFailed ? (
-              <Copy>{t("Couldn't update TMDB. Showing saved details.")}</Copy>
-            ) : null}
-            {details?.providerFailed || details?.metadataFailed ? (
-              <Choice label={t("Try again")} onPress={() => setAttempt((n) => n + 1)} />
-            ) : null}
-            {value ? (
-              <>
-                <Copy>{value.originalTitle}</Copy>
-                <Copy>{value.genres.join(" · ")}</Copy>
-                <Copy>{value.plot}</Copy>
-                {value.releaseDate && Number.isFinite(Date.parse(value.releaseDate)) ? (
-                  <Copy>{formatDate(Date.parse(value.releaseDate), "calendarDay")}</Copy>
-                ) : null}
-                <Copy>{value.directors.join(", ")}</Copy>
-                <Copy>{value.cast.map((p) => p.name).join(", ")}</Copy>
-              </>
-            ) : null}
-            {shown ? <Actions title={shown} /> : null}
-            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-              {seasons.map((s) => (
-                <Choice
-                  key={s.number}
-                  label={
-                    s.number === 0 ? t("Specials") : t("Season {number}", { number: s.number })
-                  }
-                  selected={s.number === selectedSeason?.number}
-                  onPress={() => router.setParams({ season: String(s.number) })}
-                />
-              ))}
-            </View>
-            {selectedSeason?.episodes.map((episode) => (
-              <View key={`${episode.subscriptionId}:${episode.id}`}>
-                <Copy>
-                  {formatNumber(episode.number)} · {episode.title}
-                </Copy>
-                <Copy>{episode.plot}</Copy>
-                {shown ? <Actions title={shown} episode={episode} /> : null}
-              </View>
-            ))}
-          </>
-        )}
-      </Body>
+              )),
+            )}
+          </View>
+          {saveFailed ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{ ...typeScale.small, paddingHorizontal: 24, paddingTop: 8 }}
+            >
+              {t("Couldn't save version.")}
+            </Text>
+          ) : null}
+        </SheetScroll>
+      </Sheet>
     </Screen>
+  );
+}
+
+/** A Search result: a small poster, the name, and what it is with its year. */
+function ResultRow({
+  title,
+  inset,
+  onPress,
+}: {
+  title: Title;
+  inset: number;
+  onPress: () => void;
+}) {
+  const what = t(title.kind === "movie" ? "Movie" : "Series");
+
+  return (
+    <Press
+      label={title.title}
+      onPress={onPress}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 16,
+        minHeight: 72,
+        paddingVertical: 6,
+        paddingHorizontal: inset,
+      }}
+    >
+      <Artwork url={title.posterUrl} width={40} height={60} radius={4} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={2} style={typeScale.row}>
+          {title.title}
+        </Text>
+        <Text style={typeScale.small}>
+          {title.year ? `${what} · ${formatNumber(title.year)}` : what}
+        </Text>
+      </View>
+    </Press>
   );
 }
 
@@ -574,6 +1045,8 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
   const model = useLibraryModel(injected);
   useLocale();
   useStore(model.state);
+  const { inset } = useMargins();
+  const insets = useSafeAreaInsets();
 
   const params = useLocalSearchParams<{
     query?: string;
@@ -589,47 +1062,123 @@ export function SearchScreen({ model: injected }: { model?: LibraryModel }) {
       ? "series"
       : null;
 
+  const query = params.query?.trim() ?? "";
+  const listed = model.made("movie").size("all") + model.made("series").size("all") > 0;
+  const setQuery = (query: string) => router.setParams({ query, moviesPage: "1", seriesPage: "1" });
+
+  const results = query
+    ? (["movie", "series"] as const).map((kind) => {
+        const pageKey = kind === "movie" ? "moviesPage" : "seriesPage";
+        const parsed = Number(params[pageKey]);
+        const pages = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
+
+        return { kind, pageKey, pages, result: model.search(kind, query, pages) };
+      })
+    : [];
+
+  const found = results.filter(({ result }) => result.total > 0);
+
   return (
     <Screen title={t("Search")} pushed>
-      <Body>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          minHeight: 56,
+          paddingLeft: inset,
+          paddingRight: 4,
+          borderBottomWidth: 1,
+          borderColor: colors.hairline,
+        }}
+      >
         <TextInput
           accessibilityLabel={t("Search")}
           placeholder={t("Search")}
           placeholderTextColor={colors.secondary}
-          style={{ ...text, minHeight: 48 }}
+          selectionColor={colors.text}
+          cursorColor={colors.text}
+          autoFocus
+          autoCorrect={false}
+          returnKeyType="search"
+          style={{ ...typeScale.body, fontSize: 18, lineHeight: 24, flex: 1, minHeight: 48 }}
           value={params.query ?? ""}
-          onChangeText={(query) => router.setParams({ query, moviesPage: "1", seriesPage: "1" })}
+          onChangeText={setQuery}
         />
-        {params.query?.trim()
-          ? (["movie", "series"] as const).map((kind) => {
-              const pageKey = kind === "movie" ? "moviesPage" : "seriesPage";
-              const parsed = Number(params[pageKey]);
-              const pages = Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
-              const result = model.search(kind, params.query!, pages);
-
-              return (
-                <View key={kind}>
-                  <Copy>{t(kind === "movie" ? "Movies" : "Series")}</Copy>
-                  <TitleRows
-                    titles={result.titles}
-                    destination={destination ?? (kind === "movie" ? "movies" : "series")}
-                  />
-                  {!result.total ? <Copy>{t("Nothing here.")}</Copy> : null}
-                  {result.total > result.titles.length ? (
-                    <Choice
-                      label={t(
-                        kind === "movie" ? "Show {count} more movies" : "Show {count} more series",
-                        { count: Math.min(20, result.total - result.titles.length) },
-                      )}
-                      onPress={() => router.setParams({ [pageKey]: String(pages + 1) })}
-                    />
-                  ) : null}
-                </View>
-              );
-            })
-          : null}
-        <Failure model={model} />
-      </Body>
+        {params.query ? (
+          <IconButton
+            icon="close"
+            label={t("Clear")}
+            color={colors.secondary}
+            onPress={() => setQuery("")}
+          />
+        ) : null}
+      </View>
+      {!listed ? (
+        <ListRecovery model={model} empty={t("Nothing here.")} />
+      ) : query && !found.length ? (
+        <Recovery message={t("Nothing here.")} />
+      ) : (
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        >
+          {found.map(({ kind, pageKey, pages, result }, at) => (
+            <View key={kind}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  paddingTop: at ? 20 : 12,
+                  paddingBottom: 8,
+                  paddingHorizontal: inset,
+                }}
+              >
+                <Text accessibilityRole="header" style={typeScale.section}>
+                  {t(kind === "movie" ? "Movies" : "Series")}
+                </Text>
+                <Text style={typeScale.meta}>
+                  {t("{shown} of {count}", { shown: result.titles.length, count: result.total })}
+                </Text>
+              </View>
+              {result.titles.map((title) => (
+                <ResultRow
+                  key={title.key}
+                  title={title}
+                  inset={inset}
+                  onPress={() =>
+                    openTitle(destination ?? (kind === "movie" ? "movies" : "series"), title)
+                  }
+                />
+              ))}
+              {result.total > result.titles.length ? (
+                <Press
+                  label={t(
+                    kind === "movie" ? "Show {count} more movies" : "Show {count} more series",
+                    { count: Math.min(20, result.total - result.titles.length) },
+                  )}
+                  onPress={() => router.setParams({ [pageKey]: String(pages + 1) })}
+                  style={{
+                    justifyContent: "center",
+                    minHeight: 56,
+                    paddingHorizontal: inset,
+                    borderBottomWidth: 1,
+                    borderColor: colors.hairline,
+                  }}
+                >
+                  <Text style={{ ...typeScale.label, fontSize: 15 }}>
+                    {t(kind === "movie" ? "Show {count} more movies" : "Show {count} more series", {
+                      count: Math.min(20, result.total - result.titles.length),
+                    })}
+                  </Text>
+                </Press>
+              ) : null}
+            </View>
+          ))}
+        </ScrollView>
+      )}
+      <StaleStatus model={model} />
     </Screen>
   );
 }

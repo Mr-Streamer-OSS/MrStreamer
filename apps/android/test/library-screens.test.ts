@@ -37,7 +37,7 @@ vi.mock("react-native-safe-area-context", async () => {
 });
 
 vi.mock("react-native", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, Fragment } = await import("react");
 
   interface Props {
     children?: ReactNode;
@@ -75,6 +75,17 @@ vi.mock("react-native", async () => {
         onChange: (e: { target: { value: string } }) => p.onChangeText?.(e.target.value),
       }),
     Modal: (p: Props) => (p.visible ? h("dialog", { open: true }, p.children) : null),
+    Image: () => null,
+    FlatList: <T>(p: {
+      data: readonly T[];
+      keyExtractor(item: T): string;
+      renderItem(info: { item: T }): ReactNode;
+    }) =>
+      h(
+        "div",
+        null,
+        p.data.map((item) => h(Fragment, { key: p.keyExtractor(item) }, p.renderItem({ item }))),
+      ),
     useWindowDimensions: () => ({ width: 412, height: 900 }),
     AccessibilityInfo: { sendAccessibilityEvent: () => {} },
     BackHandler: { addEventListener: () => ({ remove: () => {} }) },
@@ -160,7 +171,7 @@ it("renders Search pages and stale-list recovery from the real model", async () 
   expect(shown.textContent).toContain("Showing the last list.");
   f.fail(false);
   await act(async () => {
-    press(shown, "Try again");
+    press(shown, "Retry");
   });
   expect(shown.textContent).not.toContain("Showing the last list.");
 });
