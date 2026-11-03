@@ -102,7 +102,7 @@ def md5(b): return hashlib.md5(b).hexdigest()
 
 def decode(rendition, samples, raw):
     """Decodes the rendition whole: its errors, and its PCM as one channel of 16-bit samples."""
-    path = f"{folder}/verify-{os.getpid()}-{rendition}.{'mp3' if raw else 'mp4'}"
+    path = f"/tmp/verify-{os.getpid()}-{rendition}.{'mp3' if raw else 'mp4'}"
     with open(path, "wb") as f:
         if raw: f.write(b"".join(p for _, _, p in samples))
         else:
@@ -194,7 +194,7 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     inside = lambda t: t >= -half and not any(cuts[k] + half <= t < cuts[k + 1] - half for k in allowed)
     expected = [(t - origin, h) for t, h in packets[track["index"]] if inside(t - origin)]
     optional = {h for t, h in expected if any(abs(t - e) < half for e in edges)}
-    # FLAC cannot fill damaged edge frames; the public EDGE_S allowance applies at both ends.
+    # FLAC has no silence, so a frame left out within EDGE_S of either end is allowed.
     if codec == "flac":
         optional.update(h for t, h in expected if t <= EDGE_S or t >= picture_end - EDGE_S)
     problems, at, kept, added, drift = [], 0, 0, [], 0.0

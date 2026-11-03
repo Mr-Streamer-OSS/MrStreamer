@@ -380,16 +380,29 @@ static int flac_block(const AVCodecParameters *par) {
   return least == most && least >= 16 ? least : 0;
 }
 
-/** The FLAC tracks offered: fixed blocking, in the variants the candidate qualifies. */
-static int flac_playable(const AVCodecParameters *par) {
+/** STREAMINFO's sample rate, channels and bits per sample. */
+static void flac_format(const uint8_t *info, int *rate, int *channels, int *bits) {
+  // From byte 10: 20 bits of sample rate, 3 of channels less one, 5 of depth less one.
+  uint64_t packed = AV_RB64(info + 10);
+  *rate = (int)(packed >> 44);
+  *channels = (int)((packed >> 41) & 7) + 1;
+  *bits = (int)((packed >> 36) & 31) + 1;
+}
+
+/**
+ * Why a FLAC track isn't offered, or NULL when it is: fixed blocking, mono or stereo, 16 or 24
+ * bits, 44.1 or 48 kHz.
+ */
+static const char *flac_unplayable(const AVCodecParameters *par) {
   const uint8_t *x = flac_info(par);
-  if (!x || !flac_block(par)) return 0;
-  // STREAMINFO from byte 10: 20 bits of sample rate, 3 of channels less one, 5 of depth less one.
-  uint64_t packed = AV_RB64(x + 10);
-  int rate = (int)(packed >> 44), channels = (int)((packed >> 41) & 7) + 1;
-  int bits = (int)((packed >> 36) & 31) + 1;
-  return (rate == 44100 || rate == 48000) && (bits == 16 || bits == 24) &&
-         channels <= FLAC_CHANNELS_MOST;
+  if (!x) return "Its FLAC sound has no readable STREAMINFO.";
+  if (!flac_block(par)) return "Its FLAC sound has frames of more than one length.";
+  int rate, channels, bits;
+  flac_format(x, &rate, &channels, &bits);
+  if (channels > FLAC_CHANNELS_MOST) return "Its FLAC sound has more than two channels.";
+  if (bits != 16 && bits != 24) return "Its FLAC sound isn't 16 or 24 bit.";
+  if (rate != 44100 && rate != 48000) return "Its FLAC sound isn't 44.1 or 48 kHz.";
+  return NULL;
 }
 
 /**
@@ -401,9 +414,8 @@ static int flac_length(const AVPacket *packet, const uint8_t *info) {
   const uint8_t *x = packet->data;
   int size = packet->size;
   if (size < 10 || x[0] != 0xFF || x[1] != 0xF8 || (x[3] & 1)) return 0;
-  uint64_t packed = AV_RB64(info + 10);
-  int rate = (int)(packed >> 44), channels = (int)((packed >> 41) & 7) + 1;
-  int bits = (int)((packed >> 36) & 31) + 1;
+  int rate, channels, bits;
+  flac_format(info, &rate, &channels, &bits);
   int code = x[2] >> 4, rate_code = x[2] & 15, assignment = x[3] >> 4, depth = (x[3] >> 1) & 7;
   // Channels: 0-7 independent, 8-10 a stereo pair; depth 0 is STREAMINFO's, 3 is reserved.
   static const int DEPTHS[8] = {0, 8, 12, -1, 16, 20, 24, 32};
@@ -440,7 +452,6 @@ static int flac_length(const AVPacket *packet, const uint8_t *info) {
   if (av_crc(av_crc_get_table(AV_CRC_16_ANSI), 0, x, size)) return 0;
   return length;
 }
-
 
 /** Samples per frame of the sound codecs whose frames are all one length. */
 static int frame_samples(enum AVCodecID codec) {
@@ -586,7 +597,7 @@ static unsigned aac_type(const AVCodecParameters *par) {
  * in its CODECS fails to open whole, the default sound with it; such a track isn't offered.
  */
 static int sound_playable(const AVCodecParameters *par) {
-  if (par->codec_id == AV_CODEC_ID_FLAC) return flac_playable(par);
+  if (par->codec_id == AV_CODEC_ID_FLAC) return !flac_unplayable(par);
   if (!sound_copyable(par->codec_id)) return 0;
   if (par->codec_id != AV_CODEC_ID_AAC) return 1;
   unsigned type = aac_type(par);
@@ -1320,11 +1331,11 @@ static void mark_read(Text *text, int64_t time) {
  * Reads the next packet of the file, keeping a text track's line as it goes. Once a read has
  * failed it fails too, until `make` or `recall` clears the error for its seek: FFmpeg reads on
  * past a failed read and may skip what that read held, and a seek alone doesn't clear it.
+ * FLAC frames failing `flac_length` are left out, their slots empty for `fill` to refuse; the
+ * others carry their length in samples as their duration, for `flac_grid`.
  */
 static int read_frame(TitleHls *title, AVPacket *packet) {
   int error;
-  // Invalid FLAC frames leave empty slots for fill to refuse. Keep the checked length on
-  // the packet, in samples, so flac_grid needn't parse and checksum the frame again.
   for (;;) {
     error = av_read_frame(title->input, packet);
     if (error >= 0 && title->io->error < 0) {
@@ -1984,7 +1995,7 @@ static int stamp_pictures(const TitleHls *title, int index, Packets *pictures) {
  * file's clock, and those shorter than the grid's frame but the last of the title: a stream
  * whose frames change length can't be placed, and its slots stay empty for fill to refuse.
  */
-static void flac_grid(TitleHls *title, const Sound *sound, Packets *packets, int last) {
+static void flac_grid(const Sound *sound, Packets *packets, int last) {
   AVRational base = sound_base(sound);
   int64_t first = av_rescale_q(sound->first, sound->base, base);
   int64_t tick = av_rescale_q_rnd(1, sound->base, base, AV_ROUND_UP);
@@ -1995,10 +2006,7 @@ static void flac_grid(TitleHls *title, const Sound *sound, Packets *packets, int
     int64_t off = at - llrint((double)at / sound->frame) * sound->frame;
     int whole = packet->duration == sound->frame || (last && i == packets->count - 1);
     if (llabs(off) <= tick && whole) packets->items[kept++] = packet;
-    else {
-      title->flac_dropped++;
-      av_packet_free(&packet);
-    }
+    else av_packet_free(&packet);
   }
   packets->count = kept;
 }
@@ -2150,7 +2158,7 @@ static TitleHlsResult make(TitleHls *title, int index, Made **out, char *detail,
   for (int t = 0; t < title->sound_count; t++) {
     Sound *track = &title->sounds[t];
     if (title->input->streams[track->stream]->codecpar->codec_id == AV_CODEC_ID_FLAC)
-      flac_grid(title, track, &sound[t], last);
+      flac_grid(track, &sound[t], last);
     stamp_sound(title, track, &sound[t]);
     int gap = fill(title, track, &sound[t], start, end, &bytes);
     if (bytes > SEGMENT_BYTES_MOST) {
@@ -2266,18 +2274,8 @@ static TitleHlsResult choose(TitleHls *title, char *detail, size_t detail_size) 
     const AVCodecParameters *par = title->input->streams[i]->codecpar;
     others |= par->codec_type == AVMEDIA_TYPE_AUDIO && par->codec_id != AV_CODEC_ID_FLAC &&
               sound_playable(par) && par->sample_rate > 0;
-    if (par->codec_id != AV_CODEC_ID_FLAC) continue;
-    const uint8_t *info = flac_info(par);
-    if (!info) flac_reason = "Its FLAC sound has no readable STREAMINFO.";
-    else if (!flac_block(par)) flac_reason = "Its FLAC sound has frames of more than one length.";
-    else {
-      uint64_t packed = AV_RB64(info + 10);
-      int rate = (int)(packed >> 44), channels = (int)((packed >> 41) & 7) + 1;
-      int bits = (int)((packed >> 36) & 31) + 1;
-      if (channels > FLAC_CHANNELS_MOST) flac_reason = "Its FLAC sound has more than two channels.";
-      else if (bits != 16 && bits != 24) flac_reason = "Its FLAC sound isn't 16 or 24 bit.";
-      else if (rate != 44100 && rate != 48000) flac_reason = "Its FLAC sound isn't 44.1 or 48 kHz.";
-    }
+    const char *why = par->codec_id == AV_CODEC_ID_FLAC ? flac_unplayable(par) : NULL;
+    if (why) flac_reason = why;
   }
   for (unsigned i = 0; i < title->input->nb_streams; i++) {
     AVStream *st = title->input->streams[i];

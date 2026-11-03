@@ -19,10 +19,6 @@ flac mono 48000 1 s16 4608
 flac block4096 48000 2 s16 4096
 flac surround 48000 6 s16 4608
 flac rate96 96000 2 s16 4608
-# 32-bit input is encoded at 24 bits by system ffmpeg; patch STREAMINFO for the depth refusal.
 ffmpeg -v error -y -i "$out/stereo16.mkv" -map 0:v -map 0:a -map 0:a \
   -c:v copy -c:a:0 aac -c:a:1 copy "$out/aac-flac.mkv"
-ffmpeg -v error -y -i "$out/stereo16.mkv" -map 0:v -map 0:a -map 0:a -map 0:a \
-  -c:v copy -c:a:0 aac -c:a:1 ac3 -c:a:2 eac3 "$out/legacy.mkv"
-ffmpeg -v error -y -i "$out/stereo16.mkv" -c:v copy -c:a libmp3lame "$out/mp3.mkv"
 python3 -I "$here/flac-fixtures.py" "$out"

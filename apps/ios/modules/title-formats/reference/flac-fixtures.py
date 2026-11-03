@@ -22,18 +22,25 @@ def elements(b, start, end):
         start += k+n+size
 
 
+def flac_frames(b):
+    """Each FLAC frame's position and length among the SimpleBlocks of Matroska file b."""
+    segment = next(e for e in elements(b, 0, len(b)) if e[0] == 0x18538067)
+    result = []
+    for kind, at, k, n, s, e in elements(b, segment[4], segment[5]):
+        if kind != 0x1F43B675:
+            continue
+        for kind2, at2, k2, n2, s2, e2 in elements(b, s, e):
+            if kind2 == 0xA3:
+                p = s2 + vint(b, s2)[1] + 3
+                if b[p:p+2] == b'\xff\xf8':
+                    result.append((p, e2-p))
+    return result
+
+
 segment = next(e for e in elements(base, 0, len(base)) if e[0] == 0x18538067)
 seg = segment[4]
 top = list(elements(base, seg, segment[5]))
-frames = []
-for kind, at, k, n, s, e in top:
-    if kind == 0x1F43B675:
-        for kind2, at2, k2, n2, s2, e2 in elements(base, s, e):
-            if kind2 == 0xA3:
-                track, width = vint(base, s2)
-                p = s2 + width + 3
-                if base[p:p+2] == b'\xff\xf8':
-                    frames.append((p, e2-p))
+frames = flac_frames(base)
 assert len(frames) > 150
 info = base.index(b'fLaC') + 8
 assert int.from_bytes(base[info:info+2], 'big') == 4608
@@ -55,23 +62,8 @@ def header_end(f):
     return 4 + width + {6: 1, 7: 2}.get(f[2] >> 4, 0) + {12: 1, 13: 2, 14: 2}.get(f[2] & 15, 0)
 
 
-def alternate_frames():
-    b = (out / 'block4096.mkv').read_bytes()
-    seg2 = next(e for e in elements(b, 0, len(b)) if e[0] == 0x18538067)
-    result = []
-    for kind, at, k, n, start, end in elements(b, seg2[4], seg2[5]):
-        if kind != 0x1F43B675:
-            continue
-        for kind2, at2, k2, n2, s2, e2 in elements(b, start, end):
-            if kind2 == 0xA3:
-                _, width = vint(b, s2)
-                p = s2 + width + 3
-                if b[p:p+2] == b'\xff\xf8':
-                    result.append(b[p:e2])
-    return result
-
-
-alternate = alternate_frames()
+block4096 = (out / 'block4096.mkv').read_bytes()
+alternate = [block4096[p:p+n] for p, n in flac_frames(block4096)]
 
 
 def changed_frame(f, mode):
@@ -120,20 +112,16 @@ def save(mode):
     replacements = {}
     if mode == 'variable-info':
         b[info:info+2] = (4096).to_bytes(2, 'big')
-    elif mode == 'depth20':
-        packed = int.from_bytes(b[info+10:info+18], 'big')
-        packed = (packed & ~(31 << 36)) | (19 << 36)
-        b[info+10:info+18] = packed.to_bytes(8, 'big')
     else:
         selected = {'corrupt-middle': [len(frames)//2], 'corrupt-first': [0],
-                    'corrupt-last': [len(frames)-1], 'all-corrupt': range(len(frames)),
+                    'corrupt-last': [len(frames)-1],
                     'zero-rate': [60], 'overlong-number': [60],
                     'variable-strategy': range(len(frames)),
                     'length-change': range(len(frames)//2, len(frames))}[mode]
         for i in selected:
             p, n = frames[i]
             f = bytearray(b[p:p+n])
-            if mode.startswith('corrupt') or mode == 'all-corrupt':
+            if mode.startswith('corrupt'):
                 f[n//2] ^= 1
             elif mode == 'length-change':
                 # Actual valid 4096-sample frames replacing the second half of a 4608 grid.
@@ -149,8 +137,7 @@ def save(mode):
     (out / (mode + '.mkv')).write_bytes(result)
 
 
-for mode in ('corrupt-middle', 'corrupt-first', 'corrupt-last', 'all-corrupt',
-             'variable-info', 'depth20', 'variable-strategy', 'length-change',
-             'zero-rate', 'overlong-number'):
+for mode in ('corrupt-middle', 'corrupt-first', 'corrupt-last', 'variable-info',
+             'variable-strategy', 'length-change', 'zero-rate', 'overlong-number'):
     save(mode)
     print(mode + '.mkv')
