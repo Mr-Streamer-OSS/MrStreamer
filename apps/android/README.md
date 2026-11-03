@@ -80,14 +80,26 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
 
 ## Handoff for later Android cards
 
-- **Configuration.** This card owns `package.json`, the lockfile, `app.json`, `metro.config.cjs`,
-  `index.ts`, `tsconfig.json` and `android/`. A later card adds its native dependency or plugin
-  and regenerates `android/` in its own change, after this card has merged.
-- **Route.** `index.ts` registers `src/bootstrap/app.tsx`, which shows Connect while no source
-  is saved and the combined channel list after. The Destinations navigation card replaces that
-  root with its tabs and stacks; the Connect screen and the sources owner stay as they are.
-- **Sources.** `src/connect/sources.ts` is the one owner of saved sources: `restore`, `connect`,
-  `retry`, `remove` and its `state` store. `sources.json` in the app's files folder lists each
+- **Configuration.** `package.json`, the lockfile, `app.json`, `metro.config.cjs`, `index.ts`,
+  `tsconfig.json` and `android/` are handed on: a later card adds its native dependency or plugin
+  and regenerates `android/` in its own change. Expo Router (58.0.18, with React Native Screens
+  4.29.0, the iOS app's pins) is the router; Android's predictive Back is on.
+- **Routes.** `index.ts` starts Expo Router on `src/app/`. The root layout shows `connect` while
+  no source is saved and the destinations (`(tabs)`) after: Home, Live, Movies and Series
+  (`src/navigation/destinations.ts`), each with its own stack, along the bottom on phones and
+  down a rail from 600dp. Live (`(live)`, at `/`) is where the app opens, and Back at another
+  destination's root returns to it before leaving the app. A feature card owns its
+  destination's `index.tsx` and adds its own pushed routes beside it (`movies/title/[id].tsx`);
+  Search, Downloads and Settings are `(live)/search.tsx`, `downloads.tsx` and `settings.tsx`,
+  which the other destinations re-export so each opens on the stack it was opened from
+  (`hrefOn`). Each screen frames itself with `Screen` (`src/navigation/screen.tsx`), its top
+  app bar, and pads only the insets `useSafeAreaInsets` still gives it.
+- **Back order.** A `Sheet` (`src/ui/sheet.tsx`), a dialog or an alert closes before anything
+  under it. A detail pane or player registers its own `BackHandler` listener while it shows: the
+  newest listener runs first, before the stacks', so it closes before a pushed screen.
+- **Sources.** `src/bootstrap/sources.ts` holds the app's one `sources` owner
+  (`src/connect/sources.ts`): `restore`, `connect`, `retry`, `remove` and its `state` store. The
+  root layout restores it at launch. `sources.json` in the app's files folder lists each
   source's id, kind and host, and nothing of its login.
 - **Credentials.** `modules/credentials` seals each source's authority with an AES-GCM key the
   Android Keystore holds, one file per source id under `noBackupFilesDir/credentials`. Native
