@@ -159,8 +159,11 @@ describe("every message in every language", () => {
     const elsewhere = keys.filter(
       (key) =>
         !key.startsWith("settings.search.") &&
-        // Both the singular and the plural form of a message with a count.
-        [1, 2].some((count) => other.test(say(locale, key, valuesFor(key, count)))),
+        // Every form a counted message has, Spanish's many among them, also where its key names no
+        // count.
+        [1, 2, 5, 1_000_000].some((count) =>
+          other.test(say(locale, key, { ...valuesFor(key, count), count })),
+        ),
     );
     expect(elsewhere).toEqual([]);
   });

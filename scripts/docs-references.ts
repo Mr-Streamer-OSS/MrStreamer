@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 // Paths keep forward slashes on Windows too, so git matches them against .gitignore.
 import { posix } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const { dirname, join } = posix;
 
@@ -71,27 +72,33 @@ export function missingReferences(root: string): string[] {
       const candidates = relative
         ? [join(dirname(document), path)]
         : folders(document).map((folder) => join(folder, path));
-      if (candidates.some((candidate) => existsSync(join(root, candidate)))) continue;
-      absent.push({ reference: `${document}: ${path}`, candidates });
+      // A path that climbs out of the checkout is missing, whatever lies outside it.
+      const inside = candidates.filter(
+        (candidate) => candidate !== ".." && !candidate.startsWith("../"),
+      );
+      if (inside.some((candidate) => existsSync(join(root, candidate)))) continue;
+      absent.push({ reference: `${document}: ${path}`, candidates: inside });
     }
   }
   if (!absent.length) return [];
-  const asked = spawnSync("git", ["check-ignore", "--no-index", "--stdin"], {
+  const asked = spawnSync("git", ["check-ignore", "--no-index", "-z", "--stdin"], {
     cwd: root,
     encoding: "utf8",
-    input: absent.flatMap(({ candidates }) => candidates).join("\n"),
+    input: absent.flatMap(({ candidates }) => candidates).join("\0"),
   });
   // Status 1 means none is ignored; anything else but 0 is git failing.
   if (asked.status !== 0 && asked.status !== 1)
     throw new Error(`git check-ignore: ${asked.stderr}`);
-  const ignored = new Set(asked.stdout.split("\n"));
+  // -z keeps names with other characters unquoted, both ways.
+  const ignored = new Set(asked.stdout.split("\0"));
   return absent.flatMap(({ reference, candidates }) =>
     candidates.some((candidate) => ignored.has(candidate)) ? [] : [reference],
   );
 }
 
 if (import.meta.main) {
-  const missing = missingReferences(join(import.meta.dirname, ".."));
+  // The native path of the checkout, which posix joins would garble on Windows.
+  const missing = missingReferences(fileURLToPath(new URL("..", import.meta.url)));
   for (const line of missing) console.error(`missing path ${line}`);
   if (missing.length) process.exitCode = 1;
 }
