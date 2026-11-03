@@ -896,6 +896,30 @@ describe("live captures", () => {
     expect(captures.reading(key)).toBe(false);
   });
 
+  // Admission counts a reader's connection as the capture's once it reads: Record mustn't say it
+  // shares before then, and then find every connection in use.
+  it("tells a source is read only once its provider answered", async () => {
+    const { captures, key, provider } = await capturing();
+    const answered = Promise.withResolvers<void>();
+    const watch = new AbortController();
+    const opening = captures.request(
+      key,
+      "watch",
+      async (signal) => {
+        await answered.promise;
+        return provider(signal);
+      },
+      watch.signal,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(captures.reading(key)).toBe(false);
+    answered.resolve();
+    await take((await opening).body!.getReader(), 188);
+    expect(captures.reading(key)).toBe(true);
+    watch.abort();
+    await captures.idle("watch");
+  });
+
   it("shares only the exact source: subscription, channel, stream, address and headers, whatever their case or order", async () => {
     const { captures, source, provider, requests } = await capturing();
     const headers = { "User-Agent": "Box", Referer: "http://panel/" };

@@ -431,7 +431,9 @@ function make(options: LiveCapturesOptions) {
       resource: hls.resource,
       reading: (key: string) => {
         const entry = entries.get(key);
-        return entry?.kind === "open" || entry?.kind === "opening" || hls.reading(key);
+        // One still opening counts once its provider answered and its reader attached, as
+        // admission counts its connection as the capture's from then.
+        return entry?.kind === "open" || hls.reading(key);
       },
       joins: hls.joins,
       fixed: hls.fixed,

@@ -10,6 +10,9 @@ const fixture = vi.hoisted(() => ({
   starts: [] as Level[],
   groups: new Map<string, readonly Rendition[]>(),
   unsupported: new Set<Level>(),
+  /** Levels whose capability query hls.js couldn't make, and those it still waits on. */
+  unknown: new Set<Level>(),
+  slow: new Map<Level, Promise<void>>(),
   /** Each level the engine held loading at, -1 for its own pick. */
   held: [] as number[],
 }));
@@ -32,15 +35,18 @@ vi.mock("hls.js", async (original) => {
           fixture.parsed = () => listener(event, {});
         else super.once(event, listener);
       }
-      getMediaDecodingInfo(level: Level) {
-        return Promise.resolve({
-          supported: !fixture.unsupported.has(level),
+      async getMediaDecodingInfo(level: Level) {
+        await fixture.slow.get(level);
+        return {
+          supported: !fixture.unsupported.has(level) && !fixture.unknown.has(level),
           decodingInfoResults: [],
-        });
+          ...(fixture.unknown.has(level) && { error: new Error("decodingInfo failed") }),
+        };
       }
       override startLoad() {
         super.startLoad();
         const level = this.levels[this.startLevel === -1 ? this.firstAutoLevel : this.startLevel]!;
+        this.currentLevel = this.levels.indexOf(level);
         fixture.starts.push(level);
         this.variant({
           audio: (level.audioGroups ?? []).flatMap(
@@ -58,6 +64,8 @@ afterEach(() => {
   fixture.starts = [];
   fixture.groups.clear();
   fixture.unsupported.clear();
+  fixture.unknown.clear();
+  fixture.slow.clear();
   fixture.held = [];
 });
 function level(
@@ -156,26 +164,47 @@ it.each(["before", "after"])(
   },
 );
 
-it("holds a quality hls.js couldn't tell it decodes, as for an unsupported supplemental codec", async () => {
+it.each(["saved", "asked"])(
+  "holds a quality hls.js couldn't tell it decodes (%s), as for an unsupported supplemental codec",
+  async (answer) => {
+    const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+    const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+    if (answer === "saved")
+      high.supportedResult = {
+        supported: false,
+        configurations: [],
+        decodingInfoResults: [],
+        error: new Error("SUPPLEMENTAL-CODECS not supported"),
+      };
+    else fixture.unknown.add(high);
+    fixture.levels = [low, high];
+    engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
+      audio: null,
+      audioLanguage: null,
+    });
+    engine.fix?.(high.uri);
+    await vi.dynamicImportSettled();
+    fixture.parsed();
+    await settle();
+    expect(fixture.starts).toEqual([high]);
+    expect(fixture.held).toEqual([1]);
+  },
+);
+
+it("holds the quality already playing when a recording joins, without asking again", async () => {
   const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
-  const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
-  high.supportedResult = {
-    supported: false,
-    configurations: [],
-    decodingInfoResults: [],
-    error: new Error("SUPPLEMENTAL-CODECS not supported"),
-  };
-  fixture.levels = [low, high];
-  engine = createEngine("hls", document.createElement("video"), "http://localhost/master.m3u8", {
-    audio: null,
-    audioLanguage: null,
-  });
-  engine.fix?.(high.uri);
-  await vi.dynamicImportSettled();
-  fixture.parsed();
+  fixture.levels = [low, level(512, undefined, undefined, "http://localhost/high.m3u8")];
+  const playing = await open();
   await settle();
-  expect(fixture.starts).toEqual([high]);
-  expect(fixture.held).toEqual([1]);
+  expect(fixture.starts).toEqual([low]);
+  let failure: unknown;
+  playing.onFailure((error) => (failure = error));
+  // Asked now, it would say no: what plays is the answer.
+  fixture.unsupported.add(low);
+  playing.fix?.(low.uri);
+  await settle();
+  expect(failure).toBeUndefined();
+  expect(fixture.held).toEqual([0]);
 });
 
 // hls.js lists one of two twins at different addresses: the main process sends the held one.
@@ -215,6 +244,24 @@ it("still waits for capability checks when a hold comes and goes during startup"
   check.resolve({ supported: false, decodingInfoResults: [], configurations: [] });
   await settle();
   expect(fixture.starts).toEqual([middle]);
+});
+
+it("starts as it would alone when a hold that stopped startup is given up before its check answers", async () => {
+  const low = level(128, undefined, undefined, "http://localhost/low.m3u8");
+  const high = level(512, undefined, undefined, "http://localhost/high.m3u8");
+  fixture.levels = [low, high];
+  const check = Promise.withResolvers<NonNullable<Level["supportedResult"]>>();
+  low.supportedPromise = check.promise;
+  void check.promise.then((result) => (low.supportedResult = result));
+  fixture.slow.set(high, new Promise(() => {}));
+  const playing = await open();
+  playing.fix?.(high.uri);
+  check.resolve({ supported: true, decodingInfoResults: [], configurations: [] });
+  await settle();
+  expect(fixture.starts).toEqual([]);
+  playing.fix?.(null);
+  await settle();
+  expect(fixture.starts).toEqual([low]);
 });
 
 it("starts with the lowest bitrate when no audio group changes", async () => {

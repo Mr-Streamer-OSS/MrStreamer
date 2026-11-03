@@ -448,7 +448,9 @@ function hlsEngine(
         const level = heldLevel();
         if (!level) {
           if (loading) hls.loadLevel = -1;
-          else await (starting ??= start().finally(() => (starting = null)));
+          // A selection that ended for a hold given up since starts again.
+          while (!released && !loading && !heldLevel())
+            await (starting ??= start().finally(() => (starting = null)));
           return;
         }
         // The level playing already plays.
