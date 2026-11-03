@@ -152,7 +152,8 @@ function actions(tab: Tab, current: string): NativeStackHeaderItem[] {
     screen === "downloads"
       ? {
           type: "custom",
-          element: <DownloadStatusButton onPress={() => router.push(tabHref(tab, screen))} />,
+          // A fixed slot like its neighbours; the glyph's own ring shows the queue, with no text.
+          element: <DownloadStatusButton ring onPress={() => router.push(tabHref(tab, screen))} />,
         }
       : {
           type: "button",

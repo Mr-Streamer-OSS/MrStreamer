@@ -164,7 +164,15 @@ describe("the shared Downloads action", () => {
         .find((each) => each.type === "custom");
       if (!action || action.type !== "custom") throw new Error("No Downloads entry");
       React.act(() => root.render(action.element));
-      publish([item({ kind: "queued" })]);
+      for (const reported of [
+        transferring(499, 1000),
+        item({ kind: "paused", received: 0, size: null }),
+        item({ kind: "failed", failure: { kind: "disk-full", needed: null } }),
+        item({ kind: "queued" }),
+      ]) {
+        publish([reported]);
+        expect(container.textContent).toBe("");
+      }
       expect(label()).toBe("Downloads, 1 queued");
       React.act(() => button()?.click());
     }

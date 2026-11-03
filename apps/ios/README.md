@@ -651,11 +651,15 @@ translated.
 iOS's own controls, such as text menus, follow the localizations the app bundle declares, which this
 leaves as they were.
 
-Downloads' header entry and Watch's existing button show the queue's actual percentage, received
-bytes when its size is unknown, provider wait, queue count or failure. Search offers the same
-entry while that status exists, closing Search onto Downloads on its original tab and keeping
-the query. All three read the existing downloads store (`src/download-status.tsx`); completed
-copies alone leave no extra status. There is no new timer, transfer or animated indicator.
+Downloads' header entry is one fixed 44-point slot with no text: its circle is a still ring of the
+transfer's actual fraction, dotted when the size is unknown, a dim track while waiting, queued or
+paused, and carries a badge when only retryable failures are left. Watch's existing button shows
+the queue's actual percentage, received bytes when its size is unknown, provider wait, queue
+count or failure as text. Search offers the same entry, with that text, while that status exists,
+closing Search onto Downloads on its original tab and keeping the query. VoiceOver reads the full
+status on all three. They read the existing downloads store (`src/download-status.tsx`);
+completed copies alone leave no extra status. There is no new timer, transfer or animated
+indicator.
 Watch (`src/watch.tsx`) is a layer over the navigation rather than a route, because the view that
 starts Picture in Picture has to stay while it plays. Its Downloads and Settings open on the tab
 under it, closing Search first if Watch came back over it (`openOnTabs` in `src/header.tsx`):
