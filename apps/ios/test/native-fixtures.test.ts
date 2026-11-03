@@ -175,6 +175,7 @@ describe("the native verification fixture", () => {
   it("plays the TEST channel with subtitles and two sound tracks live, and keeps answering", async () => {
     const { channels } = await provider().liveCatalogue();
     const channel = channels.find((each) => each.name === "TEST | Subtitles and two sound tracks");
+
     if (!channel) throw new Error("no subtitles channel");
     const { url } = await provider().liveStream(channel.id);
     const playlist = await fetch(url);
@@ -185,21 +186,26 @@ describe("the native verification fixture", () => {
     // The picture, both sound tracks, silent, and the captions the picture carries.
     const file = join(out, "subtitles-channel.ts");
     writeFileSync(file, (await download(`${panel}${segment}`)).body);
+
     const probe = (args: string[]) =>
       execFileSync("ffprobe", ["-v", "error", "-of", "compact", ...args], { encoding: "utf8" });
+
     const streams = probe([
       "-show_entries",
       "stream=codec_type,codec_name:stream_tags=language",
       file,
     ]);
+
     expect(streams).toMatch(/codec_name=h264\|codec_type=video/);
     expect(streams).toMatch(/codec_name=aac\|codec_type=audio\|tag:language=eng/);
     expect(streams).toMatch(/codec_name=aac\|codec_type=audio\|tag:language=dut/);
     expect(peak(file)).toBeLessThanOrEqual(-60);
+
     const captions = probe([
       ...["-f", "lavfi", "-i", `movie=${file}[out0+subcc]`, "-select_streams", "s"],
       ...["-show_entries", "packet=stream_index"],
     ]);
+
     expect(captions).toContain("packet");
 
     expect(await (await fetch(`${control}/live`)).json()).toContain(channel.id);
