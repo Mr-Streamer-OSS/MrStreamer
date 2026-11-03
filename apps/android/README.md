@@ -80,14 +80,41 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
 
 ## Handoff for later Android cards
 
-- **Configuration.** This card owns `package.json`, the lockfile, `app.json`, `metro.config.cjs`,
-  `index.ts`, `tsconfig.json` and `android/`. A later card adds its native dependency or plugin
-  and regenerates `android/` in its own change, after this card has merged.
-- **Route.** `index.ts` registers `src/bootstrap/app.tsx`, which shows Connect while no source
-  is saved and the combined channel list after. The Destinations navigation card replaces that
-  root with its tabs and stacks; the Connect screen and the sources owner stay as they are.
-- **Sources.** `src/connect/sources.ts` is the one owner of saved sources: `restore`, `connect`,
-  `retry`, `remove` and its `state` store. `sources.json` in the app's files folder lists each
+- **Configuration.** `package.json`, the lockfile, `app.json`, `metro.config.cjs`, `index.ts`,
+  `tsconfig.json` and `android/` are handed on: a later card adds its native dependency or plugin
+  and regenerates `android/` in its own change. Expo Router (58.0.18, with React Native Screens
+  4.29.0, the iOS app's pins) is the router; Android's predictive Back is on.
+- **Routes.** `index.ts` starts Expo Router on `src/app/`. The root layout shows `connect` while
+  no source is saved and the destinations (`(tabs)`) after: Home, Live, Movies and Series
+  (`src/navigation/destinations.ts`), each with its own stack, along the bottom on phones and
+  down a rail from 600dp, which scrolls when the window is shorter than it. Live (`(live)`, at
+  `/`) is where the app opens, and Back at another destination's root returns to it before
+  leaving the app. A feature card owns its destination's `index.tsx` and adds its own pushed
+  routes beside it (`movies/title/[id].tsx`); Search, Downloads and Settings are
+  `(live)/search.tsx`, `downloads.tsx` and `settings.tsx`, which the other destinations
+  re-export so each opens on the stack it was opened from (`hrefOn`), at most once. Each stack
+  starts on its `index`, and a link that opens the app straight to a pushed screen gets that
+  root under it; navigating into another destination's stack while the app runs passes
+  `withAnchor: true` for the same. A link to no screen is dropped while the app runs, and one that
+  opens the app opens Live, or Connect while no source is saved (`+not-found.tsx`). Live's root shows the bootstrap's channel list under its own header
+  until the Live card replaces it.
+- **Screens.** Each screen frames itself with `Screen` (`src/navigation/screen.tsx`): its top
+  app bar, and the insets `useSafeAreaInsets` still gives its content (the bottom only beside
+  the rail). A screen with a list and a selected item passes `detail` (`title`, `content` and
+  `onClose`): from 840dp it shows beside the list, below that it takes the list's place under
+  its own title, with TalkBack moved there. The bar's Back closes it at either width. The list
+  stays mounted with its state but not its scroll offset, which a list restores itself if it
+  needs to, and `onClose` returns focus to the selected row. Keep the selection in the route's
+  params so it survives rotation into either form.
+- **Back order.** A `Sheet` (`src/ui/sheet.tsx`), a dialog or an alert closes before anything
+  under it, then the showing screen's detail pane (its `BackHandler` listener, registered only
+  while its screen is focused, is newer than the stacks'), then a pushed screen, then the
+  destination, back to Live and out. A player or other layer that takes Back registers its
+  listener the same way while it shows. This order is checked against the installed router and
+  React Native's listeners; on a device it is not yet observed, nor is predictive Back's preview.
+- **Sources.** `src/bootstrap/sources.ts` holds the app's one `sources` owner
+  (`src/connect/sources.ts`): `restore`, `connect`, `retry`, `remove` and its `state` store. The
+  root layout restores it at launch. `sources.json` in the app's files folder lists each
   source's id, kind and host, and nothing of its login.
 - **Credentials.** `modules/credentials` seals each source's authority with an AES-GCM key the
   Android Keystore holds, one file per source id under `noBackupFilesDir/credentials`. Native
