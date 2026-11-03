@@ -6,6 +6,8 @@ export const t = catalogue(
     Audio: "Audio",
     Subtitles: "Subtitles",
     Speed: "Speed",
+    "Speed {speed}×": "Speed {speed}×",
+    "Track {number}": "Track {number}",
     Quality: "Quality",
     Automatic: "Automatic",
     Playing: "Playing",
@@ -36,12 +38,15 @@ export const t = catalogue(
     "Not known yet. Try again in a moment.": "Not known yet. Try again in a moment.",
     "No choices on this channel.": "No choices on this channel.",
     "No subtitles in this file.": "No subtitles in this file.",
+    "No choices in this file.": "No choices in this file.",
   },
   {
     "nl-NL": {
       Audio: "Audio",
       Subtitles: "Ondertiteling",
       Speed: "Snelheid",
+      "Speed {speed}×": "Snelheid {speed}×",
+      "Track {number}": "Spoor {number}",
       Quality: "Kwaliteit",
       Automatic: "Automatisch",
       Playing: "Speelt",
@@ -73,6 +78,7 @@ export const t = catalogue(
       "Not known yet. Try again in a moment.": "Nog niet bekend. Probeer het zo opnieuw.",
       "No choices on this channel.": "Geen keuzes op deze zender.",
       "No subtitles in this file.": "Geen ondertiteling in dit bestand.",
+      "No choices in this file.": "Geen keuzes in dit bestand.",
     },
   },
 );

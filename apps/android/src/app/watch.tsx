@@ -18,6 +18,8 @@ import { describeFailure } from "../connect/failure.ts";
 import { useStore } from "../platform/store.ts";
 import { player } from "../player/instance.ts";
 import { intentKey, linkedIntent } from "../player/intent.ts";
+import { t as mediaT } from "../player/copy.ts";
+import { MediaDialog, MediaRow, MediaSheets, type MediaSheet } from "../player/media-controls.tsx";
 import { LIVE_RED, playPause } from "../player/mini-player.tsx";
 import type { NativeFailure } from "../player/native.ts";
 import type { PlaybackFailure, Playing } from "../player/player.ts";
@@ -30,7 +32,8 @@ import { colors } from "../ui/theme.ts";
 // `play` param unless that already plays, so a Watch opened again from the mini player, a link or
 // a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
-// something else is shown or one of them has keyboard focus, and always while TalkBack runs.
+// something else is shown, a media sheet is open or one of them has keyboard focus, and always
+// while TalkBack runs. Picture in picture shows the picture alone.
 
 /** Paper A's secondary text over the picture, a step brighter than over black. */
 const DIM = "#D0D0D0";
@@ -106,7 +109,15 @@ export default function Watch() {
     [],
   );
 
-  const kept = held || focusedControls > 0;
+  const [sheet, setSheet] = useState<MediaSheet | null>(null);
+
+  const open = (next: MediaSheet) => {
+    // A save or read that failed earlier is tried again as the viewer comes back to choose.
+    player.media.retryPreferences();
+    setSheet(next);
+  };
+
+  const kept = held || focusedControls > 0 || sheet !== null;
   // Kept controls count as shown, so letting go of them starts the full wait whatever hid or
   // showed them meanwhile (a pause elsewhere, then playing on).
   useEffect(() => {
@@ -187,13 +198,20 @@ export default function Watch() {
               >
                 {state.kind === "playing" ? state.intent.title : ""}
               </Text>
+              {state.kind === "playing" ? (
+                <IconButton
+                  icon="picture-in-picture"
+                  label={mediaT("Picture in picture")}
+                  onPress={() => void player.media.enterPip()}
+                />
+              ) : null}
             </View>
             {state.kind === "playing" && !loading && !state.failure ? (
               <Centre>
                 <Transport now={state} onTouch={touch} />
               </Centre>
             ) : null}
-            {state.kind === "playing" && (state.live || state.seekable) ? (
+            {state.kind === "playing" && !loading && !state.failure ? (
               <View
                 pointerEvents="box-none"
                 style={{
@@ -208,11 +226,21 @@ export default function Watch() {
                   backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
                 }}
               >
-                <Progress now={state} onTouch={touch} onHold={setHeld} />
+                {state.live || state.seekable ? (
+                  <Progress now={state} onTouch={touch} onHold={setHeld} />
+                ) : null}
+                <MediaRow now={state} media={media} onOpen={open} />
               </View>
             ) : null}
           </>
         ) : null}
+        <MediaSheets
+          open={sheet}
+          now={state.kind === "playing" ? state : null}
+          media={media}
+          onClose={() => setSheet(null)}
+        />
+        <MediaDialog error={media.error} />
       </View>
     </FocusWithin>
   );

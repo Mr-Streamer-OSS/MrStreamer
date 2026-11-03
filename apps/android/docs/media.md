@@ -18,7 +18,10 @@ PiP, cancellation, retry and error dismissal actions. Accepted commands do not i
 selected state. Preferences save after confirmation. Read/write failures stay visible and
 retryable. Track preferences match metadata on another source, never old indices; unavailable
 matches leave the default intact. English/Dutch copy lives in `apps/android/src/player/copy.ts`.
-Controls, sheets and countdown presentation belong to the later designer run.
+`apps/android/src/player/media-controls.tsx` draws Watch's row of text controls, the
+countdown, the Audio, Subtitles, Speed and Quality sheets and the refusal dialogs; Watch adds
+the picture-in-picture button. Live's Play from start waits for programme times, which Android
+Live doesn't have yet.
 
 `player.media.registerNext` takes a synchronous resolver receiving the full current episode
 PlayIntent, returning `{ intent, label }` or undefined. Its unsubscribe removes the resolver.
