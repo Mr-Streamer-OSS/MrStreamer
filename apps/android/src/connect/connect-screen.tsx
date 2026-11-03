@@ -26,14 +26,17 @@ const HAIRLINE = "#1C1C1C";
 /**
  * Adds a source: an Xtream server with its username and password, or an M3U link in the server
  * field alone. Nothing is saved until the provider accepts it. `onDone`, when given, is where Back
- * and Cancel go; without it (no source saved yet) Back leaves the app as Android does.
+ * and Cancel go; without it (no source saved yet) Back leaves the app as Android does. Settings
+ * titles it with a saved source's name when it asks for that source's login again.
  */
 export function ConnectScreen({
   owner,
+  title = t("Add provider"),
   onDone,
   onConnected,
 }: {
   owner: SourcesOwner;
+  title?: string | undefined;
   onDone?: () => void;
   onConnected: () => void;
 }) {
@@ -203,7 +206,7 @@ export function ConnectScreen({
             letterSpacing: -0.22,
           }}
         >
-          {t("Add provider")}
+          {title}
         </Text>
       </View>
       <ScrollView

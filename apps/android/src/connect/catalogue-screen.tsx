@@ -219,7 +219,7 @@ function IconButton({
 }
 
 /** Up to two initials for a channel's badge: "Harbour HD" is "HH", a one-word "Nova" is "NO". */
-function monogram(title: string): string {
+export function monogram(title: string): string {
   const words = title.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const [first, second] = words.map((word) => Array.from(word));
   const letters = second ? [first?.[0], second[0]] : (first ?? []).slice(0, 2);

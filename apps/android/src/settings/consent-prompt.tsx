@@ -1,12 +1,16 @@
 import { usePathname } from "expo-router";
 import { sources } from "../bootstrap/sources.ts";
-import { useEffect, useSyncExternalStore } from "react";
-import { Button, Modal, Text, View } from "react-native";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { statistics } from "../telemetry/index.ts";
 import { t } from "./copy.ts";
 import { useInterfaceLanguage } from "./language.ts";
+import { Dialog, DialogText } from "./parts.tsx";
 
-/** Initial explicit choice. Back and the scrim cannot grant or dismiss consent. */
+/**
+ * The first statistics choice, asked over the destinations until it is made. Back and the scrim
+ * don't close it, and Don't share and Share carry the same weight. A choice this phone can't keep
+ * leaves statistics off, as Settings then says, and isn't asked again until the app starts again.
+ */
 export default function ConsentPrompt() {
   useInterfaceLanguage();
   const path = usePathname();
@@ -44,25 +48,29 @@ export default function ConsentPrompt() {
     return sources.state.subscribe(observe);
   }, []);
   const record = useSyncExternalStore(statistics.consent.subscribe, statistics.consent.get);
+  const [answered, setAnswered] = useState(false);
+
+  const answer = (share: boolean) => {
+    setAnswered(true);
+    statistics.configure(share);
+  };
 
   return (
-    <Modal visible={record.choice === null} transparent={false} onRequestClose={() => {}}>
-      <View style={{ flex: 1, backgroundColor: "#000000" }}>
-        <Text style={{ color: "#FFFFFF" }}>{t("Help improve Mr. Streamer")}</Text>
-        <Text style={{ color: "#FFFFFF" }}>
-          {t("Counts app use, the screens you open and provider actions.")}
-        </Text>
-        <Text style={{ color: "#FFFFFF" }}>
-          {t("No viewing history, searches or provider details. Off until you choose to share.")}
-        </Text>
-        {!statistics.consent.available ? (
-          <Text style={{ color: "#FFFFFF" }}>
-            {t("They can't be saved on this phone right now.")}
-          </Text>
-        ) : null}
-        <Button title={t("Don't share")} onPress={() => statistics.configure(false)} />
-        <Button title={t("Share")} onPress={() => statistics.configure(true)} />
-      </View>
-    </Modal>
+    <Dialog
+      visible={record.choice === null && !answered}
+      title={t("Share usage statistics?")}
+      buttons={[
+        { label: t("Don't share"), onPress: () => answer(false) },
+        { label: t("Share"), onPress: () => answer(true) },
+      ]}
+    >
+      <DialogText>
+        {t(
+          "Help improve Mr. Streamer by sharing app activity and provider actions with a random app identifier.",
+        )}
+      </DialogText>
+      <DialogText>{t("No titles, channel names, search text or provider details.")}</DialogText>
+      <DialogText>{t("You can change this in Settings.")}</DialogText>
+    </Dialog>
   );
 }

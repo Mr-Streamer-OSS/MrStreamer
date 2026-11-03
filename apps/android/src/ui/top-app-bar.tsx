@@ -3,6 +3,7 @@ import { AccessibilityInfo, Text, View } from "react-native";
 import type { EdgeInsets } from "react-native-safe-area-context";
 import type { NavigationLayout } from "../navigation/destinations.ts";
 import { useOpenShared } from "../navigation/open.ts";
+import { t } from "../navigation/copy.ts";
 import { IconButton } from "./icon-button.tsx";
 import { colors } from "./theme.ts";
 
@@ -51,7 +52,7 @@ export function TopAppBar({
         backgroundColor: colors.background,
       }}
     >
-      {onBack ? <IconButton icon="arrow-back" label="Back" onPress={onBack} /> : null}
+      {onBack ? <IconButton icon="arrow-back" label={t("Back")} onPress={onBack} /> : null}
       <Text
         ref={heading}
         accessibilityRole="header"
@@ -70,9 +71,9 @@ export function TopAppBar({
       </Text>
       {!onBack && bar ? (
         <>
-          <IconButton icon="search" label="Search" onPress={() => open("search")} />
-          <IconButton icon="download" label="Downloads" onPress={() => open("downloads")} />
-          <IconButton icon="settings" label="Settings" onPress={() => open("settings")} />
+          <IconButton icon="search" label={t("Search")} onPress={() => open("search")} />
+          <IconButton icon="download" label={t("Downloads")} onPress={() => open("downloads")} />
+          <IconButton icon="settings" label={t("Settings")} onPress={() => open("settings")} />
         </>
       ) : null}
     </View>
