@@ -18,7 +18,7 @@
     "test": "vitest run",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives",
     "lint:fix": "pnpm lint --fix",
-    "check": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm knip && pnpm actionlint",
+    "check": "pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm knip && pnpm actionlint && node scripts/docs-references.ts",
     "knip": "knip",
     "actionlint": "node scripts/actionlint.ts",
     "fmt": "prettier --write .",
