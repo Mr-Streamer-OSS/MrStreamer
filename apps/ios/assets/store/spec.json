@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "direction": "Paper A: one genuine capture and a short headline",
+  "paper": "https://app.paper.design/file/01M65TDW63JP18V5XA4P7B62W9/p-C-0",
+  "rules": {
+    "checked": "2026-11-03",
+    "screenshots": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
+    "frames": "https://developer.apple.com/app-store/marketing/guidelines/"
+  },
+  "slots": [
+    {
+      "id": "ipad-13",
+      "captureSlot": "S1",
+      "width": 2752,
+      "height": 2064,
+      "scale": 2,
+      "picture": { "left": 1000, "top": 430, "width": 1600, "height": 1200 },
+      "title": { "left": 120, "top": 730, "width": 740, "height": 650, "size": 100 },
+      "headlines": {
+        "en-GB": "The whole Guide.",
+        "nl-NL": "De hele Gids.",
+        "fr-FR": "Tout le Guide.",
+        "de-DE": "Der ganze Programmführer.",
+        "es-ES": "Toda la Guía."
+      }
+    },
+    {
+      "id": "duo-inner",
+      "captureSlot": "S4",
+      "width": 2853,
+      "height": 2007,
+      "scale": 3,
+      "picture": { "left": 1100, "top": 440, "width": 1600, "height": 1126 },
+      "title": { "left": 120, "top": 700, "width": 820, "height": 650, "size": 100 },
+      "headlines": {
+        "en-GB": "Unfold the Guide.",
+        "nl-NL": "Vouw de Gids open.",
+        "fr-FR": "Dépliez le Guide.",
+        "de-DE": "Den Programmführer entfalten.",
+        "es-ES": "Despliega la Guía."
+      }
+    },
+    {
+      "id": "duo-outer",
+      "captureSlot": "S6",
+      "width": 1398,
+      "height": 2034,
+      "scale": 3,
+      "picture": { "left": 260, "top": 650, "width": 878, "height": 1278 },
+      "title": { "left": 90, "top": 160, "width": 1218, "height": 390, "size": 84 },
+      "headlines": {
+        "en-GB": "Every channel, folded.",
+        "nl-NL": "Alle zenders, dichtgevouwen.",
+        "fr-FR": "Toutes les chaînes, repliées.",
+        "de-DE": "Alle Sender, zusammengeklappt.",
+        "es-ES": "Todos los canales, plegados."
+      }
+    }
+  ]
+}
