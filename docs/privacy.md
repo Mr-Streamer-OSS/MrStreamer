@@ -145,10 +145,11 @@ Your network operator and DNS provider can see which servers your device contact
 - **Your provider** receives the login and requests needed to fetch its catalogue and guide, play streams and download copies. It receives your connecting IP address and network metadata and can see the provider resources requested.
 - **[TMDB's metadata API](https://www.themoviedb.org/privacy-policy)** receives the movie, series or season identifiers requested, language and region where used, our application's API key or read token, and your connecting IP address and network metadata. The iPhone client does not add your provider login or address, typed searches or statistics installation identifier to these calls. Metadata can be fetched while building the library, not only when you play something.
 - **Image servers** named by your provider and TMDB's separate image service receive the requested picture address, your connecting IP address and network metadata that iOS supplies. The app builds TMDB image addresses separately, without adding its TMDB API key or statistics installation identifier.
-- **An AirPlay receiver you choose** is used through iOS's system playback controls. This is separate from the desktop Google Cast and local-stream route described above.
+- **An AirPlay receiver you choose** is used through iOS's system playback controls.
+- **A TV you pick** with Play on TV, on your Wi-Fi, gets an HTTP stream address on your iPhone with a token for that one playback, and the title and its line. The iPhone reads your provider and serves the stream itself, so the TV never gets your provider's login, headers or stream address. The app uses Google's Default Media Receiver on the TV, which the TV loads from Google; the iPhone app itself contacts no Google service and has no Google SDK. Looking for TVs starts only when you open the TV chooser, which is when iOS asks for Local Network access. The TV isn't authenticated, so casting relies on a trusted local network.
 - **[SubDL](https://subdl.com/privacy)**, only after you save your own API key in Settings > Subtitles and choose **Find online** in the player: the title's TMDB id, or its name without one, a movie's year, an episode's season and number, your subtitle and title languages with English, your API key and your IP address. Downloading a result asks SubDL for that file. Provider logins and stream addresses are never sent.
 
-The iPhone app uses the TMDB key supplied with the app. It does not offer the desktop custom-key, OpenSubtitles, Google Cast or desktop update-check controls.
+The iPhone app uses the TMDB key supplied with the app. It does not offer the desktop custom-key, OpenSubtitles or desktop update-check controls.
 
 #### Restricted review provider and earlier private-beta samples
 
@@ -170,7 +171,7 @@ _Turn statistics and site analytics off, and delete your data._
 - **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
 - **Subtitle search on desktop** is off until you turn it on. On iPhone, nothing is asked of SubDL until you save your own key and choose **Find online**; **Remove** in Settings > Subtitles deletes the key.
-- **Casting on desktop** happens only after you open the receiver list and pick a device. On iPhone, AirPlay uses the system controls for the receiver you choose.
+- **Casting** happens only after you open the receiver list and pick a device, on desktop and with Play on TV on iPhone. On iPhone, AirPlay uses the system controls for the receiver you choose.
 - **TMDB** requests have no separate off switch in either app. Only desktop Settings lets you choose whose TMDB key the app uses. **Update checks** described here are desktop-only; iPhone app updates use Apple's distribution services.
 
 ### Deleting your data
