@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // The two Windows installers the installed upgrade check runs, one over the other, and why each is
 // the build it claims to be. The caller supplies a published nightly tag or explicit private
 // package identities. Remaining provenance is derived from GitHub and checked before
@@ -53,7 +54,7 @@ const PrivateInput = type({
 });
 
 /** Explicit private input. The shared verifier binds all identities and archive/file hashes. */
-export async function verifyPrivateCandidate(github: GitHub, input: unknown, authenticate = false) {
+export async function verifyPrivateCandidate(github: GitHub, input: Json, authenticate = false) {
   const value = PrivateInput.assert(input);
   check(value.repository === github.repository, "Private input belongs to another repository.");
 
@@ -513,12 +514,12 @@ export async function resolvePackages(
 }
 
 /** Refuses a receipt of another shape or with inconsistent identities before anything installs. */
-export function readReceipt(value: unknown): Receipt;
+export function readReceipt(value: Json): Receipt;
 export function readReceipt(
-  value: unknown,
+  value: Json,
   privateCandidate: PrivateCandidate | undefined,
 ): UpgradeReceipt;
-export function readReceipt(value: unknown, privateCandidate?: PrivateCandidate): UpgradeReceipt {
+export function readReceipt(value: Json, privateCandidate?: PrivateCandidate): UpgradeReceipt {
   const receipt = UpgradeReceipt.assert(value);
   const pair = checkPair(receipt.resolved);
 

@@ -57,7 +57,7 @@ class Transport implements MainTransport {
   event(method: string, params: Json | undefined) {
     this.listeners.get(method)?.(params);
   }
-  worker(message: unknown, sessionId = "owned") {
+  worker(message: Json, sessionId = "owned") {
     this.event("NodeWorker.receivedMessageFromWorker", {
       sessionId,
       message: JSON.stringify(message),

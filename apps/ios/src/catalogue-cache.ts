@@ -177,7 +177,7 @@ function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<R[] | null> {
  * every row of every list. Nothing of it is answered until all have checked.
  */
 function* checked(
-  json: unknown,
+  head: ReturnType<typeof Envelopes>["live"]["infer"] | ReturnType<typeof Envelopes>["titles"]["infer"],
   id: string,
   kind: SavedKind,
   mapping: string | null,
@@ -193,10 +193,9 @@ function* checked(
     );
   };
 
-  if (kind === "live") {
-    const head = Envelopes().live(json);
+  if (!stands(head)) return "invalid";
 
-    if (head instanceof type.errors || !stands(head)) return "invalid";
+  if (head.kind === "live") {
     const categories = yield* rows(head.catalogue.categories, Category());
 
     if (!categories) return "invalid";
@@ -207,9 +206,6 @@ function* checked(
     return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
   }
 
-  const head = Envelopes().titles(json);
-
-  if (head instanceof type.errors || !stands(head)) return "invalid";
   const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
 
   if (!movieCategories) return "invalid";
@@ -269,7 +265,10 @@ async function load(
     // the rows were checked at once; the text; one parse; then the envelope and the rows.
     for (const schema of [Envelopes, Category, Channel, Title]) schema();
     const json: unknown = JSON.parse(await file.text());
-    const saved = await inTasks(checked(json, id, kind, mapping), wanted);
+    const head = Envelopes()[kind === "live" ? "live" : "titles"](json);
+
+    if (head instanceof type.errors) throw new TypeError();
+    const saved = await inTasks(checked(head, id, kind, mapping), wanted);
 
     if (saved === null) return "stopped";
 

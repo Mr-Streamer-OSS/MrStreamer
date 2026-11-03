@@ -42,17 +42,6 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
  * the record schema deletes its undeclared counts: neither is ever sent. Consent, identity, the
  * observation ledger and other queued events keep their UUIDs, timestamps and attempts.
  */
-function withoutSummaries(kept: unknown): unknown {
-  const legacy = FormatOne()(kept);
-
-  if (legacy instanceof type.errors) return kept;
-
-  return {
-    ...legacy,
-    format: 2,
-    pending: legacy.pending.filter((item) => LegacySummary()(item) instanceof type.errors),
-  };
-}
 
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
@@ -77,9 +66,31 @@ export function analyticsStore(dataDir: string) {
 
       try {
         const parsed: unknown = JSON.parse(text);
-        const current = withoutSummaries(parsed);
+        const legacy = FormatOne()(parsed);
+        const current = legacy instanceof type.errors ? parsed : {
+          ...legacy,
+          format: 2,
+          pending: legacy.pending.filter((item) => LegacySummary()(item) instanceof type.errors),
+        };
         migrated = current !== parsed;
-        const checked = LegacyRecord()(withoutFutureDiagnostics(current));
+        // Future optional diagnostic literals cannot discard valid consent or legacy work.
+        const queue = type({
+          pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
+        })(current);
+        const diagnosticSafe = queue instanceof type.errors ? current : {
+          ...queue,
+          pending: queue.pending.map((item) => item.event.event !== "stream_error" ? item : {
+            ...item,
+            event: {
+              ...item.event,
+              properties: Object.fromEntries(Object.entries(item.event.properties).filter(
+                ([key, entry]) => !key.startsWith("diagnostic_") ||
+                  !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
+              )),
+            },
+          }),
+        };
+        const checked = LegacyRecord()(diagnosticSafe);
 
         if (
           checked instanceof type.errors ||
@@ -182,32 +193,3 @@ export function analyticsStore(dataDir: string) {
   };
 }
 
-/** New optional diagnostic literals cannot invalidate otherwise valid consent or legacy work. */
-function withoutFutureDiagnostics(value: unknown): unknown {
-  const queue = type({
-    pending: type({ event: type({ event: "string", properties: "object" }) }).array(),
-  })(value);
-
-  if (queue instanceof type.errors) return value;
-
-  return {
-    ...queue,
-    pending: queue.pending.map((item) =>
-      item.event.event !== "stream_error"
-        ? item
-        : {
-            ...item,
-            event: {
-              ...item.event,
-              properties: Object.fromEntries(
-                Object.entries(item.event.properties).filter(
-                  ([key, entry]) =>
-                    !key.startsWith("diagnostic_") ||
-                    !(PlaybackDiagnostic()({ [key]: entry }) instanceof type.errors),
-                ),
-              ),
-            },
-          },
-    ),
-  };
-}

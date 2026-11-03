@@ -1,3 +1,4 @@
+import { JsonValue, type Json } from "../../../packages/contracts/src/json.ts";
 // The made-up subscription the marketing captures show, and the public-domain footage it plays.
 // docs/assets/marketing-demo-sources.json names the sources and everything shown: channels,
 // programmes, titles, people and subtitles, all invented. See
@@ -259,11 +260,11 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
   /** The rows the provider lists for a request, for the adapter to pick from. */
   const listed = async <Row>(url: URL) => (await (await forward(url)).json()) as Row[];
 
-  async function api(url: URL): Promise<unknown> {
+  async function api(url: URL): Promise<Json> {
     switch (url.searchParams.get("action")) {
       // The account, as the provider knows it.
       case null:
-        return (await forward(url)).json();
+        return JsonValue.assert(await (await forward(url)).json());
       case "get_live_categories":
         return manifest.categories.map(categoryRow);
       case "get_live_streams": {
@@ -315,7 +316,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
       case "get_series_info":
         return url.searchParams.get("series_id") === String(featured.providerId)
           ? featuredInfo()
-          : (await forward(url)).json();
+          : JsonValue.assert(await (await forward(url)).json());
       // No movies: the captures show a series.
       default:
         return [];
@@ -353,7 +354,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
   const wrapper = await listen(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://tmdb");
     const answer = await fetch(new URL(url.pathname + url.search, tmdb.url));
-    json(response, about(url, await answer.json()), answer.status);
+    json(response, about(url, JsonValue.assert(await answer.json())), answer.status);
   });
 
   return {
@@ -409,7 +410,7 @@ export async function startMarketingDemo(media: DemoMedia): Promise<MarketingDem
 }
 
 /** The featured series' details, as a panel sends them: its seasons, episodes and their files. */
-function featuredInfo(): unknown {
+function featuredInfo(): Json {
   const seasons = [...new Set(featured.episodes.map((episode) => episode.season))];
 
   return {
@@ -449,7 +450,7 @@ function featuredInfo(): unknown {
 }
 
 /** What TMDB's stand-in answered, with the manifest's words for the titles it names. */
-function about(url: URL, body: unknown): unknown {
+function about(url: URL, body: Json): Json {
   const season = /^\/3\/tv\/(\d+)\/season\/(\d+)$/.exec(url.pathname);
 
   if (season && Number(season[1]) === featured.tmdbId) {
@@ -683,7 +684,7 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-function json(response: ServerResponse, body: unknown, status = 200): void {
+function json(response: ServerResponse, body: Json, status = 200): void {
   response.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 

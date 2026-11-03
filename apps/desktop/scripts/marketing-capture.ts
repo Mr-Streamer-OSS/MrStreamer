@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // Captures the five windows the marketing site is made from, as docs/assets/marketing-*.png: a
 // series' details, an episode playing with its subtitle menu open, Live TV, its guide grid with an
 // aired programme's catch-up and Home. See docs/contributing/marketing-artwork.md.
@@ -299,10 +300,13 @@ try {
 
     if (!record(windows) || !Array.isArray(windows["windows"])) throw new Error("No window list.");
 
-    const owned = windows["windows"].find(
-      (entry: unknown) =>
-        record(entry) && entry["pid"] === app?.pid && entry["title"] === "Mr. Streamer",
-    );
+    const nativeWindow = type({ pid: "number", title: "string", window_id: "number" });
+    const listed = windows["windows"].flatMap((entry) => {
+      const window = nativeWindow(entry);
+
+      return window instanceof type.errors ? [] : [window];
+    });
+    const owned = listed.find((entry) => entry.pid === app?.pid && entry.title === "Mr. Streamer");
 
     if (record(owned) && typeof owned["window_id"] === "number") windowId = owned["window_id"];
 
