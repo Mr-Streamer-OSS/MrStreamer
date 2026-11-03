@@ -137,9 +137,11 @@ function describeFrom(
  */
 export function mapSections(input: MapInput, query: string) {
   const ids = sourceIds(input);
+
   const channels = new Map(
     [...input.channels.values()].flat().map((channel) => [channel.key, channel]),
   );
+
   const words = query.trim().toLocaleLowerCase();
 
   const found = ({ title, mapped }: Mappable) =>

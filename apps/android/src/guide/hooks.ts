@@ -172,9 +172,11 @@ export function useProgramme(key: string, start: number, detail?: string) {
   const revision = useListingRevision();
   const [attempt, retry] = useState(0);
   const id = `${key} ${start} ${detail ?? ""}`;
+
   const [read, setRead] = useState<{ id: string; value: Programme | null; failed: boolean } | null>(
     null,
   );
+
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
