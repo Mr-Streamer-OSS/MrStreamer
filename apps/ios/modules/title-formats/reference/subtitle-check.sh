@@ -42,6 +42,14 @@ serves() {
   grep -qxF "$3" "$out/runs/$(basename "$1")/$2"-*.vtt ||
     fail "$(basename "$1"): $2 serves no \"$3\""
 }
+# Whether rendition `$2` of the last run of file `$1` says it is too large in its first segment
+# only.
+warns_first() {
+  local warned
+  warned=$(grep -lxF "These subtitles are too large to show." "$out/runs/$(basename "$1")/$2"-*.vtt || true)
+  [[ $warned == "$out/runs/$(basename "$1")/$2-0.vtt" ]] ||
+    fail "$(basename "$1"): $2 too large in ${warned:-no segment}, not only the first"
+}
 subtitles() {
   local count
   count=$(grep -c "TYPE=SUBTITLES" "$out/runs/$(basename "$1")/main.m3u8" || true)
@@ -121,10 +129,28 @@ if check "$hidden"; then
     says "$hidden" "unshown: $line"
   done
 fi
-# Past 4 MB of a track's lines, read in order, its segments say so; a seek may first find the
-# few lines it reads, so fresh seeks may differ.
+# A segment with more lines than a track's 4 MB, or than the title's 16 MB with its other tracks',
+# says so, and only that segment: a later line still shows, the same in order, from the later
+# segment first, after fresh seeks and asked again after failed reads.
 many=$fixtures/subs-many.mkv
-check "$many" --uncued && serves "$many" s0 "These subtitles are too large to show."
+check "$many" && warns_first "$many" s0
+later=$fixtures/subs-many-later.mkv
+shared=$fixtures/subs-shared.mkv
+for start in 0 30; do
+  if check "$later" --start "$start"; then
+    warns_first "$later" s0
+    serves "$later" s0 "Plus tard"
+  fi
+  if check "$shared" --start "$start"; then
+    warns_first "$shared" s0
+    warns_first "$shared" s5
+    serves "$shared" s5 "Plus tard"
+  fi
+done
+if check "$later" --faults; then
+  grep -qE "^faults: [1-9][0-9]* reads failed, 0 segments differ when asked again$" "$log" ||
+    fail "subs-many-later.mkv: no failed reads"
+fi
 check "$fixtures/subs-huge.mkv" && serves "$fixtures/subs-huge.mkv" s0 "This line is too large to show."
 long=$fixtures/subs-longline.mkv
 if check "$long"; then
