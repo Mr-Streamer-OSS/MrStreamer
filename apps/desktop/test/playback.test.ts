@@ -1487,10 +1487,12 @@ describe("live captures", () => {
     await read("watch", "hd.m3u8");
     await read("record", "master.m3u8");
     expect(captures.fixed("record")).toBe("http://provider/hd.m3u8");
-    // The recording reads hd again where it was sent: hd still, held, its segment asked once.
+    expect(await read("watch", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
+    // The recording reads hd again where it was sent, anew: hd still, held, its segment asked
+    // once.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
     await read("record", "t/hd.m3u8?token=1");
     expect(captures.fixed("record")).toBe("http://provider/hd.m3u8");
-    expect(await read("watch", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
     expect(await read("record", "t/hd-10.ts")).toBe("t/hd-10.ts 1");
     expect(asked.filter((each) => each.endsWith(".ts"))).toEqual(["t/hd-10.ts"]);
     await captures.idle("record");
