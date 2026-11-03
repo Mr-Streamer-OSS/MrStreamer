@@ -1,6 +1,5 @@
-import { Screen } from "../../../navigation/screen.tsx";
+import { BrowseScreen } from "../../../library/screens.tsx";
 
-/** Movies's root, until the card that builds Movies replaces it. */
-export default function Movies() {
-  return <Screen title="Movies" />;
+export default function Browse() {
+  return <BrowseScreen kind="movie" />;
 }
