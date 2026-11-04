@@ -1019,10 +1019,12 @@ it.each([false, true])(
     press(shown, "Test provider");
     press(shown, "Remove");
     press(shown, "Remove and delete history");
+
     if (retry) {
       await act(async () => {});
       press(shown, "Try again");
     }
+
     act(() => {
       root?.unmount();
       root = null;

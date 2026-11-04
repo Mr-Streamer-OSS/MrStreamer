@@ -384,6 +384,7 @@ it.each(["save", "remove", "restore", "clear", "progress"] as const)(
       const entries = owner.state.get().watchlist;
 
       if (operation === "restore") await owner.removeWatchlist(entries[0]!);
+      const before = owner.state.get();
       armed = true;
 
       const work = () => {
