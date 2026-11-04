@@ -50,7 +50,7 @@ export type ViewingState = {
   readonly watchlist: readonly SavedTitle[];
 };
 
-export interface ViewingPlatform {
+interface ViewingPlatform {
   readJson(name: string): unknown;
   writeJson(name: string, value: Json): void;
 }
@@ -143,23 +143,20 @@ export function viewingOwner(
     return next;
   }
 
-  async function execute<A>(call: (record: ViewingRecord["Service"]) => Effect.Effect<A, unknown>) {
-    const result = await ready().runPromise(Effect.flatMap(ViewingRecord, call));
-    await refresh();
-
-    return result;
-  }
-
+  /** Runs one record command after the ones before it, then publishes what it committed. */
   function run<A>(call: (record: ViewingRecord["Service"]) => Effect.Effect<A, unknown>) {
-    return serialize(() => execute(call));
+    return serialize(async () => {
+      const result = await ready().runPromise(Effect.flatMap(ViewingRecord, call));
+      await refresh();
+
+      return result;
+    });
   }
+
+  const current = Effect.flatMap(ViewingRecord, (record) => record.state);
 
   async function refresh() {
-    const viewing = await ready().runPromise(
-      Effect.flatMap(ViewingRecord, (record) => record.state),
-    );
-
-    state.set({ kind: "ready", viewing, watchlist: active() });
+    state.set({ kind: "ready", viewing: await ready().runPromise(current), watchlist: active() });
   }
 
   async function read() {
@@ -168,14 +165,11 @@ export function viewingOwner(
       const file = raw === null ? { record: null, watchlist: [] } : File(raw);
 
       if (file instanceof type.errors) throw new Error("viewing-read");
-      const record = file.record;
       await runtime?.dispose();
-      snapshot = record;
+      snapshot = file.record;
       saved = file.watchlist;
       runtime = makeRuntime();
-      await runtime.runPromise(Effect.flatMap(ViewingRecord, (record) => record.state));
-      state.set({ ...state.get(), kind: "ready" });
-      await refresh();
+      state.set({ kind: "ready", viewing: await runtime.runPromise(current), watchlist: active() });
     } catch {
       state.set({ ...state.get(), kind: "failed" });
     }
@@ -302,8 +296,6 @@ export function viewingOwner(
       ),
   };
 }
-
-export type ViewingOwner = ReturnType<typeof viewingOwner>;
 
 /** Translate the merged library identity; episode numbers come from current details, never names. */
 export function titleRef(

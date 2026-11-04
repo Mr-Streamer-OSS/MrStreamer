@@ -6,18 +6,15 @@ import { continuation } from "@mrstreamer/core/viewing/episodes";
 import { resumePoint } from "@mrstreamer/core/viewing/continue";
 import { writeJson } from "../platform/storage.ts";
 import { store } from "../platform/store.ts";
-import type { lists as liveLists } from "../live/runtime.ts";
-
+import type { Settled } from "../player/player.ts";
 import { readViewing } from "./storage.ts";
 import { viewingOwner, titleRef } from "./viewing.ts";
-import { homeModel, isSaved } from "./model.ts";
+import { isSaved, type Continuing } from "./model.ts";
 import { t } from "./copy.ts";
 
-export { homeModel, watchlistRows, eligibleVersion, isSaved } from "./model.ts";
+export { watchlistRows, type WatchlistRow } from "./model.ts";
 
-export type { WatchlistRow, Unopenable } from "./model.ts";
-
-export type { ViewingOwner, SavedTitle } from "./viewing.ts";
+export type { SavedTitle } from "./viewing.ts";
 
 const owners = () => {
   const state = sources.state.get();
@@ -64,22 +61,9 @@ export function acknowledgeProgress() {
   viewingFailure.set(null);
 }
 
-/** Home focus owns this handle. end() cannot stop a later viewer-selected attempt. */
-export function previewStage(intent: Parameters<typeof player.preview>[0]) {
-  return player.preview(intent);
-}
-
-let lists: typeof liveLists | undefined;
-
-export function currentHome(country?: string) {
-  return homeModel(
-    viewing.state.get(),
-    sources.state.get(),
-    library(),
-    lists?.state.get().lists.find((l) => l.id === "favourites"),
-    country,
-  );
-}
+/** Which title a play was for: its provider, kind and the exact version or episode id. */
+const playKey = (sourceId: string, media: "movie" | "episode", id: string) =>
+  JSON.stringify([sourceId, media, id]);
 
 let references = 0;
 let cleanup: (() => void) | undefined;
@@ -88,9 +72,6 @@ let cleanup: (() => void) | undefined;
 export function startViewing(): () => void {
   if (references++ === 0) {
     void viewing.read();
-    void import("../live/runtime.ts").then((live) => {
-      lists = live.lists;
-    });
 
     const known = new Map<
       string,
@@ -100,6 +81,32 @@ export function startViewing(): () => void {
         since: number;
       }
     >();
+
+    /** Saves where a channel or a known title is: a minute's checkpoint, or where it settled. */
+    const save = ({
+      intent,
+      positionMs,
+      durationMs,
+    }: Pick<Settled, "intent" | "positionMs" | "durationMs">) => {
+      const entry =
+        intent.kind === "title"
+          ? known.get(playKey(intent.sourceId, intent.media, intent.id))
+          : undefined;
+
+      if (intent.kind === "live" || intent.kind === "catch-up")
+        attempt("progress", t("Your latest position could not be saved."), () =>
+          viewing.recordWatch(intent),
+        );
+      else if (entry && durationMs)
+        attempt("progress", t("Your latest position could not be saved."), () =>
+          viewing.recordProgress(
+            titleRef(entry.media, entry.episode),
+            positionMs / 1000,
+            durationMs / 1000,
+            entry.since,
+          ),
+        );
+    };
 
     const revision = store(0);
     const marks = new Map<string, boolean>();
@@ -118,13 +125,14 @@ export function startViewing(): () => void {
       subscribe: revision.subscribe,
       snapshot: revision.get,
       play(media, episode) {
-        const key = JSON.stringify([
-          media.sourceId,
-          media.kind,
-          media.kind === "movie" ? media.version.id : media.episodeId,
-        ]);
-
-        known.set(key, { media, episode, since: Date.now() });
+        known.set(
+          playKey(
+            media.sourceId,
+            media.kind,
+            media.kind === "movie" ? media.version.id : media.episodeId,
+          ),
+          { media, episode, since: Date.now() },
+        );
       },
       watchlist(title) {
         if (viewing.state.get().kind !== "ready")
@@ -261,25 +269,21 @@ export function startViewing(): () => void {
         lastCheckpoint = 0;
 
         if (intent.kind === "title") {
-          const key = JSON.stringify([intent.sourceId, intent.media, intent.id]);
+          const key = playKey(intent.sourceId, intent.media, intent.id);
           const entry = known.get(key);
-
           const since = Date.now();
 
           if (entry) known.set(key, { ...entry, since });
           else if (intent.media === "movie") {
+            const played = (v: { subscriptionId: string; id: string }) =>
+              v.subscriptionId === intent.sourceId && v.id === intent.id;
+
             const title = library()
               .made("movie")
               .list("all", "title")
-              .find((title) =>
-                title.versions.some(
-                  (v) => v.subscriptionId === intent.sourceId && v.id === intent.id,
-                ),
-              );
+              .find((title) => title.versions.some(played));
 
-            const version = title?.versions.find(
-              (v) => v.subscriptionId === intent.sourceId && v.id === intent.id,
-            );
+            const version = title?.versions.find(played);
 
             if (title && version)
               known.set(key, {
@@ -337,49 +341,10 @@ export function startViewing(): () => void {
 
       if (now.phase !== "playing" || now.positionMs - lastCheckpoint < 60_000) return;
       lastCheckpoint = now.positionMs;
-
-      if (intent.kind === "live" || intent.kind === "catch-up")
-        attempt("progress", t("Your latest position could not be saved."), () =>
-          viewing.recordWatch(intent),
-        );
-
-      if (intent.kind === "title" && now.durationMs) {
-        const entry = known.get(JSON.stringify([intent.sourceId, intent.media, intent.id]));
-
-        if (entry)
-          attempt("progress", t("Your latest position could not be saved."), () =>
-            viewing.recordProgress(
-              titleRef(entry.media, entry.episode),
-              now.positionMs / 1000,
-              now.durationMs! / 1000,
-              entry.since,
-            ),
-          );
-      }
+      save(now);
     });
 
-    const stopPlayer = player.onSettled((settled) => {
-      const intent = settled.intent;
-
-      if (intent.kind === "live" || intent.kind === "catch-up") {
-        attempt("progress", t("Your latest position could not be saved."), () =>
-          viewing.recordWatch(intent),
-        );
-      } else if (intent.kind === "title" && settled.durationMs) {
-        const key = JSON.stringify([intent.sourceId, intent.media, intent.id]);
-        const entry = known.get(key);
-
-        if (entry)
-          attempt("progress", t("Your latest position could not be saved."), () =>
-            viewing.recordProgress(
-              titleRef(entry.media, entry.episode),
-              settled.positionMs / 1000,
-              settled.durationMs! / 1000,
-              entry.since,
-            ),
-          );
-      }
-    });
+    const stopPlayer = player.onSettled(save);
 
     cleanup = () => {
       stopState();
@@ -408,39 +373,32 @@ export function startViewing(): () => void {
 }
 
 /** Resume resolves current details and its exact eligible version before invoking a registered handler. */
-export async function resumeEntry(entry: ReturnType<typeof currentHome>["continuing"][number]) {
+export async function resumeEntry(entry: Continuing) {
   const model = library();
 
   const version = entry.title.versions.find(
     (v) => v.subscriptionId === entry.version.subscriptionId && v.id === entry.version.id,
   );
 
-  if (!version || !model.reader(version.subscriptionId)) return;
+  const reader = version && model.reader(version.subscriptionId);
+
+  if (!version || !reader) return;
   const before = player.state.get();
-  const reader = model.reader(version.subscriptionId);
+
+  // Something else started playing, or the provider signed out, while details were read.
+  const stale = () =>
+    player.state.get() !== before || model.reader(version.subscriptionId) !== reader;
+
   const details = await model.details({ ...entry.title, ...version });
 
-  if (
-    details.providerFailed ||
-    !details.value ||
-    player.state.get() !== before ||
-    model.reader(version.subscriptionId) !== reader
-  )
-    return;
+  if (details.providerFailed || !details.value || stale()) return;
 
   if (details.value.kind === "series") {
     const standing = await viewing.episodes(version);
     const next = continuation(details.value, standing.progress, standing.marks);
     const play = libraryIntents.state.get().play;
 
-    if (
-      !next ||
-      next.replay ||
-      !play ||
-      player.state.get() !== before ||
-      model.reader(version.subscriptionId) !== reader
-    )
-      return;
+    if (!next || next.replay || !play || stale()) return;
     const episode = next.episode;
     const container = details.containers.get(episode.id);
 
@@ -472,7 +430,7 @@ export async function resumeEntry(entry: ReturnType<typeof currentHome>["continu
   const container = version.container?.trim() || details.containers.get(version.id);
   const play = libraryIntents.state.get().play;
 
-  if (!container || !play || !model.reader(version.subscriptionId)) return;
+  if (!container || !play) return;
 
   const media: MediaIdentity = {
     kind: "movie",

@@ -332,7 +332,9 @@ const gone = {
   versionIds: ["999"],
 } as const;
 
-it("shows Home's shelves in iOS order, falling back to the provider's movies without TMDB", async () => {
+it("shows Home's shelves in iOS order, counting every Watchlist entry but showing only what opens", async () => {
+  scenario.saved = { version: 1, record: null, watchlist: [gone] };
+  await viewing.read();
   const played = await watched(0, 300);
   await viewing.setWatchlist(movies()[1]!, true);
   const shown = show(createElement(HomeScreen));
@@ -347,17 +349,8 @@ it("shows Home's shelves in iOS order, falling back to the provider's movies wit
   ]);
   expect(has(shown, `${played.title}, 25 min left`)).toBe(true);
   expect(has(shown, "Favourites, 1")).toBe(true);
-  expect(has(shown, "Watchlist, 1")).toBe(true);
+  // Without TMDB the shelf is the provider's movies, never "Movies for you".
   expect(shown.textContent).not.toContain("Movies for you");
-});
-
-it("counts every Watchlist entry on Home but shows posters only for what opens", async () => {
-  scenario.saved = { version: 1, record: null, watchlist: [gone] };
-  await viewing.read();
-  await viewing.setWatchlist(movies()[1]!, true);
-  const shown = show(createElement(HomeScreen));
-  await settle();
-
   expect(has(shown, "Watchlist, 2")).toBe(true);
   expect(has(shown, `${movies()[1]!.title}, Movie`)).toBe(true);
   expect(has(shown, /^Grey Pier/)).toBe(false);

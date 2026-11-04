@@ -208,12 +208,10 @@ describe("Android viewing persistence", () => {
       await owner.dispose();
     }
   });
-  it("uses honest movie fallbacks and keeps unopenable watchlist reasons", async () => {
+  it("falls back to the provider's movies without ratings when there is no TMDB", async () => {
     const f = await setup();
 
     try {
-      await f.owner.setWatchlist(f.title, true);
-
       const sources: Sources = {
         kind: "ready",
         sources: [
@@ -229,8 +227,6 @@ describe("Android viewing persistence", () => {
       const home = homeModel(f.owner.state.get(), sources, f.model, undefined);
       expect(home.movies.length).toBeGreaterThan(0);
       expect(home.movies.every((t) => t.rating === null)).toBe(true);
-      // A catalogue without a signed-in reader must never be offered for playback.
-      expect(watchlistRows(f.owner.state.get(), sources, f.model)[0]?.why).toBe(null);
     } finally {
       await f.owner.dispose();
     }

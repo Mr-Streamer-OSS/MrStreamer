@@ -2,16 +2,15 @@ import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { sameOwned } from "@mrstreamer/contracts/subscription";
 import { continueEntries } from "@mrstreamer/core/viewing/continue";
 import { entriesOf, factsOf, sameTitle } from "@mrstreamer/core/ondemand/watchlist";
-import { homeRows } from "@mrstreamer/core/home/rows";
 import type { Sources } from "../connect/sources.ts";
 import { discover } from "../live/discovery.ts";
 import { identity, resolve, type ChannelList } from "../live/model.ts";
 import type { LibraryModel } from "../library/model.ts";
 import type { ViewingState, SavedTitle } from "./viewing.ts";
 
-export type Unopenable = "loading" | "failed" | "needs-secret" | "not-listed";
+type Unopenable = "loading" | "failed" | "needs-secret" | "not-listed";
 
-export function eligibleVersion(
+function eligibleVersion(
   title: Title,
   sources: Sources,
   library: LibraryModel,
@@ -46,12 +45,12 @@ export function watchlistRows(
     }));
 
   return entriesOf(members)
-    .map((group) =>
+    .map(([first]) =>
       state.watchlist.find(
         (entry) =>
-          entry.sourceId === group[0]!.subscriptionId &&
-          entry.titleId === group[0]!.id &&
-          entry.kind === group[0]!.kind,
+          entry.sourceId === first!.subscriptionId &&
+          entry.titleId === first!.id &&
+          entry.kind === first!.kind,
       )!,
     )
     .map((saved) => {
@@ -104,19 +103,19 @@ export function homeModel(
 ) {
   const live = discover(sources);
 
+  // A saved channel shows only while its provider still lists it.
+  const listed = (entry: Parameters<typeof resolve>[0]) => {
+    const found = resolve(entry, sources);
+
+    return found.kind === "listed" ? [found.row] : [];
+  };
+
   const recent =
-    state.viewing?.recent.flatMap((owned) => {
-      const found = resolve({ sourceId: owned.subscriptionId, channelId: owned.id }, sources);
+    state.viewing?.recent.flatMap((owned) =>
+      listed({ sourceId: owned.subscriptionId, channelId: owned.id }),
+    ) ?? [];
 
-      return found.kind === "listed" ? [found.row] : [];
-    }) ?? [];
-
-  const favouriteRows =
-    favourites?.entries.flatMap((entry) => {
-      const found = resolve(entry, sources);
-
-      return found.kind === "listed" ? [found.row] : [];
-    }) ?? [];
+  const favouriteRows = favourites?.entries.flatMap(listed) ?? [];
 
   const titles = (kind: Title["kind"]) => library.made(kind).list("all", "title");
 
@@ -149,11 +148,15 @@ export function homeModel(
   const recommended = library.metadata ? movies.list("popular", "popular") : [];
   const recentMovies = movies.list("recent", "added");
 
-  const movieFallback = recommended.length
-    ? recommended
-    : recentMovies.length
-      ? recentMovies
-      : movies.list("all", "title");
+  // The Movies tab the shelf comes from: TMDB's picks, else recently added, else every movie.
+  const moviesTab = recommended.length ? "popular" : recentMovies.length ? "recent" : "all";
+
+  const movieFallback =
+    moviesTab === "popular"
+      ? recommended
+      : moviesTab === "recent"
+        ? recentMovies
+        : movies.list("all", "title");
 
   const stage =
     recent[0] ?? live.countries.find((group) => group.name === country)?.rows[0] ?? null;
@@ -161,9 +164,6 @@ export function homeModel(
   const status = library.state.get();
 
   return {
-    // Shared visibility vocabulary; Android's accepted shelf order stays fixed below.
-    rows: homeRows(undefined),
-    order: ["stage", "on-now", "favourites", "continue", "watchlist", "movies"] as const,
     stage: stage ? { row: stage, intent: { kind: "live" as const, ...identity(stage) } } : null,
     onNow: live.rows,
     favourites: favouriteRows,
@@ -174,11 +174,7 @@ export function homeModel(
     continuing,
     watchlist,
     watchlistCount: watchlist.length,
-    moviesBasis: recommended.length
-      ? ("recommendations" as const)
-      : recentMovies.length
-        ? ("recent" as const)
-        : ("all" as const),
+    moviesTab,
     movies: movieFallback
       .filter((t) => eligibleVersion(t, sources, library))
       .map((t) => (library.metadata ? t : { ...t, rating: null })),
@@ -194,3 +190,5 @@ export function homeModel(
     restoring: live.restoring,
   };
 }
+
+export type Continuing = ReturnType<typeof homeModel>["continuing"][number];

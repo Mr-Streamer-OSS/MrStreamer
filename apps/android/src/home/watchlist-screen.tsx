@@ -50,9 +50,10 @@ function openDetails(row: WatchlistRow) {
 }
 
 /** What the Undo strip says: a removal to take back, or an undo that failed. */
-type Strip =
-  | { readonly kind: "removed"; readonly entries: readonly SavedTitle[] }
-  | { readonly kind: "undo-failed"; readonly entries: readonly SavedTitle[] };
+type Strip = {
+  readonly kind: "removed" | "undo-failed";
+  readonly entries: readonly SavedTitle[];
+};
 
 /**
  * Every saved title, Newest or A to Z, including those that don't open now: they keep their
@@ -84,10 +85,7 @@ export function WatchlistScreen() {
 
   const undo = (entries: readonly SavedTitle[]) => {
     setStrip(null);
-    viewing.restoreWatchlist(entries).then(
-      () => undefined,
-      () => setStrip({ kind: "undo-failed", entries }),
-    );
+    viewing.restoreWatchlist(entries).catch(() => setStrip({ kind: "undo-failed", entries }));
   };
 
   const order = t(sort === "title" ? "A–Z" : "Newest");

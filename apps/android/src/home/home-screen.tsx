@@ -26,7 +26,8 @@ import { colors } from "../ui/theme.ts";
 import { t } from "./copy.ts";
 import { ProgressDialog } from "./feedback.tsx";
 import { useHome, useOnNow } from "./hooks.ts";
-import { previewStage, resumeEntry, viewing, type WatchlistRow } from "./index.ts";
+import type { Continuing } from "./model.ts";
+import { resumeEntry, viewing, type WatchlistRow } from "./index.ts";
 import {
   ChannelLine,
   ChannelTile,
@@ -47,8 +48,6 @@ import {
 
 type Home = ReturnType<typeof useHome>;
 
-type Continuing = Home["continuing"][number];
-
 /** "13:30 Coastal Weekly" and how far it is, or Live's "No programme information". */
 function onAir(programme: Programme | null, now = Date.now()) {
   if (!programme) return { text: live("No programme information"), done: null };
@@ -67,8 +66,7 @@ function watch(intent: PlayIntent) {
 
 /** Plays a saved channel when its provider still lists it uniquely. */
 function watchChannel(row: ChannelRow) {
-  const entry = identity(row);
-  watch({ kind: "live", ...entry });
+  watch({ kind: "live", ...identity(row) });
 }
 
 /** Opens a title's Details on Home's stack, for the version that would play. */
@@ -205,7 +203,7 @@ function Stage({
 
   useEffect(() => {
     if (!focused || !stage || !idle) return;
-    const preview = previewStage(stage.intent);
+    const preview = player.preview(stage.intent);
 
     return () => void preview?.end();
   }, [focused, key, idle]);
@@ -567,22 +565,10 @@ export function HomeScreen() {
   const moviesSection = home.movies.length ? (
     <View style={{ paddingTop: 12 }}>
       <ShelfHeading
-        title={t(home.moviesBasis === "recommendations" ? "Movies for you" : "Movies")}
+        title={t(home.moviesTab === "popular" ? "Movies for you" : "Movies")}
         inset={inset}
         large={large}
-        onOpen={() =>
-          router.navigate({
-            pathname: "/movies",
-            params: {
-              tab:
-                home.moviesBasis === "recommendations"
-                  ? "popular"
-                  : home.moviesBasis === "recent"
-                    ? "recent"
-                    : "all",
-            },
-          })
-        }
+        onOpen={() => router.navigate({ pathname: "/movies", params: { tab: home.moviesTab } })}
       />
       {large ? (
         home.movies
