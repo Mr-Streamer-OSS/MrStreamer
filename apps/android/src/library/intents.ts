@@ -76,6 +76,18 @@ export function downloadPresentationRegistry() {
 
 export const libraryDownloads = downloadPresentationRegistry();
 
+/**
+ * A line Details docks above the navigation bar: a kept episode mark with Undo, or a refused one
+ * with Try again. Details dismisses it when it closes.
+ */
+export interface ViewingNotice {
+  readonly message: string;
+  readonly failed: boolean;
+  readonly action: string;
+  run(): void;
+  dismiss(): void;
+}
+
 /** Viewing owns persistence and failure presentation; Library exposes current title/episode facts. */
 export interface ViewingPresentationAdapter {
   subscribe(listener: () => void): () => void;
@@ -84,10 +96,12 @@ export interface ViewingPresentationAdapter {
     label: string;
     activate(): void;
   };
+  /** An episode's mark: the action that flips it, and "Watched" under its name while it holds. */
   episode(
     title: import("@mrstreamer/contracts/ondemand").Title,
     episode: import("@mrstreamer/contracts/ondemand").Episode,
-  ): { label: string; activate(): void; status?: string; retry?: () => void };
+  ): { label: string; activate(): void; detail?: string };
+  notice(): ViewingNotice | null;
   play(media: MediaIdentity, episode?: { season: number; number: number }): void;
 }
 

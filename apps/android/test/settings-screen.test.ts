@@ -34,8 +34,20 @@ const scenario = vi.hoisted(() => {
     connections: [] as unknown[],
     saveRefused: false,
     releaseWait: null as Promise<void> | null,
+    /** Accounts whose viewing history Settings asked to delete, and whether that is refused. */
+    cleared: [] as string[],
+    historyRefused: false,
+    removals: 0,
   };
 });
+
+vi.mock("../src/home/index.ts", () => ({
+  clearViewing: async (id: string) => {
+    scenario.cleared.push(id);
+
+    if (scenario.historyRefused) throw new Error("The folder won't take it.");
+  },
+}));
 
 vi.mock("../src/platform/storage.ts", () => ({
   readJsonStrict: (name: string) => {
@@ -250,6 +262,8 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
         scenario.retries.push(id);
       },
       remove: async () => {
+        scenario.removals++;
+
         if (scenario.eraseRefused) throw new Error("erase refused");
 
         if (scenario.removeLast) {
@@ -322,6 +336,9 @@ beforeEach(() => {
   scenario.removeLast = false;
   scenario.releaseWait = null;
   scenario.destination = "(live)";
+  scenario.cleared = [];
+  scenario.historyRefused = false;
+  scenario.removals = 0;
 });
 
 afterEach(() => {
@@ -883,4 +900,49 @@ it("opens the Dutch Guides row", () => {
   const shown = show(createElement(SettingsScreen));
   press(shown, "Gidsen");
   expect(scenario.asked).toContain("push /guide/guides");
+});
+
+it("removes a provider keeping its history, or deletes the history too, retrying only what failed", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+
+  const provider = {
+    id: "source",
+    kind: "xtream" as const,
+    label: "tv.example.invalid",
+    channels: { kind: "ready" as const, rows: [] },
+  };
+
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  scenario.removeLast = true;
+  sources.state.set({ kind: "ready", sources: [provider] });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "tv.example.invalid");
+  press(shown, "Remove");
+  // The scrim, then the dialog's answers.
+  expect(buttons(shown)).toEqual(["Cancel", "Remove", "Remove and delete history", "Cancel"]);
+  expect(shown.querySelector("dialog")?.textContent).toContain(
+    "Remove keeps your favourites, watchlist and viewing history",
+  );
+  press(shown, "Remove");
+  await act(async () => {});
+  expect(scenario.removals).toBe(1);
+  expect(scenario.cleared).toEqual([]);
+
+  act(() => sources.state.set({ kind: "ready", sources: [provider] }));
+  scenario.historyRefused = true;
+  press(shown, "tv.example.invalid");
+  press(shown, "Remove");
+  press(shown, "Remove and delete history");
+  await act(async () => {});
+  expect(scenario.removals).toBe(2);
+  expect(scenario.cleared).toEqual(["source"]);
+  expect(shown.textContent).toContain(
+    "The provider was removed, but its history could not be deleted.",
+  );
+
+  scenario.historyRefused = false;
+  press(shown, "Try again");
+  await act(async () => {});
+  expect(scenario.cleared).toEqual(["source", "source"]);
+  expect(scenario.removals).toBe(2);
 });

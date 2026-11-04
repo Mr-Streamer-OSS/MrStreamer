@@ -70,7 +70,14 @@ export function useHome(country?: string) {
 export function useOnNow(rows: readonly ChannelRow[]) {
   useGuideStart();
   const revision = useListingRevision();
-  const wanted = useMemo(() => rows.slice(0, 20), [rows]);
+
+  // Home's model hands over fresh rows on every render; the channels they name decide the read.
+  const names = rows
+    .slice(0, 20)
+    .map((row) => row.key)
+    .join("\n");
+
+  const wanted = useMemo(() => rows.slice(0, 20), [names]);
   const [read, setRead] = useState<Awaited<ReturnType<typeof guide.listings>>>(new Map());
 
   useEffect(() => {

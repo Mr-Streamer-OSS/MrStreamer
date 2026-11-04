@@ -34,6 +34,9 @@ export const viewingFailure = store<{
   retry: () => void;
 } | null>(null);
 
+// Once the viewer dismisses a refused progress save, later refusals stay quiet until one is kept.
+let progressQuiet = false;
+
 function attempt(
   kind: "progress" | "watchlist" | "episode",
   message: string,
@@ -41,12 +44,24 @@ function attempt(
 ) {
   const retry = () => {
     void work().then(
-      () => viewingFailure.set(null),
-      () => viewingFailure.set({ kind, message, retry }),
+      () => {
+        if (kind === "progress") progressQuiet = false;
+        viewingFailure.set(null);
+      },
+      () => {
+        if (kind !== "progress" || !progressQuiet) viewingFailure.set({ kind, message, retry });
+      },
     );
   };
 
   retry();
+}
+
+/** The progress dialog's OK: it shows once until a save is kept again. */
+export function acknowledgeProgress() {
+  if (viewingFailure.get()?.kind !== "progress") return;
+  progressQuiet = true;
+  viewingFailure.set(null);
 }
 
 /** Home focus owns this handle. end() cannot stop a later viewer-selected attempt. */
@@ -89,8 +104,11 @@ export function startViewing(): () => void {
     const revision = store(0);
     const marks = new Map<string, boolean>();
     const bump = () => revision.set((n) => n + 1);
+    // The last kept episode mark, which Details offers to undo until it closes or another mark.
+    const kept = store<{ message: string; undo: () => Promise<unknown> } | null>(null);
     const stopState = viewing.state.subscribe(bump);
     const stopFailure = viewingFailure.subscribe(bump);
+    const stopKept = kept.subscribe(bump);
 
     const stopSources = sources.state.subscribe(() => {
       void viewing.refresh().catch(() => undefined);
@@ -152,7 +170,10 @@ export function startViewing(): () => void {
           );
         }
 
-        const activate = () =>
+        const label = `S${episode.season} E${episode.number}`;
+
+        const activate = () => {
+          kept.set(null);
           attempt(
             "episode",
             watched
@@ -175,20 +196,54 @@ export function startViewing(): () => void {
               );
 
               marks.set(key, mark?.watched ?? false);
+
+              if (mark)
+                kept.set({
+                  message: t(
+                    mark.watched ? "{episode} marked watched" : "{episode} marked unwatched",
+                    { episode: label },
+                  ),
+                  undo: () =>
+                    viewing.undoMark(title, mark.revision).then(() => {
+                      marks.delete(key);
+                      bump();
+                    }),
+                });
               bump();
             },
           );
+        };
 
+        const action = { label: t(watched ? "Mark unwatched" : "Mark watched"), activate };
+
+        return watched ? { ...action, detail: t("Watched") } : action;
+      },
+      notice() {
         const failed = viewingFailure.get();
 
-        return failed?.kind === "episode"
-          ? {
-              label: t(watched ? "Mark unwatched" : "Mark watched"),
-              activate,
-              status: failed.message,
-              retry: failed.retry,
-            }
-          : { label: t(watched ? "Mark unwatched" : "Mark watched"), activate };
+        if (failed && failed.kind !== "progress")
+          return {
+            message: failed.message,
+            failed: true,
+            action: t("Try again"),
+            run: failed.retry,
+            dismiss: () => viewingFailure.set(null),
+          };
+
+        const mark = kept.get();
+
+        if (!mark) return null;
+
+        return {
+          message: mark.message,
+          failed: false,
+          action: t("Undo"),
+          run: () => {
+            kept.set(null);
+            attempt("episode", t("Couldn't undo. Nothing changed."), mark.undo);
+          },
+          dismiss: () => kept.set(null),
+        };
       },
     });
 
@@ -329,6 +384,7 @@ export function startViewing(): () => void {
     cleanup = () => {
       stopState();
       stopFailure();
+      stopKept();
       stopSources();
       stopPort();
       stopPlayer();

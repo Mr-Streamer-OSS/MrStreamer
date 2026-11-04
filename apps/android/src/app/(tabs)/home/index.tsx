@@ -1,6 +1,1 @@
-import { Screen } from "../../../navigation/screen.tsx";
-
-/** Home's root, until the card that builds Home replaces it. */
-export default function Home() {
-  return <Screen title="Home" />;
-}
+export { HomeScreen as default } from "../../../home/home-screen.tsx";

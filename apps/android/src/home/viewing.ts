@@ -43,8 +43,9 @@ export type SavedTitle = Readonly<Omit<typeof Saved.infer, "versionIds">> & {
 
 const File = type({ version: "1", watchlist: Saved.array(), record: Snapshot.or("null") });
 
+/** "reading" until the first read answers; a failed read keeps what showed and stays retryable. */
 export type ViewingState = {
-  readonly kind: "ready" | "failed";
+  readonly kind: "reading" | "ready" | "failed";
   readonly viewing: Viewing | null;
   readonly watchlist: readonly SavedTitle[];
 };
@@ -62,7 +63,7 @@ export function viewingOwner(
   owners: () => readonly string[],
   library: () => LibraryModel,
 ) {
-  const state = store<ViewingState>({ kind: "failed", viewing: null, watchlist: [] });
+  const state = store<ViewingState>({ kind: "reading", viewing: null, watchlist: [] });
   let runtime: ReturnType<typeof makeRuntime> | undefined;
   let saved: readonly SavedTitle[] = [];
   let snapshot: ViewingSnapshot | null = null;

@@ -107,11 +107,11 @@ export function SettingsScreen() {
     }
   }
 
-  async function remove(source: ConnectedSource, deleteHistory = false) {
+  async function remove(source: ConnectedSource, withHistory = false) {
     if (removingIds.current.has(source.id)) return;
     removingIds.current.add(source.id);
     setBusy(new Set(removingIds.current));
-    const result = await recovery.remove(source.id, deleteHistory);
+    const result = await recovery.remove(source.id, withHistory);
     removingIds.current.delete(source.id);
     setBusy(new Set(removingIds.current));
 
@@ -165,8 +165,27 @@ export function SettingsScreen() {
       else
         notify({
           text,
-          action: { label: t("Try again"), run: () => void remove(source, deleteHistory) },
+          action: {
+            label: t("Try again"),
+            // The provider is gone by then: Try again deletes only the history that stayed.
+            run:
+              result.erase === "history-not-cleared" || result.historyNotCleared
+                ? () => void deleteHistory(source)
+                : () => void remove(source, withHistory),
+          },
         });
+    }
+  }
+
+  /** Deletes a removed provider's history again, after the first attempt was refused. */
+  async function deleteHistory(source: ConnectedSource) {
+    try {
+      await (await import("../home/index.ts")).clearViewing(source.id);
+    } catch {
+      notify({
+        text: t("The provider was removed, but its history could not be deleted."),
+        action: { label: t("Try again"), run: () => void deleteHistory(source) },
+      });
     }
   }
 
