@@ -95,7 +95,10 @@ interface Review {
   readonly version: string;
 }
 
-const Scope = createContext<{ season: SeriesController; series: SeriesController } | null>(null);
+const Scope = createContext<{
+  seasons: Map<number, SeriesController>;
+  series: SeriesController;
+} | null>(null);
 
 /** Controllers belong to Details, so moving rows for tablet layout never ends a run. */
 export function SeriesDownloadScope({ children }: { children: ReactNode }) {
@@ -105,23 +108,30 @@ export function SeriesDownloadScope({ children }: { children: ReactNode }) {
 }
 
 function DownloadScope({ owner, children }: { owner: SeriesOwner; children: ReactNode }) {
-  const [controllers] = useState(() => ({ season: owner.series(), series: owner.series() }));
+  const [controllers] = useState(() => ({
+    seasons: new Map<number, SeriesController>(),
+    series: owner.series(),
+  }));
+
   const focused = useIsFocused();
   const segments: readonly string[] = useSegments();
   const destination = useRef(segments[1]);
 
   const allowed =
-    focused || (segments[1] === destination.current && segments.at(-1) === "downloads");
+    focused ||
+    segments.at(-1) === "watch" ||
+    (segments[0] === "offline" && segments.at(-1) === "play") ||
+    (segments[1] === destination.current && segments.at(-1) === "downloads");
 
   useEffect(() => {
     if (!allowed) {
-      void controllers.season.close();
+      for (const controller of controllers.seasons.values()) void controller.close();
       void controllers.series.close();
     }
   }, [allowed, controllers]);
   useEffect(
     () => () => {
-      void controllers.season.close();
+      for (const controller of controllers.seasons.values()) void controller.close();
       void controllers.series.close();
     },
     [controllers],
@@ -163,7 +173,18 @@ function BulkRow({
 }: SeriesDownloadProps & { owner: SeriesOwner }) {
   const scoped = useContext(Scope);
   const [fallback] = useState(() => owner.series());
-  const controller = scoped ? (season === undefined ? scoped.series : scoped.season) : fallback;
+  let controller = fallback;
+
+  if (scoped) {
+    if (season === undefined) controller = scoped.series;
+    else {
+      const kept = scoped.seasons.get(season);
+      controller = kept ?? fallback;
+
+      if (!kept) scoped.seasons.set(season, controller);
+    }
+  }
+
   const run = useStore(controller.state);
   const busy = useStore(seriesBusy);
   const rows = useStore(owner.state).rows;

@@ -563,7 +563,7 @@ export function mediaModel(
       watching = visible;
 
       if (!visible) cancelNext();
-      else if (state.get().offline && state.get().offline?.kind !== "ready") refreshOfflineNext();
+      else if (state.get().offline?.kind !== "ready") refreshOfflineNext();
       void native.setWatch?.(visible);
     },
     admitted(id) {

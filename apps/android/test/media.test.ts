@@ -780,3 +780,32 @@ it("refreshes an unavailable offline notice and automatically advances only afte
   expect(f.owner.state.get()).toMatchObject({ intent: { path: "/two" } });
   await f.owner.stop();
 });
+
+it("rechecks an unfinished offline lookup when Watch returns", async () => {
+  const f = setup();
+  let finish!: (value: import("../src/downloads/offline-next.ts").OfflineNext) => void;
+
+  const resolve = vi.fn(
+    () =>
+      new Promise<import("../src/downloads/offline-next.ts").OfflineNext>((done) => {
+        finish = done;
+      }),
+  );
+
+  f.owner.media.registerOfflineNext(resolve);
+  f.owner.media.watch(true);
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("ended");
+  f.owner.media.watch(false);
+  finish({ kind: "not-saved" });
+  await flush();
+  expect(f.owner.media.state.get().offline).toBeNull();
+  f.owner.media.watch(true);
+  expect(resolve).toHaveBeenCalledTimes(2);
+  finish({ kind: "not-saved" });
+  await flush();
+  expect(f.owner.media.state.get().offline?.kind).toBe("not-saved");
+  expect(f.owner.media.state.get().remaining).toBeNull();
+  await f.owner.stop();
+});

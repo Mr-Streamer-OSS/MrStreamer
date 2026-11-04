@@ -104,46 +104,71 @@ it("keeps registration alive until the last lease and ignores a stale cleanup", 
   }
 });
 
-it("bulk admissions request notifications and cache artwork without failing durable additions", async () => {
-  const { fixture } = await import("./library-fixture.ts");
-  const { seriesFiles } = await import("../src/downloads/series.ts");
-  const f = fixture();
-  await f.model.refresh();
-  const title = f.model.made("series").list("all")[0]!;
-  const details = await f.model.details(title);
+it.each([false, true])(
+  "settles durable bulk admissions and cancellation while artwork is pending (%s)",
+  async (cancel) => {
+    mocks.cacheArtwork.mockClear();
+    let releaseArtwork!: () => void;
+    mocks.cacheArtwork.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseArtwork = resolve;
+        }),
+    );
+    const { fixture } = await import("./library-fixture.ts");
+    const { seriesFiles } = await import("../src/downloads/series.ts");
+    const f = fixture();
+    await f.model.refresh();
+    const title = f.model.made("series").list("all")[0]!;
+    const details = await f.model.details(title);
 
-  if (details.value?.kind !== "series") throw new Error("series");
+    if (details.value?.kind !== "series") throw new Error("series");
 
-  const files = seriesFiles(details.value, title, details.containers, "Source", {
-    kind: "series",
-  }).map((file) => ({ ...file, poster: "https://fixture.invalid/poster" }));
+    const files = seriesFiles(details.value, title, details.containers, "Source", {
+      kind: "series",
+    }).map((file) => ({ ...file, poster: "https://fixture.invalid/poster" }));
 
-  mocks.review.mockResolvedValue(
-    JSON.stringify({ token: "bulk", snapshot: { rows: [], free: 1 } }),
-  );
-  Object.assign(mocks.playerState.intent, { kind: "title", sourceId: "source" });
-  mocks.admit.mockImplementation(async (_token: string, key: string) => {
-    expect(mocks.blockSource).toHaveBeenCalledWith("source", true);
-    const file = files.find((file) => file.key === key)!;
-    mocks.rows.push({
-      ...file,
-      order: [...file.order],
-      id: key,
-      state: "queued",
-      bytes: 0,
-      total: 0,
-      reason: "",
+    mocks.review.mockResolvedValue(
+      JSON.stringify({ token: "bulk", snapshot: { rows: [], free: 1 } }),
+    );
+    Object.assign(mocks.playerState.intent, { kind: "title", sourceId: "source" });
+    mocks.admit.mockImplementation(async (_token: string, key: string) => {
+      if (!cancel) expect(mocks.blockSource).toHaveBeenCalledWith("source", true);
+      const file = files.find((file) => file.key === key)!;
+      mocks.rows.push({
+        ...file,
+        order: [...file.order],
+        id: key,
+        state: "queued",
+        bytes: 0,
+        total: 0,
+        reason: "",
+      });
+
+      if (cancel) controller.stop();
+
+      return "added";
+    });
+    const owner = downloads();
+    const controller = owner.series();
+    const plan = await controller.plan(files);
+    const result = await controller.start(plan, false, () => null);
+    expect(result).toMatchObject({
+      added: cancel ? 1 : 3,
+      failed: [],
+      stopped: cancel ? "cancelled" : null,
     });
 
-    return "added";
-  });
-  const owner = downloads();
-  const controller = owner.series();
-  const plan = await controller.plan(files);
-  expect(await controller.start(plan, false, () => null)).toMatchObject({ added: 3, failed: [] });
-  expect(mocks.notification).toHaveBeenCalledExactlyOnceWith("notifications");
-  expect(mocks.cacheArtwork).toHaveBeenCalledTimes(3);
-  expect(mocks.cacheArtwork).toHaveBeenCalledWith(files[0]!.key, "https://fixture.invalid/poster");
-  mocks.rows = [];
-  mocks.playerState.intent.kind = "file";
-});
+    if (!cancel) expect(mocks.notification).toHaveBeenCalledExactlyOnceWith("notifications");
+    expect(mocks.cacheArtwork).toHaveBeenCalledTimes(1);
+    mocks.cacheArtwork.mockResolvedValue(undefined);
+    releaseArtwork();
+    await vi.waitFor(() => expect(mocks.cacheArtwork).toHaveBeenCalledTimes(cancel ? 1 : 3));
+    expect(mocks.cacheArtwork).toHaveBeenCalledWith(
+      files[0]!.key,
+      "https://fixture.invalid/poster",
+    );
+    mocks.rows = [];
+    mocks.playerState.intent.kind = "file";
+  },
+);

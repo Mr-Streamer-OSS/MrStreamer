@@ -343,7 +343,7 @@ it("never counts changed-only copies as saved", async () => {
   expect(dialog(shown)).toContain("3 saved files changed.");
 });
 
-it.each(["tab", "downloads", "season", "tablet"])(
+it.each(["tab", "downloads", "watch", "offline", "season", "tablet"])(
   "keeps only the allowed series context alive on %s navigation",
   async (move) => {
     const s = await series();
@@ -410,9 +410,20 @@ it.each(["tab", "downloads", "season", "tablet"])(
       navigation.segments = ["(tabs)", "series", "downloads"];
     }
 
+    if (move === "watch" || move === "offline") {
+      navigation.focused = false;
+      navigation.segments = move === "watch" ? ["watch"] : ["offline", "play"];
+    }
+
     await act(async () =>
       root?.render(screen(move === "tablet", move === "season" ? 2 : undefined)),
     );
+
+    if (move === "season") {
+      expect(shown.textContent).not.toContain("Adding");
+      expect(shown.textContent).not.toContain("Cancel remaining");
+    }
+
     await act(async () => release("added"));
 
     if (move === "tab") {

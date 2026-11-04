@@ -74,18 +74,39 @@ function createRuntime() {
     await syncPlayer();
   }
 
-  async function cacheAdmission(key: string) {
-    // Artwork failure never changes an already durable admission into a failed addition.
-    try {
-      const parsed = Snapshot(JSON.parse(await native.snapshot()));
+  const artworkQueue = new Set<string>();
+  let cachingArtwork = false;
 
-      if (parsed instanceof type.errors) return;
-      const row = parsed.rows.find((row) => row.key === key);
+  /** Optional posters never delay a durable result; one worker bounds network concurrency. */
+  function cacheAdmission(key: string) {
+    if (artworkQueue.size < 64) artworkQueue.add(key);
 
-      if (row?.poster) await native.cacheArtwork(row.id, row.poster);
-    } catch {
-      /* Artwork is optional. */
-    }
+    if (cachingArtwork) return;
+    cachingArtwork = true;
+    void (async () => {
+      try {
+        for (const next of artworkQueue) {
+          try {
+            const parsed = Snapshot(JSON.parse(await native.snapshot()));
+
+            if (!(parsed instanceof type.errors)) {
+              const row = parsed.rows.find((row) => row.key === next);
+
+              if (row?.poster) {
+                await native.cacheArtwork(row.id, row.poster);
+                await model.refresh();
+              }
+            }
+          } catch {
+            /* Artwork is optional. */
+          } finally {
+            artworkQueue.delete(next);
+          }
+        }
+      } finally {
+        cachingArtwork = false;
+      }
+    })();
   }
 
   const admissionPort = {
@@ -95,7 +116,7 @@ function createRuntime() {
       await prepareAdmission();
       const outcome = await native.admit(token, key, expected);
 
-      if (outcome === "added" || outcome === "replaced") await cacheAdmission(key);
+      if (outcome === "added" || outcome === "replaced") cacheAdmission(key);
 
       return outcome;
     },

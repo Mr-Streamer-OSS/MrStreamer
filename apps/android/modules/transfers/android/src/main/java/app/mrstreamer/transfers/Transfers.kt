@@ -169,7 +169,7 @@ object Transfers {
     // A replacement receives a new transfer identity.
     if (status in listOf("missing", "changed")) {
       val oldArtwork = ledger.artwork(row.getString("id"))
-      val artwork = try { if (oldArtwork.isFile && oldArtwork.length() <= 2 * 1024 * 1024) oldArtwork.readBytes() else null } catch (_: Exception) { null }
+      val artwork = try { if (oldArtwork.isFile && oldArtwork.length() <= 8 * 1024 * 1024) oldArtwork.readBytes() else null } catch (_: Exception) { null }
       app.mrstreamer.player.LocalFiles.unused(ledger.media(row.getString("id")).absolutePath) {
         command(context, row.getString("id"), "remove", schedule = false)
       }

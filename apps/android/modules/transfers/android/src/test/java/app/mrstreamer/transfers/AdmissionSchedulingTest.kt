@@ -41,7 +41,8 @@ class AdmissionSchedulingTest {
       val old = ledger.read().single().put("state", "failed").put("reason", "file-changed")
       val oldId = old.getString("id")
       ledger.media(oldId).writeText("changed")
-      ledger.artwork(oldId).writeText("art")
+      val artwork = ByteArray(3 * 1024 * 1024) { 7 }
+      ledger.artwork(oldId).writeBytes(artwork)
       old.put("artwork", android.net.Uri.fromFile(ledger.artwork(oldId)).toString())
       ledger.save(listOf(old))
       val replaceToken = JSONObject(Transfers.review(context, JSONArray(listOf(request)).toString())).getString("token")
@@ -50,7 +51,7 @@ class AdmissionSchedulingTest {
         val replacement = ledger.read().single()
         assertNotEquals(oldId, replacement.getString("id"))
         val image = ledger.artwork(replacement.getString("id"))
-        assertEquals("art", image.readText())
+        assertArrayEquals(artwork, image.readBytes())
         assertEquals(android.net.Uri.fromFile(image).toString(), replacement.getString("artwork"))
         assertFalse(ledger.artwork(oldId).exists())
       } finally { Transfers.endReview(replaceToken) }
