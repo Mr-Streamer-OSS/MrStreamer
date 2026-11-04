@@ -1,8 +1,18 @@
+import { fileSourceLabel } from "../downloads/file-source-label.ts";
+import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { t } from "@mrstreamer/core/i18n";
-import { router, useIsFocused, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { router, useIsFocused, useLocalSearchParams, usePathname } from "expo-router";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import {
   AccessibilityInfo,
   Pressable,
@@ -39,8 +49,15 @@ const HIDE_AFTER_MS = 4000;
 const JUMP_MS = 10_000;
 
 export default function Watch() {
+  useSyncExternalStore(onLanguageChange, currentLanguage);
   const { play } = useLocalSearchParams<{ play?: string }>();
-  const intent = useMemo(() => linkedIntent(play), [play]);
+  const pathname = usePathname();
+
+  const intent = useMemo(
+    () => (pathname === "/offline/play" ? null : linkedIntent(play)),
+    [play, pathname],
+  );
+
   useEffect(() => {
     const now = player.state.get();
 
@@ -160,6 +177,11 @@ export default function Watch() {
               >
                 {state.kind === "playing" ? state.intent.title : ""}
               </Text>
+              {state.kind === "playing" && fileSourceLabel(state.intent) ? (
+                <Text style={{ color: DIM, fontSize: 14, paddingVertical: 13 }}>
+                  {fileSourceLabel(state.intent)}
+                </Text>
+              ) : null}
             </View>
             {state.kind === "playing" && !loading && !state.failure ? (
               <Centre>
@@ -193,8 +215,10 @@ export default function Watch() {
 
 /** Leaves Watch for the screen under it, or Live when a link opened the app here. */
 function leave() {
+  const state = player.state.get();
+
   if (router.canGoBack()) router.back();
-  else router.replace("/");
+  else router.replace(state.kind === "playing" && state.intent.kind === "file" ? "/offline" : "/");
 }
 
 /** Whether TalkBack or another screen reader runs, as it turns on and off. */

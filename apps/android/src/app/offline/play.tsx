@@ -1,6 +1,7 @@
 import { downloads } from "../../downloads/runtime.ts";
 import { t } from "../../downloads/copy.ts";
-import { useSyncExternalStore } from "react";
+import { router } from "expo-router";
+import { useEffect, useSyncExternalStore } from "react";
 import { Alert } from "react-native";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import { Dialog, RED, TextButton } from "../../live/chrome.tsx";
@@ -16,6 +17,11 @@ import Watch from "../watch.tsx";
 export default function OfflinePlay() {
   useSyncExternalStore(onLanguageChange, currentLanguage);
   const state = useStore(player.state);
+
+  const local = state.kind === "playing" && state.intent.kind === "file";
+  useEffect(() => {
+    if (!local) router.replace("/offline");
+  }, [local]);
 
   const failed =
     state.kind === "playing" &&
@@ -45,6 +51,8 @@ export default function OfflinePlay() {
       }
     }
   }
+
+  if (!local) return null;
 
   return (
     <>

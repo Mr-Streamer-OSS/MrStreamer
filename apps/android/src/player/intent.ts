@@ -107,7 +107,7 @@ const Linked = type({
  */
 export const watchHref = (intent: PlayIntent) =>
   intent.kind === "file"
-    ? ({ pathname: "/watch" } as const)
+    ? ({ pathname: "/offline/play" } as const)
     : ({ pathname: "/watch", params: { play: JSON.stringify(intent) } } as const);
 
 /**

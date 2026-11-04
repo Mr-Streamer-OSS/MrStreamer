@@ -357,7 +357,7 @@ function createRuntime() {
   };
 }
 
-/** Media must call startDownloads at cold launch, outside provider guards; that wiring is pending.
+/** The root calls startDownloads at cold launch, outside provider guards.
  * Each registration owns an idempotent lease; the last release stops subscriptions.
  */
 export function startDownloads() {

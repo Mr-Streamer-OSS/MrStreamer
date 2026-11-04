@@ -2,6 +2,8 @@ import { DarkTheme, Stack, ThemeProvider } from "expo-router";
 import { useEffect } from "react";
 import { StatusBar } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
+import { startDownloads } from "../downloads/runtime.ts";
+import { player } from "../player/instance.ts";
 import { MiniPlayer } from "../player/mini-player.tsx";
 import { useStore } from "../platform/store.ts";
 import { colors } from "../ui/theme.ts";
@@ -23,7 +25,13 @@ const theme = {
 
 export default function RootLayout() {
   const state = useStore(sources.state);
-  useEffect(() => void sources.restore(), []);
+  const playback = useStore(player.state);
+  useEffect(() => {
+    const stop = startDownloads();
+    void sources.restore();
+
+    return stop;
+  }, []);
 
   if (state.kind === "restoring") return null;
   const signedIn = state.sources.length > 0;
@@ -34,6 +42,7 @@ export default function RootLayout() {
       <Stack
         screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
       >
+        <Stack.Screen name="offline" />
         <Stack.Protected guard={signedIn}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="watch" options={{ animation: "fade" }} />
@@ -42,7 +51,9 @@ export default function RootLayout() {
           <Stack.Screen name="connect" />
         </Stack.Protected>
       </Stack>
-      {signedIn ? <MiniPlayer /> : null}
+      {signedIn || (playback.kind === "playing" && playback.intent.kind === "file") ? (
+        <MiniPlayer />
+      ) : null}
     </ThemeProvider>
   );
 }
