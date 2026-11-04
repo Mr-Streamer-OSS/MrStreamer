@@ -2,6 +2,7 @@ import { mount, ui } from "./guide-grid-fixture.ts";
 import { act, createElement as h } from "react";
 import { expect, it, vi } from "vitest";
 import { GuideSearchScreen } from "../src/guide/search.tsx";
+import type { ProgrammeSearch } from "../src/guide/guide.ts";
 
 it("caps current and future results at twenty, shows partial failure, and opens the detail token", async () => {
   ui.play.mockClear();
@@ -117,7 +118,7 @@ it("keeps fast edits locally and returns from tablet details to the changed quer
   }
 });
 
-it("refills the search when a shown programme ends", async () => {
+it("lets a pending refill finish when a shown programme ends", async () => {
   vi.useFakeTimers();
   const now = Date.now();
   ui.search.mockResolvedValue({
@@ -133,12 +134,19 @@ it("refills the search when a shown programme ends", async () => {
 
   try {
     const calls = ui.search.mock.calls.length;
-    ui.search.mockResolvedValue({ unsearched: false, found: [] });
+    const refill = Promise.withResolvers<ProgrammeSearch>();
+    ui.search.mockReturnValue(refill.promise);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1001);
     });
-    expect(ui.search.mock.calls.length).toBeGreaterThan(calls);
+    expect(ui.search).toHaveBeenCalledTimes(calls + 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(ui.search).toHaveBeenCalledTimes(calls + 1);
+    await act(async () => refill.resolve({ unsearched: false, found: [] }));
     expect(screen.container.textContent).not.toContain("Ending");
+    expect(screen.container.textContent).toContain('Nothing named "news"');
   } finally {
     await screen.close();
     vi.useRealTimers();

@@ -115,7 +115,7 @@ export function GuideSearchScreen() {
     );
 
     return () => clearTimeout(timer);
-  }, [nextEnd, attempt, focused]);
+  }, [nextEnd, focused]);
 
   const identityOf = (key: string): ChannelIdentity | null => {
     for (const [sourceId, channels] of guide.channels()) {
