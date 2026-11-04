@@ -147,7 +147,7 @@ export function viewingOwner(
   function run<A>(call: (record: ViewingRecord["Service"]) => Effect.Effect<A, unknown>) {
     return serialize(async () => {
       const result = await ready().runPromise(Effect.flatMap(ViewingRecord, call));
-      await refresh();
+      await publishCommitted();
 
       return result;
     });
@@ -157,6 +157,20 @@ export function viewingOwner(
 
   async function refresh() {
     state.set({ kind: "ready", viewing: await ready().runPromise(current), watchlist: active() });
+  }
+
+  /** A committed write stays successful even if publishing its refreshed view fails. Retry reads. */
+  async function publishCommitted(rebuild = false) {
+    try {
+      if (rebuild) {
+        await runtime?.dispose();
+        runtime = makeRuntime();
+      }
+
+      await refresh();
+    } catch {
+      state.set({ ...state.get(), kind: "failed" });
+    }
   }
 
   async function read() {
@@ -215,7 +229,7 @@ export function viewingOwner(
           : saved.filter((entry) => !matches(entry));
 
         persist(snapshot, next);
-        await refresh();
+        await publishCommitted();
       });
     },
     removeWatchlist(entry: SavedTitle) {
@@ -234,7 +248,7 @@ export function viewingOwner(
           snapshot,
           saved.filter((each) => !removed.includes(each)),
         );
-        await refresh();
+        await publishCommitted();
 
         return removed;
       });
@@ -256,7 +270,7 @@ export function viewingOwner(
         );
 
         persist(snapshot, [...saved, ...missing]);
-        await refresh();
+        await publishCommitted();
       });
     },
     clear(sourceId: string) {
@@ -269,9 +283,7 @@ export function viewingOwner(
           snapshot ? { ...snapshot, accounts } : null,
           saved.filter((entry) => entry.sourceId !== sourceId),
         );
-        await runtime?.dispose();
-        runtime = makeRuntime();
-        await refresh();
+        await publishCommitted(true);
       });
     },
     recordWatch: (channel: { sourceId: string; channelId: string }) =>

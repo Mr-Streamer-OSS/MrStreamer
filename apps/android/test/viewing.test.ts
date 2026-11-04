@@ -353,3 +353,72 @@ it("retries a malformed snapshot after the persisted file is repaired", async ()
     await f.owner.dispose();
   }
 });
+
+it.each(["save", "remove", "restore", "clear", "progress"] as const)(
+  "keeps a committed %s when its later refresh fails and retries the read",
+  async (operation) => {
+    const f = await setup();
+    let failRefresh = false;
+    let armed = false;
+    const platform = disk();
+
+    const owner = viewingOwner(
+      {
+        readJson: platform.readJson,
+        writeJson: (name, value) => {
+          platform.writeJson(name, value);
+          failRefresh = armed;
+        },
+      },
+      () => {
+        if (failRefresh) throw new Error("refresh unavailable");
+
+        return ["source"];
+      },
+      () => f.model,
+    );
+
+    try {
+      await owner.read();
+      await owner.setWatchlist(f.title, true);
+      const entries = owner.state.get().watchlist;
+
+      if (operation === "restore") await owner.removeWatchlist(entries[0]!);
+      armed = true;
+
+      const work = () => {
+        switch (operation) {
+          case "save":
+            return owner.setWatchlist(f.title, false);
+          case "remove":
+            return owner.removeWatchlist(entries[0]!);
+          case "restore":
+            return owner.restoreWatchlist(entries);
+          case "clear":
+            return owner.clear("source");
+          case "progress":
+            return owner.recordProgress(
+              { kind: "movie", subscriptionId: "source", id: f.title.id },
+              300,
+              1800,
+              1,
+            );
+        }
+      };
+
+      await work();
+      const committed = platform.readJson();
+      expect(owner.state.get().kind).toBe("failed");
+      failRefresh = false;
+      await owner.read();
+      expect(owner.state.get().kind).toBe("ready");
+      expect(owner.state.get().watchlist).toHaveLength(
+        operation === "restore" || operation === "progress" ? 1 : 0,
+      );
+      expect(platform.readJson()).toEqual(committed);
+    } finally {
+      await owner.dispose();
+      await f.owner.dispose();
+    }
+  },
+);

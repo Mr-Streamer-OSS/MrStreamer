@@ -989,6 +989,45 @@ it("retries both refused history and statistics cleanup without removing the pro
   expect(scenario.writes.filter((name) => name === "statistics.json")).toHaveLength(attempts + 1);
 });
 
+it("reports both refused cleanups after Settings unmounts", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  scenario.removeLast = true;
+  const { statistics } = await import("../src/telemetry/index.ts");
+  statistics.configure(true);
+  statistics.consent.replace({
+    choice: "on",
+    installationId: "11111111-1111-4111-8111-111111111111",
+    pending: [],
+  });
+  scenario.historyRefused = true;
+  scenario.refused.add("statistics.json");
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "source",
+        kind: "xtream",
+        label: "Test provider",
+        channels: { kind: "ready", rows: [] },
+      },
+    ],
+  });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Test provider");
+  press(shown, "Remove");
+  press(shown, "Remove and delete history");
+  act(() => {
+    root?.unmount();
+    root = null;
+  });
+  await act(async () => {});
+  expect(scenario.toasts).toEqual([
+    "The provider was removed, but its history could not be deleted. The provider was removed, but its statistics could not be cleared.",
+  ]);
+  expect(scenario.removals).toBe(1);
+});
+
 it("replaces the password through Settings while retaining Watchlist, recent, progress and marks", async () => {
   const { sources } = await import("../src/bootstrap/sources.ts");
   const { viewingOwner } = await import("../src/home/viewing.ts");
