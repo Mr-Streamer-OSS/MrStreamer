@@ -1,0 +1,38 @@
+package app.mrstreamer.reminders
+
+import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+
+class RemindersModule : Module() {
+  private val context get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
+  private var pendingTap: String? = null
+  private fun takeTap(): String? = synchronized(this) {
+    val intent = appContext.currentActivity?.intent
+    val json = pendingTap ?: intent?.getStringExtra("reminder")
+    pendingTap = null
+    intent?.removeExtra("reminder")
+    json
+  }
+  override fun definition() = ModuleDefinition {
+    Name("ProgrammeReminders")
+    Events("tap")
+    OnNewIntent { intent ->
+      intent.getStringExtra("reminder")?.let {
+        synchronized(this@RemindersModule) { pendingTap = it }
+        appContext.currentActivity?.intent = intent
+        sendEvent("tap", mapOf("json" to it))
+      }
+    }
+    AsyncFunction("takeTap") {
+      takeTap()
+    }
+    AsyncFunction("list") { ReminderStore.list(context) }
+    AsyncFunction("permission") { ReminderStore.permission(context) }
+    AsyncFunction("openSetting") { kind: String -> context.startActivity(ReminderStore.setting(context, kind)) }
+    AsyncFunction("save") { json: String -> ReminderStore.save(context, json) }
+    AsyncFunction("cancel") { id: String -> ReminderStore.cancel(context, id) }
+    AsyncFunction("reconcile") { json: String -> ReminderStore.reconcile(context, json) }
+    AsyncFunction("recover") { ReminderStore.recover(context) }
+  }
+}
