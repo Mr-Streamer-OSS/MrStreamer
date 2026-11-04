@@ -49,29 +49,31 @@ async function setup() {
   const refused = vi.fn();
   const listeners = new Set<() => void>();
 
+  const progress = vi.fn(async () => [
+    {
+      title: {
+        kind: "episode" as const,
+        subscriptionId: "source",
+        id: "first",
+        seriesId: "10",
+        season: 1,
+        episode: 1,
+      },
+      position: 50,
+      duration: 100,
+      finished: false,
+      at: 1,
+      since: 1,
+    },
+  ]);
+
   const stop = startEntries({
     intents,
     player,
     library: () => model,
     open,
     refused,
-    progress: async () => [
-      {
-        title: {
-          kind: "episode",
-          subscriptionId: "source",
-          id: "first",
-          seriesId: "10",
-          season: 1,
-          episode: 1,
-        },
-        position: 50,
-        duration: 100,
-        finished: false,
-        at: 1,
-        since: 1,
-      },
-    ],
+    progress,
     subscribe: (listener) => {
       listeners.add(listener);
 
@@ -104,6 +106,7 @@ async function setup() {
 
   return {
     ...f,
+    progress,
     model,
     player,
     intents,
@@ -221,4 +224,86 @@ it("keeps Live separate from exact programme windows and archive refusal reasons
       now,
     ),
   ).toMatchObject({ archive: null, reason: "future" });
+});
+
+it("keeps known resume independent of unreadable history and offers explicit recovery for a manual Play", async () => {
+  const f = await setup();
+
+  try {
+    f.progress.mockRejectedValue(new Error("disk"));
+    await f.intents.state.get().play?.({ ...f.intent, resumeAt: 23000 }, f.media);
+    expect(f.open).toHaveBeenCalledWith({ ...f.intent, resumeAt: 23000 });
+    expect(f.progress).not.toHaveBeenCalled();
+    await f.intents.state.get().play?.(f.intent, f.media);
+    expect(f.refused).toHaveBeenLastCalledWith(
+      "history",
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(f.open).toHaveBeenCalledTimes(1);
+    f.refused.mock.calls.at(-1)![2]();
+    await vi.waitFor(() => expect(f.open).toHaveBeenLastCalledWith({ ...f.intent, resumeAt: 0 }));
+  } finally {
+    f.stop();
+    await f.player.stop();
+  }
+});
+
+it("admits the selected movie and distinguishes missing media from failed provider details", async () => {
+  const f = await setup();
+  const title = f.model.made("movie").list("all")[0]!;
+  const version = title.versions[0]!;
+
+  const intent = {
+    kind: "title",
+    media: "movie",
+    sourceId: "source",
+    id: version.id,
+    container: "mp4",
+    title: title.title,
+  } as const;
+
+  const media = {
+    kind: "movie",
+    sourceId: "source",
+    titleKey: title.key,
+    titleId: title.id,
+    version,
+  } as const;
+
+  try {
+    await f.intents.state.get().play?.(intent, media);
+    expect(f.open).toHaveBeenCalledWith({ ...intent, resumeAt: 0 });
+    await f.intents.state.get().play?.({ ...intent, container: "mkv" }, media);
+    expect(f.refused).toHaveBeenLastCalledWith("file", expect.any(Function), undefined);
+    await f.intents.state.get().play?.(intent);
+    expect(f.refused).toHaveBeenLastCalledWith("file", expect.any(Function), undefined);
+    f.failDetails(true);
+    await f.intents.state.get().play?.(f.intent, f.media);
+    expect(f.refused).toHaveBeenLastCalledWith("details", expect.any(Function), undefined);
+  } finally {
+    f.stop();
+    await f.player.stop();
+  }
+});
+
+it("keeps a pending tap when background playback becomes idle and clears title Next after Live", async () => {
+  const f = await setup();
+
+  try {
+    f.player.play({ kind: "live", sourceId: "source", channelId: "7", title: "Channel" });
+    const pending = f.intents.state.get().play?.(f.intent, f.media);
+    f.player.state.set({ kind: "idle" });
+    await pending;
+    expect(f.open).toHaveBeenCalledWith({ ...f.intent, resumeAt: 45000 });
+    expect(f.player.media.state.get().next?.intent.id).toBe("second");
+    await f.intents.state
+      .get()
+      .play?.({ kind: "live", sourceId: "source", channelId: "7", title: "Channel" });
+    f.player.play(f.intent);
+    expect(f.player.media.state.get().next).toBeNull();
+  } finally {
+    f.stop();
+    await f.player.stop();
+  }
 });

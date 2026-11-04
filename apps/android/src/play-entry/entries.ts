@@ -13,7 +13,7 @@ export function startEntries(options: {
   player: PlayerOwner;
   library(): LibraryModel;
   open(intent: PlayIntent): void;
-  refused(): void;
+  refused(reason: "details" | "file" | "history", retry: () => void, beginning?: () => void): void;
   progress(title: Title): Promise<readonly TitleProgress[]>;
   subscribe(listener: () => void): () => void;
 }) {
@@ -21,18 +21,27 @@ export function startEntries(options: {
   let request = 0;
   let stopNext: (() => void) | undefined;
 
-  const attempt = () => {
+  let authority: (() => boolean) | undefined;
+  let nextAuthority: (() => boolean) | undefined;
+  let lastAttempt: string | null = null;
+
+  const observePlayer = () => {
     const state = options.player.state.get();
 
-    return state.kind === "playing" ? state.attempt : null;
+    if (state.kind === "playing") lastAttempt = state.attempt;
   };
+
+  observePlayer();
+  const stopPlayer = options.player.state.subscribe(observePlayer);
 
   const play = async (intent: PlayIntent, media?: MediaIdentity) => {
     const run = ++request;
-    const before = attempt();
-    const stands = () => active && request === run && attempt() === before;
+    const before = lastAttempt;
+    const stands = () => active && request === run && lastAttempt === before;
 
+    authority = undefined;
     let admitted = intent;
+    let failure: "details" | "file" | "history" = "file";
 
     try {
       if (intent.kind === "title") {
@@ -54,6 +63,8 @@ export function startEntries(options: {
         );
 
         if (!title || !version || !reader) throw new Error("Version unavailable");
+        authority = () => options.library().reader(intent.sourceId) === reader;
+        failure = "details";
         const details = await model.details({ ...title, ...version });
 
         if (!stands()) return;
@@ -61,16 +72,27 @@ export function startEntries(options: {
         if (details.providerFailed || model.reader(intent.sourceId) !== reader)
           throw new Error("Details unavailable");
 
+        failure = "file";
+
         const exact =
           intent.media === "movie"
             ? version.id === intent.id &&
               (version.container?.trim() || details.containers.get(intent.id))
             : details.value?.kind === "series" &&
-              details.value.seasons.some((s) => s.episodes.some((e) => e.id === intent.id)) &&
+              details.value.seasons.some((s) =>
+                s.episodes.some(
+                  (e) => e.id === intent.id || e.versions?.some((v) => v.id === intent.id),
+                ),
+              ) &&
               details.containers.get(intent.id);
 
         if (exact !== intent.container) throw new Error("File unavailable");
-        const progress = await options.progress({ ...title, ...version, versions: [version] });
+        failure = "history";
+
+        const progress =
+          intent.resumeAt === undefined
+            ? await options.progress({ ...title, ...version, versions: [version] })
+            : [];
 
         if (!stands() || model.reader(intent.sourceId) !== reader) return;
         const sourceId = intent.sourceId;
@@ -82,6 +104,7 @@ export function startEntries(options: {
 
         admitted = { ...intent, resumeAt: intent.resumeAt ?? position(intent.id) };
         stopNext?.();
+        nextAuthority = authority;
         stopNext = options.player.media.registerNext((current) => {
           if (
             !active ||
@@ -98,21 +121,49 @@ export function startEntries(options: {
       }
 
       if (!stands()) return;
+
+      if (intent.kind !== "title") {
+        stopNext?.();
+        stopNext = undefined;
+        nextAuthority = undefined;
+      }
+
       options.player.play(admitted);
+      authority = undefined;
       options.open(admitted);
     } catch {
-      if (stands()) options.refused();
+      if (stands())
+        options.refused(
+          failure,
+          () => {
+            void play(intent, media);
+          },
+          failure === "history" && intent.kind === "title"
+            ? () => {
+                void play({ ...intent, resumeAt: 0 }, media);
+              }
+            : undefined,
+        );
     }
   };
 
-  // A source change or cleanup withdraws pending admissions and the registered Next.
+  // Only the admitted reader changing withdraws pending Play and Next; catalogue ticks do not.
   const withdraw = () => {
     ++request;
     stopNext?.();
     stopNext = undefined;
   };
 
-  const stopAuthority = options.subscribe(withdraw);
+  const stopAuthority = options.subscribe(() => {
+    if (authority && !authority()) ++request;
+
+    if (nextAuthority && !nextAuthority()) {
+      stopNext?.();
+      stopNext = undefined;
+      nextAuthority = undefined;
+    }
+  });
+
   const unregister = options.intents.register({ play });
 
   return () => {
@@ -120,5 +171,6 @@ export function startEntries(options: {
     withdraw();
     unregister();
     stopAuthority();
+    stopPlayer();
   };
 }

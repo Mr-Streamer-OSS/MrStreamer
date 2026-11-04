@@ -427,3 +427,31 @@ it("shares the viewing registration until the last caller stops", async () => {
     scenario.saved = null;
   }
 });
+
+it("keeps a ready series action available across an unrelated channel-list notification", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+  const f = fixture();
+  await f.model.refresh();
+  scenario.model = f.model;
+  const stop = startViewing();
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const title = f.model.made("series").list("all")[0]!;
+    const details = await f.model.details(title);
+
+    if (details.value?.kind !== "series") throw new Error("series");
+    const series = details.value;
+    const port = libraryViewing.state.get()!;
+    await expect.poll(() => port.series?.(title, series)).toBeDefined();
+    const action = port.series?.(title, series);
+    sources.state.set({ ...before });
+    expect(port.series?.(title, series)).toEqual(action);
+  } finally {
+    stop();
+    await viewing.dispose();
+    scenario.saved = null;
+    sources.state.set(before);
+  }
+});

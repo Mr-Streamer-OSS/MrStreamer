@@ -132,7 +132,20 @@ export function startViewing(): () => void {
     const stopFailure = viewingFailure.subscribe(bump);
     const stopKept = kept.subscribe(bump);
 
+    const authorities = () => new Map(owners().map((id) => [id, library().reader(id)]));
+    let previousSources = authorities();
+
     const stopSources = sources.state.subscribe(() => {
+      const current = authorities();
+
+      if (
+        current.size === previousSources.size &&
+        [...current].every(
+          ([id, reader]) => previousSources.has(id) && previousSources.get(id) === reader,
+        )
+      )
+        return;
+      previousSources = current;
       marks.clear();
       bump();
       void viewing.refresh().catch(() => undefined);
