@@ -874,3 +874,119 @@ it("leaves newer playback visible when an older Home Resume finishes", async () 
     act(() => player.state.set({ kind: "idle" }));
   }
 });
+
+it("plays and resumes the selected series version from its primary Details action", async () => {
+  const { ownedKey } = await import("@mrstreamer/contracts/subscription");
+  const f = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      {
+        ...f.source,
+        reader: f.source,
+        catalogue: async () => {
+          const catalogue = await f.source.catalogue();
+
+          return {
+            ...catalogue,
+            series: catalogue.series.flatMap((s) => [s, { ...s, id: `alternate-${s.id}` }]),
+          };
+        },
+      },
+    ],
+  });
+
+  await model.refresh();
+  scenario.model = model;
+  const title = model.made("series").list("all", "title")[0]!;
+  const version = title.versions.find((v) => v.id.startsWith("alternate-"))!;
+  scenario.params = { kind: "series", title: title.key, version: ownedKey(version), season: "2" };
+  const play = vi.fn();
+  let unregisterPlay = () => {};
+  const shown = show(createElement(DetailsScreen, { model }));
+  await act(async () => {});
+  expect(has(shown, "Play S1 E1")).toBe(false);
+  act(() => {
+    unregisterPlay = libraryIntents.register({ play });
+  });
+  unregister.push(unregisterPlay);
+  await expect.poll(() => has(shown, "Play S1 E1")).toBe(true);
+  expect(play).not.toHaveBeenCalled();
+  await press(shown, "Play S1 E1");
+
+  const media = {
+    kind: "episode",
+    sourceId: "source",
+    titleKey: title.key,
+    titleId: title.id,
+    version,
+    episodeId: "first",
+  };
+
+  expect(play).toHaveBeenLastCalledWith(
+    {
+      kind: "title",
+      media: "episode",
+      sourceId: "source",
+      id: "first",
+      container: "mp4",
+      title: "Episode 1",
+      resumeAt: 0,
+    },
+    media,
+  );
+  await act(async () => {
+    await viewing.recordProgress(
+      {
+        kind: "episode",
+        subscriptionId: "source",
+        seriesId: version.id,
+        id: "first",
+        season: 1,
+        episode: 1,
+      },
+      120,
+      1800,
+      Date.now(),
+    );
+  });
+  await expect.poll(() => has(shown, "Resume S1 E1")).toBe(true);
+  await press(shown, "Resume S1 E1");
+  expect(play).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "first", resumeAt: 115000 }),
+    media,
+  );
+  await act(async () => {
+    await viewing.markEpisode(
+      {
+        kind: "episode",
+        subscriptionId: "source",
+        seriesId: version.id,
+        id: "first",
+        season: 1,
+        episode: 1,
+      },
+      true,
+    );
+  });
+  await expect.poll(() => has(shown, "Play S2 E1")).toBe(true);
+  await press(shown, "Play S2 E1");
+  expect(play).toHaveBeenLastCalledWith(expect.objectContaining({ id: "second", resumeAt: 0 }), {
+    ...media,
+    episodeId: "second",
+  });
+  act(() => {
+    scenario.params.version = ownedKey(title.versions.find((v) => v.id !== version.id)!);
+    root?.render(createElement(DetailsScreen, { model }));
+  });
+  await expect.poll(() => has(shown, "Play S2 E1")).toBe(true);
+  await press(shown, "Play S2 E1");
+  expect(play).toHaveBeenLastCalledWith(expect.objectContaining({ id: "second", resumeAt: 0 }), {
+    ...media,
+    episodeId: "second",
+    version: title.versions.find((v) => v.id !== version.id)!,
+  });
+  act(() => unregisterPlay());
+  expect(has(shown, "Play S2 E1")).toBe(false);
+});

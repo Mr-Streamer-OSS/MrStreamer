@@ -1,3 +1,4 @@
+import { ProgrammeActions } from "./actions-play.ts";
 import { ReminderAction } from "./actions-reminders.ts";
 import { formatDate, t as sharedT } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
@@ -23,7 +24,7 @@ import { Button, OutOfDate, Press, Progress, Still, guideColors, text } from "./
 // stack of the destination showing (routes.ts), so Back returns to where they were opened. From
 // 840dp (Screen's pane width) a programme opens in the pane beside its Schedule, its identity kept
 // in the route's params; narrower it is pushed (`programmeHref`). Remind me uses actions-reminders;
-// Play from start and Watch live belong to their own owners.
+// Play from start and Watch live revalidate the exact channel in actions-play.
 
 const positive = (value: string) => {
   const number = Number(value);
@@ -428,6 +429,7 @@ export function ProgrammeDetails({
   const { pending, value, failed, retry, status } = useProgramme(key, start, detail);
   const insets = useSafeAreaInsets();
   const inset = pane ? 24 : 16;
+  const channelName = guide.channel(key)?.title;
   const now = Date.now();
   const progress = value ? progressOf(value, now) : null;
   const left = value ? timeLeft(value, now) : null;
@@ -435,9 +437,7 @@ export function ProgrammeDetails({
   return (
     <ScrollView contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 16 }}>
       <View style={{ gap: 6, paddingHorizontal: inset }}>
-        {pane ? (
-          <Text style={[text.secondary, { fontWeight: "500" }]}>{guide.channel(key)?.title}</Text>
-        ) : null}
+        {pane ? <Text style={[text.secondary, { fontWeight: "500" }]}>{channelName}</Text> : null}
         {value ? (
           <>
             <Text accessibilityRole="header" style={text.large}>
@@ -463,13 +463,21 @@ export function ProgrammeDetails({
         )}
       </View>
       {failed ? <Button label={sharedT("Try again")} onPress={retry} /> : null}
-      {value && guide.channel(key)?.title ? (
-        <ReminderAction
-          identity={identity}
-          programme={value}
-          channelName={guide.channel(key)?.title ?? ""}
-          inset={inset}
-        />
+      {value && channelName ? (
+        <>
+          <ProgrammeActions
+            identity={identity}
+            programme={value}
+            channelName={channelName}
+            inset={inset}
+          />
+          <ReminderAction
+            identity={identity}
+            programme={value}
+            channelName={channelName}
+            inset={inset}
+          />
+        </>
       ) : null}
       {value?.description ? (
         <Text

@@ -11,7 +11,7 @@ import { Poster, TextButton, typeScale } from "../library/parts.tsx";
 import { library } from "../library/runtime.ts";
 import { FitSheet, Snackbar, useGaps, useLargeText } from "../live/chrome.tsx";
 import { t as live } from "../live/copy.ts";
-import { identity, resolve, type Entry } from "../live/model.ts";
+import { identity, playIntent, resolve, type Entry } from "../live/model.ts";
 import { lists } from "../live/runtime.ts";
 import { FAVOURITES } from "../live/store.ts";
 import { Empty, ListsSheet, providerOf, reason } from "../live/ui.tsx";
@@ -66,7 +66,9 @@ function watch(intent: PlayIntent) {
 
 /** Plays a saved channel when its provider still lists it uniquely. */
 function watchChannel(row: ChannelRow) {
-  watch({ kind: "live", ...identity(row) });
+  const intent = playIntent(identity(row), sources.state.get());
+
+  if (intent) watch(intent);
 }
 
 /** Opens a title's Details on Home's stack, for the version that would play. */
@@ -127,6 +129,7 @@ function useStar(row: ChannelRow) {
 
   const run = () => {
     try {
+      if (resolve(entry, sources.state.get()).kind !== "listed") return;
       lists.member(FAVOURITES, entry, !starred);
     } catch {
       Alert.alert(

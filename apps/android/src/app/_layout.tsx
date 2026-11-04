@@ -1,3 +1,4 @@
+import { startPlayEntries } from "../play-entry/runtime.ts";
 import { startReminders } from "../reminders/runtime.ts";
 import { useReminderRouting } from "../reminders/routing.ts";
 import { DarkTheme, Stack, ThemeProvider } from "expo-router";
@@ -36,6 +37,7 @@ export default function RootLayout() {
   );
   useEffect(() => startReminders(), []);
   useEffect(() => startViewing(), []);
+  useEffect(() => startPlayEntries(), []);
 
   const localFile = useSyncExternalStore(player.state.subscribe, () => {
     const state = player.state.get();

@@ -728,6 +728,53 @@ function useViewingPresentation() {
   return adapter;
 }
 
+/** Paper A's primary series action follows this version's history, independent of the open season. */
+function SeriesAction({
+  title,
+  titleId,
+  details,
+}: {
+  title: Title;
+  titleId: string;
+  details: DetailState;
+}) {
+  const { play } = useStore(libraryIntents.state);
+  const viewing = useViewingPresentation();
+
+  const next =
+    details.value?.kind === "series" && !details.providerFailed
+      ? viewing?.series?.(title, details.value)
+      : undefined;
+
+  const container = next && details.containers.get(next.episode.id);
+
+  if (!play || !next || !container) return null;
+  const { episode, resumeAt } = next;
+
+  return (
+    <FilledButton
+      label={`${t(next.resumed ? "Resume" : "Play")} S${formatNumber(episode.season)} E${formatNumber(episode.number)}`}
+      icon="play-arrow"
+      onPress={() => {
+        const media = mediaOf(title, episode, titleId);
+        viewing?.play(media, episode);
+        play(
+          {
+            kind: "title",
+            sourceId: episode.subscriptionId,
+            media: "episode",
+            id: episode.id,
+            container,
+            title: episode.title,
+            resumeAt,
+          },
+          media,
+        );
+      }}
+    />
+  );
+}
+
 /** A movie's Play and Download, each only while its later owner handles it. */
 function MovieActions({
   title,
@@ -754,14 +801,17 @@ function MovieActions({
           icon="play-arrow"
           onPress={() => {
             viewing?.play(media);
-            play({
-              kind: "title",
-              sourceId: title.subscriptionId,
-              media: "movie",
-              id: title.id,
-              container,
-              title: title.title,
-            });
+            play(
+              {
+                kind: "title",
+                sourceId: title.subscriptionId,
+                media: "movie",
+                id: title.id,
+                container,
+                title: title.title,
+              },
+              media,
+            );
           }}
         />
       ) : null}
@@ -818,14 +868,17 @@ function EpisodeRow({
     play && container
       ? () => {
           viewing?.play(media(), episode);
-          play({
-            kind: "title",
-            sourceId: episode.subscriptionId,
-            media: "episode",
-            id: episode.id,
-            container,
-            title: episode.title,
-          });
+          play(
+            {
+              kind: "title",
+              sourceId: episode.subscriptionId,
+              media: "episode",
+              id: episode.id,
+              container,
+              title: episode.title,
+            },
+            media(),
+          );
         }
       : undefined;
 
@@ -1193,6 +1246,9 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           titleId={title.id}
           container={shown.container?.trim() || details?.containers.get(shown.id)}
         />
+      ) : null}
+      {shown && kind === "series" && details ? (
+        <SeriesAction title={shown} titleId={title.id} details={details} />
       ) : null}
       {shown && viewing && viewing.watchlist(shown).available !== false ? (
         <OutlinedButton

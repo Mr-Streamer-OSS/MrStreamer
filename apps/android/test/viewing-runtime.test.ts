@@ -269,7 +269,10 @@ it("resumes through the registered handler despite a position tick while details
 
   try {
     const outcome = await resumeEntry(entry);
-    expect(play).toHaveBeenCalledWith(expect.objectContaining({ id: title.id, media: "movie" }));
+    expect(play).toHaveBeenCalledWith(
+      expect.objectContaining({ id: title.id, media: "movie" }),
+      expect.objectContaining({ version: entry.version }),
+    );
     expect(outcome).toBe("played");
     spy.mockRejectedValueOnce(new Error("details"));
     expect(await resumeEntry(entry)).toBe("details");
@@ -422,5 +425,91 @@ it("shares the viewing registration until the last caller stops", async () => {
     second();
     await viewing.dispose();
     scenario.saved = null;
+  }
+});
+
+it("keeps a ready series action available across an unrelated channel-list notification", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+  const f = fixture();
+  await f.model.refresh();
+  scenario.model = f.model;
+  const stop = startViewing();
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const title = f.model.made("series").list("all")[0]!;
+    const details = await f.model.details(title);
+
+    if (details.value?.kind !== "series") throw new Error("series");
+    const series = details.value;
+    const port = libraryViewing.state.get()!;
+    await expect.poll(() => port.series?.(title, series)).toBeDefined();
+    const action = port.series?.(title, series);
+    sources.state.set({ ...before });
+    expect(port.series?.(title, series)).toEqual(action);
+  } finally {
+    stop();
+    await viewing.dispose();
+    scenario.saved = null;
+    sources.state.set(before);
+  }
+});
+
+it("preserves provider A series actions while provider B is added, replaced and removed", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+
+  if (before.kind !== "ready") throw new Error("sources");
+  const a = fixture();
+  const b = fixture();
+  let reader = b.source;
+  let present = false;
+
+  const model = libraryModel({
+    sources: () => [
+      { ...a.source, reader: a.source },
+      ...(present ? [{ ...b.source, id: "other", reader }] : []),
+    ],
+    language: () => "en",
+  });
+
+  await model.refresh();
+  scenario.model = model;
+  const stop = startViewing();
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const title = model.made("series").list("all")[0]!;
+    const details = await model.details(title);
+
+    if (details.value?.kind !== "series") throw new Error("series");
+    const series = details.value;
+    const port = libraryViewing.state.get()!;
+    await expect.poll(() => port.series?.(title, series)).toBeDefined();
+    const action = port.series?.(title, series);
+
+    for (const change of ["add", "replace", "remove"]) {
+      present = change !== "remove";
+
+      if (change === "replace") reader = fixture().source;
+      sources.state.set({
+        kind: "ready",
+        sources: [...before.sources, ...(present ? [{ ...before.sources[0]!, id: "other" }] : [])],
+      });
+      expect(port.series?.(title, series)).toEqual(action);
+      const other = { ...title, subscriptionId: "other" };
+      expect(port.series?.(other, series)).toBeUndefined();
+
+      if (present) await expect.poll(() => port.series?.(other, series)).toBeDefined();
+      // Await the real refresh publication, then verify it did not discard A's ready action.
+      await viewing.refresh();
+      expect(port.series?.(title, series)).toEqual(action);
+    }
+  } finally {
+    stop();
+    await viewing.dispose();
+    scenario.saved = null;
+    sources.state.set(before);
   }
 });

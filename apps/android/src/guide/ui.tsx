@@ -183,7 +183,9 @@ export function Button({
           : { borderWidth: 1, borderColor: guideColors.outline }),
       }}
     >
-      {icon ? <Icon name={icon} size={20} /> : null}
+      {icon ? (
+        <Icon name={icon} size={20} color={filled ? colors.background : colors.text} />
+      ) : null}
       <Text
         style={{
           color: filled ? colors.background : colors.text,

@@ -1,3 +1,4 @@
+import type { Title } from "@mrstreamer/contracts/ondemand";
 import { draftOf } from "../live/model.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
@@ -118,24 +119,83 @@ export function startViewing(): () => void {
 
     type EpisodeState = Awaited<ReturnType<typeof viewing.episodes>>;
 
-    const marks = new Map<string, { state?: EpisodeState; failed?: boolean }>();
+    const marks = new Map<string, { sourceId: string; state?: EpisodeState; failed?: boolean }>();
     const bump = () => revision.set((n) => n + 1);
     // The last kept episode mark, which Details offers to undo until it closes or another mark.
     const kept = store<{ message: string; undo: () => Promise<unknown> } | null>(null);
 
+    let previousViewing = viewing.state.get();
+
     const stopState = viewing.state.subscribe(() => {
-      marks.clear();
+      const current = viewing.state.get();
+
+      if (
+        current.kind !== previousViewing.kind ||
+        current.viewing?.sequence !== previousViewing.viewing?.sequence
+      )
+        marks.clear();
+      previousViewing = current;
       bump();
     });
 
     const stopFailure = viewingFailure.subscribe(bump);
     const stopKept = kept.subscribe(bump);
 
+    const authorities = () => new Map(owners().map((id) => [id, library().reader(id)]));
+    let previousSources = authorities();
+
     const stopSources = sources.state.subscribe(() => {
-      marks.clear();
+      const current = authorities();
+
+      if (
+        current.size === previousSources.size &&
+        [...current].every(
+          ([id, reader]) => previousSources.has(id) && previousSources.get(id) === reader,
+        )
+      )
+        return;
+
+      for (const [key, cached] of marks) {
+        if (
+          !current.has(cached.sourceId) ||
+          current.get(cached.sourceId) !== previousSources.get(cached.sourceId)
+        )
+          marks.delete(key);
+      }
+
+      previousSources = current;
       bump();
       void viewing.refresh().catch(() => undefined);
     });
+
+    /** Share the selected version's saved episode facts across its rows and primary action. */
+    function standing(title: Title) {
+      const key = JSON.stringify([title.subscriptionId, title.id]);
+      let cached = marks.get(key);
+
+      if (!cached) {
+        cached = { sourceId: title.subscriptionId };
+        marks.set(key, cached);
+        const reading = cached;
+        // Defer publication until after the render that requested this shared series read.
+        void Promise.resolve()
+          .then(() => viewing.episodes(title))
+          .then(
+            (state) => {
+              if (marks.get(key) !== reading) return;
+              reading.state = state;
+              bump();
+            },
+            () => {
+              if (marks.get(key) !== reading) return;
+              reading.failed = true;
+              bump();
+            },
+          );
+      }
+
+      return cached;
+    }
 
     const stopPort = libraryViewing.register({
       subscribe: revision.subscribe,
@@ -174,30 +234,23 @@ export function startViewing(): () => void {
             ),
         };
       },
+      series(title, details) {
+        const state = standing(title).state;
+
+        if (!state) return undefined;
+        const next = continuation(details, state.progress, state.marks);
+
+        return next
+          ? {
+              episode: next.episode,
+              resumeAt: resumePoint(next.resume) * 1000,
+              resumed: !!next.resume,
+            }
+          : undefined;
+      },
       episode(title, episode) {
         const key = JSON.stringify([title.subscriptionId, title.id]);
-        let cached = marks.get(key);
-
-        if (!cached) {
-          cached = {};
-          marks.set(key, cached);
-          const reading = cached;
-          // Defer publication until after the render that requested this shared series read.
-          void Promise.resolve()
-            .then(() => viewing.episodes(title))
-            .then(
-              (state) => {
-                if (marks.get(key) !== reading) return;
-                reading.state = state;
-                bump();
-              },
-              () => {
-                if (marks.get(key) !== reading) return;
-                reading.failed = true;
-                bump();
-              },
-            );
-        }
+        const cached = standing(title);
 
         if (!cached.state)
           return { label: t("Mark watched"), activate: () => {}, available: false };
@@ -473,15 +526,25 @@ export async function resumeEntry(entry: Continuing) {
         },
         episode,
       );
-      play({
-        kind: "title",
-        sourceId: version.subscriptionId,
-        media: "episode",
-        id: episode.id,
-        container,
-        title: episode.title,
-        resumeAt: resumePoint(next.resume) * 1000,
-      });
+      play(
+        {
+          kind: "title",
+          sourceId: version.subscriptionId,
+          media: "episode",
+          id: episode.id,
+          container,
+          title: episode.title,
+          resumeAt: resumePoint(next.resume) * 1000,
+        },
+        {
+          kind: "episode",
+          sourceId: version.subscriptionId,
+          titleKey: entry.title.key,
+          titleId: entry.title.id,
+          version,
+          episodeId: episode.id,
+        },
+      );
 
       return "played" as const;
     }
@@ -500,15 +563,18 @@ export async function resumeEntry(entry: Continuing) {
     };
 
     libraryViewing.state.get()?.play(media);
-    play({
-      kind: "title",
-      sourceId: version.subscriptionId,
-      media: "movie",
-      id: version.id,
-      container,
-      title: entry.title.title,
-      resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
-    });
+    play(
+      {
+        kind: "title",
+        sourceId: version.subscriptionId,
+        media: "movie",
+        id: version.id,
+        container,
+        title: entry.title.title,
+        resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
+      },
+      media,
+    );
 
     return "played" as const;
   } catch {

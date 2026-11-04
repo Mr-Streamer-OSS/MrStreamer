@@ -216,7 +216,10 @@ export function Channel({
 
   const star = () => {
     try {
-      lists.member(FAVOURITES, entry, !starred);
+      const current = resolve(entry, sources.state.get());
+
+      if (current.kind !== "listed") return;
+      lists.member(FAVOURITES, { ...entry, title: current.row.title }, !starred);
     } catch (cause) {
       failure(cause, entry.title);
     }

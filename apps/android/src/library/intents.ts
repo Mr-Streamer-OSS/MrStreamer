@@ -16,11 +16,11 @@ export interface DownloadIntent {
 }
 
 export interface IntentHandlers {
-  readonly play?: (intent: PlayIntent) => void;
+  readonly play?: (intent: PlayIntent, media?: MediaIdentity) => void | Promise<void>;
   readonly download?: (intent: DownloadIntent) => void;
 }
 
-/** Later feature owners register here. Unregistering an older owner cannot remove its successor. */
+/** Feature owners register here. Unregistering an older owner cannot remove its successor. */
 export function intentRegistry() {
   const state = store<IntentHandlers>({});
 
@@ -102,6 +102,17 @@ export interface ViewingPresentationAdapter {
     title: import("@mrstreamer/contracts/ondemand").Title,
     episode: import("@mrstreamer/contracts/ondemand").Episode,
   ): { label: string; activate(): void; detail?: string; available?: boolean };
+  /** The primary series action, absent until the selected version's saved history is readable. */
+  series?(
+    title: import("@mrstreamer/contracts/ondemand").Title,
+    details: import("@mrstreamer/contracts/ondemand").SeriesDetails,
+  ):
+    | {
+        episode: import("@mrstreamer/contracts/ondemand").Episode;
+        resumeAt: number;
+        resumed: boolean;
+      }
+    | undefined;
   notice(): ViewingNotice | null;
   play(media: MediaIdentity, episode?: { season: number; number: number }): void;
 }
