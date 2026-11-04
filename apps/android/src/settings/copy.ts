@@ -3,6 +3,11 @@ import { catalogue } from "@mrstreamer/mobile/language";
 /** Settings, its sheets and dialogs, the statistics choice, Diagnostics and Licences. */
 export const t = catalogue(
   {
+    "Remove and delete history": "Remove and delete history",
+    "The provider was removed, but its history could not be deleted.":
+      "The provider was removed, but its history could not be deleted.",
+    "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.":
+      "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
     Guides: "Guides",
     "Couldn't remove the provider.": "Couldn't remove the provider.",
     "The login is erased, but the provider is still listed.":
@@ -71,6 +76,11 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      "Remove and delete history": "Verwijderen en geschiedenis wissen",
+      "The provider was removed, but its history could not be deleted.":
+        "De provider is verwijderd, maar de geschiedenis kon niet worden gewist.",
+      "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.":
+        "Verwijderen bewaart je favorieten, kijklijst en kijkgeschiedenis voor wanneer je deze provider opnieuw toevoegt.",
       Guides: "Gidsen",
       "Couldn't remove the provider.": "Kon de provider niet verwijderen.",
       "The login is erased, but the provider is still listed.":

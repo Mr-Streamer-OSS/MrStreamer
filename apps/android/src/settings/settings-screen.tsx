@@ -107,11 +107,11 @@ export function SettingsScreen() {
     }
   }
 
-  async function remove(source: ConnectedSource) {
+  async function remove(source: ConnectedSource, deleteHistory = false) {
     if (removingIds.current.has(source.id)) return;
     removingIds.current.add(source.id);
     setBusy(new Set(removingIds.current));
-    const result = await recovery.remove(source.id);
+    const result = await recovery.remove(source.id, deleteHistory);
     removingIds.current.delete(source.id);
     setBusy(new Set(removingIds.current));
 
@@ -124,7 +124,12 @@ export function SettingsScreen() {
         ),
       );
 
-    if (result.erase === "refused")
+    if (result.historyNotCleared)
+      messages.push(t("The provider was removed, but its history could not be deleted."));
+
+    if (result.erase === "history-not-cleared")
+      messages.push(t("The provider was removed, but its history could not be deleted."));
+    else if (result.erase === "refused")
       messages.push(t("Couldn't remove {name}. Its login is still saved.", { name: source.label }));
     else if (result.erase === "partial")
       messages.push(t("{name}'s login is erased, but it's still listed.", { name: source.label }));
@@ -141,13 +146,15 @@ export function SettingsScreen() {
 
       if (!mounted.current) {
         const important =
-          result.erase === "statistics-not-cleared"
-            ? t("The provider was removed, but its statistics could not be cleared.")
-            : result.erase === "refused"
-              ? t("Couldn't remove the provider.")
-              : result.erase === "partial"
-                ? t("The login is erased, but the provider is still listed.")
-                : t("Playback may still be active.");
+          result.erase === "history-not-cleared"
+            ? t("The provider was removed, but its history could not be deleted.")
+            : result.erase === "statistics-not-cleared"
+              ? t("The provider was removed, but its statistics could not be cleared.")
+              : result.erase === "refused"
+                ? t("Couldn't remove the provider.")
+                : result.erase === "partial"
+                  ? t("The login is erased, but the provider is still listed.")
+                  : t("Playback may still be active.");
 
         ToastAndroid.show(important, ToastAndroid.LONG);
 
@@ -155,7 +162,11 @@ export function SettingsScreen() {
       }
 
       if (result.erase === "removed") notify({ text });
-      else notify({ text, action: { label: t("Try again"), run: () => void remove(source) } });
+      else
+        notify({
+          text,
+          action: { label: t("Try again"), run: () => void remove(source, deleteHistory) },
+        });
     }
   }
 
@@ -366,10 +377,24 @@ export function SettingsScreen() {
               if (source) void remove(source);
             },
           },
+          {
+            label: t("Remove and delete history"),
+            onPress: () => {
+              const source = removing;
+              setRemoving(null);
+
+              if (source) void remove(source, true);
+            },
+          },
           { label: t("Cancel"), dismiss: true, onPress: () => setRemoving(null) },
         ]}
       >
-        <DialogText>{t("Its login is erased from this phone.")}</DialogText>
+        <DialogText>
+          {t("Its login is erased from this phone.")}{" "}
+          {t(
+            "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
+          )}
+        </DialogText>
       </Dialog>
     </Screen>
   );

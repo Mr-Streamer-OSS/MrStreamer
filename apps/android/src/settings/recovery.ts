@@ -3,8 +3,10 @@ import type { Release } from "../player/native.ts";
 import type { PlayerOwner } from "../player/player.ts";
 
 export interface RemovalResult {
-  readonly erase: "removed" | "partial" | "refused" | "statistics-not-cleared";
+  readonly erase:
+    "removed" | "partial" | "refused" | "statistics-not-cleared" | "history-not-cleared";
   readonly release: readonly Release[];
+  readonly historyNotCleared?: boolean;
 }
 
 /** This phone no longer has the source's login, so it needs its password or link again. */
@@ -24,6 +26,7 @@ export function providerRecovery(
   owner: SourcesOwner,
   discardStatistics: () => boolean,
   player: Pick<PlayerOwner, "release">,
+  clearHistory: (id: string) => Promise<void> = async () => {},
 ) {
   const listed = (id: string) => {
     const now = owner.state.get();
@@ -33,7 +36,7 @@ export function providerRecovery(
 
   const pending = new Map<string, Promise<RemovalResult>>();
 
-  async function remove(id: string): Promise<RemovalResult> {
+  async function remove(id: string, deleteHistory: boolean): Promise<RemovalResult> {
     const release: Release[] = [];
 
     const matches: Parameters<PlayerOwner["release"]>[0] = (hold) =>
@@ -71,23 +74,33 @@ export function providerRecovery(
       };
     }
 
+    let historyFailed = false;
+
+    if (deleteHistory) {
+      try {
+        await clearHistory(id);
+      } catch {
+        historyFailed = true;
+      }
+    }
+
     const now = owner.state.get();
 
     if (now.kind === "ready" && now.sources.length === 0 && !discardStatistics())
-      return { erase: "statistics-not-cleared", release };
+      return { erase: "statistics-not-cleared", release, historyNotCleared: historyFailed };
 
-    return { erase: "removed", release };
+    return { erase: historyFailed ? "history-not-cleared" : "removed", release };
   }
 
   return {
     get isRemoving() {
       return pending.size > 0;
     },
-    remove(id: string): Promise<RemovalResult> {
+    remove(id: string, deleteHistory = false): Promise<RemovalResult> {
       const active = pending.get(id);
 
       if (active) return active;
-      const work = remove(id).finally(() => pending.delete(id));
+      const work = remove(id, deleteHistory).finally(() => pending.delete(id));
       pending.set(id, work);
 
       return work;

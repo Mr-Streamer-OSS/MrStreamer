@@ -75,3 +75,33 @@ export function downloadPresentationRegistry() {
 }
 
 export const libraryDownloads = downloadPresentationRegistry();
+
+/** Viewing owns persistence and failure presentation; Library exposes current title/episode facts. */
+export interface ViewingPresentationAdapter {
+  subscribe(listener: () => void): () => void;
+  snapshot(): unknown;
+  watchlist(title: import("@mrstreamer/contracts/ondemand").Title): {
+    label: string;
+    activate(): void;
+  };
+  episode(
+    title: import("@mrstreamer/contracts/ondemand").Title,
+    episode: import("@mrstreamer/contracts/ondemand").Episode,
+  ): { label: string; activate(): void; status?: string; retry?: () => void };
+  play(media: MediaIdentity, episode?: { season: number; number: number }): void;
+}
+
+export const libraryViewing = (() => {
+  const state = store<ViewingPresentationAdapter | undefined>(undefined);
+
+  return {
+    state,
+    register(adapter: ViewingPresentationAdapter) {
+      state.set(adapter);
+
+      return () => {
+        if (state.get() === adapter) state.set(undefined);
+      };
+    },
+  };
+})();

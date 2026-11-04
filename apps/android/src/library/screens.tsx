@@ -26,7 +26,7 @@ import * as storage from "../platform/storage.ts";
 import { browseCollection, type BrowseChoices, type BrowsedCollection } from "./browse.ts";
 import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
-import { libraryDownloads, libraryIntents, type MediaIdentity } from "./intents.ts";
+import { libraryDownloads, libraryIntents, libraryViewing, type MediaIdentity } from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
 import {
   Artwork,
@@ -709,6 +709,17 @@ function useDownloadPresentation(media: MediaIdentity) {
   return adapter?.read(media);
 }
 
+/** Rereads viewing actions after a committed change; refused writes retain their prior label. */
+function useViewingPresentation() {
+  const adapter = useStore(libraryViewing.state);
+  useSyncExternalStore(
+    adapter?.subscribe ?? noDownloadSubscription,
+    adapter?.snapshot ?? noDownloadSnapshot,
+  );
+
+  return adapter;
+}
+
 /** A movie's Play and Download, each only while its later owner handles it. */
 function MovieActions({
   title,
@@ -722,6 +733,7 @@ function MovieActions({
   const { play, download } = useStore(libraryIntents.state);
 
   const media = mediaOf(title, undefined, titleId);
+  const viewing = useViewingPresentation();
   const saved = useDownloadPresentation(media);
 
   if (!play && !download && !saved) return null;
@@ -732,7 +744,8 @@ function MovieActions({
         <FilledButton
           label={t("Play")}
           icon="play-arrow"
-          onPress={() =>
+          onPress={() => {
+            viewing?.play(media);
             play({
               kind: "title",
               sourceId: title.subscriptionId,
@@ -740,8 +753,8 @@ function MovieActions({
               id: title.id,
               container,
               title: title.title,
-            })
-          }
+            });
+          }}
         />
       ) : null}
       {saved ? (
@@ -782,6 +795,8 @@ function EpisodeRow({
   const { play, download } = useStore(libraryIntents.state);
   const media = () => mediaOf(title, episode, titleId);
   const saved = useDownloadPresentation(media());
+  const viewing = useViewingPresentation();
+  const mark = viewing?.episode(title, episode);
 
   return (
     <View
@@ -808,11 +823,16 @@ function EpisodeRow({
           </Text>
         ) : null}
       </View>
+      {mark ? <RowAction icon="done" label={mark.label} onPress={mark.activate} /> : null}
+      {mark?.status ? (
+        <DetailNotice message={mark.status} {...(mark.retry ? { onRetry: mark.retry } : {})} />
+      ) : null}
       {play && container ? (
         <RowAction
           icon="play-arrow"
           label={t("Play")}
-          onPress={() =>
+          onPress={() => {
+            viewing?.play(media(), episode);
             play({
               kind: "title",
               sourceId: episode.subscriptionId,
@@ -820,8 +840,8 @@ function EpisodeRow({
               id: episode.id,
               container,
               title: episode.title,
-            })
-          }
+            });
+          }}
         />
       ) : null}
       {saved ? (
@@ -886,6 +906,7 @@ function DetailNotice({ message, onRetry }: { message: string; onRetry?: () => v
 
 export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   const model = useLibraryModel(injected);
+  const viewing = useViewingPresentation();
   const list = useStore(model.state);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -1035,6 +1056,12 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           title={shown}
           titleId={title.id}
           container={shown.container?.trim() || details?.containers.get(shown.id)}
+        />
+      ) : null}
+      {shown && viewing ? (
+        <OutlinedButton
+          label={viewing.watchlist(shown).label}
+          onPress={viewing.watchlist(shown).activate}
         />
       ) : null}
       {saveFailed ? <DetailNotice message={t("Couldn't save version.")} /> : null}
