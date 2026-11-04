@@ -82,14 +82,14 @@ export interface Producer {
   conclusion: string;
 }
 
-export interface Evidence {
+export type Evidence = {
   version: 1;
   sha: string;
   identity: string;
   profile: typeof profile;
   identities: { check: string; test: string; website: string };
   results: { check: string; test: string; website: string };
-}
+};
 
 /** Release consumers must authenticate the producer before passing its downloaded artifact here. */
 export function acceptsEvidence(

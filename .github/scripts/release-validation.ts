@@ -4,6 +4,7 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acceptsEvidence, validationIdentity } from "./validation-evidence.ts";
+import type { Json } from "../../packages/contracts/src/json.ts";
 
 // One budget covers every candidate run, API call and artifact download.
 const deadline = Date.now() + 5 * 60_000;
@@ -110,7 +111,7 @@ async function reusable(): Promise<boolean> {
       }),
     );
     execFileSync("unzip", ["-q", zip, "-d", dir], { timeout: timeout() });
-    const evidence: unknown = JSON.parse(readFileSync(join(dir, "validation.json"), "utf8"));
+    const evidence = JSON.parse(readFileSync(join(dir, "validation.json"), "utf8")) as Json;
 
     if (
       acceptsEvidence(
