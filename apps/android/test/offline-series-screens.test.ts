@@ -10,9 +10,11 @@ import type { ReplacePrompt } from "../src/downloads/replace.ts";
 // The bulk series rows, their sheet and result, and Replace, as Details and Downloads render them,
 // driving the real series controller over a fake native port.
 
+const navigation = vi.hoisted(() => ({ focused: true, segments: ["(tabs)", "series", "details"] }));
+
 vi.mock("expo-router", () => ({
-  useIsFocused: () => true,
-  useSegments: () => ["(tabs)", "series"],
+  useIsFocused: () => navigation.focused,
+  useSegments: () => navigation.segments,
   router: { navigate: vi.fn() },
 }));
 
@@ -74,7 +76,9 @@ vi.mock("react-native", async () => {
 
 const { seriesDownloads, seriesFiles, seriesOwner } = await import("../src/downloads/series.ts");
 
-const { SeriesDialogs, SeriesDownloadRow } = await import("../src/downloads/series-download.tsx");
+const { SeriesDialogs, SeriesDownloadRow, SeriesDownloadScope } =
+  await import("../src/downloads/series-download.tsx");
+
 const { askReplace } = await import("../src/downloads/replace.ts");
 const { router } = await import("expo-router");
 const window = new Window();
@@ -97,6 +101,8 @@ afterEach(() => {
   root = undefined;
   window.document.body.innerHTML = "";
   seriesOwner.set(undefined);
+  navigation.focused = true;
+  navigation.segments = ["(tabs)", "series", "details"];
   setLanguage(resolveLanguage("en-US", []));
   vi.mocked(router.navigate).mockClear();
 });
@@ -324,3 +330,100 @@ it("replaces a missing file at once and asks before replacing a changed one", as
   expect(value.replace).toHaveBeenCalledTimes(2);
   await vi.waitFor(() => expect(dialog(shown)).toContain("Stop playing this copy first."));
 });
+
+it("never counts changed-only copies as saved", async () => {
+  const s = await series();
+  owner(
+    s.files.map((f) => s.row(f.mediaId, { state: "failed", reason: "file-changed" })),
+    async () => "added",
+  );
+  const shown = show(seriesRow(s));
+  await press(shown, "Review series download");
+  expect(dialog(shown)).not.toContain("All 3 episodes are saved or queued.");
+  expect(dialog(shown)).toContain("3 saved files changed.");
+});
+
+it.each(["tab", "downloads", "season", "tablet"])(
+  "keeps only the allowed series context alive on %s navigation",
+  async (move) => {
+    const s = await series();
+    let release!: (value: string) => void;
+
+    const { admitted } = owner(
+      [],
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const details =
+      move === "season"
+        ? {
+            ...s.details,
+            seasons: [
+              {
+                ...s.details.seasons[0]!,
+                number: 1,
+                episodes: s.details.seasons
+                  .flatMap((season) => season.episodes)
+                  .map((episode) => ({ ...episode, season: 1 })),
+              },
+            ],
+          }
+        : s.details;
+
+    const screen = (inline = false, season?: number) =>
+      createElement(
+        SeriesDownloadScope,
+        null,
+        createElement(
+          inline ? "aside" : "main",
+          null,
+          createElement(SeriesDownloadRow, {
+            key: String(season),
+            details,
+            version: s.title,
+            containers: s.containers,
+            seasonLabel,
+            versionLabel: "Full HD",
+            sourceLabel: "Source",
+            reader: () => "reader",
+            inline,
+            season,
+          }),
+        ),
+      );
+
+    const shown = show(screen(false, move === "season" ? 1 : undefined));
+    await press(shown, move === "season" ? "Download remaining" : "Review series download");
+    await press(shown, "Download 3 episodes");
+    await vi.waitFor(() => expect(admitted).toHaveLength(1));
+
+    if (move === "tab") {
+      navigation.focused = false;
+      navigation.segments = ["(tabs)", "movies"];
+    }
+
+    if (move === "downloads") {
+      navigation.focused = false;
+      navigation.segments = ["(tabs)", "series", "downloads"];
+    }
+
+    await act(async () =>
+      root?.render(screen(move === "tablet", move === "season" ? 2 : undefined)),
+    );
+    await act(async () => release("added"));
+
+    if (move === "tab") {
+      await vi.waitFor(() => expect(shown.textContent).not.toContain("Adding"));
+      expect(admitted).toHaveLength(1);
+    } else {
+      await vi.waitFor(() => expect(admitted).toHaveLength(2));
+      await act(async () => release("added"));
+      await vi.waitFor(() => expect(admitted).toHaveLength(3));
+      await act(async () => release("added"));
+      await vi.waitFor(() => expect(shown.textContent).not.toContain("Cancel remaining"));
+    }
+  },
+);

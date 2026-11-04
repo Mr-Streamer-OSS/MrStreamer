@@ -174,6 +174,7 @@ vi.mock("../src/player/instance.ts", async () => {
         speed: asked("speed"),
         quality: asked("quality"),
         enterPip: asked("pip"),
+        refreshOfflineNext: asked("refresh offline next"),
         playNext: asked("play next"),
         cancelNext() {
           scenario.media.push("cancel next");
@@ -205,11 +206,12 @@ vi.mock("../src/downloads/runtime.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
 
   const owner = {
+    state: store({ rows: [] }),
     prompt: store<import("../src/downloads/replace.ts").ReplacePrompt | null>(null),
     replace: async (row: { id: string }) => {
       scenario.replacements.push(row.id);
 
-      return "";
+      return "replaced";
     },
   };
 

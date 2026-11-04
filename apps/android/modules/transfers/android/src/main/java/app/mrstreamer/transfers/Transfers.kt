@@ -116,7 +116,9 @@ object Transfers {
     ledger.save(rows)
     val entries = (0 until requested.length()).map { requested.getJSONObject(it) }.associateBy { row ->
       check(row.getString("sourceId") == source)
-      check(row.getString("key") == org.json.JSONArray(listOf(source, row.getString("kind"), row.getString("mediaId"), row.getString("container"))).toString())
+      val key = org.json.JSONArray(row.getString("key"))
+      val identity = listOf(source, row.getString("kind"), row.getString("mediaId"), row.getString("container"))
+      check(key.length() == identity.size && identity.indices.all { key.getString(it) == identity[it] })
       row.getString("key")
     }
     // Attach the reviewed series order to exact files already on this device, including legacy copies.
@@ -144,6 +146,15 @@ object Transfers {
     val rows = ledger.read()
     val row = rows.find { it.getString("key") == key }
     if (row != null && row.optString("state") == "complete") { ledger.recover(row); ledger.save(rows) }
+    if (row != null && row.optString("reason") == "missing") {
+      val file = ledger.media(row.getString("id"))
+      if (file.exists()) {
+        if (file.isFile && file.canRead() && file.length() > 0 && file.length() == row.optLong("total"))
+          row.put("state", "complete").put("reason", "")
+        else row.put("state", "failed").put("reason", "file-changed")
+        ledger.save(rows)
+      }
+    }
     val frozen = review.expected[key]
     if ((row == null) != (frozen == null) || row != null && row.toString() != frozen) return@admission "skipped"
     val status = if (row == null) "none" else if (row.optString("state") == "failed")
@@ -152,21 +163,40 @@ object Transfers {
     if (status != expected) return@admission "skipped"
     if (status == "missing" && row != null && ledger.media(row.getString("id")).exists()) return@admission "skipped"
     if (row == null) {
-      add(context, request.toString())
+      committed(context, key) { add(context, request.toString()); Unit }
       return@admission "added"
     }
     // A replacement receives a new transfer identity.
     if (status in listOf("missing", "changed")) {
+      val oldArtwork = ledger.artwork(row.getString("id"))
+      val artwork = try { if (oldArtwork.isFile && oldArtwork.length() <= 2 * 1024 * 1024) oldArtwork.readBytes() else null } catch (_: Exception) { null }
       app.mrstreamer.player.LocalFiles.unused(ledger.media(row.getString("id")).absolutePath) {
-        command(context, row.getString("id"), "remove")
+        command(context, row.getString("id"), "remove", schedule = false)
       }
       check(Ledger(context).read().none { it.getString("key") == key })
-      add(context, request.toString())
+      committed(context, key) { add(context, request.toString()); Unit }
+      // Keep optional artwork under the replacement identity, never its deleted file URI.
+      if (artwork != null) try {
+        val added = ledger.read()
+        val replacement = added.single { it.getString("key") == key }
+        val file = ledger.artwork(replacement.getString("id"))
+        file.writeBytes(artwork)
+        replacement.put("artwork", android.net.Uri.fromFile(file).toString())
+        ledger.save(added)
+      } catch (_: Exception) { /* Optional artwork cannot undo a durable admission. */ }
       return@admission "replaced"
     }
-    if (status == "failed") { command(context, row.getString("id"), "retry"); return@admission "retried" }
+    if (status == "failed") { committed(context, key) { command(context, row.getString("id"), "retry") }; return@admission "retried" }
     "skipped"
   } }
+
+  /** Scheduling follows the durable save. A queued row is still an accepted addition if kick fails. */
+  private fun committed(context: Context, key: String, operation: () -> Unit) {
+    try { operation() }
+    catch (cause: Exception) {
+      if (Ledger(context).read().none { it.getString("key") == key && it.optString("state") == "queued" }) throw cause
+    }
+  }
 
   fun add(context: Context, json: String) = synchronized(Ledger.lock) {
     val row = JSONObject(json)
@@ -177,6 +207,7 @@ object Transfers {
       return@synchronized it.getString("id")
     }
     val secret = Credentials.read(context, row.getString("sourceId")) ?: error("credentials")
+    row.remove("artwork")
     row.put("id", UUID.randomUUID().toString()).put("state", "queued")
       .put("binding", fingerprint(secret)).put("bytes", 0).put("total", 0).put("reason", "")
     Ledger.attempt(row)
@@ -186,7 +217,7 @@ object Transfers {
     row.getString("id")
   }
 
-  fun command(context: Context, id: String, action: String) = synchronized(Ledger.lock) { app.mrstreamer.player.LocalFiles.unused(Ledger(context).media(id).absolutePath) command@ {
+  fun command(context: Context, id: String, action: String, schedule: Boolean = true) = synchronized(Ledger.lock) { app.mrstreamer.player.LocalFiles.unused(Ledger(context).media(id).absolutePath) command@ {
     val ledger = Ledger(context)
     val rows = ledger.read()
     val row = rows.find { it.getString("id") == id } ?: return@command
@@ -225,6 +256,6 @@ object Transfers {
       catch (_: Exception) { row.put("state", "failed").put("reason", "remove") }
       ledger.save(rows)
     }
-    kick(context)
+    if (schedule) kick(context)
   } }
 }

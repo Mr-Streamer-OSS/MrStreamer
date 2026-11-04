@@ -54,6 +54,7 @@ export interface MediaModel {
   reconcile(): void;
   admitted(attempt: string): void;
   cancelNext(): void;
+  refreshOfflineNext(): void;
   playNext(): void;
   registerOfflineNext(resolve: (path: string) => Promise<OfflineNext>): () => void;
   registerNext(resolver: NextEpisodeResolver): () => void;
@@ -206,8 +207,51 @@ export function mediaModel(
           if (result.kind === "ready")
             owner.play({ kind: "file", path: result.path, title: result.row.title });
         })
-        .catch(() => patch({ offline: { kind: "read" } }));
+        .catch(() => {
+          const current = owner.state.get();
+
+          if (
+            current.kind === "playing" &&
+            current.attempt === attempt &&
+            request === offlineRequest
+          )
+            patch({ offline: { kind: "read" } });
+        });
     } else if (next) owner.play(next.intent);
+  }
+
+  function refreshOfflineNext() {
+    const now = owner.state.get();
+
+    if (
+      now.kind !== "playing" ||
+      now.intent.kind !== "file" ||
+      now.phase !== "ended" ||
+      !offlineResolver
+    )
+      return;
+    cancelNext();
+    const request = offlineRequest;
+    const id = now.attempt;
+
+    const currentRequest = () => {
+      const current = owner.state.get();
+
+      return (
+        current.kind === "playing" &&
+        current.attempt === id &&
+        current.phase === "ended" &&
+        request === offlineRequest
+      );
+    };
+
+    void offlineResolver(now.intent.path)
+      .then((offline) => {
+        if (currentRequest()) patch({ offline });
+      })
+      .catch(() => {
+        if (currentRequest()) patch({ offline: { kind: "read" } });
+      });
   }
 
   /** Writes `value`; a failed write keeps the saved data and leaves `value` for a retry. */
@@ -281,6 +325,7 @@ export function mediaModel(
     }
 
     if (now.phase === "playing") {
+      if (ended) cancelNext();
       ended = false;
       cancelled = undefined;
     }
@@ -293,11 +338,18 @@ export function mediaModel(
 
       if (now.intent.kind === "file" && offlineResolver) {
         const id = now.attempt;
+        const request = offlineRequest;
         void offlineResolver(now.intent.path)
           .then((result) => {
             const current = owner.state.get();
 
-            if (current.kind !== "playing" || current.attempt !== id) return;
+            if (
+              current.kind !== "playing" ||
+              current.attempt !== id ||
+              current.phase !== "ended" ||
+              request !== offlineRequest
+            )
+              return;
             patch({ offline: result });
 
             if (watching && result.kind === "ready" && cancelled !== id) {
@@ -309,7 +361,17 @@ export function mediaModel(
               }, 1000);
             }
           })
-          .catch(() => patch({ offline: { kind: "read" } }));
+          .catch(() => {
+            const current = owner.state.get();
+
+            if (
+              current.kind === "playing" &&
+              current.attempt === id &&
+              current.phase === "ended" &&
+              request === offlineRequest
+            )
+              patch({ offline: { kind: "read" } });
+          });
       }
 
       if (watching && cancelled !== attempt && state.get().next) {
@@ -501,6 +563,7 @@ export function mediaModel(
       watching = visible;
 
       if (!visible) cancelNext();
+      else if (state.get().offline && state.get().offline?.kind !== "ready") refreshOfflineNext();
       void native.setWatch?.(visible);
     },
     admitted(id) {
@@ -511,6 +574,7 @@ export function mediaModel(
       void native.reconcile?.();
     },
     cancelNext,
+    refreshOfflineNext,
     playNext,
     registerOfflineNext(value) {
       offlineResolver = value;

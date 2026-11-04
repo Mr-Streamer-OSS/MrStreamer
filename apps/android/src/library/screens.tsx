@@ -2,6 +2,7 @@ import { stopSeriesDownloads } from "../downloads/series.ts";
 import {
   SeriesDialogs,
   SeriesDownloadRow,
+  SeriesDownloadScope,
   type SeriesDownloadProps,
 } from "../downloads/series-download.tsx";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
@@ -1333,11 +1334,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
         inset={beside ? 12 : 4}
       />
       {bulkProps && selectedSeason ? (
-        <SeriesDownloadRow
-          key={`${key}:${selectedSeason.number}`}
-          {...bulkProps}
-          season={selectedSeason.number}
-        />
+        <SeriesDownloadRow key={key} {...bulkProps} season={selectedSeason.number} />
       ) : null}
       {shown
         ? selectedSeason?.episodes.map((episode) => (
@@ -1356,75 +1353,77 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   ) : null;
 
   return (
-    <Screen title={title.title} pushed>
-      {beside ? (
-        <View style={{ flex: 1, flexDirection: "row" }}>
-          <ScrollView
-            style={{ width: 440, flexGrow: 0 }}
-            contentContainerStyle={{
-              paddingHorizontal: 24,
-              paddingTop: 4,
-              paddingBottom: insets.bottom + 16,
-            }}
-          >
-            {header}
-          </ScrollView>
-          <ScrollView
-            style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.hairline }}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-          >
-            {episodes}
-          </ScrollView>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
-          <View
-            style={{
-              width: "100%",
-              maxWidth: 640,
-              paddingHorizontal: width >= 600 ? 24 : 16,
-              paddingTop: 4,
-            }}
-          >
-            {header}
+    <SeriesDownloadScope key={key}>
+      <Screen title={title.title} pushed>
+        {beside ? (
+          <View style={{ flex: 1, flexDirection: "row" }}>
+            <ScrollView
+              style={{ width: 440, flexGrow: 0 }}
+              contentContainerStyle={{
+                paddingHorizontal: 24,
+                paddingTop: 4,
+                paddingBottom: insets.bottom + 16,
+              }}
+            >
+              {header}
+            </ScrollView>
+            <ScrollView
+              style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.hairline }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+            >
+              {episodes}
+            </ScrollView>
           </View>
-          {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
-        </ScrollView>
-      )}
-      <ViewingLine />
-      <SeriesDialogs />
-      <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
-        <SheetTitle title={t("Version")} />
-        <SheetScroll>
-          <View accessibilityRole="radiogroup">
-            <RadioRow
-              label={t("Automatic")}
-              height={56}
-              selected={automatic}
-              onPress={() => pick(null)}
-            />
-            {groups.flatMap((group) =>
-              group.versions.map((v, at) => (
-                <RadioRow
-                  key={ownedKey(v)}
-                  label={[
-                    group.quality,
-                    group.label,
-                    group.versions.length > 1 ? formatNumber(at + 1) : "",
-                    multiSource ? model.sourceLabel(v.subscriptionId) : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  height={56}
-                  selected={!automatic && ownedKey(v) === ownedKey(version!)}
-                  onPress={() => pick(ownedKey(v))}
-                />
-              )),
-            )}
-          </View>
-        </SheetScroll>
-      </Sheet>
-    </Screen>
+        ) : (
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+            <View
+              style={{
+                width: "100%",
+                maxWidth: 640,
+                paddingHorizontal: width >= 600 ? 24 : 16,
+                paddingTop: 4,
+              }}
+            >
+              {header}
+            </View>
+            {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
+          </ScrollView>
+        )}
+        <ViewingLine />
+        <SeriesDialogs />
+        <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
+          <SheetTitle title={t("Version")} />
+          <SheetScroll>
+            <View accessibilityRole="radiogroup">
+              <RadioRow
+                label={t("Automatic")}
+                height={56}
+                selected={automatic}
+                onPress={() => pick(null)}
+              />
+              {groups.flatMap((group) =>
+                group.versions.map((v, at) => (
+                  <RadioRow
+                    key={ownedKey(v)}
+                    label={[
+                      group.quality,
+                      group.label,
+                      group.versions.length > 1 ? formatNumber(at + 1) : "",
+                      multiSource ? model.sourceLabel(v.subscriptionId) : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    height={56}
+                    selected={!automatic && ownedKey(v) === ownedKey(version!)}
+                    onPress={() => pick(ownedKey(v))}
+                  />
+                )),
+              )}
+            </View>
+          </SheetScroll>
+        </Sheet>
+      </Screen>
+    </SeriesDownloadScope>
   );
 }
 

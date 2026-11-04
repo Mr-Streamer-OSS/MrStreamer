@@ -2,6 +2,11 @@ import { expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   playerState: { kind: "playing", intent: { kind: "file", path: "/private/copy", title: "Copy" } },
+  notification: vi.fn(async () => "granted"),
+  cacheArtwork: vi.fn(async () => {}),
+  review: vi.fn(),
+  admit: vi.fn(),
+  rows: [] as import("../src/downloads/state.ts").DownloadRow[],
   release: vi.fn(),
   command: vi.fn(),
   subscribe: vi.fn(() => vi.fn()),
@@ -11,17 +16,26 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("expo", () => ({
   requireNativeModule: () => ({
+    review: mocks.review,
+    admit: mocks.admit,
+    endReview: async () => {},
+    cacheArtwork: mocks.cacheArtwork,
     filePath: async () => "/private/copy",
     command: mocks.command,
     restore: mocks.restore,
     blockSource: mocks.blockSource,
-    snapshot: async () => JSON.stringify({ rows: [], free: 1 }),
+    snapshot: async () => JSON.stringify({ rows: mocks.rows, free: 1 }),
   }),
 }));
 
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
 
 vi.mock("react-native", () => ({
+  Platform: { OS: "android", Version: 34 },
+  PermissionsAndroid: {
+    request: mocks.notification,
+    PERMISSIONS: { POST_NOTIFICATIONS: "notifications" },
+  },
   AppState: { addEventListener: () => ({ remove: vi.fn() }), currentState: "active" },
 }));
 
@@ -88,4 +102,48 @@ it("keeps registration alive until the last lease and ignores a stale cleanup", 
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("bulk admissions request notifications and cache artwork without failing durable additions", async () => {
+  const { fixture } = await import("./library-fixture.ts");
+  const { seriesFiles } = await import("../src/downloads/series.ts");
+  const f = fixture();
+  await f.model.refresh();
+  const title = f.model.made("series").list("all")[0]!;
+  const details = await f.model.details(title);
+
+  if (details.value?.kind !== "series") throw new Error("series");
+
+  const files = seriesFiles(details.value, title, details.containers, "Source", {
+    kind: "series",
+  }).map((file) => ({ ...file, poster: "https://fixture.invalid/poster" }));
+
+  mocks.review.mockResolvedValue(
+    JSON.stringify({ token: "bulk", snapshot: { rows: [], free: 1 } }),
+  );
+  Object.assign(mocks.playerState.intent, { kind: "title", sourceId: "source" });
+  mocks.admit.mockImplementation(async (_token: string, key: string) => {
+    expect(mocks.blockSource).toHaveBeenCalledWith("source", true);
+    const file = files.find((file) => file.key === key)!;
+    mocks.rows.push({
+      ...file,
+      order: [...file.order],
+      id: key,
+      state: "queued",
+      bytes: 0,
+      total: 0,
+      reason: "",
+    });
+
+    return "added";
+  });
+  const owner = downloads();
+  const controller = owner.series();
+  const plan = await controller.plan(files);
+  expect(await controller.start(plan, false, () => null)).toMatchObject({ added: 3, failed: [] });
+  expect(mocks.notification).toHaveBeenCalledExactlyOnceWith("notifications");
+  expect(mocks.cacheArtwork).toHaveBeenCalledTimes(3);
+  expect(mocks.cacheArtwork).toHaveBeenCalledWith(files[0]!.key, "https://fixture.invalid/poster");
+  mocks.rows = [];
+  mocks.playerState.intent.kind = "file";
 });

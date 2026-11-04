@@ -20,6 +20,8 @@ export interface SeriesFile {
   readonly season: number;
   readonly episode: number;
   readonly episodeName: string;
+  readonly duration: number | null;
+  readonly poster?: string;
 }
 
 type Status = "none" | "held" | "failed" | "missing" | "changed";
@@ -39,7 +41,7 @@ export function copyStatus(row: DownloadRow | undefined): Status {
 /** Uses the iOS exact-file ordering contract rather than sorting season or episode labels. */
 export function seriesFiles(
   details: SeriesDetails,
-  version: OwnedId,
+  version: OwnedId & { readonly container?: string | null },
   containers: ReadonlyMap<string, string>,
   sourceLabel: string,
   scope: Scope,
@@ -48,12 +50,12 @@ export function seriesFiles(
   const order = all.map((ref) => ref.id);
 
   return episodesIn(details, version, scope).map((ref) => {
-    const container = containers.get(ref.id)?.trim();
+    const container = containers.get(ref.id)?.trim() || version.container?.trim();
 
     if (!container) throw new Error("container");
     const episode = details.seasons.flatMap((s) => s.episodes).find((e) => e.id === ref.id);
 
-    return {
+    const file: SeriesFile = {
       key: JSON.stringify([ref.subscriptionId, "episode", ref.id, container]),
       sourceId: ref.subscriptionId,
       sourceLabel,
@@ -67,7 +69,10 @@ export function seriesFiles(
       season: ref.season,
       episode: ref.episode,
       episodeName: episode?.title ?? "",
+      duration: episode?.duration ?? null,
     };
+
+    return details.title.posterUrl ? { ...file, poster: details.title.posterUrl } : file;
   });
 }
 
@@ -122,7 +127,7 @@ export function seriesDownloads(
 
   const owner = {
     stop(reason: NonNullable<SeriesResult["stopped"]>) {
-      stopped = reason;
+      stopped ??= reason;
     },
   };
 
@@ -215,7 +220,7 @@ export function seriesDownloads(
       /** Ends the run before what isn't queued yet when there is a `reason`. */
       const halt = (reason: SeriesResult["stopped"]) => {
         if (!reason) return false;
-        result.stopped = reason;
+        result.stopped ??= reason;
         result.unqueued = steps.length - done;
 
         return true;

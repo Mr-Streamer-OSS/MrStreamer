@@ -1,5 +1,5 @@
-import { useIsFocused } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useIsFocused, useSegments } from "expo-router";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { SeriesDetails, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -15,6 +15,7 @@ import {
   seriesBusy,
   seriesFiles,
   seriesOwner,
+  type SeriesController,
   type SeriesFile,
   type SeriesOwner,
   type SeriesPlan,
@@ -34,7 +35,7 @@ export interface SeriesDownloadProps {
   readonly version: TitleVersion;
   readonly containers: ReadonlyMap<string, string>;
   /** A season's row under the tabs; without one, the whole series' row. */
-  readonly season?: number;
+  readonly season?: number | undefined;
   /** A season's tab label: "Season 1", "Specials". */
   readonly seasonLabel: (season: number) => string;
   /** The version as its menu names it: "Full HD · English sound, Nederlands subtitles". */
@@ -94,6 +95,41 @@ interface Review {
   readonly version: string;
 }
 
+const Scope = createContext<{ season: SeriesController; series: SeriesController } | null>(null);
+
+/** Controllers belong to Details, so moving rows for tablet layout never ends a run. */
+export function SeriesDownloadScope({ children }: { children: ReactNode }) {
+  const owner = useStore(seriesOwner);
+
+  return owner ? <DownloadScope owner={owner}>{children}</DownloadScope> : children;
+}
+
+function DownloadScope({ owner, children }: { owner: SeriesOwner; children: ReactNode }) {
+  const [controllers] = useState(() => ({ season: owner.series(), series: owner.series() }));
+  const focused = useIsFocused();
+  const segments: readonly string[] = useSegments();
+  const destination = useRef(segments[1]);
+
+  const allowed =
+    focused || (segments[1] === destination.current && segments.at(-1) === "downloads");
+
+  useEffect(() => {
+    if (!allowed) {
+      void controllers.season.close();
+      void controllers.series.close();
+    }
+  }, [allowed, controllers]);
+  useEffect(
+    () => () => {
+      void controllers.season.close();
+      void controllers.series.close();
+    },
+    [controllers],
+  );
+
+  return <Scope.Provider value={controllers}>{children}</Scope.Provider>;
+}
+
 /** One bulk download row of `details` for `season`, or for the whole series without one. */
 export function SeriesDownloadRow(props: SeriesDownloadProps) {
   const owner = useStore(seriesOwner);
@@ -125,7 +161,9 @@ function BulkRow({
   reader,
   inline = false,
 }: SeriesDownloadProps & { owner: SeriesOwner }) {
-  const [controller] = useState(() => owner.series());
+  const scoped = useContext(Scope);
+  const [fallback] = useState(() => owner.series());
+  const controller = scoped ? (season === undefined ? scoped.series : scoped.season) : fallback;
   const run = useStore(controller.state);
   const busy = useStore(seriesBusy);
   const rows = useStore(owner.state).rows;
@@ -133,13 +171,21 @@ function BulkRow({
   const [review, setReview] = useState<Review | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
   // The version shown now, which a run started here must still show for each admission.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const shown = useRef(ownedKey(version));
   shown.current = ownedKey(version);
   useEffect(
     () => () => {
-      void controller.close();
+      if (!scoped) void controller.close();
     },
-    [controller],
+    [controller, scoped],
   );
 
   const label = season === undefined ? details.title.title : seasonLabel(season);
@@ -197,7 +243,7 @@ function BulkRow({
           label,
           result,
           retry:
-            result.failed.length > 0 && result.stopped !== "version"
+            mounted.current && result.failed.length > 0 && result.stopped !== "version"
               ? () => void ask(result.failed)
               : undefined,
         });
@@ -357,7 +403,7 @@ function ReviewSheet({
       </View>
       <View style={{ gap: 6, paddingHorizontal: 24, paddingTop: 4, paddingBottom: 16 }}>
         <Text style={{ ...line, color: colors.text }}>
-          {remaining + plan.missing === 0
+          {plan.held === total
             ? t("All {count} episodes are saved or queued.", { count: total })
             : series && breakdown.length > 1
               ? t("{episodes} in {seasons} seasons.", {

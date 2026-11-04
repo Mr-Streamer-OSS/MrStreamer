@@ -405,6 +405,22 @@ it("restores and persists subtitles only for the same checked transfer and intac
     expect((await retainedFileSubtitle({ id: "copy", key }, "/copy"))?.subtitle?.language).toBe(
       "nl",
     );
+    state.set({
+      ...playing,
+      attempt: "stream",
+      intent: {
+        kind: "title",
+        sourceId: "source",
+        media: "movie",
+        id: "kept-copy",
+        container: "mp4",
+        title: "Film",
+      },
+    });
+    await vi.waitFor(() => expect(model.state.get().title?.fileBinding).toBeUndefined());
+    expect(await model.shift(1)).toBe(true);
+    expect(JSON.parse(fixture.files.get(name)!).fileBinding).toBeUndefined();
+    expect(await retainedFileSubtitle({ id: "copy", key }, "/copy")).toBeNull();
   } finally {
     search.mockRestore();
     download.mockRestore();

@@ -140,6 +140,7 @@ const english = {
   "Open Downloads": "Open Downloads",
   // Offline Next at the end of a downloaded episode.
   "{episode} isn't on this device": "{episode} isn't on this device",
+  "{episode} download is paused": "{episode} download is paused",
   "{episode} is still downloading": "{episode} is still downloading",
   "The next episode": "The next episode",
   "Download it to go on.": "Download it to go on.",
@@ -286,6 +287,7 @@ const dutch = {
   "Retry failed": "Mislukte opnieuw proberen",
   "Open Downloads": "Downloads openen",
   "{episode} isn't on this device": "{episode} staat niet op dit apparaat",
+  "{episode} download is paused": "Download van {episode} is gepauzeerd",
   "{episode} is still downloading": "{episode} wordt nog gedownload",
   "The next episode": "De volgende aflevering",
   "Download it to go on.": "Download hem om verder te kijken.",

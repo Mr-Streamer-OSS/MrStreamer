@@ -1,7 +1,7 @@
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
 import { offlineNextNotice, type OfflineNext } from "../downloads/offline-next.ts";
 import { t as downloadT } from "../downloads/copy.ts";
-import { askReplace, type ReplaceOwner } from "../downloads/replace.ts";
+import { askReplace } from "../downloads/replace.ts";
 import { ReplaceDialog } from "../downloads/replace-dialog.tsx";
 import { useOpenShared } from "../navigation/open.ts";
 import { TextButton, RED } from "../live/chrome.tsx";
@@ -305,7 +305,11 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
 /** The file end never offers a provider fallback or skips an unavailable next copy. */
 function OfflineEnd({ next, remaining }: { next: OfflineNext | null; remaining: number | null }) {
   const open = useOpenShared();
-  const [owner, setOwner] = useState<ReplaceOwner | null>(null);
+
+  const [owner, setOwner] = useState<ReturnType<
+    typeof import("../downloads/runtime.ts").downloads
+  > | null>(null);
+
   const [kept, setKept] = useState<{ next: OfflineNext; language: string } | null>(null);
   useEffect(() => {
     let active = true;
@@ -328,9 +332,21 @@ function OfflineEnd({ next, remaining }: { next: OfflineNext | null; remaining: 
       active = false;
     };
   }, [next]);
+  useEffect(() => {
+    if (!owner || next?.kind === "ready") return;
+    const refresh = () => player.media.refreshOfflineNext();
+    refresh();
+
+    return owner.state.subscribe(refresh);
+  }, [owner, next?.kind]);
   const notice = next ? offlineNextNotice(next) : null;
   const ready = next?.kind === "ready";
-  const code = ready ? `S${next.row.season} E${next.row.episode}` : null;
+
+  const code = ready
+    ? next.row.season !== undefined && next.row.episode !== undefined
+      ? `S${next.row.season} E${next.row.episode}`
+      : next.row.episodeName || next.row.title
+    : null;
 
   const replace = async () => {
     if (notice?.action.kind !== "replace") return;

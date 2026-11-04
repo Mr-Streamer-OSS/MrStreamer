@@ -76,6 +76,13 @@ class TransferBridgeTest {
     .put("mediaId", "episode").put("container", "mp4").put("title", "Series")
     .put("key", org.json.JSONArray(listOf("source", "episode", "episode", "mp4")).toString())
 
+  @Test fun bulkReviewAcceptsJsonIdentityWithUnescapedSlashes() {
+    val request = request().put("sourceId", "folder/source")
+      .put("key", "[\"folder/source\",\"episode\",\"episode\",\"mp4\"]")
+    val token = JSONObject(Transfers.review(context, org.json.JSONArray(listOf(request)).toString())).getString("token")
+    Transfers.endReview(token)
+  }
+
   @Test fun bulkAdmissionChecksDurableDuplicatesAndCredentialRevocation() {
     val request = request()
     val key = request.getString("key")
@@ -102,6 +109,7 @@ class TransferBridgeTest {
     assertEquals("skipped", Transfers.admit(context, token, key, "missing"))
     assertTrue(ledger.media(id).exists())
     assertEquals(id, ledger.read().single().getString("id"))
+    assertEquals("complete", ledger.read().single().getString("state"))
     Transfers.endReview(token)
   }
 

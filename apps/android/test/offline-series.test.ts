@@ -170,3 +170,59 @@ it("says why offline Next stopped, never calling a copy still downloading missin
     setLanguage(resolveLanguage("en-US", []));
   }
 });
+
+it("prefers an intact next copy over an old failed container and names paused work truthfully", async () => {
+  const old = { ...row, id: "old", mediaId: "second", state: "failed" as const, reason: "missing" };
+  const intact = { ...row, id: "new", mediaId: "second", container: "mkv" };
+
+  const port = {
+    snapshot: async () => JSON.stringify({ rows: [old, intact], free: 1 }),
+    path: async () => "/new",
+  };
+
+  expect(await offlineNext(port, row)).toMatchObject({ kind: "ready", row: intact });
+  expect(
+    offlineNextNotice({ kind: "downloading", row: { ...intact, state: "paused" } })?.lead,
+  ).toContain("paused");
+});
+
+it("checks every complete container for the same immediate episode", async () => {
+  let rows: DownloadRow[] = [
+    { ...row, id: "stale", mediaId: "second" },
+    { ...row, id: "intact", mediaId: "second", container: "mkv" },
+  ];
+
+  const port = {
+    snapshot: async () => JSON.stringify({ rows, free: 1 }),
+    path: async (id: string) => {
+      if (id === "stale") {
+        rows = rows.map((r) => (r.id === id ? { ...r, state: "failed", reason: "missing" } : r));
+        throw new Error("missing");
+      }
+
+      return "/intact";
+    },
+  };
+
+  expect(await offlineNext(port, row)).toMatchObject({ kind: "ready", path: "/intact" });
+});
+
+it("uses the selected version container and retains episode duration for bulk", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const title = f.model.made("series").list("all")[0]!;
+  const details = await f.model.details(title);
+
+  if (details.value?.kind !== "series") throw new Error("series");
+
+  const files = seriesFiles(details.value, { ...title, container: "mkv" }, new Map(), "Source", {
+    kind: "series",
+  });
+
+  expect(files).toHaveLength(3);
+  expect(files.every((file) => file.container === "mkv")).toBe(true);
+  expect(files[0]!.duration).toBe(
+    details.value.seasons.flatMap((s) => s.episodes).find((e) => e.id === files[0]!.mediaId)
+      ?.duration,
+  );
+});

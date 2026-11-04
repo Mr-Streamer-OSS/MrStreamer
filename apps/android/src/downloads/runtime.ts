@@ -65,6 +65,42 @@ function createRuntime() {
     }, identity(media));
   }
 
+  async function prepareAdmission() {
+    if (Platform.OS === "android" && Number(Platform.Version) >= 33 && !askedNotifications) {
+      askedNotifications = true;
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    }
+
+    await syncPlayer();
+  }
+
+  async function cacheAdmission(key: string) {
+    // Artwork failure never changes an already durable admission into a failed addition.
+    try {
+      const parsed = Snapshot(JSON.parse(await native.snapshot()));
+
+      if (parsed instanceof type.errors) return;
+      const row = parsed.rows.find((row) => row.key === key);
+
+      if (row?.poster) await native.cacheArtwork(row.id, row.poster);
+    } catch {
+      /* Artwork is optional. */
+    }
+  }
+
+  const admissionPort = {
+    review: (files: string) => native.review(files),
+    endReview: (token: string) => native.endReview(token),
+    async admit(token: string, key: string, expected: string) {
+      await prepareAdmission();
+      const outcome = await native.admit(token, key, expected);
+
+      if (outcome === "added" || outcome === "replaced") await cacheAdmission(key);
+
+      return outcome;
+    },
+  };
+
   async function enqueue({ media }: DownloadIntent) {
     const title = library().title(media.kind === "movie" ? "movie" : "series", media.titleKey);
 
@@ -96,12 +132,7 @@ function createRuntime() {
 
     if (!source) throw new Error("source");
 
-    if (Platform.OS === "android" && Number(Platform.Version) >= 33 && !askedNotifications) {
-      askedNotifications = true;
-      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    }
-
-    await syncPlayer();
+    await prepareAdmission();
 
     const series = details.value?.kind === "series" ? details.value : undefined;
     const seriesKey = series?.title?.key;
@@ -224,7 +255,7 @@ function createRuntime() {
     prompt,
     series() {
       return seriesDownloads(
-        native,
+        admissionPort,
         async (row) => (await fileInUse(row.id)) === null,
         () => model.refresh(),
       );
@@ -351,7 +382,10 @@ function createRuntime() {
       return lease(screen);
     },
     async replace(row: DownloadRow) {
-      const review: unknown = JSON.parse(await native.review(JSON.stringify([row])));
+      const review: unknown = JSON.parse(
+        await native.review(JSON.stringify([{ ...row, artwork: undefined }])),
+      );
+
       const parsed = type({ token: "string" })(review);
 
       if (parsed instanceof type.errors) throw new Error("review");
@@ -361,7 +395,7 @@ function createRuntime() {
 
         if (inUse) return inUse;
 
-        return await native.admit(
+        return await admissionPort.admit(
           parsed.token,
           row.key,
           row.reason === "file-changed" ? "changed" : "missing",

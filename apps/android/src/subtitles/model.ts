@@ -119,10 +119,13 @@ export function subtitleModel(options: {
     }
 
     try {
-      value =
-        title.fileBinding && value.fileBinding !== title.fileBinding
-          ? { ...value, fileBinding: title.fileBinding }
-          : value;
+      if (title.fileBinding && value.fileBinding !== title.fileBinding)
+        value = { ...value, fileBinding: title.fileBinding };
+      else if (!title.fileBinding && value.fileBinding) {
+        const { fileBinding: _previousBinding, ...record } = value;
+        value = record;
+      }
+
       files.write(title.key, value);
       retrySave = undefined;
       patch({ saved: value, error: null });
@@ -198,8 +201,12 @@ export function subtitleModel(options: {
       if (parsed instanceof type.errors) throw new Error("read");
       unread = false;
 
-      const retained =
-        title.fileBinding && parsed?.fileBinding !== title.fileBinding ? null : parsed;
+      let retained = title.fileBinding && parsed?.fileBinding !== title.fileBinding ? null : parsed;
+
+      if (!title.fileBinding && retained?.fileBinding) {
+        const { fileBinding: _previousBinding, ...record } = retained;
+        retained = record;
+      }
 
       patch({ saved: retained, error: null });
 

@@ -27,39 +27,55 @@ export async function offlineNext(
 
     if (parsed instanceof type.errors) return { kind: "read" };
 
-    const row = parsed.rows.find(
+    const matches = parsed.rows.filter(
       (r) => r.sourceId === current.sourceId && r.seriesId === current.seriesId && r.mediaId === id,
     );
 
+    let unavailable: OfflineNext | undefined;
+
+    for (const row of matches.filter((row) => row.state === "complete")) {
+      try {
+        return { kind: "ready", row, path: await port.path(row.id) };
+      } catch {
+        const fresh = Snapshot(JSON.parse(await port.snapshot()));
+
+        if (fresh instanceof type.errors) return { kind: "read" };
+        const checked = fresh.rows.find((r) => r.id === row.id);
+        unavailable ??= {
+          kind:
+            checked?.reason === "file-changed"
+              ? "changed"
+              : checked?.reason === "missing"
+                ? "missing"
+                : "read",
+          row: checked ?? row,
+        };
+      }
+    }
+
+    const active = matches.find(
+      (row) => row.state === "queued" || row.state === "running" || row.state === "paused",
+    );
+
+    if (active) return { kind: "downloading", row: active };
+
+    if (unavailable) return unavailable;
+
+    const row =
+      matches.find((row) => row.reason === "file-changed" || row.reason === "missing") ??
+      matches[0];
+
     if (!row) return { kind: "not-saved" };
 
-    if (row.state === "queued" || row.state === "running" || row.state === "paused")
-      return { kind: "downloading", row };
-
-    if (row.reason === "file-changed") return { kind: "changed", row };
-
-    if (row.reason === "missing") return { kind: "missing", row };
-
-    if (row.state !== "complete") return { kind: "not-saved", row };
-
-    try {
-      return { kind: "ready", row, path: await port.path(row.id) };
-    } catch {
-      const fresh = Snapshot(JSON.parse(await port.snapshot()));
-
-      if (fresh instanceof type.errors) return { kind: "read" };
-      const checked = fresh.rows.find((r) => r.id === row.id);
-
-      return {
-        kind:
-          checked?.reason === "file-changed"
-            ? "changed"
-            : checked?.reason === "missing"
-              ? "missing"
-              : "read",
-        row: checked ?? row,
-      };
-    }
+    return {
+      kind:
+        row.reason === "file-changed"
+          ? "changed"
+          : row.reason === "missing"
+            ? "missing"
+            : "not-saved",
+      row,
+    };
   } catch {
     return { kind: "read" };
   }
@@ -98,7 +114,12 @@ export function offlineNextNotice(next: OfflineNext, episode?: string): OfflineN
   switch (next.kind) {
     case "downloading":
       return {
-        lead: t("{episode} is still downloading", { episode: code }),
+        lead: t(
+          next.row?.state === "paused"
+            ? "{episode} download is paused"
+            : "{episode} is still downloading",
+          { episode: code },
+        ),
         status: null,
         detail: next.row ? rowStatus(next.row, false).text : null,
         action: downloads,
