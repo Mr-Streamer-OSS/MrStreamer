@@ -877,3 +877,10 @@ it.each(["home", "(live)", "movies", "series"])("opens Guides on the %s stack", 
     `push ${destination === "(live)" ? "" : `/${destination}`}/guide/guides`,
   );
 });
+
+it("opens the Dutch Guides row", () => {
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Gidsen");
+  expect(scenario.asked).toContain("push /guide/guides");
+});

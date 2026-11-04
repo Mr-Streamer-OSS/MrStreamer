@@ -9,6 +9,8 @@ const ui = vi.hoisted(() => ({
   accessibilityFocus: vi.fn(),
   params: { query: "news", country: "" },
   push: vi.fn(),
+  play: vi.fn(),
+  openShared: vi.fn(),
   back: vi.fn(),
   input: (_s: string) => {},
   backHandler: (): boolean => false,
@@ -20,6 +22,8 @@ const ui = vi.hoisted(() => ({
   search: vi.fn(),
   swipe: (_dx: number, _dy: number) => {},
 }));
+
+vi.mock("../src/player/instance.ts", () => ({ player: { play: ui.play } }));
 
 vi.mock("expo", () => ({ requireNativeModule: vi.fn() }));
 
@@ -42,7 +46,7 @@ vi.mock("expo-router", () => ({
 
 vi.mock("../src/navigation/open.ts", () => ({
   destinationIn: () => "(live)",
-  useOpenShared: () => vi.fn(),
+  useOpenShared: () => ui.openShared,
 }));
 
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
@@ -61,16 +65,19 @@ vi.mock("../src/guide/ui.tsx", () => ({
     accessibilityLabel,
     accessibilityState,
     style,
+    disabled,
   }: {
     children: ReactNode;
     onPress: () => void;
     accessibilityLabel: string;
     accessibilityState?: { selected?: boolean };
+    disabled?: boolean;
     style?: unknown;
   }) =>
     h(
       "button",
       {
+        disabled,
         onClick: onPress,
         "aria-label": accessibilityLabel,
         "aria-selected": accessibilityState?.selected,

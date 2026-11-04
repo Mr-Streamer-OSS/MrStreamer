@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { GuideSearchScreen } from "../src/guide/search.tsx";
 
 it("caps current and future results at twenty, shows partial failure, and opens the detail token", async () => {
+  ui.play.mockClear();
   const now = Date.now();
   ui.search.mockResolvedValue({
     unsearched: true,
@@ -36,6 +37,9 @@ it("caps current and future results at twenty, shows partial failure, and opens 
     expect(screen.container.textContent).not.toContain("Ended");
     await screen.click(results[0]!.getAttribute("aria-label")!);
     expect(ui.push).toHaveBeenLastCalledWith(expect.stringContaining("detail=token0"));
+    expect(ui.play).not.toHaveBeenCalled();
+    await screen.click("Guides");
+    expect(ui.push).toHaveBeenLastCalledWith("/guide/guides");
     expect(screen.container.querySelector("input")?.value).toBe("news");
     ui.search.mockResolvedValue({ unsearched: false, found: [] });
     await screen.click("Retry");
@@ -271,5 +275,85 @@ it("pauses timed refills under a pushed screen and refills on return", async () 
     await screen.close();
     ui.focused = true;
     vi.useRealTimers();
+  }
+});
+
+it("orders unsorted results now first and labels a future day", async () => {
+  const now = Date.now();
+
+  const found = [
+    {
+      key: "source:0",
+      programme: {
+        start: now + 86400000,
+        stop: now + 90000000,
+        title: "Future show",
+        detail: "t",
+      },
+    },
+    {
+      key: "source:0",
+      programme: { start: now + 60000, stop: now + 3600000, title: "Soon", detail: "s" },
+    },
+    {
+      key: "source:0",
+      programme: { start: now - 60000, stop: now + 60000, title: "Current", detail: "c" },
+    },
+  ];
+
+  ui.search.mockResolvedValue({ unsearched: false, found });
+  const screen = await mount(h(GuideSearchScreen));
+
+  try {
+    const labels = [...screen.container.querySelectorAll("button")].flatMap((b) => {
+      const label = b.getAttribute("aria-label");
+
+      return label?.includes(",") ? [label] : [];
+    });
+
+    expect(labels.map((l) => l?.split(",")[0])).toEqual(["Current", "Soon", "Future show"]);
+    expect(labels[2]).toContain("Tomorrow");
+  } finally {
+    await screen.close();
+  }
+});
+
+it("ignores an older response after a newer query", async () => {
+  const now = Date.now();
+
+  type Result = {
+    unsearched: boolean;
+    found: {
+      key: string;
+      programme: { start: number; stop: number; title: string; detail: string };
+    }[];
+  };
+
+  let finish!: (result: Result) => void;
+  ui.search.mockImplementationOnce(
+    () =>
+      new Promise<Result>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const screen = await mount(h(GuideSearchScreen));
+
+  try {
+    ui.search.mockResolvedValue({
+      unsearched: false,
+      found: [
+        {
+          key: "source:0",
+          programme: { start: now, stop: now + 3600000, title: "New result", detail: "new" },
+        },
+      ],
+    });
+    await act(async () => ui.input("new"));
+    expect(screen.container.textContent).toContain("New result");
+    await act(async () => finish({ unsearched: false, found: [] }));
+    expect(screen.container.textContent).toContain("New result");
+  } finally {
+    await screen.close();
+    ui.params.query = "news";
   }
 });

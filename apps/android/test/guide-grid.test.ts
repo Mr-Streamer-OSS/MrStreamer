@@ -66,6 +66,8 @@ it("translates guide browsing and search copy into Dutch", () => {
     for (const key of [
       "Guide",
       "Earlier",
+      "Programmes",
+      "Some channels still loading…",
       "Now",
       "More in Schedule",
       "Nothing in this window",
@@ -77,6 +79,7 @@ it("translates guide browsing and search copy into Dutch", () => {
       "Retry",
     ] as const)
       expect(t(key)).not.toBe(key);
+    expect(t("Later")).toBe("Later");
     expect(t("Schedule for {channel}", { channel: "News" })).toBe("Zendschema voor News");
     expect(t('Nothing named "{query}"', { query: "news" })).toBe('Niets met de naam "news"');
   } finally {
@@ -411,6 +414,7 @@ it("resets navigation context when the provider set changes", async () => {
 });
 
 it("ignores a bound swipe while following now", async () => {
+  setLanguage({ locale: "en-US", formats: "nl-NL" });
   vi.useFakeTimers();
   const at = new Date(2026, 9, 24, 0).getTime();
   vi.setSystemTime(at);
@@ -421,9 +425,147 @@ it("ignores a bound swipe while following now", async () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2 * 3600000);
     });
-    expect(screen.container.textContent).toContain("2:00");
+    expect(
+      [...screen.container.querySelectorAll("span")].some((node) => node.textContent === "02:00"),
+    ).toBe(true);
   } finally {
     await screen.close();
     vi.useRealTimers();
+    setLanguage({ locale: "en-US", formats: "en-US" });
+  }
+});
+
+it("moves Earlier and Previous day back across DST and disables both day edges", async () => {
+  vi.stubEnv("TZ", "Europe/Brussels");
+  setLanguage({ locale: "en-US", formats: "nl-NL" });
+  const clock = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 9, 25, 12).getTime());
+  const screen = await mount(h(GuideGrid));
+
+  const button = (label: string) =>
+    [...screen.container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === label,
+    )!;
+
+  try {
+    await screen.click("Later");
+    await screen.click("Previous day");
+    expect(ui.schedule.mock.calls.at(-1)?.[1]).toEqual(localDay(Date.now(), -1));
+    await screen.click("Earlier");
+    expect(
+      [...screen.container.querySelectorAll("span")].some((n) => n.textContent === "12:00"),
+    ).toBe(true);
+
+    for (let i = 0; i < 50; i++) await screen.click("Earlier");
+    expect(button("Earlier").disabled).toBe(true);
+    expect(button("Later").disabled).toBe(false);
+
+    for (let i = 0; i < 50; i++) await screen.click("Later");
+    expect(button("Later").disabled).toBe(true);
+    expect(button("Earlier").disabled).toBe(false);
+  } finally {
+    await screen.close();
+    clock.mockRestore();
+    vi.unstubAllEnvs();
+    setLanguage({ locale: "en-US", formats: "en-US" });
+  }
+});
+
+it("routes grid browsing without playback", async () => {
+  const now = Date.now();
+  ui.play.mockClear();
+  ui.schedule.mockResolvedValue({
+    programmes: [{ start: now, stop: now + 60000, title: "Browse only", detail: "browse" }],
+    cursor: "more",
+  });
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    const cell = [...screen.container.querySelectorAll("button")].find((b) =>
+      b.getAttribute("aria-label")?.includes(", Browse only,"),
+    )!;
+
+    await screen.click(cell.getAttribute("aria-label")!);
+    expect(ui.push).toHaveBeenLastCalledWith(
+      expect.stringContaining("/guide/programme?source=source&channel=0&start="),
+    );
+    await screen.click("Schedule for Channel 0");
+    expect(ui.push).toHaveBeenLastCalledWith(
+      `/guide/schedule?source=source&channel=0&day=${localDay(now).from}`,
+    );
+    await screen.click("Next day");
+    await screen.click("More in Schedule");
+    expect(ui.push).toHaveBeenLastCalledWith(
+      `/guide/schedule?source=source&channel=0&day=${localDay(now, 1).from}`,
+    );
+    await screen.click("Search programmes");
+    expect(ui.push).toHaveBeenLastCalledWith("/guide/search");
+    expect(ui.play).not.toHaveBeenCalled();
+  } finally {
+    await screen.close();
+  }
+});
+
+it("opens Provider settings from the unavailable banner", async () => {
+  ui.status.availability = "none";
+  const screen = await mount(h(GuideGrid));
+
+  try {
+    await screen.click("Provider settings");
+    expect(ui.openShared).toHaveBeenLastCalledWith("settings");
+  } finally {
+    await screen.close();
+    ui.status.availability = "available";
+  }
+});
+
+it.each([
+  [400, 1, 88, 60],
+  [900, 1, 74, 30],
+  [400, 2, 117.33333333333333, 80],
+])("starts and restores Now at %s dp and %s text", async (width, fontScale, left, cellWidth) => {
+  const now = new Date(2026, 9, 24, 12, 7).getTime();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  ui.dimensions = { width, fontScale };
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: `window-${width}-${fontScale}`,
+        label: "Window",
+        kind: "m3u",
+        channels: { kind: "ready", rows: [] },
+      },
+    ],
+  });
+  ui.schedule.mockResolvedValue({
+    programmes: [{ start: now, stop: now + 15 * 60000, title: "Window probe", detail: "probe" }],
+    cursor: null,
+  });
+  const screen = await mount(h(GuideGrid), false);
+
+  const cell = () =>
+    [...screen.container.querySelectorAll("button")].find((b) =>
+      b.getAttribute("aria-label")?.includes("Window probe"),
+    );
+
+  const geometry = () => {
+    expect(JSON.parse(cell()!.getAttribute("data-style")!)).toMatchObject({
+      left: expect.closeTo(left),
+      width: expect.closeTo(cellWidth),
+    });
+  };
+
+  try {
+    geometry();
+    await screen.click("Later");
+    expect(cell()?.getAttribute("data-style")).not.toContain(`"left":${left},`);
+    await screen.click("Now");
+    geometry();
+  } finally {
+    await screen.close();
+    sources.state.set({ kind: "ready", sources: [] });
+    clock.mockRestore();
+    ui.dimensions = { width: 400, fontScale: 1 };
   }
 });
