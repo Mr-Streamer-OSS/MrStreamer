@@ -1,5 +1,5 @@
 import { Window, type HTMLElement } from "happy-dom";
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode, useSyncExternalStore } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Json } from "@mrstreamer/contracts/json";
 import { libraryModel, type LibraryModel } from "../src/library/model.ts";
@@ -17,6 +17,8 @@ const scenario = vi.hoisted(() => ({
   refused: false,
   params: {} as Record<string, string>,
   opened: [] as Href[],
+  width: 412,
+  guideRevision: 0,
 }));
 
 vi.mock("expo-router", () => ({
@@ -66,7 +68,15 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
 
 vi.mock("../src/library/runtime.ts", () => ({
   library: () => scenario.model!,
-  useLibraryModel: (injected?: LibraryModel) => injected ?? scenario.model!,
+  useLibraryModel: (injected?: LibraryModel) => {
+    const active = injected ?? scenario.model!;
+    useSyncExternalStore(
+      active.metadata?.subscribe ?? (() => () => {}),
+      active.metadata?.revision ?? (() => 0),
+    );
+
+    return active;
+  },
 }));
 
 vi.mock("../src/live/runtime.ts", async () => {
@@ -117,7 +127,10 @@ vi.mock("../src/player/instance.ts", async () => {
 
 vi.mock("../src/player/surface.ts", () => ({ PlayerSurface: () => null }));
 
-vi.mock("../src/guide/hooks.ts", () => ({ useGuideStart: () => {}, useListingRevision: () => 0 }));
+vi.mock("../src/guide/hooks.ts", () => ({
+  useGuideStart: () => {},
+  useListingRevision: () => scenario.guideRevision,
+}));
 
 vi.mock("../src/guide/guide.ts", () => ({ guide: { listings: async () => new Map() } }));
 
@@ -149,6 +162,7 @@ vi.mock("react-native", async () => {
   const { createElement: h } = await import("react");
 
   interface Props {
+    style?: object;
     children?: ReactNode;
     accessibilityLabel?: string;
     accessibilityRole?: string;
@@ -164,6 +178,7 @@ vi.mock("react-native", async () => {
     h(
       tag,
       {
+        style: p.style,
         "aria-label": p.accessibilityLabel,
         role: p.accessibilityRole,
         "data-actions": p.accessibilityActions?.map((a) => a.label).join("|"),
@@ -186,7 +201,7 @@ vi.mock("react-native", async () => {
     FlatList: () => null,
     TextInput: () => null,
     Alert: { alert: () => {} },
-    useWindowDimensions: () => ({ width: 412, height: 900, fontScale: 1 }),
+    useWindowDimensions: () => ({ width: scenario.width, height: 900, fontScale: 1 }),
     AccessibilityInfo: { sendAccessibilityEvent: () => {} },
     BackHandler: { addEventListener: () => ({ remove: () => {} }) },
   };
@@ -299,6 +314,8 @@ afterEach(async () => {
   stop?.();
   await viewing.dispose();
   scenario.refused = false;
+  scenario.width = 412;
+  scenario.guideRevision = 0;
   scenario.params = {};
   scenario.opened = [];
   viewingFailure.set(null);
@@ -515,11 +532,21 @@ it.each([false, true])(
   },
 );
 
-it("opens a supported Movies tab for recently added provider films", async () => {
+it("opens All for the fallback shelf in the All tab's default order", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const { homeModel } = await import("../src/home/model.ts");
+  const model = scenario.model!;
+  const home = homeModel(viewing.state.get(), sources.state.get(), model, undefined);
+  expect(home.movies).toEqual(
+    model
+      .made("movie")
+      .list("all", "added")
+      .map((title) => ({ ...title, rating: null })),
+  );
   const shown = show(createElement(HomeScreen));
   await settle();
   await press(shown, "Movies");
-  expect(scenario.opened.at(-1)).toEqual({ pathname: "/movies", params: { tab: "new" } });
+  expect(scenario.opened.at(-1)).toEqual({ pathname: "/movies", params: { tab: "all" } });
 });
 
 it("does not describe failed viewing reads as an empty Watchlist", async () => {
@@ -586,26 +613,30 @@ it("shows Play and retry when the Stage preview fails, ending only its handle", 
   await viewing.recordWatch(intent);
   const end = vi.fn(async () => {});
   const preview = vi.spyOn(player, "preview").mockReturnValue({ end, attempt: "preview" });
-  const shown = show(createElement(HomeScreen));
-  await settle();
-  act(() => {
-    player.previewState.set({
-      kind: "previewing",
-      attempt: "preview",
-      intent,
-      phase: "failed",
-      positionMs: 0,
+
+  try {
+    const shown = show(createElement(HomeScreen));
+    await settle();
+    act(() => {
+      player.previewState.set({
+        kind: "previewing",
+        attempt: "preview",
+        intent,
+        phase: "failed",
+        positionMs: 0,
+      });
     });
-  });
-  await settle();
-  expect(has(shown, "Play Harbour HD")).toBe(true);
-  expect(shown.textContent).not.toContain("Muted");
-  expect(shown.textContent).toContain("Preview couldn't start.");
-  expect(end).toHaveBeenCalledTimes(1);
-  await press(shown, "Try again");
-  expect(preview).toHaveBeenCalledTimes(2);
-  act(() => player.previewState.set({ kind: "idle" }));
-  preview.mockRestore();
+    await settle();
+    expect(has(shown, "Play Harbour HD")).toBe(true);
+    expect(shown.textContent).not.toContain("Muted");
+    expect(shown.textContent).toContain("Preview couldn't start.");
+    expect(end).toHaveBeenCalledTimes(1);
+    await press(shown, "Try again");
+    expect(preview).toHaveBeenCalledTimes(2);
+  } finally {
+    act(() => player.previewState.set({ kind: "idle" }));
+    preview.mockRestore();
+  }
 });
 
 it("hides episode mark actions when saved marks could not be read and offers retry", async () => {
@@ -613,10 +644,8 @@ it("hides episode mark actions when saved marks could not be read and offers ret
   scenario.params = { kind: "series", title: series.key, season: "1" };
   viewing.state.set({ ...viewing.state.get(), kind: "failed" });
   const shown = show(createElement(DetailsScreen, { model: scenario.model! }));
-  await settle();
-  await settle();
-  expect(find(shown, /^1\. Episode 1/).getAttribute("data-actions")).toBe("");
-  expect(shown.textContent).toContain("Couldn't read viewing history");
+  await expect.poll(() => shown.textContent).toContain("Couldn't read viewing history");
+  await expect.poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions")).toBe("");
   await press(shown, "Try again");
   await expect
     .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
@@ -666,10 +695,182 @@ it("shows the Stage programme even when its channel is beyond the first twenty O
     });
     await viewing.recordWatch({ sourceId: "source", channelId: "25" });
     const shown = show(createElement(HomeScreen));
-    await settle();
-    expect(shown.textContent).toContain("Programme source:25");
+    await expect.poll(() => shown.textContent).toContain("Programme source:25");
   } finally {
     read.mockRestore();
     act(() => sources.state.set(before));
+  }
+});
+
+it("refreshes Home recommendations when metadata arrives after first render", async () => {
+  const { store } = await import("../src/platform/store.ts");
+  const signal = store(0);
+  const { source } = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [{ ...source, reader: source }],
+    metadata: {
+      revision: signal.get,
+      subscribe: signal.subscribe,
+      about: async () => null,
+      facts: {
+        get: () =>
+          signal.get()
+            ? {
+                popularity: 100,
+                language: "en",
+                genres: [],
+                rating: 8,
+                votes: 200,
+                collection: null,
+                backdrop: null,
+              }
+            : null,
+        name: () => null,
+        services: () => [],
+      },
+    },
+  });
+
+  await model.refresh();
+  scenario.model = model;
+  const shown = show(createElement(HomeScreen));
+  expect(headers(shown)).toContain("Movies");
+  act(() => signal.set(1));
+  expect(headers(shown)).toContain("Movies for you");
+});
+
+it("keeps Watchlist loading until provider accounts restore", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+
+  try {
+    sources.state.set({ kind: "restoring" });
+    const shown = show(createElement(HomeScreen));
+    expect(has(shown, "Watchlist, 0")).toBe(false);
+    expect(shown.textContent).not.toContain("Nothing saved yet.");
+    act(() => root?.render(createElement(WatchlistScreen)));
+    expect(shown.textContent).not.toContain("0 saved");
+    expect(shown.textContent).not.toContain("Nothing saved yet.");
+  } finally {
+    act(() => sources.state.set(before));
+  }
+});
+
+it("clears a refused episode notice when the same action is repeated successfully", async () => {
+  const series = scenario.model!.made("series").list("all", "title")[0]!;
+  scenario.params = { kind: "series", title: series.key, season: "1" };
+  const shown = show(createElement(DetailsScreen, { model: scenario.model! }));
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark watched");
+
+  const mark = () =>
+    act(() =>
+      find(shown, /^1\. Episode 1/).dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "mark", bubbles: true }),
+      ),
+    );
+
+  scenario.refused = true;
+  mark();
+  await expect.poll(() => viewingFailure.get()?.kind).toBe("episode");
+  scenario.refused = false;
+  mark();
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark unwatched");
+  expect(viewingFailure.get()).toBe(null);
+  expect(shown.textContent).not.toContain("Nothing changed");
+});
+
+it("drops an ended programme when the next listings refresh fails", async () => {
+  const { guide } = await import("../src/guide/guide.ts");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+
+  const read = vi.spyOn(guide, "listings").mockResolvedValue(
+    new Map([
+      [
+        "source:1",
+        {
+          now: { title: "Ended programme", start: 0, stop: 2000, description: null },
+          next: null,
+        },
+      ],
+    ]),
+  );
+
+  try {
+    const shown = show(createElement(HomeScreen));
+    await expect.poll(() => shown.textContent).toContain("Ended programme");
+    clock.mockReturnValue(3000);
+    read.mockRejectedValue(new Error("offline"));
+    scenario.guideRevision++;
+    act(() => root?.render(createElement(HomeScreen)));
+    await expect.poll(() => read.mock.calls.length).toBeGreaterThan(1);
+    expect(shown.textContent).not.toContain("Ended programme");
+  } finally {
+    read.mockRestore();
+    clock.mockRestore();
+  }
+});
+
+it("keeps the tablet Stage loading shape at the surface aspect ratio", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+
+  try {
+    scenario.width = 1200;
+    sources.state.set({ kind: "restoring" });
+    const shown = show(createElement(HomeScreen));
+    expect(
+      Array.from(shown.querySelectorAll("div")).some(
+        (node) =>
+          Math.abs(parseFloat(node.style.getPropertyValue("aspect-ratio")) - 16 / 9) < 0.001,
+      ),
+    ).toBe(true);
+  } finally {
+    act(() => sources.state.set(before));
+  }
+});
+
+it("leaves newer playback visible when an older Home Resume finishes", async () => {
+  const played = await watched(0, 300);
+  const { player } = await import("../src/player/instance.ts");
+  const model = scenario.model!;
+  const details = model.details.bind(model);
+
+  const spy = vi.spyOn(model, "details").mockImplementation(async (request) => {
+    player.state.set({
+      kind: "playing",
+      phase: "playing",
+      positionMs: 0,
+      durationMs: null,
+      bufferedMs: 0,
+      live: true,
+      seekable: false,
+      speed: 1,
+      tracks: [],
+      attempt: "new-play",
+      intent: { kind: "live", sourceId: "source", channelId: "1", title: "Harbour HD" },
+      failure: null,
+    });
+
+    return details(request);
+  });
+
+  const play = vi.fn();
+  unregister.push(libraryIntents.register({ play }));
+
+  try {
+    const shown = show(createElement(HomeScreen));
+    await press(shown, `${played.title}, 25 min left`);
+    await expect.poll(() => spy.mock.calls.length).toBe(1);
+    expect(scenario.opened).toEqual([]);
+    expect(play).not.toHaveBeenCalled();
+  } finally {
+    spy.mockRestore();
+    act(() => player.state.set({ kind: "idle" }));
   }
 });

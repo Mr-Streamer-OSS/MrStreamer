@@ -156,6 +156,18 @@ it("clears only this provider's favourites through Live and retries a failed lis
   await f.model.refresh();
   scenario.model = f.model;
   await viewing.read();
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const before = sources.state.get();
+
+  if (before.kind !== "ready") throw new Error("sources");
+  sources.state.set({
+    ...before,
+    sources: [...before.sources, { ...before.sources[0]!, id: "other" }],
+  });
+  await viewing.recordWatch({ sourceId: "source", channelId: "first" });
+  await viewing.recordWatch({ sourceId: "other", channelId: "kept" });
+  await viewing.recordProgress({ kind: "movie", subscriptionId: "source", id: "10" }, 100, 1000, 1);
+  await viewing.recordProgress({ kind: "movie", subscriptionId: "other", id: "20" }, 200, 1000, 1);
   const { lists } = await import("../src/live/runtime.ts");
   const entry = { sourceId: "source", channelId: "1", title: "News" };
   const other = { ...entry, sourceId: "other" };
@@ -174,6 +186,9 @@ it("clears only this provider's favourites through Live and retries a failed lis
     expect(lists.state.get().kind).toBe("failed");
     scenario.liveReadFailed = false;
     await clearViewing("source");
+    expect(viewing.state.get().viewing?.recent).toEqual([{ subscriptionId: "other", id: "kept" }]);
+    expect(viewing.state.get().viewing?.continueWatching).toHaveLength(1);
+    expect(viewing.state.get().viewing?.continueWatching[0]?.title.subscriptionId).toBe("other");
     expect(lists.state.get()).toMatchObject({
       kind: "ready",
       lists: [
@@ -182,6 +197,8 @@ it("clears only this provider's favourites through Live and retries a failed lis
       ],
     });
   } finally {
+    scenario.saved = null;
+    sources.state.set(before);
     scenario.live = null;
     scenario.liveReadFailed = false;
     await viewing.dispose();
@@ -257,6 +274,13 @@ it("resumes through the registered handler despite a position tick while details
     spy.mockRejectedValueOnce(new Error("details"));
     expect(await resumeEntry(entry)).toBe("details");
     expect(play).toHaveBeenCalledTimes(1);
+    spy.mockImplementationOnce(async (request) => {
+      player.state.set({ ...playing, attempt: "new-play" });
+
+      return details(request);
+    });
+    expect(await resumeEntry(entry)).toBe("superseded");
+    expect(play).toHaveBeenCalledTimes(1);
   } finally {
     spy.mockRestore();
     stop();
@@ -299,6 +323,76 @@ it("ignores settled episodes with no current episode numbers without breaking pl
         });
     }).not.toThrow();
   } finally {
+    stop();
+    await viewing.dispose();
+    scenario.saved = null;
+  }
+});
+
+it.each(["marks", "replay"])("keeps version-specific series behavior: %s", async (check) => {
+  const f = fixture();
+
+  const model = libraryModel({
+    language: () => "en",
+    sources: () => [
+      { ...f.source, reader: f.source },
+      { ...f.source, id: "other", reader: {} },
+    ],
+  });
+
+  await model.refresh();
+  scenario.model = model;
+  const stop = startViewing();
+  const play = vi.fn();
+  const unregister = libraryIntents.register({ play });
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const series = model.made("series").list("all", "title")[0]!;
+    const a = series.versions.find((v) => v.subscriptionId === "source")!;
+    const b = series.versions.find((v) => v.subscriptionId === "other")!;
+    const details = await model.details({ ...series, ...a });
+
+    if (details.value?.kind !== "series") throw new Error("series");
+    const episodes = details.value.seasons.flatMap((s) => s.episodes);
+
+    for (const episode of episodes)
+      await viewing.markEpisode(
+        {
+          kind: "episode",
+          subscriptionId: a.subscriptionId,
+          seriesId: a.id,
+          id: episode.id,
+          season: episode.season,
+          episode: episode.number,
+        },
+        true,
+      );
+    const port = libraryViewing.state.get()!;
+    const episode = episodes[0]!;
+    await expect
+      .poll(() => port.episode({ ...series, ...a }, episode).label)
+      .toBe("Mark unwatched");
+    const otherEpisode = { ...episode, subscriptionId: b.subscriptionId, seriesId: b.id };
+
+    if (check === "marks")
+      await expect
+        .poll(() => port.episode({ ...series, ...b }, otherEpisode).label)
+        .toBe("Mark watched");
+    expect(
+      await resumeEntry({
+        key: series.key,
+        title: series,
+        version: a,
+        progress: null,
+        line: "",
+        done: null,
+        artworkUrl: null,
+      }),
+    ).toBe("details");
+    expect(play).not.toHaveBeenCalled();
+  } finally {
+    unregister();
     stop();
     await viewing.dispose();
     scenario.saved = null;

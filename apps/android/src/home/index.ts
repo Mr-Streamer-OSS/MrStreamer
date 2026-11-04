@@ -29,6 +29,7 @@ export const viewing = viewingOwner({ readJson: readViewing, writeJson }, owners
 export const viewingFailure = store<{
   kind: "progress" | "watchlist" | "episode";
   message: string;
+  target?: string;
   retry: () => void;
 } | null>(null);
 
@@ -39,15 +40,16 @@ function attempt(
   kind: "progress" | "watchlist" | "episode",
   message: string,
   work: () => Promise<unknown>,
+  target: string = kind,
 ) {
-  const failure = { kind, message, retry: () => retry() };
+  const failure = { kind, message, target, retry: () => retry() };
 
   const retry = () => {
     void work().then(
       () => {
         if (kind === "progress") progressQuiet = false;
 
-        if (viewingFailure.get() === failure) viewingFailure.set(null);
+        if (viewingFailure.get()?.target === target) viewingFailure.set(null);
       },
       () => {
         if (kind !== "progress" || !progressQuiet) viewingFailure.set(failure);
@@ -164,13 +166,16 @@ export function startViewing(): () => void {
         return {
           label: t(saved ? "Remove from Watchlist" : "Add to Watchlist"),
           activate: () =>
-            attempt("watchlist", t("Couldn't save Watchlist. Nothing changed."), () =>
-              viewing.setWatchlist(title, !saved),
+            attempt(
+              "watchlist",
+              t("Couldn't save Watchlist. Nothing changed."),
+              () => viewing.setWatchlist(title, !saved),
+              `watchlist:${title.key}`,
             ),
         };
       },
       episode(title, episode) {
-        const key = title.key;
+        const key = JSON.stringify([title.subscriptionId, title.id]);
         let cached = marks.get(key);
 
         if (!cached) {
@@ -242,6 +247,13 @@ export function startViewing(): () => void {
                 });
               bump();
             },
+            JSON.stringify([
+              "episode",
+              episode.subscriptionId,
+              episode.seriesId,
+              episode.season,
+              episode.number,
+            ]),
           );
         };
 
@@ -410,6 +422,16 @@ export function startViewing(): () => void {
 
 /** Resume resolves current details and its exact eligible version before invoking a registered handler. */
 export async function resumeEntry(entry: Continuing) {
+  const before = player.state.get();
+
+  const superseded = () => {
+    const now = player.state.get();
+
+    return (
+      ("attempt" in now ? now.attempt : null) !== ("attempt" in before ? before.attempt : null)
+    );
+  };
+
   try {
     const model = library();
 
@@ -420,25 +442,22 @@ export async function resumeEntry(entry: Continuing) {
     const reader = version && model.reader(version.subscriptionId);
 
     if (!version || !reader) return "details" as const;
-    const before = player.state.get();
-
-    // Something else started playing, or the provider signed out, while details were read.
-    const stale = () =>
-      ((now) =>
-        ("attempt" in now ? now.attempt : null) !== ("attempt" in before ? before.attempt : null))(
-        player.state.get(),
-      ) || model.reader(version.subscriptionId) !== reader;
-
     const details = await model.details({ ...entry.title, ...version });
 
-    if (details.providerFailed || !details.value || stale()) return "details" as const;
+    if (superseded()) return "superseded" as const;
+
+    if (details.providerFailed || !details.value || model.reader(version.subscriptionId) !== reader)
+      return "details" as const;
 
     if (details.value.kind === "series") {
       const standing = await viewing.episodes(version);
       const next = continuation(details.value, standing.progress, standing.marks);
       const play = libraryIntents.state.get().play;
 
-      if (!next || !play || stale()) return "details" as const;
+      if (superseded()) return "superseded" as const;
+
+      if (!next || next.replay || !play || model.reader(version.subscriptionId) !== reader)
+        return "details" as const;
       const episode = next.episode;
       const container = details.containers.get(episode.id);
 
@@ -493,7 +512,7 @@ export async function resumeEntry(entry: Continuing) {
 
     return "played" as const;
   } catch {
-    return "details" as const;
+    return superseded() ? ("superseded" as const) : ("details" as const);
   }
 }
 

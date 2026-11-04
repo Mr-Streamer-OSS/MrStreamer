@@ -36,14 +36,14 @@ vi.mock("expo-file-system", () => ({
 import { writeJson } from "../src/platform/storage.ts";
 import { readViewing } from "../src/home/storage.ts";
 
-it("restores only committed viewing files after interrupted replacements, including the first write", () => {
+it("prefers the committed file and recovers a pending first replacement", () => {
   try {
     writeJson("viewing.json", { saved: 1 });
     disk.interrupted = true;
     expect(() => writeJson("viewing.json", { saved: 2 })).toThrow("interrupted");
     expect(readViewing("viewing.json")).toEqual({ saved: 1 });
     disk.files.delete("viewing.json");
-    expect(() => readViewing("viewing.json")).toThrow();
+    expect(readViewing("viewing.json")).toEqual({ saved: 2 });
     disk.files.set("viewing.json", "damaged");
     expect(() => readViewing("viewing.json")).toThrow();
     disk.interrupted = false;
@@ -55,13 +55,17 @@ it("restores only committed viewing files after interrupted replacements, includ
   }
 });
 
-it("refuses a valid pending first write rather than allowing empty history to overwrite it", () => {
+it("recovers a valid pending first write so a retry can commit without losing history", () => {
   try {
     disk.files.set(
       "viewing.json.next",
       JSON.stringify({ version: 1, record: null, watchlist: [] }),
     );
-    expect(() => readViewing("viewing.json")).toThrow();
+    const recovered = readViewing("viewing.json");
+    expect(recovered).toEqual({ version: 1, record: null, watchlist: [] });
+    writeJson("viewing.json", recovered as import("@mrstreamer/contracts/json").Json);
+    expect(disk.files.has("viewing.json")).toBe(true);
+    expect(readViewing("viewing.json")).toEqual(recovered);
   } finally {
     disk.files.clear();
   }

@@ -433,7 +433,7 @@ export function SettingsScreen() {
           {t(
             "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
           )}{" "}
-          {t("Deleting history also erases favourites and Watchlist.")}
+          {t("Deleting history also erases favourites and watchlist.")}
         </DialogText>
       </Dialog>
     </Screen>

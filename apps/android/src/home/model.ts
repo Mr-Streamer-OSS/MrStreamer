@@ -146,17 +146,9 @@ export function homeModel(
   const watchlist = watchlistRows(state, sources, library);
   const movies = library.made("movie");
   const recommended = library.metadata ? movies.list("popular", "popular") : [];
-  const recentMovies = movies.list("all", "added").filter((title) => title.addedAt !== null);
-
-  // The Movies tab the shelf comes from: TMDB's picks, else recently added, else every movie.
-  const moviesTab = recommended.length ? "popular" : recentMovies.length ? "recent" : "all";
-
-  const movieFallback =
-    moviesTab === "popular"
-      ? recommended
-      : moviesTab === "recent"
-        ? recentMovies
-        : movies.list("all", "title");
+  // The fallback is the All tab's default addition order, with the same language policy.
+  const moviesTab = recommended.length ? "popular" : "all";
+  const movieFallback = recommended.length ? recommended : movies.list("all", "added");
 
   const stage =
     recent[0] ?? live.countries.find((group) => group.name === country)?.rows[0] ?? null;

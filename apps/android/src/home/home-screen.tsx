@@ -232,7 +232,13 @@ function Stage({
   if (!stage)
     return home.loading.length || home.restoring ? (
       <View importantForAccessibility="no-hide-descendants" style={{ gap: 8 }}>
-        <Still height={wide ? 315 : 214} radius={12} />
+        {wide ? (
+          <View
+            style={{ aspectRatio: 16 / 9, borderRadius: 12, backgroundColor: colors.surface }}
+          />
+        ) : (
+          <Still height={214} radius={12} />
+        )}
         <View style={{ paddingTop: 16 }}>
           <Still width={168} height={20} />
         </View>
@@ -414,7 +420,7 @@ export function HomeScreen() {
   const resume = (entry: Continuing) => {
     if (play)
       void resumeEntry(entry).then((outcome) => {
-        if (outcome !== "played") openDetails(entry.title, entry.version);
+        if (outcome === "details") openDetails(entry.title, entry.version);
       });
     else openDetails(entry.title, entry.version);
   };
@@ -555,7 +561,7 @@ export function HomeScreen() {
   ) : null;
 
   const watchlistSection =
-    state.kind === "reading" ? (
+    state.kind === "reading" || home.restoring ? (
       <StillTiles inset={inset} height={180} />
     ) : (
       <View style={{ paddingTop: 12, flex: wide ? 1 : undefined, minWidth: 0 }}>
@@ -609,12 +615,7 @@ export function HomeScreen() {
           router.navigate({
             pathname: "/movies",
             params: {
-              tab:
-                home.moviesTab === "popular"
-                  ? "for-you"
-                  : home.moviesTab === "recent"
-                    ? "new"
-                    : "all",
+              tab: home.moviesTab === "popular" ? "for-you" : "all",
             },
           })
         }

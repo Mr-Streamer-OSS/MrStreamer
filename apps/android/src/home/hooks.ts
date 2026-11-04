@@ -49,6 +49,8 @@ export function useHome(country?: string) {
   const accounts = useStore(sources.state);
   const saved = useStore(lists.state);
 
+  const metadataRevision = library.metadata?.revision() ?? 0;
+
   const chosenCountry = country ?? liveCountry(navigation);
 
   const model = useMemo(
@@ -60,7 +62,7 @@ export function useHome(country?: string) {
         saved.lists.find((list) => list.id === "favourites"),
         chosenCountry,
       ),
-    [state, accounts, library, catalogue, saved, chosenCountry, locale],
+    [state, accounts, library, catalogue, saved, chosenCountry, locale, metadataRevision],
   );
 
   return model;
@@ -95,5 +97,9 @@ export function useOnNow(rows: readonly ChannelRow[]) {
     return () => controller.abort();
   }, [wanted, revision]);
 
-  return wanted.map((row) => ({ row, programme: read.get(row.key)?.now ?? null }));
+  return wanted.map((row) => {
+    const programme = read.get(row.key)?.now;
+
+    return { row, programme: programme && programme.stop > Date.now() ? programme : null };
+  });
 }

@@ -104,7 +104,9 @@ export function WatchlistScreen() {
         }}
       >
         <Text style={{ ...typeScale.meta, flex: 1 }}>
-          {state.kind === "ready" ? t("{count} saved", { count: rows.length }) : ""}
+          {state.kind === "ready" && accounts.kind === "ready"
+            ? t("{count} saved", { count: rows.length })
+            : ""}
         </Text>
         <Tappable
           label={t("Sort, {order}", { order })}
@@ -127,7 +129,7 @@ export function WatchlistScreen() {
           actions={<TextButton label={t("Try again")} onPress={() => void viewing.read()} />}
         />
       ) : null}
-      {state.kind === "reading" ? (
+      {state.kind === "reading" || accounts.kind === "restoring" ? (
         <StillTiles inset={inset} height={180} />
       ) : rows.length === 0 && state.kind === "ready" ? (
         <Empty

@@ -924,7 +924,7 @@ it("removes a provider keeping its history, or deletes the history too, retrying
     "Remove keeps your favourites, watchlist and viewing history",
   );
   expect(shown.querySelector("dialog")?.textContent).toContain(
-    "Deleting history also erases favourites and Watchlist.",
+    "Deleting history also erases favourites and watchlist.",
   );
   press(shown, "Remove");
   await act(async () => {});
