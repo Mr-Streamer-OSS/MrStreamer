@@ -32,6 +32,7 @@ export type DownloadRow = typeof Row.infer;
 export type Action = "pause" | "resume" | "retry" | "cancel" | "remove" | "up" | "down";
 
 type DownloadOperation = () => Promise<void>;
+
 type DownloadActionKey = string | DownloadOperation;
 
 export interface TransferPort {
