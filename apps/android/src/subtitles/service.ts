@@ -123,11 +123,17 @@ export async function subdlSearch(
   // An answer from where a redirect led, not SubDL's own API, isn't taken.
   if (response.url && new URL(response.url).origin !== url.origin) refuse(response, "unavailable");
 
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(
-    await body(response, JSON_LIMIT, timeout),
-  );
+  const bytes = await body(response, JSON_LIMIT, timeout);
+  let parsed: unknown;
 
-  const reply = SubDLReply()(JSON.parse(text));
+  // A reply that isn't UTF-8 JSON is refused with a fixed reason: parse errors quote the body.
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new SubtitleFailure("unavailable");
+  }
+
+  const reply = SubDLReply()(parsed);
 
   if (reply instanceof type.errors || !reply.status) throw new SubtitleFailure("unavailable");
   // SubDL may broaden an unsuccessful match, and its subtitles are for its first result. Without

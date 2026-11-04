@@ -195,3 +195,21 @@ it("refuses legacy Arabic cleanly when the engine has no Windows decoder", async
     ),
   ).rejects.toMatchObject({ reason: "unsupported" });
 });
+
+it("refuses a malformed reply with a fixed reason that quotes none of it", async () => {
+  const secret = "k3y-from-the-reply";
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(`${secret} is not JSON`)),
+  );
+
+  const failure = await subdlSearch(
+    "fixture",
+    { kind: "movie", tmdbId: 7, languages: ["en"] },
+    new AbortController().signal,
+  ).catch((cause: unknown) => cause);
+
+  expect(failure).toMatchObject({ reason: "unavailable" });
+  expect(String(failure)).not.toContain(secret);
+});
