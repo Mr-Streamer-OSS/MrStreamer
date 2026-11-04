@@ -408,7 +408,7 @@ it.each(["save", "remove", "restore", "clear", "progress"] as const)(
 
       await work();
       const committed = platform.readJson();
-      expect(owner.state.get().kind).toBe("failed");
+      expect(owner.state.get()).toEqual({ ...before, kind: "failed" });
       failRefresh = false;
       await owner.read();
       expect(owner.state.get().kind).toBe("ready");
@@ -416,6 +416,8 @@ it.each(["save", "remove", "restore", "clear", "progress"] as const)(
         operation === "restore" || operation === "progress" ? 1 : 0,
       );
       expect(platform.readJson()).toEqual(committed);
+
+      if (operation === "progress") expect((await owner.progress(f.title))[0]?.position).toBe(300);
     } finally {
       await owner.dispose();
       await f.owner.dispose();
