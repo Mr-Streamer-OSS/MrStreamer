@@ -465,7 +465,7 @@ export function ProgrammeDetails({
       </View>
       {failed ? <Button label={sharedT("Try again")} onPress={retry} /> : null}
       {value && guide.channel(key)?.title ? (
-        <ReminderAction
+        <ProgrammeActions
           identity={identity}
           programme={value}
           channelName={guide.channel(key)?.title ?? ""}
@@ -473,10 +473,11 @@ export function ProgrammeDetails({
         />
       ) : null}
       {value && guide.channel(key)?.title ? (
-        <ProgrammeActions
+        <ReminderAction
           identity={identity}
           programme={value}
           channelName={guide.channel(key)?.title ?? ""}
+          inset={inset}
         />
       ) : null}
       {value?.description ? (
