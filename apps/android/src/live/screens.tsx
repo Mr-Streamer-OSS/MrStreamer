@@ -1,5 +1,5 @@
 import { reminderCount } from "../reminders/rules.ts";
-import { reminders } from "../reminders/runtime.ts";
+import { reminders } from "../reminders/state.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";

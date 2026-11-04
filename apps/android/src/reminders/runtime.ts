@@ -2,16 +2,12 @@ import { AppState, PermissionsAndroid, Platform } from "react-native";
 import { guide, startGuide } from "../guide/runtime.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { channelKey } from "../guide/routes.ts";
-import { store } from "../platform/store.ts";
-import { nativeReminders, type Permission } from "./native.ts";
+import { nativeReminders } from "./native.ts";
+import { reminders } from "./state.ts";
+
 import { reconcile, type Reminder } from "./rules.ts";
 
-export const reminders = store<{
-  rows: readonly Reminder[];
-  permission: Permission | null;
-  error: "read" | "update" | null;
-  loaded: boolean;
-}>({ rows: [], permission: null, error: null, loaded: false });
+export { reminders } from "./state.ts";
 
 let queue = Promise.resolve();
 

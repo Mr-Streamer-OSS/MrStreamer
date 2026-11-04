@@ -1,7 +1,7 @@
 /** Guide's reminder action and observable bell state; playback stays with its owner. */
 export { ReminderAction } from "../reminders/action.tsx";
 
-export { reminders } from "../reminders/runtime.ts";
+export { reminders } from "../reminders/state.ts";
 
 export { reminderId } from "../reminders/rules.ts";
 

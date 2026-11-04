@@ -43,6 +43,10 @@ vi.mock("expo", () => ({
 
 vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
 
+vi.mock("../src/reminders/runtime.ts", () => ({ startReminders: () => () => {} }));
+
+vi.mock("../src/reminders/routing.ts", () => ({ useReminderRouting: () => {} }));
+
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
 
