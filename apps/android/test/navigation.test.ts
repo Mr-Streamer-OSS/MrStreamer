@@ -30,6 +30,24 @@ const scenario = vi.hoisted(() => ({
   sources: { kind: "restoring" } as { kind: "restoring" } | { kind: "ready"; sources: object[] },
 }));
 
+// Native modules are supplied by Expo on-device; this DOM harness supplies their ports.
+// Keep the real Downloads runtime so rendering the root proves registration and cleanup.
+vi.mock("expo", () => ({
+  requireNativeModule: () => ({
+    restore: async () => JSON.stringify({ rows: [], free: 1 }),
+    snapshot: async () => JSON.stringify({ rows: [], free: 1 }),
+    blockSource: async () => {},
+  }),
+}));
+
+vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
+
+vi.mock("../src/player/instance.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+
+  return { player: { state: store({ kind: "idle" }), release: async () => [] } };
+});
+
 vi.mock("react-native", async () => {
   const { createElement: h } = await import("react");
 
@@ -68,6 +86,7 @@ vi.mock("react-native", async () => {
       );
 
   return {
+    AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
     View: view("div"),
     ScrollView: view("div"),
     Text: view("span"),
@@ -218,6 +237,7 @@ const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: Element): { render(node: unknown): void; unmount(): void };
 };
 
+const { libraryIntents } = await import("../src/library/intents.ts");
 const { default: RootLayout } = await import("../src/app/_layout.tsx");
 
 const { default: DestinationsLayout, unstable_settings } =
@@ -277,10 +297,14 @@ describe("the app", () => {
     expect(scenario.asked).toEqual(["restore"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [] };
-    expect(screens()).toEqual(["connect"]);
+    expect(screens()).toEqual(["offline", "connect"]);
+    expect(libraryIntents.state.get().download).toBeTypeOf("function");
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
-    expect(screens()).toEqual(["(tabs)", "watch"]);
+    expect(screens()).toEqual(["offline", "(tabs)", "watch"]);
+    act(() => root?.unmount());
+    root = null;
+    expect(libraryIntents.state.get().download).toBeUndefined();
   });
 });
 

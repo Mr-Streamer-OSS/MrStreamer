@@ -54,7 +54,7 @@ export function playPause(now: Playing): { icon: IconName; label: string; run: (
  * What plays, kept going between screens while Watch isn't showing: its picture, title, play or
  * pause and Close, which stops it. Tapping it opens Watch again. Paper A: over the navigation bar
  * on phones, and at the foot of the content beside the rail from 600dp. The root layout mounts it
- * over the destinations; it sets `footOverlay` to its height while it shows, so the screens under
+ * over destinations, Connect and Offline; it sets `footOverlay` to its height while it shows, so the screens under
  * it scroll behind it and their last row still clears it.
  */
 export function MiniPlayer() {

@@ -31,6 +31,9 @@ export type DownloadRow = typeof Row.infer;
 
 export type Action = "pause" | "resume" | "retry" | "cancel" | "remove" | "up" | "down";
 
+type DownloadOperation = () => Promise<void>;
+type DownloadActionKey = string | DownloadOperation;
+
 export interface TransferPort {
   restore(): Promise<string>;
   snapshot(): Promise<string>;
@@ -63,7 +66,7 @@ export function downloadState(port: TransferPort) {
   let serial = Promise.resolve();
   let failedAction: (() => Promise<void>) | undefined;
   let writeFailed = false;
-  let failedKey: unknown;
+  let failedKey: DownloadActionKey | undefined;
   let restored = false;
 
   function publish(next: DownloadState) {
@@ -98,8 +101,8 @@ export function downloadState(port: TransferPort) {
   }
 
   function change(
-    operation: () => Promise<void>,
-    key: unknown = operation,
+    operation: DownloadOperation,
+    key: DownloadActionKey = operation,
     retry?: () => Promise<void>,
   ) {
     return run(async () => {
