@@ -160,6 +160,8 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     if not track:
         print(f"{rendition}: no source track known for it -> FAIL"); ok = False; continue
     codec, rate = track["codec_name"], int(track["sample_rate"])
+    if codec == "flac" and 'fLaC' not in master:
+        print(f"{rendition}: FLAC missing fLaC CODECS -> FAIL"); ok = False
     if not mine:
         print(f"{rendition}: serves no sound -> FAIL"); ok = False; continue
     # The source track's frame length, from its own packets' spacing; for a track of one packet,
@@ -192,6 +194,9 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     inside = lambda t: t >= -half and not any(cuts[k] + half <= t < cuts[k + 1] - half for k in allowed)
     expected = [(t - origin, h) for t, h in packets[track["index"]] if inside(t - origin)]
     optional = {h for t, h in expected if any(abs(t - e) < half for e in edges)}
+    # FLAC has no silence, so a frame left out within EDGE_S of either end is allowed.
+    if codec == "flac":
+        optional.update(h for t, h in expected if t <= EDGE_S or t >= picture_end - EDGE_S)
     problems, at, kept, added, drift = [], 0, 0, [], 0.0
     for t, d, p in mine:
         h = md5(p)
@@ -204,6 +209,7 @@ for rendition in re.findall(r'URI="(a\d+)\.m3u8"', master):
     missing = [t for t, h in expected[at:] if h not in optional]
     if missing: problems.append(f"{len(missing)} source packets missing, the first at {missing[0]:.3f} s")
     silent = {h for _, _, h in added}
+    if codec == "flac" and added: problems.append("FLAC has added frames, but cannot be filled with silence")
     if len(silent) > 1: problems.append(f"{len(silent)} different added payloads")
     times = sorted(t for t, _ in expected)
     covering = [t for t, _, _ in added if near(times, t, half)]
