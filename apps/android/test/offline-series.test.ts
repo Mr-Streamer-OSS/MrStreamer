@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { offlineNext } from "../src/downloads/offline-next.ts";
+import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
+import { offlineNext, offlineNextNotice } from "../src/downloads/offline-next.ts";
 import { seriesDownloads, seriesFiles } from "../src/downloads/series.ts";
 import type { DownloadRow } from "../src/downloads/state.ts";
 import { fixture } from "./library-fixture.ts";
@@ -132,4 +133,44 @@ it("counts durable skips and failed additions separately, and stops at changed l
     unqueued: 1,
     stopped: "login",
   });
+});
+
+it("says why offline Next stopped, never calling a copy still downloading missing", () => {
+  const next = { ...row, id: "second", mediaId: "second", season: 1, episode: 2 };
+  const downloading = { ...next, state: "running" as const, bytes: 420e6, total: 1e9 };
+  expect(offlineNextNotice({ kind: "ready", row: next, path: "/saved" })).toBeNull();
+  expect(offlineNextNotice({ kind: "last" })).toBeNull();
+  expect(offlineNextNotice({ kind: "downloading", row: downloading })).toEqual({
+    lead: "S1 E2 is still downloading",
+    status: null,
+    detail: "42% · 420 MB of 1 GB",
+    action: { kind: "downloads" },
+  });
+  const missing = { ...next, state: "failed" as const, reason: "missing" };
+  expect(offlineNextNotice({ kind: "missing", row: missing })).toEqual({
+    lead: "S1 E2",
+    status: "File missing",
+    detail: "Replace it to go on.",
+    action: { kind: "replace", row: missing },
+  });
+  expect(offlineNextNotice({ kind: "not-saved" }, "S1 E5")).toMatchObject({
+    lead: "S1 E5 isn't on this device",
+    detail: "Download it to go on.",
+    action: { kind: "downloads" },
+  });
+  setLanguage(resolveLanguage("nl-NL", []));
+
+  try {
+    expect(offlineNextNotice({ kind: "downloading", row: downloading })).toMatchObject({
+      lead: "S1 E2 wordt nog gedownload",
+      action: { kind: "downloads" },
+    });
+    expect(offlineNextNotice({ kind: "changed", row: missing })).toMatchObject({
+      status: "Bestand veranderd",
+      detail: "Vervang hem om verder te kijken.",
+      action: { kind: "replace" },
+    });
+  } finally {
+    setLanguage(resolveLanguage("en-US", []));
+  }
 });

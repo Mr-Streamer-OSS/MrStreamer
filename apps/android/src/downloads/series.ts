@@ -2,8 +2,9 @@ import { type } from "arktype";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import { episodesIn, type Scope } from "../../../../packages/mobile/series-download/index.ts";
-import { store } from "../platform/store.ts";
-import { Snapshot, type DownloadRow, type BulkTransferPort } from "./state.ts";
+import { store, type Store } from "../platform/store.ts";
+import type { ReplaceOwner } from "./replace.ts";
+import { Snapshot, type DownloadRow, type BulkTransferPort, type DownloadState } from "./state.ts";
 
 export interface SeriesFile {
   readonly key: string;
@@ -103,6 +104,9 @@ export interface SeriesRun {
 
 let runningOwner: { stop(reason: NonNullable<SeriesResult["stopped"]>): void } | undefined;
 
+/** True while any series screen is adding episodes; only one adds at a time. */
+export const seriesBusy = store(false);
+
 /** Library calls this even when the same version is selected again. */
 export function stopSeriesDownloads(reason: NonNullable<SeriesResult["stopped"]>) {
   runningOwner?.stop(reason);
@@ -176,10 +180,12 @@ export function seriesDownloads(
     ): Promise<SeriesResult | null> {
       if (runningOwner || active || review !== plan || stopped || stands()) return null;
       runningOwner = owner;
+      seriesBusy.set(true);
       active = true;
 
+      // A changed file is never replaced in bulk: replacing deletes it, so its own row asks first.
       const steps = plan.steps.filter(
-        (s) => s.was !== "held" && (replace || (s.was !== "missing" && s.was !== "changed")),
+        (s) => s.was !== "held" && s.was !== "changed" && (replace || s.was !== "missing"),
       );
 
       const failed: SeriesFile[] = [];
@@ -219,12 +225,14 @@ export function seriesDownloads(
           }
 
           try {
-            if (
-              (step.was === "missing" || step.was === "changed") &&
-              step.row &&
-              !(await beforeReplace(step.row))
-            )
-              throw new Error("playing");
+            // A copy that is playing stays as it is, counted as changed meanwhile.
+            if (step.was === "missing" && step.row && !(await beforeReplace(step.row))) {
+              result.skipped++;
+              done++;
+              publish();
+              continue;
+            }
+
             reason = stopped ?? stands();
 
             if (reason) {
@@ -258,7 +266,11 @@ export function seriesDownloads(
           await refresh();
         }
       } finally {
-        if (runningOwner === owner) runningOwner = undefined;
+        if (runningOwner === owner) {
+          runningOwner = undefined;
+          seriesBusy.set(false);
+        }
+
         active = false;
 
         try {
@@ -272,3 +284,14 @@ export function seriesDownloads(
     },
   };
 }
+
+export type SeriesController = ReturnType<typeof seriesDownloads>;
+
+/** What Details' bulk rows and dialogs use of Downloads: its rows, a run, and Replace. */
+export interface SeriesOwner extends ReplaceOwner {
+  readonly state: Store<DownloadState>;
+  series(): SeriesController;
+}
+
+/** Downloads publishes itself here while it runs, so Library needn't start it. */
+export const seriesOwner = store<SeriesOwner | undefined>(undefined);

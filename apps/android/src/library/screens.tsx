@@ -1,5 +1,9 @@
 import { stopSeriesDownloads } from "../downloads/series.ts";
-import { SeriesDownload } from "./series-download.tsx";
+import {
+  SeriesDialogs,
+  SeriesDownloadRow,
+  type SeriesDownloadProps,
+} from "../downloads/series-download.tsx";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
@@ -1112,7 +1116,6 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
 
   const kind = params.kind === "series" || params.kind === "movie" ? params.kind : undefined;
   const title = kind ? model.title(kind, params.title ?? "") : undefined;
-  const [downloadRevision, setDownloadRevision] = useState(0);
   const [menu, setMenu] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -1162,8 +1165,8 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     : [];
 
   const pick = (next: string | null) => {
+    // Accepting a version, even the one shown, ends what a bulk download's sheet reviewed.
     stopSeriesDownloads("version");
-    setDownloadRevision((value) => value + 1);
 
     if (!title) return;
 
@@ -1205,6 +1208,27 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
       t("Version"));
 
   const multiSource = new Set(title.versions.map((v) => v.subscriptionId)).size > 1;
+
+  const group =
+    version && groups.find((g) => g.versions.some((v) => ownedKey(v) === ownedKey(version)));
+
+  const seasonLabel = (number: number) =>
+    number === 0 ? t("Specials") : t("Season {number}", { number });
+
+  // Downloads' bulk rows for the shown version, once its details name every episode's file.
+  const bulkProps: SeriesDownloadProps | null =
+    value?.kind === "series" && version && details
+      ? {
+          details: value,
+          version,
+          containers: details.containers,
+          seasonLabel,
+          versionLabel: group ? [group.quality, group.label].filter(Boolean).join(" · ") : "",
+          sourceLabel: model.sourceLabel(version.subscriptionId) ?? "",
+          reader: () => model.reader(version.subscriptionId),
+        }
+      : null;
+
   const numberedSeasons = seasons.filter((s) => s.number > 0).length;
 
   const facts = [
@@ -1293,6 +1317,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           {t("With {names}", { names: formatList(value.cast.map((p) => p.name)) })}
         </Text>
       ) : null}
+      {beside && bulkProps ? <SeriesDownloadRow key={key} {...bulkProps} inline /> : null}
     </>
   );
 
@@ -1301,20 +1326,17 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
       <TextTabs
         tabs={seasons.map((s) => ({
           value: String(s.number),
-          label: s.number === 0 ? t("Specials") : t("Season {number}", { number: s.number }),
+          label: seasonLabel(s.number),
         }))}
         selected={selectedSeason ? String(selectedSeason.number) : undefined}
         onSelect={(season) => router.setParams({ season })}
         inset={beside ? 12 : 4}
       />
-      {value?.kind === "series" && version && details && selectedSeason ? (
-        <SeriesDownload
-          key={`${key}:${selectedSeason.number}:${downloadRevision}`}
-          details={value}
-          version={version}
-          containers={details.containers}
+      {bulkProps && selectedSeason ? (
+        <SeriesDownloadRow
+          key={`${key}:${selectedSeason.number}`}
+          {...bulkProps}
           season={selectedSeason.number}
-          revision={downloadRevision}
         />
       ) : null}
       {shown
@@ -1329,15 +1351,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
             />
           ))
         : null}
-      {value?.kind === "series" && version && details ? (
-        <SeriesDownload
-          key={`${key}:${downloadRevision}`}
-          details={value}
-          version={version}
-          containers={details.containers}
-          revision={downloadRevision}
-        />
-      ) : null}
+      {!beside && bulkProps ? <SeriesDownloadRow key={key} {...bulkProps} /> : null}
     </>
   ) : null;
 
@@ -1378,6 +1392,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
         </ScrollView>
       )}
       <ViewingLine />
+      <SeriesDialogs />
       <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
         <SheetTitle title={t("Version")} />
         <SheetScroll>

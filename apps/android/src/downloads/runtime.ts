@@ -1,5 +1,6 @@
 import { episodesIn } from "../../../../packages/mobile/series-download/index.ts";
-import { seriesDownloads } from "./series.ts";
+import { seriesDownloads, seriesOwner } from "./series.ts";
+import { askReplace, type ReplacePrompt } from "./replace.ts";
 import { offlineNext } from "./offline-next.ts";
 import { Snapshot } from "./state.ts";
 import { type } from "arktype";
@@ -25,6 +26,7 @@ function createRuntime() {
   const tapErrors = new Map<string, () => Promise<void>>();
   const identity = (media: DownloadIntent["media"]) => JSON.stringify(media);
   const presentation = store(0);
+  const prompt = store<ReplacePrompt | null>(null);
 
   function tapAction(media: DownloadIntent["media"], operation: () => Promise<void>) {
     void model.change(async () => {
@@ -197,6 +199,7 @@ function createRuntime() {
   return {
     ...model,
     native,
+    prompt,
     series() {
       return seriesDownloads(
         native,
@@ -235,6 +238,9 @@ function createRuntime() {
         return { kind: "last" };
       });
 
+      const self = downloads();
+      seriesOwner.set(self);
+
       const unregister = libraryIntents.register({
         download: (intent) => tapAction(intent.media, () => enqueue(intent)),
       });
@@ -261,18 +267,7 @@ function createRuntime() {
                   // playCopy refreshes the native missing-file state before refusing.
                 }
               } else if (action === "replace") {
-                const replace = () => {
-                  void downloads()
-                    .replace(row)
-                    .catch(() => Alert.alert(t("Couldn't save that change.")));
-                };
-
-                if (row.reason === "file-changed")
-                  Alert.alert(t("Replace this changed copy?"), undefined, [
-                    { text: t("Cancel"), style: "cancel" },
-                    { text: t("Replace"), onPress: replace },
-                  ]);
-                else replace();
+                askReplace(downloads(), row);
               } else {
                 const reason = await downloads().command(row, action);
 
@@ -335,6 +330,9 @@ function createRuntime() {
         .catch(() => {});
       stop = () => {
         unregisterOffline?.();
+
+        if (seriesOwner.get() === self) seriesOwner.set(undefined);
+
         unregister();
         unregisterPresentation();
         unsubscribe();

@@ -290,16 +290,19 @@ export function Dialog({
 /**
  * A modal bottom sheet as tall as its content, up to 88% of the window, which ui/sheet.tsx's
  * fixed-height `Sheet` doesn't offer: the same #141414 surface, 28dp corners, handle and Back.
+ * It is 560dp wide at most, or `maxWidth` (a series download's sheet is 640dp on tablets).
  */
 export function FitSheet({
   visible,
   label,
   onClose,
+  maxWidth = 560,
   children,
 }: {
   visible: boolean;
   label: string;
   onClose: () => void;
+  maxWidth?: number;
   children: ReactNode;
 }) {
   return (
@@ -319,13 +322,13 @@ export function FitSheet({
           focusable={false}
           style={{ position: "absolute", inset: 0, backgroundColor: colors.scrim }}
         />
-        <SheetBody>{children}</SheetBody>
+        <SheetBody maxWidth={maxWidth}>{children}</SheetBody>
       </SafeAreaProvider>
     </Modal>
   );
 }
 
-function SheetBody({ children }: { children: ReactNode }) {
+function SheetBody({ maxWidth, children }: { maxWidth: number; children: ReactNode }) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -333,7 +336,7 @@ function SheetBody({ children }: { children: ReactNode }) {
       style={{
         maxHeight: "88%",
         width: "100%",
-        maxWidth: 560,
+        maxWidth,
         alignSelf: "center",
         borderTopLeftRadius: 28,
         borderTopRightRadius: 28,

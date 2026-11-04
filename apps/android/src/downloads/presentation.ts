@@ -4,8 +4,8 @@ import type { DownloadRow } from "./state.ts";
 import { t } from "./copy.ts";
 
 // What a Downloads row says and offers, from the native snapshot alone. Paper A's downloads page:
-// one state line, red only for a failure or a missing file, one trailing action, and the rest in
-// the long-press sheet.
+// one state line, red only for a failure or a missing or changed file, one trailing action, and the
+// rest in the long-press sheet.
 
 /** What a row offers. `delete` and `cancel` ask first; the rest happen at once. */
 export type RowChoice =
@@ -66,7 +66,7 @@ export function rowStatus(row: DownloadRow, providerRemoved: boolean): RowStatus
       return {
         text: t(
           row.reason === "file-changed"
-            ? "File changed"
+            ? "File changed. Replace it to play."
             : row.reason === "missing"
               ? "File missing"
               : row.reason === "playlist"
@@ -110,13 +110,11 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
     case "complete":
       return "play";
     case "failed":
-      return row.reason === "missing"
-        ? "delete"
-        : row.reason === "file-changed"
-          ? "replace"
-          : row.reason === "remove"
-            ? "remove"
-            : "retry";
+      return row.reason === "missing" || row.reason === "file-changed"
+        ? "replace"
+        : row.reason === "remove"
+          ? "remove"
+          : "retry";
     case "paused":
       return "resume";
     case "queued":
@@ -130,7 +128,7 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
 /**
  * What the long-press sheet offers. Queue rows: Pause or Resume, Move up and down among those
  * waiting (queued or paused, in queue order), Cancel download. Failed rows: Retry and Remove.
- * Copies: Play offline and Delete download.
+ * Copies: Play offline and Delete download; a missing or changed one Replace and Delete download.
  */
 export function sheetChoices(row: DownloadRow, rows: readonly DownloadRow[]): RowChoice[] {
   switch (row.state) {
