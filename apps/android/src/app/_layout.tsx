@@ -1,3 +1,5 @@
+import { startReminders } from "../reminders/runtime.ts";
+import { useReminderRouting } from "../reminders/routing.ts";
 import { DarkTheme, Stack, ThemeProvider } from "expo-router";
 import { useEffect, useSyncExternalStore } from "react";
 import { StatusBar } from "react-native";
@@ -26,6 +28,11 @@ const theme = {
 
 export default function RootLayout() {
   const state = useStore(sources.state);
+  useReminderRouting(
+    state.kind === "ready" && state.sources.length > 0,
+    state.kind === "ready" && state.sources.length === 0,
+  );
+  useEffect(() => startReminders(), []);
 
   const localFile = useSyncExternalStore(player.state.subscribe, () => {
     const state = player.state.get();

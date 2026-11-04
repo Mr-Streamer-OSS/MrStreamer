@@ -1,3 +1,5 @@
+import { reminderCount } from "../reminders/rules.ts";
+import { reminders } from "../reminders/state.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
@@ -347,14 +349,15 @@ function LiveTop({
 
 /**
  * Live: every provider's channels together, opening on All of every country. Favourites, each
- * list and Find head it; Country is a sheet, and the status line names a provider still loading or
- * failed while what loaded shows at once.
+ * list, Reminders and Find head it; Country is a sheet, and the status line names a provider still
+ * loading or failed while what loaded shows at once.
  */
 export function LiveScreen() {
   useLocale();
   const { layout, framed } = useFrame();
   const state = useStore(sources.state);
   const saved = useStore(lists.state);
+  const reminderState = useStore(reminders);
   const { country = "" } = useLocalSearchParams<{ country?: string }>();
   const [tab, setTab] = useState<Tab>("All");
   const [choosing, setChoosing] = useState(false);
@@ -378,6 +381,13 @@ export function LiveScreen() {
         onPress: () => openList(list),
       }),
     ),
+    {
+      id: "reminders",
+      icon: "notifications-none" as const,
+      label: t("Reminders"),
+      count: reminderCount(reminderState, Date.now()),
+      onPress: () => router.push("/reminders"),
+    },
     {
       id: "find",
       icon: "search" as const,

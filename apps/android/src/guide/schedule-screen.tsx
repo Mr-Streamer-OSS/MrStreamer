@@ -1,3 +1,4 @@
+import { ReminderAction } from "./actions-reminders.ts";
 import { formatDate, t as sharedT } from "@mrstreamer/core/i18n";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { FlatList, ScrollView, Text, useWindowDimensions, View } from "react-native";
@@ -21,8 +22,8 @@ import { Button, OutOfDate, Press, Progress, Still, guideColors, text } from "./
 // A channel's Schedule, one local day at a time, and a programme's details. Both open on the
 // stack of the destination showing (routes.ts), so Back returns to where they were opened. From
 // 840dp (Screen's pane width) a programme opens in the pane beside its Schedule, its identity kept
-// in the route's params; narrower it is pushed (`programmeHref`). Play from start, Watch live and
-// Remind me belong to their own owners and show only once those are wired.
+// in the route's params; narrower it is pushed (`programmeHref`). Remind me uses actions-reminders;
+// Play from start and Watch live belong to their own owners.
 
 const positive = (value: string) => {
   const number = Number(value);
@@ -462,6 +463,14 @@ export function ProgrammeDetails({
         )}
       </View>
       {failed ? <Button label={sharedT("Try again")} onPress={retry} /> : null}
+      {value && guide.channel(key)?.title ? (
+        <ReminderAction
+          identity={identity}
+          programme={value}
+          channelName={guide.channel(key)?.title ?? ""}
+          inset={inset}
+        />
+      ) : null}
       {value?.description ? (
         <Text
           style={{

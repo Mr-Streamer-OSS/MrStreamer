@@ -128,6 +128,10 @@ vi.mock("expo-router", async () => {
 
 vi.mock("../src/player/surface.ts", () => ({ PlayerSurface: () => null }));
 
+vi.mock("../src/reminders/runtime.ts", () => ({ startReminders: () => () => {} }));
+
+vi.mock("../src/reminders/routing.ts", () => ({ useReminderRouting: () => {} }));
+
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
   const state = store<PlayerState>({ kind: "idle" });
