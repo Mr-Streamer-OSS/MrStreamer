@@ -8,6 +8,7 @@
     "./accounts/*": "./accounts/*.ts",
     "./language/*": "./language/*.ts",
     "./consent/*": "./consent/*.ts",
+    "./series-download": "./series-download/index.ts",
     "./language": "./language/index.ts"
   },
   "dependencies": {

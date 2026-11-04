@@ -1,7 +1,7 @@
 import { type } from "arktype";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
-import { episodesIn, type Scope } from "../../../../packages/mobile/series-download/index.ts";
+import { episodesIn, type Scope } from "@mrstreamer/mobile/series-download";
 import { store, type Store } from "../platform/store.ts";
 import type { ReplaceOwner } from "./replace.ts";
 import { Snapshot, type DownloadRow, type BulkTransferPort, type DownloadState } from "./state.ts";

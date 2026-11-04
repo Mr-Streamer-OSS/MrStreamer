@@ -1,4 +1,4 @@
-import { episodesIn } from "../../../../packages/mobile/series-download/index.ts";
+import { episodesIn } from "@mrstreamer/mobile/series-download";
 import { seriesDownloads, seriesOwner } from "./series.ts";
 import { askReplace, type ReplacePrompt } from "./replace.ts";
 import { offlineNext } from "./offline-next.ts";

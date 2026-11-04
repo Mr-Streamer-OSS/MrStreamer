@@ -111,6 +111,8 @@ export const SavedSubtitle = lazy(() =>
   type({
     /** Opaque cached-result identity. Timing writes name the result they edit. */
     "selection?": "0 < string <= 64",
+    /** Android checked transfer/file identity; absent in legacy and streamed records. */
+    "fileBinding?": "string",
     /**
      * False once the viewer chose Off or a file track over this result in this exact file. It
      * then stays listed with its timing and no longer shows by itself when the file opens.

@@ -3,6 +3,9 @@ import { store } from "../src/platform/store.ts";
 import type { PlayerState } from "../src/player/player.ts";
 
 const fixture = vi.hoisted(() => ({
+  mediaSize: 100,
+  mediaModified: 123,
+  checked: true,
   fail: true,
   sizeFail: true,
   files: new Map<string, string>(),
@@ -21,6 +24,11 @@ vi.mock("expo", () => ({
   requireNativeModule: () => ({
     snapshot: () => JSON.stringify({ rows: fixture.copies }),
     filePath: async () => "/copy",
+    path: async () => {
+      if (!fixture.checked) throw new Error("changed");
+
+      return "/copy";
+    },
   }),
 }));
 
@@ -34,11 +42,16 @@ vi.mock("expo-file-system", () => {
     constructor(_root: FixtureDirectory, name: string) {
       this.name = name;
     }
+    get size() {
+      return fixture.mediaSize;
+    }
     get exists() {
+      if (this.name === undefined) return true;
+
       return fixture.files.has(this.name);
     }
     get modificationTime() {
-      return fixture.times.get(this.name) ?? 0;
+      return this.name === undefined ? fixture.mediaModified : (fixture.times.get(this.name) ?? 0);
     }
     textSync() {
       return fixture.files.get(this.name)!;
@@ -104,7 +117,7 @@ vi.mock("../src/library/runtime.ts", async () => {
   };
 });
 
-vi.mock("../src/guide/secrets.ts", () => ({ sealedLinks: {} }));
+vi.mock("../src/guide/secrets.ts", () => ({ sealedLinks: { read: async () => "fixture-key" } }));
 
 vi.mock("../src/player/native.ts", () => ({
   nativePlayer: () => ({ setSidecar: fixture.sidecar, setSubtitleSize: fixture.size }),
@@ -226,7 +239,10 @@ it("resolves Watch's production episode intent through startSubtitles and retrie
   // Opening a kept copy after provider removal also restores its ownership on a fresh read.
   const copyKey = JSON.stringify(["source", "movie", "kept-copy", "mp4"]);
   fixture.copies = [{ key: copyKey, id: "copy", kind: "movie", title: "Film" }];
-  fixture.files.set(encodeURIComponent(copyKey) + ".json", JSON.stringify(retained));
+  fixture.files.set(
+    encodeURIComponent(copyKey) + ".json",
+    JSON.stringify({ ...retained, fileBinding: JSON.stringify(["copy", "/copy", 100, 123]) }),
+  );
   const current = state.get();
 
   if (current.kind !== "playing") throw new Error("not playing");
@@ -255,4 +271,143 @@ it("keeps failed size reads visible until a successful retry", async () => {
   const { setSubtitleTextSize } = await import("../src/subtitles/runtime.ts");
   expect(setSubtitleTextSize(1)).toBe(true);
   expect(subtitleTextSizeError.get()).toBe(false);
+});
+
+it("restores and persists subtitles only for the same checked transfer and intact file", async () => {
+  vi.resetModules();
+  fixture.files.clear();
+  fixture.mediaSize = 100;
+  fixture.mediaModified = 123;
+  fixture.checked = true;
+  fixture.sidecar.mockClear();
+  const key = JSON.stringify(["source", "movie", "kept-copy", "mp4"]);
+  fixture.copies = [{ key, id: "copy", kind: "movie", title: "Film" }];
+
+  const record = {
+    fileBinding: JSON.stringify(["copy", "/copy", 100, 123]),
+    subtitle: {
+      service: "subdl",
+      language: "nl",
+      release: "Fixture",
+      cues: [{ start: 0, end: 2, text: "Hallo" }],
+    },
+    timing: { offset: 0, speed: 1 },
+  };
+
+  const name = encodeURIComponent(key) + ".json";
+  fixture.files.set(name, JSON.stringify(record));
+  const { startSubtitles, retainedFileSubtitle } = await import("../src/subtitles/runtime.ts");
+  const state = store<PlayerState>({ kind: "idle" });
+  const model = startSubtitles({ state, media: { text: vi.fn(async () => true) } });
+
+  const playing = {
+    kind: "playing",
+    attempt: "bound",
+    intent: { kind: "file", path: "/copy", title: "Film" },
+    phase: "paused",
+    positionMs: 0,
+    durationMs: null,
+    bufferedMs: 0,
+    live: false,
+    seekable: true,
+    speed: 1,
+    failure: null,
+    tracks: [],
+  } as const;
+
+  state.set(playing);
+  await vi.waitFor(() => expect(model.state.get().saved?.subtitle?.language).toBe("nl"));
+  expect(fixture.sidecar).toHaveBeenCalledTimes(1);
+  expect(await model.shift(1)).toBe(true);
+  const persisted = JSON.parse(fixture.files.get(name)!);
+  expect(persisted.fileBinding).toBe(record.fileBinding);
+  expect(persisted.timing.offset).toBe(1);
+  expect((await retainedFileSubtitle({ id: "copy", key }, "/copy"))?.timing.offset).toBe(1);
+  fixture.mediaModified = 999;
+  expect(await model.shift(1)).toBe(false);
+  expect(fixture.files.get(name)).toBe(JSON.stringify(persisted));
+  fixture.mediaModified = 123;
+  state.set({ ...playing, attempt: "reopen" });
+  await vi.waitFor(() => expect(fixture.sidecar).toHaveBeenCalledTimes(3));
+
+  for (const change of ["legacy", "transfer", "size", "modified", "unchecked"] as const) {
+    fixture.files.set(
+      name,
+      JSON.stringify(change === "legacy" ? { ...record, fileBinding: undefined } : record),
+    );
+    fixture.copies = [
+      { key, id: change === "transfer" ? "new-copy" : "copy", kind: "movie", title: "Film" },
+    ];
+    fixture.mediaSize = change === "size" ? 101 : 100;
+    fixture.mediaModified = change === "modified" ? 456 : 123;
+    fixture.checked = change !== "unchecked";
+    const calls = fixture.sidecar.mock.calls.length;
+    state.set({ ...playing, attempt: change });
+    await vi.waitFor(() =>
+      expect(
+        change === "unchecked" ? model.state.get().error : model.state.get().title?.fileBinding,
+      ).toBe(
+        change === "unchecked"
+          ? "read"
+          : JSON.stringify([
+              change === "transfer" ? "new-copy" : "copy",
+              "/copy",
+              fixture.mediaSize,
+              fixture.mediaModified,
+            ]),
+      ),
+    );
+    expect(model.state.get().saved).toBeNull();
+    expect(fixture.sidecar).toHaveBeenCalledTimes(calls);
+    expect(await model.shift(1)).toBe(false);
+
+    const read = retainedFileSubtitle(
+      { id: change === "transfer" ? "new-copy" : "copy", key },
+      "/copy",
+    );
+
+    if (change === "unchecked") await expect(read).rejects.toThrow();
+    else expect(await read).toBeNull();
+  }
+
+  fixture.checked = true;
+  fixture.mediaSize = 100;
+  fixture.mediaModified = 123;
+  fixture.files.set(name, JSON.stringify({ ...record, fileBinding: undefined }));
+  state.set({ ...playing, attempt: "choose-new" });
+  await vi.waitFor(() => expect(model.state.get().title?.fileBinding).toBe(record.fileBinding));
+  const service = await import("../src/subtitles/service.ts");
+
+  const search = vi.spyOn(service, "subdlSearch").mockResolvedValue({
+    candidates: [
+      {
+        language: "nl",
+        release: "Fixture",
+        hearingImpaired: false,
+        format: "WebVTT",
+        url: "https://fixture.invalid/subtitle",
+      },
+    ],
+    unsupported: [],
+  });
+
+  const download = vi.spyOn(service, "subdlDownload").mockResolvedValue({
+    service: "subdl",
+    language: "nl",
+    release: "Fixture",
+    cues: [{ start: 0, end: 2, text: "Hallo" }],
+  });
+
+  try {
+    await model.find();
+    expect(await model.choose(model.state.get().results[0]!.id)).toBe(true);
+    expect(JSON.parse(fixture.files.get(name)!).fileBinding).toBe(record.fileBinding);
+    expect((await retainedFileSubtitle({ id: "copy", key }, "/copy"))?.subtitle?.language).toBe(
+      "nl",
+    );
+  } finally {
+    search.mockRestore();
+    download.mockRestore();
+    state.set({ kind: "idle" });
+  }
 });

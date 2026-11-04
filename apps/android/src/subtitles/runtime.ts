@@ -1,3 +1,4 @@
+import { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { defined } from "@mrstreamer/core/defined";
 import { requireNativeModule } from "expo";
 import { Directory, File, Paths } from "expo-file-system";
@@ -22,6 +23,29 @@ const root = () => new Directory(Paths.document, "subtitles");
 const fileOf = (key: string) => new File(root(), `${encodeURIComponent(key)}.json`);
 let model: SubtitleModel | undefined;
 
+/** The native checked path plus transfer id and intact file metadata identify the retained bytes. */
+function fileBinding(id: string, path: string) {
+  const file = new File(path);
+
+  if (!file.exists || file.size <= 0 || file.modificationTime === null) throw new Error("read");
+
+  return JSON.stringify([id, path, file.size, file.modificationTime]);
+}
+
+/** Read the actual persisted record for the checked next copy, never a provider-version guess. */
+export async function retainedFileSubtitle(row: { id: string; key: string }, path: string) {
+  const transfers = requireNativeModule<TransferPort>("Transfers");
+
+  if ((await transfers.path(row.id)) !== path) throw new Error("read");
+  const binding = fileBinding(row.id, path);
+  const file = fileOf(row.key);
+  const parsed = file.exists ? SavedSubtitle()(JSON.parse(file.textSync())) : null;
+
+  if (parsed instanceof type.errors) throw new Error("read");
+
+  return parsed?.fileBinding === binding ? parsed : null;
+}
+
 export function subtitles(): SubtitleModel {
   if (!model) throw new Error("Subtitle playback has not started");
 
@@ -37,11 +61,27 @@ export function startSubtitles(
     secrets: sealedLinks,
     files: {
       read(key) {
+        const binding = model?.state.get().title?.fileBinding;
+
+        if (binding) {
+          const [id, path]: [string, string] = JSON.parse(binding);
+
+          if (binding !== fileBinding(id, path)) throw new Error("read");
+        }
+
         const file = fileOf(key);
 
         return file.exists ? JSON.parse(file.textSync()) : null;
       },
       write(key, value) {
+        const binding = model?.state.get().title?.fileBinding;
+
+        if (binding) {
+          const [id, path]: [string, string] = JSON.parse(binding);
+
+          if (value.fileBinding !== fileBinding(id, path)) throw new Error("read");
+        }
+
         const identity: unknown = JSON.parse(key);
         const current = sources.state.get();
 
@@ -102,15 +142,19 @@ export function startSubtitles(
 
         for (const row of parsed.rows) {
           if ((await transfers.filePath(row.id)) !== intent.path) continue;
+
+          if ((await transfers.path(row.id)) !== intent.path) throw new Error("read");
+          const binding = fileBinding(row.id, intent.path);
           const known = knownSubtitleTitle(row.key);
 
-          if (known) return known;
+          if (known) return { ...known, fileBinding: binding };
 
           if (row.kind === "episode" && (row.season === undefined || row.episode === undefined))
             return null;
 
           return {
             key: row.key,
+            fileBinding: binding,
             query:
               row.kind === "movie"
                 ? { kind: "movie", title: row.title, ...defined({ year: row.year ?? undefined }) }
