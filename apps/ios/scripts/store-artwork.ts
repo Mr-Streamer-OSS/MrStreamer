@@ -1,5 +1,5 @@
 // Compose candidates only. Native captures and inspected Apple frames stay in .local/.
-import type { Json, JsonObject } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
