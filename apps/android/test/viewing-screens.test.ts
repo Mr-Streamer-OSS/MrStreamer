@@ -495,3 +495,181 @@ it("offers Mark watched on an episode, Download only with its handler, and says 
     .toBe("Mark watched|Download");
   expect(shown.textContent).not.toContain("marked watched");
 });
+
+it.each([false, true])(
+  "removes an unlisted saved title without TMDB identity (adult %s) and restores it with Undo",
+  async (adult) => {
+    scenario.saved = {
+      version: 1,
+      record: null,
+      watchlist: [{ ...gone, adult, tmdbId: adult ? "999" : null }],
+    };
+    await viewing.read();
+    const shown = show(createElement(WatchlistScreen));
+    await press(shown, "More options for Grey Pier");
+    await press(shown, "Remove from Watchlist");
+    expect(has(shown, "Grey Pier, No longer listed")).toBe(false);
+    expect(viewing.state.get().watchlist).toHaveLength(0);
+    await press(shown, "Undo");
+    expect(has(shown, "Grey Pier, No longer listed")).toBe(true);
+  },
+);
+
+it("opens a supported Movies tab for recently added provider films", async () => {
+  const shown = show(createElement(HomeScreen));
+  await settle();
+  await press(shown, "Movies");
+  expect(scenario.opened.at(-1)).toEqual({ pathname: "/movies", params: { tab: "new" } });
+});
+
+it("does not describe failed viewing reads as an empty Watchlist", async () => {
+  viewing.state.set({ kind: "failed", viewing: null, watchlist: [] });
+  const shown = show(createElement(HomeScreen));
+  await settle();
+  expect(shown.textContent).not.toContain("Nothing saved yet.");
+  expect(has(shown, "Watchlist, 0")).toBe(false);
+  expect(shown.textContent).toContain("Couldn't read viewing history");
+  act(() => root?.render(createElement(WatchlistScreen)));
+  expect(shown.textContent).not.toContain("0 saved");
+});
+
+it("drops displayed episode marks when history is cleared", async () => {
+  const series = scenario.model!.made("series").list("all", "title")[0]!;
+  scenario.params = { kind: "series", title: series.key, season: "1" };
+  await viewing.markEpisode(
+    {
+      kind: "episode",
+      subscriptionId: "source",
+      seriesId: series.id,
+      id: "first",
+      season: 1,
+      episode: 1,
+    },
+    true,
+  );
+  const shown = show(createElement(DetailsScreen, { model: scenario.model! }));
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark unwatched");
+  await act(async () => {
+    await viewing.clear("source");
+  });
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark watched");
+});
+
+it("keeps a refused episode action retryable after a successful Watchlist change", async () => {
+  const series = scenario.model!.made("series").list("all", "title")[0]!;
+  scenario.params = { kind: "series", title: series.key, season: "1" };
+  const shown = show(createElement(DetailsScreen, { model: scenario.model! }));
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark watched");
+  scenario.refused = true;
+  act(() => {
+    find(shown, /^1\. Episode 1/).dispatchEvent(
+      new window.KeyboardEvent("keydown", { key: "mark", bubbles: true }),
+    );
+  });
+  await expect.poll(() => viewingFailure.get()?.kind).toBe("episode");
+  scenario.refused = false;
+  await press(shown, "Add to Watchlist");
+  await expect.poll(() => viewing.state.get().watchlist.length).toBe(1);
+  expect(viewingFailure.get()?.kind).toBe("episode");
+  expect(shown.textContent).toContain("Try again");
+});
+
+it("shows Play and retry when the Stage preview fails, ending only its handle", async () => {
+  const { player } = await import("../src/player/instance.ts");
+  const intent = { kind: "live", sourceId: "source", channelId: "1", title: "Harbour HD" } as const;
+  await viewing.recordWatch(intent);
+  const end = vi.fn(async () => {});
+  const preview = vi.spyOn(player, "preview").mockReturnValue({ end, attempt: "preview" });
+  const shown = show(createElement(HomeScreen));
+  await settle();
+  act(() => {
+    player.previewState.set({
+      kind: "previewing",
+      attempt: "preview",
+      intent,
+      phase: "failed",
+      positionMs: 0,
+    });
+  });
+  await settle();
+  expect(has(shown, "Play Harbour HD")).toBe(true);
+  expect(shown.textContent).not.toContain("Muted");
+  expect(shown.textContent).toContain("Preview couldn't start.");
+  expect(end).toHaveBeenCalledTimes(1);
+  await press(shown, "Try again");
+  expect(preview).toHaveBeenCalledTimes(2);
+  act(() => player.previewState.set({ kind: "idle" }));
+  preview.mockRestore();
+});
+
+it("hides episode mark actions when saved marks could not be read and offers retry", async () => {
+  const series = scenario.model!.made("series").list("all", "title")[0]!;
+  scenario.params = { kind: "series", title: series.key, season: "1" };
+  viewing.state.set({ ...viewing.state.get(), kind: "failed" });
+  const shown = show(createElement(DetailsScreen, { model: scenario.model! }));
+  await settle();
+  await settle();
+  expect(find(shown, /^1\. Episode 1/).getAttribute("data-actions")).toBe("");
+  expect(shown.textContent).toContain("Couldn't read viewing history");
+  await press(shown, "Try again");
+  await expect
+    .poll(() => find(shown, /^1\. Episode 1/).getAttribute("data-actions"))
+    .toBe("Mark watched");
+});
+
+it("shows the Stage programme even when its channel is beyond the first twenty On now rows", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const { guide } = await import("../src/guide/guide.ts");
+
+  const before = sources.state.get();
+
+  if (before.kind !== "ready") throw new Error("sources");
+
+  const source = before.sources[0]!;
+
+  const rows = Array.from({ length: 25 }, (_, i) => ({
+    key: `source:${i + 1}`,
+    sourceId: "source",
+    title: `Channel ${i + 1}`,
+    number: i + 1,
+    category: null,
+  }));
+
+  const read = vi.spyOn(guide, "listings").mockImplementation(
+    async (keys) =>
+      new Map(
+        keys.map((key) => [
+          key,
+          {
+            now: {
+              title: `Programme ${key}`,
+              start: Date.now() - 10000,
+              stop: Date.now() + 10000,
+              description: null,
+            },
+            next: null,
+          },
+        ]),
+      ),
+  );
+
+  try {
+    sources.state.set({
+      kind: "ready",
+      sources: [{ ...source, channels: { kind: "ready", rows } }],
+    });
+    await viewing.recordWatch({ sourceId: "source", channelId: "25" });
+    const shown = show(createElement(HomeScreen));
+    await settle();
+    expect(shown.textContent).toContain("Programme source:25");
+  } finally {
+    read.mockRestore();
+    act(() => sources.state.set(before));
+  }
+});

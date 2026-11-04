@@ -95,12 +95,13 @@ export interface ViewingPresentationAdapter {
   watchlist(title: import("@mrstreamer/contracts/ondemand").Title): {
     label: string;
     activate(): void;
+    available?: boolean;
   };
-  /** An episode's mark: the action that flips it, and "Watched" under its name while it holds. */
+  /** An episode's mark, hidden while its saved state is unavailable. */
   episode(
     title: import("@mrstreamer/contracts/ondemand").Title,
     episode: import("@mrstreamer/contracts/ondemand").Episode,
-  ): { label: string; activate(): void; detail?: string };
+  ): { label: string; activate(): void; detail?: string; available?: boolean };
   notice(): ViewingNotice | null;
   play(media: MediaIdentity, episode?: { season: number; number: number }): void;
 }

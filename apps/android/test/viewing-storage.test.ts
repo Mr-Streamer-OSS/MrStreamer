@@ -43,7 +43,7 @@ it("restores only committed viewing files after interrupted replacements, includ
     expect(() => writeJson("viewing.json", { saved: 2 })).toThrow("interrupted");
     expect(readViewing("viewing.json")).toEqual({ saved: 1 });
     disk.files.delete("viewing.json");
-    expect(readViewing("viewing.json")).toBe(null);
+    expect(() => readViewing("viewing.json")).toThrow();
     disk.files.set("viewing.json", "damaged");
     expect(() => readViewing("viewing.json")).toThrow();
     disk.interrupted = false;
@@ -52,5 +52,17 @@ it("restores only committed viewing files after interrupted replacements, includ
   } finally {
     disk.files.clear();
     disk.interrupted = false;
+  }
+});
+
+it("refuses a valid pending first write rather than allowing empty history to overwrite it", () => {
+  try {
+    disk.files.set(
+      "viewing.json.next",
+      JSON.stringify({ version: 1, record: null, watchlist: [] }),
+    );
+    expect(() => readViewing("viewing.json")).toThrow();
+  } finally {
+    disk.files.clear();
   }
 });

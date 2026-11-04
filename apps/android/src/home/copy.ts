@@ -2,6 +2,7 @@ import { catalogue } from "@mrstreamer/mobile/language";
 
 export const t = catalogue(
   {
+    "Preview couldn't start.": "Preview couldn't start.",
     Home: "Home",
     "On now": "On now",
     Favourites: "Favourites",
@@ -25,7 +26,6 @@ export const t = catalogue(
     "Remove from Continue watching": "Remove from Continue watching",
     "Mark watched": "Mark watched",
     "Mark unwatched": "Mark unwatched",
-    Download: "Download",
     "Lists still loading": "Lists still loading",
     "Lists didn't load": "Lists didn't load",
     "Password needed in Settings": "Password needed in Settings",
@@ -50,7 +50,6 @@ export const t = catalogue(
     Muted: "Muted",
     Unmute: "Unmute",
     "Full screen": "Full screen",
-    "Resume {episode}": "Resume {episode}",
     "{episode} marked watched": "{episode} marked watched",
     "{episode} marked unwatched": "{episode} marked unwatched",
     "Nothing saved yet.": "Nothing saved yet.",
@@ -63,6 +62,7 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      "Preview couldn't start.": "Voorvertoning kon niet starten.",
       Home: "Home",
       "On now": "Nu op tv",
       Favourites: "Favorieten",
@@ -86,7 +86,6 @@ export const t = catalogue(
       "Remove from Continue watching": "Uit Verder kijken verwijderen",
       "Mark watched": "Markeren als bekeken",
       "Mark unwatched": "Markeren als niet bekeken",
-      Download: "Downloaden",
       "Lists still loading": "Lijsten laden nog",
       "Lists didn't load": "Lijsten niet geladen",
       "Password needed in Settings": "Wachtwoord nodig in Instellingen",
@@ -113,7 +112,6 @@ export const t = catalogue(
       Muted: "Gedempt",
       Unmute: "Geluid aan",
       "Full screen": "Volledig scherm",
-      "Resume {episode}": "Verder met {episode}",
       "{episode} marked watched": "{episode} gemarkeerd als bekeken",
       "{episode} marked unwatched": "{episode} gemarkeerd als niet bekeken",
       "Nothing saved yet.": "Nog niets bewaard.",

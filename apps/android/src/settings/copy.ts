@@ -8,6 +8,8 @@ export const t = catalogue(
       "The provider was removed, but its history could not be deleted.",
     "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.":
       "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
+    "Deleting history also erases favourites and Watchlist.":
+      "Deleting history also erases favourites and Watchlist.",
     Guides: "Guides",
     "Couldn't remove the provider.": "Couldn't remove the provider.",
     "The login is erased, but the provider is still listed.":
@@ -81,6 +83,8 @@ export const t = catalogue(
         "De provider is verwijderd, maar de geschiedenis kon niet worden gewist.",
       "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.":
         "Verwijderen bewaart je favorieten, kijklijst en kijkgeschiedenis voor wanneer je deze provider opnieuw toevoegt.",
+      "Deleting history also erases favourites and Watchlist.":
+        "Geschiedenis wissen verwijdert ook favorieten en de kijklijst.",
       Guides: "Gidsen",
       "Couldn't remove the provider.": "Kon de provider niet verwijderen.",
       "The login is erased, but the provider is still listed.":

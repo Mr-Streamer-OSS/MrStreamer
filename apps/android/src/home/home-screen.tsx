@@ -1,5 +1,5 @@
 import { router, useIsFocused } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -199,14 +199,35 @@ function Stage({
   const focused = useIsFocused();
   const stage = home.stage;
   const key = stage ? intentKey(stage.intent) : null;
-  const idle = home.playback.kind === "idle";
+  const playback = useStore(player.state);
+  const previewState = useStore(player.previewState);
+  const idle = playback.kind === "idle";
+  const handle = useRef<ReturnType<typeof player.preview>>(null);
+  const [retry, setRetry] = useState(0);
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   useEffect(() => {
     if (!focused || !stage || !idle) return;
+    setPreviewFailed(false);
     const preview = player.preview(stage.intent);
+    handle.current = preview;
 
-    return () => void preview?.end();
-  }, [focused, key, idle]);
+    return () => {
+      handle.current = null;
+      void preview?.end();
+    };
+  }, [focused, key, idle, retry]);
+
+  useEffect(() => {
+    if (
+      previewState.kind !== "previewing" ||
+      previewState.phase !== "failed" ||
+      intentKey(previewState.intent) !== key
+    )
+      return;
+    setPreviewFailed(true);
+    void handle.current?.end();
+  }, [previewState, key]);
 
   if (!stage)
     return home.loading.length || home.restoring ? (
@@ -219,7 +240,10 @@ function Stage({
       </View>
     ) : null;
 
-  const previewing = home.preview.kind === "previewing" && intentKey(home.preview.intent) === key;
+  const previewing =
+    previewState.kind === "previewing" &&
+    previewState.phase !== "failed" &&
+    intentKey(previewState.intent) === key;
 
   const air = programme ? onAir(programme) : null;
   const title = stage.row.title;
@@ -318,6 +342,12 @@ function Stage({
           </View>
         )}
       </View>
+      {previewFailed ? (
+        <Notice
+          message={t("Preview couldn't start.")}
+          actions={<TextButton label={t("Try again")} onPress={() => setRetry((n) => n + 1)} />}
+        />
+      ) : null}
       <Text style={{ ...typeScale.title, letterSpacing: -0.22, paddingTop: 12 }}>{title}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 2 }}>
         {previewing ? (
@@ -361,6 +391,7 @@ export function HomeScreen() {
   const accounts = useStore(sources.state);
   const saved = useStore(lists.state);
   const onNow = useOnNow(home.onNow);
+  const stageAir = useOnNow(home.stage ? [home.stage.row] : []);
   const favourites = useOnNow(home.favourites);
   const [held, setHeld] = useState<Continuing | null>(null);
   const [listing, setListing] = useState<Entry | null>(null);
@@ -381,7 +412,10 @@ export function HomeScreen() {
       : undefined);
 
   const resume = (entry: Continuing) => {
-    if (play) void resumeEntry(entry);
+    if (play)
+      void resumeEntry(entry).then((outcome) => {
+        if (outcome !== "played") openDetails(entry.title, entry.version);
+      });
     else openDetails(entry.title, entry.version);
   };
 
@@ -409,14 +443,8 @@ export function HomeScreen() {
   const notes = heldBack(favouriteList?.entries ?? [], accounts);
 
   const stageSection = (
-    <View
-      style={wide ? { width: 560, flexShrink: 0 } : { paddingHorizontal: inset, paddingTop: 16 }}
-    >
-      <Stage
-        home={home}
-        programme={onNow.find((each) => each.row.key === home.stage?.row.key)?.programme ?? null}
-        wide={wide}
-      />
+    <View style={wide ? { flex: 1, minWidth: 0 } : { paddingHorizontal: inset, paddingTop: 16 }}>
+      <Stage home={home} programme={stageAir[0]?.programme ?? null} wide={wide} />
     </View>
   );
 
@@ -444,12 +472,19 @@ export function HomeScreen() {
     <View style={{ paddingTop: 8 }}>
       <ShelfHeading
         title={t("Favourites")}
-        count={home.favouriteCount}
+        count={saved.kind === "ready" && !home.restoring ? home.favouriteCount : undefined}
         inset={inset}
         large={large}
         onOpen={() => router.push("/home/favourites")}
       />
-      {home.favouriteCount === 0 ? (
+      {saved.kind === "failed" ? (
+        <Notice
+          message={t("Lists didn't load")}
+          actions={<TextButton label={t("Try again")} onPress={() => lists.read()} />}
+        />
+      ) : home.restoring ? (
+        <StillTiles inset={inset} height={68} />
+      ) : home.favouriteCount === 0 ? (
         <Empty title={live("No favourites yet.")} body={live("Star a channel in Live.")} />
       ) : !favourites.length && channelsWaiting ? (
         <StillTiles inset={inset} height={68} />
@@ -520,16 +555,18 @@ export function HomeScreen() {
   ) : null;
 
   const watchlistSection =
-    state.kind === "reading" ? null : (
+    state.kind === "reading" ? (
+      <StillTiles inset={inset} height={180} />
+    ) : (
       <View style={{ paddingTop: 12, flex: wide ? 1 : undefined, minWidth: 0 }}>
         <ShelfHeading
           title={t("Watchlist")}
-          count={home.watchlistCount}
+          count={state.kind === "ready" ? home.watchlistCount : undefined}
           inset={wide && home.continuing.length ? 0 : inset}
           large={large}
           onOpen={() => router.push("/home/watchlist")}
         />
-        {home.watchlistCount === 0 ? (
+        {state.kind === "failed" ? null : home.watchlistCount === 0 ? (
           <Empty
             title={t("Nothing saved yet.")}
             body={t("Save a movie or series from its details.")}
@@ -568,7 +605,19 @@ export function HomeScreen() {
         title={t(home.moviesTab === "popular" ? "Movies for you" : "Movies")}
         inset={inset}
         large={large}
-        onOpen={() => router.navigate({ pathname: "/movies", params: { tab: home.moviesTab } })}
+        onOpen={() =>
+          router.navigate({
+            pathname: "/movies",
+            params: {
+              tab:
+                home.moviesTab === "popular"
+                  ? "for-you"
+                  : home.moviesTab === "recent"
+                    ? "new"
+                    : "all",
+            },
+          })
+        }
       />
       {large ? (
         home.movies
@@ -626,13 +675,13 @@ export function HomeScreen() {
       </View>
       {failure}
       {unread}
+      {favouritesSection}
       {continueSection || watchlistSection ? (
         <View style={{ flexDirection: "row", gap: 16 }}>
           {continueSection}
           {watchlistSection}
         </View>
       ) : null}
-      {favouritesSection}
       {moviesSection}
     </>
   ) : (

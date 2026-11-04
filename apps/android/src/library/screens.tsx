@@ -808,7 +808,8 @@ function EpisodeRow({
   const media = () => mediaOf(title, episode, titleId);
   const saved = useDownloadPresentation(media());
   const viewing = useViewingPresentation();
-  const mark = viewing?.episode(title, episode);
+  const candidate = viewing?.episode(title, episode);
+  const mark = candidate?.available === false ? undefined : candidate;
   const insets = useSafeAreaInsets();
   const [held, setHeld] = useState(false);
   const name = `${formatNumber(episode.number)}. ${episode.title}`;
@@ -1193,7 +1194,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           container={shown.container?.trim() || details?.containers.get(shown.id)}
         />
       ) : null}
-      {shown && viewing ? (
+      {shown && viewing && viewing.watchlist(shown).available !== false ? (
         <OutlinedButton
           label={viewing.watchlist(shown).label}
           onPress={viewing.watchlist(shown).activate}

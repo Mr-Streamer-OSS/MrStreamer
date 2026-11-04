@@ -167,26 +167,46 @@ export function SettingsScreen() {
           text,
           action: {
             label: t("Try again"),
-            // The provider is gone by then: Try again deletes only the history that stayed.
+            // The provider is gone: retry only the cleanups that failed.
             run:
-              result.erase === "history-not-cleared" || result.historyNotCleared
-                ? () => void deleteHistory(source)
+              result.erase === "history-not-cleared" ||
+              result.historyNotCleared ||
+              result.erase === "statistics-not-cleared"
+                ? () =>
+                    void retryCleanup(
+                      source,
+                      result.erase === "history-not-cleared" || !!result.historyNotCleared,
+                      result.erase === "statistics-not-cleared",
+                    )
                 : () => void remove(source, withHistory),
           },
         });
     }
   }
 
-  /** Deletes a removed provider's history again, after the first attempt was refused. */
-  async function deleteHistory(source: ConnectedSource) {
-    try {
-      await (await import("../home/index.ts")).clearViewing(source.id);
-    } catch {
-      notify({
-        text: t("The provider was removed, but its history could not be deleted."),
-        action: { label: t("Try again"), run: () => void deleteHistory(source) },
-      });
+  /** Retry each outstanding cleanup after removal, without removing the provider again. */
+  async function retryCleanup(source: ConnectedSource, history: boolean, usage: boolean) {
+    if (history) {
+      try {
+        await (await import("../home/index.ts")).clearViewing(source.id);
+        history = false;
+      } catch {
+        /* Remains retryable below. */
+      }
     }
+
+    if (usage) usage = !statistics.discard();
+
+    const messages = [
+      ...(history ? [t("The provider was removed, but its history could not be deleted.")] : []),
+      ...(usage ? [t("The provider was removed, but its statistics could not be cleared.")] : []),
+    ];
+
+    if (messages.length)
+      notify({
+        text: messages.join(" "),
+        action: { label: t("Try again"), run: () => void retryCleanup(source, history, usage) },
+      });
   }
 
   const openLink = (url: string) =>
@@ -412,7 +432,8 @@ export function SettingsScreen() {
           {t("Its login is erased from this phone.")}{" "}
           {t(
             "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
-          )}
+          )}{" "}
+          {t("Deleting history also erases favourites and Watchlist.")}
         </DialogText>
       </Dialog>
     </Screen>

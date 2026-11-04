@@ -15,7 +15,7 @@ import { colors } from "../ui/theme.ts";
 import { t } from "./copy.ts";
 import { ProgressDialog } from "./feedback.tsx";
 import { viewing, watchlistRows, type SavedTitle, type WatchlistRow } from "./index.ts";
-import { Notice, SheetAction, SheetHeader, Tappable } from "./parts.tsx";
+import { Notice, StillTiles, SheetAction, SheetHeader, Tappable } from "./parts.tsx";
 
 const why = {
   loading: "Lists still loading",
@@ -78,7 +78,7 @@ export function WatchlistScreen() {
     setMenu(null);
     setRefused(null);
     viewing.removeWatchlist(row.saved).then(
-      (entries) => setStrip({ kind: "removed", entries }),
+      (entries) => (entries.length ? setStrip({ kind: "removed", entries }) : setRefused(row)),
       () => setRefused(row),
     );
   };
@@ -104,7 +104,7 @@ export function WatchlistScreen() {
         }}
       >
         <Text style={{ ...typeScale.meta, flex: 1 }}>
-          {t("{count} saved", { count: rows.length })}
+          {state.kind === "ready" ? t("{count} saved", { count: rows.length }) : ""}
         </Text>
         <Tappable
           label={t("Sort, {order}", { order })}
@@ -127,7 +127,9 @@ export function WatchlistScreen() {
           actions={<TextButton label={t("Try again")} onPress={() => void viewing.read()} />}
         />
       ) : null}
-      {rows.length === 0 && state.kind === "ready" ? (
+      {state.kind === "reading" ? (
+        <StillTiles inset={inset} height={180} />
+      ) : rows.length === 0 && state.kind === "ready" ? (
         <Empty
           title={t("Nothing saved yet.")}
           body={t("Save a movie or series from its details.")}

@@ -4,5 +4,20 @@ import { File, Paths } from "expo-file-system";
 export function readViewing(name: string): unknown {
   const file = new File(Paths.document, name);
 
-  return file.exists ? JSON.parse(file.textSync()) : null;
+  if (file.exists) return JSON.parse(file.textSync());
+  const pending = new File(Paths.document, `${name}.next`);
+
+  if (pending.exists) {
+    const text = pending.textSync();
+
+    try {
+      JSON.parse(text);
+    } catch {
+      return null;
+    }
+
+    throw new Error("viewing-read");
+  }
+
+  return null;
 }

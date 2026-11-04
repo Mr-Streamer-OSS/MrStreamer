@@ -146,7 +146,7 @@ export function homeModel(
   const watchlist = watchlistRows(state, sources, library);
   const movies = library.made("movie");
   const recommended = library.metadata ? movies.list("popular", "popular") : [];
-  const recentMovies = movies.list("recent", "added");
+  const recentMovies = movies.list("all", "added").filter((title) => title.addedAt !== null);
 
   // The Movies tab the shelf comes from: TMDB's picks, else recently added, else every movie.
   const moviesTab = recommended.length ? "popular" : recentMovies.length ? "recent" : "all";

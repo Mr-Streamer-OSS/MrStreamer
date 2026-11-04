@@ -183,6 +183,7 @@ export function viewingOwner(
       serialize(async () => {
         await runtime?.dispose();
         runtime = undefined;
+        state.set({ ...state.get(), kind: "reading" });
       }),
     setWatchlist(title: Title, wanted: boolean) {
       return serialize(async () => {
@@ -223,7 +224,10 @@ export function viewingOwner(
 
         const removed = saved.filter(
           (each) =>
-            owners().includes(each.sourceId) && each.kind === entry.kind && sameEntry(each, entry),
+            owners().includes(each.sourceId) &&
+            each.kind === entry.kind &&
+            ((each.sourceId === entry.sourceId && each.titleId === entry.titleId) ||
+              sameEntry(each, entry)),
         );
 
         persist(
@@ -282,7 +286,10 @@ export function viewingOwner(
           title.kind === "movie" ? { movies: title.versions } : { series: title.versions },
         ),
       ),
-    episodes: (series: OwnedId) => run((record) => record.episodes(series)),
+    episodes: (series: OwnedId) =>
+      serialize(() =>
+        ready().runPromise(Effect.flatMap(ViewingRecord, (record) => record.episodes(series))),
+      ),
     markEpisode: (episode: Extract<TitleRef, { kind: "episode" }>, watched: boolean) =>
       run((record) => record.markEpisode(command(), episode, watched)),
     undoMark: (series: OwnedId, revision: number) =>

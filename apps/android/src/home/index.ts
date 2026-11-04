@@ -1,3 +1,4 @@
+import { draftOf } from "../live/model.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
 import { libraryIntents, libraryViewing, type MediaIdentity } from "../library/intents.ts";
@@ -39,14 +40,17 @@ function attempt(
   message: string,
   work: () => Promise<unknown>,
 ) {
+  const failure = { kind, message, retry: () => retry() };
+
   const retry = () => {
     void work().then(
       () => {
         if (kind === "progress") progressQuiet = false;
-        viewingFailure.set(null);
+
+        if (viewingFailure.get() === failure) viewingFailure.set(null);
       },
       () => {
-        if (kind !== "progress" || !progressQuiet) viewingFailure.set({ kind, message, retry });
+        if (kind !== "progress" || !progressQuiet) viewingFailure.set(failure);
       },
     );
   };
@@ -97,7 +101,7 @@ export function startViewing(): () => void {
         attempt("progress", t("Your latest position could not be saved."), () =>
           viewing.recordWatch(intent),
         );
-      else if (entry && durationMs)
+      else if (entry && durationMs && (entry.media.kind === "movie" || entry.episode))
         attempt("progress", t("Your latest position could not be saved."), () =>
           viewing.recordProgress(
             titleRef(entry.media, entry.episode),
@@ -109,15 +113,25 @@ export function startViewing(): () => void {
     };
 
     const revision = store(0);
-    const marks = new Map<string, boolean>();
+
+    type EpisodeState = Awaited<ReturnType<typeof viewing.episodes>>;
+
+    const marks = new Map<string, { state?: EpisodeState; failed?: boolean }>();
     const bump = () => revision.set((n) => n + 1);
     // The last kept episode mark, which Details offers to undo until it closes or another mark.
     const kept = store<{ message: string; undo: () => Promise<unknown> } | null>(null);
-    const stopState = viewing.state.subscribe(bump);
+
+    const stopState = viewing.state.subscribe(() => {
+      marks.clear();
+      bump();
+    });
+
     const stopFailure = viewingFailure.subscribe(bump);
     const stopKept = kept.subscribe(bump);
 
     const stopSources = sources.state.subscribe(() => {
+      marks.clear();
+      bump();
       void viewing.refresh().catch(() => undefined);
     });
 
@@ -135,6 +149,9 @@ export function startViewing(): () => void {
         );
       },
       watchlist(title) {
+        if (viewing.state.get().kind === "reading")
+          return { label: t("Add to Watchlist"), activate: () => {}, available: false };
+
         if (viewing.state.get().kind !== "ready")
           return {
             label: t("Couldn't read viewing history. Try again."),
@@ -153,30 +170,36 @@ export function startViewing(): () => void {
         };
       },
       episode(title, episode) {
-        const key = JSON.stringify([
-          title.subscriptionId,
-          title.id,
-          episode.season,
-          episode.number,
-        ]);
+        const key = title.key;
+        let cached = marks.get(key);
 
-        const watched = marks.get(key) ?? false;
-
-        if (!marks.has(key)) {
-          marks.set(key, false);
-          void viewing.episodes(title).then(
-            (state) => {
-              marks.set(
-                key,
-                state.marks.some(
-                  (m) => m.season === episode.season && m.episode === episode.number && m.watched,
-                ),
-              );
-              bump();
-            },
-            () => marks.delete(key),
-          );
+        if (!cached) {
+          cached = {};
+          marks.set(key, cached);
+          const reading = cached;
+          // Defer publication until after the render that requested this shared series read.
+          void Promise.resolve()
+            .then(() => viewing.episodes(title))
+            .then(
+              (state) => {
+                if (marks.get(key) !== reading) return;
+                reading.state = state;
+                bump();
+              },
+              () => {
+                if (marks.get(key) !== reading) return;
+                reading.failed = true;
+                bump();
+              },
+            );
         }
+
+        if (!cached.state)
+          return { label: t("Mark watched"), activate: () => {}, available: false };
+
+        const watched = cached.state.marks.some(
+          (m) => m.season === episode.season && m.episode === episode.number && m.watched,
+        );
 
         const label = `S${episode.season} E${episode.number}`;
 
@@ -203,7 +226,7 @@ export function startViewing(): () => void {
                 !watched,
               );
 
-              marks.set(key, mark?.watched ?? false);
+              marks.clear();
 
               if (mark)
                 kept.set({
@@ -238,6 +261,19 @@ export function startViewing(): () => void {
             dismiss: () => viewingFailure.set(null),
           };
 
+        if ([...marks.values()].some((entry) => entry.failed))
+          return {
+            message: t("Couldn't read viewing history. Try again."),
+            failed: true,
+            action: t("Try again"),
+            run: () => {
+              marks.clear();
+
+              if (viewing.state.get().kind !== "ready") void viewing.read();
+              bump();
+            },
+            dismiss: () => {},
+          };
         const mark = kept.get();
 
         if (!mark) return null;
@@ -374,82 +410,91 @@ export function startViewing(): () => void {
 
 /** Resume resolves current details and its exact eligible version before invoking a registered handler. */
 export async function resumeEntry(entry: Continuing) {
-  const model = library();
+  try {
+    const model = library();
 
-  const version = entry.title.versions.find(
-    (v) => v.subscriptionId === entry.version.subscriptionId && v.id === entry.version.id,
-  );
+    const version = entry.title.versions.find(
+      (v) => v.subscriptionId === entry.version.subscriptionId && v.id === entry.version.id,
+    );
 
-  const reader = version && model.reader(version.subscriptionId);
+    const reader = version && model.reader(version.subscriptionId);
 
-  if (!version || !reader) return;
-  const before = player.state.get();
+    if (!version || !reader) return "details" as const;
+    const before = player.state.get();
 
-  // Something else started playing, or the provider signed out, while details were read.
-  const stale = () =>
-    player.state.get() !== before || model.reader(version.subscriptionId) !== reader;
+    // Something else started playing, or the provider signed out, while details were read.
+    const stale = () =>
+      ((now) =>
+        ("attempt" in now ? now.attempt : null) !== ("attempt" in before ? before.attempt : null))(
+        player.state.get(),
+      ) || model.reader(version.subscriptionId) !== reader;
 
-  const details = await model.details({ ...entry.title, ...version });
+    const details = await model.details({ ...entry.title, ...version });
 
-  if (details.providerFailed || !details.value || stale()) return;
+    if (details.providerFailed || !details.value || stale()) return "details" as const;
 
-  if (details.value.kind === "series") {
-    const standing = await viewing.episodes(version);
-    const next = continuation(details.value, standing.progress, standing.marks);
+    if (details.value.kind === "series") {
+      const standing = await viewing.episodes(version);
+      const next = continuation(details.value, standing.progress, standing.marks);
+      const play = libraryIntents.state.get().play;
+
+      if (!next || !play || stale()) return "details" as const;
+      const episode = next.episode;
+      const container = details.containers.get(episode.id);
+
+      if (!container) return "details" as const;
+      libraryViewing.state.get()?.play(
+        {
+          kind: "episode",
+          sourceId: version.subscriptionId,
+          titleKey: entry.title.key,
+          titleId: entry.title.id,
+          version,
+          episodeId: episode.id,
+        },
+        episode,
+      );
+      play({
+        kind: "title",
+        sourceId: version.subscriptionId,
+        media: "episode",
+        id: episode.id,
+        container,
+        title: episode.title,
+        resumeAt: resumePoint(next.resume) * 1000,
+      });
+
+      return "played" as const;
+    }
+
+    const container = version.container?.trim() || details.containers.get(version.id);
     const play = libraryIntents.state.get().play;
 
-    if (!next || next.replay || !play || stale()) return;
-    const episode = next.episode;
-    const container = details.containers.get(episode.id);
+    if (!container || !play) return "details" as const;
 
-    if (!container) return;
-    libraryViewing.state.get()?.play(
-      {
-        kind: "episode",
-        sourceId: version.subscriptionId,
-        titleKey: entry.title.key,
-        titleId: entry.title.id,
-        version,
-        episodeId: episode.id,
-      },
-      episode,
-    );
+    const media: MediaIdentity = {
+      kind: "movie",
+      sourceId: version.subscriptionId,
+      titleKey: entry.title.key,
+      titleId: entry.title.id,
+      version,
+    };
+
+    libraryViewing.state.get()?.play(media);
     play({
       kind: "title",
       sourceId: version.subscriptionId,
-      media: "episode",
-      id: episode.id,
+      media: "movie",
+      id: version.id,
       container,
-      title: episode.title,
-      resumeAt: resumePoint(next.resume) * 1000,
+      title: entry.title.title,
+      resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
     });
 
-    return;
+    return "played" as const;
+  } catch {
+    return "details" as const;
   }
-
-  const container = version.container?.trim() || details.containers.get(version.id);
-  const play = libraryIntents.state.get().play;
-
-  if (!container || !play) return;
-
-  const media: MediaIdentity = {
-    kind: "movie",
-    sourceId: version.subscriptionId,
-    titleKey: entry.title.key,
-    titleId: entry.title.id,
-    version,
-  };
-
-  libraryViewing.state.get()?.play(media);
-  play({
-    kind: "title",
-    sourceId: version.subscriptionId,
-    media: "movie",
-    id: version.id,
-    container,
-    title: entry.title.title,
-    resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
-  });
 }
 
 /** Explicit history deletion also clears Live favourites, keeping custom lists intact. */
@@ -457,19 +502,14 @@ export async function clearViewing(sourceId: string) {
   if (viewing.state.get().kind !== "ready") await viewing.read();
   await viewing.clear(sourceId);
   const live = (await import("../live/runtime.ts")).lists;
+
+  if (live.state.get().kind !== "ready") live.read();
   const state = live.state.get();
 
   if (state.kind !== "ready") throw new Error("lists-read");
-  writeJson("live-lists.json", {
-    version: 1,
-    lists: state.lists.map((list) => ({
-      ...list,
-      entries: list.entries
-        .filter((entry) => list.id !== "favourites" || entry.sourceId !== sourceId)
-        .map((entry) => ({ ...entry })),
-    })),
-  });
-  live.read();
+  const favourites = state.lists.find((list) => list.id === "favourites");
 
-  if (live.state.get().kind !== "ready") throw new Error("lists-read");
+  if (!favourites) throw new Error("lists-read");
+  const draft = draftOf(favourites, sources.state.get());
+  live.commit({ ...draft, entries: draft.entries.filter((entry) => entry.sourceId !== sourceId) });
 }

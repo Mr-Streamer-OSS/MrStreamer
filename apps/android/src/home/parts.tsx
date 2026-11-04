@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pressable, Text, View, type ViewStyle } from "react-native";
+import { Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { Artwork, Icon, typeScale } from "../library/parts.tsx";
 import { RED } from "../live/chrome.tsx";
@@ -163,13 +163,13 @@ export function ShelfHeading({
 /** A shelf's tiles in one sideways row on the heading's inset, 10dp apart. */
 export function Shelf({ inset, children }: { inset: number; children: ReactNode }) {
   return (
-    <View style={{ overflow: "hidden" }}>
-      <View
-        style={{ flexDirection: "row", gap: TILE_GAP, paddingLeft: inset, paddingRight: inset }}
-      >
-        {children}
-      </View>
-    </View>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ flexDirection: "row", gap: TILE_GAP, paddingHorizontal: inset }}
+    >
+      {children}
+    </ScrollView>
   );
 }
 

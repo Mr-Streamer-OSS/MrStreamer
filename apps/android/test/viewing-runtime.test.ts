@@ -2,27 +2,60 @@ import { expect, it, vi } from "vitest";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { LibraryModel } from "../src/library/model.ts";
 import type { Settled } from "../src/player/player.ts";
+import { libraryModel } from "../src/library/model.ts";
 import { fixture } from "./library-fixture.ts";
 
 const scenario = vi.hoisted(() => ({
   model: undefined as LibraryModel | undefined,
   saved: null as Json,
   refused: false,
+  live: null as Json,
+  liveReadFailed: false,
   listeners: new Set<(settled: Settled) => void>(),
 }));
 
 vi.mock("../src/bootstrap/sources.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
 
-  return { sources: { state: store({ kind: "ready", sources: [{ id: "source" }] }) } };
+  return {
+    sources: {
+      state: store({
+        kind: "ready",
+        sources: [
+          {
+            id: "source",
+            kind: "xtream",
+            label: "Test provider",
+            channels: { kind: "ready", rows: [] },
+          },
+        ],
+      }),
+    },
+  };
 });
 
 vi.mock("../src/library/runtime.ts", () => ({ library: () => scenario.model! }));
 
 vi.mock("../src/live/runtime.ts", async () => {
-  const { store } = await import("../src/platform/store.ts");
+  const { listsOwner } = await import("../src/live/store.ts");
+  const { sources } = await import("../src/bootstrap/sources.ts");
 
-  return { lists: { state: store({ kind: "ready", lists: [] }) } };
+  return {
+    lists: listsOwner(
+      {
+        readJson: () => {
+          if (scenario.liveReadFailed) throw new Error("read");
+
+          return scenario.live;
+        },
+        writeJson: (_name, value) => {
+          if (scenario.refused) throw new Error("refused");
+          scenario.live = value;
+        },
+      },
+      sources.state.get,
+    ),
+  };
 });
 
 vi.mock("../src/home/storage.ts", () => ({ readViewing: () => structuredClone(scenario.saved) }));
@@ -51,8 +84,14 @@ vi.mock("../src/player/instance.ts", async () => {
   };
 });
 
-import { startViewing, viewing, viewingFailure } from "../src/home/index.ts";
-import { libraryViewing } from "../src/library/intents.ts";
+import {
+  clearViewing,
+  resumeEntry,
+  startViewing,
+  viewing,
+  viewingFailure,
+} from "../src/home/index.ts";
+import { libraryIntents, libraryViewing } from "../src/library/intents.ts";
 
 it("registers Details for the app lifetime, saves settled progress and reconciles a refused save through retry", async () => {
   const f = fixture();
@@ -110,4 +149,158 @@ it("registers Details for the app lifetime, saves settled progress and reconcile
 
   expect(libraryViewing.state.get()).toBeUndefined();
   expect(scenario.listeners.size).toBe(0);
+});
+
+it("clears only this provider's favourites through Live and retries a failed lists read", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  scenario.model = f.model;
+  await viewing.read();
+  const { lists } = await import("../src/live/runtime.ts");
+  const entry = { sourceId: "source", channelId: "1", title: "News" };
+  const other = { ...entry, sourceId: "other" };
+  scenario.live = {
+    version: 1,
+    lists: [
+      { id: "favourites", name: "Favourites", entries: [entry, other] },
+      { id: "custom", name: "Custom", entries: [entry] },
+    ],
+  };
+  scenario.liveReadFailed = true;
+  lists.read();
+
+  try {
+    await expect(clearViewing("source")).rejects.toThrow();
+    expect(lists.state.get().kind).toBe("failed");
+    scenario.liveReadFailed = false;
+    await clearViewing("source");
+    expect(lists.state.get()).toMatchObject({
+      kind: "ready",
+      lists: [
+        { id: "favourites", entries: [other] },
+        { id: "custom", entries: [entry] },
+      ],
+    });
+  } finally {
+    scenario.live = null;
+    scenario.liveReadFailed = false;
+    await viewing.dispose();
+  }
+});
+
+it("resumes through the registered handler despite a position tick while details load, and returns Details on failure", async () => {
+  const f = fixture();
+
+  const model = libraryModel({
+    sources: () => [{ ...f.source, reader: f.source }],
+    language: () => "en",
+  });
+
+  await model.refresh();
+  scenario.model = model;
+  await viewing.read();
+  const title = model.made("movie").list("all", "title")[0]!;
+  const version = title.versions[0]!;
+
+  const entry = {
+    key: title.key,
+    title,
+    version,
+    progress: null,
+    line: "",
+    done: null,
+    artworkUrl: null,
+  };
+
+  const { player } = await import("../src/player/instance.ts");
+
+  const intent = {
+    kind: "title",
+    sourceId: "source",
+    media: "movie",
+    id: title.id,
+    container: "mp4",
+    title: title.title,
+  } as const;
+
+  const playing = {
+    kind: "playing",
+    attempt: "same",
+    intent,
+    phase: "playing",
+    positionMs: 1,
+    durationMs: 1800000,
+    bufferedMs: 0,
+    live: false,
+    seekable: true,
+    speed: 1,
+    failure: null,
+    tracks: [],
+  } as const;
+
+  player.state.set(playing);
+  const details = model.details.bind(model);
+
+  const spy = vi.spyOn(model, "details").mockImplementation(async (request) => {
+    player.state.set({ ...playing, positionMs: 2 });
+
+    return details(request);
+  });
+
+  const play = vi.fn();
+  const stop = libraryIntents.register({ play });
+
+  try {
+    const outcome = await resumeEntry(entry);
+    expect(play).toHaveBeenCalledWith(expect.objectContaining({ id: title.id, media: "movie" }));
+    expect(outcome).toBe("played");
+    spy.mockRejectedValueOnce(new Error("details"));
+    expect(await resumeEntry(entry)).toBe("details");
+    expect(play).toHaveBeenCalledTimes(1);
+  } finally {
+    spy.mockRestore();
+    stop();
+    player.state.set({ kind: "idle" });
+    await viewing.dispose();
+  }
+});
+
+it("ignores settled episodes with no current episode numbers without breaking player listeners", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  scenario.model = f.model;
+  const stop = startViewing();
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const series = f.model.made("series").list("all", "title")[0]!;
+    libraryViewing.state.get()!.play({
+      kind: "episode",
+      sourceId: "source",
+      titleKey: series.key,
+      titleId: series.id,
+      version: series.versions[0]!,
+      episodeId: "unknown",
+    });
+    expect(() => {
+      for (const listener of scenario.listeners)
+        listener({
+          intent: {
+            kind: "title",
+            sourceId: "source",
+            media: "episode",
+            id: "unknown",
+            container: "mp4",
+            title: "Episode",
+          },
+          phase: "paused",
+          positionMs: 1000,
+          durationMs: 10000,
+        });
+    }).not.toThrow();
+  } finally {
+    stop();
+    await viewing.dispose();
+    scenario.saved = null;
+  }
 });

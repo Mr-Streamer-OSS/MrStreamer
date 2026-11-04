@@ -1,6 +1,5 @@
 import { useRootNavigationState } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { player } from "../player/instance.ts";
 import { sources } from "../bootstrap/sources.ts";
 import type { ChannelRow } from "../connect/sources.ts";
 import { guide } from "../guide/guide.ts";
@@ -42,28 +41,29 @@ function liveCountry(state: NavigationTree | undefined, inLive = false): string 
 
 /** React screens follow the same pure Home model, including source removal and metadata updates. */
 export function useHome(country?: string) {
-  useLocale();
+  const locale = useLocale();
   const navigation = useRootNavigationState();
   const library = useLibraryModel();
-  useStore(library.state);
+  const catalogue = useStore(library.state);
   const state = useStore(viewing.state);
   const accounts = useStore(sources.state);
   const saved = useStore(lists.state);
 
-  const playback = useStore(player.state);
-  const preview = useStore(player.previewState);
+  const chosenCountry = country ?? liveCountry(navigation);
 
-  return {
-    playback,
-    preview,
-    ...homeModel(
-      state,
-      accounts,
-      library,
-      saved.lists.find((list) => list.id === "favourites"),
-      country ?? liveCountry(navigation),
-    ),
-  };
+  const model = useMemo(
+    () =>
+      homeModel(
+        state,
+        accounts,
+        library,
+        saved.lists.find((list) => list.id === "favourites"),
+        chosenCountry,
+      ),
+    [state, accounts, library, catalogue, saved, chosenCountry, locale],
+  );
+
+  return model;
 }
 
 /** Missing guide facts leave the channel's own name; they never invent a programme or rating. */
@@ -90,9 +90,7 @@ export function useOnNow(rows: readonly ChannelRow[]) {
       .then((found) => {
         if (!controller.signal.aborted) setRead(found);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setRead(new Map());
-      });
+      .catch(() => undefined);
 
     return () => controller.abort();
   }, [wanted, revision]);
