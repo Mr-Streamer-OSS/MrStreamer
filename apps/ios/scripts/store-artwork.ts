@@ -3,7 +3,7 @@ import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import { parseArgs } from "node:util";
 import sharp, {
   type Metadata,

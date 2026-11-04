@@ -709,21 +709,31 @@ describe("downloads", { timeout: 30_000 }, () => {
     // Every connection the subscription allows is in use elsewhere.
     one.stallMovieFile(otherMovie().id, 1, 60_000);
     const held = new AbortController();
-    const login = `${ONE.username}/${encodeURIComponent(ONE.password)}`;
-    await fetch(`${one.url}/movie/${login}/${otherMovie().id}.mp4`, { signal: held.signal });
-    expect(one.activeStreams()).toBe(1);
-    const film = await app.addDownload(movieRef(a));
-    await until(() => statusOf(app, film.id)?.kind === "failed", "the refusal");
-    expect(statusOf(app, film.id)).toEqual({
-      kind: "failed",
-      failure: { kind: "stream", failure: { kind: "refused", status: 403 } },
-    });
-    held.abort();
-    await until(() => one.activeStreams() === 0, "the other connection to close");
-    await app.retryDownload(film.id);
-    await until(() => isComplete(app, film.id), "the retried copy");
-    // Added again once failed, a download is queued again rather than duplicated.
-    expect(doc().items).toHaveLength(1);
+
+    try {
+      const login = `${ONE.username}/${encodeURIComponent(ONE.password)}`;
+
+      const occupied = await fetch(`${one.url}/movie/${login}/${otherMovie().id}.mp4`, {
+        signal: held.signal,
+      });
+
+      expect(one.activeStreams()).toBe(1);
+      const film = await app.addDownload(movieRef(a));
+      await until(() => statusOf(app, film.id)?.kind === "failed", "the refusal");
+      expect(statusOf(app, film.id)).toEqual({
+        kind: "failed",
+        failure: { kind: "stream", failure: { kind: "refused", status: 403 } },
+      });
+      await occupied.body?.cancel();
+      held.abort();
+      await until(() => one.activeStreams() === 0, "the other connection to close");
+      await app.retryDownload(film.id);
+      await until(() => isComplete(app, film.id), "the retried copy");
+      // Added again once failed, a download is queued again rather than duplicated.
+      expect(doc().items).toHaveLength(1);
+    } finally {
+      held.abort();
+    }
   });
 
   it("goes on in the background to the next authorized download, one request at a time, with no JavaScript", async () => {

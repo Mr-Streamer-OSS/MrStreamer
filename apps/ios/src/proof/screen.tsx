@@ -31,8 +31,8 @@ async function prove() {
 
   const results = await runCases({
     fixture,
-    // expo/fetch implements fetch with types of its own; the cases use only what both share.
-    fetches: { global: fetch, expo: expoFetch as typeof fetch },
+    // The proof contract names only the request and response fields both implementations share.
+    fetches: { global: fetch, expo: expoFetch },
   });
 
   const started = Date.now();
