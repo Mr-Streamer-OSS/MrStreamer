@@ -616,7 +616,7 @@ it("shows Play and retry when the Stage preview fails, ending only its handle", 
 
   try {
     const shown = show(createElement(HomeScreen));
-    await settle();
+    await expect.poll(() => preview.mock.calls.length).toBe(1);
     act(() => {
       player.previewState.set({
         kind: "previewing",
@@ -626,14 +626,13 @@ it("shows Play and retry when the Stage preview fails, ending only its handle", 
         positionMs: 0,
       });
     });
-    await settle();
+    await expect.poll(() => shown.textContent).toContain("Preview couldn't start.");
     expect(has(shown, "Play Harbour HD")).toBe(true);
     expect(shown.textContent).not.toContain("Muted");
-    expect(shown.textContent).toContain("Preview couldn't start.");
-    expect(end).toHaveBeenCalledTimes(1);
+    await expect.poll(() => end.mock.calls.length).toBe(1);
     await press(shown, "Try again");
-    expect(preview).toHaveBeenCalledTimes(2);
-    expect(end).toHaveBeenCalledTimes(2);
+    await expect.poll(() => preview.mock.calls.length).toBe(2);
+    await expect.poll(() => end.mock.calls.length).toBe(2);
   } finally {
     act(() => player.previewState.set({ kind: "idle" }));
     preview.mockRestore();
