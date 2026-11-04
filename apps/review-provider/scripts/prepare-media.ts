@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import { readProbe } from "./probe.ts";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
@@ -98,54 +99,14 @@ function run(command: "ffmpeg" | "ffprobe", args: readonly string[], label: stri
   return result.stdout;
 }
 
-const ProbeNumber = type("number | string").pipe((value) => {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) throw new Error("Missing probe number");
-
-  return number;
-});
-
-const Probe = type({
-  streams: type({
-    codec_type: "string",
-    codec_name: "string",
-    index: ProbeNumber,
-    "width?": ProbeNumber,
-    "height?": ProbeNumber,
-    "r_frame_rate?": "string",
-    "nb_read_frames?": ProbeNumber,
-    "sample_rate?": ProbeNumber,
-    "channels?": ProbeNumber,
-  }).array(),
-  packets: type({
-    stream_index: ProbeNumber,
-    pts_time: ProbeNumber,
-    duration_time: ProbeNumber,
-    data_hash: "string",
-    flags: "string",
-  }).array(),
-});
-
 function text(value: string | undefined): string {
   if (value === undefined) throw new Error("Missing probe text");
 
   return value;
 }
 
-function numeric(value: number | undefined): number {
-  const n =
-    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
-
-  if (!Number.isFinite(n)) throw new Error("Missing probe number");
-
-  return n;
-}
-
-const ticks = (value: number) => Math.round(numeric(value) * 90000);
-
 function probe(path: string, label: string) {
-  const raw: unknown = JSON.parse(
+  return readProbe(
     run(
       "ffprobe",
       [
@@ -165,41 +126,6 @@ function probe(path: string, label: string) {
       label,
     ),
   );
-
-  const result = Probe.assert(raw);
-  const streams = result.streams;
-  const video = streams.find((s) => s.codec_type === "video");
-  const audio = streams.find((s) => s.codec_type === "audio");
-
-  if (!video || !audio || streams.length !== 2)
-    throw new Error("Expected one video and one audio stream");
-
-  const packets = result.packets.map((row) => {
-    return {
-      stream: numeric(row.stream_index),
-      pts: ticks(row.pts_time),
-      duration: ticks(row.duration_time),
-      hash: text(row.data_hash),
-      flags: text(row.flags),
-    };
-  });
-
-  return {
-    video: {
-      codec: text(video.codec_name),
-      width: numeric(video.width),
-      height: numeric(video.height),
-      frameRate: text(video.r_frame_rate),
-      frames: numeric(video.nb_read_frames),
-      packets: packets.filter((p) => p.stream === numeric(video.index)),
-    },
-    audio: {
-      codec: text(audio.codec_name),
-      rate: numeric(audio.sample_rate),
-      channels: numeric(audio.channels),
-      packets: packets.filter((p) => p.stream === numeric(audio.index)),
-    },
-  };
 }
 
 function firstVideoNals(path: string, label: string): Uint8Array[] {

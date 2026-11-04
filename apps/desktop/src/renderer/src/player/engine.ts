@@ -1,4 +1,4 @@
-import { type } from "arktype";
+import type { PESPrivateData } from "mpegts.js/d.ts/src/demux/pes-private-data";
 import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { observeMediaPlayback } from "./analytics.ts";
 // Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
@@ -278,25 +278,16 @@ function mpegtsEngine(
     if (ends === null) life.fail({ kind: "network", detail: t("The provider ended the stream.") });
   });
 
-  const PrivatePacket = type({
-    pid: "number",
-    data: type.instanceOf(Uint8Array),
-    "pts?": "number",
-    "nearest_pts?": "number",
-  });
-
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- mpegts supplies untyped packets; PrivatePacket validates raw before use.
-  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (raw: unknown) => {
-    if (!privateData) return;
+  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: PESPrivateData) => {
+    if (!privateData || typeof packet !== "object" || packet === null) return;
+    const { pid, data, pts, nearest_pts } = packet;
+    const at = typeof pts === "number" ? pts : nearest_pts;
 
-    const packet = PrivatePacket(raw);
-
-    if (packet instanceof type.errors) return;
-    const at = packet.pts ?? packet.nearest_pts;
-
-    if (at !== undefined) privateData(packet.pid, packet.data, at / 1000);
+    if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
+      privateData(pid, data, at / 1000);
+    }
   });
   player.attachMediaElement(video);
   player.load();
