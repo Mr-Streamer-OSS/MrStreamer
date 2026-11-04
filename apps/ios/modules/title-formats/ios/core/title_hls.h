@@ -1,10 +1,12 @@
 // A movie or episode file AVPlayer can't open, such as Matroska, served as a VOD HLS stream it
 // can: a complete playlist cut at the keyframes the file's own index lists, and segments made on
 // request from the file's packets, copied unchanged: fragmented MP4, or packed audio for MP3.
-// Nothing is decoded; where a sound track has no packets, frames of silence fill in.
+// Nothing is decoded; gaps are filled only for sound tracks with a supported silence frame.
+// Other sound tracks fail with a gap message.
 //
 // The picture is one rendition and each sound track AVPlayer plays (AAC-LC, HE-AAC, AC-3,
-// E-AC-3, MP3) another, listed as the stream's audio choices. Each text subtitle track (SubRip,
+// E-AC-3, MP3, or fixed-block mono/stereo 16/24-bit 44.1/48 kHz FLAC without another playable
+// sound family) another, listed as the stream's audio choices. Each text subtitle track (SubRip,
 // ASS or SSA, WebVTT) is a WebVTT rendition, listed as its subtitle choices; the other subtitle
 // tracks, such as PGS or DVD pictures, aren't served, and `title_hls_unshown` names them.
 //
