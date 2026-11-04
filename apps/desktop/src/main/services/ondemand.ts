@@ -1764,7 +1764,9 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
           const result = workerResults[method](reply.value);
 
           if (result instanceof ArkErrors) {
-            console.warn(`[catalogue] invalid ${method} reply: ${result.summary}`);
+            console.warn(
+              `[catalogue] invalid ${method} reply: ${result.map((error) => `${error.path}: ${error.expected}`).join("; ")}`,
+            );
             reject(
               new AppFailure({
                 kind: "unexpected",

@@ -206,7 +206,7 @@ vi.mock("../src/viewing.ts", () => ({
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
-  resumeMovie: (_title: unknown, version: OwnedId) => scenario.played.push(version),
+  resumeMovie: (_title: Title, version: OwnedId) => scenario.played.push(version),
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));

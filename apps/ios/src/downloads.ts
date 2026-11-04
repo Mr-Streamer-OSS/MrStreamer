@@ -1,4 +1,3 @@
-import { JsonValue } from "@mrstreamer/contracts/json-value";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -192,16 +191,17 @@ const Stored = lazy(() =>
     completedAt: "number | null",
     /** How far the copy was watched here. */
     progress: type({ position: "number", duration: "number", at: "number" }).or("null"),
-    /** Optional ordering added by this build; an unreadable edge never hides a playable copy. */
-    "continuation?": JsonValue,
-    /** Its native authorization (`Transfer`), read on its own: a bad one holds back only it. */
-    "transfer?": JsonValue,
-    /** Why it is being removed (`Removal`), read on its own: a bad one holds back only it. */
-    "removal?": JsonValue,
   }),
 );
 
-type Stored = Infer<typeof Stored>;
+type Stored = Infer<typeof Stored> & {
+  /** Optional ordering added by this build; an unreadable edge never hides a playable copy. */
+  continuation?: Json;
+  /** Its native authorization (`Transfer`), read on its own: a bad one holds back only it. */
+  transfer?: Json;
+  /** Why it is being removed (`Removal`), read on its own: a bad one holds back only it. */
+  removal?: Json;
+};
 
 const Continuation = lazy(() => type({ version: "1", title: RawTitleRef() }));
 
@@ -233,7 +233,7 @@ type StoredFailure = NonNullable<Stored["failure"]>;
 const Document = lazy(() =>
   type({
     version: "1",
-    items: JsonValue.and("object").array(),
+    items: "object[]",
     /** Ids whose resume data still has to go: launch removes it. */
     forgetting: "string[]",
   }),
@@ -1321,11 +1321,22 @@ function load() {
   const items: Stored[] = [];
   const unreadable: (JsonObject | readonly Json[])[] = [];
 
-  for (const item of valid ? parsed.items : []) {
+  const entries =
+    valid &&
+    read !== null &&
+    typeof read === "object" &&
+    !Array.isArray(read) &&
+    "items" in read &&
+    Array.isArray(read.items)
+      ? read.items
+      : [];
+
+  for (const item of entries) {
+    if (item === null || typeof item !== "object") continue;
     const record = Stored()(item);
 
     if (record instanceof type.errors) unreadable.push(item);
-    else items.push(record);
+    else items.push({ ...item, ...record });
   }
 
   doc = { items, forgetting: valid ? parsed.forgetting : [], unreadable };

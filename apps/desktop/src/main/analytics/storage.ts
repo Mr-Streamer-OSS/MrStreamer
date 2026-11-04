@@ -45,6 +45,7 @@ export async function profileOrigin(dataDir: string): Promise<ProfileOrigin> {
 const FormatOne = lazy(() => type({ format: "1", pending: "unknown[]" }));
 const LegacySummary = lazy(() => type({ event: { event: "'app_summary_day'" } }));
 
+// Analytics state is private. Never use storage diagnostics that print a parse failure's values.
 export function analyticsStore(dataDir: string) {
   const path = join(dataDir, "analytics.json");
 

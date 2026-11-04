@@ -1,4 +1,3 @@
-import { JsonValue } from "@mrstreamer/contracts/json-value";
 import type { Json } from "@mrstreamer/contracts/json";
 // reminders.json in the data folder: the programme reminders, which only services/reminders.ts
 // reads and writes. Version 1 keeps each saved subscription's reminders under its id:
@@ -32,7 +31,7 @@ export type ReadReminders =
   | { readonly kind: "refused"; readonly reason: "unreadable" | "newer" };
 
 const Head = lazy(() =>
-  type({ version: "number.integer", "subscriptions?": { "[string]": JsonValue.array() } }),
+  type({ version: "number.integer", "subscriptions?": { "[string]": "unknown[]" } }),
 );
 
 /** One reminder as stored, without the subscription it is kept under. */
@@ -64,7 +63,7 @@ export async function readReminders(path: string): Promise<ReadReminders> {
     return { kind: "refused", reason: "unreadable" };
   }
 
-  let data: unknown;
+  let data: Json;
 
   try {
     data = JSON.parse(text);
@@ -81,7 +80,18 @@ export async function readReminders(path: string): Promise<ReadReminders> {
   const reminders: KeptReminder[] = [];
   const unread = new Map<string, Json[]>();
 
-  for (const [subscriptionId, entries] of Object.entries(head.subscriptions ?? {})) {
+  const subscriptions =
+    data && typeof data === "object" && !Array.isArray(data) && "subscriptions" in data
+      ? data.subscriptions
+      : null;
+
+  for (const [subscriptionId, entries] of Object.entries(
+    subscriptions && typeof subscriptions === "object" && !Array.isArray(subscriptions)
+      ? subscriptions
+      : {},
+  )) {
+    if (!Array.isArray(entries)) continue;
+
     for (const entry of entries) {
       const parsed = Entry()(entry);
 

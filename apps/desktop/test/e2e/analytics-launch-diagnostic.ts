@@ -172,7 +172,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       });
 
       if (!response.ok) throw new Error(`Target listing HTTP ${response.status}`);
-      const targets = await response.json();
+      const targets: Json = JSON.parse(await response.text());
 
       if (!Array.isArray(targets)) throw new Error("No target list");
 

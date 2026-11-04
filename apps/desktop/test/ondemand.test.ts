@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import type * as Duration from "effect/Duration";
-import { describe, expect, inject, it, vi } from "vitest";
+import { describe, expect, inject, it, onTestFinished, vi } from "vitest";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { OnDemand } from "../src/main/services/ondemand.ts";
 import { Settings } from "../src/main/services/preferences.ts";
@@ -79,6 +79,8 @@ async function onDemandApp(options: { titles?: number } = {}) {
 // Each test starts the catalogue's worker thread, which takes a moment under a busy suite.
 describe("movies and series", { timeout: 20_000 }, () => {
   it("reports a plain failure for a malformed catalogue reply", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warning.mockRestore());
     const dataDir = await tempDir();
 
     const runtime = runtimeFor(
@@ -102,6 +104,8 @@ describe("movies and series", { timeout: 20_000 }, () => {
     await expect(service.refresh(id)).rejects.toMatchObject({
       error: { kind: "unexpected", detail: "Invalid catalogue reply for refresh." },
     });
+    expect(warning).toHaveBeenCalled();
+    expect(warning.mock.calls.flat().join(" ")).not.toContain("private schema payload");
   });
 
   it("fetches both lists on first use and lists them newest first, without adult titles", async () => {

@@ -25,24 +25,9 @@ export async function readJsonFile<T>(
   path: string,
   schema: Type<T>,
 ): Promise<Type<T>["infer"] | null> {
-  let bytes: Buffer;
+  const data = await readJson(path);
 
-  try {
-    bytes = await readFile(path);
-  } catch (cause) {
-    if (isMissing(cause)) return null;
-    throw cause;
-  }
-
-  let data: unknown;
-
-  try {
-    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
-  } catch {
-    console.warn(`[storage] ignoring unreadable ${path}`);
-
-    return null;
-  }
+  if (data === null) return null;
 
   const parsed = schema(data);
 
@@ -53,6 +38,30 @@ export async function readJsonFile<T>(
   }
 
   return parsed;
+}
+
+/** Reads JSON without traversing fields owned by a later build. */
+export async function readJson(path: string): Promise<Json | null> {
+  let bytes: Buffer;
+
+  try {
+    bytes = await readFile(path);
+  } catch (cause) {
+    if (isMissing(cause)) return null;
+    throw cause;
+  }
+
+  let data: Json;
+
+  try {
+    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
+  } catch {
+    console.warn(`[storage] ignoring unreadable ${path}`);
+
+    return null;
+  }
+
+  return data;
 }
 
 /**

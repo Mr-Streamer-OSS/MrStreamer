@@ -1,4 +1,4 @@
-import { JsonValue } from "@mrstreamer/contracts/json-value";
+import type { Json } from "@mrstreamer/contracts/json";
 
 import { type } from "arktype";
 import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
@@ -35,7 +35,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
-import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
+import { readJson, readJsonFile, writeJsonFile } from "../platform/json-file.ts";
 import { Subscriptions, type SavedSubscription } from "./subscription.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { defined } from "@mrstreamer/core/defined";
@@ -46,9 +46,7 @@ import { defined } from "@mrstreamer/core/defined";
  * the record has imported them. Keys of newer versions are kept.
  */
 const Stored = lazy(() =>
-  Preferences().merge(SubscriptionPreferences()).merge({
-    /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
-    "nextEpisodeDelaySeconds?": JsonValue,
+  Preferences().omit("nextEpisodeDelaySeconds").merge(SubscriptionPreferences()).merge({
     "favouriteChannelIds?": "string[]",
     "recentChannelIds?": "string[]",
     /**
@@ -56,11 +54,29 @@ const Stored = lazy(() =>
      * a later release adds doesn't make this one drop the file. System default when absent.
      */
     "interfaceLanguage?": "string",
-    "rememberedLiveBrowse?": JsonValue,
   }),
 );
 
-type Stored = Infer<typeof Stored>;
+type Stored = Infer<typeof Stored> & {
+  /** Preserve malformed and future values until the viewer explicitly replaces this leaf. */
+  nextEpisodeDelaySeconds?: Json;
+  rememberedLiveBrowse?: Json;
+};
+
+async function readStored(path: string): Promise<Stored | null> {
+  const data = await readJson(path);
+  const parsed = Stored()(data);
+
+  if (
+    parsed instanceof type.errors ||
+    data === null ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+  )
+    return null;
+
+  return { ...data, ...parsed };
+}
 
 export class Settings extends Context.Service<
   Settings,
@@ -106,7 +122,7 @@ export class Settings extends Context.Service<
 >()("mrstreamer/Settings") {
   /** Reads the saved choice before the runtime exists, so startup errors use its language. */
   static async readInterfaceLanguage(dataDir: string): Promise<string | undefined> {
-    const saved = await readJsonFile(join(dataDir, "preferences.json"), Stored());
+    const saved = await readStored(join(dataDir, "preferences.json"));
 
     return saved?.interfaceLanguage;
   }
@@ -127,7 +143,7 @@ function make(dataDir: string, usage?: UsageObservers) {
 
     /** The file as last read or written. Only runs while holding `one`. */
     const stored = Effect.promise(async () => {
-      current ??= (await readJsonFile(path, Stored())) ?? {
+      current ??= (await readStored(path)) ?? {
         ...defaultPreferences,
         ...defaultSubscriptionPreferences,
       };

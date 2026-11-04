@@ -740,6 +740,24 @@ describe("several subscriptions", () => {
     expect(await ids(await create())).toEqual(recovered.map((each) => each.id));
   });
 
+  it("reads a registry with a deeply nested opaque field", async () => {
+    const { dataDir, create, original, beside } = await two();
+    const text = await readFile(join(dataDir, "subscriptions.json"), "utf8");
+    const depth = 1700;
+    await writeFile(
+      join(dataDir, "subscriptions.json"),
+      text.replace(
+        '"subscriptions":[',
+        '"subscriptions":[{"future":' + "[".repeat(depth) + "0" + "]".repeat(depth) + "},",
+      ),
+    );
+
+    expect(await ids(await create())).toEqual([original.id, beside.id]);
+    expect(await readFile(join(dataDir, "subscriptions.json"), "utf8")).toContain(
+      '"future":' + "[".repeat(depth),
+    );
+  });
+
   it("settles a removal cut short, and leaves alone what it can't read", async () => {
     const { dataDir, create, original, beside } = await two();
     const unread = "0f0e0d0c-0b0a-4908-8706-050403020100";
