@@ -10,12 +10,19 @@
 export type Observed =
   null | boolean | number | string | readonly Observed[] | { readonly [key: string]: Observed };
 
+/** The request/response surface used by the cases, shared by global and Expo fetch. */
+type ProofResponse = Pick<Response, "status" | "redirected" | "type" | "headers" | "text" | "body">;
+
+type ProofRequestInit = { [K in keyof RequestInit]?: Exclude<RequestInit[K], undefined> };
+
+type ProofFetch = (input: string, init?: ProofRequestInit) => Promise<ProofResponse>;
+
 /** Where a case's requests go, and which fetch implementations the runtime has. */
 export interface ProofContext {
   /** The proof server's origin, as this runtime reaches it. */
   readonly fixture: string;
   /** Global fetch everywhere; the app adds `expo/fetch`. */
-  readonly fetches: Readonly<Record<string, typeof fetch>>;
+  readonly fetches: Readonly<Record<string, ProofFetch>>;
 }
 
 export interface ProofCase {
@@ -52,7 +59,7 @@ export const groups: readonly {
 export const plain = (text: string | undefined): Observed => JSON.parse(text ?? "null");
 
 /** What a request came to, without anything that differs per run. */
-export async function outcome(request: () => Promise<Response>): Promise<Observed> {
+export async function outcome(request: () => Promise<ProofResponse>): Promise<Observed> {
   try {
     const response = await request();
 
@@ -71,7 +78,7 @@ export async function outcome(request: () => Promise<Response>): Promise<Observe
 /** One observation per fetch implementation the runtime has. */
 export async function perFetch(
   context: ProofContext,
-  observe: (fetchImpl: typeof fetch) => Promise<Observed>,
+  observe: (fetchImpl: ProofFetch) => Promise<Observed>,
 ): Promise<Observed> {
   const results: Record<string, Observed> = {};
 

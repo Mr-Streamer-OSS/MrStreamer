@@ -247,15 +247,19 @@ export interface ProviderLogin {
  * header that holds it goes to no other origin (`sentWith`). `from` is
  * the stream's address when its playlists named `url`, as they name variants, segments and keys:
  * those are held to `from` as its redirects are. Its errors name no address beyond its origin.
+ * The transport receives concrete headers and manual redirects; its own response type is retained.
  */
-export function providerFetch(fetchImpl: typeof fetch, login: ProviderLogin) {
+export function providerFetch<R extends Pick<Response, "status" | "headers" | "body">>(
+  fetchImpl: (input: string, init: { headers: Headers; redirect: "manual" }) => Promise<R>,
+  login: ProviderLogin,
+) {
   // An empty value would be in everything.
   const known: ProviderLogin = {
     secrets: login.secrets.filter(Boolean),
     uncertain: login.uncertain?.filter(Boolean) ?? [],
   };
 
-  return async (url: string, init: RequestInit = {}, from = url): Promise<Response> => {
+  return async (url: string, init: RequestInit = {}, from = url): Promise<R> => {
     try {
       const admitted = new URL(from);
       const headers = new Headers(init.headers);

@@ -194,7 +194,7 @@ test("refuses a layout reference instead of a native-pixel capture", async () =>
     .toBuffer();
 
   await writeFile(join(dir, "ipad-13.png"), bytes);
-  slots["ipad-13"] = { ...slots["ipad-13"], sha256: hash(bytes) };
+  slots["ipad-13"] = { ...slots["ipad-13"], file: "ipad-13.png", sha256: hash(bytes) };
   await expect(run(dir, slots)).rejects.toThrow(/native capture must be 2752x2064/);
 });
 
@@ -411,13 +411,7 @@ function animated(png: Buffer) {
     return chunk("fcTL", data);
   };
 
-  const pixels = Buffer.concat(
-    chunks
-      .values()
-      .filter((item) => item.type === "IDAT")
-      .map((item) => item.data)
-      .toArray(),
-  );
+  const pixels = Buffer.concat(chunks.flatMap((item) => (item.type === "IDAT" ? [item.data] : [])));
 
   const sequence = Buffer.alloc(4);
   sequence.writeUInt32BE(2);

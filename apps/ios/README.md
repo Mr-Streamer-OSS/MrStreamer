@@ -132,7 +132,7 @@ Actual background and physical-device acceptance remain separate from source and
 ## Where it stands
 
 - **iOS 0.1.0**, build 17, went to Apple App Review on 27 October 2026 with manual release. It
-  isn't on the App Store, and none of the work below changes that build or its review
+  remains `WAITING_FOR_REVIEW` as of 4 November 2026. None of the work below changes that build or its review
   ([iOS app card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288133475)).
 - **iOS 0.2.0** is the parity wave on `main`: M3U playlists, XMLTV guides and channel mapping, the
   guide grid, programme Search, catch-up, custom lists, reminders, Live audio and subtitle tracks,
@@ -142,7 +142,7 @@ Actual background and physical-device acceptance remain separate from source and
   archived from `main` at `a80a34e2`, has been on TestFlight for the internal "Private iPhone
   testing" group since 3 November 2026, with the Downloads header ring and Play on TV. Build 18,
   from `7229b687`, predates both and stays available to the same group. There is no App Store
-  release of 0.2.0. Its simulator
+  release of 0.2.0. Source now proposes build 20; it has not been archived, uploaded or delivered. Its simulator
   results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
   holds what it still needs.
 - **Play on TV** ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691))
@@ -1050,14 +1050,16 @@ proof out: `src/app/proof.tsx` loads it only in development.
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
 builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
-`ios.buildNumber` `19`. Build 19 was archived from `a80a34e2`, uploaded once and added to the
+`ios.buildNumber` `20`, a proposed candidate that has not been archived, uploaded or delivered.
+The read-only App Store Connect inventory on 4 November 2026 at 12:59 UTC found build 20 absent
+from both builds and uploads. Build 19 was archived from `a80a34e2`, uploaded once and added to the
 internal TestFlight group on 3 November 2026, where App Store Connect shows it VALID and in beta
 testing; it has Play on TV and the Downloads header ring. Build 18, archived from `7229b687`,
 predates both and stays in that group. Build 17 of 0.1.0 went to App Review on 27 October 2026
-with manual release and is still waiting there; leave that build and its review as they are.
-Because 19 is now taken, the next archive needs a new number: before each archive, read the
-current App Store Connect build and upload inventory again, move `ios.buildNumber` to the next
-unused number, and record the dated readback and allocation on the candidate's project card.
+with manual release and remains `WAITING_FOR_REVIEW`; leave that build and its review as they are.
+Before each archive, read the current App Store Connect build and upload inventory again, confirm
+the proposed number is still unused or allocate the next unused number, and record the dated
+readback and allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
 next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
