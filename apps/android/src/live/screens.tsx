@@ -1,3 +1,4 @@
+import { reminders } from "../reminders/runtime.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
@@ -338,7 +339,13 @@ function LiveTop({
         contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", gap: 24 }}
       >
         {shortcuts.map((shortcut) => (
-          <Chip key={shortcut.id} {...shortcut} />
+          <Chip
+            key={shortcut.id}
+            {...shortcut}
+            label={
+              shortcut.id === "reminders" ? `${shortcut.label} ${shortcut.count}` : shortcut.label
+            }
+          />
         ))}
       </ScrollView>
     </View>
@@ -355,6 +362,7 @@ export function LiveScreen() {
   const { layout, framed } = useFrame();
   const state = useStore(sources.state);
   const saved = useStore(lists.state);
+  const reminderState = useStore(reminders);
   const { country = "" } = useLocalSearchParams<{ country?: string }>();
   const [tab, setTab] = useState<Tab>("All");
   const [choosing, setChoosing] = useState(false);
@@ -369,6 +377,13 @@ export function LiveScreen() {
   const favourites = all.find((list) => list.id === FAVOURITES);
 
   const shortcuts = [
+    {
+      id: "reminders",
+      icon: "notifications-none" as const,
+      label: t("Reminders"),
+      count: String(reminderState.rows.length),
+      onPress: () => router.push("/reminders"),
+    },
     ...[...(favourites ? [favourites] : []), ...all.filter((list) => list.id !== FAVOURITES)].map(
       (list) => ({
         id: list.id,

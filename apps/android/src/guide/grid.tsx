@@ -1,3 +1,4 @@
+import { reminders, reminderId } from "./actions-reminders.ts";
 import { formatDate } from "@mrstreamer/core/i18n";
 import { catalogue } from "@mrstreamer/mobile/language";
 import { router, useIsFocused, useLocalSearchParams, useSegments } from "expo-router";
@@ -872,6 +873,7 @@ const GridRow = memo(function GridRow({
   onSchedule: (channel: GridChannel) => void;
   onProgramme: (channel: GridChannel, p: ScheduleItem) => void;
 }) {
+  const reminderState = useStore(reminders);
   useGuideStatus();
   useLocale();
   const { read, retry } = useGridRow(channel.key, day, active);
@@ -1001,6 +1003,16 @@ const GridRow = memo(function GridRow({
                   backgroundColor: marked ? guideColors.current : undefined,
                 }}
               >
+                {reminderState.rows.some(
+                  (row) =>
+                    row.id ===
+                    reminderId(
+                      { sourceId: channel.sourceId, channelId: channel.channelId },
+                      item.start,
+                    ),
+                ) ? (
+                  <Icon name="notifications-active" size={14} />
+                ) : null}
                 {/* Too narrow for words, the cell is still a button with its whole label. */}
                 {words >= ROOM.time ? (
                   <>
