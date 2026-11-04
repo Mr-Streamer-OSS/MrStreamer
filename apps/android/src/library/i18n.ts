@@ -44,6 +44,7 @@ const english = {
   Version: "Version",
   Automatic: "Automatic",
   Play: "Play",
+  Resume: "Resume",
   "Show {count} more movies": {
     one: "Show {count} more movie",
     other: "Show {count} more movies",
@@ -123,6 +124,7 @@ const dutch = {
   Version: "Versie",
   Automatic: "Automatisch",
   Play: "Afspelen",
+  Resume: "Verder",
   "Show {count} more movies": {
     one: "Nog {count} film tonen",
     other: "Nog {count} films tonen",

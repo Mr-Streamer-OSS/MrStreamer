@@ -49,6 +49,8 @@ vi.mock("../src/reminders/runtime.ts", () => ({ startReminders: () => () => {} }
 
 vi.mock("../src/reminders/routing.ts", () => ({ useReminderRouting: () => {} }));
 
+vi.mock("../src/play-entry/runtime.ts", () => ({ startPlayEntries: () => () => {} }));
+
 vi.mock("../src/home/index.ts", () => ({
   startViewing: () => {
     scenario.viewing++;

@@ -137,6 +137,35 @@ export function startViewing(): () => void {
       void viewing.refresh().catch(() => undefined);
     });
 
+    /** Share the selected version's saved episode facts across its rows and primary action. */
+    function standing(title: import("@mrstreamer/contracts/ondemand").Title) {
+      const key = JSON.stringify([title.subscriptionId, title.id]);
+      let cached = marks.get(key);
+
+      if (!cached) {
+        cached = {};
+        marks.set(key, cached);
+        const reading = cached;
+        // Defer publication until after the render that requested this shared series read.
+        void Promise.resolve()
+          .then(() => viewing.episodes(title))
+          .then(
+            (state) => {
+              if (marks.get(key) !== reading) return;
+              reading.state = state;
+              bump();
+            },
+            () => {
+              if (marks.get(key) !== reading) return;
+              reading.failed = true;
+              bump();
+            },
+          );
+      }
+
+      return cached;
+    }
+
     const stopPort = libraryViewing.register({
       subscribe: revision.subscribe,
       snapshot: revision.get,
@@ -174,30 +203,23 @@ export function startViewing(): () => void {
             ),
         };
       },
+      series(title, details) {
+        const state = standing(title).state;
+
+        if (!state) return undefined;
+        const next = continuation(details, state.progress, state.marks);
+
+        return next
+          ? {
+              episode: next.episode,
+              resumeAt: resumePoint(next.resume) * 1000,
+              resumed: !!next.resume,
+            }
+          : undefined;
+      },
       episode(title, episode) {
         const key = JSON.stringify([title.subscriptionId, title.id]);
-        let cached = marks.get(key);
-
-        if (!cached) {
-          cached = {};
-          marks.set(key, cached);
-          const reading = cached;
-          // Defer publication until after the render that requested this shared series read.
-          void Promise.resolve()
-            .then(() => viewing.episodes(title))
-            .then(
-              (state) => {
-                if (marks.get(key) !== reading) return;
-                reading.state = state;
-                bump();
-              },
-              () => {
-                if (marks.get(key) !== reading) return;
-                reading.failed = true;
-                bump();
-              },
-            );
-        }
+        const cached = standing(title);
 
         if (!cached.state)
           return { label: t("Mark watched"), activate: () => {}, available: false };

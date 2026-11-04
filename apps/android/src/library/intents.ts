@@ -102,6 +102,17 @@ export interface ViewingPresentationAdapter {
     title: import("@mrstreamer/contracts/ondemand").Title,
     episode: import("@mrstreamer/contracts/ondemand").Episode,
   ): { label: string; activate(): void; detail?: string; available?: boolean };
+  /** The primary series action, absent until the selected version's saved history is readable. */
+  series?(
+    title: import("@mrstreamer/contracts/ondemand").Title,
+    details: import("@mrstreamer/contracts/ondemand").SeriesDetails,
+  ):
+    | {
+        episode: import("@mrstreamer/contracts/ondemand").Episode;
+        resumeAt: number;
+        resumed: boolean;
+      }
+    | undefined;
   notice(): ViewingNotice | null;
   play(media: MediaIdentity, episode?: { season: number; number: number }): void;
 }
