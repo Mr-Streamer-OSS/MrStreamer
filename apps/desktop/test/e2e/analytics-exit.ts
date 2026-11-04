@@ -1,9 +1,10 @@
 import type { ChildProcess } from "node:child_process";
+import type { Page } from "./app.ts";
 
 /** A forced cleanup is evidence of failure, even when it successfully removes the owned child. */
 export async function closeNative(
   app: ChildProcess,
-  close: () => Promise<void | Awaited<ReturnType<import("./app.ts").Page["send"]>>>,
+  close: () => Promise<void | Awaited<ReturnType<Page["send"]>>>,
   graceMs = 4000,
 ) {
   const started = Date.now();

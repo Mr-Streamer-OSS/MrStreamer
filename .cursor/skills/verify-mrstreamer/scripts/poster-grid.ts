@@ -1,10 +1,10 @@
-import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Poster-grid focus through the real built window. Movies > All movies, the Movies search and the
 // Watchlist share one grid: the keys move one selection that DOM focus follows, the selected
 // poster is the grid's one Tab stop, names say title and year and list items their place, and
 // identity holds across pages, a 960x600 window and larger text. Closing details puts the focus
 // back on the poster that opened them, and a removal on the tile that took its place. Keys and
 // clicks go through CDP; DOM and accessibility-tree reads observe the result.
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import type { Driver } from "./language.ts";
 
 const GRID = `document.querySelector('[role="list"]:has([role="listitem"][data-index])')`;

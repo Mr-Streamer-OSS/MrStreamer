@@ -325,11 +325,7 @@ function metadataOf() {
     read: async () => {
       const file = metadataFile();
 
-      const contents: import("@mrstreamer/contracts/json").Json = file.exists
-        ? JSON.parse(await file.text())
-        : null;
-
-      return contents;
+      return file.exists ? JSON.parse(await file.text()) : null;
     },
     write: async (contents) => {
       const file = metadataFile();

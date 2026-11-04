@@ -1,5 +1,5 @@
 import type { Title } from "@mrstreamer/contracts/ondemand";
-import { metadataStore } from "@mrstreamer/core/metadata/store";
+import { metadataStore, type MetadataFile } from "@mrstreamer/core/metadata/store";
 import { tmdb } from "@mrstreamer/core/metadata/tmdb";
 import { byIds, indexCatalogue, kindOf, searchPage } from "@mrstreamer/core/ondemand/catalogue";
 import { collectionRows, collections } from "@mrstreamer/core/ondemand/collections";
@@ -457,7 +457,7 @@ const correctness: readonly ProofCase[] = [
       const about = await client.about("movie", "501", "nl");
       const season = await client.season("601", 1, "nl");
       const services = await client.services("movie", "NL");
-      let file: import("@mrstreamer/core/metadata/store").MetadataFile | null = null;
+      let file: MetadataFile | null = null;
 
       const store = metadataStore({
         read: async () => file,

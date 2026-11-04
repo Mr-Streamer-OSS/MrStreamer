@@ -1,4 +1,3 @@
-import { nativeDownloads } from "./native-downloads.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { guideFixture } from "./native-guide.ts";
@@ -75,7 +74,7 @@ vi.mock("expo-video", () => ({
 }));
 
 const { native, File: DiskFile, Directory: Folder } = await import("./native-files.ts");
-const { background } = await import("./native-downloads.ts");
+const { background, nativeDownloads: port } = await import("./native-downloads.ts");
 const host = globalThis as { expo?: { modules?: Record<string, unknown> } };
 let guide = guideFixture();
 const releases: Array<() => void> = [];
@@ -369,8 +368,6 @@ describe("Demo through the production lifecycle", () => {
   it("refuses a validated download crossing Reset's erase snapshot while its old Source is current", async () => {
     const first = await withDemo();
 
-    const port = nativeDownloads;
-
     let armed = false;
     const authorize = port.authorize;
     vi.spyOn(port, "authorize").mockImplementation(async (...args) => {
@@ -598,8 +595,6 @@ describe("Demo through the production lifecycle", () => {
     const gate = held();
     let fencing = false;
 
-    const port = nativeDownloads;
-
     const cancel = port.cancelAuthorization;
     vi.spyOn(port, "cancelAuthorization").mockImplementation(async (...args) => {
       fencing = true;
@@ -617,8 +612,6 @@ describe("Demo through the production lifecycle", () => {
 
   it("starts once on a clean install without waiting for native readiness or touching secrets", async () => {
     const ready = held();
-
-    const port = nativeDownloads;
 
     const actual = port.reconcile;
     vi.spyOn(port, "reconcile").mockImplementation(async (...args) => {
@@ -1033,8 +1026,6 @@ describe("Demo through the production lifecycle", () => {
     );
     // A background wake may not deliver receipt hints to JS before the account command.
     background.listeners.get("receipt")?.clear();
-
-    const port = nativeDownloads;
 
     let fences = 0;
 

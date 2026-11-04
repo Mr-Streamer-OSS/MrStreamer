@@ -1,4 +1,3 @@
-import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // The prior stable release and this build on one profile, each driven through its own window.
 // This build makes a list holding channels of two subscriptions and chooses it in Live TV. The
 // prior release, which knows nothing of lists, starts on the same profile: it shows its own
@@ -14,6 +13,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import {
   FIRST,
   SECOND,

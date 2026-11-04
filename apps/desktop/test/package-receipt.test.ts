@@ -300,13 +300,7 @@ describe("successful package receipts", () => {
     ],
   ] satisfies [
     string,
-    (
-      r: PackageReceipt,
-    ) => Omit<PackageReceipt, "files" | "schemaVersion" | "status"> & {
-      schemaVersion: number;
-      status: string;
-      files: (Partial<PackageReceipt["files"][number]> | undefined)[];
-    },
+    (r: PackageReceipt) => Parameters<ReturnType<typeof fixture>["updateReceipt"]>[0],
     RegExp,
   ][])("refuses a receipt with wrong %s", async (_, spoil, message) => {
     const world = fixture();

@@ -1,10 +1,10 @@
-import type { Json } from "@mrstreamer/contracts/json";
 // What a Cast receiver says, read where it arrives. Each message is JSON on a namespace; the
 // schemas name only the fields the app uses and let everything else pass unread, so a newer
 // receiver's extra fields and message types are ignored rather than trusted. A receiver may send
 // null for a field it has nothing to say in, so every optional field takes it.
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
+import type { Json } from "@mrstreamer/contracts/json";
 
 /** Who the app is on a channel, and the receiver itself, as opposed to an app running on it. */
 export const SENDER = "sender-0";

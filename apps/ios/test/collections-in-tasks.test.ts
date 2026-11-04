@@ -11,7 +11,7 @@ import {
   type Collections,
   type ServiceTitles,
 } from "@mrstreamer/core/ondemand/collections";
-import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
+import type { OnDemandCatalogue, Provider } from "@mrstreamer/core/provider";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { Window, type Element } from "happy-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,10 +38,7 @@ const edges = vi.hoisted(() => ({
   }>,
   roster: new Set<() => void>(),
   /** Each subscription's login, as sources.ts keeps it while it is signed in. */
-  sources: new Map<
-    string,
-    { provider: { titleFile: import("@mrstreamer/core/provider").Provider["titleFile"] } }
-  >(),
+  sources: new Map<string, { provider: Pick<Provider, "titleFile"> }>(),
   /** What the metadata store answers: TMDB's metadata of each title, by kind and TMDB id. */
   known: null as ((kind: string, id: string) => TitleMetadata) | null,
   services: [] as ServiceTitles[],
@@ -90,12 +87,8 @@ vi.mock("../src/account.ts", async () => {
     readingSaved: () => false,
     onReadingSaved: () => () => undefined,
     onSavable: () => () => undefined,
-    savable: (
-      id: string,
-      source: {
-        provider: { titleFile: import("@mrstreamer/core/provider").Provider["titleFile"] };
-      },
-    ) => edges.sources.get(id) === source,
+    savable: (id: string, source: { provider: Pick<Provider, "titleFile"> }) =>
+      edges.sources.get(id) === source,
   };
 });
 
@@ -415,6 +408,15 @@ beforeAll(async () => {
 });
 
 afterAll(() => provider.close());
+
+/** A login whose provider is never asked for a file. */
+const fileless = () => ({
+  provider: {
+    titleFile: async () => {
+      throw new Error("No file expected");
+    },
+  },
+});
 
 describe("the collections Movies, Series, Home and details show", () => {
   type Owner = typeof import("../src/titles.ts");
@@ -862,13 +864,7 @@ describe("the collections Movies, Series, Home and details show", () => {
     const start = Date.now();
     edges.known = tmdbOf(0);
     edges.expiry = () => start + 5_000;
-    edges.sources.set("a", {
-      provider: {
-        titleFile: async () => {
-          throw new Error("No file expected");
-        },
-      },
-    });
+    edges.sources.set("a", fileless());
     subscribe("a");
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
     const index = indexed();
@@ -978,13 +974,7 @@ describe("the collections Movies, Series, Home and details show", () => {
         const { CollectionScreen } = await import("../src/titles-screen.tsx");
         const fixture = browseFixture(kind);
         edges.nativeGrid = true;
-        edges.sources.set("a", {
-          provider: {
-            titleFile: async () => {
-              throw new Error("No file expected");
-            },
-          },
-        });
+        edges.sources.set("a", fileless());
         list([["a", fixture.catalogue]]);
         await until(() => titles.collectionsOf(kind) !== null, "collections");
         await draw(React.createElement(CollectionScreen, { kind, id: "all" }));
@@ -1012,13 +1002,7 @@ describe("the collections Movies, Series, Home and details show", () => {
 
         const recoverSource = async () =>
           React.act(async () => {
-            edges.sources.set("a", {
-              provider: {
-                titleFile: async () => {
-                  throw new Error("No file expected");
-                },
-              },
-            });
+            edges.sources.set("a", fileless());
             edges.members = edges.members.map((member) => ({
               ...member,
               needsSecret: false,
@@ -1084,13 +1068,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       "shows %s collection controls, counts, matching activation and reset",
       async (kind) => {
         const { CollectionScreen } = await import("../src/titles-screen.tsx");
-        edges.sources.set("a", {
-          provider: {
-            titleFile: async () => {
-              throw new Error("No file expected");
-            },
-          },
-        });
+        edges.sources.set("a", fileless());
         list([["a", browseFixture(kind).catalogue]]);
         await until(() => titles.collectionsOf(kind) !== null, "fixture collections");
         await draw(React.createElement(CollectionScreen, { kind, id: "all" }));
@@ -1122,13 +1100,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       const kind = "movie";
       const { TitlesHome } = await import("../src/titles-screen.tsx");
       const fixture = browseFixture(kind);
-      edges.sources.set("a", {
-        provider: {
-          titleFile: async () => {
-            throw new Error("No file expected");
-          },
-        },
-      });
+      edges.sources.set("a", fileless());
       list([["a", fixture.catalogue]]);
       await until(() => titles.collectionsOf(kind) !== null, "collections");
       await draw(React.createElement(TitlesHome, { kind }));
@@ -1136,15 +1108,7 @@ describe("the collections Movies, Series, Home and details show", () => {
       const id = "nl-4k";
       const oldTap = edges.presses.get(`tile:${id}`)!;
       const oldMade = titles.collectionsOf(kind);
-
-      const replacement = {
-        provider: {
-          titleFile: async () => {
-            throw new Error("No file expected");
-          },
-        },
-      };
-
+      const replacement = fileless();
       await React.act(async () => {
         edges.sources.set("a", replacement);
         edges.members = edges.members.map((member) => ({

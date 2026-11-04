@@ -1,4 +1,3 @@
-import type { Json } from "@mrstreamer/contracts/json";
 // The installers the Windows installed upgrade check accepts, from GitHub's answers: the newest
 // published stable release and the candidate nightly the caller names, each the build its tag
 // names, and nothing else. Answers come from fixtures shaped like GitHub's; a check that doubts
@@ -9,6 +8,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { Json } from "@mrstreamer/contracts/json";
 import {
   readReceipt,
   resolvePackages,

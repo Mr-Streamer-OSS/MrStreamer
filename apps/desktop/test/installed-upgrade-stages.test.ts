@@ -1,7 +1,7 @@
-import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 // The installed upgrade check must inherit stable's copies before playing anything, and resume
 // them after a restart. The window stands in for public reads and UI input; the stages are real.
 import { describe, expect, it } from "vitest";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type { Download } from "../../../packages/contracts/src/downloads.ts";
 import type { IpcOutput } from "../../../packages/contracts/src/ipc.ts";
 import { SUBTITLE_CUE, SUBTITLE_TIMING } from "./e2e/installed-subtitles.ts";
@@ -97,11 +97,7 @@ function standIn(player: Player = PLAYER) {
               },
             },
           ],
-    "preferences.get": () => ({
-      ...state.preferences,
-      revision: 1,
-      preferences: { ...defaultPreferences, ...state.preferences },
-    }),
+    "preferences.get": () => ({ preferences: { ...defaultPreferences, ...state.preferences } }),
     "viewing.get": () => ({ favourites: state.favourites }),
     "watchlist.list": () => state.watchlist,
     "viewing.progress": () => state.progress,

@@ -1,9 +1,9 @@
-import type { Json } from "@mrstreamer/contracts/json";
 // Explicit native acceptance. The ordinary release-UI scenario never calls this workload.
 import assert from "node:assert/strict";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
+import type { Json } from "@mrstreamer/contracts/json";
 import type {
   AnalyticsRecord,
   CaptureEvent,

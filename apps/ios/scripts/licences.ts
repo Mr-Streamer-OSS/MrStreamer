@@ -1,4 +1,3 @@
-import type { Json } from "@mrstreamer/contracts/json";
 // Generates src/licences.json, the notices Settings' Licences shows offline, from what the build
 // really carries:
 //
@@ -39,6 +38,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import type { Json } from "@mrstreamer/contracts/json";
 import type { Component, Fact, Licences, Notice } from "../src/licences.ts";
 import {
   app,

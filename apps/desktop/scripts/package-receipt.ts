@@ -1,4 +1,3 @@
-import type { Json } from "@mrstreamer/contracts/json";
 // Successful package jobs write this contract after native verification and artifact upload.
 // A receipt identifies bytes and their build, but never replaces installed acceptance.
 import { createHash } from "node:crypto";
@@ -8,6 +7,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import { unzipSync } from "fflate";
 import { PLATFORMS, platformFiles } from "@mrstreamer/contracts/release-files";
+import type { Json } from "@mrstreamer/contracts/json";
 import { packageVersion } from "./msix-version.ts";
 
 const Sha = type(/^[0-9a-f]{40}$/);
