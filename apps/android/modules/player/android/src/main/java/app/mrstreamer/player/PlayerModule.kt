@@ -8,6 +8,7 @@ import android.os.Looper
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.functions.Queues
@@ -78,6 +79,15 @@ class PlayerModule : Module() {
     AsyncFunction("setQuality") { attempt: String, trackId: String? -> owner().setQuality(attempt, trackId) }
       .runOnQueue(Queues.MAIN)
     AsyncFunction("setAudio") { attempt: String, trackId: String -> owner().setAudio(attempt, trackId) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setSubtitleInset") { fraction: Double -> owner().setSubtitleInset(fraction.toFloat()) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setSubtitleSize") { size: Double -> owner().setSubtitleSize(size.toFloat()) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("unpackSubtitle") { bytes: ByteArray ->
+      try { Subtitles.unpack(bytes) }
+      catch (_: Exception) { throw IllegalArgumentException("Can't use this subtitle") }
+    }
+    AsyncFunction("setSidecar") { attempt: String, text: String, language: String, offset: Double, speed: Double, promise: Promise ->
+      if (!owner().setSidecar(attempt, text, language, offset, speed) { promise.resolve(it) }) promise.resolve(false)
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("setText") { attempt: String, trackId: String? -> owner().setText(attempt, trackId) }.runOnQueue(Queues.MAIN)
     AsyncFunction("setNextAvailable") { attempt: String, available: Boolean ->
       val current = owner()

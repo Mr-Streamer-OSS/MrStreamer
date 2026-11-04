@@ -1,3 +1,4 @@
+import { rememberSubtitleTitle, versionKey } from "../subtitles/context.ts";
 import {
   nextEpisode as coreNextEpisode,
   seriesEpisodeOrder,
@@ -19,6 +20,17 @@ export function nextEpisode(details: DetailState, current: EpisodeIntent): NextE
 
   if (!row) return undefined;
   const exact = episodeFileVersion(row, current.id);
+  rememberSubtitleTitle({
+    key: versionKey(current.sourceId, "episode", current.id, current.container),
+    query: {
+      kind: "episode",
+      season: exact.season,
+      episode: exact.number,
+      ...(series.title.tmdbId && /^[1-9]\d{0,9}$/.test(series.title.tmdbId)
+        ? { tmdbId: Number(series.title.tmdbId) }
+        : { title: series.title.title }),
+    },
+  });
 
   const episode =
     coreNextEpisode(series, { id: exact.id, season: exact.season, episode: exact.number }) ??

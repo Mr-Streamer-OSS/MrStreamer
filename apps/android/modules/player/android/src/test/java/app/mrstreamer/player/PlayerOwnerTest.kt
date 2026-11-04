@@ -119,6 +119,164 @@ class PlayerOwnerTest {
   private fun untilPhase(attempt: String, vararg phases: Phase) =
     until { recorder.of(attempt).lastOrNull()?.phase in phases }
 
+
+  @Test fun pendingSidecarSettlesOnceOnStop() = pendingStop(false)
+  @Test fun pendingSidecarSettlesOnceOnReplacement() = pendingStop(true)
+
+  private fun pendingStop(replace: Boolean) {
+    run {
+      val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+      val media = fixture("h264-aac.mp4")
+      try {
+        owner.admit(file("pending", media))
+        untilPhase("pending", Phase.PLAYING)
+        val completions = mutableListOf<Boolean>()
+        val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+        assertTrue(owner.setSidecar("pending", text, "en", 0.0, 1.0) { completions += it })
+        assertEquals(emptyList<Boolean>(), completions)
+        if (replace) owner.admit(file("later", media)) else {
+          assertTrue(owner.stop("pending"))
+          owner.admit(file("later", media))
+        }
+        untilPhase("later", Phase.PLAYING)
+        assertEquals(listOf(false), completions)
+        val later = mutableListOf<Boolean>()
+        assertTrue(owner.setSidecar("later", text, "en", 0.0, 1.0) { later += it })
+        until { later.isNotEmpty() }
+        assertEquals(listOf(true), later)
+        assertEquals(listOf(false), completions)
+        owner.stopAll()
+      } finally { media.delete() }
+    }
+  }
+
+  // The ExoPlayer boundary supplies a synchronous exception or an end notification while
+  // preparation is pending; subsequent playback still uses the real test ExoPlayer.
+  @Test fun pendingSidecarSettlesOnceOnEnd() = pendingEnd(true)
+  @Test fun pendingSidecarSettlesOnceOnSynchronousPrepareFailure() = pendingEnd(false)
+
+  private fun pendingEnd(ending: Boolean) {
+    run {
+      val real = TestExoPlayerBuilder(context)
+        .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)).build()
+      players += real
+      val listeners = mutableListOf<androidx.media3.common.Player.Listener>()
+      var failPrepare = false
+      var ended = false
+      val boundary = java.lang.reflect.Proxy.newProxyInstance(
+        ExoPlayer::class.java.classLoader, arrayOf(ExoPlayer::class.java),
+      ) { _, method, args ->
+        when {
+          method.name == "addListener" -> {
+            listeners += args!![0] as androidx.media3.common.Player.Listener
+            method.invoke(real, *args)
+          }
+          method.name == "prepare" && failPrepare -> {
+            failPrepare = false
+            throw IllegalStateException("Fixture prepare failure")
+          }
+          method.name == "getPlaybackState" && ended -> androidx.media3.common.Player.STATE_ENDED
+          else -> try { method.invoke(real, *(args ?: emptyArray())) }
+            catch (cause: java.lang.reflect.InvocationTargetException) { throw cause.targetException }
+        }
+      } as ExoPlayer
+      val owner = PlayerOwner(boundary, recorder)
+      val media = fixture("h264-aac.mp4")
+      try {
+        owner.admit(file("pending", media))
+        untilPhase("pending", Phase.PLAYING)
+        val completions = mutableListOf<Boolean>()
+        val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+        failPrepare = !ending
+        assertTrue(owner.setSidecar("pending", text, "en", 0.0, 1.0) { completions += it })
+        if (ending) {
+          assertEquals(emptyList<Boolean>(), completions)
+          ended = true
+          val events = androidx.media3.common.Player.Events(
+            androidx.media3.common.FlagSet.Builder().add(androidx.media3.common.Player.EVENT_PLAYBACK_STATE_CHANGED).build(),
+          )
+          listeners.forEach { it.onEvents(boundary, events) }
+          ended = false
+        }
+        assertEquals(listOf(false), completions)
+        owner.admit(file("later", media))
+        untilPhase("later", Phase.PLAYING)
+        val later = mutableListOf<Boolean>()
+        assertTrue(owner.setSidecar("later", text, "en", 0.0, 1.0) { later += it })
+        until { later.isNotEmpty() }
+        assertEquals(listOf(true), later)
+        assertEquals(listOf(false), completions)
+        owner.stopAll()
+      } finally { media.delete() }
+    }
+  }
+
+  @Test fun downloadedTextUsesTheExistingOwnerAndReportsItsSelection() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("h264-aac.mp4")
+    try {
+      owner.admit(file("subtitle", media))
+      until { recorder.tracks["subtitle"]?.any { it.type == "video" } == true }
+      assertTrue(owner.pause("subtitle"))
+      assertTrue(owner.seek("subtitle", 500))
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      assertFalse(owner.setSidecar("other", text, "en", 0.0, 1.0))
+      assertTrue(owner.setSidecar("subtitle", text, "en", 0.1, 1.0))
+      until { recorder.tracks["subtitle"]?.any { it.id == Subtitles.TRACK && it.selected } == true }
+      assertFalse(owner.isPlaying)
+      assertEquals(500L, recorder.of("subtitle").last().positionMs)
+      assertTrue(owner.seek("subtitle", 1000))
+      assertTrue(owner.setText("subtitle", null))
+      until { recorder.tracks["subtitle"]?.none { it.type == "text" && it.selected } == true }
+      assertTrue(owner.setText("subtitle", Subtitles.TRACK))
+      until { recorder.tracks["subtitle"]?.any { it.id == Subtitles.TRACK && it.selected } == true }
+      owner.stop("subtitle")
+      until { recorder.releases.any { it.attempt == "subtitle" } }
+    } finally { media.delete() }
+  }
+
+  @Test fun offDuringSidecarPrepareSettlesAndAllowsAnotherApply() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("h264-aac.mp4")
+    try {
+      owner.admit(file("cancel-sidecar", media))
+      until { recorder.tracks["cancel-sidecar"]?.any { it.type == "video" } == true }
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      var applied: Boolean? = null
+      assertTrue(owner.setSidecar("cancel-sidecar", text, "en", 0.0, 1.0) { applied = it })
+      assertTrue(owner.setText("cancel-sidecar", null))
+      assertEquals(false, applied)
+      assertTrue(owner.setSidecar("cancel-sidecar", text, "en", 1.0, 1.0) { applied = it })
+      until { applied == true }
+      owner.stop("cancel-sidecar")
+    } finally { media.delete() }
+  }
+
+  @Test fun sidecarKeepsTheChosenAudioAndReportsPrepareFailure() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("hevc-ac3-eac3-srt.mkv")
+    try {
+      owner.admit(file("audio-sidecar", media))
+      until { recorder.tracks["audio-sidecar"]?.count { it.type == "audio" } == 2 }
+      val chosen = recorder.tracks["audio-sidecar"]!!.last { it.type == "audio" }
+      assertTrue(owner.setAudio("audio-sidecar", chosen.id))
+      until { recorder.tracks["audio-sidecar"]?.any { it.type == "audio" && it.codec == chosen.codec && it.selected } == true }
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      var applied: Boolean? = null
+      assertTrue(owner.setSidecar("audio-sidecar", text, "en", 0.0, 1.0) { applied = it })
+      assertEquals(null, applied)
+      until { applied != null }
+      assertEquals(true, applied)
+      assertEquals(chosen.codec, recorder.tracks["audio-sidecar"]!!.single { it.type == "audio" && it.selected }.codec)
+      media.delete()
+      applied = null
+      assertTrue(owner.setSidecar("audio-sidecar", text, "en", 1.0, 1.0) { applied = it })
+      until { applied != null }
+      assertEquals(false, applied)
+      owner.stop("audio-sidecar")
+    } finally { media.delete() }
+  }
+
   @Test fun previewIsMutedAndNeverRequestsAudioFocus() {
     val player = TestExoPlayerBuilder(context)
       .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO)).build()

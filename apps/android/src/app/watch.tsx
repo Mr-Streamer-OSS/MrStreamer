@@ -34,6 +34,7 @@ import { LIVE_RED, playPause } from "../player/mini-player.tsx";
 import type { NativeFailure } from "../player/native.ts";
 import type { PlaybackFailure, Playing } from "../player/player.ts";
 import { PlayerSurface } from "../player/surface.ts";
+import { SubtitleDialog } from "../subtitles/sheets.tsx";
 import { FocusWithin, useKeyboardFocus } from "../ui/focus.ts";
 import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
@@ -277,9 +278,13 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
               open={sheet}
               now={state.kind === "playing" ? state : null}
               media={media}
+              onOpen={open}
               onClose={() => setSheet(null)}
             />
             <MediaDialog error={media.error} />
+            {player.subtitles ? (
+              <SubtitleDialog model={player.subtitles} sheet={sheet} onOpen={open} />
+            ) : null}
           </>
         ) : null}
       </View>

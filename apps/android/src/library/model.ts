@@ -59,6 +59,8 @@ export function libraryModel(options: {
   const abouts = new Map<string, { at: number; value: TitleAbout | null }>();
   const provided = new Map<string, ProviderDetails>();
 
+  const providedReaders = new Map<string, object | undefined>();
+
   const pending = new Map<
     string,
     { reader: object | undefined; value: Promise<ProviderDetails> }
@@ -186,6 +188,30 @@ export function libraryModel(options: {
         ] as const
       ).flatMap(([tab, shown]) => (shown ? [tab] : []));
     },
+    /** Exact episode identity from details already opened by Library, with its source still present. */
+    playbackEpisode(sourceId: string, id: string, container: string) {
+      const source = options.sources().find((source) => source.id === sourceId);
+
+      if (!source) return null;
+
+      for (const title of kindOf(catalogue(), "series").titles) {
+        for (const version of title.versions.filter(
+          (version) => version.subscriptionId === sourceId,
+        )) {
+          const key = `series:${sourceId}:${version.id}`;
+
+          if (providedReaders.get(key) !== source.reader) continue;
+
+          const episode = provided
+            .get(key)
+            ?.episodes.find((episode) => episode.id === id && episode.container === container);
+
+          if (episode) return { title, episode };
+        }
+      }
+
+      return null;
+    },
     title(kind: TitleKind, key: string) {
       return kindOf(catalogue(), kind).titles.find((t) => t.key === key);
     },
@@ -216,6 +242,7 @@ export function libraryModel(options: {
 
           if (!stands()) throw new Error("Source changed");
           provided.set(key, value);
+          providedReaders.set(key, source.reader);
         } finally {
           if (pending.get(key) === read) pending.delete(key);
         }

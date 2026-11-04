@@ -601,3 +601,42 @@ describe("Android media public contract", () => {
     expect(f.saved().quality).toBe("automatic");
   });
 });
+
+it("does not restore a late embedded preference over the version's downloaded subtitle", async () => {
+  const f = setup();
+  const { subtitleModel } = await import("../src/subtitles/model.ts");
+  const text = { ...audio, type: "text" } as const;
+  f.owner.subtitles = subtitleModel({
+    player: f.owner,
+    native: { setSidecar: async () => true },
+    secrets: { read: async () => null, write: async () => {}, remove: async () => {} },
+    files: {
+      read: () => ({
+        timing: { offset: 0, speed: 1 },
+        subtitle: {
+          service: "subdl",
+          language: "en",
+          release: "Fixture",
+          cues: [{ start: 0, end: 2, text: "Hello" }],
+        },
+      }),
+      write() {},
+      remove() {},
+    },
+    title: async () => ({ key: "version", query: { kind: "movie", title: "Fixture" } }),
+    languages: () => ["en"],
+  });
+  f.owner.play(episode);
+  await flush();
+  f.observe("playing");
+  f.tracks([text]);
+  await f.owner.media.text(text.id);
+  f.tracks([{ ...text, selected: true }]);
+  f.owner.play({ ...episode, id: "other" });
+  await flush();
+  f.observe("playing");
+  await vi.waitFor(() => expect(f.owner.subtitles!.state.get().saved?.subtitle).toBeTruthy());
+  vi.mocked(f.native.setText!).mockClear();
+  f.tracks([text]);
+  expect(f.native.setText).not.toHaveBeenCalled();
+});

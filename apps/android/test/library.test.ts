@@ -402,3 +402,18 @@ it.each(["throws", "invalid"])(
     expect(raw).toEqual({});
   },
 );
+
+it("hands the selected episode's exact identity to playback after opening series details", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  const title = f.model.made("series").list("all")[0]!;
+  expect(f.model.playbackEpisode("source", "second", "mp4")).toBeNull();
+  await f.model.details(title);
+  expect(f.model.playbackEpisode("source", "second", "mp4")).toMatchObject({
+    title: { title: title.title },
+    episode: { season: 2, number: 1 },
+  });
+  expect(f.model.playbackEpisode("source", "second", "mkv")).toBeNull();
+  f.remove();
+  expect(f.model.playbackEpisode("source", "second", "mp4")).toBeNull();
+});

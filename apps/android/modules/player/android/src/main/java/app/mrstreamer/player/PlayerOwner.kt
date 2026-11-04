@@ -12,14 +12,19 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ByteArrayDataSource
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import java.io.File
 
 /** Where an attempt's media comes from: a saved source's provider, or a file on this phone. */
@@ -110,6 +115,12 @@ class PlayerOwner(
   var events: PlayerEvents? = null,
 ) {
   private class Current(val admission: Admission, val hold: Hold) {
+    var sidecar: ByteArray? = null
+    var sidecarLanguage: String = ""
+    var pickSidecar = false
+    var sidecarDone: ((Boolean) -> Unit)? = null
+    var rollbackSidecar: (() -> Unit)? = null
+    var audioFormat: androidx.media3.common.Format? = null
     var stopped = false
     /** Why it failed, until it plays again. */
     var failure: Failure? = null
@@ -134,6 +145,8 @@ class PlayerOwner(
 
   private val main = Handler(player.applicationLooper)
   private var current: Current? = null
+  private var subtitleInset = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
+  private var subtitleSize = 1f
   private val views = ArrayDeque<PlayerView>()
   private val tick = object : Runnable {
     override fun run() {
@@ -152,11 +165,46 @@ class PlayerOwner(
       object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
           if (!ownsCurrentItem()) return
-          if (events.contains(Player.EVENT_TRACKS_CHANGED)) reportTracks()
+          if (events.contains(Player.EVENT_TRACKS_CHANGED)) {
+            val now = current
+            if (now?.pickSidecar == true) {
+              val group = player.currentTracks.groups.firstOrNull { it.getTrackFormat(0).isSidecar }
+              if (group != null) {
+                now.pickSidecar = false
+                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0)).build()
+              }
+            }
+            current?.audioFormat?.let { wanted ->
+              for (group in player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }) {
+                val index = (0 until group.length).firstOrNull { group.getTrackFormat(it).let { candidate -> candidate.id.orEmpty().removePrefix("0:") == wanted.id.orEmpty().removePrefix("0:") && candidate.sampleMimeType == wanted.sampleMimeType && candidate.language == wanted.language } }
+                if (index != null) {
+                  player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)).build()
+                  if (group.isTrackSelected(index)) current?.audioFormat = null
+                  break
+                }
+              }
+            }
+            reportTracks()
+          }
           if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
             main.removeCallbacks(tick)
             if (player.isPlaying) main.postDelayed(tick, TICK_MS)
             views.lastOrNull()?.keepScreenOn = player.isPlaying
+          }
+          if (player.playbackState == Player.STATE_READY) current?.audioFormat = null
+          if (player.playbackState == Player.STATE_ENDED) {
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            current?.pickSidecar = false
+            current?.audioFormat = null
+            done?.invoke(false)
+          }
+          if (player.playbackState == Player.STATE_READY && current?.pickSidecar == false && player.currentTracks.groups.any { it.getTrackFormat(0).isSidecar && it.isTrackSelected(0) }) {
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            done?.invoke(true)
           }
           if (
             events.containsAny(
@@ -178,6 +226,14 @@ class PlayerOwner(
 
         override fun onPlayerError(error: PlaybackException) {
           if (!ownsCurrentItem()) return
+          current?.rollbackSidecar?.let { rollback ->
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            runCatching { rollback() }
+            done?.invoke(false)
+            return
+          }
           if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
             player.seekToDefaultPosition()
             player.prepare()
@@ -263,7 +319,63 @@ class PlayerOwner(
     val upstream = if (local != null) FileDataSource.Factory() else http
     val source =
       DefaultMediaSourceFactory(hold.factory(upstream) { allows(admission, it) }, extractors).createMediaSource(item)
-    if (admission.mode == "live") player.setMediaSource(source) else player.setMediaSource(source, admission.startMs)
+    val bytes = current?.sidecar
+    val combined = if (bytes == null) source else {
+      val configuration = MediaItem.SubtitleConfiguration.Builder(Uri.parse("memory:subtitle"))
+        .setId(Subtitles.TRACK).setLabel("Downloaded").setLanguage(current?.sidecarLanguage)
+        .setMimeType(MimeTypes.TEXT_VTT).setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()
+      val sidecar = SingleSampleMediaSource.Factory(DataSource.Factory { ByteArrayDataSource(bytes) })
+        .createMediaSource(configuration, C.TIME_UNSET)
+      MergingMediaSource(source, sidecar)
+    }
+    if (admission.mode == "live") player.setMediaSource(combined) else player.setMediaSource(combined, admission.startMs)
+  }
+
+  /** Rebuilds only this owner's media, preserving position and pause; bytes outlive saved-data removal. */
+  fun setSidecar(attempt: String, text: String, language: String, offset: Double, speed: Double, completed: ((Boolean) -> Unit)? = null): Boolean {
+    val now = current ?: return false
+    if (now.admission.attempt != attempt || now.stopped || now.admission.mode !in listOf("title", "file")) return false
+    val bytes = try { Subtitles.timed(text, offset, speed) } catch (_: Exception) { return false }
+    if (now.sidecarDone != null) return false
+    if (now.sidecar?.contentEquals(bytes) == true && now.sidecarLanguage == language) {
+      val ok = setText(attempt, Subtitles.TRACK)
+      if (ok) completed?.invoke(true)
+      return ok
+    }
+    val old = now.sidecar
+    val oldLanguage = now.sidecarLanguage
+    val oldParameters = player.trackSelectionParameters
+    val position = player.currentPosition
+    val ready = player.playWhenReady
+    now.audioFormat = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.firstNotNullOfOrNull { group ->
+      (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let { group.getTrackFormat(it) }
+    }
+    now.sidecarDone = completed
+    now.rollbackSidecar = {
+      now.sidecar = old
+      now.sidecarLanguage = oldLanguage
+      now.pickSidecar = false
+      now.audioFormat = null
+      prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
+      player.trackSelectionParameters = oldParameters
+      player.playWhenReady = ready
+      player.prepare()
+    }
+    now.sidecar = bytes
+    now.sidecarLanguage = language
+    now.pickSidecar = true
+    try {
+      prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
+      player.playWhenReady = ready
+      player.prepare()
+    } catch (_: RuntimeException) {
+      val rollback = now.rollbackSidecar
+      now.rollbackSidecar = null
+      now.sidecarDone = null
+      runCatching { rollback?.invoke() }
+      completed?.invoke(false)
+    }
+    return true
   }
 
   fun pause(attempt: String) = command(attempt, ::ownsCurrentItem) { mediaCommand("cancel-next"); player.pause() }
@@ -295,6 +407,21 @@ class PlayerOwner(
   fun setText(attempt: String, trackId: String?) = selectTrack(attempt, C.TRACK_TYPE_TEXT, trackId)
 
   private fun selectTrack(attempt: String, type: Int, trackId: String?): Boolean {
+    if (current?.admission?.attempt != attempt) return false
+    if (type == C.TRACK_TYPE_TEXT) {
+      current?.pickSidecar = false
+      if (trackId != Subtitles.TRACK) {
+        val done = current?.sidecarDone
+        current?.sidecarDone = null
+        current?.rollbackSidecar = null
+        current?.audioFormat = null
+        done?.invoke(false)
+      }
+    }
+    if (trackId == Subtitles.TRACK) {
+      val index = player.currentTracks.groups.indexOfFirst { it.getTrackFormat(0).isSidecar }
+      return if (index < 0) false else selectTrack(attempt, type, "$index:0")
+    }
     if (trackId == null) {
       return command(attempt) {
         player.trackSelectionParameters =
@@ -335,8 +462,28 @@ class PlayerOwner(
     current?.let { stop(it.admission.attempt) }
   }
 
+  /** Lifts cues by [fraction] of the picture's height, as the timing sheet does while it shows. */
+  fun setSubtitleInset(fraction: Float) {
+    if (!fraction.isFinite() || fraction !in 0f..0.8f) return
+    subtitleInset = fraction
+    views.forEach(::styleSubtitles)
+  }
+
+  /** Scales cues by [size] of Media3's default text size. */
+  fun setSubtitleSize(size: Float) {
+    if (!size.isFinite() || size !in 0.5f..2f) return
+    subtitleSize = size
+    views.forEach(::styleSubtitles)
+  }
+
+  private fun styleSubtitles(view: PlayerView) {
+    view.subtitleView?.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleSize)
+    view.subtitleView?.setBottomPaddingFraction(subtitleInset)
+  }
+
   /** Shows the picture in [view], the newest of those attached. */
   fun attach(view: PlayerView) {
+    styleSubtitles(view)
     val previous = views.lastOrNull()
     views.remove(view)
     views.addLast(view)
@@ -369,6 +516,9 @@ class PlayerOwner(
       main.removeCallbacks(tick)
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
+    ending.sidecarDone?.invoke(false)
+    ending.sidecarDone = null
+    ending.rollbackSidecar = null
     current = null
     if (notify) notifyChanged()
     return ending
@@ -464,7 +614,7 @@ class PlayerOwner(
         (0 until group.length).map { index ->
           val format: Format = group.getTrackFormat(index)
           Track(
-            id = "$groupIndex:$index",
+            id = if (format.isSidecar) Subtitles.TRACK else "$groupIndex:$index",
             type = type,
             codec = format.sampleMimeType,
             language = format.language?.takeIf { it != C.LANGUAGE_UNDETERMINED },

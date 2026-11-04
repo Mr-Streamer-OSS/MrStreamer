@@ -1,3 +1,4 @@
+import type { SubtitleModel } from "../subtitles/model.ts";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import { withoutAddresses } from "@mrstreamer/core/provider";
 import { store, type Store } from "../platform/store.ts";
@@ -73,6 +74,8 @@ export interface Settled {
 }
 
 export interface PlayerOwner {
+  /** Subtitle actions share this player; the native app attaches its protected-storage adapter. */
+  subtitles?: SubtitleModel;
   readonly state: Store<PlayerState>;
   readonly previewState: Store<PreviewState>;
   preview(intent: PlayIntent): Preview | null;
