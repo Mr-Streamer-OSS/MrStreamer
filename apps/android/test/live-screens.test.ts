@@ -3,8 +3,26 @@ import { act, createElement as h, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("react-native", () => {
-  const view = ({ children, onPress }: { children?: ReactNode; onPress?: () => void }) =>
-    h(onPress ? "button" : "div", { onClick: onPress }, children);
+  const view = ({
+    children,
+    onPress,
+    onAccessibilityAction,
+    onLongPress,
+  }: {
+    children?: ReactNode;
+    onPress?: () => void;
+    onLongPress?: () => void;
+    onAccessibilityAction?: (e: { nativeEvent: { actionName: string } }) => void;
+  }) =>
+    h(
+      onPress ? "button" : "div",
+      {
+        onClick: onPress,
+        onDoubleClick: onLongPress,
+        onContextMenu: () => onAccessibilityAction?.({ nativeEvent: { actionName: "schedule" } }),
+      },
+      children,
+    );
 
   return {
     View: view,
@@ -43,6 +61,7 @@ vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
 const params = vi.hoisted(() => ({ id: "custom", country: "" }));
 
 vi.mock("expo-router", () => ({
+  useSegments: () => ["(tabs)", "(live)"],
   useLocalSearchParams: () => params,
   useIsFocused: () => true,
   router: { back() {}, push: vi.fn() },
@@ -75,8 +94,10 @@ vi.mock("../src/live/chrome.tsx", () => {
       h("div", {}, bar, children),
     Bar: ({ trailing }: { trailing: ReactNode }) => trailing,
     SheetTitle: view,
-    FitSheet: () => null,
-    SheetRow: () => null,
+    FitSheet: ({ visible, children }: { visible: boolean; children: ReactNode }) =>
+      visible ? h("section", {}, children) : null,
+    SheetRow: ({ label, onPress }: { label: string; onPress: () => void }) =>
+      h("button", { onClick: onPress }, label),
     TextButton: ({ label, onPress }: { label: string; onPress: () => void }) =>
       h("button", { onClick: onPress }, label),
     Dialog: ({ title, actions }: { title: string; actions: ReactNode }) =>
@@ -89,6 +110,10 @@ vi.mock("../src/live/chrome.tsx", () => {
   };
 });
 
+vi.mock("../src/guide/grid.tsx", () => ({
+  GuideGrid: ({ country }: { country: string }) => h("p", {}, `Guide grid for ${country}`),
+}));
+
 vi.mock("../src/player/instance.ts", () => ({ player: { play: vi.fn() } }));
 
 vi.mock("../src/live/ui.tsx", async (importOriginal) => ({
@@ -97,7 +122,7 @@ vi.mock("../src/live/ui.tsx", async (importOriginal) => ({
   NavRow: ({ label, onPress }: { label: string; onPress: () => void }) =>
     h("button", { onClick: onPress }, label),
   Channel: (await importOriginal<typeof import("../src/live/ui.tsx")>()).Channel,
-  ListsSheet: () => null,
+  ListsSheet: (await importOriginal<typeof import("../src/live/ui.tsx")>()).ListsSheet,
   StillRows: () => null,
   Badge: () => null,
   Lines: () => null,
@@ -222,3 +247,104 @@ it("opens Settings from the Providers shortcut", async () => {
   await act(async () => providers!.click());
   expect(router.push).toHaveBeenCalledWith("/settings");
 });
+
+it("opens the Guide tab with the selected country", async () => {
+  params.country = "Belgium";
+  await act(async () => root.render(h(LiveScreen)));
+  const tab = [...container.querySelectorAll("button")].find((b) => b.textContent === "Guide");
+  expect(tab).toBeDefined();
+  await act(async () => tab!.click());
+  expect(container.textContent).toContain("Guide grid for Belgium");
+});
+
+it("opens the channel Schedule through its Live accessibility action", async () => {
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "source",
+        label: "Provider",
+        kind: "m3u",
+        channels: {
+          kind: "ready",
+          rows: [
+            { key: "source:news", sourceId: "source", title: "News", number: null, category: null },
+          ],
+        },
+      },
+    ],
+  });
+  const { Channel } = await import("../src/live/ui.tsx");
+  const { router } = await import("expo-router");
+  await act(async () =>
+    root.render(
+      h(Channel, { entry: { sourceId: "source", channelId: "news", title: "News" }, onLists() {} }),
+    ),
+  );
+  const row = container.querySelector("button");
+  expect(row).toBeTruthy();
+  await act(async () => {
+    row!.dispatchEvent(new window.Event("contextmenu", { bubbles: true }));
+  });
+  expect(router.push).toHaveBeenLastCalledWith("/guide/schedule?source=source&channel=news");
+});
+
+it.each([
+  ["en-US", "Guide", "Schedule"],
+  ["nl-NL", "Gids", "Zendschema"],
+] as const)(
+  "opens and closes the Live hold sheet Schedule in %s",
+  async (locale, guide, schedule) => {
+    const { setLanguage } = await import("@mrstreamer/core/i18n");
+    const { router } = await import("expo-router");
+    setLanguage({ locale, formats: locale });
+    sources.state.set({
+      kind: "ready",
+      sources: [
+        {
+          id: "source",
+          label: "Provider",
+          kind: "m3u",
+          channels: {
+            kind: "ready",
+            rows: [
+              {
+                key: "source:news",
+                sourceId: "source",
+                title: "News",
+                number: null,
+                category: null,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    lists.state.set({ kind: "ready", lists: [] });
+
+    try {
+      await act(async () => root.render(h(LiveScreen)));
+      expect([...container.querySelectorAll("button")].some((b) => b.textContent === guide)).toBe(
+        true,
+      );
+
+      const row = [...container.querySelectorAll("button")].find((b) =>
+        b.textContent?.includes("News"),
+      );
+
+      expect(row).toBeDefined();
+      await act(async () => row!.dispatchEvent(new window.Event("dblclick", { bubbles: true })));
+
+      const action = [...container.querySelectorAll("button")].find(
+        (b) => b.textContent === schedule,
+      );
+
+      expect(action).toBeDefined();
+      await act(async () => action!.click());
+      expect(container.querySelector("section")).toBeNull();
+      expect(router.push).toHaveBeenLastCalledWith("/guide/schedule?source=source&channel=news");
+    } finally {
+      setLanguage({ locale: "en-US", formats: "en-US" });
+    }
+  },
+);

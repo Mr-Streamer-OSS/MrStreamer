@@ -1,4 +1,6 @@
-import { router } from "expo-router";
+import { router, useSegments } from "expo-router";
+import { scheduleHref } from "../guide/routes.ts";
+import { destinationIn } from "../navigation/open.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useState, type ReactNode } from "react";
 import { Alert, Pressable, Text, TextInput, View } from "react-native";
@@ -159,6 +161,8 @@ export function Channel({
   listName?: string;
 }) {
   useLocale();
+  const destination = destinationIn(useSegments());
+  const schedule = () => router.push(scheduleHref(destination, entry));
   const state = useStore(sources.state);
   const saved = useStore(lists.state);
   const found = resolve(entry, state);
@@ -226,6 +230,7 @@ export function Channel({
       // Android's click label: TalkBack says "Double-tap to play" for a playable row.
       accessibilityActions={[
         { name: "activate", label: t("Play") },
+        { name: "schedule", label: t("Schedule") },
         ...(saved.kind === "ready" ? [{ name: "star", label: favourite }] : []),
         { name: "lists", label: t("Lists") },
       ]}
@@ -235,6 +240,8 @@ export function Channel({
         if (nativeEvent.actionName === "star" && saved.kind === "ready") star();
 
         if (nativeEvent.actionName === "lists") onLists(entry);
+
+        if (nativeEvent.actionName === "schedule") schedule();
       }}
       onPress={play}
       onLongPress={() => onLists(entry)}
@@ -551,6 +558,7 @@ export function NameDialog({
  * and New list…, whose dialog puts the channel in the list it makes.
  */
 export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose: () => void }) {
+  const destination = destinationIn(useSegments());
   useLocale();
   const saved = useStore(lists.state);
   const state = useStore(sources.state);
@@ -598,6 +606,16 @@ export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose: (
         </View>
       </View>
       <View style={{ paddingTop: 8 }}>
+        <SheetRow
+          icon="event-note"
+          label={t("Schedule")}
+          onPress={() => {
+            if (entry) {
+              onClose();
+              router.push(scheduleHref(destination, entry));
+            }
+          }}
+        />
         {saved.kind === "failed" ? (
           <>
             <Text

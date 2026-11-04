@@ -1,6 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import type { ChannelRow, Sources } from "../connect/sources.ts";
@@ -38,7 +38,11 @@ const findQuery = store("");
 
 const root = "/(tabs)/(live)" as const;
 
-type Tab = "For you" | "Categories" | "All";
+const GuideGrid = lazy(() =>
+  import("../guide/grid.tsx").then((module) => ({ default: module.GuideGrid })),
+);
+
+type Tab = "For you" | "Categories" | "All" | "Guide";
 
 const count = (rows: number) => t("{count} channels", { count: rows });
 
@@ -153,7 +157,7 @@ function Channels({
   );
 }
 
-/** Live's tabs after the country it shows: For you, Categories and All. Scrolls when text grows. */
+/** Live's tabs after the country it shows: For you, Categories, All and Guide. Scrolls when text grows. */
 function Tabs({
   tab,
   onTab,
@@ -197,7 +201,7 @@ function Tabs({
         <View
           style={{ alignSelf: "center", width: 1, height: 24, backgroundColor: colors.hairline }}
         />
-        {(["For you", "Categories", "All"] as const).map((name) => (
+        {(["For you", "Categories", "All", "Guide"] as const).map((name) => (
           <TabButton
             key={name}
             label={t(name)}
@@ -434,7 +438,14 @@ export function LiveScreen() {
     <Frame framed={framed} bar={<LiveTop layout={layout} framed={framed} shortcuts={shortcuts} />}>
       <Body>
         {layout !== "bar" ? tabs : null}
-        {tab === "All" ? (
+        {tab === "Guide" ? (
+          <>
+            {layout === "bar" ? tabs : null}
+            <Suspense fallback={null}>
+              <GuideGrid country={country} />
+            </Suspense>
+          </>
+        ) : tab === "All" ? (
           <Channels
             header={header}
             tabs={scrollingTabs}

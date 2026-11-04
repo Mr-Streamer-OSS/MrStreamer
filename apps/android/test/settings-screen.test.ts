@@ -867,3 +867,20 @@ it("updates mounted navigation, top bar, sheet and mini-player labels between En
     );
   }
 });
+
+it.each(["home", "(live)", "movies", "series"])("opens Guides on the %s stack", (destination) => {
+  scenario.destination = destination;
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Guides");
+  expect(scenario.asked).toContain(
+    `push ${destination === "(live)" ? "" : `/${destination}`}/guide/guides`,
+  );
+});
+
+it("opens the Dutch Guides row", () => {
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Gidsen");
+  expect(scenario.asked).toContain("push /guide/guides");
+});

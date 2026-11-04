@@ -412,7 +412,7 @@ export function ProgrammeScreen() {
  * the guide may be out of date. In a `pane` it names its channel, which a pushed screen's bar
  * carries instead.
  */
-function ProgrammeDetails({
+export function ProgrammeDetails({
   identity,
   start,
   detail,

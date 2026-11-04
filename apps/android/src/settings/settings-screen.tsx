@@ -18,6 +18,8 @@ import { sources } from "../bootstrap/sources.ts";
 import { ConnectScreen } from "../connect/connect-screen.tsx";
 import { describeFailure } from "../connect/failure.ts";
 import type { ConnectedSource } from "../connect/sources.ts";
+import { guidesHref } from "../guide/routes.ts";
+import { destinationIn } from "../navigation/open.ts";
 import { layoutFor } from "../navigation/destinations.ts";
 import { Screen } from "../navigation/screen.tsx";
 import { useStore } from "../platform/store.ts";
@@ -251,6 +253,11 @@ export function SettingsScreen() {
               {t("Add provider")}
             </Text>
           </Pressed>
+          <Row
+            label={t("Guides")}
+            trailing="next"
+            onPress={() => router.push(guidesHref(destinationIn(segments)))}
+          />
         </Section>
         <Section name={t("Privacy")}>
           <SwitchRow

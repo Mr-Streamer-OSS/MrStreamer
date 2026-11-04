@@ -6,6 +6,8 @@ import { catalogue } from "./catalogue.ts";
  */
 export const t = catalogue(
   {
+    Guide: "Guide",
+    Schedule: "Schedule",
     "Couldn't read your lists.": "Couldn't read your lists.",
     "Nothing was moved.": "Nothing was moved.",
     Live: "Live",
@@ -96,6 +98,8 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      Guide: "Gids",
+      Schedule: "Zendschema",
       "Couldn't read your lists.": "Je lijsten konden niet worden gelezen.",
       "Nothing was moved.": "Er is niets verplaatst.",
       Live: "Live",

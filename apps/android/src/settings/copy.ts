@@ -3,6 +3,7 @@ import { catalogue } from "@mrstreamer/mobile/language";
 /** Settings, its sheets and dialogs, the statistics choice, Diagnostics and Licences. */
 export const t = catalogue(
   {
+    Guides: "Guides",
     "Couldn't remove the provider.": "Couldn't remove the provider.",
     "The login is erased, but the provider is still listed.":
       "The login is erased, but the provider is still listed.",
@@ -70,6 +71,7 @@ export const t = catalogue(
   },
   {
     "nl-NL": {
+      Guides: "Gidsen",
       "Couldn't remove the provider.": "Kon de provider niet verwijderen.",
       "The login is erased, but the provider is still listed.":
         "De login is gewist, maar de provider staat nog in de lijst.",
