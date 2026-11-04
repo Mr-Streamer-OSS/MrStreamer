@@ -1,3 +1,5 @@
+import { type, type Type } from "arktype";
+import { isCollectionId } from "@mrstreamer/contracts/ondemand";
 // Messages between the main process and the catalogue worker. A call about one subscription's
 // lists names that subscription; a call for what the lists show names every subscription whose
 // lists count, in their order, so an answer never holds what a subscription that went left
@@ -239,3 +241,111 @@ export interface WorkerEvent {
   readonly content: boolean;
   readonly status: MetadataStatus;
 }
+
+/** Validates a reply against the result owned by the method that was called. */
+const Status = type({
+  movies: "number",
+  series: "number",
+  fetchedAt: "number | null",
+  "catalogueStamp?": "string",
+  "importRevision?": "string",
+});
+
+const Version = type({
+  subscriptionId: "string",
+  id: "string",
+  tags: "string[]",
+  "name?": "string",
+  "container?": "string | null",
+  "addedAt?": "number | null",
+  "listedOrder?": "number",
+  "observed?": { files: "number", audio: "(string | null)[]", subtitles: "(string | null)[]" },
+  "episodeFiles?": "string[]",
+});
+
+const ListedTitle = type({
+  kind: "'movie' | 'series'",
+  key: "string",
+  subscriptionId: "string",
+  id: "string",
+  name: "string",
+  title: "string",
+  originalTitle: "string | null",
+  originalLanguage: "string | null",
+  tags: "string[]",
+  year: "number | null",
+  posterUrl: "string | null",
+  backdropUrl: "string | null",
+  rating: "number | null",
+  addedAt: "number | null",
+  adult: "boolean",
+  tmdbId: "string | null",
+  genres: "string[]",
+  versions: Version.array(),
+  "ambiguous?": "true",
+});
+
+const Page = type({ total: "number", titles: ListedTitle.array(), "unfiltered?": "number" });
+
+const Collection = type("string").narrow((value): value is CollectionId => isCollectionId(value));
+
+export const workerResults: { [M in WorkerMethod]: Type<WorkerCalls[M]["result"]> } = {
+  status: Status.array(),
+  refresh: type("null"),
+  finishRefresh: Status.and({ "markedForAdults?": "true" }),
+  byIds: ListedTitle.array(),
+  search: type({ movies: ListedTitle.array(), series: ListedTitle.array() }),
+  searchKind: Page,
+  filterOptions: type({
+    qualities: "('4k' | 'full-hd' | 'hd' | 'sd' | 'unknown')[]",
+    languages: "string[]",
+    verified: type({ kind: "'audio' | 'subtitles'", language: "string" }).array(),
+    files: "number",
+  }),
+  rows: type({
+    id: Collection,
+    name: "string",
+    total: "number",
+    titles: ListedTitle.array(),
+  }).array(),
+  related: type({
+    basis: "string | null",
+    titles: type({ title: ListedTitle, reason: "string" }).array(),
+  }),
+  recommendations: type({ title: ListedTitle, seed: "string", reason: "string" }).array(),
+  tiles: type({
+    id: Collection,
+    name: "string",
+    count: "number",
+    artworkUrl: "string | null",
+  }).array(),
+  collection: Page.and({ name: "string" }),
+  saved: type({
+    total: "number",
+    entries: type({
+      subscriptionId: "string",
+      id: "string",
+      kind: "'movie' | 'series'",
+      name: "string",
+      year: "number | null",
+      savedAt: "number",
+      title: ListedTitle.or("null"),
+      artworkUrl: "string | null",
+      sources: "string[]",
+      listed: "boolean",
+    }).array(),
+  }),
+  savedFacts: type({
+    kind: "'movie' | 'series'",
+    tmdbId: "string | null",
+    versionIds: "string[]",
+    name: "string",
+    year: "number | null",
+    adult: "boolean",
+  })
+    .array()
+    .or("null"),
+  container: type({ container: "string", listingKey: "string" }).or("null"),
+  forget: type("null"),
+  flush: type("null"),
+};

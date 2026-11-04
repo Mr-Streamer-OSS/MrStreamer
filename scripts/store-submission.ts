@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 // The Microsoft side of a Store submission, through Microsoft's Store submission API: what the
 // Store holds, sending a checked package, and reading what Microsoft did with it.
 // scripts/store-release.ts is the GitHub side; docs/maintainers/microsoft-store.md describes both.
@@ -185,7 +186,7 @@ export class StoreError extends Error {}
 interface Answer {
   readonly status: number;
   /** The body as JSON; undefined when it wasn't JSON. */
-  readonly body: unknown;
+  readonly body: Json | undefined;
   /** Microsoft's ID for the request, which its support asks for. */
   readonly correlation: string | null;
 }
@@ -217,7 +218,7 @@ interface Submission {
   /** Microsoft's errors and warnings about it, safe to print. */
   readonly remarks: readonly string[];
   /** All of it, as Microsoft sent it. */
-  readonly raw: Record<string, unknown>;
+  readonly raw: Record<string, Json | undefined>;
 }
 
 interface StoreState {
@@ -738,13 +739,16 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
  * status, status details and upload address, and each listing's "What's new" and, where the
  * package's name goes into it, title.
  */
-function metadata(submission: Submission, release: CheckedRelease): Record<string, unknown> {
+function metadata(
+  submission: Submission,
+  release: CheckedRelease,
+): Record<string, Json | undefined> {
   const changing = ["applicationPackages", "status", "statusDetails", "fileUploadUrl"];
 
   const ours =
     release.package.displayName === STORE_NAME ? ["releaseNotes", "title"] : ["releaseNotes"];
 
-  const without = (from: Record<string, unknown>, keys: readonly string[]) =>
+  const without = (from: Record<string, Json | undefined>, keys: readonly string[]) =>
     Object.entries(from).filter(([key]) => !keys.includes(key));
 
   return Object.fromEntries(
@@ -771,8 +775,8 @@ function fingerprint(submission: Submission, release: CheckedRelease): string {
  * `value` as JSON with every object's fields in the order of their names, so the order Microsoft
  * sends fields in doesn't count. The order of a list does.
  */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, each: unknown) =>
+function canonical(value: Json | undefined): string {
+  return JSON.stringify(value, (_key, each: Json) =>
     isRecord(each)
       ? Object.fromEntries(
           Object.keys(each)
@@ -787,7 +791,7 @@ function canonical(value: unknown): string {
  * Where `before` and `after` differ, by the paths of the fields and never their values. A list
  * counts as one field.
  */
-function differing(before: unknown, after: unknown, path = ""): string[] {
+function differing(before: Json | undefined, after: Json | undefined, path = ""): string[] {
   if (!isRecord(before) || !isRecord(after)) {
     return canonical(before) === canonical(after) ? [] : [path];
   }
@@ -811,9 +815,12 @@ function listed(paths: readonly string[], clean: Session["clean"]): string {
  * `change` returns it. Whatever isn't such a listing stays as it is.
  */
 function relisted(
-  listings: unknown,
-  change: (base: Record<string, unknown>, language: string) => Record<string, unknown>,
-): unknown {
+  listings: Json | undefined,
+  change: (
+    base: Record<string, Json | undefined>,
+    language: string,
+  ) => Record<string, Json | undefined>,
+): Json | undefined {
   if (!isRecord(listings)) return listings;
 
   return Object.fromEntries(
@@ -943,11 +950,11 @@ async function fill(
 ): Promise<Submission> {
   const { fileName } = release.package;
 
-  const copied: unknown[] = Array.isArray(draft.raw["applicationPackages"])
+  const copied: readonly Json[] = Array.isArray(draft.raw["applicationPackages"])
     ? draft.raw["applicationPackages"]
     : [];
 
-  const mine = (file: unknown) => isRecord(file) && file["fileName"] === fileName;
+  const mine = (file: Json) => isRecord(file) && file["fileName"] === fileName;
   const renamed = retitled(draft, release);
 
   const body = {
@@ -1160,10 +1167,10 @@ function isId(value: unknown): value is string {
 }
 
 /** The submission in one of Microsoft's answers, or null when this script can't read one there. */
-function submissionOf(body: unknown, clean: Session["clean"]): Submission | null {
+function submissionOf(body: Json | undefined, clean: Session["clean"]): Submission | null {
   if (!isRecord(body) || !isId(body["id"]) || typeof body["status"] !== "string") return null;
 
-  const text = (from: Record<string, unknown>, key: string) => {
+  const text = (from: Record<string, Json | undefined>, key: string) => {
     const value = from[key];
 
     return typeof value === "string" ? value : "";
@@ -1188,7 +1195,7 @@ function submissionOf(body: unknown, clean: Session["clean"]): Submission | null
 }
 
 /** Microsoft's errors and warnings about a submission. Its reports are counted: they are links. */
-function remarksOf(details: unknown, clean: Session["clean"]): string[] {
+function remarksOf(details: Json | undefined, clean: Session["clean"]): string[] {
   if (!isRecord(details)) return [];
 
   const listed = (key: string, label: string) =>
@@ -1289,7 +1296,7 @@ function call(
   session: Session,
   method: "GET" | "PUT" | "POST",
   path: string,
-  body?: unknown,
+  body?: Json,
 ): Promise<Answer | null> {
   return request(
     session.access,
@@ -1327,7 +1334,7 @@ async function request(
       const response = await access.send(url, { ...init, signal: AbortSignal.timeout(REQUEST_MS) });
       const text = await response.text();
       const correlation = response.headers.get("MS-CorrelationId");
-      let body: unknown;
+      let body: Json | undefined;
 
       try {
         body = JSON.parse(text);
@@ -1550,11 +1557,11 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main().catch((error: unknown) => {
+  await main().catch((cause: unknown) => {
     // This script's own messages hold nothing secret. Any other is cleaned like Microsoft's text.
-    const message = error instanceof Error ? error.message : String(error);
+    const message = cause instanceof Error ? cause.message : String(cause);
     const clean = cleaner([process.env["STORE_CLIENT_SECRET"] ?? ""]);
-    console.log(`::error::${error instanceof StoreError ? message : clean(message)}`);
+    console.log(`::error::${cause instanceof StoreError ? message : clean(message)}`);
     process.exit(1);
   });
 }

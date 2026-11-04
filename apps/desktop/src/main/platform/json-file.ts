@@ -1,3 +1,5 @@
+import type { Json } from "@mrstreamer/contracts/json";
+import type { Type } from "arktype";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -21,26 +23,11 @@ const ZLIB = { chunkSize: 1024 * 1024 };
  */
 export async function readJsonFile<T>(
   path: string,
-  schema: (data: unknown) => T | ArkErrors,
-): Promise<T | null> {
-  let bytes: Buffer;
+  schema: Type<T>,
+): Promise<Type<T>["infer"] | null> {
+  const data = await readJson(path);
 
-  try {
-    bytes = await readFile(path);
-  } catch (cause) {
-    if (isMissing(cause)) return null;
-    throw cause;
-  }
-
-  let data: unknown;
-
-  try {
-    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
-  } catch {
-    console.warn(`[storage] ignoring unreadable ${path}`);
-
-    return null;
-  }
+  if (data === null) return null;
 
   const parsed = schema(data);
 
@@ -53,12 +40,36 @@ export async function readJsonFile<T>(
   return parsed;
 }
 
+/** Reads JSON without traversing fields owned by a later build. */
+export async function readJson(path: string): Promise<Json | null> {
+  let bytes: Buffer;
+
+  try {
+    bytes = await readFile(path);
+  } catch (cause) {
+    if (isMissing(cause)) return null;
+    throw cause;
+  }
+
+  let data: Json;
+
+  try {
+    data = JSON.parse((path.endsWith(".gz") ? await gunzip(bytes, ZLIB) : bytes).toString("utf8"));
+  } catch {
+    console.warn(`[storage] ignoring unreadable ${path}`);
+
+    return null;
+  }
+
+  return data;
+}
+
 /**
  * Writes JSON atomically, packed when the name ends in .gz: a crash mid-write leaves the previous
  * file intact. Windows replacement retries keep the same temp and bytes, with at most 70 ms of
  * intentional delay. Callers must await each write settling before starting a newer same-path write.
  */
-export async function writeJsonFile(path: string, value: unknown): Promise<void> {
+export async function writeJsonFile(path: string, value: Json | { toJSON(): Json }): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${randomUUID()}.tmp`;
   const text = JSON.stringify(value);

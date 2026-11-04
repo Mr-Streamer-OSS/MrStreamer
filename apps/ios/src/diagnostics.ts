@@ -16,7 +16,7 @@ const OMITTED =
   "Addresses, logins, provider and title names, viewing history and file paths are left out.";
 
 /** `value` when it reads as `pattern` whole, else "unknown". */
-const checked = (value: unknown, pattern: RegExp) =>
+const checked = (value: string | null | undefined, pattern: RegExp) =>
   typeof value === "string" && pattern.test(value) ? value : "unknown";
 
 /** An error's kind, which is a word of the app's own; never its detail. */

@@ -452,8 +452,8 @@ export function airplayAdapter(options: AirplayOptions): ReceiverAdapter {
       signal.addEventListener("abort", abort, { once: true });
       on.helper
         .send({ cmd: "showPicker", request: mine.request, anchor: request.anchor })
-        .catch((refusal: unknown) =>
-          settle(mine, refusal instanceof ReceiverFailed ? refusal : unreachable()),
+        .catch((cause: unknown) =>
+          settle(mine, cause instanceof ReceiverFailed ? cause : unreachable()),
         );
 
       try {

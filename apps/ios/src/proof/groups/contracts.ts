@@ -10,7 +10,7 @@ export const cases: readonly ProofCase[] = [
       const schema = Preferences();
 
       return {
-        good: plain(schema({ volume: 0.5, muted: true })),
+        good: plain(JSON.stringify(schema({ volume: 0.5, muted: true }))),
         badRejected: !schema.allows({ volume: "loud", muted: false }),
       };
     },
@@ -22,7 +22,9 @@ export const cases: readonly ProofCase[] = [
       const schema = TitleFilters();
 
       return {
-        good: plain(schema({ quality: "4k", verified: { kind: "audio", language: "nl" } })),
+        good: plain(
+          JSON.stringify(schema({ quality: "4k", verified: { kind: "audio", language: "nl" } })),
+        ),
         badRejected: !schema.allows({ quality: "8k" }),
       };
     },

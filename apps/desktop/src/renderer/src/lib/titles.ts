@@ -295,9 +295,9 @@ export function useResume(): (entry: ContinueEntry) => void {
         if (found.kind !== "series" || !goesOn || goesOn.replay) return open();
         playTitle(episodeNow(found, goesOn.episode), resumePoint(goesOn.resume));
       },
-      (error: unknown) => {
+      (cause: unknown) => {
         // Cancelled when the account changed, or the details failed: open them only if still wanted.
-        if (!isCancelledError(error) && wanted()) open();
+        if (!isCancelledError(cause) && wanted()) open();
       },
     );
   };

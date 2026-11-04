@@ -442,7 +442,7 @@ describe("a playlist subscription", () => {
       await app.detailsOf(kindOf(lists.index, "movie").titles.find((each) => each.name === name)!);
 
     // The memory disk keeps a details record as the bytes written.
-    const text = (value: unknown) =>
+    const text = (value: string | Uint8Array) =>
       value instanceof Uint8Array ? new TextDecoder().decode(value) : String(value);
 
     const details = () =>

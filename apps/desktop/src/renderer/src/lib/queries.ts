@@ -803,7 +803,7 @@ export function syncLibraryUpdates(client: QueryClient): () => void {
  * lists marked for adults a title they listed before, each goes rather than show what it kept
  * (see `syncOnDemand`).
  */
-const TITLE_LISTS: ReadonlySet<unknown> = new Set([
+const TITLE_LISTS: ReadonlySet<string> = new Set([
   "home-recommendations",
   "rows",
   "collection",
@@ -861,8 +861,13 @@ export function syncOnDemand(client: QueryClient): () => void {
 
     if (newLists || marked) invalidateDetailsCatalogue();
 
-    const dropped = (part: unknown) =>
-      part === "related" ? newLists || marked : marked && TITLE_LISTS.has(part);
+    const dropped = (query: QueryFilters["queryKey"]) => {
+      const part = query?.[1];
+
+      return part === "related"
+        ? newLists || marked
+        : marked && typeof part === "string" && TITLE_LISTS.has(part);
+    };
 
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again
     // the next time it shows, not each time more metadata arrives.
@@ -871,7 +876,7 @@ export function syncOnDemand(client: QueryClient): () => void {
       predicate: (query) =>
         query.queryKey[1] !== "details" &&
         query.queryKey[1] !== "season" &&
-        !dropped(query.queryKey[1]),
+        !dropped(query.queryKey),
     } satisfies QueryFilters;
 
     // Invalidation alone reuses a first read with no cached data. Cancel its old answer before
@@ -885,7 +890,7 @@ export function syncOnDemand(client: QueryClient): () => void {
     void client.invalidateQueries({ queryKey: ["viewing", "episodes"] });
 
     if (newLists || marked)
-      forget(client, { queryKey: ["ondemand"], predicate: (query) => dropped(query.queryKey[1]) });
+      forget(client, { queryKey: ["ondemand"], predicate: (query) => dropped(query.queryKey) });
   });
 
   return () => {

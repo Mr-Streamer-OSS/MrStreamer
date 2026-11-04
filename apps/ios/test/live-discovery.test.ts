@@ -245,7 +245,7 @@ function press(testID: string) {
 function type(text: string) {
   const field = find("discover-field") as {
     value: string;
-    dispatchEvent(event: unknown): void;
+    dispatchEvent(event: import("happy-dom").Event): void;
   } | null;
 
   if (!field) throw new Error("No field on screen");

@@ -133,7 +133,10 @@ vi.mock("../src/titles.ts", () => ({
     return { url: `file:${ref.subscriptionId}:${ref.id}`, container: "mp4" };
   },
   useCollections: () => null,
-  episodesOf: async (_title: unknown, season: { episodes: readonly Episode[] }) => season.episodes,
+  episodesOf: async (
+    _title: import("@mrstreamer/contracts/ondemand").Title,
+    season: { episodes: readonly Episode[] },
+  ) => season.episodes,
 }));
 
 vi.mock("../src/viewing.ts", () => ({

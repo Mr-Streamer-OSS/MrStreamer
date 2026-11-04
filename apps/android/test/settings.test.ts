@@ -1,3 +1,5 @@
+import type { ConsentRecord } from "@mrstreamer/mobile/consent/statistics";
+import type { CaptureEvent } from "../src/telemetry/model.ts";
 import { URL as NodeURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
 import { setLanguage } from "@mrstreamer/core/i18n";
@@ -86,7 +88,7 @@ it("diagnostics only include anonymous kinds and counts despite private input", 
 });
 
 it("captures only Android fields and aborts delivery when switched Off", async () => {
-  const send = vi.fn(async (_event: unknown, _signal: AbortSignal) => "accepted" as const);
+  const send = vi.fn(async (_event: CaptureEvent, _signal: AbortSignal) => "accepted" as const);
 
   const build = {
     ...androidBuild("16", "0.1.0", "1"),
@@ -307,7 +309,7 @@ it("retries a refused Off before delivery after a new owner starts", async () =>
 
   const ports = {
     load: () => saved,
-    save: (record: unknown) => {
+    save: (record: ConsentRecord<CaptureEvent>) => {
       if (refused) return false;
       saved = record;
 

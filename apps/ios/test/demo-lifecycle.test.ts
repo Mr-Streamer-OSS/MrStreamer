@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { guideFixture } from "./native-guide.ts";
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
@@ -97,7 +98,7 @@ const registry = () =>
 const downloads = () =>
   json("downloads.json") as { items: Array<Record<string, unknown>>; forgetting: string[] };
 
-const save = (name: string, value: unknown) => disk(name).writeSync(JSON.stringify(value));
+const save = (name: string, value: Json) => disk(name).writeSync(JSON.stringify(value));
 
 const personal = (id = "personal") => ({
   id,
@@ -295,6 +296,68 @@ afterEach(async () => {
 });
 
 describe("Demo through the production lifecycle", () => {
+  it("restores a registry with a deeply nested opaque field", async () => {
+    const depth = 12000;
+    disk("subscriptions.json").writeSync(
+      '{"version":1,"subscriptions":[],"retired":[],"pendingSecrets":[],"erasing":[],"future":' +
+        "[".repeat(depth) +
+        "null" +
+        "]".repeat(depth) +
+        "}",
+    );
+    await launch(false);
+    const { readRegistry } = await import("../src/subscriptions.ts");
+    let value = readRegistry()!.opaque.future;
+    let levels = 0;
+
+    while (Array.isArray(value)) {
+      value = value[0];
+      levels++;
+    }
+
+    expect(levels).toBe(depth);
+    expect(value).toBeNull();
+  });
+
+  it("keeps readable native receipts when another entry is malformed", async () => {
+    const receipt = {
+      version: 2,
+      receipt: "kept",
+      authorization: "a",
+      attempt: null,
+      id: "d",
+      sequence: 1,
+      received: 0,
+      expected: null,
+      restarted: false,
+      outcome: { kind: "cancelled" },
+    };
+
+    const previous = host.expo!.modules!["BackgroundDownloads"];
+    host.expo!.modules!["BackgroundDownloads"] = {
+      reconcile: async () => ({
+        version: 2,
+        queueEpoch: "q",
+        sequence: 1,
+        foregroundToken: null,
+        blocked: "none",
+        sources: [],
+        authorizations: [],
+        legacy: { receipts: [] },
+        receipts: [receipt, null, { ...receipt, receipt: "bad", sequence: NaN }],
+      }),
+    };
+    vi.resetModules();
+
+    try {
+      const { transfers } = await import("../src/download-task.ts");
+      const result = await transfers.reconcile("ordinary");
+      expect(result.receipts.map((entry) => entry.receipt)).toEqual(["kept"]);
+    } finally {
+      host.expo!.modules!["BackgroundDownloads"] = previous;
+    }
+  });
+
   it("queues an ordinary Demo download while its Source is eligible", async () => {
     const app = await withDemo();
     const added = await app.addDownload(movie);

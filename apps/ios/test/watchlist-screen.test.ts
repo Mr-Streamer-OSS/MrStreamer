@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
 import type { Title, TitleKind } from "@mrstreamer/contracts/ondemand";
@@ -64,7 +65,7 @@ vi.mock("../src/files.ts", async (original) => {
 
   return {
     ...files,
-    writeJson: (name: string, value: unknown) => {
+    writeJson: (name: string, value: Json) => {
       if (scenario.refuse) throw new Error("The disk is full");
       files.writeJson(name, value);
     },

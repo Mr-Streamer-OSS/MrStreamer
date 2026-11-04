@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 // Notices for what the installers ship, for Settings > About: every third-party component, and the
 // app's own licence, which licences.config.json adds like a component. electron.vite.config.ts
 // notes the modules each bundle holds; once main, preload and renderer are written, this finds the
@@ -16,7 +17,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, extname, join } from "node:path";
-import { type, type ArkErrors } from "arktype";
+import { type } from "arktype";
 import type { NoticeManifest } from "@mrstreamer/contracts/licences";
 import type { Plugin } from "vite";
 
@@ -810,7 +811,7 @@ function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-async function readJson<T>(path: string, schema: (data: unknown) => T | ArkErrors): Promise<T> {
+async function readJson<T>(path: string, schema: Type<T>): Promise<Type<T>["infer"]> {
   const parsed = schema(JSON.parse(await readFile(path, "utf8")));
 
   if (parsed instanceof type.errors) throw new Error(`${path}: ${parsed.summary}`);

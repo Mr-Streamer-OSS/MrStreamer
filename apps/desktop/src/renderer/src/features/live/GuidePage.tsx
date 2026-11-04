@@ -1329,8 +1329,8 @@ function useLiveView(): [LiveView, (view: LiveView) => void, string | null] {
     setError(null);
     setPendingView(draft);
     void updatePreferences({ liveView }, client)
-      .catch((error: unknown) => {
-        if (latestView.current === draft) setError(describeError(appError(error)));
+      .catch((cause: unknown) => {
+        if (latestView.current === draft) setError(describeError(appError(cause)));
       })
       .finally(() => setPendingView((current) => (current === draft ? null : current)));
   };

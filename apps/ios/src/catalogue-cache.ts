@@ -1,3 +1,5 @@
+import type { Json } from "@mrstreamer/contracts/json";
+import type { Type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type {
   LiveCatalogue,
@@ -7,7 +9,7 @@ import type {
   ProviderTitle,
 } from "@mrstreamer/core/provider";
 import { pacer, type Steps } from "@mrstreamer/core/steps";
-import { type, type ArkErrors } from "arktype";
+import { type } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { inTasks } from "./library.ts";
 import {
@@ -156,12 +158,9 @@ const Envelopes = lazy(() => ({
 }));
 
 /** Each of `list` as `row` checks it, a slice at a time; null at the first that doesn't check. */
-function* rows<R>(
-  list: readonly unknown[],
-  row: (data: unknown) => R | ArkErrors,
-): Steps<R[] | null> {
+function* rows<R>(list: readonly unknown[], row: Type<R>): Steps<Type<R>["infer"][] | null> {
   const due = pacer();
-  const checked: R[] = [];
+  const checked: Type<R>["infer"][] = [];
 
   for (const each of list) {
     if (due()) yield;
@@ -175,11 +174,12 @@ function* rows<R>(
 }
 
 /**
- * `json` as `id`'s saved `kind` made under `mapping`, or "invalid": its envelope, its age, then
+ * `head` as `id`'s saved `kind` made under `mapping`, or "invalid": its envelope, its age, then
  * every row of every list. Nothing of it is answered until all have checked.
  */
 function* checked(
-  json: unknown,
+  head:
+    ReturnType<typeof Envelopes>["live"]["infer"] | ReturnType<typeof Envelopes>["titles"]["infer"],
   id: string,
   kind: SavedKind,
   mapping: string | null,
@@ -195,10 +195,9 @@ function* checked(
     );
   };
 
-  if (kind === "live") {
-    const head = Envelopes().live(json);
+  if (!stands(head)) return "invalid";
 
-    if (head instanceof type.errors || !stands(head)) return "invalid";
+  if (head.kind === "live") {
     const categories = yield* rows(head.catalogue.categories, Category());
 
     if (!categories) return "invalid";
@@ -206,12 +205,9 @@ function* checked(
 
     if (!channels) return "invalid";
 
-    return { kind, catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
+    return { kind: "live", catalogue: { categories, channels }, fetchedAt: head.fetchedAt };
   }
 
-  const head = Envelopes().titles(json);
-
-  if (head instanceof type.errors || !stands(head)) return "invalid";
   const movieCategories = yield* rows(head.catalogue.movieCategories, Category());
 
   if (!movieCategories) return "invalid";
@@ -226,7 +222,7 @@ function* checked(
   if (!series) return "invalid";
   const catalogue = { movieCategories, movies, seriesCategories, series };
 
-  return { kind, catalogue, fetchedAt: head.fetchedAt };
+  return { kind: "titles", catalogue, fetchedAt: head.fetchedAt };
 }
 
 /** The last operation on each list's files, settled or not, by file name. */
@@ -271,7 +267,10 @@ async function load(
     // the rows were checked at once; the text; one parse; then the envelope and the rows.
     for (const schema of [Envelopes, Category, Channel, Title]) schema();
     const json: unknown = JSON.parse(await file.text());
-    const saved = await inTasks(checked(json, id, kind, mapping), wanted);
+    const head = Envelopes()[kind === "live" ? "live" : "titles"](json);
+
+    if (head instanceof type.errors) throw new TypeError();
+    const saved = await inTasks(checked(head, id, kind, mapping), wanted);
 
     if (saved === null) return "stopped";
 
@@ -513,7 +512,7 @@ function* textOf(
 }
 
 /** `list` copied by `copy`, a slice at a time; false at the first copy whose text holds `login`. */
-function* copies<A, B extends object>(
+function* copies<A, B extends Json>(
   list: readonly A[],
   copy: (each: A) => B,
   login: Login,

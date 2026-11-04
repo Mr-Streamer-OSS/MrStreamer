@@ -133,7 +133,7 @@ const moduleName = "react-dom/client";
 
 const { createRoot } = (await import(moduleName)) as {
   createRoot(container: ReturnType<typeof window.document.createElement>): {
-    render(node: unknown): void;
+    render(node: ReactNode): void;
   };
 };
 

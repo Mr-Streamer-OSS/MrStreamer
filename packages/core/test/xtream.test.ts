@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // The live and catch-up addresses the Xtream adapter gives each app's player: MPEG-TS for the
 // desktop app's, HLS for AVPlayer on iOS. Panels serve both from the same login.
 import { describe, expect, it } from "vitest";
@@ -59,7 +60,7 @@ describe("Xtream catalogue answers", () => {
   const row = { stream_id: 7, series_id: 7, name: "Seven", category_id: "1" };
 
   /** A provider whose lists answer `list`, and whose categories answer `categoryList`. */
-  const answering = (list: unknown, categoryList: unknown = categories) =>
+  const answering = (list: Json, categoryList: Json = categories) =>
     xtreamProvider(account, {
       userAgent: "fixture",
       fetch: async (input) => {

@@ -99,7 +99,11 @@ export class Analytics {
     this.ports = ports;
 
     try {
-      this.record = loaded(ports.store.load());
+      const saved = ports.store.load();
+      const record = saved === null ? fresh() : AnalyticsRecord()(saved);
+
+      if (record instanceof type.errors) throw new Error("Analytics state unavailable.");
+      this.record = loaded(record);
     } catch {
       // Unreadable: nothing is captured until the viewer's next choice writes a new record.
       this.available = false;
@@ -499,13 +503,8 @@ function fresh(): AnalyticsRecord {
   };
 }
 
-/** The saved record, or a fresh one when there is none. Throws, quoting nothing, when invalid. */
-function loaded(saved: unknown): AnalyticsRecord {
-  if (saved === null) return fresh();
-  const record = AnalyticsRecord()(saved);
-
-  if (record instanceof type.errors) throw new Error("Analytics state unavailable.");
-
+/** Checks a parsed record's identities and consent, quoting nothing when invalid. */
+function loaded(record: AnalyticsRecord): AnalyticsRecord {
   if (record.choice === null) return fresh();
 
   if (

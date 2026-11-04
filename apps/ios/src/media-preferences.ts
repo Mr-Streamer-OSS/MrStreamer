@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { QUALITIES, type LiveChannel, type Quality } from "@mrstreamer/contracts/library";
 import { DEFAULT_LIVE_QUALITY } from "@mrstreamer/contracts/preferences";
 import { TITLE_LANGUAGES, type TitleLanguage } from "@mrstreamer/core/ondemand/languages";
@@ -45,27 +46,28 @@ interface MediaPreferences {
 
 const FILE = "media-preferences.json";
 const BACKUP = "media-preferences.accepted.json";
-let contents: Record<string, unknown> = { version: 1 };
+let contents: JsonObject = { version: 1 };
 let writable = true;
 let checkpointed = false;
 let cached: Store<MediaPreferences> | undefined;
 
-const record = (value: unknown): value is Record<string, unknown> =>
+const record = (value: Json | undefined): value is JsonObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const knownLanguage = (value: unknown) => TITLE_LANGUAGES.find(({ code }) => code === value)?.code;
+const knownLanguage = (value: Json | undefined) =>
+  TITLE_LANGUAGES.find(({ code }) => code === value)?.code;
 
 /** Each subscription's chosen stream per channel, by channel id: what core's chosenVariant reads. */
 type ChannelPicks = Readonly<Record<string, Readonly<Record<string, string>>>>;
 
-const isChannelPicks = (value: unknown): value is ChannelPicks =>
+const isChannelPicks = (value: Json | undefined): value is ChannelPicks =>
   record(value) &&
   Object.values(value).every(
     (channels) =>
       record(channels) && Object.values(channels).every((stream) => typeof stream === "string"),
   );
 
-function audioOf(value: unknown): Audio {
+function audioOf(value: Json | undefined): Audio {
   if (record(value)) {
     if (value["kind"] === "original") return { kind: "original" };
     const language = knownLanguage(value["language"]);
@@ -76,7 +78,7 @@ function audioOf(value: unknown): Audio {
   return { kind: "follow-title" };
 }
 
-function subtitlesOf(value: unknown): Subtitles {
+function subtitlesOf(value: Json | undefined): Subtitles {
   if (record(value)) {
     if (value["kind"] === "off") return { kind: "off" };
     const language = knownLanguage(value["language"]);
@@ -106,7 +108,7 @@ function saved(): Store<MediaPreferences> {
       const file = new File(Paths.document, name);
 
       if (!file.exists) continue;
-      const raw: unknown = JSON.parse(file.textSync());
+      const raw: Json = JSON.parse(file.textSync());
 
       if (!record(raw)) {
         writable = false;
@@ -164,7 +166,7 @@ export const effectiveTitleLanguage = (): string =>
  * proposal. That is not a promise the files are untouched: a checkpoint that succeeded stays
  * committed when the primary write then fails, and the primary may already be deleted.
  */
-function propose(next: Record<string, unknown>): boolean {
+function propose(next: JsonObject): boolean {
   if (!writable) return false;
 
   if (!checkpointed) {

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { Window } from "happy-dom";
 import { expect, it, vi } from "vitest";
 
@@ -9,7 +9,7 @@ const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: ReturnType<typeof document.createElement>): {
-    render(node: unknown): void;
+    render(node: ReactNode): void;
     unmount(): void;
   };
 };

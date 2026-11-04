@@ -1,4 +1,5 @@
-import { type } from "arktype";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
+import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
@@ -190,16 +191,17 @@ const Stored = lazy(() =>
     completedAt: "number | null",
     /** How far the copy was watched here. */
     progress: type({ position: "number", duration: "number", at: "number" }).or("null"),
-    /** Optional ordering added by this build; an unreadable edge never hides a playable copy. */
-    "continuation?": "unknown",
-    /** Its native authorization (`Transfer`), read on its own: a bad one holds back only it. */
-    "transfer?": "unknown",
-    /** Why it is being removed (`Removal`), read on its own: a bad one holds back only it. */
-    "removal?": "unknown",
   }),
 );
 
-type Stored = Infer<typeof Stored>;
+type Stored = Infer<typeof Stored> & {
+  /** Optional ordering added by this build; an unreadable edge never hides a playable copy. */
+  continuation?: Json;
+  /** Its native authorization (`Transfer`), read on its own: a bad one holds back only it. */
+  transfer?: Json;
+  /** Why it is being removed (`Removal`), read on its own: a bad one holds back only it. */
+  removal?: Json;
+};
 
 const Continuation = lazy(() => type({ version: "1", title: RawTitleRef() }));
 
@@ -241,7 +243,7 @@ interface Doc {
   readonly items: readonly Stored[];
   readonly forgetting: readonly string[];
   /** Entries this build can't read, kept as they are with their folders. */
-  readonly unreadable: readonly object[];
+  readonly unreadable: readonly (JsonObject | readonly Json[])[];
 }
 
 /** What an earlier build kept in `download:<id>`: the address its resume data was made for. */
@@ -250,7 +252,7 @@ const Legacy = lazy(() => type({ url: "string", resumeData: "string" }));
 /** A field read on its own: absent, as this build writes it, or present and unreadable. */
 type Field<A> = A | undefined | "bad";
 
-function fieldOf<A>(parse: (value: unknown) => A | type.errors, value: unknown): Field<A> {
+function fieldOf<A>(parse: Type<A>, value: Json | undefined): Field<Type<A>["infer"]> {
   if (value === undefined) return undefined;
   const parsed = parse(value);
 
@@ -1317,13 +1319,24 @@ function load() {
   const parsed = read === null ? null : Document()(read);
   const valid = parsed !== null && !(parsed instanceof type.errors);
   const items: Stored[] = [];
-  const unreadable: object[] = [];
+  const unreadable: (JsonObject | readonly Json[])[] = [];
 
-  for (const item of valid ? parsed.items : []) {
+  const entries =
+    valid &&
+    read !== null &&
+    typeof read === "object" &&
+    !Array.isArray(read) &&
+    "items" in read &&
+    Array.isArray(read.items)
+      ? read.items
+      : [];
+
+  for (const item of entries) {
+    if (item === null || typeof item !== "object") continue;
     const record = Stored()(item);
 
     if (record instanceof type.errors) unreadable.push(item);
-    else items.push(record);
+    else items.push({ ...item, ...record });
   }
 
   doc = { items, forgetting: valid ? parsed.forgetting : [], unreadable };

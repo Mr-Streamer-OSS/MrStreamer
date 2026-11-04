@@ -97,8 +97,7 @@ function requiredFiles(
 }
 
 /** Validate downloaded JSON before trusting any field, including the success marker. */
-function readReceipt(value: unknown): PackageReceipt {
-  const receipt = Schema.assert(value);
+const readReceipt = Schema.pipe((receipt) => {
   check(
     receipt.distribution !== "store" || receipt.platform === "win-x64",
     "Store requires win-x64.",
@@ -118,7 +117,7 @@ function readReceipt(value: unknown): PackageReceipt {
   );
 
   return receipt;
-}
+}).assert;
 
 /** Produces a receipt only for a complete package set after the workflow's checks succeeded. */
 export function producePackageReceipt(

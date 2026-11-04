@@ -18,10 +18,8 @@ export const box = ({ children, testID, accessibilityLabel }: Props) =>
   createElement("div", { "data-testid": testID, "aria-label": accessibilityLabel }, children);
 
 /** A list's header, footer or empty part, which React Native takes as an element or a component. */
-const part = (given: unknown): ReactNode =>
-  given === undefined || given === null || isValidElement(given)
-    ? (given as ReactNode)
-    : createElement(given as ComponentType);
+const part = (given: import("react").ReactElement | ComponentType | null | undefined): ReactNode =>
+  given === undefined || given === null || isValidElement(given) ? given : createElement(given);
 
 /** A row's key as React Native's lists pick it: the list's own extractor, else the row's key or id. */
 const rowKey = <T>(item: T, index: number, keyExtractor?: (item: T, index: number) => string) => {
@@ -44,9 +42,9 @@ const FlatList = <T>({
   data: readonly T[];
   renderItem: (info: { item: T; index: number }) => ReactNode;
   keyExtractor?: (item: T, index: number) => string;
-  ListHeaderComponent?: unknown;
-  ListFooterComponent?: unknown;
-  ListEmptyComponent?: unknown;
+  ListHeaderComponent?: React.ReactElement | React.ComponentType;
+  ListFooterComponent?: React.ReactElement | React.ComponentType;
+  ListEmptyComponent?: React.ReactElement | React.ComponentType;
   testID?: string;
 }) =>
   createElement(
@@ -82,9 +80,9 @@ const SectionList = <T, S extends { data: readonly T[] }>({
   keyExtractor?: (item: T, index: number) => string;
   renderSectionHeader?: (info: { section: S }) => ReactNode;
   renderSectionFooter?: (info: { section: S }) => ReactNode;
-  ListHeaderComponent?: unknown;
-  ListFooterComponent?: unknown;
-  ListEmptyComponent?: unknown;
+  ListHeaderComponent?: React.ReactElement | React.ComponentType;
+  ListFooterComponent?: React.ReactElement | React.ComponentType;
+  ListEmptyComponent?: React.ReactElement | React.ComponentType;
   testID?: string;
 }) =>
   createElement(

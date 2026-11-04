@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Whether text the app keeps on disk could give a subscription's login away. The saved copies of
 // lists use it to keep artwork addresses that may carry the login out of their files, and to leave
 // out what holds the password anywhere else. Pure: nothing here reads or writes a file.
@@ -103,14 +104,14 @@ export function exposes(
  * it, and so on for `LAYERS` more decodings. Text that still decodes after the last counts as
  * holding one. Artwork kept has none.
  */
-export function holds(value: unknown, login: Login): boolean {
+export function holds(value: Json | undefined, login: Login): boolean {
   if (typeof value === "string")
     return (login.passwords.length > 0 || login.uncertain.length > 0) && textHolds(value, login);
 
   return (
     typeof value === "object" &&
     value !== null &&
-    Object.values(value).some((each: unknown) => holds(each, login))
+    Object.values(value).some((each: Json | undefined) => holds(each, login))
   );
 }
 

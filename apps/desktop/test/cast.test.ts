@@ -136,7 +136,7 @@ function film(generation: number, overrides: Partial<ReceiverMedia> = {}): Recei
 const failure = (call: Promise<unknown>) =>
   call.then(
     () => null,
-    (error: unknown) => (error instanceof ReceiverFailed ? error.failure : error),
+    (cause: unknown) => (cause instanceof ReceiverFailed ? cause.failure : cause),
   );
 
 /**

@@ -234,7 +234,10 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: Element): { render(node: unknown): void; unmount(): void };
+  createRoot(container: Element): {
+    render(node: import("react").ReactNode): void;
+    unmount(): void;
+  };
 };
 
 const { libraryIntents } = await import("../src/library/intents.ts");

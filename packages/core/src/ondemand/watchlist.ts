@@ -21,7 +21,7 @@ import { kindOf, type IndexedCatalogue } from "./catalogue.ts";
  * What one subscription's lists say of a title that the watchlist goes by, and keeps for when
  * they say no more.
  */
-export interface TitleFacts {
+export type TitleFacts = {
   readonly kind: TitleKind;
   /** TMDB's id of it, as the lists give it, or null. */
   readonly tmdbId: string | null;
@@ -35,10 +35,10 @@ export interface TitleFacts {
   readonly year: number | null;
   /** For adults: a row that stands on its own, which never joins others by its TMDB id. */
   readonly adult: boolean;
-}
+};
 
 /** A saved title as an account's record keeps it, by the provider's own ids. */
-export interface SavedTitle extends TitleFacts {
+export type SavedTitle = TitleFacts & {
   /** Made up when it was saved, and its own from then on. */
   readonly id: string;
   /**
@@ -51,7 +51,7 @@ export interface SavedTitle extends TitleFacts {
    * written later. It says which of two with the same time was saved first.
    */
   readonly sequence: number;
-}
+};
 
 /** A saved title with the subscription whose account keeps it: with `id`, an `OwnedId`. */
 export interface SavedMember extends SavedTitle {

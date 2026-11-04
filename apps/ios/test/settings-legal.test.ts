@@ -53,7 +53,7 @@ vi.mock("expo-router", () => {
   const TABS = ["(home)", "live", "films", "series"].map((name) => ({ name }));
 
   return {
-    router: { push: (href: unknown) => scenario.pushed.push(href) },
+    router: { push: (href: import("expo-router").Href) => scenario.pushed.push(href) },
     useRootNavigationState: () => ({
       index: 0,
       routes: [{ name: "(tabs)", state: { index: scenario.tab, routes: TABS } }],

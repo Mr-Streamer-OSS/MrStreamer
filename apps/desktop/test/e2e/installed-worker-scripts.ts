@@ -1,14 +1,17 @@
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseAst } from "vite";
 
-function object(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new Error("Invalid ASAR manifest object");
+const isObject = (value: Json | undefined): value is JsonObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
-  return value as Record<string, unknown>;
+function object(value: Json | undefined): JsonObject {
+  if (!isObject(value)) throw new Error("Invalid ASAR manifest object");
+
+  return value;
 }
 
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -27,7 +30,7 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
 
   if (headerEnd > dataStart || dataStart > bytes.length)
     throw new Error("Invalid ASAR header bounds");
-  const header: unknown = JSON.parse(bytes.subarray(16, headerEnd).toString());
+  const header: Json = JSON.parse(bytes.subarray(16, headerEnd).toString());
   let files = object(object(header).files);
 
   for (const directory of ["out", "main"]) files = object(object(files[directory]).files);

@@ -389,7 +389,9 @@ describe("watch links", () => {
   };
 
   it("carries what screens play, never a file and never an impossible position", () => {
-    const linked = (value: unknown) => linkedIntent(JSON.stringify(value));
+    const linked = (value: import("@mrstreamer/contracts/json").Json | PlayIntent) =>
+      linkedIntent(JSON.stringify(value));
+
     expect(linked(live("7"))).toEqual(live("7"));
     expect(linked({ ...title, resumeAt: 90_000 })).toEqual({ ...title, resumeAt: 90_000 });
     expect(linked({ kind: "file", path: "/data/files/a.mkv", title: "A" })).toBeNull();

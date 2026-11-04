@@ -1,4 +1,4 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, type QueryClient, type QueryOptions } from "@tanstack/react-query";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
 import { call, listen } from "./ipc.ts";
@@ -87,7 +87,10 @@ function applyChanges(
 }
 
 /** React Query's own queryFn completion must also preserve a newer event already in its cache. */
-function newest(previous: unknown, incoming: unknown): unknown {
+const newest: Exclude<
+  QueryOptions<PreferenceSnapshot>["structuralSharing"],
+  boolean | undefined
+> = (previous, incoming) => {
   if (
     previous &&
     incoming &&
@@ -102,7 +105,7 @@ function newest(previous: unknown, incoming: unknown): unknown {
     return previous;
 
   return incoming;
-}
+};
 
 export const preferenceQuery = () =>
   queryOptions({

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // TMDB's metadata for the catalogue: fetched in the background, newest titles first, kept in a
 // file the app names and refreshed before TMDB's six months run out. Each title's name is asked
 // for in the viewer's language and kept per language, so switching back asks nothing. Without a
@@ -69,7 +70,7 @@ const ServiceList = lazy(() =>
   type({ id: "number", name: "string", priority: "number", ids: "string[]" }),
 );
 
-const MetadataFile = lazy(() =>
+export const MetadataFile = lazy(() =>
   type({
     version: "1",
     entries: type({ "[string]": Entry() }),
@@ -711,19 +712,16 @@ function delay(ms: number, signal: AbortSignal): Promise<boolean> {
 }
 
 /** Whether two JSON values are equal, whatever order their keys are in. */
-function sameValue(a: unknown, b: unknown): boolean {
+function sameValue(a: Json | undefined, b: Json | undefined): boolean {
   if (a === b) return true;
 
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
 
   if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const aKeys = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
-  const bKeys = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
+  const left = Object.entries(a).filter(([, value]) => value !== undefined);
+  const right = new Map(Object.entries(b).filter(([, value]) => value !== undefined));
 
   return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((key) =>
-      sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
-    )
+    left.length === right.size && left.every(([key, value]) => sameValue(value, right.get(key)))
   );
 }

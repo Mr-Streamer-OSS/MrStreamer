@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // What the installed upgrade check does to the Windows machine it runs on: the per-user NSIS
 // install, the process tree of each app instance it starts, and the outbound block on the
 // installed app and its bundled ffmpeg for the offline part. It refuses anywhere but a
@@ -68,7 +69,7 @@ const FleetOwner = type({
  * separate trust boundary from Actions, not an environment-variable bypass. The VM must be a
  * clean QEMU guest under agent, with absent app/profile roots and a task-specific temp directory.
  */
-export function fleetRunner(input: unknown): Runner {
+export function fleetRunner(input: Json): Runner {
   const owner = FleetOwner.assert(input);
   const env = process.env;
 

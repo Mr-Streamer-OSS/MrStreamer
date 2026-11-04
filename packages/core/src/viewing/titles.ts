@@ -18,12 +18,12 @@ const MIN_CREDITS_SECONDS = 30;
  * How far a movie or an episode got in one account, by the provider's own ids. The service makes
  * a `TitleProgress` of it by saying which subscription's.
  */
-export interface RawProgress extends Omit<TitleProgress, "title"> {
+export type RawProgress = Omit<TitleProgress, "title"> & {
   readonly title: RawTitleRef;
-}
+};
 
 /** What the store keeps per title and account. */
-export interface TitleRow extends RawProgress {
+export type TitleRow = RawProgress & {
   /** Taken out of Continue watching, until a play begun after `removedAt`. */
   readonly hidden: boolean;
   /**
@@ -31,7 +31,7 @@ export interface TitleRow extends RawProgress {
    * when it never did, or when a build without it wrote the row.
    */
   readonly removedAt: number | null;
-}
+};
 
 /** Whether a position is in the credits, or past the end. */
 export function isFinished(position: number, duration: number): boolean {

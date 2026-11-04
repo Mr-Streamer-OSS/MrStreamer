@@ -9,7 +9,7 @@ export const cases: readonly ProofCase[] = [
     name: "core: SubRip text cues",
     compare: "same",
     run: async () => {
-      return plain(subtitleTextFile(SRT));
+      return plain(JSON.stringify(subtitleTextFile(SRT)));
     },
   },
 ];

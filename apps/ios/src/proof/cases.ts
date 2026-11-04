@@ -48,9 +48,8 @@ export const groups: readonly {
   { name: "fetch", load: () => import("./groups/fetch.ts") },
 ];
 
-/** JSON round trip: drops undefined and functions the way the report will. */
-export const plain = (value: unknown): Observed =>
-  JSON.parse(JSON.stringify(value ?? null)) as Observed;
+/** Reads the JSON text a case serialises, the same data the report will compare. */
+export const plain = (text: string | undefined): Observed => JSON.parse(text ?? "null");
 
 /** What a request came to, without anything that differs per run. */
 export async function outcome(request: () => Promise<Response>): Promise<Observed> {

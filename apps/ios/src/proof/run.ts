@@ -9,8 +9,8 @@ export interface CaseResult {
   readonly thrown?: string;
 }
 
-const describe = (error: unknown) =>
-  error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+const describe = (cause: unknown) =>
+  cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
 
 /**
  * Runs every case in order, each to its end, so one failure doesn't hide the rest. A group that

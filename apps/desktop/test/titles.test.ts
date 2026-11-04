@@ -261,7 +261,7 @@ async function subtitles(url: string, start: number, track: number, page: number
 
   read().then(
     () => reject(new Error("The feed ended before it said what it has.")),
-    (error: unknown) => reject(error),
+    (cause: unknown) => reject(cause),
   );
 
   return {

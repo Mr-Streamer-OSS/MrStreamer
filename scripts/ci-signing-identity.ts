@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 // The Developer ID Application identity GitHub Actions signs Mac releases with. It ends up in this
 // repository's Actions secrets MAC_CERTIFICATE_P12 and MAC_CERTIFICATE_PASSWORD.
 //
@@ -235,7 +236,7 @@ async function developerIdCertificates(): Promise<readonly ApiCertificate[]> {
   return found.data;
 }
 
-async function api(method: string, path: string, body?: unknown): Promise<unknown> {
+async function api(method: string, path: string, body?: Json): Promise<unknown> {
   const response = await fetch(`https://api.appstoreconnect.apple.com/v1${path}`, {
     method,
     headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" },
@@ -258,7 +259,7 @@ async function api(method: string, path: string, body?: unknown): Promise<unknow
 function token(): string {
   if (!ascKey) throw new Error("Set ASC_KEY_PATH, ASC_KEY_ID and ASC_ISSUER_ID for API calls.");
   const now = Math.floor(Date.now() / 1000);
-  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const part = (value: Json) => Buffer.from(JSON.stringify(value)).toString("base64url");
 
   const body = `${part({ alg: "ES256", kid: ascKey.keyId, typ: "JWT" })}.${part({
     iss: ascKey.issuer,

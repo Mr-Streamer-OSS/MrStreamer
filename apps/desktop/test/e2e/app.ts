@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
 // host. Shared by the tests of a built app and the measuring script.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -86,21 +87,20 @@ export async function connect(
     socket.addEventListener("error", reject, { once: true });
   });
   let nextId = 1;
-  const pending = new Map<number, (message: { result?: unknown; error?: unknown }) => void>();
-  const listeners = new Map<string, (params: unknown) => void>();
+
+  const pending = new Map<
+    number,
+    (message: { result?: Json | undefined; error?: Json | undefined }) => void
+  >();
+
+  const listeners = new Map<string, (params: Json | undefined) => void>();
   const closeListeners = new Set<() => void>();
   let closed = false;
   socket.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data)) as {
-      id?: number;
-      method?: string;
-      params?: unknown;
-      result?: unknown;
-      error?: unknown;
-    };
+    const message: JsonObject = JSON.parse(String(event.data));
 
-    if (message.id !== undefined) pending.get(message.id)?.(message);
-    else if (message.method) listeners.get(message.method)?.(message.params);
+    if (typeof message.id === "number") pending.get(message.id)?.(message);
+    else if (typeof message.method === "string") listeners.get(message.method)?.(message.params);
   });
   socket.addEventListener("close", () => {
     closed = true;
@@ -112,7 +112,7 @@ export async function connect(
   });
 
   const send = (method: string, params: Record<string, unknown> = {}, timeoutMs = 10_000) =>
-    new Promise<{ result?: unknown; error?: unknown }>((resolve) => {
+    new Promise<{ result?: Json | undefined; error?: Json | undefined }>((resolve) => {
       if (closed) {
         resolve({ error: "DevTools connection closed" });
 
@@ -144,7 +144,7 @@ export async function connect(
   return {
     send,
     /** Calls `listener` with each event of this name, as `Fetch.requestPaused`. */
-    on(method: string, listener: (params: unknown) => void): () => void {
+    on(method: string, listener: (params: Json | undefined) => void): () => void {
       listeners.set(method, listener);
 
       return () => {

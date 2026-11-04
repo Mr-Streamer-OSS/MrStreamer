@@ -569,14 +569,14 @@ async function subtitleArchive(data: Uint8Array, signal: AbortSignal): Promise<U
     let selected = 0;
     let complete = false;
 
-    const end = (error?: unknown) => {
+    const end = (cause?: unknown) => {
       if (finished) return;
       finished = true;
       signal.removeEventListener("abort", abort);
 
       for (const file of files) file.terminate();
 
-      if (error) reject(error);
+      if (cause) reject(cause);
       else resolve(Buffer.concat(chunks, size));
     };
 

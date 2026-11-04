@@ -868,6 +868,24 @@ describe("offline Next", { timeout: 30_000 }, () => {
     await app.stop();
   });
 
+  it("reads downloads with a deeply nested opaque field", async () => {
+    let { app, a, from } = await pair();
+    await app.remove(a, { keepHistory: false });
+    const disk = new DiskFile(native.root, "documents", "downloads.json");
+    const depth = 1700;
+    disk.writeSync(
+      disk
+        .textSync()
+        .replace(
+          '"items":[',
+          '"items":[{"future":' + "[".repeat(depth) + "0" + "]".repeat(depth) + "},",
+        ),
+    );
+    app = await launch();
+    expect(app.downloadList().items.some((each) => each.id === from.id)).toBe(true);
+    expect(disk.textSync()).toContain('"future":' + "[".repeat(depth));
+  });
+
   for (const continuation of [undefined, { version: 2, title: "future" }]) {
     it(`keeps a copy playable without guessing an unreadable saved order: ${JSON.stringify(continuation)}`, async () => {
       let { app, a, from } = await pair();

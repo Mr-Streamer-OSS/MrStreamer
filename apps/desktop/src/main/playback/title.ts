@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Movies and episodes: what a file holds, as ffprobe reports it, and the ffmpeg run that plays it
 // from a position. The run copies what the player decodes and converts the rest: the picture to
 // H.264, sound to stereo AAC, text subtitles to WebVTT. Subtitles the player draws itself, PGS,
@@ -119,7 +120,7 @@ const SUBTITLE_FORMATS: Readonly<Record<string, SubtitleFormat>> = {
 };
 
 /** What ffprobe's JSON says about a file, or null when it isn't ffprobe's JSON. */
-export function readProbe(json: unknown): TitleProbe | null {
+export function readProbe(json: Json | undefined): TitleProbe | null {
   const probe = Probe()(json);
 
   if (probe instanceof type.errors) return null;

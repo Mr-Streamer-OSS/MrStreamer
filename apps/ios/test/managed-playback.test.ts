@@ -44,7 +44,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-const receipt = (attemptId: number, itemId: number | null): ObservedDetachResult => ({
+const receipt = (
+  attemptId: number,
+  itemId: number | null,
+): Extract<ObservedDetachResult, { kind: "detached" }> => ({
   kind: "detached",
   attemptId,
   itemId,

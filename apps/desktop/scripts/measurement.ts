@@ -205,9 +205,7 @@ export function metric(
   };
 }
 
-export function validateMeasurement(input: unknown): Measurement {
-  const result = Result.assert(input);
-
+export const validateMeasurement = Result.pipe((result) => {
   const searchRuns =
     result.tool === "app" && result.workload["warmSearchRunsPerQuery"]
       ? positiveCount(
@@ -449,7 +447,7 @@ export function validateMeasurement(input: unknown): Measurement {
     if (!passed) throw new Error(`Invalid instrumentation: ${name}`);
 
   return result;
-}
+}).assert;
 
 /** Prepare the requested destination before creating a fixture, profile or expensive workload. */
 export function prepareMeasurementOutput(path: string): void {
@@ -484,8 +482,8 @@ export const MINIMUM_COMPARISON_SAMPLES = 5;
 export function compareMeasurements(baseline: unknown[], candidate: unknown[]) {
   if (!baseline.length || baseline.length !== candidate.length)
     throw new Error("Incomplete comparison rounds");
-  const before = baseline.map(validateMeasurement);
-  const after = candidate.map(validateMeasurement);
+  const before = baseline.map((value) => validateMeasurement(value));
+  const after = candidate.map((value) => validateMeasurement(value));
   const first = before[0]!;
   const names = Object.keys(first.metrics).sort();
 

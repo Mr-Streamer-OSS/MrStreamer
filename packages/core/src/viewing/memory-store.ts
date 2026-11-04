@@ -26,7 +26,7 @@ import type { RawTitleFilter, StoredLook, StoredViewing, ViewingStore } from "./
 import { STARTED_SECONDS, continueWatching, type RawProgress, type TitleRow } from "./titles.ts";
 
 /** One account's record as the snapshot keeps it. */
-export interface AccountSnapshot {
+export type AccountSnapshot = {
   readonly state: ViewingState;
   readonly sequence: number;
   /** The sequence of the event that gave each favourite and recent channel its place. */
@@ -37,10 +37,10 @@ export interface AccountSnapshot {
   readonly rows: readonly TitleRow[];
   readonly removals: Readonly<Record<string, number>>;
   readonly series: Readonly<Record<string, SeriesMarks>>;
-}
+};
 
 /** Everything the store holds, as JSON. */
-export interface ViewingSnapshot {
+export type ViewingSnapshot = {
   readonly version: 1;
   /** The last event's number, across every account. */
   readonly sequence: number;
@@ -48,7 +48,7 @@ export interface ViewingSnapshot {
   readonly receipts: readonly string[];
   readonly imported: boolean;
   readonly accounts: Readonly<Record<string, AccountSnapshot>>;
-}
+};
 
 /** Commands remembered as done. */
 const RECEIPTS = 500;

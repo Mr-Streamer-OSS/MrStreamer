@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { File, Paths } from "expo-file-system";
 
 // Whole JSON files in the app's private files folder, which Android deletes with the app and,
@@ -10,12 +11,12 @@ const fileOf = (name: string) => new File(Paths.document, name);
 const pendingOf = (name: string) => new File(Paths.document, `${name}.next`);
 
 /** The file's contents, or null when there is none or it doesn't read as JSON. */
-export function readJson(name: string): unknown {
+export function readJson(name: string): Json {
   for (const file of [fileOf(name), pendingOf(name)]) {
     if (!file.exists) continue;
 
     try {
-      return JSON.parse(file.textSync()) as unknown;
+      return JSON.parse(file.textSync());
     } catch {
       // Unreadable or not JSON: try the other, then start again.
     }
@@ -25,7 +26,7 @@ export function readJson(name: string): unknown {
 }
 
 /** Replaces the file with `value`, whole. Throws when the folder won't take it. */
-export function writeJson(name: string, value: unknown): void {
+export function writeJson(name: string, value: Json): void {
   const pending = pendingOf(name);
 
   if (!pending.exists) pending.create();
@@ -34,11 +35,11 @@ export function writeJson(name: string, value: unknown): void {
 }
 
 /** Preferences distinguish a missing file from a failed read and never reset one on failure. */
-export function readJsonStrict(name: string): unknown {
+export function readJsonStrict(name: string): Json {
   const file = fileOf(name);
 
-  if (file.exists) return JSON.parse(file.textSync()) as unknown;
+  if (file.exists) return JSON.parse(file.textSync());
   const pending = pendingOf(name);
 
-  return pending.exists ? (JSON.parse(pending.textSync()) as unknown) : null;
+  return pending.exists ? JSON.parse(pending.textSync()) : null;
 }

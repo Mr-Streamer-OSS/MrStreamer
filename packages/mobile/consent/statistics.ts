@@ -1,10 +1,10 @@
 export type Choice = "on" | "off" | null;
 
-export interface ConsentRecord<Event> {
+export type ConsentRecord<Event> = {
   readonly choice: Choice;
   readonly installationId: string | null;
   readonly pending: readonly Event[];
-}
+};
 
 export interface ConsentStorage<Event> {
   load(): ConsentRecord<Event> | null;

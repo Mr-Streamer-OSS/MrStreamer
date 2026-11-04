@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -22,7 +23,7 @@ vi.mock("../src/files.ts", () => ({
 
     return text === undefined ? null : (JSON.parse(text) as unknown);
   },
-  writeJson: (name: string, value: unknown) => {
+  writeJson: (name: string, value: Json) => {
     if (storageFails) throw new Error("Unwritable");
     files.set(name, JSON.stringify(value));
   },

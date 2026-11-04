@@ -15,12 +15,12 @@ export type NextEpisodeResolver = (current: EpisodeIntent) => NextEpisode | unde
 
 type Choice = Pick<Track, "language" | "label" | "codec" | "height" | "bitrate">;
 
-export interface MediaPreferences {
+export type MediaPreferences = {
   readonly speed?: number;
   readonly audio?: Choice;
   readonly text?: Choice | "off";
   readonly quality?: Choice | "automatic";
-}
+};
 
 export interface MediaPersistence {
   /** Throws on failed reads, including invalid saved data. */

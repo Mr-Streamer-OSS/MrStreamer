@@ -150,7 +150,7 @@ vi.mock("../src/player/instance.ts", async () => {
   const media = store<MediaState>(still);
 
   // Each action records what it was asked, and the player accepts it.
-  const asked = (name: string) => (value?: unknown) => {
+  const asked = (name: string) => (value?: string | number) => {
     scenario.media.push(value === undefined ? name : `${name} ${String(value)}`);
 
     return Promise.resolve(true);
@@ -201,7 +201,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: Element): { render(node: unknown): void; unmount(): void };
+  createRoot(container: Element): { render(node: ReactNode): void; unmount(): void };
 };
 
 const { default: Watch } = await import("../src/app/watch.tsx");

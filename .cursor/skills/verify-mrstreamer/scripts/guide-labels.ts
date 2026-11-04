@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Settings > Guides with two guides from one host, which only their names tell apart.
 //
 // `guide-labels`: one fake guide host serves /a.xml and /b.xml, each behind the host's key, and
@@ -54,7 +55,7 @@ export function serveLabelled(host: GuideHost): void {
   host.serve("/b.xml", xmltv(LABELLED.b.guideId));
 }
 
-const expect = (ok: boolean, message: string, seen?: unknown) => {
+const expect = (ok: boolean, message: string, seen?: Json) => {
   if (!ok) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 

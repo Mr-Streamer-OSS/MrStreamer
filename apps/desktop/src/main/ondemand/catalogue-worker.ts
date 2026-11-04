@@ -1086,8 +1086,47 @@ const handlers: {
 
 parentPort?.on("message", (request: WorkerRequest) => {
   setLanguage(request.interfaceLanguage);
-  const handler = handlers[request.method] as (args: unknown) => Promise<unknown>;
-  handler(request.args).then(
+
+  const dispatch = () => {
+    switch (request.method) {
+      case "refresh":
+        return handlers.refresh(request.args);
+      case "finishRefresh":
+        return handlers.finishRefresh(request.args);
+      case "status":
+        return handlers.status(request.args);
+      case "byIds":
+        return handlers.byIds(request.args);
+      case "search":
+        return handlers.search(request.args);
+      case "searchKind":
+        return handlers.searchKind(request.args);
+      case "filterOptions":
+        return handlers.filterOptions(request.args);
+      case "rows":
+        return handlers.rows(request.args);
+      case "recommendations":
+        return handlers.recommendations(request.args);
+      case "related":
+        return handlers.related(request.args);
+      case "tiles":
+        return handlers.tiles(request.args);
+      case "collection":
+        return handlers.collection(request.args);
+      case "saved":
+        return handlers.saved(request.args);
+      case "savedFacts":
+        return handlers.savedFacts(request.args);
+      case "container":
+        return handlers.container(request.args);
+      case "forget":
+        return handlers.forget(request.args);
+      case "flush":
+        return handlers.flush(request.args);
+    }
+  };
+
+  dispatch().then(
     (value) => parentPort?.postMessage({ id: request.id, ok: true, value }),
     (cause: unknown) =>
       parentPort?.postMessage({ id: request.id, ok: false, error: errorOf(cause) }),

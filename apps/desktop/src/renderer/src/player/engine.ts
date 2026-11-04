@@ -1,3 +1,4 @@
+import type { PESPrivateData } from "mpegts.js/d.ts/src/demux/pes-private-data";
 import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { observeMediaPlayback } from "./analytics.ts";
 // Playback engines behind one interface, so the rest of the UI only ever talks to `Engine`. The
@@ -262,18 +263,26 @@ function mpegtsEngine(
     ends,
   );
 
-  player.on(mpegts.Events.ERROR, (type: unknown, detail: unknown, info: unknown) => {
-    life.fail(mpegtsError(mpegts, type, detail, info));
-  });
+  player.on(
+    mpegts.Events.ERROR,
+    (
+      type: MpegtsJs["ErrorTypes"][keyof MpegtsJs["ErrorTypes"]],
+      detail: MpegtsJs["ErrorDetails"][keyof MpegtsJs["ErrorDetails"]],
+      info?: mpegts.LoaderErrorMessage,
+    ) => {
+      life.fail(mpegtsError(mpegts, type, detail, info));
+    },
+  );
   // A recording's end plays out what arrived, and the element says when it is over.
   player.on(mpegts.Events.LOADING_COMPLETE, () => {
     if (ends === null) life.fail({ kind: "network", detail: t("The provider ended the stream.") });
   });
+
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
-  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: unknown) => {
+  player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: PESPrivateData) => {
     if (!privateData || typeof packet !== "object" || packet === null) return;
-    const { pid, data, pts, nearest_pts } = packet as Record<string, unknown>;
+    const { pid, data, pts, nearest_pts } = packet;
     const at = typeof pts === "number" ? pts : nearest_pts;
 
     if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
@@ -306,7 +315,12 @@ function mpegtsEngine(
   };
 }
 
-function mpegtsError(mpegts: MpegtsJs, type: unknown, detail: unknown, info: unknown): EngineError {
+function mpegtsError(
+  mpegts: MpegtsJs,
+  type: MpegtsJs["ErrorTypes"][keyof MpegtsJs["ErrorTypes"]],
+  detail: MpegtsJs["ErrorDetails"][keyof MpegtsJs["ErrorDetails"]],
+  info?: mpegts.LoaderErrorMessage,
+): EngineError {
   const message =
     info && typeof info === "object" && "msg" in info && typeof info.msg === "string"
       ? info.msg
@@ -909,10 +923,10 @@ function elementInfo(video: HTMLVideoElement): StreamInfo {
   };
 }
 
-function numberOr(value: unknown): number | null {
+function numberOr(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
-function stringOr(value: unknown): string | null {
+function stringOr(value: string | undefined): string | null {
   return typeof value === "string" && value ? value : null;
 }

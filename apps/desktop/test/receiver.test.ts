@@ -1190,7 +1190,7 @@ describe("an HLS channel for a receiver", () => {
 
     const playback = await promised(runtime, Playback);
     const rejections: unknown[] = [];
-    const note = (reason: unknown) => void rejections.push(reason);
+    const note = (cause: unknown) => void rejections.push(cause);
     process.on("unhandledRejection", note);
 
     try {

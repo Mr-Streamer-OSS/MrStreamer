@@ -30,7 +30,7 @@ interface FileResult {
   readonly assertionResults: readonly { readonly fullName: string; readonly status: string }[];
 }
 
-const isTest = (value: unknown) =>
+const isTest = (value: unknown): value is FileResult["assertionResults"][number] =>
   typeof value === "object" &&
   value !== null &&
   "fullName" in value &&

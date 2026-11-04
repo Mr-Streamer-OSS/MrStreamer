@@ -16,10 +16,12 @@ import { browseCollection, DEFAULT_BROWSE } from "../src/title-browse.ts";
 // picked and what Play plays where they were. The real screens run with React DOM on a happy-dom
 // window, as details-screen.test.ts does, over the real collections (title-browse-fixture.ts).
 
+type Member = { entry: { id: string }; label: string; needsSecret?: boolean };
+
 const scenario = vi.hoisted(() => ({
   made: null as unknown,
-  index: null as unknown,
-  members: [] as Array<{ entry: { id: string }; label: string; needsSecret?: boolean }>,
+  index: null as IndexedCatalogue | null,
+  members: [] as Member[],
   /** The system sheet last shown: its words, and what picking one does. */
   menu: null as {
     title: string | undefined;
@@ -33,9 +35,9 @@ const scenario = vi.hoisted(() => ({
 
 /** One answer per source, as the app's stores give: a new render alone makes nothing new. */
 const stable = vi.hoisted(() => {
-  const made = new Map<unknown, unknown>();
+  const made = new Map<IndexedCatalogue | Member[] | null, unknown>();
 
-  return <T>(source: unknown, make: () => T): T => {
+  return <T>(source: IndexedCatalogue | Member[] | null, make: () => T): T => {
     if (!made.has(source)) made.set(source, make());
 
     return made.get(source) as T;
@@ -206,7 +208,7 @@ vi.mock("../src/viewing.ts", () => ({
 vi.mock("../src/play-title.ts", () => ({
   failureOf: () => undefined,
   useFailure: () => undefined,
-  resumeMovie: (_title: unknown, version: OwnedId) => scenario.played.push(version),
+  resumeMovie: (_title: Title, version: OwnedId) => scenario.played.push(version),
   resumeEpisode: () => undefined,
   resumeSeries: () => undefined,
 }));

@@ -29,11 +29,18 @@ vi.mock("expo-router/native-tabs", () => {
 });
 
 vi.mock("expo-router", async () => {
-  const navigation = { dispatch: (action: unknown) => scenario.did.push(action) };
+  const navigation = {
+    dispatch: (action: {
+      readonly type: string;
+      readonly payload?: object;
+      readonly source?: string;
+      readonly target?: string;
+    }) => scenario.did.push(action),
+  };
 
   return {
     router: {
-      push: (href: unknown) => scenario.did.push(`push ${String(href)}`),
+      push: (href: import("expo-router").Href) => scenario.did.push(`push ${String(href)}`),
       dismiss: (count: number) => scenario.did.push(`dismiss ${count}`),
       back: () => scenario.did.push("back"),
       canGoBack: () => scenario.canGoBack,

@@ -377,7 +377,7 @@ function deleteForGood(db: DatabaseSync, tables: readonly string[], account: str
 
 /** An event as stored, or null when this version can't read it: newer, or of an unknown type. */
 function eventOf(
-  raw: unknown,
+  raw: Record<string, import("node:sqlite").SQLOutputValue>,
 ): { account: string; sequence: number; at: number; event: ViewingEvent } | null {
   const row = EventRow()(raw);
 

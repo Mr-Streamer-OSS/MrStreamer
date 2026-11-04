@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { defined } from "@mrstreamer/core/defined";
@@ -7,13 +8,13 @@ export interface MainTransport {
   /** Must settle and release request resources within timeoutMs, as the shared Page does. */
   send(
     method: string,
-    params?: Record<string, unknown>,
+    params?: Record<string, Json | undefined>,
     timeoutMs?: number,
   ): Promise<{
-    result?: unknown;
-    error?: unknown;
+    result?: Json | undefined;
+    error?: Json | undefined;
   }>;
-  on(method: string, listener: (params: unknown) => void): () => void;
+  on(method: string, listener: (params: Json | undefined) => void): () => void;
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -35,7 +36,7 @@ export interface StartupPause {
   readonly scriptId: string;
   readonly pid: number;
   readonly reason: "Break on start";
-  readonly callFrame: Readonly<Record<string, unknown>>;
+  readonly callFrame: Readonly<Record<string, Json | undefined>>;
 }
 
 export interface ProbeOptions {
@@ -52,18 +53,18 @@ export interface ProbeOptions {
 
 const installed = new WeakSet<MainTransport>();
 
-const object = (value: unknown): value is Record<string, unknown> =>
+const object = (value: Json | undefined): value is Record<string, Json | undefined> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function errorText(value: unknown): string {
-  if (value instanceof Error) return value.message;
+function errorText(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
 
-  if (typeof value === "string") return value;
+  if (typeof cause === "string") return cause;
 
   try {
-    return JSON.stringify(value) ?? String(value);
+    return JSON.stringify(cause) ?? String(cause);
   } catch {
-    return String(value);
+    return String(cause);
   }
 }
 
@@ -135,11 +136,11 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   let active = false;
   let sessionId: string | undefined;
   let nextId = 1;
-  let pause: Record<string, unknown> | undefined;
+  let pause: Record<string, Json | undefined> | undefined;
   let startup: StartupPause | undefined;
   let resumed = false;
   let controlling = false;
-  let debuggerReady: Promise<Outcome<Record<string, unknown>>> | undefined;
+  let debuggerReady: Promise<Outcome<Record<string, Json | undefined>>> | undefined;
   const errors: string[] = [];
   const scripts = new Map<string, string>();
   const tasks = new Set<Promise<unknown>>();
@@ -148,7 +149,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   const pending = new Map<
     number,
     {
-      finish: (reply: Record<string, unknown>) => void;
+      finish: (reply: Record<string, Json | undefined>) => void;
       fail: (error: Error) => void;
     }
   >();
@@ -161,12 +162,12 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     for (const notify of [...waiters]) notify();
   };
 
-  function fail(error: unknown) {
-    errors.push(errorText(error));
+  function fail(cause: unknown) {
+    errors.push(errorText(cause));
     wake();
   }
 
-  function record(kind: string, data: unknown) {
+  function record(kind: string, data: Json | StartupPause) {
     const entry: Evidence = {
       at: new Date().toISOString(),
       kind,
@@ -186,10 +187,10 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
       .then(work)
       .then(
         (value): Outcome<T> => ({ ok: true, value }),
-        (error: unknown): Outcome<T> => {
-          fail(error);
+        (cause: unknown): Outcome<T> => {
+          fail(cause);
 
-          return { ok: false, error: errorText(error) };
+          return { ok: false, error: errorText(cause) };
         },
       );
 
@@ -210,7 +211,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return sessionId;
   }
 
-  async function mainSend(method: string, params: Record<string, unknown>) {
+  async function mainSend(method: string, params: Record<string, Json | undefined>) {
     const reply = await main.send(method, params, timeoutMs);
     record("main-reply", { method, reply });
 
@@ -221,12 +222,12 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return reply.result;
   }
 
-  async function workerSend(method: string, params: Record<string, unknown> = {}) {
+  async function workerSend(method: string, params: Record<string, Json | undefined> = {}) {
     const ownedSession = assertActive();
     const id = nextId++;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const reply = new Promise<Record<string, unknown>>((resolve, reject) => {
+    const reply = new Promise<Record<string, Json | undefined>>((resolve, reject) => {
       timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error(`${method} worker reply timed out`));
@@ -252,9 +253,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     const delivery = mainSend("NodeWorker.sendMessageToWorker", {
       sessionId: ownedSession,
       message: JSON.stringify(message),
-    }).catch((error: unknown) => {
-      pending.get(id)?.fail(new Error(errorText(error)));
-      throw error;
+    }).catch((cause: unknown) => {
+      pending.get(id)?.fail(new Error(errorText(cause)));
+      throw cause;
     });
 
     try {
@@ -313,7 +314,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     return verifiedMainPID;
   }
 
-  async function verifyPause(current: Record<string, unknown>) {
+  async function verifyPause(current: Record<string, Json | undefined>) {
     if (current.reason !== "Break on start") return;
     const frames = current.callFrames;
     const frame = Array.isArray(frames) ? frames[0] : undefined;
@@ -361,7 +362,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     wake();
   }
 
-  function listen(method: string, callback: (params: Record<string, unknown>) => void) {
+  function listen(method: string, callback: (params: Record<string, Json | undefined>) => void) {
     unsubscribe.push(
       main.on(method, (params) => {
         if (closed) return;
@@ -380,7 +381,7 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     if (params.sessionId !== sessionId || !active) return;
 
     if (typeof params.message !== "string") throw new Error("Malformed worker message");
-    const message: unknown = JSON.parse(params.message);
+    const message: Json = JSON.parse(params.message);
 
     if (!object(message)) throw new Error("Worker message must be an object");
     record("worker-message", message);

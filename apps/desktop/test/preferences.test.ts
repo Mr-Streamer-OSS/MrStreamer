@@ -90,6 +90,22 @@ const stored = async (dataDir: string): Promise<unknown> =>
   JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8"));
 
 describe("preferences", () => {
+  it("logs schema failures in preferences.json without saved values", async ({
+    onTestFinished,
+  }) => {
+    const dataDir = await tempDir();
+    const path = join(dataDir, "preferences.json");
+    await writeFile(path, JSON.stringify({ volume: "private-invalid-value" }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warning.mockRestore());
+
+    await (await settingsIn(dataDir)).get();
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(`[storage] ignoring ${path}:`));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("volume:"));
+    expect(warning.mock.calls.flat().join(" ")).not.toContain("private-invalid-value");
+  });
+
   it("keeps Home row order, hidden and future rows across restart and subscription removal", async () => {
     const { dataDir, settings, subscriptions, id } = await connected();
 

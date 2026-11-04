@@ -294,24 +294,26 @@ const correctness: readonly ProofCase[] = [
 
       const like = { subscriptionId: SUB, id: "4" };
 
-      return plain({
-        movies: movies.map(shown),
-        series: kindOf(index, "series").titles.map(shown),
-        search: searchPage(index, "movie", "copper").titles.map((title) => title.id),
-        searchTotal: searchPage(index, "movie", "lake").total,
-        forYou: collectionRows(made, "for-you", like).map((each) => [
-          each.id,
-          each.name,
-          each.total,
-          each.titles.map((title) => title.id),
-        ]),
-        fresh: collectionRows(made, "new", null).map((each) => [each.id, each.total]),
-        genres: made.genres().map((genre) => [genre.name, genre.count, genre.artwork]),
-        services: made.services().map((service) => [service.name, service.count]),
-        fourK: made.list("4k").map((title) => [title.id, title.tags]),
-        byTitle: made.list("all", "title").map((title) => title.title),
-        adult: made.list("adult").map((title) => title.id),
-      });
+      return plain(
+        JSON.stringify({
+          movies: movies.map(shown),
+          series: kindOf(index, "series").titles.map(shown),
+          search: searchPage(index, "movie", "copper").titles.map((title) => title.id),
+          searchTotal: searchPage(index, "movie", "lake").total,
+          forYou: collectionRows(made, "for-you", like).map((each) => [
+            each.id,
+            each.name,
+            each.total,
+            each.titles.map((title) => title.id),
+          ]),
+          fresh: collectionRows(made, "new", null).map((each) => [each.id, each.total]),
+          genres: made.genres().map((genre) => [genre.name, genre.count, genre.artwork]),
+          services: made.services().map((service) => [service.name, service.count]),
+          fourK: made.list("4k").map((title) => [title.id, title.tags]),
+          byTitle: made.list("all", "title").map((title) => title.title),
+          adult: made.list("adult").map((title) => title.id),
+        }),
+      );
     },
   },
   {
@@ -343,36 +345,38 @@ const correctness: readonly ProofCase[] = [
       const series = seriesDetails(kestrel, SERIES_DETAILS, null, "en");
       const first = series.seasons[0];
 
-      return plain({
-        movie: [movie.plot, movie.genres, movie.duration, movie.directors, movie.backdropUrl],
-        seasons: series.seasons.map((season) => [
-          season.number,
-          season.name,
-          season.episodes.map((episode) => [episode.id, episode.number, episode.title]),
-        ]),
-        next: nextEpisode(series, { season: 1, episode: 3 })?.id ?? null,
-        last: nextEpisode(series, { season: 2, episode: 2 }) ?? null,
-        tmdbSeason: first
-          ? seasonEpisodes(first, [
-              [1, 2].map((number) => ({
-                number,
-                name: number === 2 ? null : `TMDB ${number}`,
-                overview: `Story of ${number}.`,
-                still: `/s${number}.jpg`,
-                airDate: null,
-                runtime: 48,
-                rating: 8,
-                cast: [],
-                directors: [],
-              })),
-            ]).map((episode) => [episode.title, episode.stillUrl, episode.duration])
-          : null,
-        versions: versionOptions(copper.versions, "en", [SUB]).map((group) => [
-          group.quality,
-          group.label,
-          group.versions.map((version) => version.id),
-        ]),
-      });
+      return plain(
+        JSON.stringify({
+          movie: [movie.plot, movie.genres, movie.duration, movie.directors, movie.backdropUrl],
+          seasons: series.seasons.map((season) => [
+            season.number,
+            season.name,
+            season.episodes.map((episode) => [episode.id, episode.number, episode.title]),
+          ]),
+          next: nextEpisode(series, { season: 1, episode: 3 })?.id ?? null,
+          last: nextEpisode(series, { season: 2, episode: 2 }) ?? null,
+          tmdbSeason: first
+            ? seasonEpisodes(first, [
+                [1, 2].map((number) => ({
+                  number,
+                  name: number === 2 ? null : `TMDB ${number}`,
+                  overview: `Story of ${number}.`,
+                  still: `/s${number}.jpg`,
+                  airDate: null,
+                  runtime: 48,
+                  rating: 8,
+                  cast: [],
+                  directors: [],
+                })),
+              ]).map((episode) => [episode.title, episode.stillUrl, episode.duration])
+            : null,
+          versions: versionOptions(copper.versions, "en", [SUB]).map((group) => [
+            group.quality,
+            group.label,
+            group.versions.map((version) => version.id),
+          ]),
+        }),
+      );
     },
   },
   {
@@ -427,17 +431,21 @@ const correctness: readonly ProofCase[] = [
         20,
       );
 
-      return plain({
-        mark: mark ? [mark.season, mark.episode, mark.watched] : null,
-        undoable: standing.undoable === mark?.revision,
-        states: details.seasons.flatMap((season) =>
-          season.episodes.map((each) => [each.id, stateOf(each).kind]),
-        ),
-        goesOn: goesOn ? [goesOn.episode.id, goesOn.resume?.position ?? null, goesOn.replay] : null,
-        continuing: viewing.continueWatching.map(({ title, position }) => [title.id, position]),
-        entries: entries.map((entry) => [entry.title.id, entry.line, entry.done]),
-        undone: undone.marks.length,
-      });
+      return plain(
+        JSON.stringify({
+          mark: mark ? [mark.season, mark.episode, mark.watched] : null,
+          undoable: standing.undoable === mark?.revision,
+          states: details.seasons.flatMap((season) =>
+            season.episodes.map((each) => [each.id, stateOf(each).kind]),
+          ),
+          goesOn: goesOn
+            ? [goesOn.episode.id, goesOn.resume?.position ?? null, goesOn.replay]
+            : null,
+          continuing: viewing.continueWatching.map(({ title, position }) => [title.id, position]),
+          entries: entries.map((entry) => [entry.title.id, entry.line, entry.done]),
+          undone: undone.marks.length,
+        }),
+      );
     },
   },
   {
@@ -474,19 +482,21 @@ const correctness: readonly ProofCase[] = [
         await new Promise((done) => setTimeout(done, 25));
       }
 
-      return plain({
-        details: [details.name, details.original, details.genres, details.popularity],
-        about: [about.overview, about.runtime, about.directors, about.cast.map((c) => c.name)],
-        season: season.map((episode) => [episode.number, episode.name, episode.still]),
-        services: services.map((service) => [service.id, service.name]),
-        stored: {
-          status: store.status(),
-          genres: store.get("movie", "501")?.genres ?? null,
-          name: store.name("movie", "504", "nl"),
-          search: store.searchName("movie", "501"),
-          netflix: store.services("movie").map((service) => [service.name, [...service.ids]]),
-        },
-      });
+      return plain(
+        JSON.stringify({
+          details: [details.name, details.original, details.genres, details.popularity],
+          about: [about.overview, about.runtime, about.directors, about.cast.map((c) => c.name)],
+          season: season.map((episode) => [episode.number, episode.name, episode.still]),
+          services: services.map((service) => [service.id, service.name]),
+          stored: {
+            status: store.status(),
+            genres: store.get("movie", "501")?.genres ?? null,
+            name: store.name("movie", "504", "nl"),
+            search: store.searchName("movie", "501"),
+            netflix: store.services("movie").map((service) => [service.name, [...service.ids]]),
+          },
+        }),
+      );
     },
   },
 ];

@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // The sound and subtitle tracks of an HLS stream, read from hls.js and chosen through it. The
 // stream's multivariant playlist declares its sound renditions, its subtitle renditions (WebVTT,
 // or IMSC, which hls.js reads too) and its caption channels; hls.js also finds captions (CEA-608)
@@ -468,7 +469,16 @@ export function hlsTracks(hls: Hls, video: HTMLVideoElement, sound: SoundChoice)
   hls.on(Hls.Events.CUES_PARSED, (_event, data) => {
     if (released) return;
     forgetOld();
-    const cues = cuesOf(data.cues);
+
+    const cues = Array.isArray(data.cues)
+      ? data.cues.flatMap((cue): Cue[] => {
+          const parsed = ParsedCue(cue);
+
+          return parsed instanceof type.errors || !parsed.text
+            ? []
+            : [{ start: parsed.startTime, end: parsed.endTime, text: parsed.text }];
+        })
+      : [];
 
     if (data.type === "captions") {
       const channel = captionChannel(data.track);
@@ -678,18 +688,5 @@ function captionChannel(name: string | undefined): number | null {
   return channel ? Number(channel) : null;
 }
 
-/** The cues hls.js parsed, which it types loosely, as lines; whatever isn't a cue is left out. */
-function cuesOf(parsed: unknown): Cue[] {
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed.flatMap((cue: unknown): Cue[] => {
-    if (typeof cue !== "object" || cue === null) return [];
-
-    if (!("startTime" in cue) || !("endTime" in cue) || !("text" in cue)) return [];
-    const { startTime: start, endTime: end, text } = cue;
-
-    return typeof start === "number" && typeof end === "number" && typeof text === "string" && text
-      ? [{ start, end, text }]
-      : [];
-  });
-}
+/** A cue as hls.js parses it, which it types loosely: a row of another shape is left out. */
+const ParsedCue = type({ startTime: "number", endTime: "number", text: "string" });

@@ -1,4 +1,5 @@
 import { type } from "arktype";
+import type { Json } from "@mrstreamer/contracts/json";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { isAdultCategory } from "@mrstreamer/core/adult";
@@ -88,7 +89,7 @@ export type Connected =
 export interface SourcesPlatform {
   readonly credentials: Credentials;
   readonly readJson: (name: string) => unknown;
-  readonly writeJson: (name: string, value: unknown) => void;
+  readonly writeJson: (name: string, value: Json) => void;
   readonly fetch: typeof fetch;
   readonly userAgent: string;
 }

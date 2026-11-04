@@ -1,3 +1,5 @@
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -20,12 +22,12 @@ type LaunchFailure = {
   launchOrdinal: number;
 };
 
-function record(value: unknown): value is Record<string, unknown> {
+function record(value: unknown): value is JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 // Later samples are allowlisted and bounded. The primary rejected URL stays exact.
-function fields(value: unknown, names: readonly string[]) {
+function fields(value: Json | undefined, names: readonly string[]) {
   const result: Record<string, string | number | boolean> = {};
 
   if (record(value))
@@ -140,7 +142,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
 
       if (reply.error !== undefined) throw new Error(JSON.stringify(reply.error));
 
-      return reply.result;
+      return JsonValue.assert(reply.result);
     };
 
     // These first reads use the same page socket as the rejected location evaluation.
@@ -159,7 +161,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
 
       return {
         ...fields(result, ["currentIndex"]),
-        entries: result["entries"].map((entry: unknown) =>
+        entries: result["entries"].map((entry: Json) =>
           fields(entry, ["url", "userTypedURL", "transitionType"]),
         ),
       };
@@ -170,17 +172,18 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       });
 
       if (!response.ok) throw new Error(`Target listing HTTP ${response.status}`);
-      const targets: unknown = await response.json();
+      const targets: Json = JSON.parse(await response.text());
 
       if (!Array.isArray(targets)) throw new Error("No target list");
 
-      return targets.map((target: unknown) =>
+      return targets.map((target: Json) =>
         fields(target, ["id", "type", "url", "title", "attached"]),
       );
     });
     await sample("later-main-identity-and-webcontents", async (timeoutMs) => {
-      const result = await context.mainPage.evaluate(
-        `(() => {
+      const result = JsonValue.assert(
+        await context.mainPage.evaluate(
+          `(() => {
         const {app, webContents} = process.getBuiltinModule('module').createRequire(process.execPath)('electron');
         return {pid:process.pid, executable:process.execPath, resources:process.resourcesPath,
           appPath:app.getAppPath(), version:app.getVersion(),
@@ -191,7 +194,8 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
               isLoadingMainFrame:contents.isLoadingMainFrame(), crashed:contents.isCrashed()})};
           })};
       })()`,
-        timeoutMs,
+          timeoutMs,
+        ),
       );
 
       if (!record(result) || !Array.isArray(result["webContents"]))
@@ -199,7 +203,7 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
 
       return {
         ...fields(result, ["pid", "executable", "resources", "appPath", "version"]),
-        webContents: result["webContents"].map((contents: unknown) =>
+        webContents: result["webContents"].map((contents: Json) =>
           fields(contents, [
             "id",
             "type",

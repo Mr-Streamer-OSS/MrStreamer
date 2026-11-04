@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 import { describe, expect, it } from "vitest";
 import { FEED, listedDownloads, verifiedDownloads } from "../src/downloads.ts";
 
@@ -59,7 +60,7 @@ describe("the installers the open page takes from the feed", () => {
     expect(listedDownloads(feed("0.0.7", { installers: undefined }))).toBeNull();
   });
 
-  it.each<[string, unknown]>([
+  it.each<[string, Json]>([
     ["a nightly named as stable", feed("0.0.8-nightly.20261007.190")],
     ["a version that is a path", feed("../../../evil/releases/download/v1.0.0")],
     [
@@ -85,7 +86,7 @@ describe("the installers the build writes", () => {
    * GitHub and the feed's site, answering `updates` for the feed and redirecting to the
    * installers in `present`. Records every request as "METHOD address".
    */
-  function web(updates: unknown, present: readonly string[] = []) {
+  function web(updates: Json | Error, present: readonly string[] = []) {
     const asked: string[] = [];
 
     const request: typeof fetch = async (input, init) => {
@@ -168,7 +169,7 @@ describe("the installers the build writes", () => {
     expect(asked).toEqual([]);
   });
 
-  it.each<[string, unknown]>([
+  it.each<[string, Json | Error]>([
     ["is unreachable", new Error("offline")],
     ["answers an error", 503],
     ["names no stable release", { ...feed("0.0.8"), stable: null }],
