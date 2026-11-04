@@ -1,11 +1,80 @@
 import { catalogue } from "@mrstreamer/mobile/language";
 
-const english = {
-  "Opens the player": "Opens the player",
-};
-
-const dutch = {
-  "Opens the player": "Opent de speler",
-};
-
-export const t = catalogue(english, { "nl-NL": dutch });
+/** The player's copy: the mini player's hint and the media controls, in English and Dutch. */
+export const t = catalogue(
+  {
+    "Opens the player": "Opens the player",
+    Audio: "Audio",
+    Subtitles: "Subtitles",
+    Speed: "Speed",
+    "Speed {speed}×": "Speed {speed}×",
+    "Track {number}": "Track {number}",
+    Quality: "Quality",
+    Automatic: "Automatic",
+    Playing: "Playing",
+    Off: "Off",
+    OK: "OK",
+    Cancel: "Cancel",
+    "Next episode": "Next episode",
+    "Play next": "Play next",
+    "Play again": "Play again",
+    "Plays in {seconds}": "Plays in {seconds}",
+    "Picture in picture": "Picture in picture",
+    "Can't show here: {tracks}.": "Can't show here: {tracks}.",
+    "Can't play here: {tracks}.": "Can't play here: {tracks}.",
+    "Couldn't change audio": "Couldn't change audio",
+    "Couldn't show subtitles": "Couldn't show subtitles",
+    "Couldn't change speed": "Couldn't change speed",
+    "Couldn't change quality": "Couldn't change quality",
+    "This phone refused the change. Try again.": "This phone refused the change. Try again.",
+    "Couldn't save media preference": "Couldn't save media preference",
+    "Your previous choice is still saved. Try again.":
+      "Your previous choice is still saved. Try again.",
+    "Couldn't read media preferences": "Couldn't read media preferences",
+    "Your saved choices weren't changed. Try again.":
+      "Your saved choices weren't changed. Try again.",
+    "Not known yet. Try again in a moment.": "Not known yet. Try again in a moment.",
+    "No choices on this channel.": "No choices on this channel.",
+    "No subtitles in this file.": "No subtitles in this file.",
+    "No choices in this file.": "No choices in this file.",
+  },
+  {
+    "nl-NL": {
+      "Opens the player": "Opent de speler",
+      Audio: "Audio",
+      Subtitles: "Ondertiteling",
+      Speed: "Snelheid",
+      "Speed {speed}×": "Snelheid {speed}×",
+      "Track {number}": "Spoor {number}",
+      Quality: "Kwaliteit",
+      Automatic: "Automatisch",
+      Playing: "Speelt",
+      Off: "Uit",
+      OK: "OK",
+      Cancel: "Annuleren",
+      "Next episode": "Volgende aflevering",
+      "Play next": "Volgende afspelen",
+      "Play again": "Opnieuw afspelen",
+      "Plays in {seconds}": "Speelt over {seconds}",
+      "Picture in picture": "Beeld-in-beeld",
+      "Can't show here: {tracks}.": "Hier niet te tonen: {tracks}.",
+      "Can't play here: {tracks}.": "Hier niet af te spelen: {tracks}.",
+      "Couldn't change audio": "Audio kon niet worden gewijzigd",
+      "Couldn't show subtitles": "Ondertiteling kon niet worden getoond",
+      "Couldn't change speed": "Snelheid kon niet worden gewijzigd",
+      "Couldn't change quality": "Kwaliteit kon niet worden gewijzigd",
+      "This phone refused the change. Try again.":
+        "Deze telefoon weigerde de wijziging. Probeer het opnieuw.",
+      "Couldn't save media preference": "Mediavoorkeur kon niet worden bewaard",
+      "Your previous choice is still saved. Try again.":
+        "Je vorige keuze is nog bewaard. Probeer het opnieuw.",
+      "Couldn't read media preferences": "Mediavoorkeuren konden niet worden gelezen",
+      "Your saved choices weren't changed. Try again.":
+        "Je bewaarde keuzes zijn niet gewijzigd. Probeer het opnieuw.",
+      "Not known yet. Try again in a moment.": "Nog niet bekend. Probeer het zo opnieuw.",
+      "No choices on this channel.": "Geen keuzes op deze zender.",
+      "No subtitles in this file.": "Geen ondertiteling in dit bestand.",
+      "No choices in this file.": "Geen keuzes in dit bestand.",
+    },
+  },
+);

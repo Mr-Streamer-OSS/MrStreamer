@@ -52,6 +52,8 @@ vi.mock("react-native", async () => {
     Text: view("span"),
     Pressable: view("button"),
     StatusBar: () => null,
+    BackHandler: { addEventListener: () => ({ remove() {} }) },
+    AppState: { addEventListener: () => ({ remove() {} }) },
     useWindowDimensions: () => ({ width: 412, height: 900 }),
     AccessibilityInfo: {
       isScreenReaderEnabled: () => new Promise<boolean>(() => {}),
@@ -103,6 +105,12 @@ vi.mock("../src/player/instance.ts", async () => {
   return {
     player: {
       state,
+      media: {
+        state: store({ pip: false, pipSupported: true, error: null, next: null }),
+        reconcile: vi.fn(),
+        cancelNext: vi.fn(),
+        watch: vi.fn(),
+      },
       play(intent: PlayIntent) {
         scenario.played.push(intent);
         state.set(playing(intent));
@@ -127,6 +135,12 @@ const REACT_DOM = "react-dom/client";
 const { createRoot } = (await import(REACT_DOM)) as {
   createRoot(container: Element): { render(node: ReactNode): void; unmount(): void };
 };
+
+vi.mock("../src/player/media-controls.tsx", () => ({
+  MediaRow: () => null,
+  MediaDialog: () => null,
+  MediaSheets: () => null,
+}));
 
 const { default: Watch } = await import("../src/app/watch.tsx");
 
@@ -297,4 +311,22 @@ it("refuses provider playback on the unprotected file route and returns to Downl
   expect(container.textContent).toBe("");
   expect(scenario.asked).toEqual(["replace /offline"]);
   expect(scenario.played).toEqual([]);
+});
+
+it("reconciles offline Watch through PiP and keeps the mini surface hidden", () => {
+  const file: PlayIntent = { kind: "file", path: "/private/copy.mp4", title: "Saved movie" };
+  player.state.set(playing(file));
+  scenario.pathname = "/offline/play";
+  const shown = open(null);
+  expect(player.media.reconcile).toHaveBeenCalled();
+  expect(player.media.watch).toHaveBeenCalledWith(true);
+  expect(shown.textContent).toContain("Downloaded");
+  act(() => player.media.state.set({ ...player.media.state.get(), pip: true }));
+  expect(shown.textContent).not.toContain("Downloaded");
+  act(() => player.media.state.set({ ...player.media.state.get(), pip: false }));
+  expect(shown.textContent).toContain("Downloaded");
+  expect(scenario.played).toEqual([]);
+  act(() => root?.unmount());
+  root = null;
+  expect(player.media.watch).toHaveBeenLastCalledWith(false);
 });

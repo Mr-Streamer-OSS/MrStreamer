@@ -44,6 +44,8 @@ data class Admission(
   /** Where a title, recording or file starts, in ms; live starts at its live edge. */
   val startMs: Long,
   val hold: HoldRef,
+  val title: String = "",
+  val preview: Boolean = false,
 )
 
 enum class Phase { PREPARING, BUFFERING, PLAYING, PAUSED, ENDED, FAILED, STOPPED }
@@ -91,6 +93,8 @@ data class Release(val attempt: String, val hold: HoldRef, val outcome: String)
 interface PlayerEvents {
   fun observed(observation: Observation)
   fun tracks(attempt: String, tracks: List<Track>)
+  fun media(attempt: String, pip: Boolean) {}
+  fun mediaCommand(attempt: String, command: String) {}
   fun released(release: Release)
 }
 
@@ -110,6 +114,23 @@ class PlayerOwner(
     /** Why it failed, until it plays again. */
     var failure: Failure? = null
   }
+
+  private var lastControls: List<Any?>? = null
+  private fun notifyChanged() {
+    val controls = listOf(attempt, live, nextAvailable, isPlaying, preview)
+    if (controls != lastControls) { lastControls = controls; changed?.invoke() }
+  }
+  var changed: (() -> Unit)? = null
+  val automatic: Boolean get() = player.trackSelectionParameters.overrides.values.none { it.type == C.TRACK_TYPE_VIDEO }
+  var nextAvailable = false
+  val preview: Boolean get() = current?.admission?.preview == true
+  val attempt: String? get() = current?.admission?.attempt
+  val live: Boolean get() = current?.admission?.mode == "live"
+  val isPlaying: Boolean get() = player.isPlaying
+  fun reconcile() { observe(); reportTracks() }
+  fun mediaCommand(command: String) { attempt?.let { events?.mediaCommand(it, command) } }
+  fun pauseCurrent() { attempt?.let { pause(it) } }
+  fun jump(by: Long) { attempt?.let { seek(it, player.currentPosition + by) } }
 
   private val main = Handler(player.applicationLooper)
   private var current: Current? = null
@@ -144,10 +165,15 @@ class PlayerOwner(
               Player.EVENT_POSITION_DISCONTINUITY,
               Player.EVENT_TIMELINE_CHANGED,
               Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
+              Player.EVENT_TRACK_SELECTION_PARAMETERS_CHANGED,
               Player.EVENT_IS_PLAYING_CHANGED,
               Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED,
             )
           ) observe()
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+          if (reason == Player.DISCONTINUITY_REASON_SEEK) mediaCommand("cancel-next")
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -163,21 +189,25 @@ class PlayerOwner(
     )
   }
 
-  /** Plays [admission], replacing what played before. */
-  fun admit(admission: Admission) {
-    val ending = end()
+  /** Plays [admission], replacing what played before; false means a preview was not admitted. */
+  fun admit(admission: Admission): Boolean {
+    if (admission.preview && !PlayerPip.canPreview()) return false
+    val ending = end(notify = false)
     val hold =
       Hold(main) { closed ->
         events?.released(Release(admission.attempt, admission.hold, if (closed) outcomeOf(admission) else "unconfirmed"))
       }
     current = Current(admission, hold)
+    player.volume = if (admission.preview) 0f else 1f
+    player.setAudioAttributes(player.audioAttributes, !admission.preview)
+    notifyChanged()
     val local = admission.hold as? HoldRef.LocalFile
     if (local != null && !File(local.path).isFile) {
       player.stop()
       player.clearMediaItems()
       ending?.let(::letGo)
       observe(Failure("file-missing", "ERROR_CODE_IO_FILE_NOT_FOUND"))
-      return
+      return true
     }
     try {
       prepare(admission, hold, local)
@@ -188,16 +218,19 @@ class PlayerOwner(
       player.clearMediaItems()
       ending?.let(::letGo)
       hold.retire()
+      notifyChanged()
       throw error
     }
     // Only now that its media is no longer the player's can what the last attempt held settle.
     ending?.let(::letGo)
+    nextAvailable = false
     player.setPlaybackSpeed(1f)
     player.trackSelectionParameters =
-      player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+      player.trackSelectionParameters.buildUpon().clearOverrides().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
     player.playWhenReady = true
     player.prepare()
     observe()
+    return true
   }
 
   /** Gives the player [admission]'s media, read through [hold]. */
@@ -217,6 +250,7 @@ class PlayerOwner(
       MediaItem.Builder()
         .setUri(if (local != null) Uri.fromFile(File(local.path)) else Uri.parse(admission.url))
         .setMediaId(admission.attempt)
+        .setMediaMetadata(androidx.media3.common.MediaMetadata.Builder().setTitle(admission.title).build())
         .setMimeType(
           when (admission.format) {
             "hls" -> MimeTypes.APPLICATION_M3U8
@@ -232,7 +266,7 @@ class PlayerOwner(
     if (admission.mode == "live") player.setMediaSource(source) else player.setMediaSource(source, admission.startMs)
   }
 
-  fun pause(attempt: String) = command(attempt, ::ownsCurrentItem) { player.pause() }
+  fun pause(attempt: String) = command(attempt, ::ownsCurrentItem) { mediaCommand("cancel-next"); player.pause() }
 
   /** Plays on; Live rejoins its live edge, an ended title starts again, a failed one tries again. */
   fun resume(attempt: String) =
@@ -244,7 +278,7 @@ class PlayerOwner(
     }
 
   fun seek(attempt: String, positionMs: Long) =
-    command(attempt, { ownsCurrentItem() && seekable() }) { player.seekTo(positionMs.coerceAtLeast(0)) }
+    command(attempt, { ownsCurrentItem() && seekable() }) { mediaCommand("cancel-next"); player.seekTo(positionMs.coerceAtLeast(0)) }
 
   fun setSpeed(attempt: String, speed: Float) =
     command(attempt, { current?.admission?.mode != "live" && speed in 0.25f..4f }) {
@@ -253,20 +287,29 @@ class PlayerOwner(
 
   /** Plays the video track [trackId] from the reported tracks, or chooses by itself again for null. */
   fun setQuality(attempt: String, trackId: String?): Boolean {
+    if (!live || tracksOf(player.currentTracks).count { it.type == "video" && it.supported } < 2) return false
+    return selectTrack(attempt, C.TRACK_TYPE_VIDEO, trackId)
+  }
+
+  fun setAudio(attempt: String, trackId: String) = selectTrack(attempt, C.TRACK_TYPE_AUDIO, trackId)
+  fun setText(attempt: String, trackId: String?) = selectTrack(attempt, C.TRACK_TYPE_TEXT, trackId)
+
+  private fun selectTrack(attempt: String, type: Int, trackId: String?): Boolean {
     if (trackId == null) {
       return command(attempt) {
         player.trackSelectionParameters =
-          player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO).build()
+          player.trackSelectionParameters.buildUpon().clearOverridesOfType(type).setTrackTypeDisabled(type, type == C.TRACK_TYPE_TEXT).build()
       }
     }
     val (groupIndex, trackIndex) =
       TRACK_ID.matchEntire(trackId)?.destructured?.let { (group, track) -> group.toInt() to track.toInt() } ?: return false
     val group = player.currentTracks.groups.getOrNull(groupIndex) ?: return false
-    val valid = group.type == C.TRACK_TYPE_VIDEO && trackIndex in 0 until group.length && group.isTrackSupported(trackIndex)
+    val valid = group.type == type && trackIndex in 0 until group.length && group.isTrackSupported(trackIndex)
     return command(attempt, { valid }) {
       player.trackSelectionParameters =
         player.trackSelectionParameters
           .buildUpon()
+          .setTrackTypeDisabled(type, false)
           .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, trackIndex))
           .build()
     }
@@ -319,7 +362,7 @@ class PlayerOwner(
   }
 
   /** Reports the current attempt's last position as stopped, and returns it for [letGo]. */
-  private fun end(): Current? {
+  private fun end(notify: Boolean = true): Current? {
     val ending = current ?: return null
     if (!ending.stopped) {
       ending.stopped = true
@@ -327,6 +370,7 @@ class PlayerOwner(
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
     current = null
+    if (notify) notifyChanged()
     return ending
   }
 
@@ -367,6 +411,7 @@ class PlayerOwner(
         else -> Phase.PAUSED
       }
     events?.observed(observationOf(now.admission, phase, now.failure))
+    notifyChanged()
   }
 
   private fun observationOf(admission: Admission, phase: Phase, failure: Failure?) =
@@ -428,7 +473,7 @@ class PlayerOwner(
             height = format.height.takeIf { it != Format.NO_VALUE },
             bitrate = format.bitrate.takeIf { it != Format.NO_VALUE },
             channels = format.channelCount.takeIf { it != Format.NO_VALUE },
-            selected = group.isTrackSelected(index),
+            selected = group.isTrackSupported(index) && group.isTrackSelected(index),
             supported = group.isTrackSupported(index),
           )
         }

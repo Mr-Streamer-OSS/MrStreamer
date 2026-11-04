@@ -762,10 +762,15 @@ Titles are tried whatever their file type: a version that fails says so in Watch
 details, and the version menu marks it and offers the others. Matroska (`.mkv`) goes through a
 format session; everything else goes to AVPlayer as it is, as does a `.mkv` that turns out to be
 another container. A session plays an H.264 or HEVC picture with AAC-LC, HE-AAC, AC-3, E-AC-3 or
-MP3 sound, with its sound tracks to choose from, starting where the title stopped. A track that
-ends early, pauses or starts late is silent there. One whose frames this can't make silent, such as
-HE-AAC or E-AC-3 over 5.1, stops there with a message when chosen, and Try again goes on with the
-main sound. A track AVPlayer doesn't play in HLS, such as AAC Main, or one that starts more than
+MP3 sound, with its sound tracks to choose from, starting where the title stopped. With no other
+playable sound family, it also offers fixed-block FLAC, mono or stereo, 16 or 24 bits, at 44.1
+or 48 kHz, with each block lasting at least two ticks of the track's clock; other FLAC variants
+fail with a reason. A track that ends early, pauses or starts late is silent there. One whose
+frames this can't make silent, such as FLAC, HE-AAC or E-AC-3 over 5.1, may start or end up to
+0.1 s (for FLAC, one frame) inside the picture; elsewhere it stops at a gap with a message when
+chosen, as FLAC also does at an invalid frame or a change in frame length. Try again goes on
+with the main sound, so a FLAC-only title stops there again. A track AVPlayer doesn't play in
+HLS, such as AAC Main, or one that starts more than
 five seconds after where playing starts, isn't offered. It needs the file's keyframe index
 (Matroska's Cues); other Matroska files fail as files Mr. Streamer can't play.
 
@@ -808,8 +813,9 @@ line, a 1 MB packet, 4 MB of lines alone, before a later line or in six tracks p
 one or 20 DVB tracks; `check.c` asks each subtitle segment of a title just opened, as after a seek,
 for `subs.mkv` and the file with the later line also with its reads failing from each one on, and
 `verify.py` checks every segment's lines against ffmpeg's own reading of the source.
-`subtitle-check.sh <out>` runs them all with what each must show, and fails on any miss. Whether
-AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
+`modules/title-formats/reference/flac-check.sh <out>` checks FLAC admission, gaps, bounded reads
+and subtitle retries on synthetic files. `subtitle-check.sh <out>` runs the subtitle fixtures
+with what each must show, and fails on any miss. Whether AVPlayer shows, seeks and switches these renditions as HLS describes, captions inside a
 Matroska title's picture included, is still to be seen on the simulator and a phone.
 
 ### Online subtitles

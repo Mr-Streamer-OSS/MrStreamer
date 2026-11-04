@@ -1,0 +1,8 @@
+<resources>
+  <string name="player_back">10 terug</string>
+  <string name="player_forward">10 vooruit</string>
+  <string name="player_pause">Pauzeren</string>
+  <string name="player_play">Afspelen</string>
+  <string name="player_next">Volgende aflevering</string>
+  <string name="player_close">Sluiten</string>
+</resources>

@@ -1,7 +1,7 @@
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActionSheetIOS,
   FlatList,
@@ -11,6 +11,8 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import {
   playChannel,
@@ -840,7 +842,7 @@ function GuideGrid({
 }: {
   library: Library;
   channels: readonly Channel[];
-  /** The country shown, which keeps its own scroll position. */
+  /** The country shown, which keeps its own scroll position. A new one remounts the grid (Live's key). */
   scope: string;
   header: ReactNode;
 }) {
@@ -915,7 +917,17 @@ function GuideGrid({
     [read.rows, from, until, now, place.chosen, scheduled, strip, fontScale, split, locale],
   );
 
-  const saved = gridScroll.get(scope);
+  // Restore after layout, once: mounting contentOffset clamps shallow positions before the
+  // automatic header inset is applied. Never replay an inset change recorded during a push/pop.
+  const saved = useRef(gridScroll.get(scope));
+  const list = useRef<FlatList<Channel>>(null);
+  const navigation = useNavigation();
+
+  // Save drag, momentum, accessibility and scroll-to-top completion while this screen is focused.
+  // Ignore the synthetic end event when a covered screen detaches.
+  const remember = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (navigation.isFocused()) gridScroll.set(scope, nativeEvent.contentOffset.y);
+  };
 
   return (
     <FlatList
@@ -1013,8 +1025,22 @@ function GuideGrid({
       getItemLayout={(_, index) => ({ length: height, offset: top + height * index, index })}
       contentInsetAdjustmentBehavior="automatic"
       contentContainerStyle={{ paddingBottom: inset }}
-      {...(saved === undefined ? {} : { contentOffset: { x: 0, y: saved } })}
-      onScroll={(event) => gridScroll.set(scope, event.nativeEvent.contentOffset.y)}
+      ref={list}
+      scrollToOverflowEnabled
+      onLayout={() => {
+        if (saved.current === undefined) return;
+        list.current?.scrollToOffset({ offset: saved.current, animated: false });
+        saved.current = undefined;
+      }}
+      onScroll={({ nativeEvent }) => {
+        // A touch can stop momentum without an end event. Keep user-driven samples as a fallback.
+        if ("responderIgnoreScroll" in nativeEvent && nativeEvent.responderIgnoreScroll === false) {
+          if (navigation.isFocused()) gridScroll.set(scope, nativeEvent.contentOffset.y);
+        }
+      }}
+      onScrollEndDrag={remember}
+      onMomentumScrollEnd={remember}
+      onScrollToTop={remember}
       scrollEventThrottle={100}
       onViewableItemsChanged={onVisible}
       viewabilityConfig={{ itemVisiblePercentThreshold: 10 }}

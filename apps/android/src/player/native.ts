@@ -21,12 +21,15 @@ export type HoldRef =
  */
 export interface Admission {
   readonly attempt: string;
+  /** Muted Home preview: no focus, session or saved playback state. */
+  readonly preview?: boolean;
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly format: StreamFormat;
   readonly mode: PlaybackMode;
   /** Where a title, recording or file starts, in ms. Live starts at its live edge. */
   readonly startMs: number;
+  readonly title?: string;
   readonly sourceId?: string;
   readonly path?: string;
 }
@@ -64,6 +67,7 @@ export interface Observation {
   readonly seekable: boolean;
   readonly speed: number;
   readonly failure: NativeFailure | null;
+  readonly qualityAutomatic?: boolean;
 }
 
 /** A track the media declares, and whether this phone decodes it. */
@@ -105,19 +109,35 @@ export interface Capabilities {
 type Listener<T> = (event: T) => void;
 
 export interface NativePlayer {
-  admit(admission: Admission): Promise<void>;
+  /** False refuses a preview; older native clients return no admission result. */
+  admit(admission: Admission): Promise<boolean | void>;
   pause(attempt: string): Promise<boolean>;
   resume(attempt: string): Promise<boolean>;
   seek(attempt: string, positionMs: number): Promise<boolean>;
   setSpeed(attempt: string, speed: number): Promise<boolean>;
   /** A video track's id, or null to choose by itself again. */
   setQuality(attempt: string, trackId: string | null): Promise<boolean>;
+  setAudio?(attempt: string, trackId: string): Promise<boolean>;
+  setText?(attempt: string, trackId: string | null): Promise<boolean>;
+  setNextAvailable?(attempt: string, available: boolean): Promise<void>;
+  setWatch?(visible: boolean): Promise<void>;
+  pipSupported?(): boolean;
+  enterPip?(): Promise<boolean>;
+  reconcile?(): Promise<void>;
   stop(attempt: string): Promise<boolean>;
   capabilities(): Capabilities;
   addListener(event: "onState", listener: Listener<Observation>): { remove(): void };
   addListener(
     event: "onTracks",
     listener: Listener<{ attempt: string; tracks: readonly Track[] }>,
+  ): { remove(): void };
+  addListener(
+    event: "onMedia",
+    listener: Listener<{ attempt: string; pip: boolean; pipSupported?: boolean }>,
+  ): { remove(): void };
+  addListener(
+    event: "onMediaCommand",
+    listener: Listener<{ attempt: string; command: "next" | "cancel-next" }>,
   ): { remove(): void };
   addListener(event: "onReleased", listener: Listener<Release>): { remove(): void };
 }

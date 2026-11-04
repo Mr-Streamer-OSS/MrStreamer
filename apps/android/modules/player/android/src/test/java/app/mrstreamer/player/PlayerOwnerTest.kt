@@ -30,6 +30,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
@@ -71,6 +72,7 @@ class PlayerOwnerTest {
 
   @After
   fun tearDown() {
+    resetPlayerState()
     players.forEach { it.release() }
     servers.forEach { it.shutdown() }
   }
@@ -116,6 +118,28 @@ class PlayerOwnerTest {
 
   private fun untilPhase(attempt: String, vararg phases: Phase) =
     until { recorder.of(attempt).lastOrNull()?.phase in phases }
+
+  @Test fun previewIsMutedAndNeverRequestsAudioFocus() {
+    val player = TestExoPlayerBuilder(context)
+      .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO)).build()
+    players += player
+    player.setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
+    val owner = PlayerOwner(player, recorder)
+    val media = fixture("h264-aac.mp4")
+    val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
+    PlayerPip.attach(activity); PlayerPip.started()
+    try {
+      owner.admit(file("preview", media).copy(preview = true))
+      until { recorder.of("preview").any { it.phase == Phase.PLAYING } }
+      assertEquals(0f, player.volume)
+      val audio = org.robolectric.Shadows.shadowOf(context.getSystemService(android.media.AudioManager::class.java))
+      assertEquals(null, audio.lastAudioFocusRequest)
+      owner.admit(file("normal", media))
+      until { recorder.of("normal").any { it.phase == Phase.PLAYING } }
+      assertEquals(1f, player.volume)
+      assertTrue(audio.lastAudioFocusRequest != null)
+    } finally { owner.stopAll(); media.delete(); PlayerPip.detach(activity); activity.finish() }
+  }
 
   @Test
   fun replacingAnAttemptStopsItClosesItsFileAndRefusesItsCommands() {
@@ -213,7 +237,7 @@ class PlayerOwnerTest {
     }
     val files = ladder.map { fixture("hls-ladder/$it") }
     val owner = owner()
-    owner.admit(file("a", files.first(), format = "hls"))
+    owner.admit(file("a", files.first(), format = "hls").copy(mode = "live"))
     untilPhase("a", Phase.PLAYING)
     val video = recorder.tracks.getValue("a").filter { it.type == "video" }
     assertEquals(listOf(180, 90), video.map { it.height })

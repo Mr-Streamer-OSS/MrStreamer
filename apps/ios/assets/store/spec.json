@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "direction": "Paper A: one genuine capture and a short headline",
+  "paper": "https://app.paper.design/file/01M65TDW63JP18V5XA4P7B62W9/p-C-0",
+  "rules": {
+    "checked": "2026-11-03",
+    "screenshots": "https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications",
+    "frames": "https://developer.apple.com/app-store/marketing/guidelines/"
+  },
+  "units": "Layout values are Paper points; multiply by the slot's scale for pixels.",
+  "style": {
+    "background": "#000000",
+    "title": {
+      "font": "Inter",
+      "weight": 900,
+      "letterSpacing": -0.045,
+      "colour": "#FFFFFF"
+    },
+    "hairline": {
+      "width": 1,
+      "colour": "#2C2C2E"
+    }
+  },
+  "slots": [
+    {
+      "id": "ipad-13",
+      "captureSlot": "S1",
+      "width": 2752,
+      "height": 2064,
+      "scale": 2,
+      "title": {
+        "size": 72,
+        "lineHeight": 76,
+        "lines": 1
+      },
+      "framed": {
+        "top": 64,
+        "gap": 44,
+        "width": 1051,
+        "height": 803
+      },
+      "frameless": {
+        "top": 64,
+        "gap": 44,
+        "width": 1051,
+        "height": 803
+      },
+      "headlines": {
+        "en-US": "The whole guide.",
+        "nl-NL": "De hele gids.",
+        "fr-FR": "Tout le guide.",
+        "de-DE": "Der ganze Programmführer.",
+        "es-ES": "Toda la guía."
+      }
+    },
+    {
+      "id": "duo-inner",
+      "captureSlot": "S4",
+      "width": 2853,
+      "height": 2007,
+      "scale": 3,
+      "title": {
+        "size": 50,
+        "lineHeight": 54,
+        "lines": 1
+      },
+      "framed": {
+        "top": 44,
+        "gap": 30,
+        "width": 668,
+        "height": 482
+      },
+      "frameless": {
+        "top": 44,
+        "gap": 28,
+        "width": 704,
+        "height": 495
+      },
+      "headlines": {
+        "en-US": "Unfold the guide.",
+        "nl-NL": "Vouw de gids open.",
+        "fr-FR": "Dépliez le guide.",
+        "de-DE": "Den Programmführer entfalten.",
+        "es-ES": "Despliega la guía."
+      }
+    },
+    {
+      "id": "duo-outer",
+      "captureSlot": "S6",
+      "width": 1398,
+      "height": 2034,
+      "scale": 3,
+      "title": {
+        "size": 37,
+        "lineHeight": 40,
+        "lines": 2
+      },
+      "framed": {
+        "top": 40,
+        "gap": 26,
+        "width": 336,
+        "height": 475
+      },
+      "frameless": {
+        "top": 40,
+        "gap": 26,
+        "width": 345,
+        "height": 502
+      },
+      "headlines": {
+        "en-US": "Every channel, folded.",
+        "nl-NL": "Alle zenders, dichtgevouwen.",
+        "fr-FR": "Toutes les chaînes, repliées.",
+        "de-DE": "Alle Sender, zusammengeklappt.",
+        "es-ES": "Todos los canales, plegados."
+      }
+    }
+  ]
+}
