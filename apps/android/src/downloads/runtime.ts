@@ -1,3 +1,8 @@
+import { episodesIn } from "../../../../packages/mobile/series-download/index.ts";
+import { seriesDownloads } from "./series.ts";
+import { offlineNext } from "./offline-next.ts";
+import { Snapshot } from "./state.ts";
+import { type } from "arktype";
 import { router } from "expo-router";
 import { requireNativeModule } from "expo";
 import { Alert, AppState, PermissionsAndroid, Platform } from "react-native";
@@ -8,12 +13,12 @@ import { libraryDownloads, libraryIntents, type DownloadIntent } from "../librar
 import { player } from "../player/instance.ts";
 import { store } from "../platform/store.ts";
 import { t } from "./copy.ts";
-import { downloadState, type TransferPort, type DownloadRow, type Action } from "./state.ts";
+import { downloadState, type BulkTransferPort, type DownloadRow, type Action } from "./state.ts";
 
 let owner: ReturnType<typeof createRuntime> | undefined;
 
 function createRuntime() {
-  const native = requireNativeModule<TransferPort>("Transfers");
+  const native = requireNativeModule<BulkTransferPort>("Transfers");
   const model = downloadState(native);
 
   let askedNotifications = false;
@@ -73,6 +78,15 @@ function createRuntime() {
 
     await syncPlayer();
 
+    const series = details.value?.kind === "series" ? details.value : undefined;
+
+    const seriesKey = series?.title?.key;
+
+    const order =
+      series && seriesKey
+        ? episodesIn(series, media.version, { kind: "series" }).map((ref) => ref.id)
+        : undefined;
+
     const copyId = await native.enqueue(
       JSON.stringify({
         key: JSON.stringify([media.sourceId, media.kind, id, container]),
@@ -87,6 +101,9 @@ function createRuntime() {
         season: episode?.season,
         episode: episode?.number,
         episodeName: episode?.title,
+        seriesKey,
+        seriesId: seriesKey ? media.version.id : undefined,
+        order,
       }),
     );
 
@@ -180,8 +197,43 @@ function createRuntime() {
   return {
     ...model,
     native,
+    series() {
+      return seriesDownloads(
+        native,
+        async (row) => {
+          const path = await native.filePath(row.id);
+          const current = player.state.get();
+
+          if (
+            current.kind === "playing" &&
+            current.intent.kind === "file" &&
+            current.intent.path === path
+          )
+            return false;
+
+          const released = await player.release(
+            (hold) => hold.kind === "file" && hold.path === path,
+          );
+
+          return released.every((entry) => entry.outcome === "file-closed");
+        },
+        () => model.refresh(),
+      );
+    },
     start(screen = false) {
       if (stop) return lease(screen);
+
+      const unregisterOffline = player.media?.registerOfflineNext(async (path) => {
+        const parsed = Snapshot(JSON.parse(await native.snapshot()));
+
+        if (parsed instanceof type.errors) return { kind: "read" };
+
+        for (const row of parsed.rows) {
+          if ((await native.filePath(row.id)) === path) return offlineNext(native, row);
+        }
+
+        return { kind: "last" };
+      });
 
       const unregister = libraryIntents.register({
         download: (intent) => tapAction(intent.media, () => enqueue(intent)),
@@ -208,6 +260,19 @@ function createRuntime() {
                 } catch {
                   // playCopy refreshes the native missing-file state before refusing.
                 }
+              } else if (action === "replace") {
+                const replace = () => {
+                  void downloads()
+                    .replace(row)
+                    .catch(() => Alert.alert(t("Couldn't save that change.")));
+                };
+
+                if (row.reason === "file-changed")
+                  Alert.alert(t("Replace this changed copy?"), undefined, [
+                    { text: t("Cancel"), style: "cancel" },
+                    { text: t("Replace"), onPress: replace },
+                  ]);
+                else replace();
               } else {
                 const reason = await downloads().command(row, action);
 
@@ -269,6 +334,7 @@ function createRuntime() {
         })
         .catch(() => {});
       stop = () => {
+        unregisterOffline?.();
         unregister();
         unregisterPresentation();
         unsubscribe();
@@ -279,6 +345,36 @@ function createRuntime() {
       };
 
       return lease(screen);
+    },
+    async replace(row: DownloadRow) {
+      const review: unknown = JSON.parse(await native.review(JSON.stringify([row])));
+      const parsed = type({ token: "string" })(review);
+
+      if (parsed instanceof type.errors) throw new Error("review");
+
+      try {
+        const path = await native.filePath(row.id);
+        const current = player.state.get();
+
+        if (
+          current.kind === "playing" &&
+          current.intent.kind === "file" &&
+          current.intent.path === path
+        )
+          return "playing";
+        const release = await player.release((hold) => hold.kind === "file" && hold.path === path);
+
+        if (release.some((r) => r.outcome !== "file-closed")) return "closing";
+
+        return await native.admit(
+          parsed.token,
+          row.key,
+          row.reason === "file-changed" ? "changed" : "missing",
+        );
+      } finally {
+        await native.endReview(parsed.token);
+        await model.refresh();
+      }
     },
     async playCopy(row: DownloadRow) {
       if (removing.has(row.id)) throw new Error("removing");

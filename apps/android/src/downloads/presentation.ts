@@ -9,7 +9,16 @@ import { t } from "./copy.ts";
 
 /** What a row offers. `delete` and `cancel` ask first; the rest happen at once. */
 export type RowChoice =
-  "pause" | "resume" | "retry" | "play" | "delete" | "up" | "down" | "cancel" | "remove";
+  | "replace"
+  | "pause"
+  | "resume"
+  | "retry"
+  | "play"
+  | "delete"
+  | "up"
+  | "down"
+  | "cancel"
+  | "remove";
 
 export interface RowStatus {
   /** The one state line, or null for a copy with nothing more to say. */
@@ -24,7 +33,10 @@ export interface RowStatus {
 export function isCopy(row: DownloadRow) {
   if (row.state === "removing") return row.total > 0 && row.bytes === row.total;
 
-  return row.state === "complete" || (row.state === "failed" && row.reason === "missing");
+  return (
+    row.state === "complete" ||
+    (row.state === "failed" && (row.reason === "missing" || row.reason === "file-changed"))
+  );
 }
 
 /** "1.2 GB of 2.8 GB", or null before anything arrived. */
@@ -53,21 +65,23 @@ export function rowStatus(row: DownloadRow, providerRemoved: boolean): RowStatus
     case "failed":
       return {
         text: t(
-          row.reason === "missing"
-            ? "File missing"
-            : row.reason === "playlist"
-              ? "This provider returned a playlist, not a downloadable file."
-              : row.reason === "document"
-                ? "This provider returned a document, not a video file."
-                : row.reason === "length"
-                  ? "The provider did not report the file size. This file cannot be checked for completion."
-                  : row.reason === "remove"
-                    ? "The file could not be removed. Try removing it again."
-                    : row.reason === "disk"
-                      ? "Disk full. Free some space, then retry."
-                      : row.reason === "credentials"
-                        ? "The provider login changed or is unavailable."
-                        : "The download couldn't go on from where it stopped.",
+          row.reason === "file-changed"
+            ? "File changed"
+            : row.reason === "missing"
+              ? "File missing"
+              : row.reason === "playlist"
+                ? "This provider returned a playlist, not a downloadable file."
+                : row.reason === "document"
+                  ? "This provider returned a document, not a video file."
+                  : row.reason === "length"
+                    ? "The provider did not report the file size. This file cannot be checked for completion."
+                    : row.reason === "remove"
+                      ? "The file could not be removed. Try removing it again."
+                      : row.reason === "disk"
+                        ? "Disk full. Free some space, then retry."
+                        : row.reason === "credentials"
+                          ? "The provider login changed or is unavailable."
+                          : "The download couldn't go on from where it stopped.",
         ),
         failed: true,
         progress: null,
@@ -96,7 +110,13 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
     case "complete":
       return "play";
     case "failed":
-      return row.reason === "missing" ? "delete" : row.reason === "remove" ? "remove" : "retry";
+      return row.reason === "missing"
+        ? "delete"
+        : row.reason === "file-changed"
+          ? "replace"
+          : row.reason === "remove"
+            ? "remove"
+            : "retry";
     case "paused":
       return "resume";
     case "queued":
@@ -117,7 +137,9 @@ export function sheetChoices(row: DownloadRow, rows: readonly DownloadRow[]): Ro
     case "complete":
       return ["play", "delete"];
     case "failed":
-      return row.reason === "missing" ? ["delete"] : ["retry", "remove"];
+      return row.reason === "missing" || row.reason === "file-changed"
+        ? ["replace", "delete"]
+        : ["retry", "remove"];
     case "removing":
       return [];
     case "running":

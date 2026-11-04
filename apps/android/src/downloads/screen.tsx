@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { formatBytes } from "@mrstreamer/core/i18n";
@@ -34,6 +34,7 @@ const TRACK = "#3A3A3A";
 const small = { fontSize: 13, lineHeight: 18 } as const;
 
 const choices = {
+  replace: { label: "Replace", icon: "refresh" },
   pause: { label: "Pause", icon: "pause" },
   resume: { label: "Resume", icon: "file-download" },
   retry: { label: "Retry", icon: "refresh" },
@@ -91,6 +92,27 @@ export default function DownloadsScreen() {
     close();
 
     switch (choice) {
+      case "replace": {
+        const replace = () => {
+          void owner
+            .replace(row)
+            .then((reason) => {
+              if (reason === "playing" || reason === "closing")
+                setOverlay({ kind: "refused", row, reason });
+            })
+            .catch(() => setOverlay({ kind: "unreadable", row }));
+        };
+
+        if (row.reason === "file-changed")
+          Alert.alert(t("Replace this changed copy?"), undefined, [
+            { text: t("Cancel"), style: "cancel" },
+            { text: t("Replace"), onPress: replace },
+          ]);
+        else replace();
+
+        return;
+      }
+
       case "play":
         return void play(row);
       case "cancel":
@@ -106,7 +128,9 @@ export default function DownloadsScreen() {
       key={item.id}
       row={item}
       status={rowStatus(item, providerRemoved(item))}
-      onChoose={(choice) => choose(item, choice)}
+      onChoose={(choice) =>
+        choose(item, choice === "delete" && item.reason === "missing" ? "replace" : choice)
+      }
       onMore={() => setOverlay({ kind: "sheet", row: item })}
     />
   );
@@ -293,7 +317,7 @@ function Row({
   onMore: () => void;
 }) {
   const { focused, handlers } = useKeyboardFocus();
-  const trailing = trailingChoice(row);
+  const trailing = row.reason === "missing" ? "replace" : trailingChoice(row);
   const facts = rowFacts(row);
 
   return (

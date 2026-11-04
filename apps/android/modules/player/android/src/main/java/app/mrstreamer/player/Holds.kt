@@ -61,6 +61,7 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
   private inner class Counted(private val upstream: DataSource, private val allowed: (Uri) -> Boolean) :
     DataSource {
     private var counted = false
+    private var localPath: String? = null
 
     override fun addTransferListener(transferListener: TransferListener) =
       upstream.addTransferListener(transferListener)
@@ -71,6 +72,10 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
       if (!counted) {
         if (!opened()) throw IOException("The attempt was released")
         counted = true
+        if (dataSpec.uri.scheme == "file") {
+          localPath = dataSpec.uri.path
+          localPath?.let { LocalFiles.opened(it) }
+        }
       }
       return upstream.open(dataSpec)
     }
@@ -86,6 +91,8 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
         upstream.close()
       } finally {
         if (counted) {
+          localPath?.let { LocalFiles.closed(it) }
+          localPath = null
           counted = false
           closed()
         }

@@ -20,12 +20,19 @@ const Row = type({
   "season?": "number",
   "episode?": "number",
   "episodeName?": "string",
+  "seriesKey?": "string",
+  "seriesId?": "string",
+  "order?": "string[]",
   "blocked?": "boolean",
   "poster?": "string",
   "artwork?": "string",
 });
 
-const Snapshot = type({ rows: Row.array(), free: "number >= 0", "notifications?": "boolean" });
+export const Snapshot = type({
+  rows: Row.array(),
+  free: "number >= 0",
+  "notifications?": "boolean",
+});
 
 export type DownloadRow = typeof Row.infer;
 
@@ -44,6 +51,12 @@ export interface TransferPort {
   path(id: string): Promise<string>;
   filePath(id: string): Promise<string>;
   blockSource(sourceId: string, blocked: boolean): Promise<void>;
+}
+
+export interface BulkTransferPort extends TransferPort {
+  review(json: string): Promise<string>;
+  endReview(token: string): Promise<void>;
+  admit(token: string, key: string, expected: string): Promise<string>;
 }
 
 export type DownloadState = {

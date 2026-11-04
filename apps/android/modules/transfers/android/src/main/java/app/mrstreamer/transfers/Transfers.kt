@@ -31,7 +31,7 @@ object Transfers {
 
   fun isBlocked(source: String): Boolean = synchronized(Ledger.lock) { source in blockedSources }
 
-  fun clearAuthority() = synchronized(Ledger.lock) { blockedSources.clear() }
+  fun clearAuthority() = synchronized(Ledger.lock) { blockedSources.clear(); reviews.clear() }
 
   fun block(context: Context, source: String, blocked: Boolean) = synchronized(Ledger.lock) {
     if (blocked) blockedSources.add(source) else blockedSources.remove(source)
@@ -72,7 +72,7 @@ object Transfers {
     val rows = ledger.read()
     val row = rows.first { it.getString("id") == id }
     val file = ledger.media(id)
-    if (row.getString("state") != "complete" || !file.canRead() || file.length() <= 0 || file.length() != row.getLong("total")) {
+    if (row.getString("state") != "complete" || !file.isFile || !file.canRead() || file.length() <= 0 || file.length() != row.getLong("total")) {
       ledger.recover(row)
       ledger.save(rows)
       error("missing")
@@ -101,6 +101,73 @@ object Transfers {
     JSONObject().put("rows", org.json.JSONArray(publicRows)).put("free", ledger.root.usableSpace).put("notifications", context.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled()).toString()
   }
 
+  private data class Review(val source: String, val binding: String, val rows: Map<String, JSONObject>, val expected: Map<String, String>)
+  private val reviews = mutableMapOf<String, Review>()
+
+  /** Freeze native file identities and outcomes, never credentials, for one confirmation. */
+  fun review(context: Context, json: String): String = synchronized(Ledger.lock) {
+    val requested = org.json.JSONArray(json)
+    check(requested.length() > 0)
+    val source = requested.getJSONObject(0).getString("sourceId")
+    val binding = fingerprint(Credentials.read(context, source) ?: error("credentials"))
+    val ledger = Ledger(context)
+    val rows = ledger.read()
+    rows.filter { it.optString("state") == "complete" }.forEach { ledger.recover(it) }
+    ledger.save(rows)
+    val entries = (0 until requested.length()).map { requested.getJSONObject(it) }.associateBy { row ->
+      check(row.getString("sourceId") == source)
+      check(row.getString("key") == org.json.JSONArray(listOf(source, row.getString("kind"), row.getString("mediaId"), row.getString("container"))).toString())
+      row.getString("key")
+    }
+    // Attach the reviewed series order to exact files already on this device, including legacy copies.
+    for ((key, request) in entries) {
+      val kept = rows.find { it.getString("key") == key } ?: continue
+      for (field in listOf("seriesKey", "seriesId", "order")) {
+        if (request.has(field)) kept.put(field, request.get(field))
+      }
+    }
+    ledger.save(rows)
+    val token = UUID.randomUUID().toString()
+    reviews[token] = Review(source, binding, entries, rows.associate { it.getString("key") to it.toString() })
+    JSONObject().put("token", token).put("snapshot", JSONObject(snapshot(context, false))).toString()
+  }
+
+  fun endReview(token: String) = synchronized(Ledger.lock) { reviews.remove(token); Unit }
+
+  /** Compare the durable row again under the writer lock before every accepted addition. */
+  fun admit(context: Context, token: String, key: String, expected: String): String = synchronized(Ledger.lock) { synchronized(Credentials) admission@ {
+    val review = reviews[token] ?: return@admission "stopped"
+    val secret = Credentials.read(context, review.source)
+    if (secret == null || fingerprint(secret) != review.binding) return@admission "login"
+    val request = review.rows[key] ?: error("identity")
+    val ledger = Ledger(context)
+    val rows = ledger.read()
+    val row = rows.find { it.getString("key") == key }
+    if (row != null && row.optString("state") == "complete") { ledger.recover(row); ledger.save(rows) }
+    val frozen = review.expected[key]
+    if ((row == null) != (frozen == null) || row != null && row.toString() != frozen) return@admission "skipped"
+    val status = if (row == null) "none" else if (row.optString("state") == "failed")
+      when (row.optString("reason")) { "missing" -> "missing"; "file-changed" -> "changed"; else -> "failed" }
+      else "held"
+    if (status != expected) return@admission "skipped"
+    if (status == "missing" && row != null && ledger.media(row.getString("id")).exists()) return@admission "skipped"
+    if (row == null) {
+      add(context, request.toString())
+      return@admission "added"
+    }
+    // A replacement receives a new transfer identity.
+    if (status in listOf("missing", "changed")) {
+      app.mrstreamer.player.LocalFiles.unused(ledger.media(row.getString("id")).absolutePath) {
+        command(context, row.getString("id"), "remove")
+      }
+      check(Ledger(context).read().none { it.getString("key") == key })
+      add(context, request.toString())
+      return@admission "replaced"
+    }
+    if (status == "failed") { command(context, row.getString("id"), "retry"); return@admission "retried" }
+    "skipped"
+  } }
+
   fun add(context: Context, json: String) = synchronized(Ledger.lock) {
     val row = JSONObject(json)
     val ledger = Ledger(context)
@@ -119,19 +186,19 @@ object Transfers {
     row.getString("id")
   }
 
-  fun command(context: Context, id: String, action: String) = synchronized(Ledger.lock) {
+  fun command(context: Context, id: String, action: String) = synchronized(Ledger.lock) { app.mrstreamer.player.LocalFiles.unused(Ledger(context).media(id).absolutePath) command@ {
     val ledger = Ledger(context)
     val rows = ledger.read()
-    val row = rows.find { it.getString("id") == id } ?: return@synchronized
+    val row = rows.find { it.getString("id") == id } ?: return@command
     when (action) {
       "pause" -> {
-        if (row.getString("state") !in listOf("queued", "running")) return@synchronized
+        if (row.getString("state") !in listOf("queued", "running")) return@command
         row.put("state", "paused"); Ledger.attempt(row) }
       "cancel", "remove" -> {
-        if (action == "cancel" && row.getString("state") == "complete") return@synchronized
+        if (action == "cancel" && row.getString("state") == "complete") return@command
         row.put("state", "removing"); Ledger.attempt(row) }
       "resume", "retry" -> {
-        if (row.getString("state") !in listOf("paused", "failed")) return@synchronized
+        if (row.getString("state") !in listOf("paused", "failed")) return@command
         val secret = Credentials.read(context, row.getString("sourceId")) ?: error("credentials")
         val binding = fingerprint(secret)
         if (binding != row.getString("binding")) {
@@ -144,10 +211,10 @@ object Transfers {
       }
       "up", "down" -> {
         val at = rows.indexOf(row)
-        if (row.getString("state") !in listOf("queued", "paused")) return@synchronized
+        if (row.getString("state") !in listOf("queued", "paused")) return@command
         val candidates = if (action == "up") (at - 1 downTo 0) else (at + 1..rows.lastIndex)
         val next = candidates.firstOrNull { rows[it].getString("state") in listOf("queued", "paused") }
-          ?: return@synchronized
+          ?: return@command
         val other = rows[next]; rows[next] = row; rows[at] = other
       }
       else -> error("command")
@@ -159,5 +226,5 @@ object Transfers {
       ledger.save(rows)
     }
     kick(context)
-  }
+  } }
 }

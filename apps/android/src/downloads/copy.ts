@@ -11,6 +11,9 @@ const english = {
     "The provider did not report the file size. This file cannot be checked for completion.",
   "The file could not be removed. Try removing it again.":
     "The file could not be removed. Try removing it again.",
+  "File changed": "File changed",
+  Replace: "Replace",
+  "Replace this changed copy?": "Replace this changed copy?",
   Downloads: "Downloads",
   Downloaded: "Downloaded",
   Downloading: "Downloading",
@@ -77,6 +80,9 @@ const dutch = {
     "De provider gaf geen bestandsgrootte door. Deze download kan niet op volledigheid worden gecontroleerd.",
   "The file could not be removed. Try removing it again.":
     "Het bestand kon niet worden verwijderd. Probeer het opnieuw.",
+  "File changed": "Bestand gewijzigd",
+  Replace: "Vervangen",
+  "Replace this changed copy?": "Deze gewijzigde kopie vervangen?",
   Downloads: "Downloads",
   Downloaded: "Gedownload",
   Downloading: "Downloaden",

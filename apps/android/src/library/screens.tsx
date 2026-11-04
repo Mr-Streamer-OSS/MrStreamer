@@ -1,3 +1,5 @@
+import { stopSeriesDownloads } from "../downloads/series.ts";
+import { SeriesDownload } from "./series-download.tsx";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
@@ -1110,6 +1112,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
 
   const kind = params.kind === "series" || params.kind === "movie" ? params.kind : undefined;
   const title = kind ? model.title(kind, params.title ?? "") : undefined;
+  const [downloadRevision, setDownloadRevision] = useState(0);
   const [menu, setMenu] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -1159,6 +1162,9 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     : [];
 
   const pick = (next: string | null) => {
+    stopSeriesDownloads("version");
+    setDownloadRevision((value) => value + 1);
+
     if (!title) return;
 
     try {
@@ -1301,6 +1307,16 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
         onSelect={(season) => router.setParams({ season })}
         inset={beside ? 12 : 4}
       />
+      {value?.kind === "series" && version && details && selectedSeason ? (
+        <SeriesDownload
+          key={`${key}:${selectedSeason.number}:${downloadRevision}`}
+          details={value}
+          version={version}
+          containers={details.containers}
+          season={selectedSeason.number}
+          revision={downloadRevision}
+        />
+      ) : null}
       {shown
         ? selectedSeason?.episodes.map((episode) => (
             <EpisodeRow
@@ -1313,6 +1329,15 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
             />
           ))
         : null}
+      {value?.kind === "series" && version && details ? (
+        <SeriesDownload
+          key={`${key}:${downloadRevision}`}
+          details={value}
+          version={version}
+          containers={details.containers}
+          revision={downloadRevision}
+        />
+      ) : null}
     </>
   ) : null;
 
