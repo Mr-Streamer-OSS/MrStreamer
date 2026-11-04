@@ -1,4 +1,5 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { SubtitleSettingsSection } from "../subtitles/settings-section.tsx";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useRef, useState, useSyncExternalStore, type ComponentRef } from "react";
 import {
@@ -259,6 +260,7 @@ export function SettingsScreen() {
             onPress={() => router.push(guidesHref(destinationIn(segments)))}
           />
         </Section>
+        <SubtitleSettingsSection notify={notify} />
         <Section name={t("Privacy")}>
           <SwitchRow
             label={t("Share basic usage statistics")}

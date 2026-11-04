@@ -28,7 +28,7 @@ const SIZES = [
  * Paper A's Subtitles group in Settings, between Media and TMDB: the SubDL API key, only ever
  * Saved or Not set, whose Replace asks for the whole key again and whose Remove keeps downloaded
  * subtitles, and Text size for all subtitles. A read or write this phone refused is
- * `notify`'d as the Settings screen's snackbar with Try again. Insertion is pending the Settings handoff.
+ * `notify`'d as the Settings screen's snackbar with Try again.
  */
 export function SubtitleSettingsSection({
   notify,

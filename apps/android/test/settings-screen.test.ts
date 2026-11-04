@@ -1,6 +1,7 @@
 import type { ShareContent } from "react-native";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { writeJson } from "../src/platform/storage.ts";
+import type { SnackbarMessage } from "../src/settings/parts.tsx";
 import { Window } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -16,6 +17,7 @@ const scenario = vi.hoisted(() => {
   return {
     /** The app's files folder; a name in `refused` keeps its old contents on a write. */
     files: new Map<string, string>([["language.json", JSON.stringify({ choice: "nl-NL" })]]),
+    subtitleRetries: 0,
     refused: new Set<string>(),
     params: {} as Record<string, string | undefined>,
     asked: [] as string[],
@@ -279,6 +281,21 @@ const { currentLanguage, setLanguage } = await import("@mrstreamer/core/i18n");
 await import("../index.ts");
 
 const launchedIn = currentLanguage().locale;
+
+// The subtitle section has its own mounted owner tests. Here its public notification callback
+// checks that Settings hosts it and presents its retry through the shared snackbar.
+vi.mock("../src/subtitles/settings-section.tsx", () => ({
+  SubtitleSettingsSection: ({ notify }: { notify: (message: SnackbarMessage) => void }) =>
+    createElement("button", {
+      "aria-label": "Subtitle settings refusal",
+      onClick: () =>
+        notify({
+          text: "Fixture subtitle save failed",
+          action: { label: "Try again", run: () => scenario.subtitleRetries++ },
+        }),
+    }),
+}));
+
 const { SettingsScreen } = await import("../src/settings/settings-screen.tsx");
 const { default: ConsentPrompt } = await import("../src/settings/consent-prompt.tsx");
 
@@ -306,6 +323,7 @@ const buttons = (container: ReturnType<typeof show>) =>
   );
 
 beforeEach(() => {
+  scenario.subtitleRetries = 0;
   scenario.shareRefused = false;
   scenario.saveRefused = false;
   scenario.connections = [];
@@ -322,6 +340,14 @@ beforeEach(() => {
   scenario.removeLast = false;
   scenario.releaseWait = null;
   scenario.destination = "(live)";
+});
+
+it("presents the subtitle section's failure and retries it through Settings", () => {
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Subtitle settings refusal");
+  expect(shown.textContent).toContain("Fixture subtitle save failed");
+  press(shown, "Try again");
+  expect(scenario.subtitleRetries).toBe(1);
 });
 
 afterEach(() => {
