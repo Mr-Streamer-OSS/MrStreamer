@@ -95,10 +95,7 @@ const AuthorizationView = lazy(() =>
 export type AuthorizationView = Infer<typeof AuthorizationView>;
 
 /** Receipts that read, and how many didn't: one bad entry hides no other. */
-function readable<T>(
-  parse: Type<T>,
-  values: Json | readonly object[] | undefined,
-): Type<T>["infer"][] {
+function readable<T>(parse: Type<T>, values: Json | undefined): Type<T>["infer"][] {
   return (Array.isArray(values) ? values : []).flatMap((value) => {
     const parsed = parse(value);
 
@@ -114,9 +111,9 @@ const Envelope = lazy(() =>
     foregroundToken: "string | null",
     blocked: "'none' | 'locked' | 'storage' | 'corrupt' | 'capacity' | 'recovering'",
     sources: "string[]",
-    authorizations: "object[]",
-    receipts: "object[]",
-    legacy: { receipts: "object[]" },
+    authorizations: "unknown[]",
+    receipts: "unknown[]",
+    legacy: { receipts: "unknown[]" },
   }),
 );
 
@@ -409,9 +406,21 @@ export const transfers = {
       foregroundToken: body.foregroundToken,
       blocked: body.blocked,
       sources: body.sources,
-      authorizations: readable(AuthorizationView(), body.authorizations),
-      receipts: readable(ReceiptV2(), body.receipts),
-      legacy: readable(LegacyReceipt(), body.legacy.receipts),
+      authorizations: body.authorizations.flatMap((entry) => {
+        const parsed = AuthorizationView()(entry);
+
+        return parsed instanceof type.errors ? [] : [parsed];
+      }),
+      receipts: body.receipts.flatMap((entry) => {
+        const parsed = ReceiptV2()(entry);
+
+        return parsed instanceof type.errors ? [] : [parsed];
+      }),
+      legacy: body.legacy.receipts.flatMap((entry) => {
+        const parsed = LegacyReceipt()(entry);
+
+        return parsed instanceof type.errors ? [] : [parsed];
+      }),
     };
   },
   finishForegroundReconcile: async (token: string): Promise<void> =>

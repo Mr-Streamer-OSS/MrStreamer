@@ -67,6 +67,12 @@ async function readStored(path: string): Promise<Stored | null> {
   const data = await readJson(path);
   const parsed = Stored()(data);
 
+  if (data !== null && parsed instanceof type.errors) {
+    console.warn(
+      `[storage] ignoring ${path}: ${parsed.map((error) => `${error.path}: ${error.expected}`).join("; ")}`,
+    );
+  }
+
   if (
     parsed instanceof type.errors ||
     data === null ||

@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import { Failed } from "@mrstreamer/core/failure";
 import type { Secrets } from "../src/main/platform/secrets.ts";
@@ -90,6 +90,22 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
 }
 
 describe("subscriptions", () => {
+  it("logs schema failures in subscriptions.json without saved values", async ({
+    onTestFinished,
+  }) => {
+    const { dataDir, create } = await subscriptions();
+    const path = join(dataDir, "subscriptions.json");
+    await writeFile(path, JSON.stringify({ version: "private-invalid-value", subscriptions: [] }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warning.mockRestore());
+
+    await (await create()).list();
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(`[storage] ignoring ${path}:`));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("version:"));
+    expect(warning.mock.calls.flat().join(" ")).not.toContain("private-invalid-value");
+  });
+
   it("connects with a valid login and reports the account", async () => {
     const provider = await fakeProvider();
     const { service } = await subscriptions();

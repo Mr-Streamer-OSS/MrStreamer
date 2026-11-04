@@ -1031,6 +1031,13 @@ async function readRegistry(path: string): Promise<{
 }> {
   const data = await readJson(path);
   const head = Registry()(data);
+
+  if (data !== null && head instanceof type.errors) {
+    console.warn(
+      `[storage] ignoring ${path}: ${head.map((error) => `${error.path}: ${error.expected}`).join("; ")}`,
+    );
+  }
+
   const entries: RegistryEntry[] = [];
 
   if (

@@ -344,7 +344,7 @@ describe("Demo through the production lifecycle", () => {
         sources: [],
         authorizations: [],
         legacy: { receipts: [] },
-        receipts: [receipt, { ...receipt, receipt: "bad", sequence: NaN }],
+        receipts: [receipt, null, { ...receipt, receipt: "bad", sequence: NaN }],
       }),
     };
     vi.resetModules();

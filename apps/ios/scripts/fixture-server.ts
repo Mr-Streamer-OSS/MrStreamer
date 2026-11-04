@@ -589,8 +589,14 @@ createServer((request, response) => {
 createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://control.test");
 
-  const json = (body: import("@mrstreamer/contracts/json").Json) =>
-    answer(response, 200, "application/json", JSON.stringify(body));
+  const json = (
+    body:
+      | import("@mrstreamer/contracts/json").Json
+      | Logged[]
+      | NonNullable<typeof profile>
+      | ReturnType<typeof maker.provenance>
+      | (string | undefined)[],
+  ) => answer(response, 200, "application/json", JSON.stringify(body));
 
   const method = request.method ?? "GET";
 
