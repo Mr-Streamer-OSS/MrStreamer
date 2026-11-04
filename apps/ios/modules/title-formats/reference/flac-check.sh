@@ -60,6 +60,45 @@ for start in 0 7.3; do
     fi
   done
 done
+# Check whole decoded sound without -t/-to, including the last frame. FFmpeg decodes FLAC
+# independently of MP4 sample durations, so also compare those durations to decoded lengths:
+# Apple decoders can pad a short last frame when its MP4 duration overstates its length.
+python3 -I - "$out" <<'PYEND' || fail 'FLAC whole sound and frame durations'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+out = Path(sys.argv[1])
+ok = True
+for name in ('stereo16', 'stereo24', 'mono', 'block4096', 'corrupt-last'):
+    folder = out / 'start-0' / name
+    joined = folder / 'whole.mp4'
+    segments = sorted(folder.glob('a0-*.m4s'), key=lambda p: int(p.stem.split('-')[-1]))
+    joined.write_bytes((folder / 'a0.mp4').read_bytes() + b''.join(p.read_bytes() for p in segments))
+    try:
+        pcm = []
+        for kind, path in (('source', out / 'fixtures' / (name + '.mkv')), ('served', joined)):
+            run = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:a:0',
+                                  '-c:a', 'pcm_f32le', '-f', 'f32le', '-'], capture_output=True, check=True)
+            (folder / (kind + '-decode.log')).write_bytes(run.stderr)
+            pcm.append(run.stdout)
+        probe = json.loads(subprocess.check_output([
+            'ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_packets', '-show_frames',
+            '-show_entries', 'packet=duration:frame=nb_samples', '-of', 'json', str(joined)]))
+        entries = probe['packets_and_frames']
+        durations = [p['duration'] for p in entries if p['type'] == 'packet']
+        lengths = [f['nb_samples'] for f in entries if f['type'] == 'frame']
+        same = pcm[0] == pcm[1]
+        timed = bool(lengths) and durations == lengths
+        ok &= same and timed
+        print(f'{name}: source={len(pcm[0])} served={len(pcm[1])} PCM bytes, '
+              f'identical={same}, extra bytes={len(pcm[1]) - len(pcm[0])}, '
+              f'last duration={durations[-1]} samples={lengths[-1]}, all durations exact={timed}')
+    finally:
+        joined.unlink()
+sys.exit(0 if ok else 1)
+PYEND
 # Prepare the later picture segment, fail indexed recall twice, then compare repaired text
 # with a fresh good session. No later segment read may mask a swallowed recall failure.
 ff=$here/../../../vendor/ffmpeg/reference/prefix

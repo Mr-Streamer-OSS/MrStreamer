@@ -2037,13 +2037,14 @@ static void flac_grid(const Sound *sound, Packets *packets, int last) {
   packets->count = kept;
 }
 
-/** Gives a segment's sound its times in `sound_base`; on a frame grid, each one frame long. */
+/** Gives sound its times in `sound_base`, keeping FLAC's checked length in samples. */
 static void stamp_sound(const TitleHls *title, const Sound *sound, Packets *packets) {
   for (int i = 0; i < packets->count; i++) {
     AVPacket *packet = packets->items[i];
     int64_t at = sound_time(title, sound, packet);
-    packet->duration = sound->frame ? sound->frame
-                                    : av_rescale_q(packet->duration, sound->base, sound_base(sound));
+    if (title->input->streams[sound->stream]->codecpar->codec_id != AV_CODEC_ID_FLAC)
+      packet->duration = sound->frame ? sound->frame
+                                      : av_rescale_q(packet->duration, sound->base, sound_base(sound));
     packet->pts = packet->dts = at;
   }
 }
