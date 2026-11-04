@@ -1,7 +1,7 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
-import { Alert, Modal, Pressable, Text, View } from "react-native";
+import { Alert, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocale } from "../live/catalogue.ts";
 import { SheetRow, SheetTitle, TextButton } from "../live/chrome.tsx";
@@ -15,22 +15,32 @@ import type { IconName } from "../ui/icon-button.tsx";
 import { Sheet } from "../ui/sheet.tsx";
 import { colors } from "../ui/theme.ts";
 import { t } from "./copy.ts";
+import { DIM, PlayerDialog } from "./dialog.tsx";
 import { player } from "./instance.ts";
 import type { MediaState } from "./media.ts";
 import type { Track } from "./native.ts";
 import type { Playing } from "./player.ts";
+import { SIDECAR_TRACK } from "../subtitles/model.ts";
+import {
+  DownloadedRows,
+  isSubtitleSheet,
+  SubtitleSheetContent,
+  subtitleSheetTitle,
+  type SubtitleSheet,
+} from "../subtitles/sheets.tsx";
 
 // Watch's media controls, as Paper A's "Android media controls" page has them: the row of text
 // controls under the seek bar, the countdown to the next episode in its place, the Audio,
 // Subtitles, Speed and Quality sheets, and the dialogs for a refused change or a failed save.
 // Every tick follows what the player reports (`player.state`), never the tap.
 
-/** Paper A's secondary text over the picture and in dialogs. */
-const DIM = "#D0D0D0";
-
-export type MediaSheet = "audio" | "text" | "speed" | "quality";
+export type MediaSheet = "audio" | "text" | "speed" | "quality" | SubtitleSheet;
 
 const TITLES = { audio: "Audio", text: "Subtitles", speed: "Speed", quality: "Quality" } as const;
+
+/** What TalkBack calls the open sheet's scrim. */
+const sheetTitle = (open: MediaSheet | null) =>
+  isSubtitleSheet(open) ? subtitleSheetTitle(open) : t(TITLES[open ?? "audio"]);
 
 /**
  * The row under the seek bar. Titles: Audio, Subtitles, Speed and, when the caller's resolver
@@ -236,21 +246,24 @@ function Countdown({ label, remaining }: { label: string; remaining: number }) {
 /**
  * The open sheet: its rows with the format in a right lane, a tick on what the player reports,
  * and one grey line for the tracks this phone can't decode. Choosing a row closes it; a refusal
- * comes back as `MediaDialog`.
+ * comes back as `MediaDialog`. Subtitles' Find online and Adjust timing `onOpen` their own sheets
+ * in its place.
  */
 export function MediaSheets({
   open,
   now,
   media,
+  onOpen,
   onClose,
 }: {
   open: MediaSheet | null;
   now: Playing | null;
   media: MediaState;
+  onOpen: (sheet: MediaSheet) => void;
   onClose: () => void;
 }) {
   useLocale();
-  const title = t(open ? TITLES[open] : "Audio");
+  const title = sheetTitle(open);
 
   const choose = (run: () => Promise<boolean>) => () => {
     onClose();
@@ -259,8 +272,24 @@ export function MediaSheets({
 
   return (
     <Sheet visible={open !== null && now !== null} label={title} onClose={onClose} fit>
-      <SheetTitle>{title}</SheetTitle>
-      {now && open ? <Rows open={open} now={now} media={media} choose={choose} /> : null}
+      {isSubtitleSheet(open) ? (
+        now && player.subtitles ? (
+          <SubtitleSheetContent
+            open={open}
+            now={now}
+            model={player.subtitles}
+            onOpen={onOpen}
+            onClose={onClose}
+          />
+        ) : null
+      ) : (
+        <>
+          <SheetTitle>{title}</SheetTitle>
+          {now && open ? (
+            <Rows open={open} now={now} media={media} choose={choose} onOpen={onOpen} />
+          ) : null}
+        </>
+      )}
       <Foot />
     </Sheet>
   );
@@ -271,11 +300,13 @@ function Rows({
   now,
   media,
   choose,
+  onOpen,
 }: {
-  open: MediaSheet;
+  open: Exclude<MediaSheet, SubtitleSheet>;
   now: Playing;
   media: MediaState;
   choose: (run: () => Promise<boolean>) => () => void;
+  onOpen: (sheet: SubtitleSheet) => void;
 }) {
   if (open === "speed")
     return (
@@ -293,9 +324,23 @@ function Rows({
       </>
     );
 
-  if (!media.tracksKnown) return <Note>{t("Not known yet. Try again in a moment.")}</Note>;
+  // The downloaded subtitle, Find online and Adjust timing, under the file's own.
+  const downloaded =
+    open === "text" && player.subtitles ? (
+      <DownloadedRows model={player.subtitles} choose={choose} onOpen={onOpen} />
+    ) : null;
+
+  if (!media.tracksKnown)
+    return (
+      <>
+        <Note>{t("Not known yet. Try again in a moment.")}</Note>
+        {downloaded}
+      </>
+    );
+
   const type = open === "quality" ? "video" : open;
-  const all = now.tracks.filter((track) => track.type === type);
+  // The downloaded subtitle is a track the player reports too; it has its own row below.
+  const all = now.tracks.filter((track) => track.type === type && track.id !== SIDECAR_TRACK);
   const supported = all.filter((track) => track.supported);
   const unplayable = all.filter((track) => !track.supported);
 
@@ -308,7 +353,16 @@ function Rows({
       ? t("No subtitles in this file.")
       : t("No choices in this file.");
 
-  if (!supported.length && !unplayable.length) return <Note>{empty}</Note>;
+  const sidecar = now.tracks.some((track) => track.id === SIDECAR_TRACK);
+
+  if (!supported.length && !unplayable.length && !(type === "text" && sidecar))
+    return (
+      <>
+        <Note>{empty}</Note>
+        {downloaded}
+      </>
+    );
+
   const playing = selected(now, type);
 
   return (
@@ -381,6 +435,7 @@ function Rows({
           </Text>
         </View>
       ) : null}
+      {downloaded}
     </>
   );
 }
@@ -422,48 +477,13 @@ export function MediaDialog({ error }: { error: MediaState["error"] }) {
   const [title, body] = DIALOGS[error];
 
   return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      navigationBarTranslucent
-      onRequestClose={dismiss}
-    >
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("OK")}
-          focusable={false}
-          onPress={dismiss}
-          style={{ position: "absolute", inset: 0, backgroundColor: colors.scrim }}
-        />
-        <View
-          accessibilityViewIsModal
-          style={{
-            width: "100%",
-            maxWidth: 400,
-            gap: 16,
-            paddingTop: 24,
-            paddingHorizontal: 24,
-            paddingBottom: 12,
-            borderRadius: 28,
-            backgroundColor: colors.surface,
-          }}
-        >
-          <Text
-            accessibilityRole="header"
-            style={{ color: colors.text, fontSize: 20, lineHeight: 24, fontWeight: "700" }}
-          >
-            {t(title)}
-          </Text>
-          <Text style={{ color: DIM, fontSize: 14, lineHeight: 20 }}>{t(body)}</Text>
-          <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-            <TextButton label={t("OK")} strong onPress={dismiss} />
-          </View>
-        </View>
-      </View>
-    </Modal>
+    <PlayerDialog
+      title={t(title)}
+      body={t(body)}
+      closeLabel={t("OK")}
+      onClose={dismiss}
+      actions={<TextButton label={t("OK")} strong onPress={dismiss} />}
+    />
   );
 }
 

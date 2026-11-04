@@ -1,62 +1,166 @@
-import { useEffect } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useLocale } from "../live/catalogue.ts";
+import { SheetTitle } from "../live/chrome.tsx";
 import { useStore } from "../platform/store.ts";
-import { subtitles, subtitleTextSize, readSubtitleTextSize } from "./runtime.ts";
+import { Note, Row, Section, SheetAction, type SnackbarMessage } from "../settings/parts.tsx";
+import { Sheet } from "../ui/sheet.tsx";
+import { colors } from "../ui/theme.ts";
+import { t } from "./copy.ts";
+import { KeyDialog } from "./sheets.tsx";
+import {
+  readSubtitleTextSize,
+  setSubtitleTextSize,
+  subtitles,
+  subtitleTextSize,
+} from "./runtime.ts";
 
-/** Unmounted handoff: the designer supplies key/size dialogs; Settings mounts this after its handoff. */
+/** Text size's choices, as iOS names them, by their scale of the player's cue size. */
+const SIZES = [
+  { name: "Small", scale: 0.8 },
+  { name: "Medium", scale: 1 },
+  { name: "Large", scale: 1.3 },
+] as const;
+
+/**
+ * Paper A's Subtitles group in Settings, between Media and TMDB: the SubDL API key, only ever
+ * Saved or Not set, whose Replace asks for the whole key again and whose Remove keeps downloaded
+ * subtitles, and Text size for downloaded subtitles. A read or write this phone refused is
+ * `notify`'d as the Settings screen's snackbar with Try again. Settings mounts it.
+ */
 export function SubtitleSettingsSection({
-  onKey,
-  onTextSize,
+  notify,
 }: {
-  onKey: (saved: boolean) => void;
-  onTextSize: () => void;
+  notify: (message: SnackbarMessage) => void;
 }) {
+  useLocale();
   const model = subtitles();
   const state = useStore(model.state);
   const size = useStore(subtitleTextSize);
+  const insets = useSafeAreaInsets();
+  const [open, setOpen] = useState<"actions" | "key" | "size" | null>(null);
+
+  const retry = useCallback(
+    (text: string, run: () => void) => notify({ text, action: { label: t("Try again"), run } }),
+    [notify],
+  );
+
+  const readKey = useCallback(async () => {
+    await model.readKey();
+
+    if (model.state.get().error !== "keychain") return;
+    model.dismissError();
+    retry(t("Couldn't read your SubDL key"), () => void readKey());
+  }, [model, retry]);
+
+  const readSize = useCallback(() => {
+    if (!readSubtitleTextSize()) retry(t("Couldn't read the text size."), readSize);
+  }, [retry]);
+
   useEffect(() => {
-    void model.readKey();
-    readSubtitleTextSize();
-  }, [model]);
+    void readKey();
+    readSize();
+  }, [readKey, readSize]);
+
+  const saveKey = async (key: string) => {
+    setOpen(null);
+
+    if (await model.saveKey(key)) return;
+    model.dismissError();
+    retry(t("Couldn't save the key. This phone refused it."), () => void saveKey(key));
+  };
+
+  const removeKey = async () => {
+    setOpen(null);
+
+    if (await model.removeKey()) return;
+    model.dismissError();
+    retry(t("Couldn't remove the key. This phone refused it."), () => void removeKey());
+  };
+
+  const chooseSize = (scale: number) => {
+    setOpen(null);
+
+    if (!setSubtitleTextSize(scale))
+      retry(t("Couldn't save the text size. This phone refused it."), () => chooseSize(scale));
+  };
+
+  const sizeName = SIZES.reduce((near, each) =>
+    Math.abs(each.scale - size) < Math.abs(near.scale - size) ? each : near,
+  ).name;
 
   return (
-    <View style={{ backgroundColor: "#000" }}>
-      <Text style={{ color: "#FFF" }}>Subtitles</Text>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => onKey(state.keySaved === true)}
-        style={{ minHeight: 48 }}
+    <Section name={t("Subtitles")}>
+      <Row
+        label={t("SubDL API key")}
+        value={
+          state.keySaved === null ? t("Not known") : state.keySaved ? t("Saved") : t("Not set")
+        }
+        onPress={() => setOpen(state.keySaved ? "actions" : "key")}
+      />
+      <Row label={t("Text size")} value={t(sizeName)} onPress={() => setOpen("size")} />
+      <View style={{ paddingTop: 4, paddingBottom: 8 }}>
+        <Note>
+          {t(
+            "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.",
+          )}
+        </Note>
+      </View>
+      <Sheet
+        visible={open === "actions" || open === "size"}
+        label={open === "size" ? t("Text size") : t("SubDL API key")}
+        onClose={() => setOpen(null)}
+        fit
       >
-        <Text style={{ color: "#FFF" }}>SubDL API key</Text>
-        <Text style={{ color: "#FFF" }}>
-          {state.keySaved === null
-            ? "Couldn't read your SubDL key"
-            : state.keySaved
-              ? "Saved"
-              : "Not set"}
-        </Text>
-      </Pressable>
-      {state.keySaved ? (
-        <>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onKey(true)}
-            style={{ minHeight: 48 }}
-          >
-            <Text style={{ color: "#FFF" }}>Replace</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void model.removeKey()}
-            style={{ minHeight: 48 }}
-          >
-            <Text style={{ color: "#FFF" }}>Remove</Text>
-          </Pressable>
-        </>
+        <View style={{ paddingBottom: insets.bottom + 24 }}>
+          {open === "size" ? (
+            <>
+              <SheetTitle>{t("Text size")}</SheetTitle>
+              {SIZES.map((each) => (
+                <SheetAction
+                  key={each.name}
+                  icon={each.name === sizeName ? "check" : null}
+                  label={t(each.name)}
+                  primary={each.name === sizeName}
+                  selected={each.name === sizeName}
+                  onPress={() => chooseSize(each.scale)}
+                />
+              ))}
+            </>
+          ) : (
+            <>
+              <SheetTitle>{t("SubDL API key")}</SheetTitle>
+              <SheetAction icon="edit" label={t("Replace")} onPress={() => setOpen("key")} />
+              <SheetAction icon="delete" label={t("Remove")} onPress={() => void removeKey()} />
+              <Text
+                style={{
+                  paddingTop: 8,
+                  paddingLeft: 64,
+                  paddingRight: 24,
+                  color: colors.secondary,
+                  fontSize: 14,
+                  lineHeight: 18,
+                }}
+              >
+                {t("Replace asks for the whole key again. Downloaded subtitles stay either way.")}
+              </Text>
+            </>
+          )}
+        </View>
+      </Sheet>
+      {open === "key" ? (
+        <KeyDialog
+          submit={t("Save")}
+          onSave={(key) => {
+            // It closes at once; a refusal comes back as the snackbar.
+            void saveKey(key);
+
+            return Promise.resolve(true);
+          }}
+          onClose={() => setOpen(null)}
+        />
       ) : null}
-      <Pressable accessibilityRole="button" onPress={onTextSize} style={{ minHeight: 48 }}>
-        <Text style={{ color: "#FFF" }}>Text size · {Math.round(size * 100)}%</Text>
-      </Pressable>
-    </View>
+    </Section>
   );
 }

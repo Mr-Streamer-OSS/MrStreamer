@@ -1,0 +1,180 @@
+import { catalogue } from "@mrstreamer/mobile/language";
+
+/**
+ * Online subtitles' copy in Watch and Settings, in English and Dutch: the downloaded row, Find
+ * online, the SubDL key, the timing sheet and what failed. Ported from iOS with "This phone".
+ */
+export const t = catalogue(
+  {
+    Downloaded: "Downloaded",
+    Downloading: "Downloading",
+    "Find online": "Find online",
+    "Online subtitles": "Online subtitles",
+    "Searching SubDL": "Searching SubDL",
+    "{title}, in {languages}": "{title}, in {languages}",
+    "{list} and {last}": "{list} and {last}",
+    "Hearing impaired": "Hearing impaired",
+    "No subtitles found": "No subtitles found",
+    "SubDL has none for this in your languages.": "SubDL has none for this in your languages.",
+    "Can't show here: {count} results in {formats}.": {
+      one: "Can't show here: {count} result in {formats}.",
+      other: "Can't show here: {count} results in {formats}.",
+    },
+    "unknown format": "unknown format",
+    "Adjust timing": "Adjust timing",
+    "{seconds} s earlier": "{seconds} s earlier",
+    "{seconds} s later": "{seconds} s later",
+    "Shown {seconds} s earlier": "Shown {seconds} s earlier",
+    "Shown {seconds} s later": "Shown {seconds} s later",
+    "Original timing": "Original timing",
+    "Frame rate": "Frame rate",
+    "Subtitle fps → video fps": "Subtitle fps → video fps",
+    Original: "Original",
+    Reset: "Reset",
+    "Kept with this subtitle for this version, offline too.":
+      "Kept with this subtitle for this version, offline too.",
+    "Couldn't change timing": "Couldn't change timing",
+    "The previous timing is kept.": "The previous timing is kept.",
+    "SubDL key needed": "SubDL key needed",
+    "Find online searches SubDL with your own API key. It stays sealed on this phone.":
+      "Find online searches SubDL with your own API key. It stays sealed on this phone.",
+    "Add key": "Add key",
+    "SubDL API key": "SubDL API key",
+    "API key": "API key",
+    "From your account on subdl.com.": "From your account on subdl.com.",
+    "Show key": "Show key",
+    "Hide key": "Hide key",
+    "Save and search": "Save and search",
+    Save: "Save",
+    "SubDL refused the key": "SubDL refused the key",
+    "Check your SubDL API key. Nothing was searched.":
+      "Check your SubDL API key. Nothing was searched.",
+    "Replace key": "Replace key",
+    "SubDL limit reached": "SubDL limit reached",
+    "Your SubDL key has no requests left for now. Try again later.":
+      "Your SubDL key has no requests left for now. Try again later.",
+    "SubDL isn't available": "SubDL isn't available",
+    "Check your connection and try again.": "Check your connection and try again.",
+    "The downloaded subtitle still shows.": "The downloaded subtitle still shows.",
+    "Can't use this subtitle": "Can't use this subtitle",
+    "It isn't text the app can read. Try another.": "It isn't text the app can read. Try another.",
+    "Other results": "Other results",
+    "Couldn't read your SubDL key": "Couldn't read your SubDL key",
+    "This phone didn't give it. Try again.": "This phone didn't give it. Try again.",
+    "Couldn't keep this subtitle": "Couldn't keep this subtitle",
+    "This phone refused to save it, so it isn't shown. Try again.":
+      "This phone refused to save it, so it isn't shown. Try again.",
+    "Couldn't read the downloaded subtitle": "Couldn't read the downloaded subtitle",
+    "It wasn't changed. Try again.": "It wasn't changed. Try again.",
+    "Try again": "Try again",
+    "Couldn't save the key. This phone refused it.":
+      "Couldn't save the key. This phone refused it.",
+    "Couldn't remove the key. This phone refused it.":
+      "Couldn't remove the key. This phone refused it.",
+    "Couldn't save the text size. This phone refused it.":
+      "Couldn't save the text size. This phone refused it.",
+    "Couldn't read the text size.": "Couldn't read the text size.",
+    Subtitles: "Subtitles",
+    Saved: "Saved",
+    "Not set": "Not set",
+    "Not known": "Not known",
+    "Text size": "Text size",
+    Small: "Small",
+    Medium: "Medium",
+    Large: "Large",
+    "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.":
+      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.",
+    Replace: "Replace",
+    Remove: "Remove",
+    "Replace asks for the whole key again. Downloaded subtitles stay either way.":
+      "Replace asks for the whole key again. Downloaded subtitles stay either way.",
+  },
+  {
+    "nl-NL": {
+      Downloaded: "Gedownload",
+      Downloading: "Downloaden",
+      "Find online": "Online zoeken",
+      "Online subtitles": "Online ondertiteling",
+      "Searching SubDL": "SubDL doorzoeken",
+      "{title}, in {languages}": "{title}, in {languages}",
+      "{list} and {last}": "{list} en {last}",
+      "Hearing impaired": "Slechthorenden",
+      "No subtitles found": "Geen ondertiteling gevonden",
+      "SubDL has none for this in your languages.": "SubDL heeft er geen in je talen.",
+      "Can't show here: {count} results in {formats}.": {
+        one: "Hier niet te tonen: {count} resultaat in {formats}.",
+        other: "Hier niet te tonen: {count} resultaten in {formats}.",
+      },
+      "unknown format": "onbekend formaat",
+      "Adjust timing": "Timing aanpassen",
+      "{seconds} s earlier": "{seconds} s eerder",
+      "{seconds} s later": "{seconds} s later",
+      "Shown {seconds} s earlier": "{seconds} s eerder getoond",
+      "Shown {seconds} s later": "{seconds} s later getoond",
+      "Original timing": "Oorspronkelijke timing",
+      "Frame rate": "Beeldsnelheid",
+      "Subtitle fps → video fps": "Fps ondertiteling → fps video",
+      Original: "Oorspronkelijk",
+      Reset: "Herstellen",
+      "Kept with this subtitle for this version, offline too.":
+        "Bewaard bij deze ondertiteling voor deze versie, ook offline.",
+      "Couldn't change timing": "Timing kon niet worden gewijzigd",
+      "The previous timing is kept.": "De vorige timing blijft.",
+      "SubDL key needed": "SubDL-sleutel nodig",
+      "Find online searches SubDL with your own API key. It stays sealed on this phone.":
+        "Online zoeken doorzoekt SubDL met je eigen API-sleutel. Die blijft verzegeld op deze telefoon.",
+      "Add key": "Sleutel toevoegen",
+      "SubDL API key": "SubDL-API-sleutel",
+      "API key": "API-sleutel",
+      "From your account on subdl.com.": "Uit je account op subdl.com.",
+      "Show key": "Sleutel tonen",
+      "Hide key": "Sleutel verbergen",
+      "Save and search": "Bewaren en zoeken",
+      Save: "Bewaren",
+      "SubDL refused the key": "SubDL weigerde de sleutel",
+      "Check your SubDL API key. Nothing was searched.":
+        "Controleer je SubDL-API-sleutel. Er is niets gezocht.",
+      "Replace key": "Sleutel vervangen",
+      "SubDL limit reached": "SubDL-limiet bereikt",
+      "Your SubDL key has no requests left for now. Try again later.":
+        "Je SubDL-sleutel heeft voorlopig geen verzoeken meer. Probeer het later opnieuw.",
+      "SubDL isn't available": "SubDL is niet beschikbaar",
+      "Check your connection and try again.": "Controleer je verbinding en probeer het opnieuw.",
+      "The downloaded subtitle still shows.": "De gedownloade ondertiteling blijft zichtbaar.",
+      "Can't use this subtitle": "Deze ondertiteling is niet bruikbaar",
+      "It isn't text the app can read. Try another.":
+        "Het is geen tekst die de app kan lezen. Probeer een andere.",
+      "Other results": "Andere resultaten",
+      "Couldn't read your SubDL key": "Je SubDL-sleutel kon niet worden gelezen",
+      "This phone didn't give it. Try again.": "Deze telefoon gaf hem niet. Probeer het opnieuw.",
+      "Couldn't keep this subtitle": "Deze ondertiteling kon niet worden bewaard",
+      "This phone refused to save it, so it isn't shown. Try again.":
+        "Deze telefoon weigerde haar te bewaren, dus ze wordt niet getoond. Probeer het opnieuw.",
+      "Couldn't read the downloaded subtitle":
+        "De gedownloade ondertiteling kon niet worden gelezen",
+      "It wasn't changed. Try again.": "Ze is niet gewijzigd. Probeer het opnieuw.",
+      "Try again": "Opnieuw proberen",
+      "Couldn't save the key. This phone refused it.":
+        "Kon de sleutel niet bewaren. Deze telefoon weigerde hem.",
+      "Couldn't remove the key. This phone refused it.":
+        "Kon de sleutel niet verwijderen. Deze telefoon weigerde het.",
+      "Couldn't save the text size. This phone refused it.":
+        "Kon de tekstgrootte niet bewaren. Deze telefoon weigerde haar.",
+      "Couldn't read the text size.": "Kon de tekstgrootte niet lezen.",
+      Subtitles: "Ondertiteling",
+      Saved: "Bewaard",
+      "Not set": "Niet ingesteld",
+      "Not known": "Niet bekend",
+      "Text size": "Tekstgrootte",
+      Small: "Klein",
+      Medium: "Middel",
+      Large: "Groot",
+      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.":
+        "Online zoeken in de speler doorzoekt SubDL met je eigen sleutel, die verzegeld blijft op deze telefoon. Tekstgrootte geldt voor gedownloade ondertiteling.",
+      Replace: "Vervangen",
+      Remove: "Verwijderen",
+      "Replace asks for the whole key again. Downloaded subtitles stay either way.":
+        "Vervangen vraagt opnieuw om de hele sleutel. Gedownloade ondertiteling blijft hoe dan ook.",
+    },
+  },
+);

@@ -399,7 +399,8 @@ export function subtitleModel(options: {
 
     if (await apply(updated)) return true;
 
-    if (state.get().saved === updated) persist(saved);
+    // Putting the previous timing back clears the error, which the viewer still needs to see.
+    if (state.get().saved === updated && persist(saved)) fail("timing");
 
     return false;
   }
