@@ -246,7 +246,11 @@ it("shows seasons and translated copy, and only exposes actions while their owne
   let stopDownload = () => {};
 
   act(() => {
-    stopPlay = libraryIntents.register({ play: (intent) => intents.push(intent) });
+    stopPlay = libraryIntents.register({
+      play: (intent) => {
+        intents.push(intent);
+      },
+    });
     stopDownload = libraryIntents.register({ download: (intent) => intents.push(intent) });
   });
 
@@ -332,7 +336,9 @@ it("labels versions with saved source names and plays the selected movie file", 
   try {
     act(() => {
       stop = libraryIntents.register({
-        play: (intent) => intents.push(intent),
+        play: (intent) => {
+          intents.push(intent);
+        },
         download: (intent) => intents.push(intent),
       });
     });

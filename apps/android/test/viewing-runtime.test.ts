@@ -269,7 +269,10 @@ it("resumes through the registered handler despite a position tick while details
 
   try {
     const outcome = await resumeEntry(entry);
-    expect(play).toHaveBeenCalledWith(expect.objectContaining({ id: title.id, media: "movie" }));
+    expect(play).toHaveBeenCalledWith(
+      expect.objectContaining({ id: title.id, media: "movie" }),
+      expect.objectContaining({ version: entry.version }),
+    );
     expect(outcome).toBe("played");
     spy.mockRejectedValueOnce(new Error("details"));
     expect(await resumeEntry(entry)).toBe("details");

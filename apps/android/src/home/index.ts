@@ -473,15 +473,25 @@ export async function resumeEntry(entry: Continuing) {
         },
         episode,
       );
-      play({
-        kind: "title",
-        sourceId: version.subscriptionId,
-        media: "episode",
-        id: episode.id,
-        container,
-        title: episode.title,
-        resumeAt: resumePoint(next.resume) * 1000,
-      });
+      play(
+        {
+          kind: "title",
+          sourceId: version.subscriptionId,
+          media: "episode",
+          id: episode.id,
+          container,
+          title: episode.title,
+          resumeAt: resumePoint(next.resume) * 1000,
+        },
+        {
+          kind: "episode",
+          sourceId: version.subscriptionId,
+          titleKey: entry.title.key,
+          titleId: entry.title.id,
+          version,
+          episodeId: episode.id,
+        },
+      );
 
       return "played" as const;
     }
@@ -500,15 +510,18 @@ export async function resumeEntry(entry: Continuing) {
     };
 
     libraryViewing.state.get()?.play(media);
-    play({
-      kind: "title",
-      sourceId: version.subscriptionId,
-      media: "movie",
-      id: version.id,
-      container,
-      title: entry.title.title,
-      resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
-    });
+    play(
+      {
+        kind: "title",
+        sourceId: version.subscriptionId,
+        media: "movie",
+        id: version.id,
+        container,
+        title: entry.title.title,
+        resumeAt: Math.max(0, (entry.progress?.position ?? 0) - 5) * 1000,
+      },
+      media,
+    );
 
     return "played" as const;
   } catch {

@@ -16,11 +16,11 @@ export interface DownloadIntent {
 }
 
 export interface IntentHandlers {
-  readonly play?: (intent: PlayIntent) => void;
+  readonly play?: (intent: PlayIntent, media?: MediaIdentity) => void | Promise<void>;
   readonly download?: (intent: DownloadIntent) => void;
 }
 
-/** Later feature owners register here. Unregistering an older owner cannot remove its successor. */
+/** Feature owners register here. Unregistering an older owner cannot remove its successor. */
 export function intentRegistry() {
   const state = store<IntentHandlers>({});
 

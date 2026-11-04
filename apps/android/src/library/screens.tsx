@@ -754,14 +754,17 @@ function MovieActions({
           icon="play-arrow"
           onPress={() => {
             viewing?.play(media);
-            play({
-              kind: "title",
-              sourceId: title.subscriptionId,
-              media: "movie",
-              id: title.id,
-              container,
-              title: title.title,
-            });
+            play(
+              {
+                kind: "title",
+                sourceId: title.subscriptionId,
+                media: "movie",
+                id: title.id,
+                container,
+                title: title.title,
+              },
+              media,
+            );
           }}
         />
       ) : null}
@@ -818,14 +821,17 @@ function EpisodeRow({
     play && container
       ? () => {
           viewing?.play(media(), episode);
-          play({
-            kind: "title",
-            sourceId: episode.subscriptionId,
-            media: "episode",
-            id: episode.id,
-            container,
-            title: episode.title,
-          });
+          play(
+            {
+              kind: "title",
+              sourceId: episode.subscriptionId,
+              media: "episode",
+              id: episode.id,
+              container,
+              title: episode.title,
+            },
+            media(),
+          );
         }
       : undefined;
 
