@@ -457,7 +457,7 @@ const correctness: readonly ProofCase[] = [
       const about = await client.about("movie", "501", "nl");
       const season = await client.season("601", 1, "nl");
       const services = await client.services("movie", "NL");
-      let file: unknown = null;
+      let file: import("@mrstreamer/core/metadata/store").MetadataFile | null = null;
 
       const store = metadataStore({
         read: async () => file,

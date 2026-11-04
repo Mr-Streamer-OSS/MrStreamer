@@ -34,7 +34,7 @@ import { playlistReader } from "./playlist.ts";
 
 /** What a source answers for: checking its login and listing its channels. */
 export interface CatalogueReader {
-  authenticate: Provider["authenticate"];
+  authenticate(signal?: AbortSignal): Promise<void | Awaited<ReturnType<Provider["authenticate"]>>>;
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
 }
 

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { expect, it, vi } from "vitest";
 
 vi.mock("expo", () => ({ requireNativeModule: vi.fn() }));
@@ -11,7 +12,7 @@ import type { SecretStore } from "../src/guide/secrets.ts";
 
 function setup() {
   const secrets = new Map<string, string>();
-  let disk: unknown = null;
+  let disk: Json = null;
   let refused = false;
 
   const sealed: SecretStore = {

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import { describe, expect, it } from "vitest";
 import type { ChannelRow, Sources } from "../src/connect/sources.ts";
@@ -28,7 +29,7 @@ function catalogue(rows: readonly ChannelRow[] = [row, other]): Sources {
 
 function setup() {
   let current = catalogue();
-  let file: unknown = null;
+  let file: Json = null;
   let refused = false;
   const writes: unknown[] = [];
 

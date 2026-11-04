@@ -801,7 +801,10 @@ describe("the collections Movies, Series, Home and details show", () => {
     /** A login whose provider names each file by it. */
     const loginOf = (login: string) => ({
       provider: {
-        titleFile: async (kind: string, id: string) => ({ url: `${login}/${kind}/${id}` }),
+        titleFile: async (kind: string, id: string, container: string) => ({
+          url: `${login}/${kind}/${id}`,
+          container,
+        }),
       },
     });
 
@@ -859,7 +862,13 @@ describe("the collections Movies, Series, Home and details show", () => {
     const start = Date.now();
     edges.known = tmdbOf(0);
     edges.expiry = () => start + 5_000;
-    edges.sources.set("a", { provider: { titleFile: () => null } });
+    edges.sources.set("a", {
+      provider: {
+        titleFile: async () => {
+          throw new Error("No file expected");
+        },
+      },
+    });
     subscribe("a");
     await until(() => titles.collectionsOf("movie") !== null, "the first collections");
     const index = indexed();
@@ -969,7 +978,13 @@ describe("the collections Movies, Series, Home and details show", () => {
         const { CollectionScreen } = await import("../src/titles-screen.tsx");
         const fixture = browseFixture(kind);
         edges.nativeGrid = true;
-        edges.sources.set("a", { provider: { titleFile: () => null } });
+        edges.sources.set("a", {
+          provider: {
+            titleFile: async () => {
+              throw new Error("No file expected");
+            },
+          },
+        });
         list([["a", fixture.catalogue]]);
         await until(() => titles.collectionsOf(kind) !== null, "collections");
         await draw(React.createElement(CollectionScreen, { kind, id: "all" }));
@@ -997,7 +1012,13 @@ describe("the collections Movies, Series, Home and details show", () => {
 
         const recoverSource = async () =>
           React.act(async () => {
-            edges.sources.set("a", { provider: { titleFile: () => null } });
+            edges.sources.set("a", {
+              provider: {
+                titleFile: async () => {
+                  throw new Error("No file expected");
+                },
+              },
+            });
             edges.members = edges.members.map((member) => ({
               ...member,
               needsSecret: false,
@@ -1063,7 +1084,13 @@ describe("the collections Movies, Series, Home and details show", () => {
       "shows %s collection controls, counts, matching activation and reset",
       async (kind) => {
         const { CollectionScreen } = await import("../src/titles-screen.tsx");
-        edges.sources.set("a", { provider: { titleFile: () => null } });
+        edges.sources.set("a", {
+          provider: {
+            titleFile: async () => {
+              throw new Error("No file expected");
+            },
+          },
+        });
         list([["a", browseFixture(kind).catalogue]]);
         await until(() => titles.collectionsOf(kind) !== null, "fixture collections");
         await draw(React.createElement(CollectionScreen, { kind, id: "all" }));
@@ -1095,7 +1122,13 @@ describe("the collections Movies, Series, Home and details show", () => {
       const kind = "movie";
       const { TitlesHome } = await import("../src/titles-screen.tsx");
       const fixture = browseFixture(kind);
-      edges.sources.set("a", { provider: { titleFile: () => null } });
+      edges.sources.set("a", {
+        provider: {
+          titleFile: async () => {
+            throw new Error("No file expected");
+          },
+        },
+      });
       list([["a", fixture.catalogue]]);
       await until(() => titles.collectionsOf(kind) !== null, "collections");
       await draw(React.createElement(TitlesHome, { kind }));
@@ -1103,7 +1136,15 @@ describe("the collections Movies, Series, Home and details show", () => {
       const id = "nl-4k";
       const oldTap = edges.presses.get(`tile:${id}`)!;
       const oldMade = titles.collectionsOf(kind);
-      const replacement = { provider: { titleFile: () => null } };
+
+      const replacement = {
+        provider: {
+          titleFile: async () => {
+            throw new Error("No file expected");
+          },
+        },
+      };
+
       await React.act(async () => {
         edges.sources.set("a", replacement);
         edges.members = edges.members.map((member) => ({

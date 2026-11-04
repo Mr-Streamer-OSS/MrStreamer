@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { startFakePlaylist, type FakePlaylist } from "../../desktop/test/fake-playlist.ts";
 import { startFakeProvider, type FakeProvider } from "../../desktop/test/fake-provider.ts";
@@ -63,7 +64,9 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
     // As storage.ts reads: no file, or one that isn't JSON, is none.
     readJson: (name) => {
       try {
-        return JSON.parse(phone.files.get(name) ?? "null") as unknown;
+        const value: Json = JSON.parse(phone.files.get(name) ?? "null");
+
+        return value;
       } catch {
         return null;
       }

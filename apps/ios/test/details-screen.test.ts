@@ -944,7 +944,10 @@ const listed = (subscriptionId: string, id: string, season: number, number: numb
  * Series 2's details from `subscriptionId`: Season 1, Specials, Season 2, in that order, with the
  * playlist's own order when `order` is given.
  */
-function seriesFacts(subscriptionId: string, order?: readonly string[]) {
+function seriesFacts(
+  subscriptionId: string,
+  order?: readonly string[],
+): import("@mrstreamer/contracts/ondemand").SeriesDetails {
   const at = (id: string, season: number, number: number) =>
     listed(subscriptionId, id, season, number);
 
@@ -956,7 +959,11 @@ function seriesFacts(subscriptionId: string, order?: readonly string[]) {
     genres: [],
     duration: null,
     backdropUrl: null,
-    title: {},
+    originalTitle: null,
+    releaseDate: null,
+    title: byIds(indexCatalogue([{ subscriptionId, catalogue }], "en"), "series", [
+      { subscriptionId, id: "2" },
+    ])[0]!,
     seasons: [
       {
         number: 1,

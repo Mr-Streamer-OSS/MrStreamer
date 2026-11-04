@@ -503,7 +503,7 @@ const busy = () => Object.assign(new Error("busy"), { code: "ERR_DOWNLOADS_BUSY"
 
 /** Answers `busy` at once, as a command past its deadline does, and is written natively later. */
 const late =
-  <A extends unknown[]>(command: (...args: A) => Promise<Json | void>) =>
+  <A extends unknown[]>(command: (...args: A) => Promise<void>) =>
   async (...args: A): Promise<never> => {
     setTimeout(() => void command(...args).catch(() => undefined), 300);
     throw busy();
@@ -522,7 +522,7 @@ interface Bridge {
 /** How a command the native side didn't answer in time ends: written later, or never. */
 const unanswered = <A extends unknown[]>(
   how: "written late" | "never written",
-  command: (...args: A) => Promise<Json | void>,
+  command: (...args: A) => Promise<void>,
 ) =>
   how === "written late"
     ? late(command)
