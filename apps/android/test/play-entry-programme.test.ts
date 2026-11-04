@@ -16,7 +16,10 @@ vi.mock("../src/platform/credentials.ts", () => ({
   }),
 }));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 it("shows Live during archive loading and failure, retries archives, and retains them across unrelated source changes and reopening", async () => {
   let release!: () => void;
@@ -43,7 +46,9 @@ it("shows Live during archive loading and failure, retries archives, and retains
 
   vi.stubGlobal("fetch", fetcher);
   const reader = {};
+  const descriptor = Object.getOwnPropertyDescriptor(sources, "onDemand");
   Object.assign(sources, { onDemand: () => reader });
+  const before = sources.state.get();
 
   const source = {
     id: "programme-source",
@@ -92,6 +97,14 @@ it("shows Live during archive loading and failure, retries archives, and retains
     });
     expect(screen.container.textContent).toContain("Couldn't check playback");
     expect(screen.container.textContent).toContain("Watch live");
+    const failedCalls = fetcher.mock.calls.length;
+    await screen.render(null);
+    await screen.render(h(ProgrammeActions, props));
+    await vi.waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThan(failedCalls));
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(screen.container.textContent).toContain("Couldn't check playback");
+    });
     failed = false;
     await screen.click("Try again");
     await vi.waitFor(async () => {
@@ -108,6 +121,11 @@ it("shows Live during archive loading and failure, retries archives, and retains
       window: { start: props.programme.start, end: props.programme.stop },
     });
     const calls = fetcher.mock.calls.length;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 3 * 86400000);
+    play.mockClear();
+    await screen.click("Catch-up");
+    expect(play).not.toHaveBeenCalled();
+    clock.mockRestore();
     await act(async () =>
       sources.state.set({ kind: "ready", sources: [source, { ...source, id: "other" }] }),
     );
@@ -129,5 +147,9 @@ it("shows Live during archive loading and failure, retries archives, and retains
   } finally {
     await screen.close();
     stop();
+    sources.state.set(before);
+
+    if (descriptor) Object.defineProperty(sources, "onDemand", descriptor);
+    else Reflect.deleteProperty(sources, "onDemand");
   }
 });

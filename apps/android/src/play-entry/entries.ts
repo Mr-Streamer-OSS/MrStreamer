@@ -41,6 +41,7 @@ export function startEntries(options: {
 
     authority = undefined;
     let admitted = intent;
+    let playingAttempt: string | null = null;
     let failure: "details" | "file" | "history" = "file";
 
     try {
@@ -89,35 +90,65 @@ export function startEntries(options: {
         if (exact !== intent.container) throw new Error("File unavailable");
         failure = "history";
 
-        const progress =
-          intent.resumeAt === undefined
-            ? await options.progress({ ...title, ...version, versions: [version] })
-            : [];
+        const selected = { ...title, ...version, versions: [version] };
+        let progress: readonly TitleProgress[] | undefined;
+
+        if (intent.resumeAt === undefined) progress = await options.progress(selected);
 
         if (!stands() || model.reader(intent.sourceId) !== reader) return;
         const sourceId = intent.sourceId;
 
         const position = (id: string) =>
           resumePoint(
-            progress.find((p) => p.title.subscriptionId === sourceId && p.title.id === id),
+            progress?.find((p) => p.title.subscriptionId === sourceId && p.title.id === id),
           ) * 1000;
 
         admitted = { ...intent, resumeAt: intent.resumeAt ?? position(intent.id) };
         stopNext?.();
         nextAuthority = authority;
-        stopNext = options.player.media.registerNext((current) => {
-          if (
-            !active ||
-            model.reader(current.sourceId) !== reader ||
-            current.sourceId !== media.sourceId
-          )
-            return undefined;
-          const next = nextEpisodeIn(details, current);
+        const currentAuthority = authority;
 
-          return next
-            ? { ...next, intent: { ...next.intent, resumeAt: position(next.intent.id) } }
-            : undefined;
-        });
+        const publishNext = () => {
+          stopNext?.();
+          stopNext = options.player.media.registerNext((current) => {
+            if (
+              !active ||
+              !progress ||
+              model.reader(current.sourceId) !== reader ||
+              current.sourceId !== media.sourceId
+            )
+              return undefined;
+            const next = nextEpisodeIn(details, current);
+
+            return next
+              ? { ...next, intent: { ...next.intent, resumeAt: position(next.intent.id) } }
+              : undefined;
+          });
+        };
+
+        publishNext();
+
+        // Known current positions play immediately. Next stays unavailable until history succeeds.
+        if (!progress && intent.media === "episode") {
+          const historyStands = () =>
+            active &&
+            request === run &&
+            nextAuthority === currentAuthority &&
+            currentAuthority() &&
+            lastAttempt === playingAttempt;
+
+          void Promise.resolve().then(async () => {
+            try {
+              const saved = await options.progress(selected);
+
+              if (!historyStands()) return;
+              progress = saved;
+              publishNext();
+            } catch {
+              // A failed read cannot supply a zero-position successor. A later Play retries it.
+            }
+          });
+        }
       }
 
       if (!stands()) return;
@@ -129,6 +160,7 @@ export function startEntries(options: {
       }
 
       options.player.play(admitted);
+      playingAttempt = lastAttempt;
       authority = undefined;
       options.open(admitted);
     } catch {

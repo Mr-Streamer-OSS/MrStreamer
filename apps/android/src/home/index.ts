@@ -119,13 +119,22 @@ export function startViewing(): () => void {
 
     type EpisodeState = Awaited<ReturnType<typeof viewing.episodes>>;
 
-    const marks = new Map<string, { state?: EpisodeState; failed?: boolean }>();
+    const marks = new Map<string, { sourceId: string; state?: EpisodeState; failed?: boolean }>();
     const bump = () => revision.set((n) => n + 1);
     // The last kept episode mark, which Details offers to undo until it closes or another mark.
     const kept = store<{ message: string; undo: () => Promise<unknown> } | null>(null);
 
+    let previousViewing = viewing.state.get();
+
     const stopState = viewing.state.subscribe(() => {
-      marks.clear();
+      const current = viewing.state.get();
+
+      if (
+        current.kind !== previousViewing.kind ||
+        current.viewing?.sequence !== previousViewing.viewing?.sequence
+      )
+        marks.clear();
+      previousViewing = current;
       bump();
     });
 
@@ -145,8 +154,16 @@ export function startViewing(): () => void {
         )
       )
         return;
+
+      for (const [key, cached] of marks) {
+        if (
+          !current.has(cached.sourceId) ||
+          current.get(cached.sourceId) !== previousSources.get(cached.sourceId)
+        )
+          marks.delete(key);
+      }
+
       previousSources = current;
-      marks.clear();
       bump();
       void viewing.refresh().catch(() => undefined);
     });
@@ -157,7 +174,7 @@ export function startViewing(): () => void {
       let cached = marks.get(key);
 
       if (!cached) {
-        cached = {};
+        cached = { sourceId: title.subscriptionId };
         marks.set(key, cached);
         const reading = cached;
         // Defer publication until after the render that requested this shared series read.

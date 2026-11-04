@@ -78,6 +78,9 @@ function archiveCatalogue(key: ArchiveAuthority, sourceId: string) {
     return reader.liveCatalogue();
   })();
   archives.set(key, pending);
+  void pending.catch(() => {
+    if (archives.get(key) === pending) archives.delete(key);
+  });
 
   return pending;
 }
@@ -131,7 +134,9 @@ export function ProgrammeActions({
             failed: false,
           });
       },
-      (error: Error) => {
+      // Promise rejections are untyped; narrow the external failure before using its message.
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters
+      (error: unknown) => {
         if (active)
           setAnswer({
             key,
@@ -181,7 +186,18 @@ export function ProgrammeActions({
         .length !== 1
     )
       return;
-    const intent = archive ? entry?.archive : entry?.live;
+
+    const currentEntry = programmeEntry(
+      identity,
+      ready?.channel ?? { id: identity.channelId, catchupDays: null },
+      channelName,
+      programme,
+      Date.now(),
+    );
+
+    const intent = archive ? currentEntry?.archive : currentEntry?.live;
+
+    if (archive && !intent) setRetry((n) => n + 1);
 
     if (intent) libraryIntents.state.get().play?.(intent);
   };

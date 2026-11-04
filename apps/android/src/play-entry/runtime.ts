@@ -1,3 +1,4 @@
+import { t as sharedT } from "@mrstreamer/core/i18n";
 import { catalogue } from "../guide/catalogue.ts";
 import { viewing } from "../home/index.ts";
 import { sources } from "../bootstrap/sources.ts";
@@ -52,6 +53,7 @@ export const startPlayEntries = () =>
         ),
         undefined,
         [
+          { text: sharedT("Cancel"), style: "cancel" },
           { text: t("Try again"), onPress: retry },
           ...(beginning ? [{ text: t("Play from beginning"), onPress: beginning }] : []),
         ],

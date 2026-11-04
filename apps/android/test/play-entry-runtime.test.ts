@@ -123,8 +123,14 @@ it("production subscription keeps pending Play and Next across catalogue churn, 
     expect(ui.alert).not.toHaveBeenCalled();
     await libraryIntents.state.get().play?.(intent, media);
     expect(ui.alert).toHaveBeenLastCalledWith("Couldn't read viewing history", undefined, [
+      { text: "Cancel", style: "cancel" },
       { text: "Try again", onPress: expect.any(Function) },
       { text: "Play from beginning", onPress: expect.any(Function) },
+    ]);
+    await libraryIntents.state.get().play?.({ ...intent, container: "mkv" }, media);
+    expect(ui.alert).toHaveBeenLastCalledWith("File unavailable", undefined, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Try again", onPress: expect.any(Function) },
     ]);
     control.readers.set(
       "source",
