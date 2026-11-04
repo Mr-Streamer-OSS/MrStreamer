@@ -316,3 +316,42 @@ describe("Android viewing persistence", () => {
     }
   });
 });
+
+it("retries a malformed snapshot after the persisted file is repaired", async () => {
+  const f = await setup();
+
+  try {
+    await f.owner.recordProgress(
+      { kind: "movie", subscriptionId: "source", id: f.title.id },
+      300,
+      1800,
+      1,
+    );
+    const valid = f.platform.readJson();
+    const malformed = structuredClone(valid);
+
+    if (!malformed || typeof malformed !== "object" || Array.isArray(malformed))
+      throw new Error("file");
+    const record = malformed.record;
+
+    if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("record");
+    const accounts = record.accounts;
+
+    if (!accounts || typeof accounts !== "object" || Array.isArray(accounts))
+      throw new Error("accounts");
+    const source = accounts.source;
+
+    if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("source");
+    delete source.rows;
+    f.platform.writeJson("viewing.json", malformed);
+    await f.owner.read();
+    expect(f.owner.state.get().kind).toBe("failed");
+    expect(f.platform.readJson()).toEqual(malformed);
+    f.platform.writeJson("viewing.json", valid);
+    await f.owner.read();
+    expect(f.owner.state.get().kind).toBe("ready");
+    expect((await f.owner.progress(f.title))[0]?.position).toBe(300);
+  } finally {
+    await f.owner.dispose();
+  }
+});

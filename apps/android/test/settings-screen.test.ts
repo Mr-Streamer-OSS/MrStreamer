@@ -988,3 +988,98 @@ it("retries both refused history and statistics cleanup without removing the pro
   expect(scenario.removals).toBe(1);
   expect(scenario.writes.filter((name) => name === "statistics.json")).toHaveLength(attempts + 1);
 });
+
+it("replaces the password through Settings while retaining Watchlist, recent, progress and marks", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const { viewingOwner } = await import("../src/home/viewing.ts");
+  const { fixture } = await import("./library-fixture.ts");
+  const { libraryModel } = await import("../src/library/model.ts");
+  const platform = await import("../src/platform/storage.ts");
+  const f = fixture();
+
+  const model = libraryModel({
+    sources: () => [{ ...f.source, id: "xtream:private-id", reader: f.source }],
+    language: () => "en",
+  });
+
+  await model.refresh();
+
+  const owner = viewingOwner(
+    { readJson: platform.readJsonStrict, writeJson: platform.writeJson },
+    () => ["xtream:private-id"],
+    () => model,
+  );
+
+  const before = sources.state.get();
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "xtream:private-id",
+        kind: "xtream",
+        label: "tv.example.invalid",
+        channels: {
+          kind: "failed",
+          error: { kind: "needs-secret", subscriptionId: "xtream:private-id" },
+        },
+      },
+    ],
+  });
+
+  try {
+    await owner.read();
+    const title = model.made("movie").list("all", "title")[0]!;
+    const series = model.made("series").list("all", "title")[0]!;
+    await owner.setWatchlist(title, true);
+    await owner.recordWatch({ sourceId: "xtream:private-id", channelId: "live" });
+    await owner.recordProgress(
+      { kind: "movie", subscriptionId: "xtream:private-id", id: title.id },
+      300,
+      1800,
+      1,
+    );
+    await owner.markEpisode(
+      {
+        kind: "episode",
+        subscriptionId: "xtream:private-id",
+        seriesId: series.id,
+        id: "first",
+        season: 1,
+        episode: 1,
+      },
+      true,
+    );
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "tv.example.invalid");
+    press(shown, "Enter password");
+    fill(shown, "Server or M3U link", "https://tv.example.invalid");
+    fill(shown, "Username", "fixture");
+    fill(shown, "Password", "replacement");
+    press(shown, "Connect");
+    await act(async () => {});
+    expect(scenario.connections).toEqual([
+      {
+        id: "xtream:private-id",
+        input: {
+          server: "https://tv.example.invalid",
+          username: "fixture",
+          password: "replacement",
+        },
+      },
+    ]);
+    expect(shown.querySelector("dialog")).toBeNull();
+    expect(scenario.cleared).toEqual([]);
+    await owner.read();
+    expect(owner.state.get().watchlist[0]?.name).toBe(title.title);
+    expect(owner.state.get().viewing?.recent).toEqual([
+      { subscriptionId: "xtream:private-id", id: "live" },
+    ]);
+    expect((await owner.progress(title))[0]?.position).toBe(300);
+    expect((await owner.episodes(series)).marks).toHaveLength(1);
+  } finally {
+    await owner.dispose();
+    sources.state.set(before);
+    scenario.files.delete("viewing.json");
+  }
+});

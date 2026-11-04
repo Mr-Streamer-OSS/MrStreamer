@@ -633,6 +633,7 @@ it("shows Play and retry when the Stage preview fails, ending only its handle", 
     expect(end).toHaveBeenCalledTimes(1);
     await press(shown, "Try again");
     expect(preview).toHaveBeenCalledTimes(2);
+    expect(end).toHaveBeenCalledTimes(2);
   } finally {
     act(() => player.previewState.set({ kind: "idle" }));
     preview.mockRestore();

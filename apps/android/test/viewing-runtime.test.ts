@@ -398,3 +398,29 @@ it.each(["marks", "replay"])("keeps version-specific series behavior: %s", async
     scenario.saved = null;
   }
 });
+
+it("shares the viewing registration until the last caller stops", async () => {
+  const f = fixture();
+  await f.model.refresh();
+  scenario.model = f.model;
+  const first = startViewing();
+  const second = startViewing();
+
+  try {
+    await expect.poll(() => viewing.state.get().kind).toBe("ready");
+    const port = libraryViewing.state.get();
+    expect(port).toBeDefined();
+    expect(scenario.listeners.size).toBe(1);
+    first();
+    expect(libraryViewing.state.get()).toBe(port);
+    expect(scenario.listeners.size).toBe(1);
+    second();
+    expect(libraryViewing.state.get()).toBeUndefined();
+    expect(scenario.listeners.size).toBe(0);
+  } finally {
+    first();
+    second();
+    await viewing.dispose();
+    scenario.saved = null;
+  }
+});
