@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { Json } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { defined } from "@mrstreamer/core/defined";
 import type { Sources } from "../src/connect/sources.ts";
 import { libraryModel } from "../src/library/model.ts";
 import { viewingOwner, titleRef } from "../src/home/viewing.ts";
 import { homeModel, watchlistRows } from "../src/home/model.ts";
 import { fixture } from "./library-fixture.ts";
+
+/** Reaches into a saved JSON object so a test can damage one field; anything else fails the test. */
+function object(value: Json | undefined): { [field: string]: Json | undefined } {
+  if (!value || typeof value !== "object" || !isObject(value)) throw new Error("Not an object");
+
+  return value;
+}
+
+const isObject = (value: Json): value is JsonObject => !Array.isArray(value);
 
 function disk() {
   let value: Json = null;
@@ -329,20 +338,9 @@ it("retries a malformed snapshot after the persisted file is repaired", async ()
     );
     const valid = f.platform.readJson();
     const malformed = structuredClone(valid);
+    const source = object(object(object(malformed).record).accounts).source;
 
-    if (!malformed || typeof malformed !== "object" || Array.isArray(malformed))
-      throw new Error("file");
-    const record = malformed.record;
-
-    if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("record");
-    const accounts = record.accounts;
-
-    if (!accounts || typeof accounts !== "object" || Array.isArray(accounts))
-      throw new Error("accounts");
-    const source = accounts.source;
-
-    if (!source || typeof source !== "object" || Array.isArray(source)) throw new Error("source");
-    delete source.rows;
+    delete object(source).rows;
     f.platform.writeJson("viewing.json", malformed);
     await f.owner.read();
     expect(f.owner.state.get().kind).toBe("failed");
