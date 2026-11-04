@@ -1,3 +1,5 @@
+import type { Json } from "@mrstreamer/contracts/json";
+
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { Title } from "@mrstreamer/contracts/ondemand";
@@ -27,12 +29,6 @@ const State = lazy(() =>
      * are watched. Live itself opens on every country.
      */
     region: "string | null",
-    /**
-     * The version picked for a title in its details, as the desktop keeps them: by subscription,
-     * then `kind:tmdbId`, the id of that subscription's version. Read through `TitleVersions`,
-     * so a shape this build doesn't know counts as no pick and never loses the rest of the file.
-     */
-    "titleVersions?": "unknown",
   }),
 );
 
@@ -40,7 +36,14 @@ const TitleVersions = lazy(() => type({ "[string]": { "[string]": "string" } }))
 
 type TitleVersions = Infer<typeof TitleVersions>;
 
-export type SavedState = Infer<typeof State>;
+export type SavedState = Infer<typeof State> & {
+  /**
+   * The version picked for a title in its details, as the desktop keeps them: by subscription,
+   * then `kind:tmdbId`, the id of that subscription's version. Read through `TitleVersions`,
+   * so a shape this build doesn't know counts as no pick and never loses the rest of the file.
+   */
+  titleVersions?: Json;
+};
 
 export type SavedSubscription = NonNullable<SavedState["subscription"]>;
 
@@ -62,8 +65,17 @@ export function readState(): SavedState {
   const known = cached.get();
 
   if (known) return known;
-  const parsed = State()(readJson(FILE));
-  const state = parsed instanceof type.errors ? EMPTY : parsed;
+  const data = readJson(FILE);
+  const parsed = State()(data);
+
+  const state =
+    parsed instanceof type.errors ||
+    data === null ||
+    typeof data !== "object" ||
+    Array.isArray(data)
+      ? EMPTY
+      : { ...data, ...parsed };
+
   cached.set(state);
 
   return state;

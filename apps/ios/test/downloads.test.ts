@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import {
   memory,
   native,
@@ -412,9 +413,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const disk = new DiskFile(native.root, "documents", "downloads.json");
     disk.writeSync(
       JSON.stringify(
-        JSON.parse(disk.textSync(), (key, value: unknown) =>
-          key === "tmdbId" ? undefined : value,
-        ),
+        JSON.parse(disk.textSync(), (key, value: Json) => (key === "tmdbId" ? undefined : value)),
       ),
     );
     const relaunched = await launch();
@@ -469,7 +468,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     await until(() => isComplete(app, copy.id), "the saved copy");
     const disk = new DiskFile(native.root, "documents", "downloads.json");
 
-    const stored: unknown = JSON.parse(disk.textSync(), (key, value: unknown) =>
+    const stored: unknown = JSON.parse(disk.textSync(), (key, value: Json) =>
       key === "about" && typeof value === "object" && value !== null
         ? { ...value, originalLanguage: "fr" }
         : value,

@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 /** The app's own types have no React DOM; the tests resolve it from the desktop's install. */
 const REACT_DOM = "react-dom/client";
 
-type Root = { render(node: unknown): void; unmount(): void };
+type Root = { render(node: import("react").ReactNode): void; unmount(): void };
 
 /** happy-dom's document; the app's own types have no DOM. */
 const { document } = globalThis as typeof globalThis & {

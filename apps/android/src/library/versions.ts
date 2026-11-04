@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 
@@ -23,8 +24,8 @@ export function chosenVersion(
 }
 
 export function versionMemory(storage: {
-  readJson(name: string): unknown;
-  writeJson(name: string, value: unknown): void;
+  readJson(name: string): Json;
+  writeJson(name: string, value: Json): void;
 }) {
   const file = "library-versions.json";
   let raw: unknown;
@@ -46,9 +47,11 @@ export function versionMemory(storage: {
       // Reread before saving: null starts again; an unreadable file remains retryable.
       const saved = storage.readJson(file);
 
-      if (saved !== null && (typeof saved !== "object" || Array.isArray(saved)))
-        throw new Error("Couldn't save version");
-      const next: Record<string, unknown> = saved === null ? {} : { ...saved };
+      const object = (value: Json): value is JsonObject =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+
+      if (saved !== null && !object(saved)) throw new Error("Couldn't save version");
+      const next: Record<string, Json | undefined> = saved === null ? {} : { ...saved };
 
       if (version === null) delete next[key];
       else next[key] = version;

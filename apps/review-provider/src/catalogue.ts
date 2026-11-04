@@ -1,3 +1,5 @@
+import { type } from "arktype";
+
 // One sample definition. The preparation driver reads these same source identities;
 // protocol lists, details and the linear programme cycle all derive from them.
 export const SOURCE_COMMIT = "9791b09908e03742cee981c97e37d47829fc7a18";
@@ -101,126 +103,61 @@ export interface MediaIndex {
   readonly segments: readonly Segment[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const Finite = type("number").narrow(Number.isFinite);
 
-function record(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw new Error("Invalid media index object");
+const ObjectFact = type({
+  key: "string",
+  bytes: Finite,
+  sha256: "string",
+  mime: "'video/mp4' | 'video/mp2t' | 'image/png'",
+});
 
-  return value;
-}
+const MediaId = type("'movie' | 'episode-1' | 'episode-2'");
 
-function string(value: unknown): string {
-  if (typeof value !== "string") throw new Error("Invalid media index text");
-
-  return value;
-}
-
-function number(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value))
-    throw new Error("Invalid media index number");
-
-  return value;
-}
-
-function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error("Invalid media index list");
-
-  return value;
-}
-
-function mediaId(value: unknown): MediaId {
-  const original = ORIGINALS.find((item) => item.id === value);
-
-  if (!original) throw new Error("Invalid media identity");
-
-  return original.id;
-}
-
-function objectFact(value: unknown): ObjectFact {
-  const item = record(value);
-  const mime = item.mime;
-
-  if (mime !== "video/mp4" && mime !== "video/mp2t" && mime !== "image/png")
-    throw new Error("Invalid media MIME");
-
-  return { key: string(item.key), sha256: string(item.sha256), bytes: number(item.bytes), mime };
-}
-
-/** Parse generated JSON at the product boundary; tests may supply explicitly synthetic facts. */
-export function readMediaIndex(raw: unknown): MediaIndex {
-  const value = record(raw);
-
-  if (value.version !== 1) throw new Error("Unknown media index version");
-  const originals = record(value.originals);
-  const artwork = record(value.artwork);
-
-  const index: MediaIndex = {
-    version: 1,
-    sourceCommit: string(value.sourceCommit),
-    release: string(value.release),
-    originals: {
-      movie: objectFact(originals.movie),
-      "episode-1": objectFact(originals["episode-1"]),
-      "episode-2": objectFact(originals["episode-2"]),
+const MediaIndex = type({
+  version: "1",
+  sourceCommit: "string",
+  release: "string",
+  originals: { movie: ObjectFact, "episode-1": ObjectFact, "episode-2": ObjectFact },
+  artwork: {
+    "movie-cover": ObjectFact,
+    "movie-backdrop": ObjectFact,
+    "series-cover": ObjectFact,
+    "series-backdrop": ObjectFact,
+  },
+  programmes: type({
+    id: MediaId,
+    videoFrames: Finite,
+    audio: {
+      accessUnitsSha256: "string",
+      firstEdgeTicks: Finite,
+      lastEdgeTicks: Finite,
+      continuous: "boolean",
     },
-    artwork: {
-      "movie-cover": objectFact(artwork["movie-cover"]),
-      "movie-backdrop": objectFact(artwork["movie-backdrop"]),
-      "series-cover": objectFact(artwork["series-cover"]),
-      "series-backdrop": objectFact(artwork["series-backdrop"]),
-    },
-    programmes: array(value.programmes).map((rawProgramme) => {
-      const p = record(rawProgramme);
-      const audio = record(p.audio);
+  }).array(),
+  renditions: type({
+    id: "'540p' | '180p'",
+    width: Finite,
+    height: Finite,
+    frameRate: Finite,
+    codecs: "string",
+    bandwidth: Finite,
+    averageBandwidth: Finite,
+  }).array(),
+  segments: type({
+    programme: MediaId,
+    frames: Finite,
+    videoDurationTicks: Finite,
+    files: { "540p": ObjectFact, "180p": ObjectFact },
+  }).array(),
+});
 
-      if (typeof audio.continuous !== "boolean") throw new Error("Invalid audio continuity fact");
-
-      return {
-        id: mediaId(p.id),
-        videoFrames: number(p.videoFrames),
-        audio: {
-          accessUnitsSha256: string(audio.accessUnitsSha256),
-          firstEdgeTicks: number(audio.firstEdgeTicks),
-          lastEdgeTicks: number(audio.lastEdgeTicks),
-          continuous: audio.continuous,
-        },
-      };
-    }),
-    renditions: array(value.renditions).map((rawRendition) => {
-      const r = record(rawRendition);
-      const id = r.id;
-
-      if (id !== "540p" && id !== "180p") throw new Error("Invalid rendition identity");
-
-      return {
-        id,
-        width: number(r.width),
-        height: number(r.height),
-        frameRate: number(r.frameRate),
-        codecs: string(r.codecs),
-        bandwidth: number(r.bandwidth),
-        averageBandwidth: number(r.averageBandwidth),
-      };
-    }),
-    segments: array(value.segments).map((rawSegment) => {
-      const s = record(rawSegment);
-      const files = record(s.files);
-
-      return {
-        programme: mediaId(s.programme),
-        frames: number(s.frames),
-        videoDurationTicks: number(s.videoDurationTicks),
-        files: { "540p": objectFact(files["540p"]), "180p": objectFact(files["180p"]) },
-      };
-    }),
-  };
-
+/** Parse generated JSON and certify its cycle before any provider can serve it. */
+export const readMediaIndex = MediaIndex.pipe((index): MediaIndex => {
   validateMedia(index);
 
   return index;
-}
+}).assert;
 
 /** Reject an incomplete or inconsistent index before any provider can serve it. */
 export function validateMedia(index: MediaIndex): void {

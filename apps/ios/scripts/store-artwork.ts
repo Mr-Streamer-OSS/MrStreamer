@@ -1,4 +1,5 @@
 // Compose candidates only. Native captures and inspected Apple frames stay in .local/.
+import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -45,27 +46,27 @@ try {
 }
 
 /** Reject unrecognised metadata rather than copying operator notes into exports. */
-function knownKeys(value: Record<string, unknown>, keys: readonly string[], label: string) {
+function knownKeys(value: JsonObject, keys: readonly string[], label: string) {
   for (const key of Object.keys(value))
     if (!keys.includes(key)) throw new Error(`${label}: unknown key ${key}`);
 }
 
 /** JSON is untrusted: require objects and named values before using any capture metadata. */
-function object(value: unknown, label: string): Record<string, unknown> {
+function object(value: Json | undefined, label: string): JsonObject {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(`${label} must be an object`);
 
-  return value as Record<string, unknown>;
+  return value as JsonObject;
 }
 
-function string(value: unknown, label: string): string {
+function string(value: Json | undefined, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is required`);
 
   return value;
 }
 
 /** Device and OS names only: letters, digits, spaces and `.,()'"+-`, so no path, URL or login. */
-function plainLabel(value: unknown, label: string): string {
+function plainLabel(value: Json | undefined, label: string): string {
   const text = string(value, label);
 
   if (!/^[\p{L}\p{N} .,()'"+-]{1,64}$/u.test(text))
@@ -75,7 +76,7 @@ function plainLabel(value: unknown, label: string): string {
 }
 
 /** Official provenance URLs cannot carry credentials, queries or fragments. */
-function appleUrl(value: unknown, label: string): string {
+function appleUrl(value: Json | undefined, label: string): string {
   const text = string(value, label);
   const url = URL.canParse(text) ? new URL(text) : undefined;
 
@@ -95,7 +96,7 @@ function appleUrl(value: unknown, label: string): string {
   return text;
 }
 
-function integer(value: unknown, label: string, minimum = 0): number {
+function integer(value: Json | undefined, label: string, minimum = 0): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum)
     throw new Error(`${label} must be an integer >= ${minimum}`);
 
@@ -118,7 +119,7 @@ async function inputFile(path: string) {
 }
 
 const input = await inputFile(resolve(values.input));
-const config = object(JSON.parse(input.bytes.toString()), "input");
+const config = object(JSON.parse(input.bytes.toString()) as Json, "input");
 
 knownKeys(config, ["slots"], "input");
 
@@ -240,11 +241,8 @@ function uprightPng(info: Metadata, bytes: Buffer) {
   return info.format === "png" && (info.pages || 1) === 1 && (info.orientation || 1) === 1;
 }
 
-/**
- * Paper A with a supplied frame: the frame scaled into the picture box, the capture resized
- * into its cutout underneath. The manifest records the frame with its file and licence hashes.
- */
-async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
+/** Parse the supplied frame metadata before composition reads files or pixels. */
+function parseFrame(value: Json | undefined) {
   const supplied = object(value, "frame");
   knownKeys(
     supplied,
@@ -255,24 +253,36 @@ async function framed(slot: Slot, capture: Buffer, value: unknown, box: Box) {
   const frameSource = appleUrl(supplied.source, "frame.source");
   const termsSource = appleUrl(supplied.termsSource, "frame.termsSource");
 
-  const licence = await inputFile(
-    resolve(dirname(input.file), string(supplied.licenceFile, "frame.licenceFile")),
-  );
+  const cutout = object(supplied.cutout, "frame.cutout");
+  knownKeys(cutout, ["left", "top", "width", "height"], "frame.cutout");
+
+  return {
+    frameSource,
+    termsSource,
+    licenceFile: string(supplied.licenceFile, "frame.licenceFile"),
+    file: string(supplied.file, "frame.file"),
+    left: integer(cutout.left, "cutout.left"),
+    top: integer(cutout.top, "cutout.top"),
+    width: integer(cutout.width, "cutout.width", 1),
+    height: integer(cutout.height, "cutout.height", 1),
+    cornerRadius: integer(supplied.cornerRadius, "frame.cornerRadius"),
+  };
+}
+
+type Frame = ReturnType<typeof parseFrame>;
+
+/** Scale the supplied frame and fit the capture underneath its cutout. */
+async function framed(slot: Slot, capture: Buffer, frame: Frame, box: Box) {
+  const { frameSource, termsSource, left, top, width, height, cornerRadius } = frame;
+  const licence = await inputFile(resolve(dirname(input.file), frame.licenceFile));
 
   if (!licence.bytes.toString("utf8").trim()) throw new Error("frame licence must be non-empty");
 
-  const image = await inputFile(resolve(dirname(input.file), string(supplied.file, "frame.file")));
+  const image = await inputFile(resolve(dirname(input.file), frame.file));
   const info = await sharp(image.bytes).metadata();
 
   if (!uprightPng(info, image.bytes) || !info.hasAlpha || !info.width || !info.height)
     throw new Error("frame must be an upright transparent PNG");
-  const cutout = object(supplied.cutout, "frame.cutout");
-  knownKeys(cutout, ["left", "top", "width", "height"], "frame.cutout");
-  const left = integer(cutout.left, "cutout.left");
-  const top = integer(cutout.top, "cutout.top");
-  const width = integer(cutout.width, "cutout.width", 1);
-  const height = integer(cutout.height, "cutout.height", 1);
-  const cornerRadius = integer(supplied.cornerRadius, "frame.cornerRadius");
 
   if (cornerRadius > Math.min(width, height) / 2 || Math.min(width, height) <= 4)
     throw new Error("frame cornerRadius must fit the cutout with a 2 px anti-alias band");
@@ -465,7 +475,7 @@ for (const slot of spec.slots.filter((slot) => Object.hasOwn(slots, slot.id))) {
   const { picture, width, height, screenGeometry, frame } =
     capture.frame === undefined
       ? await frameless(slot, source.bytes, box)
-      : await framed(slot, source.bytes, capture.frame, box);
+      : await framed(slot, source.bytes, parseFrame(capture.frame), box);
 
   const headlines: Record<string, string> = slot.headlines;
   const headline = headlines[locale]!;

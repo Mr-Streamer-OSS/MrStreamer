@@ -34,7 +34,17 @@ const audio: Track = {
 function setup(failSave = false, failRead = false, resolve?: Resolve) {
   const listeners = new Map<string, Set<(event: never) => void>>();
 
-  const emit = (event: string, value: unknown) => {
+  const emit = (
+    event: string,
+    value:
+      | Partial<Observation>
+      | {
+          attempt: string;
+          tracks?: readonly Track[];
+          pip?: boolean;
+          command?: "next" | "cancel-next";
+        },
+  ) => {
     for (const listener of listeners.get(event) ?? []) listener(value as never);
   };
 

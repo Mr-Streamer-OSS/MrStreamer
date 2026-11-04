@@ -161,7 +161,7 @@ function press(testID: string) {
 
 function type(query: string) {
   const field = find("discover-field") as {
-    dispatchEvent(event: unknown): void;
+    dispatchEvent(event: Parameters<typeof window.dispatchEvent>[0]): void;
   } | null;
 
   if (!field) throw new Error("No field on screen");

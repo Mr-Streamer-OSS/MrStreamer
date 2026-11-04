@@ -31,11 +31,13 @@ export const cases: readonly ProofCase[] = [
     run: () => {
       const normalized = normalizeCatalogue(CATALOGUE);
 
-      return plain({
-        categories: normalized.categories.map((c) => [c.group, c.title]),
-        streams: normalized.streams.map((s) => [s.title, s.tags]),
-        search: groupLiveSearch([]).length,
-      });
+      return plain(
+        JSON.stringify({
+          categories: normalized.categories.map((c) => [c.group, c.title]),
+          streams: normalized.streams.map((s) => [s.title, s.tags]),
+          search: groupLiveSearch([]).length,
+        }),
+      );
     },
   },
 ];

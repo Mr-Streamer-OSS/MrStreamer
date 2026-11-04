@@ -62,7 +62,7 @@ async function problems(
 ): Promise<string> {
   const failure = await collectNotices({ root, modules, variables }).then(
     () => new Error("The notices were written."),
-    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    (cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))),
   );
 
   return failure.message;

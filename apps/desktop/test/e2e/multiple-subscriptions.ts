@@ -1,3 +1,4 @@
+import type { IpcInput, IpcMethod } from "@mrstreamer/contracts/ipc";
 // Checks several subscriptions in a built app, against two fake providers whose panels number
 // everything alike, and the fake TMDB: what the suite can't, because the window, the player, the
 // worker and the main process meet only there. It connects the first, then checks, in order:
@@ -88,7 +89,11 @@ function report(name: string, problems: readonly string[]): void {
   failed ||= problems.length > 0;
 }
 
-const invoke = async <T>(page: Page, method: string, input?: unknown): Promise<T> => {
+const invoke = async <T>(
+  page: Page,
+  method: IpcMethod,
+  input?: IpcInput<IpcMethod>,
+): Promise<T> => {
   const result = await page.evaluate<{ ok: boolean; value: T; error?: unknown }>(
     `window.mrStreamer.invoke(${JSON.stringify(method)}, ${JSON.stringify(input)})`,
   );
@@ -471,7 +476,7 @@ try {
     await leave(page, "title");
 
     const progress = await invoke<TitleProgress[]>(page, "viewing.progress", {
-      movies: film.versions,
+      movies: film.versions.map(({ subscriptionId, id }) => ({ subscriptionId, id })),
     });
 
     const played = progress.map((each) => each.title.subscriptionId);

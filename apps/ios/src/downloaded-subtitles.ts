@@ -270,7 +270,7 @@ function keep(title: SubtitleTitle, kept: Kept): boolean {
   try {
     if (!folder.exists) folder.create();
     before = file.exists ? file.textSync() : null;
-    writeJson(nameOf(title), kept);
+    writeJson(nameOf(title), { ...kept });
   } catch {
     // A refused write can leave its proposal beside the file, which a read would take instead,
     // and the move that refused may already have deleted the file: what it held goes back.

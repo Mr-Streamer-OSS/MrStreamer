@@ -154,7 +154,7 @@ async function erasureApp() {
 
       const done = removal.remove(b, true).then(
         () => null,
-        (error: unknown) => error,
+        (cause: unknown) => cause,
       );
 
       await paused.arrived;
@@ -173,7 +173,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
       .setFavourite("late-favourite", { subscriptionId: app.b, id: "1" }, true)
       .then(
         () => null,
-        (error: unknown) => error,
+        (cause: unknown) => cause,
       );
 
     await held.arrived;
@@ -194,7 +194,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
 
     const command = app.watchlist.save("movie", { subscriptionId: app.b, id: "91001" }).then(
       () => null,
-      (error: unknown) => error,
+      (cause: unknown) => cause,
     );
 
     await held.arrived;
@@ -245,7 +245,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
 
       const command = write().then(
         () => null,
-        (error: unknown) => error,
+        (cause: unknown) => cause,
       );
 
       await held.arrived;
@@ -277,7 +277,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
 
     const command = app.watchlist.save("movie", { subscriptionId: app.a, id: "91001" }).then(
       () => null,
-      (error: unknown) => error,
+      (cause: unknown) => cause,
     );
 
     await held.arrived;
@@ -324,7 +324,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
 
       const command = write().then(
         () => null,
-        (error: unknown) => error,
+        (cause: unknown) => cause,
       );
 
       await held.arrived;
@@ -367,7 +367,7 @@ describe("viewing-data erasure with pending writes", { timeout: 30_000 }, () => 
 
     const command = app.watchlist.remove(entry).then(
       () => null,
-      (error: unknown) => error,
+      (cause: unknown) => cause,
     );
 
     await held.arrived;

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // The made-up marketing subscription for the iOS app on the simulator, for the iPhone captures the
 // website shows (docs/contributing/marketing-artwork.md). It starts the desktop captures' demo
 // (apps/desktop/scripts/marketing-demo.ts), unchanged, and puts in front of it what the iOS app
@@ -149,7 +150,7 @@ createServer((request, response) => {
 async function tmdb(url: URL, response: ServerResponse): Promise<void> {
   const answer = await fetch(`${demo.tmdbApi}${url.pathname.slice("/tmdb/3".length)}${url.search}`);
 
-  const body = JSON.stringify(await answer.json(), (key, value: unknown) =>
+  const body = JSON.stringify(await answer.json(), (key, value: Json) =>
     key.endsWith("_path") ? null : value,
   );
 

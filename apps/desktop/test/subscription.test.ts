@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import { Failed } from "@mrstreamer/core/failure";
 import type { Secrets } from "../src/main/platform/secrets.ts";
@@ -90,6 +90,22 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
 }
 
 describe("subscriptions", () => {
+  it("logs schema failures in subscriptions.json without saved values", async ({
+    onTestFinished,
+  }) => {
+    const { dataDir, create } = await subscriptions();
+    const path = join(dataDir, "subscriptions.json");
+    await writeFile(path, JSON.stringify({ version: "private-invalid-value", subscriptions: [] }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warning.mockRestore());
+
+    await (await create()).list();
+
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(`[storage] ignoring ${path}:`));
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("version:"));
+    expect(warning.mock.calls.flat().join(" ")).not.toContain("private-invalid-value");
+  });
+
   it("connects with a valid login and reports the account", async () => {
     const provider = await fakeProvider();
     const { service } = await subscriptions();
@@ -738,6 +754,24 @@ describe("several subscriptions", () => {
     );
 
     expect(await ids(await create())).toEqual(recovered.map((each) => each.id));
+  });
+
+  it("reads a registry with a deeply nested opaque field", async () => {
+    const { dataDir, create, original, beside } = await two();
+    const text = await readFile(join(dataDir, "subscriptions.json"), "utf8");
+    const depth = 1700;
+    await writeFile(
+      join(dataDir, "subscriptions.json"),
+      text.replace(
+        '"subscriptions":[',
+        '"subscriptions":[{"future":' + "[".repeat(depth) + "0" + "]".repeat(depth) + "},",
+      ),
+    );
+
+    expect(await ids(await create())).toEqual([original.id, beside.id]);
+    expect(await readFile(join(dataDir, "subscriptions.json"), "utf8")).toContain(
+      '"future":' + "[".repeat(depth),
+    );
   });
 
   it("settles a removal cut short, and leaves alone what it can't read", async () => {

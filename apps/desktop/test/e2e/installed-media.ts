@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // Installed-only media acceptance. Product pins are separate from this verifier's revision.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -38,9 +39,6 @@ const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const hash = async (path: string) => digest(await readFile(path));
 
-const json = (path: string, value: unknown) =>
-  writeFile(path, JSON.stringify(value, null, 2) + "\n");
-
 const git = (...args: string[]) =>
   execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim();
 
@@ -65,61 +63,36 @@ interface Target {
   pins: Pins;
 }
 
-function object(value: unknown): Record<string, unknown> {
-  assert(value && typeof value === "object" && !Array.isArray(value), "Expected JSON object");
+const TargetInput = type({
+  "+": "reject",
+  platform: "'win32' | 'darwin' | 'linux'",
+  executable: "string",
+  resources: "string",
+  version: "string",
+  source: "string",
+  pins: {
+    "+": "reject",
+    executable: "string",
+    asar: "string",
+    main: "string",
+    ffmpeg: "string",
+    ffprobe: "string",
+  },
+});
 
-  return value as Record<string, unknown>;
-}
-
-function keys(value: Record<string, unknown>, expected: string[]) {
-  assert.deepEqual(Object.keys(value).sort(), expected.toSorted(), "Unexpected target fields");
-}
-
-function string(value: unknown): string {
-  assert(typeof value === "string", "Expected string");
-
-  return value;
-}
-
-/** Explicit data only. Unknown fields, including launch commands, are refused before spawning. */
-export function readTarget(input: unknown): Target {
-  const data = object(input);
-  keys(data, ["platform", "executable", "resources", "version", "source", "pins"]);
-  const platform = data.platform;
-  assert(platform === "win32" || platform === "darwin" || platform === "linux");
+/** Explicit data only. Unknown fields are refused before spawning. */
+export const readTarget = TargetInput.pipe((data): Target => {
+  const { platform, executable, resources, version, source, pins } = data;
   assert.equal(platform, process.platform, "Target platform differs from this host");
-  const executable = string(data.executable);
-  const resources = string(data.resources);
   assert(isAbsolute(executable) && isAbsolute(resources), "Target paths must be absolute");
-  const version = string(data.version);
   assert.match(version, /^0\.0\.16-nightly\.\d{8}\.\d+$/, "Expected a .16 nightly version");
-  const source = string(data.source);
   assert.match(source, /^[a-f0-9]{40}$/, "Expected a full product source SHA");
-  const pins = object(data.pins);
-  keys(pins, ["executable", "asar", "main", "ffmpeg", "ffprobe"]);
 
-  const pin = (key: keyof Pins) => {
-    const value = string(pins[key]);
+  for (const [key, value] of Object.entries(pins))
     assert.match(value, /^[a-f0-9]{64}$/, `Invalid ${key} pin`);
 
-    return value;
-  };
-
-  return {
-    platform,
-    executable,
-    resources,
-    version,
-    source,
-    pins: {
-      executable: pin("executable"),
-      asar: pin("asar"),
-      main: pin("main"),
-      ffmpeg: pin("ffmpeg"),
-      ffprobe: pin("ffprobe"),
-    },
-  };
-}
+  return { platform, executable, resources, version, source, pins };
+}).assert;
 
 const samePath = (left: string, right: string) =>
   process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
@@ -386,9 +359,9 @@ function launch(
         ...base,
         async capture(name) {
           await base.capture(name);
-          await json(
+          await writeFile(
             join(evidence, `${name}-ax.json`),
-            await page!.send("Accessibility.getFullAXTree"),
+            JSON.stringify(await page!.send("Accessibility.getFullAXTree"), null, 2) + "\n",
           );
         },
       };
@@ -476,11 +449,18 @@ function launch(
         if (workerTask) workerStartup = await workerTask;
       });
       await attempt(() =>
-        json(join(evidence, "worker-evidence.json"), {
-          events: workerEvents,
-          startup: workerStartup,
-          cleanup: workerCleanup,
-        }),
+        writeFile(
+          join(evidence, "worker-evidence.json"),
+          JSON.stringify(
+            {
+              events: workerEvents,
+              startup: workerStartup,
+              cleanup: workerCleanup,
+            },
+            null,
+            2,
+          ) + "\n",
+        ),
       );
 
       if (workers && (!workerStartup?.ok || workerCleanup?.errors.length))
@@ -1589,7 +1569,9 @@ export async function installedMedia(args: string[]) {
     ],
   };
 
-  const save = () => json(join(evidence, "proof-incremental.json"), proof);
+  const save = () =>
+    writeFile(join(evidence, "proof-incremental.json"), JSON.stringify(proof, null, 2) + "\n");
+
   let pair: Awaited<ReturnType<typeof installedTelemetryPair>> | undefined;
   let target: Target | undefined;
 
@@ -1617,7 +1599,10 @@ export async function installedMedia(args: string[]) {
           headers: request.headers,
           body: Buffer.concat(chunks).toString(),
         });
-        await json(join(evidence, "loopback-capture.json"), wire);
+        await writeFile(
+          join(evidence, "loopback-capture.json"),
+          JSON.stringify(wire, null, 2) + "\n",
+        );
         response.end("ok");
       } catch (error) {
         captureErrors.push(String(error));
@@ -1723,7 +1708,10 @@ export async function installedMedia(args: string[]) {
       ),
     };
 
-    await json(join(evidence, "target.json"), { ...target, setup, verifier });
+    await writeFile(
+      join(evidence, "target.json"),
+      JSON.stringify({ ...target, setup, verifier }, null, 2) + "\n",
+    );
     proof.details["preflightPins"] = await verifyPins(target);
     av1Bytes("short");
     av1Bytes("long");
@@ -1820,9 +1808,9 @@ export async function installedMedia(args: string[]) {
     }
 
     proof.details["endedAt"] = Date.now();
-    await json(join(evidence, "loopback-capture.json"), wire);
+    await writeFile(join(evidence, "loopback-capture.json"), JSON.stringify(wire, null, 2) + "\n");
     await save();
-    await json(join(evidence, "proof.json"), proof);
+    await writeFile(join(evidence, "proof.json"), JSON.stringify(proof, null, 2) + "\n");
     console.log(`MEDIA_FINAL ${proof.outcome}: ${evidence}`);
   }
 

@@ -1,3 +1,4 @@
+import type { StandInData } from "./hls-stand-in.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { AttrList, Level } from "hls.js";
@@ -33,7 +34,7 @@ vi.mock("hls.js", async (original) => {
       get firstAutoLevel() {
         return this.levels.length - 1;
       }
-      override once(event: string, listener: (event: string, data: unknown) => void) {
+      override once(event: string, listener: (event: string, data: StandInData) => void) {
         if (event === real.default.Events.MANIFEST_PARSED)
           fixture.parsed = () => listener(event, {});
         else super.once(event, listener);
@@ -160,7 +161,7 @@ it.each(["before", "after"])(
       audioLanguage: null,
     });
     let failure: unknown;
-    engine.started.catch((error: unknown) => (failure = error));
+    engine.started.catch((cause: unknown) => (failure = cause));
 
     if (when === "before") engine.fix?.(high.uri);
     await vi.dynamicImportSettled();
@@ -228,7 +229,7 @@ it("starts as it would alone when hls.js doesn't list the held quality", async (
     audioLanguage: "es",
   });
   let failure: unknown;
-  engine.started.catch((error: unknown) => (failure = error));
+  engine.started.catch((cause: unknown) => (failure = cause));
   engine.fix?.("http://localhost/twin.m3u8");
   await vi.dynamicImportSettled();
   fixture.parsed();

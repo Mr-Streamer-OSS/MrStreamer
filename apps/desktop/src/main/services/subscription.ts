@@ -1,3 +1,5 @@
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
+
 import type { UsageObservers } from "../analytics/observers.ts";
 // The saved subscriptions: each validated with its provider and stored with a sealed password or,
 // for a playlist, a sealed link. Every one of them shows in the app at once; none is "the active
@@ -45,6 +47,7 @@ import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import { t } from "@mrstreamer/core/i18n";
 import {
+  readJson,
   readJsonFile,
   removeFile,
   removeUnfinishedWrites,
@@ -124,7 +127,7 @@ const Registry = lazy(() => type({ version: "1", subscriptions: "object[]" }));
  * One of the registry's entries as the file holds it, unparsed: each is read on its own, and one
  * this build can't read is kept as it is.
  */
-type RegistryEntry = Infer<typeof Registry>["subscriptions"][number];
+type RegistryEntry = JsonObject | readonly Json[];
 
 /**
  * A saved subscription as other services know it, whether or not its password or link can be
@@ -495,7 +498,9 @@ function make(deps: SubscriptionDeps) {
         ? at
         : entries.findIndex((raw, each) => each !== at && "id" in raw && raw.id === of.id);
 
-      const { name: _name, ...kept }: { name?: unknown } = entries[index] ?? {};
+      const kept = Object.fromEntries(
+        Object.entries(entries[index] ?? {}).filter(([key]) => key !== "name"),
+      );
 
       const entry = saved && {
         ...kept,
@@ -1024,7 +1029,29 @@ async function readRegistry(path: string): Promise<{
   readonly at: number;
   readonly original: Infer<typeof OriginalEntry> | null;
 }> {
-  const entries = (await readJsonFile(path, Registry()))?.subscriptions ?? [];
+  const data = await readJson(path);
+  const head = Registry()(data);
+
+  if (data !== null && head instanceof type.errors) {
+    console.warn(
+      `[storage] ignoring ${path}: ${head.map((error) => `${error.path}: ${error.expected}`).join("; ")}`,
+    );
+  }
+
+  const entries: RegistryEntry[] = [];
+
+  if (
+    !(head instanceof type.errors) &&
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    "subscriptions" in data &&
+    Array.isArray(data.subscriptions)
+  ) {
+    for (const entry of data.subscriptions) {
+      if (entry !== null && typeof entry === "object") entries.push(entry);
+    }
+  }
 
   for (const [at, entry] of entries.entries()) {
     const original = OriginalEntry()(entry);

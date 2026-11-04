@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Stream sessions and the loopback proxy that serves them to the UI.
 //
 // The UI never sees provider URLs: they carry the login. It gets a 127.0.0.1 URL with a random
@@ -3632,7 +3633,7 @@ function make(deps: PlaybackDeps) {
         session.closed.signal.addEventListener("abort", stop, { once: true });
       });
 
-      let json: unknown = null;
+      let json: Json | null = null;
 
       try {
         json = output === null ? null : JSON.parse(output);

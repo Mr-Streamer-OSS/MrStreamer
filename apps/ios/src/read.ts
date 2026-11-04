@@ -23,7 +23,7 @@ const LOADING = { kind: "loading" } as const;
 export function useRead<A>(
   key: string | null,
   read: (show: (value: A) => void) => Promise<A>,
-  again?: unknown,
+  again?: string | number,
 ): Loaded<A> {
   const [held, setHeld] = useState<{ readonly key: string; readonly loaded: Loaded<A> } | null>(
     null,

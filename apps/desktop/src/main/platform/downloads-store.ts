@@ -204,7 +204,9 @@ export const downloadStoreLayer = Layer.effect(
 );
 
 /** A row's record as this build knows them, or null. */
-function readRecord(record: unknown): StoredDownload | null {
+function readRecord(
+  record: import("node:sqlite").SQLOutputValue | undefined,
+): StoredDownload | null {
   try {
     const parsed = Stored()(JSON.parse(String(record)));
 

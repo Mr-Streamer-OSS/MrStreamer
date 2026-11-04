@@ -33,8 +33,8 @@ export async function closeNative(
   if (!alreadyExited)
     void Promise.resolve()
       .then(close)
-      .catch((error: unknown) => {
-        requestError = String(error);
+      .catch((cause: unknown) => {
+        requestError = String(cause);
       });
   const forced = !alreadyExited && !(await wait(Math.max(0, graceMs - (Date.now() - started))));
 

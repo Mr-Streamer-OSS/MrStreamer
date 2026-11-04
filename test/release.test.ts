@@ -1,3 +1,4 @@
+import type { Json } from "../packages/contracts/src/json.ts";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -924,7 +925,7 @@ describe("update feed", () => {
       published("v0.0.3-nightly.20261002.9", 1),
     ]);
 
-    const json: Record<string, unknown> = JSON.parse(JSON.stringify(feed));
+    const json: Record<string, Json | undefined> = JSON.parse(JSON.stringify(feed));
 
     expect(readFeed(json)).toEqual(feed);
     // A feed deployed before installers were listed reads as it is, without them, and so does
@@ -1105,7 +1106,7 @@ else console.log(JSON.stringify({workflow_runs:fixture.runs}));
 });
 
 /** A stored ZIP fixture with one JSON file, without an additional test tool dependency. */
-function validationArchive(value: unknown): Buffer {
+function validationArchive(value: Json): Buffer {
   const name = Buffer.from("validation.json");
   const data = Buffer.from(JSON.stringify(value));
   let crc = 0xffffffff;

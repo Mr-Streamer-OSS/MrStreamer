@@ -1,3 +1,6 @@
+import type { ShareContent } from "react-native";
+import type { LoginInput } from "@mrstreamer/contracts/ipc";
+import type { writeJson } from "../src/platform/storage.ts";
 import { Window } from "happy-dom";
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -40,7 +43,7 @@ vi.mock("../src/platform/storage.ts", () => ({
 
     return text === undefined ? null : (JSON.parse(text) as unknown);
   },
-  writeJson: (name: string, value: unknown) => {
+  writeJson: (name: string, value: Parameters<typeof writeJson>[1]) => {
     scenario.writes.push(name);
 
     if (scenario.refused.has(name)) throw new Error("The folder won't take it.");
@@ -136,7 +139,7 @@ vi.mock("react-native", async () => {
     I18nManager: { getConstants: () => ({ localeIdentifier: "en_US" }) },
     Platform: { OS: "android", Version: 36, constants: { Release: "16" } },
     Share: {
-      share: async (content: unknown) => {
+      share: async (content: ShareContent) => {
         if (scenario.shareRefused) throw new Error("share refused");
         scenario.shared.push(content);
 
@@ -236,7 +239,7 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
         ],
       }),
       restore: async () => {},
-      connect: async (input: unknown, _signal?: AbortSignal, id?: string) => {
+      connect: async (input: LoginInput, _signal?: AbortSignal, id?: string) => {
         scenario.connections.push({ input, id });
 
         return scenario.saveRefused
@@ -267,7 +270,7 @@ Object.assign(globalThis, { window, document: window.document });
 const REACT_DOM = "react-dom/client";
 
 const { createRoot } = (await import(REACT_DOM)) as {
-  createRoot(container: HTMLElement): { render(node: unknown): void; unmount(): void };
+  createRoot(container: HTMLElement): { render(node: ReactNode): void; unmount(): void };
 };
 
 const { currentLanguage, setLanguage } = await import("@mrstreamer/core/i18n");

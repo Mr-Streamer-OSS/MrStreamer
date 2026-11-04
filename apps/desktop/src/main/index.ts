@@ -1341,11 +1341,11 @@ if (app.requestSingleInstanceLock()) {
     // Not while Quit asks first.
     if (!event.defaultPrevented) app.releaseSingleInstanceLock();
   });
-  void start().catch((error: unknown) => {
-    console.error("[startup]", error);
+  void start().catch((cause: unknown) => {
+    console.error("[startup]", cause);
     dialog.showErrorBox(
       t("Mr. Streamer could not start"),
-      error instanceof Error ? error.message : String(error),
+      cause instanceof Error ? cause.message : String(cause),
     );
     app.exit(1);
   });

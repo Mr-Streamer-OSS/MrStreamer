@@ -61,11 +61,11 @@ export type ScheduleMiss = "away" | "busy" | "stream" | "disk" | "held" | "unrea
 export type RecordingGapReason = "away" | "busy" | "stream" | "disk" | "space";
 
 /** Time a recording missed, from `from`; `to` is null while it still misses it. */
-export interface RecordingGap {
+export type RecordingGap = {
   readonly from: number;
   readonly to: number | null;
   readonly why: RecordingGapReason;
-}
+};
 
 export interface Recording {
   /** Names it for `recordings.stop`, `recordings.remove` and `playback.openCopy`. */
@@ -154,10 +154,10 @@ export type RecordingStart =
 export const RECORDING_MAX_MS = 12 * 60 * 60 * 1000;
 
 /** Minutes a schedule records before its programme or slot starts, and after it ends. */
-export interface RecordingPadding {
+export type RecordingPadding = {
   readonly before: number;
   readonly after: number;
-}
+};
 
 /** Padding a new schedule starts with, as guides run early and late. */
 export const DEFAULT_PADDING: RecordingPadding = { before: 2, after: 5 };

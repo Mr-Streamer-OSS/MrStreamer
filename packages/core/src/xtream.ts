@@ -1,8 +1,9 @@
 // Xtream Codes compatible providers (player_api.php). Most IPTV resellers run a panel that speaks this API.
 // Shared by the desktop app and the iOS app; the desktop's Node-only https probe stays in its
 // providers/xtream.ts.
-import { type } from "arktype";
+import { type, type Type } from "arktype";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
+import type { Json } from "@mrstreamer/contracts/json";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { StreamFormat } from "@mrstreamer/contracts/playback";
@@ -222,16 +223,23 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
    * with `options.inTasks`, rows are checked a few slices per task, and an abort stops that. A
    * refused login is an error, never an empty list that could replace the lists the app has.
    */
-  const getRows = <A>(
+  const getRows = <R, A>(
     params: string,
     signal: AbortSignal | undefined,
-    map: (raw: unknown) => A[],
+    schema: Type<R>,
+    map: (row: Type<R>["infer"]) => A[],
   ) =>
     request(params, CATALOGUE_TIMEOUT_MS, signal, async (response) => {
-      const body: unknown = JSON.parse(await response.text());
+      const body: Json = JSON.parse(await response.text());
 
       if (isRejectedLogin(body)) throw new AppFailure({ kind: "invalid-login" });
-      const mapping = mapSteps(rows(body), map);
+
+      // A malformed row is skipped on its own.
+      const mapping = mapSteps(rows(body), (raw) => {
+        const row = schema(raw);
+
+        return row instanceof type.errors ? [] : map(row);
+      });
 
       if (!options.inTasks) return finish(mapping);
       const mapped = await options.inTasks(mapping, () => !signal?.aborted);
@@ -271,19 +279,12 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
     },
 
     async liveCatalogue(signal): Promise<LiveCatalogue> {
-      const [categories, streams] = await Promise.all([
-        getJson("&action=get_live_categories", CATALOGUE_TIMEOUT_MS, signal),
-        getJson("&action=get_live_streams", CATALOGUE_TIMEOUT_MS, signal),
+      const [categories, channels] = await Promise.all([
+        getRows("&action=get_live_categories", signal, CategoryRow(), toCategory),
+        getRows("&action=get_live_streams", signal, StreamRow(), toChannel),
       ]);
 
-      if (isRejectedLogin(categories) || isRejectedLogin(streams)) {
-        throw new AppFailure({ kind: "invalid-login" });
-      }
-
-      return {
-        categories: rows(categories).flatMap(toCategory),
-        channels: rows(streams).flatMap(toChannel),
-      };
+      return { categories, channels };
     },
 
     async liveGuideRequest(signal) {
@@ -324,20 +325,16 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
 
     async onDemandCatalogue(signal): Promise<OnDemandCatalogue> {
       const [movieCategories, seriesCategories, movies, series] = await Promise.all([
-        getJson("&action=get_vod_categories", CATALOGUE_TIMEOUT_MS, signal),
-        getJson("&action=get_series_categories", CATALOGUE_TIMEOUT_MS, signal),
-        getRows("&action=get_vod_streams", signal, toMovie),
-        getRows("&action=get_series", signal, toSeries),
+        getRows("&action=get_vod_categories", signal, CategoryRow(), toCategory),
+        getRows("&action=get_series_categories", signal, CategoryRow(), toCategory),
+        getRows("&action=get_vod_streams", signal, rowSchemas().MovieRow, toMovie),
+        getRows("&action=get_series", signal, rowSchemas().SeriesRow, toSeries),
       ]);
 
-      if (isRejectedLogin(movieCategories) || isRejectedLogin(seriesCategories)) {
-        throw new AppFailure({ kind: "invalid-login" });
-      }
-
       return {
-        movieCategories: rows(movieCategories).flatMap(toCategory),
+        movieCategories,
         movies,
-        seriesCategories: rows(seriesCategories).flatMap(toCategory),
+        seriesCategories,
         series,
       };
     },
@@ -397,7 +394,11 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
             },
           ];
         }),
-        episodes: episodes.flatMap(toEpisode),
+        episodes: episodes.flatMap((raw) => {
+          const row = detailSchemas().EpisodeRow(raw);
+
+          return row instanceof type.errors ? [] : toEpisode(row);
+        }),
         container: null,
       };
     },
@@ -609,10 +610,7 @@ const detailSchemas = lazy(defineDetailSchemas);
 
 type Info = ReturnType<typeof detailSchemas>["Info"]["infer"];
 
-function toMovie(raw: unknown): ProviderTitle[] {
-  const row = rowSchemas().MovieRow(raw);
-
-  if (row instanceof type.errors) return [];
+function toMovie(row: ReturnType<typeof rowSchemas>["MovieRow"]["infer"]): ProviderTitle[] {
   const id = String(row.stream_id);
 
   return [
@@ -639,10 +637,7 @@ function tmdbIdOf(value: string | number | null | undefined): string | null {
   return /^\d+$/.test(text) && Number(text) > 0 ? text : null;
 }
 
-function toSeries(raw: unknown): ProviderTitle[] {
-  const row = rowSchemas().SeriesRow(raw);
-
-  if (row instanceof type.errors) return [];
+function toSeries(row: ReturnType<typeof rowSchemas>["SeriesRow"]["infer"]): ProviderTitle[] {
   const id = String(row.series_id);
 
   return [
@@ -662,10 +657,9 @@ function toSeries(raw: unknown): ProviderTitle[] {
   ];
 }
 
-function toEpisode(raw: unknown): ProviderEpisode[] {
-  const row = detailSchemas().EpisodeRow(raw);
-
-  if (row instanceof type.errors) return [];
+function toEpisode(
+  row: ReturnType<typeof detailSchemas>["EpisodeRow"]["infer"],
+): ProviderEpisode[] {
   const season = toInteger(row.season);
   const number = toInteger(row.episode_num);
 
@@ -786,19 +780,13 @@ function notAnApi(server: string): AppFailure {
   });
 }
 
-function toCategory(raw: unknown): ProviderCategory[] {
-  const row = CategoryRow()(raw);
-
-  if (row instanceof type.errors) return [];
+function toCategory(row: Infer<typeof CategoryRow>): ProviderCategory[] {
   const id = String(row.category_id);
 
   return [{ id, name: row.category_name?.trim() || `Category ${id}` }];
 }
 
-function toChannel(raw: unknown): ProviderChannel[] {
-  const row = StreamRow()(raw);
-
-  if (row instanceof type.errors) return [];
+function toChannel(row: Infer<typeof StreamRow>): ProviderChannel[] {
   const id = String(row.stream_id);
   const archiveDays = toInteger(row.tv_archive_duration);
 
@@ -847,7 +835,7 @@ function accountState(status: string | null | undefined): AccountState {
  * Some panels answer catalogue actions with a login failure instead of an HTTP error. `body` is
  * usually the whole list, so this checks it without copying it.
  */
-function isRejectedLogin(body: unknown): boolean {
+function isRejectedLogin(body: Json): boolean {
   const parsed = AuthBody()(body);
 
   if (parsed instanceof type.errors) return false;
@@ -857,7 +845,10 @@ function isRejectedLogin(body: unknown): boolean {
 }
 
 /** Every row `map` reads, in order, pausing between slices of them. */
-function* mapSteps<A>(raw: readonly unknown[], map: (raw: unknown) => A[]): Steps<A[]> {
+function* mapSteps<A>(
+  raw: readonly (Json | undefined)[],
+  map: (raw: Json | undefined) => A[],
+): Steps<A[]> {
   const due = pacer();
   const mapped: A[] = [];
 
@@ -870,7 +861,7 @@ function* mapSteps<A>(raw: readonly unknown[], map: (raw: unknown) => A[]): Step
   return mapped;
 }
 
-function rows(body: unknown): unknown[] {
+function rows(body: Json): readonly (Json | undefined)[] {
   if (Array.isArray(body)) return body;
 
   // A few panels return an object keyed by index instead of an array.

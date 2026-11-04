@@ -22,8 +22,8 @@ const BANNER =
 const named = (selector: string, text: string, within = "document") =>
   `[...${within}.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
 
-const expect = (value: boolean, message: string, seen?: unknown) => {
-  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
+const expect = (value: boolean, message: string, seen?: string) => {
+  if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${seen}`}`);
 };
 
 /** The reminders as the main process lists them, read without changing anything. */
@@ -66,7 +66,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   expect(
     firstRow.includes("H.264 + AAC"),
     "The grid doesn't start on the playable channel",
-    firstRow,
+    JSON.stringify(firstRow),
   );
 
   // The keys move along the first row to a programme a few minutes ahead.
@@ -84,7 +84,11 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   }
 
   const gridStart = await selectedStart();
-  expect(gridStart !== null && gridStart - Date.now() >= 150_000, "No programme ahead", gridStart);
+  expect(
+    gridStart !== null && gridStart - Date.now() >= 150_000,
+    "No programme ahead",
+    JSON.stringify(gridStart),
+  );
   const remind = named("button", "Remind me", DETAILS);
   await d.wait(() => d.exists(remind));
   // Tab reaches Remind me from the grid, and Enter presses it.
@@ -99,17 +103,21 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   }
 
   d.observed["tabsToRemindMe"] = tabs;
-  expect(tabs.at(-1) === "Remind me", "Tab didn't reach Remind me", tabs);
+  expect(tabs.at(-1) === "Remind me", "Tab didn't reach Remind me", JSON.stringify(tabs));
   await d.key("Enter", 13);
   const set = named("button", "Reminder set", DETAILS);
   await d.wait(() => d.evaluate<boolean>(`${set}?.getAttribute('aria-pressed') === 'true'`));
   const cell = await d.evaluate<string>(`${SELECTED}.getAttribute('aria-label')`);
-  expect(cell.includes("Reminder set"), "The cell doesn't say it has a reminder", cell);
+  expect(
+    cell.includes("Reminder set"),
+    "The cell doesn't say it has a reminder",
+    JSON.stringify(cell),
+  );
   const afterGrid = await listed(d);
   expect(
     afterGrid.reminders.length === 1 && afterGrid.reminders[0]!.start === gridStart,
     "The grid's reminder isn't stored for its programme",
-    afterGrid,
+    JSON.stringify(afterGrid),
   );
   const gridReminder = afterGrid.reminders[0]!;
   d.observed["gridReminder"] = {
@@ -159,7 +167,11 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   await d.click("Cancel it with a second press", named("button", "Reminder set", block));
   await d.wait(() => d.exists(named("button", "Remind me", block)));
   d.observed["scheduleCancelled"] = (await listed(d)).reminders.length;
-  expect(d.observed["scheduleCancelled"] === 1, "The second press didn't cancel", d.observed);
+  expect(
+    d.observed["scheduleCancelled"] === 1,
+    "The second press didn't cancel",
+    JSON.stringify(d.observed),
+  );
 
   // A failed save: reminders.json is a folder, so nothing can be written over it.
   await rename(file, `${file}.kept`);
@@ -184,7 +196,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   await d.click("Press again once it can be saved", named("button", "Remind me", other));
   await d.wait(() => d.exists(named("button", "Reminder set", other)));
   d.observed["retried"] = (await listed(d)).reminders.length;
-  expect(d.observed["retried"] === 2, "The retry didn't set it", d.observed);
+  expect(d.observed["retried"] === 2, "The retry didn't set it", JSON.stringify(d.observed));
   await d.click("Cancel the retried one", named("button", "Reminder set", other));
   await d.wait(() => d.exists(named("button", "Remind me", other)));
 
@@ -208,7 +220,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   await d.capture("search-reminder-set");
   await d.key("Escape", 27);
   const afterSearch = await listed(d);
-  expect(afterSearch.reminders.length === 2, "Search didn't set it", afterSearch);
+  expect(afterSearch.reminders.length === 2, "Search didn't set it", JSON.stringify(afterSearch));
   const stored = JSON.parse(await readFile(file, "utf8")) as { version: number };
   d.observed["storedVersion"] = stored.version;
 
@@ -246,7 +258,11 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   });
   const after = fixture.streams();
   d.observed["watch"] = { before, after, picture: await picture(d) };
-  expect(after.active === 1, "Watch holds more than one provider connection", after);
+  expect(
+    after.active === 1,
+    "Watch holds more than one provider connection",
+    JSON.stringify(after),
+  );
   expect(!(await d.exists(BANNER)), "The notice stayed after Watch");
   await d.capture("watch-from-banner");
   await d.key("Escape", 27);
@@ -277,7 +293,7 @@ export async function remindersScenario(d: Driver, fixture: ReminderFixture) {
   expect(
     await d.evaluate<boolean>(`document.activeElement === ${crosses}[0]`),
     "The keys didn't go on to the next cross",
-    d.observed["focusAfterRemove"],
+    JSON.stringify(d.observed["focusAfterRemove"]),
   );
   await d.capture("bell-after-keyboard-remove");
   await d.key("Escape", 27);

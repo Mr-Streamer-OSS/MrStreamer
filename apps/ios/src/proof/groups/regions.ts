@@ -6,11 +6,13 @@ export const cases: readonly ProofCase[] = [
     name: "core: region codes and country names",
     compare: "same",
     run: () =>
-      plain({
-        codes: ["UK", "GB", "BE", "GER", "EXYU", "AR", "ZZ"].map(regionForCode),
-        names: ["Italia", "België", "Deutschland", "Brasil", "Belgique", "Nowhere"].map(
-          regionForName,
-        ),
-      }),
+      plain(
+        JSON.stringify({
+          codes: ["UK", "GB", "BE", "GER", "EXYU", "AR", "ZZ"].map(regionForCode),
+          names: ["Italia", "België", "Deutschland", "Brasil", "Belgique", "Nowhere"].map(
+            regionForName,
+          ),
+        }),
+      ),
   },
 ];

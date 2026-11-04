@@ -1,3 +1,5 @@
+import { ArkErrors } from "arktype";
+import { workerResults } from "../ondemand/protocol.ts";
 import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // Movies and series: the catalogue lives in a worker thread (see ../ondemand/catalogue-worker.ts),
 // details come from the provider and TMDB when a title opens, never before, TMDB's episodes when
@@ -10,7 +12,7 @@ import { listedFileKey } from "@mrstreamer/core/ondemand/files";
 // reached keeps what it loaded and holds no other back.
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
-import type { AppError } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type {
   CollectionId,
   CollectionPage,
@@ -1712,7 +1714,7 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
 
   const pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (cause: unknown) => void; worker: Worker }
+    { resolve: (reply: WorkerReply) => void; reject: (cause: unknown) => void; worker: Worker }
   >();
 
   /** Fails the calls `from` was given, and only those: another may have started meanwhile. */
@@ -1734,7 +1736,7 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
       if (!entry) return;
       pending.delete(reply.id);
 
-      if (reply.ok) entry.resolve(reply.value);
+      if (reply.ok) entry.resolve(reply);
       else entry.reject(new Failed({ error: reply.error }));
     });
     started.on("error", (cause) => failAll(started, cause));
@@ -1755,7 +1757,31 @@ function workerClient(start: () => Worker, onEvent: (event: WorkerEvent) => void
 
     return new Promise((resolve, reject) => {
       const to = running();
-      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, worker: to });
+      pending.set(id, {
+        resolve: (reply) => {
+          if (!reply.ok) return;
+
+          const result = workerResults[method](reply.value);
+
+          if (result instanceof ArkErrors) {
+            console.warn(
+              `[catalogue] invalid ${method} reply: ${result.map((error) => `${error.path}: ${error.expected}`).join("; ")}`,
+            );
+            reject(
+              new AppFailure({
+                kind: "unexpected",
+                detail: `Invalid catalogue reply for ${method}.`,
+              }),
+            );
+
+            return;
+          }
+
+          resolve(result);
+        },
+        reject,
+        worker: to,
+      });
       // The worker writes names, such as "New this week", in the language of the call.
       to.postMessage({ id, method, args, interfaceLanguage: currentLanguage() });
     });

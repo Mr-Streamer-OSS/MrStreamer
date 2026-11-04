@@ -1,3 +1,4 @@
+import type { Type } from "arktype";
 import { ipcMain, type WebContents } from "electron";
 import { type } from "arktype";
 import type { Result } from "@mrstreamer/contracts/errors";
@@ -97,17 +98,18 @@ export function registerIpc(
 
   for (const method of Object.keys(ipcInputs) as IpcMethod[]) {
     // TypeScript cannot pair `ipcInputs[method]` with `handlers[method]` inside a loop over all
-    // methods, so the loop uses erased types. `IpcHandlers` keeps each handler fully typed.
-    const schema: () => (data: unknown) => unknown = ipcInputs[method];
+    // methods, so the loop uses the union of contract inputs. `IpcHandlers` keeps each handler fully typed.
+    const schema: () => Type<IpcInput<IpcMethod>> = ipcInputs[method];
 
     const handler = handlers[method] as (
-      input: unknown,
+      input: IpcInput<IpcMethod>,
       frame: string,
     ) => Effect.Effect<unknown, Failed>;
 
     // Built on the method's first call, not while the app starts.
-    let validate: ((data: unknown) => unknown) | null = null;
+    let validate: Type<IpcInput<IpcMethod>> | null = null;
 
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Electron supplies untyped arguments; the method input schema validates raw before dispatch.
     ipcMain.handle(method, async (event, raw: unknown): Promise<Result<unknown>> => {
       // Electron gives no frame once the one that sent the call has navigated or gone.
       const from = event.senderFrame;

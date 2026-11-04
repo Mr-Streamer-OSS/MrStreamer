@@ -111,7 +111,10 @@ async function launch() {
   const React = await import("react");
 
   const { createRoot } = (await import(REACT_DOM)) as {
-    createRoot(container: Element): { render(node: unknown): void; unmount(): void };
+    createRoot(container: Element): {
+      render(node: import("react").ReactNode): void;
+      unmount(): void;
+    };
   };
 
   const { ChannelLogo } = await import("../src/ui.tsx");

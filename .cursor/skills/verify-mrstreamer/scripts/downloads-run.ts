@@ -250,6 +250,7 @@ export async function ownedRun<D>(
   let running: { app: ChildProcess; page?: Page } | undefined;
   let failed: unknown;
   const cleanupErrors: string[] = [];
+  let fixturePorts: number[] = [];
 
   try {
     await options.prepare?.(observed);
@@ -259,9 +260,7 @@ export async function ownedRun<D>(
     pictures = await options.pictures();
     const picturesUrl = `http://127.0.0.1:${(pictures.address() as AddressInfo).port}`;
 
-    const fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) =>
-      Number(new URL(url).port),
-    );
+    fixturePorts = [provider.url, tmdb.url, picturesUrl].map((url) => Number(new URL(url).port));
 
     observed["fixturePorts"] = fixturePorts;
     /** Each start's own process, debugging port, profile and renderer, as checked. */
@@ -450,7 +449,7 @@ export async function ownedRun<D>(
 
     if (pictures?.listening)
       await clean(() => new Promise<void>((resolve) => pictures!.close(() => resolve())));
-    observed["mainNetwork"] = summarise(readLines(networkLog), observed["fixturePorts"]);
+    observed["mainNetwork"] = summarise(readLines(networkLog), fixturePorts);
 
     if (profile && (!running || running.app.exitCode !== null || running.app.signalCode !== null))
       await clean(() => rm(profile!, { recursive: true, force: true, maxRetries: 5 }));
@@ -508,8 +507,8 @@ export function readLines(path: string): Connection[] {
 }
 
 /** Main's connections by where they went, with the fixtures named. */
-function summarise(lines: readonly Connection[], fixtures: unknown) {
-  const ports = new Set(Array.isArray(fixtures) ? fixtures : []);
+function summarise(lines: readonly Connection[], fixtures: readonly number[]) {
+  const ports = new Set(fixtures);
   const by = new Map<string, number>();
 
   for (const line of lines) {
@@ -518,7 +517,7 @@ function summarise(lines: readonly Connection[], fixtures: unknown) {
     const where =
       line.kind === "artwork"
         ? `artwork ${line.host}`
-        : `${line.kind} ${line.host}:${line.port}${ports.has(line.port) ? " (fixture)" : ""}`;
+        : `${line.kind} ${line.host}:${line.port}${line.port !== undefined && ports.has(line.port) ? " (fixture)" : ""}`;
 
     by.set(where, (by.get(where) ?? 0) + 1);
   }

@@ -8,11 +8,13 @@ export const cases: readonly ProofCase[] = [
     run: async () => {
       const at = Date.UTC(2026, 2, 29, 0, 30);
 
-      return plain({
-        amsterdam: wallClock(at, "Europe/Amsterdam"),
-        newYork: wallClock(at, "America/New_York"),
-        utc: wallClock(at, null),
-      });
+      return plain(
+        JSON.stringify({
+          amsterdam: wallClock(at, "Europe/Amsterdam"),
+          newYork: wallClock(at, "America/New_York"),
+          utc: wallClock(at, null),
+        }),
+      );
     },
   },
 ];

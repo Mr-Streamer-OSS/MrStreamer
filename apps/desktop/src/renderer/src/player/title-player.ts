@@ -1012,10 +1012,10 @@ function problemOf(upstream: StreamFailure | null, error: EngineError): TitlePro
   }
 }
 
-function asEngineError(error: unknown): EngineError {
-  return typeof error === "object" && error !== null && "kind" in error && "detail" in error
-    ? (error as EngineError)
-    : { kind: "media", detail: String(error) };
+function asEngineError(cause: unknown): EngineError {
+  return typeof cause === "object" && cause !== null && "kind" in cause && "detail" in cause
+    ? (cause as EngineError)
+    : { kind: "media", detail: String(cause) };
 }
 
 /** Stops moving the position on between two words of the receiver. */
@@ -1857,8 +1857,8 @@ export const titlePlayer = {
     store.setState({ audioId: id });
 
     if (track.language) {
-      void updatePreferences({ audioLanguage: track.language }).catch((error: unknown) => {
-        flashNote(`${t("Sound")}: ${describeError(appError(error))}`, true);
+      void updatePreferences({ audioLanguage: track.language }).catch((cause: unknown) => {
+        flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
       });
     }
 

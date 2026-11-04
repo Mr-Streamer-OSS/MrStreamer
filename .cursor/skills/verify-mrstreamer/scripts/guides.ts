@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Settings > Guides: XMLTV guides of the viewer's own, which every subscription reads after its
 // own guide, in their order.
 //
@@ -81,7 +82,7 @@ interface Source {
   readonly processing: { readonly state: string; readonly total?: number | null };
 }
 
-const expect = (ok: boolean, message: string, seen?: unknown) => {
+const expect = (ok: boolean, message: string, seen?: Json) => {
   if (!ok) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 

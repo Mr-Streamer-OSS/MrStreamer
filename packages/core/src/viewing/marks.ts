@@ -54,17 +54,17 @@ export function seriesIdentity(series: OwnedId, title: Title | undefined): Serie
 }
 
 /** What the latest mark of a series replaced, kept while that mark can still be taken back. */
-export interface MarkUndo {
+export type MarkUndo = {
   /** The mark it takes back. */
   readonly revision: number;
   /** The episode's mark before it, or null when it had none. */
   readonly prior: StoredMark | null;
   /** Whether the series was out of Continue watching then. */
   readonly hidden: boolean;
-}
+};
 
 /** What an account keeps of the marks made under one key. */
-export interface SeriesMarks {
+export type SeriesMarks = {
   /** One per episode marked. */
   readonly marks: readonly StoredMark[];
   /** The versions of the series its subscription listed when it was last marked. */
@@ -82,7 +82,7 @@ export interface SeriesMarks {
   readonly undo: MarkUndo | null;
   /** The record's number of the last mark or Undo here: a later one has a higher number. */
   readonly changed: number;
-}
+};
 
 export const noMarks: SeriesMarks = {
   marks: [],

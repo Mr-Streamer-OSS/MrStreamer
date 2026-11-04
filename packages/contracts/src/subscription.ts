@@ -54,12 +54,12 @@ export function hasTitles(
  * it comes from. A provider's ids are unique only within its own lists, so a channel, category,
  * movie, series or episode is never looked up by `id` alone.
  */
-export interface OwnedId {
+export type OwnedId = {
   /** The `SubscriptionSummary.id` of the subscription that lists it. */
   readonly subscriptionId: string;
   /** The provider's own id, as it sent it. */
   readonly id: string;
-}
+};
 
 /** `owned`'s id alone, without whatever else it carries: what a request sends to name it. */
 export function ownedId({ subscriptionId, id }: OwnedId): OwnedId {

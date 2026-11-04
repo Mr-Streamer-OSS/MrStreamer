@@ -5,8 +5,6 @@ export const cases: readonly ProofCase[] = [
     name: "runtime globals",
     compare: "record",
     run: () => {
-      const has = (value: unknown) => typeof value !== "undefined";
-
       const zone = (() => {
         try {
           return new Intl.DateTimeFormat("en-GB", {
@@ -23,24 +21,24 @@ export const cases: readonly ProofCase[] = [
       const crypto = scope["crypto"] as { randomUUID?: unknown; subtle?: unknown } | undefined;
 
       return {
-        Buffer: has(scope["Buffer"]),
-        TextEncoder: has(scope["TextEncoder"]),
-        TextDecoder: has(scope["TextDecoder"]),
-        ReadableStream: has(scope["ReadableStream"]),
-        structuredClone: has(scope["structuredClone"]),
-        setImmediate: has(scope["setImmediate"]),
-        cryptoRandomUUID: has(crypto?.randomUUID),
-        cryptoSubtle: has(crypto?.subtle),
+        Buffer: typeof scope["Buffer"] !== "undefined",
+        TextEncoder: typeof scope["TextEncoder"] !== "undefined",
+        TextDecoder: typeof scope["TextDecoder"] !== "undefined",
+        ReadableStream: typeof scope["ReadableStream"] !== "undefined",
+        structuredClone: typeof scope["structuredClone"] !== "undefined",
+        setImmediate: typeof scope["setImmediate"] !== "undefined",
+        cryptoRandomUUID: typeof crypto?.randomUUID !== "undefined",
+        cryptoSubtle: typeof crypto?.subtle !== "undefined",
         AbortSignalTimeout: "timeout" in AbortSignal,
         AbortSignalAny: "any" in AbortSignal,
         PromiseWithResolvers: typeof Promise.withResolvers === "function",
         MapGroupBy: typeof Map.groupBy === "function",
         ArrayToSorted: typeof Array.prototype.toSorted === "function",
-        IntlDisplayNames: has(Intl.DisplayNames),
-        IntlListFormat: has(Intl.ListFormat),
-        IntlPluralRules: has(Intl.PluralRules),
-        IntlLocale: has(Intl.Locale),
-        IntlCollator: has(Intl.Collator),
+        IntlDisplayNames: typeof Intl.DisplayNames !== "undefined",
+        IntlListFormat: typeof Intl.ListFormat !== "undefined",
+        IntlPluralRules: typeof Intl.PluralRules !== "undefined",
+        IntlLocale: typeof Intl.Locale !== "undefined",
+        IntlCollator: typeof Intl.Collator !== "undefined",
         timeZoneKolkataMidnightUtc: zone,
         normalizeNfd: "é".normalize("NFD").length,
       };

@@ -23,7 +23,7 @@ const PLAYLIST_LIVE = { live: { kind: "playlist" } } as const;
 async function refusal(work: Promise<unknown>): Promise<AppError> {
   const cause = await work.then(
     () => null,
-    (thrown: unknown) => thrown,
+    (cause: unknown) => cause,
   );
 
   if (!(cause instanceof AppFailure)) throw new Error(`Expected an AppFailure: ${String(cause)}`);

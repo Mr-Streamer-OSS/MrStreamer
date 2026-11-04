@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 // Synthetic package bytes prove the producer/resolver contract. Native packaging stays separate.
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
@@ -115,7 +116,13 @@ function fixture(build = builds[2]!) {
     },
   };
 
-  const updateReceipt = (value: unknown) => {
+  const updateReceipt = (
+    value:
+      | Json
+      | (Omit<PackageReceipt, "files"> & {
+          files: readonly (PackageReceipt["files"][number] | undefined)[];
+        }),
+  ) => {
     const bytes = zipSync({ "package-receipt.json": strToU8(JSON.stringify(value)) });
     archives.set(31, bytes);
     receiptArtifact.digest = `sha256:${sha256(bytes)}`;

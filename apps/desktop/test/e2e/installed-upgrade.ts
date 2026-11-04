@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { preferenceValues } from "./preference-reply.ts";
 // The Windows installed upgrade check, which a stable release run makes before publishing and
 // `.github/workflows/release.yml` makes by hand from main, on a disposable GitHub-hosted
@@ -170,7 +171,7 @@ export async function startServices() {
 
       if (upstream.headers.get("content-type")?.includes("json")) {
         const text = JSON.stringify(
-          JSON.parse(body.toString(), (key: string, value: unknown) =>
+          JSON.parse(body.toString(), (key: string, value: Json) =>
             toTmdb && key.endsWith("_path") ? null : value,
           ),
         ).replaceAll("https://image.example", `${origin}/picture`);
@@ -1196,9 +1197,9 @@ async function resolveCommand(args: string[]) {
   const github = restGitHub(repository, token);
   const archives = new Map<string, Uint8Array>();
 
-  const privateInput: unknown = values["private-input"]
+  const privateInput: Json = values["private-input"]
     ? JSON.parse(await readFile(values["private-input"], "utf8"))
-    : undefined;
+    : null;
 
   const privateCandidate = values["private-input"]
     ? await verifyPrivateCandidate(
@@ -1321,13 +1322,13 @@ async function start(
 
     const ended = await tree
       .stop(() => verifiedPage?.send("Browser.close") ?? Promise.resolve())
-      .catch((error: unknown) => {
+      .catch((cause: unknown) => {
         if (workerError)
           throw new AggregateError(
-            [workerError, error],
+            [workerError, cause],
             "Worker and installed process cleanup failed",
           );
-        throw error;
+        throw cause;
       });
 
     const exit = { code: app.exitCode, signal: app.signalCode };
@@ -1566,8 +1567,8 @@ export interface Leftovers {
  * step here, leaves the rest as it was for the workflow to upload. `failed` is the run's own
  * failure, or the first step's; `kept` names what is still on disk.
  */
-export async function cleanUp(failure: unknown, left: Leftovers) {
-  let failed = failure;
+export async function cleanUp(cause: unknown, left: Leftovers) {
+  let failed = cause;
   const steps: Record<string, unknown> = {};
 
   const attempt = async (what: string, action: () => unknown) => {
@@ -1670,7 +1671,9 @@ export async function runCommand(args: string[]) {
     throw new Error(
       `${usage}\nThe root must be ${fleet ? "a new direct child of the owned task temp" : "a new folder under RUNNER_TEMP"}.`,
     );
-  const raw: unknown = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
+
+  const raw: Json = JSON.parse(await readFile(join(values.packages, "receipt.json"), "utf8"));
+
   const repository = fleet ? values.repository : process.env["GITHUB_REPOSITORY"];
   check(repository, "A repository is required.");
 
@@ -1805,7 +1808,6 @@ export async function runCommand(args: string[]) {
     limits: [] as string[],
   };
 
-  const record = (part: ByStage, stage: Stage, value: unknown) => (part[stage] = value);
   const services = await startServices();
   const titles = fixtures(services.titles);
 
@@ -1840,11 +1842,7 @@ export async function runCommand(args: string[]) {
         throw new Error(`${pkg.file} changed since it was checked.`);
 
       if (pkg.stage !== "candidate-restart")
-        record(
-          proof.installs,
-          pkg.stage,
-          await installPublished(runner, setup, pkg.version, previous),
-        );
+        proof.installs[pkg.stage] = await installPublished(runner, setup, pkg.version, previous);
       previous = pkg.version;
 
       const session = await start(
@@ -1857,7 +1855,7 @@ export async function runCommand(args: string[]) {
       );
 
       try {
-        record(proof.starts, pkg.stage, session.identity);
+        proof.starts[pkg.stage] = session.identity;
 
         if (
           pkg.stage === "candidate-restart" &&
@@ -1875,7 +1873,7 @@ export async function runCommand(args: string[]) {
 
           if (!shown.text.includes(pkg.version) || shown.source !== pkg.source)
             throw new Error(`About shows ${shown.source}, not ${pkg.version} from ${pkg.source}.`);
-          record(proof.about, pkg.stage, shown.source);
+          proof.about[pkg.stage] = shown.source;
         };
 
         if (pkg.stage !== "stable") await checkAbout();
@@ -1956,11 +1954,7 @@ export async function runCommand(args: string[]) {
         else if (pkg.stage === "candidate")
           upgraded = await upgradeToCandidate(session.d, titles, seeded!);
         else
-          record(
-            proof.stages,
-            pkg.stage,
-            await restartCandidate(session.d, titles, upgraded!, offline),
-          );
+          proof.stages[pkg.stage] = await restartCandidate(session.d, titles, upgraded!, offline);
 
         if (pkg.stage === "candidate" && (await session.subtitleRequests()).length !== 0)
           throw new Error(
@@ -1975,17 +1969,17 @@ export async function runCommand(args: string[]) {
 
         if (pkg.stage === "stable") await checkAbout();
 
-        if (pkg.stage === "stable") record(proof.stages, "stable", seeded);
+        if (pkg.stage === "stable") proof.stages["stable"] = seeded;
 
         if (pkg.stage === "candidate")
-          record(proof.stages, pkg.stage, {
+          proof.stages[pkg.stage] = {
             kept: upgraded!.kept,
             inherited: upgraded!.inherited,
             savedSubtitle: upgraded!.savedSubtitle,
             played: upgraded!.played,
             copies: upgraded!.copies,
             after: upgraded!.after,
-          });
+          };
         await session.verifyWorker();
         session.tree.sample();
       } catch (error) {
@@ -1995,16 +1989,16 @@ export async function runCommand(args: string[]) {
 
       // Every process of this start ends before the next setup, or the chain stops here. A stage
       // that failed keeps its own error; a stop that fails after a passing stage is the failure.
-      record(proof.actions, pkg.stage, session.d.actions);
+      proof.actions[pkg.stage] = session.d.actions;
 
       try {
         const ended = await session.stop();
-        record(proof.ends, pkg.stage, ended);
+        proof.ends[pkg.stage] = ended;
 
         // Each start must close cleanly before the next setup or restart.
         if (!ended.graceful) failed ??= new Error("The installed app required forced termination.");
       } catch (error) {
-        record(proof.ends, pkg.stage, `failed: ${String(error)}`);
+        proof.ends[pkg.stage] = `failed: ${String(error)}`;
         failed = failed
           ? new AggregateError([failed, error], "Installed stage and cleanup failed")
           : error;
@@ -2075,7 +2069,7 @@ export async function runCommand(args: string[]) {
 const reaches = (url: string): Promise<{ url: string; status: number | null; error?: string }> =>
   fetch(url, { method: "HEAD", redirect: "manual", signal: AbortSignal.timeout(20_000) }).then(
     (response) => ({ url, status: response.status }),
-    (error: unknown) => ({ url, status: null, error: String(error) }),
+    (cause: unknown) => ({ url, status: null, error: String(cause) }),
   );
 
 /** The window's request to a public address, which the block must stop. */

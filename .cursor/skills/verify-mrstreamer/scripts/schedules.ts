@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Scheduling through the built window, against the fake provider's one connection: Record's At a
 // time, the guide grid's schedule panel for a programme once and on its weekday, the conflict the
 // channel below shows at the same time, Scheduled in Recordings with Edit and Cancel schedule, and
@@ -26,7 +27,7 @@ const CURSOR_SHOWN = `(() => {
     cell.bottom <= grid.getBoundingClientRect().bottom + 0.5;
 })()`;
 
-const expect = (value: boolean, message: string, seen?: unknown) => {
+const expect = (value: boolean, message: string, seen?: Json) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 

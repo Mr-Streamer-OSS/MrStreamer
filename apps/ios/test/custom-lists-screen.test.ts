@@ -94,7 +94,8 @@ vi.mock("react-native", async () => {
         },
         children,
       ),
-    findNodeHandle: (view: unknown) => (view == null ? null : 17),
+    findNodeHandle: (view: Parameters<typeof import("react-native").findNodeHandle>[0]) =>
+      view == null ? null : 17,
     Alert: {
       alert: (title: string, message?: string, buttons?: readonly Button[]) =>
         void scenario.alerts.push({

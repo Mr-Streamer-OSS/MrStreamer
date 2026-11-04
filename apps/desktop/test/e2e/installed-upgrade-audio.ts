@@ -54,8 +54,8 @@ interface AudioEvidence {
   error?: string;
 }
 
-const errorText = (error: unknown) =>
-  error instanceof Error ? (error.stack ?? error.message) : String(error);
+const errorText = (cause: unknown) =>
+  cause instanceof Error ? (cause.stack ?? cause.message) : String(cause);
 
 /** Restore only stable's Dutch seed, observing its native input through the public save check. */
 export async function restoreAudioInput(

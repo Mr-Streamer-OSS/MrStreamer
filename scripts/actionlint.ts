@@ -142,8 +142,8 @@ async function main(): Promise<number> {
 }
 
 if (import.meta.main) {
-  process.exitCode = await main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = await main().catch((cause: unknown) => {
+    console.error(cause instanceof Error ? cause.message : String(cause));
 
     return 1;
   });

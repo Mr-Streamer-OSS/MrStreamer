@@ -34,7 +34,9 @@ const scenario = vi.hoisted(() => ({
   alerts: [] as string[],
   lists: { kind: "idle" } as { kind: "idle" } | { kind: "ready"; index: unknown },
   /** Each read of the film's details, answered in turn; the last answers every later read. */
-  details: [] as ((show: (details: unknown) => void) => Promise<unknown>)[],
+  details: [] as ((
+    show: (details: import("../src/titles.ts").ShownDetails) => void,
+  ) => Promise<unknown>)[],
   /** The providers saved: Settings' tests leave them out, the film's details list one. */
   members: [] as { entry: { id: string }; label: string }[],
   reads: 0,
@@ -59,7 +61,7 @@ vi.mock("react-native", async () => ({
     },
   },
   Share: {
-    share: async (content: unknown) => {
+    share: async (content: import("react-native").ShareContent) => {
       scenario.shared.push(content);
 
       return { action: "sharedAction" };
@@ -124,7 +126,10 @@ vi.mock("../src/titles.ts", async () => ({
     byIds(index, kind, [version])[0],
   useCollections: () => null,
   episodesOf: async () => [],
-  detailsOf: (_title: unknown, show: (details: unknown) => void) => {
+  detailsOf: (
+    _title: import("@mrstreamer/contracts/ondemand").Title,
+    show: (details: import("../src/titles.ts").ShownDetails) => void,
+  ) => {
     const read = scenario.details[Math.min(scenario.reads++, scenario.details.length - 1)];
 
     return read ? read(show) : new Promise(() => undefined);
@@ -385,7 +390,12 @@ const catalogue: OnDemandCatalogue = {
 };
 
 /** The film's facts as details answer them, with where TMDB's part stands. */
-const facts = (about: AboutStanding) => ({
+const facts = (about: AboutStanding): import("../src/titles.ts").ShownDetails => ({
+  title: byIds(indexCatalogue([{ subscriptionId: "a", catalogue }], "en"), "movie", [
+    { subscriptionId: "a", id: "1" },
+  ])[0]!,
+  originalTitle: null,
+  releaseDate: null,
   kind: "movie",
   plot: "A linguist is recruited.",
   directors: [],

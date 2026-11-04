@@ -1,3 +1,4 @@
+import type { ProviderCategory, ProviderChannel, ProviderTitle } from "@mrstreamer/core/provider";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type {
@@ -639,7 +640,9 @@ async function fromSaved(id: string, kind: Kind, source: Source): Promise<boolea
  * holds the same as the saved copy that shows (`shown`), read for the same login, keeps that copy,
  * as loaded now (`sameSteps`). `landed` has the answer, the login that gave it and when.
  */
-function follow<A extends Record<keyof A, readonly unknown[]>>(
+function follow<
+  A extends Record<keyof A, readonly (ProviderCategory | ProviderChannel | ProviderTitle)[]>,
+>(
   id: string,
   kind: Kind,
   read: (provider: Provider, signal: AbortSignal) => Promise<A>,

@@ -370,7 +370,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
         expect(app.removed).not.toHaveBeenCalled();
         app.state.written.push(structuredClone(trace));
       });
-      const error = await restoreAudioInput(app.d, app.write).catch((error: unknown) => error);
+      const error = await restoreAudioInput(app.d, app.write).catch((cause: unknown) => cause);
       expect(error).toBe(app.state.timeouts[0]);
       expect(error).toEqual(
         new Error(
@@ -429,7 +429,7 @@ describe("installed-upgrade's original Dutch audio restore", () => {
       app.removed.mockImplementation(() => {
         throw new Error("diagnostic cleanup failed");
       });
-      const error = await restoreAudioInput(app.d, app.write).catch((error: unknown) => error);
+      const error = await restoreAudioInput(app.d, app.write).catch((cause: unknown) => cause);
       expect(error).toBe(which === "native input" ? primary : app.state.timeouts[0]);
       expect(app.write).toHaveBeenCalled();
       expect(app.removed).toHaveBeenCalled();

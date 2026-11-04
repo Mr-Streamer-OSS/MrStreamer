@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // The site's download links: where each installer of the current stable release is, and how
 // the page shows it. README.md, Downloads, has the whole account.
 //
@@ -55,7 +56,7 @@ const urlOf = (version: string, installer: Installer): string =>
  * one this site won't link: a nightly, or files from anywhere but this repository's release of
  * that version.
  */
-function stableOf(feed: unknown): { version: string; listed: unknown } | null {
+function stableOf(feed: Json | undefined): { version: string; listed: Json | undefined } | null {
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
 
@@ -69,7 +70,7 @@ function stableOf(feed: unknown): { version: string; listed: unknown } | null {
  * null leaves the page as the build wrote it: when the feed can't be trusted, and when it comes
  * from before feeds listed installers.
  */
-export function listedDownloads(feed: unknown): Downloads | null {
+export function listedDownloads(feed: Json | undefined): Downloads | null {
   const stable = stableOf(feed);
   const listed = stable?.listed;
 
@@ -103,7 +104,7 @@ export async function verifiedDownloads(
         signal: AbortSignal.timeout(10_000),
         cache: "no-store",
       })
-        .then((response): Promise<unknown> | null => (response.ok ? response.json() : null))
+        .then((response): Promise<Json> | null => (response.ok ? response.json() : null))
         .catch(() => null);
 
   const published = released && Date.parse(released.published);
@@ -140,7 +141,7 @@ export async function verifiedDownloads(
 }
 
 /** One browser refresh. A cached feed cannot undo the release or withdrawal this build verified. */
-export function showFeedDownloads(page: ParentNode, feed: unknown): void {
+export function showFeedDownloads(page: ParentNode, feed: Json | undefined): void {
   const release = page.querySelector<HTMLElement>("[data-release-verified]");
   const minimum = release?.dataset["releaseVerified"];
   const downloads = listedDownloads(feed);
@@ -213,9 +214,10 @@ export function showDownloads(page: ParentNode, downloads: Downloads): void {
 
 /** The version describes verified/listed installers, rather than an unreleased package version. */
 function writeSoftwareVersion(json: string, downloads: Downloads): string {
-  const data: unknown = JSON.parse(json);
+  const parsed: Json = JSON.parse(json);
 
-  if (!isRecord(data)) return json;
+  if (!isRecord(parsed)) return json;
+  const data = { ...parsed };
 
   if (downloads.installers.length) data["softwareVersion"] = downloads.version;
   else delete data["softwareVersion"];
@@ -269,6 +271,6 @@ export function writeDownloads(
     );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: Json | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

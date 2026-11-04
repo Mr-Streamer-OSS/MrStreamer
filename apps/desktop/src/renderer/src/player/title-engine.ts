@@ -663,12 +663,12 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
   }
 
   video.src = objectUrl;
-  play().catch((error: unknown) => {
+  play().catch((cause: unknown) => {
     if (abort.signal.aborted) return;
     fail(
-      isEngineError(error)
-        ? error
-        : { kind: "media", detail: error instanceof Error ? error.message : String(error) },
+      isEngineError(cause)
+        ? cause
+        : { kind: "media", detail: cause instanceof Error ? cause.message : String(cause) },
     );
   });
 
@@ -745,10 +745,10 @@ export function titleEngine(video: HTMLVideoElement, run: TitleRun): TitleEngine
 const CODECS: readonly SubtitleCodec[] = ["pgs", "dvb", "teletext", "captions"];
 
 /** Marks a rejected transport operation at its boundary, without interpreting its message. */
-function networkFailure(error: unknown): never {
+function networkFailure(cause: unknown): never {
   throw {
     kind: "network",
-    detail: error instanceof Error ? error.message : String(error),
+    detail: cause instanceof Error ? cause.message : String(cause),
   } satisfies EngineError;
 }
 

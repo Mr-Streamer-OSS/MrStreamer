@@ -15,7 +15,7 @@ export function hydrateSubtitleLook(look: SubtitleLook): void {
 /** Merge against the latest intent across editors. Superseded failures have no feedback. */
 export async function updateSubtitleLook(
   patch: Partial<SubtitleLook>,
-  { client, onError }: { client?: QueryClient; onError?: (error: unknown) => void } = {},
+  { client, onError }: { client?: QueryClient; onError?: (cause: unknown) => void } = {},
 ): Promise<void> {
   const next = {
     ...(pending ?? currentPreferences(client)?.subtitleLook ?? DEFAULT_SUBTITLE_LOOK),

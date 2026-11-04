@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import type {
   ObservedDetachResult,
   ObservedFailure,
@@ -23,7 +24,8 @@ export function nativePlayer(
   const listeners = new Map<string, (payload: never) => void>();
   let sequence = 0;
   let identity: ObservedItemIdentity = { attemptId: 0, itemId: 0 };
-  const emit = (event: string, payload: unknown) => listeners.get(event)?.(payload as never);
+
+  const emit = (event: string, payload: Json) => listeners.get(event)?.(payload as never);
 
   const port = {
     mrStreamerPlaybackContract: 1,

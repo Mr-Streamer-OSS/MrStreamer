@@ -2,6 +2,7 @@
 // itself is core's, shared with iOS; this names its file.
 import {
   metadataStore as sharedStore,
+  MetadataFile,
   type MetadataDeps as SharedDeps,
 } from "@mrstreamer/core/metadata/store";
 import { readJsonFile, writeJsonFile } from "../platform/json-file.ts";
@@ -15,8 +16,7 @@ export interface MetadataDeps extends Omit<SharedDeps, "read" | "write"> {
 export function metadataStore({ path, ...deps }: MetadataDeps) {
   return sharedStore({
     ...deps,
-    // Checked against the file's shape by the store.
-    read: () => readJsonFile(path, (data: unknown) => data),
+    read: () => readJsonFile(path, MetadataFile()),
     write: (file) => writeJsonFile(path, file),
   });
 }

@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Live TV's guide grid through the built window, on the real clock: Guide beside Watch opens it,
 // the keys move between programmes and channels and open a programme's details, an aired
 // programme on a channel without catch-up only watches live, and one on "TEST | H.264 + AAC",
@@ -19,7 +20,7 @@ const PROGRAMME = '[role=gridcell]:not([aria-label^="No programme information"])
 const named = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
 
-const expect = (value: boolean, message: string, seen?: unknown) => {
+const expect = (value: boolean, message: string, seen?: Json) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 

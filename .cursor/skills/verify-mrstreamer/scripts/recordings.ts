@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Record now through the built window, against the fake provider's one connection. A playable
 // channel previews in Live TV, so Record says the recording shares the connection playing here,
 // and starts it on Watch's own provider request while Watch plays on. Recordings, which stops the
@@ -96,7 +97,7 @@ const named = (selector: string, text: string, within = "document") =>
 
 const POPUP = "document.querySelector('[role=dialog][aria-label=Record]')";
 
-const expect = (value: boolean, message: string, seen?: unknown) => {
+const expect = (value: boolean, message: string, seen?: Json) => {
   if (!value) throw new Error(`${message}${seen === undefined ? "" : `: ${JSON.stringify(seen)}`}`);
 };
 
@@ -383,7 +384,11 @@ export async function recordingsHlsScenario(d: Driver, fixture: HlsFixture, qual
         .filter((path) => path.endsWith(".m3u8")),
     };
     await d.capture(shot("fixed"));
-    const streams = new Set(segmentsSent(fixture, shared).map((each) => each.split(" ")[0]));
+
+    const streams = new Set(
+      segmentsSent(fixture, shared).map((each) => each.split(" ")[0] ?? each),
+    );
+
     expect(streams.size === 1, "More than one quality was sent while both read", [...streams]);
   } else {
     expect(
