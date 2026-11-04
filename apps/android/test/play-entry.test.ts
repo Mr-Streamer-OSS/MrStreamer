@@ -163,30 +163,18 @@ it("refuses wrong files and failed details; cleanup drops pending entry work wit
   }
 });
 
-it("drops a selected episode when its source is withdrawn during the details read", async () => {
+it("lets a newer channel play or a source withdrawal win over late episode details", async () => {
   const f = await setup();
 
   try {
-    const pending = f.intents.state.get().play?.(f.intent, f.media);
+    const overtaken = f.intents.state.get().play?.(f.intent, f.media);
+    f.player.play({ kind: "live", sourceId: "source", channelId: "7", title: "Channel" });
+    await overtaken;
+    const withdrawn = f.intents.state.get().play?.(f.intent, f.media);
     f.remove();
-    await pending;
+    await withdrawn;
     expect(f.open).not.toHaveBeenCalled();
     expect(f.refused).not.toHaveBeenCalled();
-    expect(f.player.state.get().kind).toBe("idle");
-  } finally {
-    f.stop();
-    await f.player.stop();
-  }
-});
-
-it("does not replace a newer channel play when episode details answer late", async () => {
-  const f = await setup();
-
-  try {
-    const pending = f.intents.state.get().play?.(f.intent, f.media);
-    f.player.play({ kind: "live", sourceId: "source", channelId: "7", title: "Channel" });
-    await pending;
-    expect(f.open).not.toHaveBeenCalled();
     expect(f.player.state.get()).toMatchObject({ intent: { kind: "live", channelId: "7" } });
   } finally {
     f.stop();

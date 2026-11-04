@@ -429,6 +429,7 @@ export function ProgrammeDetails({
   const { pending, value, failed, retry, status } = useProgramme(key, start, detail);
   const insets = useSafeAreaInsets();
   const inset = pane ? 24 : 16;
+  const channelName = guide.channel(key)?.title;
   const now = Date.now();
   const progress = value ? progressOf(value, now) : null;
   const left = value ? timeLeft(value, now) : null;
@@ -436,9 +437,7 @@ export function ProgrammeDetails({
   return (
     <ScrollView contentContainerStyle={{ paddingTop: 8, paddingBottom: insets.bottom + 16 }}>
       <View style={{ gap: 6, paddingHorizontal: inset }}>
-        {pane ? (
-          <Text style={[text.secondary, { fontWeight: "500" }]}>{guide.channel(key)?.title}</Text>
-        ) : null}
+        {pane ? <Text style={[text.secondary, { fontWeight: "500" }]}>{channelName}</Text> : null}
         {value ? (
           <>
             <Text accessibilityRole="header" style={text.large}>
@@ -464,21 +463,21 @@ export function ProgrammeDetails({
         )}
       </View>
       {failed ? <Button label={sharedT("Try again")} onPress={retry} /> : null}
-      {value && guide.channel(key)?.title ? (
-        <ProgrammeActions
-          identity={identity}
-          programme={value}
-          channelName={guide.channel(key)?.title ?? ""}
-          inset={inset}
-        />
-      ) : null}
-      {value && guide.channel(key)?.title ? (
-        <ReminderAction
-          identity={identity}
-          programme={value}
-          channelName={guide.channel(key)?.title ?? ""}
-          inset={inset}
-        />
+      {value && channelName ? (
+        <>
+          <ProgrammeActions
+            identity={identity}
+            programme={value}
+            channelName={channelName}
+            inset={inset}
+          />
+          <ReminderAction
+            identity={identity}
+            programme={value}
+            channelName={channelName}
+            inset={inset}
+          />
+        </>
       ) : null}
       {value?.description ? (
         <Text

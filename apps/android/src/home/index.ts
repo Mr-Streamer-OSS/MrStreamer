@@ -1,3 +1,4 @@
+import type { Title } from "@mrstreamer/contracts/ondemand";
 import { draftOf } from "../live/model.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { library } from "../library/runtime.ts";
@@ -138,7 +139,7 @@ export function startViewing(): () => void {
     });
 
     /** Share the selected version's saved episode facts across its rows and primary action. */
-    function standing(title: import("@mrstreamer/contracts/ondemand").Title) {
+    function standing(title: Title) {
       const key = JSON.stringify([title.subscriptionId, title.id]);
       let cached = marks.get(key);
 

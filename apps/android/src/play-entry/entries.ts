@@ -105,21 +105,20 @@ export function startEntries(options: {
     }
   };
 
-  const stopAuthority = options.subscribe(() => {
+  // A source change or cleanup withdraws pending admissions and the registered Next.
+  const withdraw = () => {
     ++request;
     stopNext?.();
     stopNext = undefined;
-  });
+  };
 
-  const unregister = options.intents.register({
-    play,
-  });
+  const stopAuthority = options.subscribe(withdraw);
+  const unregister = options.intents.register({ play });
 
   return () => {
     active = false;
-    ++request;
+    withdraw();
     unregister();
     stopAuthority();
-    stopNext?.();
   };
 }
