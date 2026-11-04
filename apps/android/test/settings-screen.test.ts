@@ -34,8 +34,20 @@ const scenario = vi.hoisted(() => {
     connections: [] as unknown[],
     saveRefused: false,
     releaseWait: null as Promise<void> | null,
+    /** Accounts whose viewing history Settings asked to delete, and whether that is refused. */
+    cleared: [] as string[],
+    historyRefused: false,
+    removals: 0,
   };
 });
+
+vi.mock("../src/home/index.ts", () => ({
+  clearViewing: async (id: string) => {
+    scenario.cleared.push(id);
+
+    if (scenario.historyRefused) throw new Error("The folder won't take it.");
+  },
+}));
 
 vi.mock("../src/platform/storage.ts", () => ({
   readJsonStrict: (name: string) => {
@@ -250,6 +262,8 @@ vi.mock("../src/bootstrap/sources.ts", async () => {
         scenario.retries.push(id);
       },
       remove: async () => {
+        scenario.removals++;
+
         if (scenario.eraseRefused) throw new Error("erase refused");
 
         if (scenario.removeLast) {
@@ -322,6 +336,9 @@ beforeEach(() => {
   scenario.removeLast = false;
   scenario.releaseWait = null;
   scenario.destination = "(live)";
+  scenario.cleared = [];
+  scenario.historyRefused = false;
+  scenario.removals = 0;
 });
 
 afterEach(() => {
@@ -883,4 +900,234 @@ it("opens the Dutch Guides row", () => {
   const shown = show(createElement(SettingsScreen));
   press(shown, "Gidsen");
   expect(scenario.asked).toContain("push /guide/guides");
+});
+
+it("removes a provider keeping its history, or deletes the history too, retrying only what failed", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+
+  const provider = {
+    id: "source",
+    kind: "xtream" as const,
+    label: "tv.example.invalid",
+    channels: { kind: "ready" as const, rows: [] },
+  };
+
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  scenario.removeLast = true;
+  sources.state.set({ kind: "ready", sources: [provider] });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "tv.example.invalid");
+  press(shown, "Remove");
+  // The scrim, then the dialog's answers.
+  expect(buttons(shown)).toEqual(["Cancel", "Remove", "Remove and delete history", "Cancel"]);
+  expect(shown.querySelector("dialog")?.textContent).toContain(
+    "Remove keeps your favourites, watchlist and viewing history",
+  );
+  expect(shown.querySelector("dialog")?.textContent).toContain(
+    "Deleting history also erases favourites and watchlist.",
+  );
+  press(shown, "Remove");
+  await act(async () => {});
+  expect(scenario.removals).toBe(1);
+  expect(scenario.cleared).toEqual([]);
+
+  act(() => sources.state.set({ kind: "ready", sources: [provider] }));
+  scenario.historyRefused = true;
+  press(shown, "tv.example.invalid");
+  press(shown, "Remove");
+  press(shown, "Remove and delete history");
+  await act(async () => {});
+  expect(scenario.removals).toBe(2);
+  expect(scenario.cleared).toEqual(["source"]);
+  expect(shown.textContent).toContain(
+    "The provider was removed, but its history could not be deleted.",
+  );
+
+  scenario.historyRefused = false;
+  press(shown, "Try again");
+  await act(async () => {});
+  expect(scenario.cleared).toEqual(["source", "source"]);
+  expect(scenario.removals).toBe(2);
+});
+
+it("retries both refused history and statistics cleanup without removing the provider again", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  scenario.removeLast = true;
+  const { statistics } = await import("../src/telemetry/index.ts");
+  statistics.configure(true);
+  statistics.consent.replace({
+    choice: "on",
+    installationId: "11111111-1111-4111-8111-111111111111",
+    pending: [],
+  });
+  scenario.historyRefused = true;
+  scenario.refused.add("statistics.json");
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "source",
+        kind: "xtream",
+        label: "Test provider",
+        channels: { kind: "ready", rows: [] },
+      },
+    ],
+  });
+  const shown = show(createElement(SettingsScreen));
+  press(shown, "Test provider");
+  press(shown, "Remove");
+  press(shown, "Remove and delete history");
+  await act(async () => {});
+  const attempts = scenario.writes.filter((name) => name === "statistics.json").length;
+  scenario.historyRefused = false;
+  scenario.refused.delete("statistics.json");
+  press(shown, "Try again");
+  await act(async () => {});
+  expect(scenario.cleared).toEqual(["source", "source"]);
+  expect(scenario.removals).toBe(1);
+  expect(scenario.writes.filter((name) => name === "statistics.json")).toHaveLength(attempts + 1);
+});
+
+it.each([false, true])(
+  "reports both refused cleanups after Settings unmounts, retry=%s",
+  async (retry) => {
+    const { sources } = await import("../src/bootstrap/sources.ts");
+    setLanguage({ locale: "en-US", formats: "en-US" });
+    scenario.removeLast = true;
+    const { statistics } = await import("../src/telemetry/index.ts");
+    statistics.configure(true);
+    statistics.consent.replace({
+      choice: "on",
+      installationId: "11111111-1111-4111-8111-111111111111",
+      pending: [],
+    });
+    scenario.historyRefused = true;
+    scenario.refused.add("statistics.json");
+    sources.state.set({
+      kind: "ready",
+      sources: [
+        {
+          id: "source",
+          kind: "xtream",
+          label: "Test provider",
+          channels: { kind: "ready", rows: [] },
+        },
+      ],
+    });
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "Test provider");
+    press(shown, "Remove");
+    press(shown, "Remove and delete history");
+
+    if (retry) {
+      await act(async () => {});
+      press(shown, "Try again");
+    }
+
+    act(() => {
+      root?.unmount();
+      root = null;
+    });
+    await act(async () => {});
+    expect(scenario.toasts).toEqual([
+      "The provider was removed, but its history could not be deleted. The provider was removed, but its statistics could not be cleared.",
+    ]);
+    expect(scenario.removals).toBe(1);
+  },
+);
+
+it("replaces the password through Settings while retaining Watchlist, recent, progress and marks", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const { viewingOwner } = await import("../src/home/viewing.ts");
+  const { fixture } = await import("./library-fixture.ts");
+  const { libraryModel } = await import("../src/library/model.ts");
+  const platform = await import("../src/platform/storage.ts");
+  const f = fixture();
+
+  const model = libraryModel({
+    sources: () => [{ ...f.source, id: "xtream:private-id", reader: f.source }],
+    language: () => "en",
+  });
+
+  await model.refresh();
+
+  const owner = viewingOwner(
+    { readJson: platform.readJsonStrict, writeJson: platform.writeJson },
+    () => ["xtream:private-id"],
+    () => model,
+  );
+
+  const before = sources.state.get();
+  setLanguage({ locale: "en-US", formats: "en-US" });
+  sources.state.set({
+    kind: "ready",
+    sources: [
+      {
+        id: "xtream:private-id",
+        kind: "xtream",
+        label: "tv.example.invalid",
+        channels: {
+          kind: "failed",
+          error: { kind: "needs-secret", subscriptionId: "xtream:private-id" },
+        },
+      },
+    ],
+  });
+
+  try {
+    await owner.read();
+    const title = model.made("movie").list("all", "title")[0]!;
+    const series = model.made("series").list("all", "title")[0]!;
+    await owner.setWatchlist(title, true);
+    await owner.recordWatch({ sourceId: "xtream:private-id", channelId: "live" });
+    await owner.recordProgress(
+      { kind: "movie", subscriptionId: "xtream:private-id", id: title.id },
+      300,
+      1800,
+      1,
+    );
+    await owner.markEpisode(
+      {
+        kind: "episode",
+        subscriptionId: "xtream:private-id",
+        seriesId: series.id,
+        id: "first",
+        season: 1,
+        episode: 1,
+      },
+      true,
+    );
+    const shown = show(createElement(SettingsScreen));
+    press(shown, "tv.example.invalid");
+    press(shown, "Enter password");
+    fill(shown, "Server or M3U link", "https://tv.example.invalid");
+    fill(shown, "Username", "fixture");
+    fill(shown, "Password", "replacement");
+    press(shown, "Connect");
+    await act(async () => {});
+    expect(scenario.connections).toEqual([
+      {
+        id: "xtream:private-id",
+        input: {
+          server: "https://tv.example.invalid",
+          username: "fixture",
+          password: "replacement",
+        },
+      },
+    ]);
+    expect(shown.querySelector("dialog")).toBeNull();
+    expect(scenario.cleared).toEqual([]);
+    await owner.read();
+    expect(owner.state.get().watchlist[0]?.name).toBe(title.title);
+    expect(owner.state.get().viewing?.recent).toEqual([
+      { subscriptionId: "xtream:private-id", id: "live" },
+    ]);
+    expect((await owner.progress(title))[0]?.position).toBe(300);
+    expect((await owner.episodes(series)).marks).toHaveLength(1);
+  } finally {
+    await owner.dispose();
+    sources.state.set(before);
+    scenario.files.delete("viewing.json");
+  }
 });

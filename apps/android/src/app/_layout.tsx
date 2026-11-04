@@ -5,6 +5,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { StatusBar } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
 import { startDownloads } from "../downloads/runtime.ts";
+import { startViewing } from "../home/index.ts";
 import { player } from "../player/instance.ts";
 import { MiniPlayer } from "../player/mini-player.tsx";
 import { useStore } from "../platform/store.ts";
@@ -14,6 +15,7 @@ import { colors } from "../ui/theme.ts";
 // the saved sources are read, so a returning viewer never sees Connect flash first. Watch opens
 // over the destinations and hands notification links for files to OfflinePlay. Offline stays
 // available without a provider; a local copy also keeps its mini player while Connect is showing.
+// Viewing history lives for the app, so progress is saved from every playback, not only from Home.
 
 const theme = {
   ...DarkTheme,
@@ -33,6 +35,7 @@ export default function RootLayout() {
     state.kind === "ready" && state.sources.length === 0,
   );
   useEffect(() => startReminders(), []);
+  useEffect(() => startViewing(), []);
 
   const localFile = useSyncExternalStore(player.state.subscribe, () => {
     const state = player.state.get();

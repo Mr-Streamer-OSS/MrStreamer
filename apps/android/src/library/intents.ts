@@ -75,3 +75,48 @@ export function downloadPresentationRegistry() {
 }
 
 export const libraryDownloads = downloadPresentationRegistry();
+
+/**
+ * A line Details docks above the navigation bar: a kept episode mark with Undo, or a refused one
+ * with Try again. Details dismisses it when it closes.
+ */
+export interface ViewingNotice {
+  readonly message: string;
+  readonly failed: boolean;
+  readonly action: string;
+  run(): void;
+  dismiss(): void;
+}
+
+/** Viewing owns persistence and failure presentation; Library exposes current title/episode facts. */
+export interface ViewingPresentationAdapter {
+  subscribe(listener: () => void): () => void;
+  snapshot(): unknown;
+  watchlist(title: import("@mrstreamer/contracts/ondemand").Title): {
+    label: string;
+    activate(): void;
+    available?: boolean;
+  };
+  /** An episode's mark, hidden while its saved state is unavailable. */
+  episode(
+    title: import("@mrstreamer/contracts/ondemand").Title,
+    episode: import("@mrstreamer/contracts/ondemand").Episode,
+  ): { label: string; activate(): void; detail?: string; available?: boolean };
+  notice(): ViewingNotice | null;
+  play(media: MediaIdentity, episode?: { season: number; number: number }): void;
+}
+
+export const libraryViewing = (() => {
+  const state = store<ViewingPresentationAdapter | undefined>(undefined);
+
+  return {
+    state,
+    register(adapter: ViewingPresentationAdapter) {
+      state.set(adapter);
+
+      return () => {
+        if (state.get() === adapter) state.set(undefined);
+      };
+    },
+  };
+})();

@@ -107,11 +107,11 @@ export function SettingsScreen() {
     }
   }
 
-  async function remove(source: ConnectedSource) {
+  async function remove(source: ConnectedSource, withHistory = false) {
     if (removingIds.current.has(source.id)) return;
     removingIds.current.add(source.id);
     setBusy(new Set(removingIds.current));
-    const result = await recovery.remove(source.id);
+    const result = await recovery.remove(source.id, withHistory);
     removingIds.current.delete(source.id);
     setBusy(new Set(removingIds.current));
 
@@ -123,6 +123,9 @@ export function SettingsScreen() {
           "A playback reader was still open after ten seconds. The provider's connection may still be active.",
         ),
       );
+
+    if (result.historyNotCleared || result.erase === "history-not-cleared")
+      messages.push(t("The provider was removed, but its history could not be deleted."));
 
     if (result.erase === "refused")
       messages.push(t("Couldn't remove {name}. Its login is still saved.", { name: source.label }));
@@ -140,14 +143,22 @@ export function SettingsScreen() {
       const text = messages.join(" ");
 
       if (!mounted.current) {
-        const important =
-          result.erase === "statistics-not-cleared"
-            ? t("The provider was removed, but its statistics could not be cleared.")
-            : result.erase === "refused"
-              ? t("Couldn't remove the provider.")
-              : result.erase === "partial"
-                ? t("The login is erased, but the provider is still listed.")
-                : t("Playback may still be active.");
+        const cleanups = [
+          ...(result.historyNotCleared || result.erase === "history-not-cleared"
+            ? [t("The provider was removed, but its history could not be deleted.")]
+            : []),
+          ...(result.erase === "statistics-not-cleared"
+            ? [t("The provider was removed, but its statistics could not be cleared.")]
+            : []),
+        ];
+
+        const important = cleanups.length
+          ? cleanups.join(" ")
+          : result.erase === "refused"
+            ? t("Couldn't remove the provider.")
+            : result.erase === "partial"
+              ? t("The login is erased, but the provider is still listed.")
+              : t("Playback may still be active.");
 
         ToastAndroid.show(important, ToastAndroid.LONG);
 
@@ -155,8 +166,53 @@ export function SettingsScreen() {
       }
 
       if (result.erase === "removed") notify({ text });
-      else notify({ text, action: { label: t("Try again"), run: () => void remove(source) } });
+      else
+        notify({
+          text,
+          action: {
+            label: t("Try again"),
+            // The provider is gone: retry only the cleanups that failed.
+            run:
+              result.erase === "history-not-cleared" ||
+              result.historyNotCleared ||
+              result.erase === "statistics-not-cleared"
+                ? () =>
+                    void retryCleanup(
+                      source,
+                      result.erase === "history-not-cleared" || !!result.historyNotCleared,
+                      result.erase === "statistics-not-cleared",
+                    )
+                : () => void remove(source, withHistory),
+          },
+        });
     }
+  }
+
+  /** Retry each outstanding cleanup after removal, without removing the provider again. */
+  async function retryCleanup(source: ConnectedSource, history: boolean, usage: boolean) {
+    if (history) {
+      try {
+        await (await import("../home/index.ts")).clearViewing(source.id);
+        history = false;
+      } catch {
+        /* Remains retryable below. */
+      }
+    }
+
+    if (usage) usage = !statistics.discard();
+
+    const messages = [
+      ...(history ? [t("The provider was removed, but its history could not be deleted.")] : []),
+      ...(usage ? [t("The provider was removed, but its statistics could not be cleared.")] : []),
+    ];
+
+    if (messages.length && !mounted.current)
+      ToastAndroid.show(messages.join(" "), ToastAndroid.LONG);
+    else if (messages.length)
+      notify({
+        text: messages.join(" "),
+        action: { label: t("Try again"), run: () => void retryCleanup(source, history, usage) },
+      });
   }
 
   const openLink = (url: string) =>
@@ -366,10 +422,25 @@ export function SettingsScreen() {
               if (source) void remove(source);
             },
           },
+          {
+            label: t("Remove and delete history"),
+            onPress: () => {
+              const source = removing;
+              setRemoving(null);
+
+              if (source) void remove(source, true);
+            },
+          },
           { label: t("Cancel"), dismiss: true, onPress: () => setRemoving(null) },
         ]}
       >
-        <DialogText>{t("Its login is erased from this phone.")}</DialogText>
+        <DialogText>
+          {t("Its login is erased from this phone.")}{" "}
+          {t(
+            "Remove keeps your favourites, watchlist and viewing history for when you add this provider again.",
+          )}{" "}
+          {t("Deleting history also erases favourites and watchlist.")}
+        </DialogText>
       </Dialog>
     </Screen>
   );

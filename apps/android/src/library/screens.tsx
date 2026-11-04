@@ -1,6 +1,14 @@
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { FlatList, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   COLLECTION_SORTS,
@@ -26,7 +34,7 @@ import * as storage from "../platform/storage.ts";
 import { browseCollection, type BrowseChoices, type BrowsedCollection } from "./browse.ts";
 import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
-import { libraryDownloads, libraryIntents, type MediaIdentity } from "./intents.ts";
+import { libraryDownloads, libraryIntents, libraryViewing, type MediaIdentity } from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
 import {
   Artwork,
@@ -709,6 +717,17 @@ function useDownloadPresentation(media: MediaIdentity) {
   return adapter?.read(media);
 }
 
+/** Rereads viewing actions after a committed change; refused writes retain their prior label. */
+function useViewingPresentation() {
+  const adapter = useStore(libraryViewing.state);
+  useSyncExternalStore(
+    adapter?.subscribe ?? noDownloadSubscription,
+    adapter?.snapshot ?? noDownloadSnapshot,
+  );
+
+  return adapter;
+}
+
 /** A movie's Play and Download, each only while its later owner handles it. */
 function MovieActions({
   title,
@@ -722,6 +741,7 @@ function MovieActions({
   const { play, download } = useStore(libraryIntents.state);
 
   const media = mediaOf(title, undefined, titleId);
+  const viewing = useViewingPresentation();
   const saved = useDownloadPresentation(media);
 
   if (!play && !download && !saved) return null;
@@ -732,7 +752,8 @@ function MovieActions({
         <FilledButton
           label={t("Play")}
           icon="play-arrow"
-          onPress={() =>
+          onPress={() => {
+            viewing?.play(media);
             play({
               kind: "title",
               sourceId: title.subscriptionId,
@@ -740,8 +761,8 @@ function MovieActions({
               id: title.id,
               container,
               title: title.title,
-            })
-          }
+            });
+          }}
         />
       ) : null}
       {saved ? (
@@ -765,7 +786,11 @@ function MovieActions({
   );
 }
 
-/** An episode's row: its still, number and name, length, and the actions its owners handle. */
+/**
+ * An episode's row: its still, number and name, length, and the actions its owners handle. One
+ * TalkBack stop whose actions are Play, Mark watched and Download, each only while its owner
+ * handles it; holding the row opens a sheet with Mark watched and Download.
+ */
 function EpisodeRow({
   title,
   titleId,
@@ -782,9 +807,62 @@ function EpisodeRow({
   const { play, download } = useStore(libraryIntents.state);
   const media = () => mediaOf(title, episode, titleId);
   const saved = useDownloadPresentation(media());
+  const viewing = useViewingPresentation();
+  const candidate = viewing?.episode(title, episode);
+  const mark = candidate?.available === false ? undefined : candidate;
+  const insets = useSafeAreaInsets();
+  const [held, setHeld] = useState(false);
+  const name = `${formatNumber(episode.number)}. ${episode.title}`;
+
+  const playing =
+    play && container
+      ? () => {
+          viewing?.play(media(), episode);
+          play({
+            kind: "title",
+            sourceId: episode.subscriptionId,
+            media: "episode",
+            id: episode.id,
+            container,
+            title: episode.title,
+          });
+        }
+      : undefined;
+
+  const downloading = saved
+    ? { label: saved.label, run: saved.activate }
+    : download
+      ? { label: t("Download"), run: () => download({ action: "download", media: media() }) }
+      : undefined;
+
+  const actions = [
+    ...(playing ? [{ name: "play", label: t("Play"), run: playing }] : []),
+    ...(mark ? [{ name: "mark", label: mark.label, run: mark.activate }] : []),
+    ...(downloading ? [{ name: "download", ...downloading }] : []),
+  ];
+
+  const sheet = [
+    mark ? actions.find((a) => a.name === "mark")! : null,
+    downloading ? actions.at(-1)! : null,
+  ].filter((action) => action !== null);
 
   return (
-    <View
+    <Pressable
+      accessible
+      accessibilityLabel={[
+        name,
+        episode.duration ? runtime(episode.duration) : null,
+        mark?.detail,
+        saved?.text,
+      ]
+        .filter(Boolean)
+        .join(", ")}
+      accessibilityActions={actions.map(({ name, label }) => ({ name, label }))}
+      onAccessibilityAction={({ nativeEvent }) =>
+        actions.find((action) => action.name === nativeEvent.actionName)?.run()
+      }
+      onLongPress={sheet.length ? () => setHeld(true) : undefined}
+      android_ripple={sheet.length ? { color: colors.ripple } : undefined}
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -797,10 +875,14 @@ function EpisodeRow({
     >
       <Artwork url={episode.stillUrl} width={wide ? 160 : 112} height={wide ? 90 : 63} radius={8} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        <Text style={typeScale.row}>
-          {formatNumber(episode.number)}. {episode.title}
-        </Text>
-        {episode.duration ? <Text style={typeScale.small}>{runtime(episode.duration)}</Text> : null}
+        <Text style={typeScale.row}>{name}</Text>
+        {episode.duration || mark?.detail ? (
+          <Text style={typeScale.small}>
+            {[episode.duration ? runtime(episode.duration) : null, mark?.detail]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+        ) : null}
         {saved ? <Text style={typeScale.small}>{saved.text}</Text> : null}
         {wide && episode.plot ? (
           <Text numberOfLines={2} style={typeScale.small}>
@@ -808,22 +890,7 @@ function EpisodeRow({
           </Text>
         ) : null}
       </View>
-      {play && container ? (
-        <RowAction
-          icon="play-arrow"
-          label={t("Play")}
-          onPress={() =>
-            play({
-              kind: "title",
-              sourceId: episode.subscriptionId,
-              media: "episode",
-              id: episode.id,
-              container,
-              title: episode.title,
-            })
-          }
-        />
-      ) : null}
+      {playing ? <RowAction icon="play-arrow" label={t("Play")} onPress={playing} /> : null}
       {saved ? (
         <Press
           label={`${saved.label}, S${episode.season} E${episode.number}, ${episode.title}`}
@@ -867,6 +934,95 @@ function EpisodeRow({
           onPress={() => download({ action: "download", media: media() })}
         />
       ) : null}
+      <Sheet visible={held} label={name} fit onClose={() => setHeld(false)}>
+        <View style={{ paddingBottom: 24 + insets.bottom }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 16,
+              paddingBottom: 12,
+              paddingHorizontal: 24,
+              borderBottomWidth: 1,
+              borderColor: sheetLine,
+            }}
+          >
+            <Artwork url={episode.stillUrl} width={80} height={45} radius={6} />
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text
+                accessibilityRole="header"
+                style={{ ...typeScale.body, fontWeight: "700", lineHeight: 20 }}
+              >
+                {name}
+              </Text>
+              <Text style={typeScale.meta}>
+                {[title.title, `S${episode.season} E${episode.number}`, mark?.detail]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </Text>
+            </View>
+          </View>
+          <View style={{ paddingTop: 8 }}>
+            {sheet.map((action) => (
+              <Press
+                key={action.name}
+                label={action.label}
+                onPress={() => {
+                  setHeld(false);
+                  action.run();
+                }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 16,
+                  minHeight: 56,
+                  paddingHorizontal: 24,
+                }}
+              >
+                <Icon name={action.name === "mark" ? "done" : "download"} />
+                <Text style={{ ...typeScale.body, flex: 1, lineHeight: 20 }}>{action.label}</Text>
+              </Press>
+            ))}
+          </View>
+        </View>
+      </Sheet>
+    </Pressable>
+  );
+}
+
+/**
+ * The viewing line Details docks above the navigation bar: a kept episode mark with Undo, or a
+ * refused mark or Watchlist change with Try again. It goes when Details closes.
+ */
+function ViewingLine() {
+  const notice = useViewingPresentation()?.notice() ?? null;
+  useEffect(() => () => libraryViewing.state.get()?.notice()?.dismiss(), []);
+
+  if (!notice) return null;
+
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        minHeight: 56,
+        paddingVertical: 4,
+        paddingLeft: 16,
+        paddingRight: 4,
+        borderTopWidth: 1,
+        borderColor: colors.hairline,
+        backgroundColor: colors.background,
+      }}
+    >
+      <Icon
+        name={notice.failed ? "error-outline" : "done"}
+        size={20}
+        color={notice.failed ? colors.failure : colors.secondary}
+      />
+      <Text style={{ ...typeScale.meta, color: colors.text, flex: 1 }}>{notice.message}</Text>
+      <TextButton label={notice.action} onPress={notice.run} />
     </View>
   );
 }
@@ -886,6 +1042,7 @@ function DetailNotice({ message, onRetry }: { message: string; onRetry?: () => v
 
 export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   const model = useLibraryModel(injected);
+  const viewing = useViewingPresentation();
   const list = useStore(model.state);
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -1037,6 +1194,12 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           container={shown.container?.trim() || details?.containers.get(shown.id)}
         />
       ) : null}
+      {shown && viewing && viewing.watchlist(shown).available !== false ? (
+        <OutlinedButton
+          label={viewing.watchlist(shown).label}
+          onPress={viewing.watchlist(shown).activate}
+        />
+      ) : null}
       {saveFailed ? <DetailNotice message={t("Couldn't save version.")} /> : null}
       {!details ? <DetailNotice message={t("Loading…")} /> : null}
       {details?.providerFailed ? (
@@ -1133,6 +1296,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
         </ScrollView>
       )}
+      <ViewingLine />
       <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
         <SheetTitle title={t("Version")} />
         <SheetScroll>

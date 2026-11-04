@@ -29,6 +29,8 @@ const scenario = vi.hoisted(() => ({
   showing: true,
   /** What the saved sources' store holds. */
   sources: { kind: "restoring" } as { kind: "restoring" } | { kind: "ready"; sources: object[] },
+  /** How many app-lifetime viewing starts are still running. */
+  viewing: 0,
 }));
 
 // Native modules are supplied by Expo on-device; this DOM harness supplies their ports.
@@ -46,6 +48,16 @@ vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
 vi.mock("../src/reminders/runtime.ts", () => ({ startReminders: () => () => {} }));
 
 vi.mock("../src/reminders/routing.ts", () => ({ useReminderRouting: () => {} }));
+
+vi.mock("../src/home/index.ts", () => ({
+  startViewing: () => {
+    scenario.viewing++;
+
+    return () => {
+      scenario.viewing--;
+    };
+  },
+}));
 
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
@@ -319,6 +331,7 @@ describe("the app", () => {
     const screens = () => labels(show(createElement(RootLayout)), "section");
     expect(screens()).toEqual([]);
     expect(scenario.asked).toEqual(["restore"]);
+    expect(scenario.viewing).toBe(1);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [] };
     expect(screens()).toEqual(["offline", "connect"]);
@@ -331,6 +344,7 @@ describe("the app", () => {
     act(() => root?.unmount());
     root = null;
     expect(libraryIntents.state.get().download).toBeUndefined();
+    expect(scenario.viewing).toBe(0);
   });
 });
 
