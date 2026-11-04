@@ -709,11 +709,14 @@ describe("downloads", { timeout: 30_000 }, () => {
     // Every connection the subscription allows is in use elsewhere.
     one.stallMovieFile(otherMovie().id, 1, 60_000);
     const held = new AbortController();
+
     try {
       const login = `${ONE.username}/${encodeURIComponent(ONE.password)}`;
+
       const occupied = await fetch(`${one.url}/movie/${login}/${otherMovie().id}.mp4`, {
         signal: held.signal,
       });
+
       expect(one.activeStreams()).toBe(1);
       const film = await app.addDownload(movieRef(a));
       await until(() => statusOf(app, film.id)?.kind === "failed", "the refusal");
