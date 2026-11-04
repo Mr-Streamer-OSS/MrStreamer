@@ -4,7 +4,7 @@ import {
   type SubtitleTiming,
 } from "@mrstreamer/contracts/online-subtitles";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocale } from "../live/catalogue.ts";
@@ -71,7 +71,9 @@ export function DownloadedRows({
           icon={state.shown ? "check" : undefined}
           selected={state.shown}
           title={languageName(subtitle.language) ?? subtitle.language}
-          detail={subtitle.release}
+          detail={[subtitle.hearingImpaired ? t("Hearing impaired") : null, subtitle.release]
+            .filter(Boolean)
+            .join(" · ")}
           trailing={t("Downloaded")}
           onPress={choose(() => model.show())}
         />
@@ -143,11 +145,10 @@ function Online({
   onClose: () => void;
 }) {
   const state = useStore(model.state);
-  const opened = useRef(state.saved);
 
   useEffect(() => {
-    if (state.error || (state.saved !== opened.current && state.saved?.subtitle)) onClose();
-  }, [state.error, state.saved, onClose]);
+    if (state.error) onClose();
+  }, [state.error, onClose]);
 
   const names = state.languages.map((code) => languageName(code) ?? code);
 
@@ -180,7 +181,11 @@ function Online({
             detail={result.release}
             trailing={downloading ? t("Downloading") : result.format}
             active={downloading}
-            onPress={() => void model.choose(result.id)}
+            onPress={() =>
+              void model.choose(result.id).then((kept) => {
+                if (kept) onClose();
+              })
+            }
           />
         );
       })}
@@ -393,6 +398,17 @@ function words(
     return { title: t("Couldn't change timing"), body: t("The previous timing is kept.") };
 
   switch (error) {
+    case "timing-limit":
+      return {
+        title: t("Timing limit reached"),
+        body: t("Timing can change by up to 600 seconds."),
+      };
+    case "selection-save":
+      return {
+        title: t("Couldn’t keep the subtitle choice"),
+        body: t("The previous choice is kept. Try again."),
+        action: { label: t("Try again"), run: "retry" },
+      };
     case "not-configured":
       return {
         title: t("SubDL key needed"),

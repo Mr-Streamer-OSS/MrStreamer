@@ -92,6 +92,7 @@ export const DownloadedSubtitle = lazy(() =>
     service: "'subdl' | 'opensubtitles'",
     language: "string <= 64",
     release: "string <= 1024",
+    "hearingImpaired?": "boolean",
     cues: type({
       start: "0 <= number <= 86400",
       end: "0 < number <= 86400",

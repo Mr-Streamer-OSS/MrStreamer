@@ -74,6 +74,11 @@ export const t = catalogue(
     "Couldn't save the text size. This phone refused it.":
       "Couldn't save the text size. This phone refused it.",
     "Couldn't read the text size.": "Couldn't read the text size.",
+    Text: "Text",
+    "Timing limit reached": "Timing limit reached",
+    "Timing can change by up to 600 seconds.": "Timing can change by up to 600 seconds.",
+    "Couldn’t keep the subtitle choice": "Couldn’t keep the subtitle choice",
+    "The previous choice is kept. Try again.": "The previous choice is kept. Try again.",
     Subtitles: "Subtitles",
     Saved: "Saved",
     "Not set": "Not set",
@@ -82,8 +87,8 @@ export const t = catalogue(
     Small: "Small",
     Medium: "Medium",
     Large: "Large",
-    "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.":
-      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.",
+    "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size applies to all subtitles.":
+      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size applies to all subtitles.",
     Replace: "Replace",
     Remove: "Remove",
     "Replace asks for the whole key again. Downloaded subtitles stay either way.":
@@ -157,10 +162,16 @@ export const t = catalogue(
       "Couldn't save the key. This phone refused it.":
         "Kon de sleutel niet bewaren. Deze telefoon weigerde hem.",
       "Couldn't remove the key. This phone refused it.":
-        "Kon de sleutel niet verwijderen. Deze telefoon weigerde het.",
+        "Kon de sleutel niet verwijderen. Deze telefoon weigerde hem.",
       "Couldn't save the text size. This phone refused it.":
         "Kon de tekstgrootte niet bewaren. Deze telefoon weigerde haar.",
       "Couldn't read the text size.": "Kon de tekstgrootte niet lezen.",
+      Text: "Tekst",
+      "Timing limit reached": "Timinglimiet bereikt",
+      "Timing can change by up to 600 seconds.": "De timing kan maximaal 600 seconden veranderen.",
+      "Couldn’t keep the subtitle choice": "De ondertitelkeuze kon niet worden bewaard",
+      "The previous choice is kept. Try again.":
+        "De vorige keuze blijft behouden. Probeer opnieuw.",
       Subtitles: "Ondertiteling",
       Saved: "Bewaard",
       "Not set": "Niet ingesteld",
@@ -169,8 +180,8 @@ export const t = catalogue(
       Small: "Klein",
       Medium: "Middel",
       Large: "Groot",
-      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.":
-        "Online zoeken in de speler doorzoekt SubDL met je eigen sleutel, die verzegeld blijft op deze telefoon. Tekstgrootte geldt voor gedownloade ondertiteling.",
+      "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size applies to all subtitles.":
+        "Online zoeken in de speler doorzoekt SubDL met je eigen sleutel, die verzegeld blijft op deze telefoon. Tekstgrootte geldt voor alle ondertiteling.",
       Replace: "Vervangen",
       Remove: "Verwijderen",
       "Replace asks for the whole key again. Downloaded subtitles stay either way.":

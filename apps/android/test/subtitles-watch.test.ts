@@ -234,6 +234,7 @@ vi.mock("../src/subtitles/runtime.ts", async () => {
   return {
     subtitles: () => player.subtitles,
     subtitleTextSize: size,
+    subtitleTextSizeError: (await import("../src/platform/store.ts")).store(false),
     readSubtitleTextSize: () => true,
     setSubtitleTextSize(value: number) {
       if (!scenario.sizeWritable) return false;
@@ -445,7 +446,7 @@ describe("Watch's online subtitles", () => {
     expect(labels(shown).some((label) => label?.startsWith("Adjust timing"))).toBe(false);
 
     await press(shown, downloaded);
-    expect(scenario.sidecars).toHaveLength(2);
+    expect(scenario.sidecars).toHaveLength(1);
     await press(shown, "Subtitles");
     expect(ticked(shown)).toEqual(["Nederlands, SubRip"]);
 
@@ -644,4 +645,28 @@ describe("Settings' Subtitles section", () => {
     act(() => notify.mock.lastCall?.[0].action?.run());
     expect(shown.textContent).toContain("Large");
   });
+});
+
+it("keeps Online open when retained data finishes restoring", async () => {
+  scenario.key = "fixture";
+  const shown = await watch(episode, { tracks: tracks("nl") });
+  await press(shown, "Subtitles");
+  await press(shown, "Find online, SubDL");
+  await vi.waitFor(() => expect(shown.textContent).toContain("Estuary.Line.S01E03.1080p.WEB-DL"));
+  scenario.retained = kept();
+  await act(async () => {
+    await player.subtitles!.retry();
+  });
+  expect(shown.textContent).toContain("Estuary.Line.S01E03.1080p.WEB-DL");
+  expect(shown.textContent).toContain("Online subtitles");
+});
+
+it("shows hearing impaired on the downloaded row", async () => {
+  const saved = kept();
+  scenario.retained = { ...saved, subtitle: { ...saved.subtitle, hearingImpaired: true } };
+  const shown = await watch(episode, { tracks: tracks("nl") });
+  await press(shown, "Subtitles");
+  expect(labels(shown)).toContain(
+    "English, Hearing impaired · Estuary.Line.S01E03.720p.HDTV.x264, Downloaded",
+  );
 });

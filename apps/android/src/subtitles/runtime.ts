@@ -4,6 +4,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { currentLanguage } from "@mrstreamer/core/i18n";
 import { titleName } from "@mrstreamer/core/ondemand/names";
 import { type } from "arktype";
+import { library } from "../library/runtime.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { sealedLinks } from "../guide/secrets.ts";
 import type { PlayerOwner } from "../player/player.ts";
@@ -27,7 +28,9 @@ export function subtitles(): SubtitleModel {
   return model;
 }
 
-export function startSubtitles(player: PlayerOwner): SubtitleModel {
+export function startSubtitles(
+  player: Pick<PlayerOwner, "state"> & { media: Pick<PlayerOwner["media"], "text"> },
+): SubtitleModel {
   return (model ??= subtitleModel({
     player,
     native: nativePlayer(),
@@ -46,6 +49,21 @@ export function startSubtitles(player: PlayerOwner): SubtitleModel {
         if (!pending.exists) pending.create();
         pending.writeSync(JSON.stringify({ ...value, query: model?.state.get().title?.query }));
         pending.moveSync(file, { overwrite: true });
+
+        try {
+          const kept = root()
+            .list()
+            .filter(
+              (entry): entry is File => entry instanceof File && entry.name.endsWith(".json"),
+            );
+
+          for (const old of kept
+            .toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0))
+            .slice(0, Math.max(0, kept.length - 100)))
+            old.delete();
+        } catch {
+          /* The next successful write retries pruning. */
+        }
       },
       remove(key) {
         const file = fileOf(key);
@@ -133,11 +151,57 @@ export function startSubtitles(player: PlayerOwner): SubtitleModel {
         return { key, query: parsed.query };
       }
 
-      if (intent.media === "episode") return null;
+      if (intent.media === "episode") {
+        const exact = library().playbackEpisode(intent.sourceId, intent.id, intent.container);
+
+        if (exact)
+          return {
+            key,
+            query: {
+              kind: "episode",
+              title: exact.title.title,
+              ...defined({
+                tmdbId:
+                  exact.title.tmdbId && /^[1-9]\d{0,9}$/.test(exact.title.tmdbId)
+                    ? Number(exact.title.tmdbId)
+                    : undefined,
+              }),
+              season: exact.episode.season,
+              episode: exact.episode.number,
+            },
+          };
+      }
+
       const reader = sources.onDemand(intent.sourceId);
 
       if (!reader) throw new Error("read");
       const catalogue = await reader.onDemandCatalogue();
+
+      if (intent.media === "episode") {
+        const series = catalogue.series.find((item) => item.episodeFiles?.includes(intent.id));
+
+        if (!series) return null;
+        const details = await reader.seriesDetails(series.id);
+
+        const episode = details.episodes.find(
+          (item) => item.id === intent.id && item.container === intent.container,
+        );
+
+        if (!episode) return null;
+
+        return {
+          key,
+          query: {
+            kind: "episode",
+            season: episode.season,
+            episode: episode.number,
+            ...(series.tmdbId && /^[1-9]\d{0,9}$/.test(series.tmdbId)
+              ? { tmdbId: Number(series.tmdbId) }
+              : { title: titleName(series.name).title }),
+          },
+        };
+      }
+
       const movie = catalogue.movies.find((item) => item.id === intent.id);
 
       if (!movie) return null;
@@ -159,17 +223,21 @@ export function startSubtitles(player: PlayerOwner): SubtitleModel {
 
 const TextSize = type("0.5 <= number <= 2");
 export const subtitleTextSize = store(1);
+export const subtitleTextSizeError = store(false);
 
 export function readSubtitleTextSize() {
   try {
     const raw = preferences().read("subtitle-size.json");
     const parsed = raw === null ? 1 : TextSize(raw);
 
-    if (parsed instanceof type.errors) return false;
+    if (parsed instanceof type.errors) throw new Error("read");
+    subtitleTextSizeError.set(false);
     subtitleTextSize.set(parsed);
 
     return true;
   } catch {
+    subtitleTextSizeError.set(true);
+
     return false;
   }
 }
@@ -182,3 +250,29 @@ export function setSubtitleTextSize(value: number) {
 
   return true;
 }
+
+// The native reader holds its own bytes, so erasing retained records does not interrupt cues.
+const initialSources = sources.state.get();
+
+let listedSources =
+  initialSources.kind === "ready"
+    ? new Set(initialSources.sources.map((source) => source.id))
+    : undefined;
+
+sources.state.subscribe(() => {
+  const now = sources.state.get();
+
+  if (now.kind !== "ready") return;
+  const next = new Set(now.sources.map((source) => source.id));
+  const removed = [...(listedSources ?? [])].filter((id) => !next.has(id));
+  listedSources = next;
+
+  if (!removed.length || !root().exists) return;
+
+  for (const file of root().list()) {
+    if (!(file instanceof File) || !file.name.endsWith(".json")) continue;
+    const key: unknown = JSON.parse(decodeURIComponent(file.name.slice(0, -5)));
+
+    if (Array.isArray(key) && removed.includes(key[0])) file.delete();
+  }
+});

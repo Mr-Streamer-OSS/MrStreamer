@@ -118,6 +118,9 @@ class PlayerOwner(
     var sidecar: ByteArray? = null
     var sidecarLanguage: String = ""
     var pickSidecar = false
+    var sidecarDone: ((Boolean) -> Unit)? = null
+    var rollbackSidecar: (() -> Unit)? = null
+    var audioFormat: androidx.media3.common.Format? = null
     var stopped = false
     /** Why it failed, until it plays again. */
     var failure: Failure? = null
@@ -171,12 +174,28 @@ class PlayerOwner(
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0)).build()
               }
             }
+            current?.audioFormat?.let { wanted ->
+              for (group in player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }) {
+                val index = (0 until group.length).firstOrNull { group.getTrackFormat(it).let { candidate -> candidate.id?.removePrefix("0:") == wanted.id?.removePrefix("0:") && candidate.sampleMimeType == wanted.sampleMimeType && candidate.language == wanted.language } }
+                if (index != null) {
+                  player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)).build()
+                  if (group.isTrackSelected(index)) current?.audioFormat = null
+                  break
+                }
+              }
+            }
             reportTracks()
           }
           if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
             main.removeCallbacks(tick)
             if (player.isPlaying) main.postDelayed(tick, TICK_MS)
             views.lastOrNull()?.keepScreenOn = player.isPlaying
+          }
+          if (player.playbackState == Player.STATE_READY && current?.pickSidecar == false && current?.audioFormat == null && player.currentTracks.groups.any { it.getTrackFormat(0).isSidecar && it.isTrackSelected(0) }) {
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            done?.invoke(true)
           }
           if (
             events.containsAny(
@@ -198,6 +217,14 @@ class PlayerOwner(
 
         override fun onPlayerError(error: PlaybackException) {
           if (!ownsCurrentItem()) return
+          current?.rollbackSidecar?.let { rollback ->
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            rollback()
+            done?.invoke(false)
+            return
+          }
           if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
             player.seekToDefaultPosition()
             player.prepare()
@@ -296,18 +323,48 @@ class PlayerOwner(
   }
 
   /** Rebuilds only this owner's media, preserving position and pause; bytes outlive saved-data removal. */
-  fun setSidecar(attempt: String, text: String, language: String, offset: Double, speed: Double): Boolean {
+  fun setSidecar(attempt: String, text: String, language: String, offset: Double, speed: Double, completed: ((Boolean) -> Unit)? = null): Boolean {
     val now = current ?: return false
     if (now.admission.attempt != attempt || now.stopped || now.admission.mode !in listOf("title", "file")) return false
     val bytes = try { Subtitles.timed(text, offset, speed) } catch (_: Exception) { return false }
+    if (now.sidecarDone != null) return false
+    if (now.sidecar?.contentEquals(bytes) == true && now.sidecarLanguage == language) {
+      val ok = setText(attempt, Subtitles.TRACK)
+      if (ok) completed?.invoke(true)
+      return ok
+    }
+    val old = now.sidecar
+    val oldLanguage = now.sidecarLanguage
+    val oldParameters = player.trackSelectionParameters
     val position = player.currentPosition
     val ready = player.playWhenReady
+    now.audioFormat = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }.firstNotNullOfOrNull { group ->
+      (0 until group.length).firstOrNull { group.isTrackSelected(it) }?.let { group.getTrackFormat(it) }
+    }
+    now.sidecarDone = completed
+    now.rollbackSidecar = {
+      now.sidecar = old
+      now.sidecarLanguage = oldLanguage
+      now.pickSidecar = false
+      prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
+      player.trackSelectionParameters = oldParameters
+      player.playWhenReady = ready
+      player.prepare()
+    }
     now.sidecar = bytes
     now.sidecarLanguage = language
     now.pickSidecar = true
-    prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
-    player.playWhenReady = ready
-    player.prepare()
+    try {
+      prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
+      player.playWhenReady = ready
+      player.prepare()
+    } catch (_: RuntimeException) {
+      val rollback = now.rollbackSidecar
+      now.rollbackSidecar = null
+      now.sidecarDone = null
+      rollback?.invoke()
+      completed?.invoke(false)
+    }
     return true
   }
 
@@ -440,6 +497,9 @@ class PlayerOwner(
       main.removeCallbacks(tick)
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
+    ending.sidecarDone?.invoke(false)
+    ending.sidecarDone = null
+    ending.rollbackSidecar = null
     current = null
     if (notify) notifyChanged()
     return ending

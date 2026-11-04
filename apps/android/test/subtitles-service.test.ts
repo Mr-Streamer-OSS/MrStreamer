@@ -84,3 +84,63 @@ it("does not use a broadened title match", async () => {
     ),
   ).toEqual({ candidates: [], unsupported: [] });
 });
+
+it("derives formats from every filename and counts only requested languages", async () => {
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify({
+          status: true,
+          results: [{ tmdb_id: 7, type: "movie" }],
+          subtitles: [
+            { language: "English", release_name: "Movie", name: "Movie.srt", url: "/one.zip" },
+            { language: "English", release_name: "Movie", url: "/two.zip" },
+            { language: "French", format: "ass", url: "/three.zip" },
+          ],
+        }),
+      ),
+  );
+
+  const result = await subdlSearch(
+    "fixture",
+    { kind: "movie", tmdbId: 7, languages: ["en"] },
+    new AbortController().signal,
+  );
+
+  expect(result.candidates).toHaveLength(2);
+  expect(result.candidates[0]?.format).toBe("SubRip");
+  expect(result.unsupported).toEqual([]);
+});
+
+it("downloads Arabic legacy text as bytes and retains hearing-impaired metadata", async () => {
+  const { subdlDownload } = await import("../src/subtitles/service.ts");
+
+  const bytes = new Uint8Array(
+    Buffer.from(
+      "310d0a30303a30303a31302c303030202d2d3e2030303a30303a31322c3030300d0ae3d1cdc8c720c8c7e1dac7e1e3210d0ac7e1cde1dec920320d0a",
+      "hex",
+    ),
+  );
+
+  vi.stubGlobal("fetch", async () => new Response(bytes));
+
+  const downloaded = await subdlDownload(
+    {
+      language: "ar",
+      release: "Release",
+      hearingImpaired: true,
+      format: "SubRip",
+      url: "/one.zip",
+    },
+    new AbortController().signal,
+    async (input) => {
+      expect(input).toBeInstanceOf(Uint8Array);
+
+      return input;
+    },
+  );
+
+  expect(downloaded.hearingImpaired).toBe(true);
+  expect(downloaded.cues).toEqual([{ start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" }]);
+});

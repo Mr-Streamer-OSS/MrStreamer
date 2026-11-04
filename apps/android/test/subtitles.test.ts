@@ -24,7 +24,7 @@ function setup() {
   const text = vi.fn(async () => true);
   const player = { state, media: { text } };
   const setSidecar = vi.fn(async () => true);
-  const native = { setSidecar, unpackSubtitle: async (bytes: number[]) => bytes };
+  const native = { setSidecar, unpackSubtitle: async (bytes: Uint8Array) => bytes };
   const files = { read: vi.fn<() => unknown>(() => saved), write: vi.fn(), remove: vi.fn() };
 
   const secrets = {
@@ -211,4 +211,47 @@ it("a late download cannot save or show text for a replacement play", async () =
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it("keeps both quick timing presses while native is applying", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  let release!: () => void;
+  s.setSidecar.mockImplementationOnce(
+    () =>
+      new Promise<boolean>((resolve) => {
+        release = () => resolve(true);
+      }),
+  );
+  const first = s.model.shift(1);
+  const second = s.model.shift(1);
+  await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+  release();
+  expect(await first).toBe(true);
+  expect(await second).toBe(true);
+  expect(s.model.state.get().saved?.timing.offset).toBe(2);
+});
+
+it("reports a timing limit instead of silently ignoring it", async () => {
+  const s = setup();
+  s.files.read.mockReturnValue({ ...saved, timing: { offset: 600, speed: 1 } });
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  expect(await s.model.shift(1)).toBe(false);
+  expect(s.model.state.get().error).toBe("timing-limit");
+});
+
+it("keeps a refused Off mark retryable without bringing the sidecar back", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  s.files.write.mockImplementationOnce(() => {
+    throw new Error("write");
+  });
+  expect(await s.model.select(null)).toBe(false);
+  expect(s.model.state.get().error).toBe("selection-save");
+  await s.model.retry();
+  expect(s.model.state.get().saved?.shown).toBe(false);
+  expect(s.setSidecar).toHaveBeenCalledOnce();
 });

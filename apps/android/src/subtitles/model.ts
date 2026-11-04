@@ -94,7 +94,9 @@ export function subtitleModel(options: {
   let candidates: readonly Candidate[] = [];
   let search = 0;
   let unread = false;
-  let applying = false;
+  let timingQueue = Promise.resolve(false);
+  let loaded: SavedSubtitle | undefined;
+  let resolveTitle: (() => Promise<void>) | undefined;
   let retrySave: (() => Promise<void>) | undefined;
 
   const cancel = () => {
@@ -135,7 +137,13 @@ export function subtitleModel(options: {
     const now = player.state.get();
 
     if (now.kind !== "playing" || now.attempt !== attempt || !value.subtitle) return false;
-    applying = true;
+
+    if (
+      loaded?.subtitle === value.subtitle &&
+      loaded.timing.offset === value.timing.offset &&
+      loaded.timing.speed === value.timing.speed
+    )
+      return player.media.text(SIDECAR_TRACK);
     let ok = false;
 
     try {
@@ -148,18 +156,25 @@ export function subtitleModel(options: {
       ));
     } catch {
       // A refusal either way.
-    } finally {
-      applying = false;
     }
 
     if (attempt !== now.attempt) return false;
 
-    if (!ok) fail("timing");
+    if (ok) loaded = value;
+    else fail("timing");
 
     return ok;
   }
 
-  async function restore() {
+  let restoring: Promise<void> | undefined;
+
+  function restore(): Promise<void> {
+    return (restoring ??= restoreFile().finally(() => {
+      restoring = undefined;
+    }));
+  }
+
+  async function restoreFile() {
     const title = state.get().title;
 
     if (!title) return;
@@ -215,21 +230,25 @@ export function subtitleModel(options: {
     attempt = now.attempt;
     const forAttempt = attempt;
     patch({ title: null, saved: null, shown: false, results: [], unsupported: [], error: null });
-    void options
-      .title(now.intent)
-      .then(async (title) => {
-        if (attempt !== forAttempt) return;
-        patch({ title });
-        const current = player.state.get();
+    loaded = undefined;
+    restoring = undefined;
+    resolveTitle = () =>
+      options
+        .title(now.intent)
+        .then(async (title) => {
+          if (attempt !== forAttempt) return;
+          patch({ title });
+          const current = player.state.get();
 
-        if (current.kind !== "playing" || current.attempt !== forAttempt) return;
+          if (current.kind !== "playing" || current.attempt !== forAttempt) return;
 
-        if (current.phase === "resolving" || current.phase === "preparing") restorePending = true;
-        else await restore();
-      })
-      .catch(() => {
-        if (attempt === forAttempt) fail("read");
-      });
+          if (current.phase === "resolving" || current.phase === "preparing") restorePending = true;
+          else await restore();
+        })
+        .catch(() => {
+          if (attempt === forAttempt) fail("read");
+        });
+    void resolveTitle();
   }
 
   player.state.subscribe(observe);
@@ -360,9 +379,13 @@ export function subtitleModel(options: {
       if (signal.aborted) return;
       const saved = { subtitle, timing: DEFAULT_SUBTITLE_TIMING, shown: true };
 
-      if (persist(saved)) await apply(saved);
+      const kept = persist(saved);
+
+      if (kept) await apply(saved);
 
       if (!signal.aborted) patch({ phase: "idle", downloading: null });
+
+      return kept && !signal.aborted;
     } catch (error) {
       if (!signal.aborted)
         patch({
@@ -379,9 +402,23 @@ export function subtitleModel(options: {
 
     if (id === SIDECAR_TRACK)
       return saved ? persist({ ...saved, shown: true }) && (await apply(saved)) : false;
+
+    if (saved && !persist({ ...saved, shown: false })) {
+      retrySave = async () => {
+        await select(id);
+      };
+
+      fail("selection-save");
+
+      return false;
+    }
+
     const ok = await player.media.text(id);
 
-    if (ok && saved && state.get().saved === saved) persist({ ...saved, shown: false });
+    if (!ok && saved) {
+      persist(saved);
+      fail("timing");
+    }
 
     return ok;
   }
@@ -390,7 +427,13 @@ export function subtitleModel(options: {
     const parsed = SubtitleTiming()(value);
     const saved = state.get().saved;
 
-    if (parsed instanceof type.errors || !saved || applying) return false;
+    if (parsed instanceof type.errors) {
+      fail("timing-limit");
+
+      return false;
+    }
+
+    if (!saved) return false;
     const updated = { ...saved, timing: parsed };
 
     if (!persist(updated)) return false;
@@ -401,6 +444,17 @@ export function subtitleModel(options: {
     if (state.get().saved === updated && persist(saved)) fail("timing");
 
     return false;
+  }
+
+  function scheduleTiming(change: (previous: SubtitleTiming) => SubtitleTiming) {
+    const forAttempt = attempt;
+    timingQueue = timingQueue.then(() => {
+      const saved = state.get().saved;
+
+      return saved && attempt === forAttempt ? timing(change(saved.timing)) : false;
+    });
+
+    return timingQueue;
   }
 
   return {
@@ -419,22 +473,21 @@ export function subtitleModel(options: {
     find,
     choose,
     select,
-    timing,
+    timing: (value: SubtitleTiming) => scheduleTiming(() => value),
     saveKey,
     removeKey,
     readKey,
     cancel,
-    retry: () => (retrySave ? retrySave() : restore()),
+    retry: () =>
+      retrySave ? retrySave() : !state.get().title && resolveTitle ? resolveTitle() : restore(),
     dismissError: () => patch({ error: null }),
     show: () => select(SIDECAR_TRACK),
-    shift: (seconds: number) => {
-      const saved = state.get().saved;
-
-      return saved
-        ? timing({ ...saved.timing, offset: Math.round((saved.timing.offset + seconds) * 10) / 10 })
-        : Promise.resolve(false);
-    },
-    reset: () => timing(DEFAULT_SUBTITLE_TIMING),
+    shift: (seconds: number) =>
+      scheduleTiming((previous) => ({
+        ...previous,
+        offset: Math.round((previous.offset + seconds) * 10) / 10,
+      })),
+    reset: () => scheduleTiming(() => DEFAULT_SUBTITLE_TIMING),
     async removeRetained() {
       cancel();
       const title = state.get().title;

@@ -3,20 +3,26 @@ import type {
   DownloadedSubtitle,
   SubtitleServiceFailure,
 } from "@mrstreamer/contracts/online-subtitles";
-import { SUBTITLE_TEXT_LIMIT, subtitleTextFile } from "@mrstreamer/core/subtitles/text-file";
+import { SUBTITLE_TEXT_LIMIT, subtitleTextBytes } from "@mrstreamer/core/subtitles/text-file";
 import { normalize } from "@mrstreamer/core/text";
 import { defined } from "@mrstreamer/core/defined";
 import { type } from "arktype";
 
 export type SubtitleFailureReason =
-  SubtitleServiceFailure | "keychain" | "read" | "not-saved" | "timing";
+  | SubtitleServiceFailure
+  | "keychain"
+  | "read"
+  | "not-saved"
+  | "timing"
+  | "timing-limit"
+  | "selection-save";
 
 export interface FoundSubtitle {
   readonly id: string;
   readonly language: string;
   readonly release: string;
   readonly hearingImpaired: boolean;
-  readonly format: "SubRip" | "WebVTT";
+  readonly format: "SubRip" | "WebVTT" | "Text";
 }
 
 export type SubtitleQuery = {
@@ -149,6 +155,8 @@ export async function subdlSearch(
 
     if (files?.length) {
       for (const file of files) {
+        if (!requestedLanguage(file.language, query.languages)) continue;
+
         if (!/^(srt|vtt)$/i.test(file.format)) {
           unsupported.push(file.format);
           continue;
@@ -167,17 +175,25 @@ export async function subdlSearch(
       (sub.language || sub.lang) &&
       (query.kind === "movie" || (sub.season === query.season && sub.episode === query.episode))
     ) {
+      if (!requestedLanguage(sub.language ?? sub.lang ?? "", query.languages)) continue;
+
       const format =
         sub.format?.toLowerCase() ??
-        /\.(srt|vtt)(?:\.zip)?$/i.exec(sub.release_name ?? sub.name ?? sub.url)?.[1]?.toLowerCase();
+        [sub.release_name, sub.name, sub.url].flatMap((name) => {
+          const match = /\.(srt|vtt|ass|ssa|sub|idx|ttml)(?:\.zip)?$/i.exec(
+            (name ?? "").replace(/\.zip$/i, ""),
+          );
 
-      if (!format || !/^(srt|vtt)$/.test(format)) {
-        unsupported.push(format ?? "Unknown");
+          return match ? [match[1]!.toLowerCase()] : [];
+        })[0];
+
+      if (format && !/^(srt|vtt)$/.test(format)) {
+        unsupported.push(format);
         continue;
       }
 
       results.push({
-        format: format === "srt" ? "SubRip" : "WebVTT",
+        format: format === "srt" ? "SubRip" : format === "vtt" ? "WebVTT" : "Text",
         url: sub.url,
         language: requestedLanguage(sub.language ?? sub.lang ?? "", query.languages),
         release: sub.release_name ?? sub.name ?? "",
@@ -211,7 +227,7 @@ function listedURL(value: string): string | null {
 export async function subdlDownload(
   candidate: Candidate,
   signal: AbortSignal,
-  unpack: (bytes: number[]) => Promise<number[]>,
+  unpack: (bytes: Uint8Array) => Promise<Uint8Array>,
 ): Promise<DownloadedSubtitle> {
   const timeout = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
   const response = await request(downloadURL(candidate.url), {}, timeout);
@@ -223,16 +239,15 @@ export async function subdlDownload(
     refuse(response, "unsupported");
   }
 
-  const text = new Uint8Array(
-    await unpack([...(await body(response, SUBTITLE_TEXT_LIMIT, timeout))]),
-  );
+  const text = new Uint8Array(await unpack(await body(response, SUBTITLE_TEXT_LIMIT, timeout)));
 
   try {
     return {
       service: "subdl",
       language: candidate.language,
       release: candidate.release.slice(0, 1024),
-      cues: [...subtitleTextFile(new TextDecoder("utf-8", { fatal: true }).decode(text))],
+      hearingImpaired: candidate.hearingImpaired,
+      cues: [...subtitleTextBytes(text, candidate.language)],
     };
   } catch {
     throw new SubtitleFailure("unsupported");

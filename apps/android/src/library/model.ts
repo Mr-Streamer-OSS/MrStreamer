@@ -186,6 +186,29 @@ export function libraryModel(options: {
         ] as const
       ).flatMap(([tab, shown]) => (shown ? [tab] : []));
     },
+    /** Exact episode identity from details already opened by Library, with its source still present. */
+    playbackEpisode(sourceId: string, id: string, container: string) {
+      const source = options.sources().find((source) => source.id === sourceId);
+
+      if (!source) return null;
+
+      for (const title of kindOf(catalogue(), "series").titles) {
+        for (const version of title.versions.filter(
+          (version) => version.subscriptionId === sourceId,
+        )) {
+          const key = `series:${sourceId}:${version.id}`;
+
+          if (pending.get(key)?.reader !== source.reader) continue;
+          const episode = provided
+            .get(key)
+            ?.episodes.find((episode) => episode.id === id && episode.container === container);
+
+          if (episode) return { title, episode };
+        }
+      }
+
+      return null;
+    },
     title(kind: TitleKind, key: string) {
       return kindOf(catalogue(), kind).titles.find((t) => t.key === key);
     },

@@ -14,6 +14,7 @@ import {
   setSubtitleTextSize,
   subtitles,
   subtitleTextSize,
+  subtitleTextSizeError,
 } from "./runtime.ts";
 
 /** Text size's choices, as iOS names them, by their scale of the player's cue size. */
@@ -26,8 +27,8 @@ const SIZES = [
 /**
  * Paper A's Subtitles group in Settings, between Media and TMDB: the SubDL API key, only ever
  * Saved or Not set, whose Replace asks for the whole key again and whose Remove keeps downloaded
- * subtitles, and Text size for downloaded subtitles. A read or write this phone refused is
- * `notify`'d as the Settings screen's snackbar with Try again. Settings mounts it.
+ * subtitles, and Text size for all subtitles. A read or write this phone refused is
+ * `notify`'d as the Settings screen's snackbar with Try again. Insertion is pending the Settings handoff.
  */
 export function SubtitleSettingsSection({
   notify,
@@ -38,6 +39,7 @@ export function SubtitleSettingsSection({
   const model = subtitles();
   const state = useStore(model.state);
   const size = useStore(subtitleTextSize);
+  const sizeError = useStore(subtitleTextSizeError);
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState<"actions" | "key" | "size" | null>(null);
 
@@ -99,11 +101,15 @@ export function SubtitleSettingsSection({
         }
         onPress={() => setOpen(state.keySaved ? "actions" : "key")}
       />
-      <Row label={t("Text size")} value={t(sizeName)} onPress={() => setOpen("size")} />
+      <Row
+        label={t("Text size")}
+        value={sizeError ? t("Not known") : t(sizeName)}
+        onPress={() => setOpen("size")}
+      />
       <View style={{ paddingTop: 4, paddingBottom: 8 }}>
         <Note>
           {t(
-            "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size is for downloaded subtitles.",
+            "Find online in Watch searches SubDL with your own key, which stays sealed on this phone. Text size applies to all subtitles.",
           )}
         </Note>
       </View>

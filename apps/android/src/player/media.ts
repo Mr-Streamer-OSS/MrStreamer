@@ -292,6 +292,15 @@ export function mediaModel(
 
     // Saved choices apply once per attempt, by identity, to the first tracks that match them.
     for (const key of ["audio", "text", "quality"] as const) {
+      if (
+        key === "text" &&
+        owner.subtitles?.state.get().saved?.shown !== false &&
+        owner.subtitles?.state.get().saved?.subtitle
+      ) {
+        restored.add("text");
+        continue;
+      }
+
       const value = saved[key];
       const now = owner.state.get();
 

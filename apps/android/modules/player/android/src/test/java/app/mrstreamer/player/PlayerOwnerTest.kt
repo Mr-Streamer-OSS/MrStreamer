@@ -143,6 +143,31 @@ class PlayerOwnerTest {
     } finally { media.delete() }
   }
 
+  @Test fun sidecarKeepsTheChosenAudioAndReportsPrepareFailure() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("hevc-ac3-eac3-srt.mkv")
+    try {
+      owner.admit(file("audio-sidecar", media))
+      until { recorder.tracks["audio-sidecar"]?.count { it.type == "audio" } == 2 }
+      val chosen = recorder.tracks["audio-sidecar"]!!.last { it.type == "audio" }
+      assertTrue(owner.setAudio("audio-sidecar", chosen.id))
+      until { recorder.tracks["audio-sidecar"]?.any { it.type == "audio" && it.codec == chosen.codec && it.selected } == true }
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      var applied: Boolean? = null
+      assertTrue(owner.setSidecar("audio-sidecar", text, "en", 0.0, 1.0) { applied = it })
+      assertEquals(null, applied)
+      until { applied != null }
+      assertEquals(true, applied)
+      assertEquals(chosen.codec, recorder.tracks["audio-sidecar"]!!.single { it.type == "audio" && it.selected }.codec)
+      media.delete()
+      applied = null
+      assertTrue(owner.setSidecar("audio-sidecar", text, "en", 1.0, 1.0) { applied = it })
+      until { applied != null }
+      assertEquals(false, applied)
+      owner.stop("audio-sidecar")
+    } finally { media.delete() }
+  }
+
   @Test fun previewIsMutedAndNeverRequestsAudioFocus() {
     val player = TestExoPlayerBuilder(context)
       .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO)).build()

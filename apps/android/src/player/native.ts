@@ -120,7 +120,7 @@ export interface NativePlayer {
   setAudio?(attempt: string, trackId: string): Promise<boolean>;
   setSubtitleInset?(fraction: number): Promise<void>;
   setSubtitleSize?(size: number): Promise<void>;
-  unpackSubtitle?(bytes: number[]): Promise<number[]>;
+  unpackSubtitle?(bytes: Uint8Array): Promise<Uint8Array>;
   setSidecar?(
     attempt: string,
     text: string,
