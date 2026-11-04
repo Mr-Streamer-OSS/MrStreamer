@@ -67,7 +67,7 @@ export const TIMING_STEPS = [-1, -0.1, 0.1, 1] as const;
 /** One play's work is cancelled before another play or selection can use it. Errors contain reasons only. */
 export function subtitleModel(options: {
   player: Pick<PlayerOwner, "state"> & { media: Pick<PlayerOwner["media"], "text"> };
-  native: Pick<NativePlayer, "setSidecar" | "unpackSubtitle" | "setSubtitleInset">;
+  native: Pick<NativePlayer, "setSidecar" | "setText" | "unpackSubtitle" | "setSubtitleInset">;
   secrets: SecretStore;
   files: SubtitleFiles;
   title: (intent: Parameters<PlayerOwner["play"]>[0]) => Promise<SubtitleTitle | null>;
@@ -143,7 +143,7 @@ export function subtitleModel(options: {
       loaded.timing.offset === value.timing.offset &&
       loaded.timing.speed === value.timing.speed
     )
-      return player.media.text(SIDECAR_TRACK);
+      return !!(await native.setText?.(now.attempt, SIDECAR_TRACK));
     let ok = false;
 
     try {
@@ -169,9 +169,15 @@ export function subtitleModel(options: {
   let restoring: Promise<void> | undefined;
 
   function restore(): Promise<void> {
-    return (restoring ??= restoreFile().finally(() => {
-      restoring = undefined;
-    }));
+    if (restoring) return restoring;
+
+    const pending = restoreFile().finally(() => {
+      if (restoring === pending) restoring = undefined;
+    });
+
+    restoring = pending;
+
+    return pending;
   }
 
   async function restoreFile() {
@@ -399,11 +405,15 @@ export function subtitleModel(options: {
   async function select(id: string | null) {
     cancel();
     const saved = state.get().saved;
+    const title = state.get().title;
+    const forAttempt = attempt;
 
     if (id === SIDECAR_TRACK)
       return saved ? persist({ ...saved, shown: true }) && (await apply(saved)) : false;
 
-    if (saved && !persist({ ...saved, shown: false })) {
+    const hidden = saved ? { ...saved, shown: false } : null;
+
+    if (hidden && !persist(hidden)) {
       retrySave = async () => {
         await select(id);
       };
@@ -415,10 +425,14 @@ export function subtitleModel(options: {
 
     const ok = await player.media.text(id);
 
-    if (!ok && saved) {
+    if (
+      !ok &&
+      saved &&
+      attempt === forAttempt &&
+      state.get().title === title &&
+      state.get().saved === hidden
+    )
       persist(saved);
-      fail("timing");
-    }
 
     return ok;
   }
@@ -438,7 +452,7 @@ export function subtitleModel(options: {
 
     if (!persist(updated)) return false;
 
-    if (await apply(updated)) return true;
+    if (saved.shown === false || (await apply(updated))) return true;
 
     // Putting the previous timing back clears the error, which the viewer still needs to see.
     if (state.get().saved === updated && persist(saved)) fail("timing");

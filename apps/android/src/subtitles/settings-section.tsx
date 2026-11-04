@@ -126,10 +126,10 @@ export function SubtitleSettingsSection({
               {SIZES.map((each) => (
                 <SheetAction
                   key={each.name}
-                  icon={each.name === sizeName ? "check" : null}
+                  icon={!sizeError && each.name === sizeName ? "check" : null}
                   label={t(each.name)}
-                  primary={each.name === sizeName}
-                  selected={each.name === sizeName}
+                  primary={!sizeError && each.name === sizeName}
+                  selected={!sizeError && each.name === sizeName}
                   onPress={() => chooseSize(each.scale)}
                 />
               ))}

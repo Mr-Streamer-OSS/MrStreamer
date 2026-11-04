@@ -49,7 +49,7 @@ vi.mock("react-native", async () => {
     children?: ReactNode;
     accessibilityLabel?: string;
     accessibilityRole?: string;
-    accessibilityState?: { checked?: boolean };
+    accessibilityState?: { checked?: boolean; selected?: boolean };
     onPress?: () => void;
     onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
   };
@@ -75,6 +75,7 @@ vi.mock("react-native", async () => {
           "aria-label": accessibilityLabel,
           role: accessibilityRole === "radio" ? "radio" : undefined,
           "aria-checked": accessibilityState?.checked,
+          "aria-selected": accessibilityState?.selected,
           onClick: onPress,
           tabIndex: -1,
         },
@@ -173,6 +174,7 @@ vi.mock("../src/player/instance.ts", async () => {
   const subtitles = subtitleModel({
     player,
     native: {
+      setText: () => Promise.resolve(true),
       setSidecar(_attempt, _text, _language, offset, speed) {
         scenario.sidecars.push({ offset, speed });
 
@@ -669,4 +671,74 @@ it("shows hearing impaired on the downloaded row", async () => {
   expect(labels(shown)).toContain(
     "English, Hearing impaired · Estuary.Line.S01E03.720p.HDTV.x264, Downloaded",
   );
+});
+
+it("keeps the current sheet when an old Online download finishes", async () => {
+  scenario.key = "fixture";
+  scenario.retained = kept();
+  const shown = await watch(episode, { tracks: tracks("downloaded") });
+  await press(shown, "Subtitles");
+  await press(shown, "Find online, SubDL");
+  await vi.waitFor(() => expect(shown.textContent).toContain("Estuary.Line.S01E03.1080p.WEB-DL"));
+  let finish!: (response: Response) => void;
+  fetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const result = labels(shown).find((label) => label?.includes("1080p.WEB-DL"))!;
+  await press(shown, result);
+  // Back closes Online; another Subtitles sheet belongs to a new viewer action.
+  await press(shown, "Close Online subtitles");
+  await press(shown, "Subtitles");
+  await act(async () => {
+    finish(new Response("1\n00:00:01,000 --> 00:00:02,000\nHello\n"));
+  });
+  await vi.waitFor(() => expect(player.subtitles!.state.get().phase).toBe("idle"));
+  expect(shown.textContent).toContain("Find online");
+});
+
+it("does not tick a text size whose read failed", async () => {
+  const { subtitleTextSizeError } = await import("../src/subtitles/runtime.ts");
+  act(() => subtitleTextSizeError.set(true));
+  const shown = mount(createElement(SubtitleSettingsSection));
+  await press(shown, "Text size");
+  expect(shown.querySelectorAll('[aria-selected="true"]')).toHaveLength(0);
+  act(() => subtitleTextSizeError.set(false));
+});
+
+it("translates an untyped result's format in Dutch and keeps catalogue apostrophes consistent", async () => {
+  const { setLanguage } = await import("@mrstreamer/core/i18n");
+  const { SubtitleSheetContent } = await import("../src/subtitles/sheets.tsx");
+  const { t } = await import("../src/subtitles/copy.ts");
+  await act(async () => player.state.set(playing(episode)));
+  player.subtitles!.state.set((previous) => ({
+    ...previous,
+    results: [
+      { id: "text", language: "en", release: "Fixture", format: "Text", hearingImpaired: false },
+    ],
+  }));
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+
+  try {
+    const shown = mount(
+      createElement(SubtitleSheetContent, {
+        open: "online",
+        now: playing(episode),
+        model: player.subtitles!,
+        onOpen() {},
+        onClose() {},
+      }),
+    );
+
+    expect(shown.textContent).toContain("Tekst");
+    expect(t("The previous choice is kept. Try again.")).toBe(
+      "De vorige keuze blijft behouden. Probeer het opnieuw.",
+    );
+  } finally {
+    setLanguage({ locale: "en-US", formats: "en-US" });
+  }
+
+  expect(t("Couldn't keep the subtitle choice")).toBe("Couldn't keep the subtitle choice");
 });

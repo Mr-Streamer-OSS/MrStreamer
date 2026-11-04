@@ -42,6 +42,16 @@ export function startSubtitles(
         return file.exists ? JSON.parse(file.textSync()) : null;
       },
       write(key, value) {
+        const identity: unknown = JSON.parse(key);
+        const current = sources.state.get();
+
+        if (
+          Array.isArray(identity) &&
+          current.kind === "ready" &&
+          !current.sources.some((source) => source.id === identity[0]) &&
+          !ownedKeys.has(key)
+        )
+          throw new Error("Source removed");
         root().create({ intermediates: true, idempotent: true });
         const file = fileOf(key);
         const pending = new File(root(), `${encodeURIComponent(key)}.next`);
@@ -50,20 +60,7 @@ export function startSubtitles(
         pending.writeSync(JSON.stringify({ ...value, query: model?.state.get().title?.query }));
         pending.moveSync(file, { overwrite: true });
 
-        try {
-          const kept = root()
-            .list()
-            .filter(
-              (entry): entry is File => entry instanceof File && entry.name.endsWith(".json"),
-            );
-
-          for (const old of kept
-            .toSorted((a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0))
-            .slice(0, Math.max(0, kept.length - 100)))
-            old.delete();
-        } catch {
-          /* The next successful write retries pruning. */
-        }
+        void prune();
       },
       remove(key) {
         const file = fileOf(key);
@@ -101,6 +98,7 @@ export function startSubtitles(
         })(snapshot);
 
         if (parsed instanceof type.errors) throw new Error("read");
+        ownedKeys = new Set(parsed.rows.map((row) => row.key));
 
         for (const row of parsed.rows) {
           if ((await transfers.filePath(row.id)) !== intent.path) continue;
@@ -233,6 +231,7 @@ export function readSubtitleTextSize() {
     if (parsed instanceof type.errors) throw new Error("read");
     subtitleTextSizeError.set(false);
     subtitleTextSize.set(parsed);
+    void nativePlayer().setSubtitleSize?.(parsed);
 
     return true;
   } catch {
@@ -245,34 +244,105 @@ export function readSubtitleTextSize() {
 export function setSubtitleTextSize(value: number) {
   if (TextSize(value) instanceof type.errors || !preferences().write("subtitle-size.json", value))
     return false;
+  subtitleTextSizeError.set(false);
   subtitleTextSize.set(value);
   void nativePlayer().setSubtitleSize?.(value);
 
   return true;
 }
 
-// The native reader holds its own bytes, so erasing retained records does not interrupt cues.
+// Download rows own the same version key even after their provider is removed.
+let ownedKeys = new Set<string>();
+
+async function downloadKeys() {
+  const snapshot: unknown = JSON.parse(
+    await requireNativeModule<TransferPort>("Transfers").snapshot(),
+  );
+
+  const parsed = type({ rows: type({ key: "string" }).array() })(snapshot);
+
+  if (parsed instanceof type.errors) throw new Error("read");
+  ownedKeys = new Set(parsed.rows.map((row) => row.key));
+
+  return ownedKeys;
+}
+
+async function prune() {
+  try {
+    const owned = await downloadKeys();
+
+    const kept = root()
+      .list()
+      .filter((entry): entry is File => entry instanceof File && entry.name.endsWith(".json"));
+
+    let excess = kept.length - 100;
+
+    for (const file of kept.toSorted(
+      (a, b) => (a.modificationTime ?? 0) - (b.modificationTime ?? 0),
+    )) {
+      if (excess <= 0) break;
+
+      try {
+        if (owned.has(decodeURIComponent(file.name.slice(0, -5)))) continue;
+        file.delete();
+        excess--;
+      } catch {
+        /* A later write retries this file. */
+      }
+    }
+  } catch {
+    /* A failed download read must not erase owned records. */
+  }
+}
+
 const initialSources = sources.state.get();
 
 let listedSources =
   initialSources.kind === "ready"
     ? new Set(initialSources.sources.map((source) => source.id))
-    : undefined;
+    : new Set<string>();
+
+let erasing = Promise.resolve();
 
 sources.state.subscribe(() => {
   const now = sources.state.get();
 
   if (now.kind !== "ready") return;
   const next = new Set(now.sources.map((source) => source.id));
-  const removed = [...(listedSources ?? [])].filter((id) => !next.has(id));
-  listedSources = next;
 
-  if (!removed.length || !root().exists) return;
+  // Remember additions immediately, retaining failed removals until cleanup succeeds.
+  for (const id of next) listedSources.add(id);
+  erasing = erasing.then(async () => {
+    const removed = [...listedSources].filter((id) => !next.has(id));
 
-  for (const file of root().list()) {
-    if (!(file instanceof File) || !file.name.endsWith(".json")) continue;
-    const key: unknown = JSON.parse(decodeURIComponent(file.name.slice(0, -5)));
+    if (!removed.length) return;
 
-    if (Array.isArray(key) && removed.includes(key[0])) file.delete();
-  }
+    try {
+      const owned = await downloadKeys();
+      const failed = new Set<string>();
+
+      for (const file of root().exists ? root().list() : []) {
+        if (!(file instanceof File) || !file.name.endsWith(".json")) continue;
+        let source: string | undefined;
+
+        try {
+          const key = decodeURIComponent(file.name.slice(0, -5));
+          const identity: unknown = JSON.parse(key);
+
+          if (!Array.isArray(identity) || typeof identity[0] !== "string") continue;
+          source = identity[0];
+
+          if (removed.includes(source) && !owned.has(key)) file.delete();
+        } catch {
+          if (source) failed.add(source);
+        }
+      }
+
+      for (const id of removed) if (!failed.has(id)) listedSources.delete(id);
+    } catch {
+      /* Keep removed IDs for the next source notification. */
+    }
+  });
+
+  return erasing;
 });

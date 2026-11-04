@@ -180,7 +180,7 @@ export async function subdlSearch(
       const format =
         sub.format?.toLowerCase() ??
         [sub.release_name, sub.name, sub.url].flatMap((name) => {
-          const match = /\.(srt|vtt|ass|ssa|sub|idx|ttml)(?:\.zip)?$/i.exec(
+          const match = /\.(srt|vtt|ass|ssa|sub|idx|ttml|smi|sbv|sup)(?:\.zip)?$/i.exec(
             (name ?? "").replace(/\.zip$/i, ""),
           );
 

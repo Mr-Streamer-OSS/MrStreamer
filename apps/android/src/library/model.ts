@@ -59,6 +59,8 @@ export function libraryModel(options: {
   const abouts = new Map<string, { at: number; value: TitleAbout | null }>();
   const provided = new Map<string, ProviderDetails>();
 
+  const providedReaders = new Map<string, object | undefined>();
+
   const pending = new Map<
     string,
     { reader: object | undefined; value: Promise<ProviderDetails> }
@@ -198,7 +200,8 @@ export function libraryModel(options: {
         )) {
           const key = `series:${sourceId}:${version.id}`;
 
-          if (pending.get(key)?.reader !== source.reader) continue;
+          if (providedReaders.get(key) !== source.reader) continue;
+
           const episode = provided
             .get(key)
             ?.episodes.find((episode) => episode.id === id && episode.container === container);
@@ -239,6 +242,7 @@ export function libraryModel(options: {
 
           if (!stands()) throw new Error("Source changed");
           provided.set(key, value);
+          providedReaders.set(key, source.reader);
         } finally {
           if (pending.get(key) === read) pending.delete(key);
         }

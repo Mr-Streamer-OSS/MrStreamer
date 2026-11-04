@@ -144,3 +144,54 @@ it("downloads Arabic legacy text as bytes and retains hearing-impaired metadata"
   expect(downloaded.hearingImpaired).toBe(true);
   expect(downloaded.cues).toEqual([{ start: 10, end: 12, text: "مرحبا بالعالم!\nالحلقة 2" }]);
 });
+
+it("counts SMI, SBV and SUP as formats this player cannot show", async () => {
+  vi.stubGlobal("fetch", async () =>
+    Response.json({
+      status: true,
+      results: [{ tmdb_id: 7, type: "movie" }],
+      subtitles: ["smi", "sbv", "sup"].map((ext) => ({
+        language: "English",
+        release_name: `Release.${ext}`,
+        url: "/file.zip",
+      })),
+    }),
+  );
+
+  const found = await subdlSearch(
+    "fixture",
+    { kind: "movie", tmdbId: 7, languages: ["en"] },
+    new AbortController().signal,
+  );
+
+  expect(found.candidates).toEqual([]);
+  expect(found.unsupported).toEqual(["smi", "sbv", "sup"]);
+});
+
+it("refuses legacy Arabic cleanly when the engine has no Windows decoder", async () => {
+  const Decoder = globalThis.TextDecoder;
+  vi.stubGlobal(
+    "TextDecoder",
+    class extends Decoder {
+      constructor(label?: string, options?: ConstructorParameters<typeof Decoder>[1]) {
+        if (label === "windows-1256") throw new RangeError("Unsupported encoding");
+        super(label, options);
+      }
+    },
+  );
+  vi.stubGlobal("fetch", async () => new Response(new Uint8Array([0xff])));
+  const { subdlDownload } = await import("../src/subtitles/service.ts");
+  await expect(
+    subdlDownload(
+      {
+        url: "https://dl.subdl.com/file.zip",
+        language: "ar",
+        release: "Fixture",
+        format: "Text",
+        hearingImpaired: false,
+      },
+      new AbortController().signal,
+      async (bytes) => bytes,
+    ),
+  ).rejects.toMatchObject({ reason: "unsupported" });
+});

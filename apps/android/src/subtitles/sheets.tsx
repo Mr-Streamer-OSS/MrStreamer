@@ -4,7 +4,7 @@ import {
   type SubtitleTiming,
 } from "@mrstreamer/contracts/online-subtitles";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocale } from "../live/catalogue.ts";
@@ -145,6 +145,15 @@ function Online({
   onClose: () => void;
 }) {
   const state = useStore(model.state);
+  const active = useRef(true);
+
+  useEffect(() => {
+    active.current = true;
+
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (state.error) onClose();
@@ -179,11 +188,13 @@ function Online({
             key={result.id}
             title={result.hearingImpaired ? `${language} · ${t("Hearing impaired")}` : language}
             detail={result.release}
-            trailing={downloading ? t("Downloading") : result.format}
+            trailing={
+              downloading ? t("Downloading") : result.format === "Text" ? t("Text") : result.format
+            }
             active={downloading}
             onPress={() =>
               void model.choose(result.id).then((kept) => {
-                if (kept) onClose();
+                if (kept && active.current) onClose();
               })
             }
           />
@@ -405,7 +416,7 @@ function words(
       };
     case "selection-save":
       return {
-        title: t("Couldn’t keep the subtitle choice"),
+        title: t("Couldn't keep the subtitle choice"),
         body: t("The previous choice is kept. Try again."),
         action: { label: t("Try again"), run: "retry" },
       };

@@ -143,6 +143,23 @@ class PlayerOwnerTest {
     } finally { media.delete() }
   }
 
+  @Test fun offDuringSidecarPrepareSettlesAndAllowsAnotherApply() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("h264-aac.mp4")
+    try {
+      owner.admit(file("cancel-sidecar", media))
+      until { recorder.tracks["cancel-sidecar"]?.any { it.type == "video" } == true }
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      var applied: Boolean? = null
+      assertTrue(owner.setSidecar("cancel-sidecar", text, "en", 0.0, 1.0) { applied = it })
+      assertTrue(owner.setText("cancel-sidecar", null))
+      assertEquals(false, applied)
+      assertTrue(owner.setSidecar("cancel-sidecar", text, "en", 1.0, 1.0) { applied = it })
+      until { applied == true }
+      owner.stop("cancel-sidecar")
+    } finally { media.delete() }
+  }
+
   @Test fun sidecarKeepsTheChosenAudioAndReportsPrepareFailure() {
     val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
     val media = fixture("hevc-ac3-eac3-srt.mkv")

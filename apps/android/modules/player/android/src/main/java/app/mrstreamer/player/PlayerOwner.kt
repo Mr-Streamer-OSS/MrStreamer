@@ -176,7 +176,7 @@ class PlayerOwner(
             }
             current?.audioFormat?.let { wanted ->
               for (group in player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }) {
-                val index = (0 until group.length).firstOrNull { group.getTrackFormat(it).let { candidate -> candidate.id?.removePrefix("0:") == wanted.id?.removePrefix("0:") && candidate.sampleMimeType == wanted.sampleMimeType && candidate.language == wanted.language } }
+                val index = (0 until group.length).firstOrNull { group.getTrackFormat(it).let { candidate -> candidate.id.orEmpty().removePrefix("0:") == wanted.id.orEmpty().removePrefix("0:") && candidate.sampleMimeType == wanted.sampleMimeType && candidate.language == wanted.language } }
                 if (index != null) {
                   player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index)).build()
                   if (group.isTrackSelected(index)) current?.audioFormat = null
@@ -191,7 +191,16 @@ class PlayerOwner(
             if (player.isPlaying) main.postDelayed(tick, TICK_MS)
             views.lastOrNull()?.keepScreenOn = player.isPlaying
           }
-          if (player.playbackState == Player.STATE_READY && current?.pickSidecar == false && current?.audioFormat == null && player.currentTracks.groups.any { it.getTrackFormat(0).isSidecar && it.isTrackSelected(0) }) {
+          if (player.playbackState == Player.STATE_READY) current?.audioFormat = null
+          if (player.playbackState == Player.STATE_ENDED) {
+            val done = current?.sidecarDone
+            current?.sidecarDone = null
+            current?.rollbackSidecar = null
+            current?.pickSidecar = false
+            current?.audioFormat = null
+            done?.invoke(false)
+          }
+          if (player.playbackState == Player.STATE_READY && current?.pickSidecar == false && player.currentTracks.groups.any { it.getTrackFormat(0).isSidecar && it.isTrackSelected(0) }) {
             val done = current?.sidecarDone
             current?.sidecarDone = null
             current?.rollbackSidecar = null
@@ -221,7 +230,7 @@ class PlayerOwner(
             val done = current?.sidecarDone
             current?.sidecarDone = null
             current?.rollbackSidecar = null
-            rollback()
+            runCatching { rollback() }
             done?.invoke(false)
             return
           }
@@ -346,6 +355,7 @@ class PlayerOwner(
       now.sidecar = old
       now.sidecarLanguage = oldLanguage
       now.pickSidecar = false
+      now.audioFormat = null
       prepare(now.admission.copy(startMs = position), now.hold, now.admission.hold as? HoldRef.LocalFile)
       player.trackSelectionParameters = oldParameters
       player.playWhenReady = ready
@@ -362,7 +372,7 @@ class PlayerOwner(
       val rollback = now.rollbackSidecar
       now.rollbackSidecar = null
       now.sidecarDone = null
-      rollback?.invoke()
+      runCatching { rollback?.invoke() }
       completed?.invoke(false)
     }
     return true
@@ -398,7 +408,16 @@ class PlayerOwner(
 
   private fun selectTrack(attempt: String, type: Int, trackId: String?): Boolean {
     if (current?.admission?.attempt != attempt) return false
-    if (type == C.TRACK_TYPE_TEXT) current?.pickSidecar = false
+    if (type == C.TRACK_TYPE_TEXT) {
+      current?.pickSidecar = false
+      if (trackId != Subtitles.TRACK) {
+        val done = current?.sidecarDone
+        current?.sidecarDone = null
+        current?.rollbackSidecar = null
+        current?.audioFormat = null
+        done?.invoke(false)
+      }
+    }
     if (trackId == Subtitles.TRACK) {
       val index = player.currentTracks.groups.indexOfFirst { it.getTrackFormat(0).isSidecar }
       return if (index < 0) false else selectTrack(attempt, type, "$index:0")

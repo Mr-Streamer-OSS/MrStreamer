@@ -24,7 +24,8 @@ function setup() {
   const text = vi.fn(async () => true);
   const player = { state, media: { text } };
   const setSidecar = vi.fn(async () => true);
-  const native = { setSidecar, unpackSubtitle: async (bytes: Uint8Array) => bytes };
+  const setText = vi.fn(async () => true);
+  const native = { setText, setSidecar, unpackSubtitle: async (bytes: Uint8Array) => bytes };
   const files = { read: vi.fn<() => unknown>(() => saved), write: vi.fn(), remove: vi.fn() };
 
   const secrets = {
@@ -67,7 +68,7 @@ function setup() {
     });
   }
 
-  return { model, state, files, secrets, setSidecar, play, text };
+  return { model, state, files, secrets, setSidecar, play, text, setText };
 }
 
 describe("Android subtitles", () => {
@@ -254,4 +255,94 @@ it("keeps a refused Off mark retryable without bringing the sidecar back", async
   await s.model.retry();
   expect(s.model.state.get().saved?.shown).toBe(false);
   expect(s.setSidecar).toHaveBeenCalledOnce();
+});
+
+it("does not roll an old refused Off into the next title", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  let finish!: (ok: boolean) => void;
+  s.text.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const off = s.model.select(null);
+  s.files.read.mockReturnValue(null);
+  s.play("two");
+  await vi.waitFor(() => expect(s.model.state.get().title?.key).toBe("two"));
+  finish(false);
+  await off;
+  expect(s.model.state.get().saved).toBeNull();
+  expect(s.files.write.mock.calls.map((call) => call[0])).not.toContain("two");
+});
+
+it("leaves a refused text pick's error to media", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  s.text.mockResolvedValue(false);
+  expect(await s.model.select(null)).toBe(false);
+  expect(s.model.state.get().saved).toEqual(saved);
+  expect(s.model.state.get().error).toBeNull();
+});
+
+it("reselects Downloaded without saving a global text preference", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  expect(await s.model.show()).toBe(true);
+  expect(s.text).not.toHaveBeenCalled();
+  expect(s.setText).toHaveBeenCalledWith("one", "mrstreamer-downloaded-subtitle");
+});
+
+it("keeps queued timing after Off without selecting the sidecar again", async () => {
+  const s = setup();
+  s.play();
+  await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
+  let finish!: (ok: boolean) => void;
+  s.setSidecar.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const first = s.model.shift(1);
+  const second = s.model.shift(1);
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  await s.model.select(null);
+  finish(true);
+  await first;
+  await second;
+  expect(s.model.state.get().saved).toMatchObject({ shown: false, timing: { offset: 2 } });
+  expect(s.setSidecar).toHaveBeenCalledTimes(2);
+});
+
+it("shares the current restore while an old restore finishes", async () => {
+  const s = setup();
+  let finish!: (ok: boolean) => void;
+  s.setSidecar.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  s.play();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  let next!: (ok: boolean) => void;
+  s.setSidecar.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        next = resolve;
+      }),
+  );
+  s.play("two");
+  await vi.waitFor(() => expect(next).toBeTypeOf("function"));
+  finish(true);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const retry = s.model.retry();
+  expect(s.setSidecar).toHaveBeenCalledTimes(2);
+  next(true);
+  await retry;
 });
