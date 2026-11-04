@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Successful package jobs write this contract after native verification and artifact upload.
 // A receipt identifies bytes and their build, but never replaces installed acceptance.
 import { createHash } from "node:crypto";
@@ -61,7 +62,7 @@ export const Artifact = type({
 
 export interface PackageGitHub {
   readonly repository: string;
-  json(path: string): Promise<unknown>;
+  json(path: string): Promise<Json | undefined>;
   bytes(path: string): Promise<Uint8Array>;
 }
 

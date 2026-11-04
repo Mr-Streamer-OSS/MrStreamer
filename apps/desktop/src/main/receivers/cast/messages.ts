@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // What a Cast receiver says, read where it arrives. Each message is JSON on a namespace; the
 // schemas name only the fields the app uses and let everything else pass unread, so a newer
 // receiver's extra fields and message types are ignored rather than trusted. A receiver may send
@@ -76,7 +77,7 @@ export type MediaMessage = Messages["Media"]["infer"];
 export type MediaStatus = NonNullable<MediaMessage["status"]>[number];
 
 /** A payload's JSON, or undefined when it isn't JSON, which no schema takes. */
-function json(payload: string): unknown {
+function json(payload: string): Json | undefined {
   try {
     return JSON.parse(payload);
   } catch {

@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // The prior stable release and this build on one profile, each driven through its own window.
 // This build makes a list holding channels of two subscriptions and chooses it in Live TV. The
 // prior release, which knows nothing of lists, starts on the same profile: it shows its own
@@ -77,11 +78,8 @@ function onDisk(profile: string, account: string) {
 }
 
 /** What preferences.json remembers of discovery, read-only. */
-async function remembered(profile: string): Promise<unknown> {
-  const file = JSON.parse(await readFile(join(profile, "preferences.json"), "utf8")) as Record<
-    string,
-    unknown
-  >;
+async function remembered(profile: string): Promise<Json> {
+  const file: JsonObject = JSON.parse(await readFile(join(profile, "preferences.json"), "utf8"));
 
   return file["rememberedLiveBrowse"] ?? null;
 }

@@ -62,7 +62,7 @@ const scenario = vi.hoisted(() => ({
   details: (
     _version: string,
     _show: (facts: import("../src/titles.ts").ShownDetails) => void,
-  ): Promise<unknown> => new Promise(() => undefined),
+  ): ReturnType<typeof import("../src/titles.ts").detailsOf> => new Promise(() => undefined),
 }));
 
 vi.mock("react-native", async () => ({

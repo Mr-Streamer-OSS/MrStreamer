@@ -245,7 +245,15 @@ const updateFeed = createServer((_req, res) => {
 });
 
 const actions: { action: string; at: string }[] = [];
-const observations: Record<string, unknown> = {};
+
+const observations: Record<string, unknown> & {
+  guideFavouriteRenames?: {
+    capturedAt: number;
+    count: number;
+    measurements: Awaited<ReturnType<Awaited<ReturnType<typeof boundary>>["measurements"]>>;
+  };
+} = {};
+
 let prefixProfile: string | undefined;
 let prefixObserving = false;
 let prefixProbe: Awaited<ReturnType<typeof boundary>> | undefined;
@@ -254,7 +262,13 @@ const prefixErrors: string[] = [];
 const prefixCounters: {
   key: UsageKey;
   samples: number;
-  last: Record<string, unknown>;
+  last: {
+    readStartedAt?: number;
+    stage?: string;
+    readEndedAt?: number;
+    total?: number;
+    error?: string;
+  };
   transitions: { at: number; total: number }[];
 }[] = [];
 
@@ -1075,7 +1089,7 @@ async function capturePrefixFailure() {
   if (profile !== prefixProfile || !profiles.includes(profile)) return;
   const destination = join(evidence, "guide-favourite-failure");
 
-  const capture = async (name: string, read: () => Promise<unknown>) => {
+  const capture = async (name: string, read: () => Promise<Json | undefined>) => {
     const startedAt = Date.now();
 
     try {
@@ -2256,7 +2270,7 @@ try {
 
   if (page) await snapshot("failure").catch(() => {});
 } finally {
-  const clean = async (operation: () => Promise<unknown>) => {
+  const clean = async (operation: () => Promise<void>) => {
     try {
       await operation();
     } catch (error) {

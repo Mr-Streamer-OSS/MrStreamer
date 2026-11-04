@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // The installers the Windows installed upgrade check accepts, from GitHub's answers: the newest
 // published stable release and the candidate nightly the caller names, each the build its tag
 // names, and nothing else. Answers come from fixtures shaped like GitHub's; a check that doubts
@@ -94,7 +95,7 @@ function published() {
   const diff = { status: "ahead", ahead_by: 8, behind_by: 0 };
   const onMain = { status: "ahead", ahead_by: 1, behind_by: 0 };
 
-  const json: Record<string, unknown> = {
+  const json: Record<string, Json> = {
     "": { default_branch: "main" },
     [`/releases/tags/${EXPECTED.stableTag}`]: stable.value,
     [`/releases/tags/${EXPECTED.candidateTag}`]: candidate.value,

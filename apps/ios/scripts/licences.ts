@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 // Generates src/licences.json, the notices Settings' Licences shows offline, from what the build
 // really carries:
 //
@@ -148,7 +149,7 @@ function bundleSources(): string[] {
 }
 
 /** Runs one of expo-modules-autolinking's commands and returns its JSON. */
-const autolinking = (args: readonly string[]): unknown =>
+const autolinking = (args: readonly string[]): Json =>
   JSON.parse(
     execFileSync(join(app, "node_modules/.bin/expo-modules-autolinking"), args, {
       cwd: app,

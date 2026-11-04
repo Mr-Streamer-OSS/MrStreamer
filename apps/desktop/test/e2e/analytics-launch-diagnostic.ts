@@ -10,7 +10,7 @@ type LaunchFailure = {
   evidence: string;
   observations: Record<string, unknown>;
   page: Pick<Page, "send">;
-  mainPage: { evaluate(expression: string, timeoutMs: number): Promise<unknown> };
+  mainPage: { evaluate(expression: string, timeoutMs: number): Promise<Json | undefined> };
   app: Pick<ChildProcess, "pid" | "exitCode" | "signalCode">;
   rejectedUrl: string;
   comparedMainPid: number;
@@ -104,7 +104,10 @@ export async function failRendererLaunch(error: Error, context: LaunchFailure): 
       error?: string;
     }[] = [];
 
-    const sample = async (phase: string, read: (timeoutMs: number) => Promise<unknown>) => {
+    const sample = async (
+      phase: string,
+      read: (timeoutMs: number) => Promise<Json | undefined>,
+    ) => {
       const startedAt = new Date().toISOString();
       let timer: ReturnType<typeof setTimeout> | undefined;
       let outcome: { result?: unknown; error?: string };

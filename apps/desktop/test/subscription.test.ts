@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -32,7 +33,7 @@ async function subscriptions(fetchImpl: typeof fetch = fetch) {
 }
 
 /** A JSON file of the data folder, or null when it isn't there. */
-async function saved(dataDir: string, name: string): Promise<unknown> {
+async function saved(dataDir: string, name: string): Promise<Json> {
   const text = await readFile(join(dataDir, name), "utf8").catch(() => null);
 
   return text === null ? null : JSON.parse(text);

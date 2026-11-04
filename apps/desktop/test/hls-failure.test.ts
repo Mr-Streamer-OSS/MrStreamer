@@ -6,7 +6,7 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { PLAYLIST_CHANNELS, startFakePlaylist } from "./fake-playlist.ts";
 import { promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 
-const dispose: (() => Promise<unknown>)[] = [];
+const dispose: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
   for (const close of dispose.splice(0).reverse()) await close();

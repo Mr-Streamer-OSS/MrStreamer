@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Poster-grid focus through the real built window. Movies > All movies, the Movies search and the
 // Watchlist share one grid: the keys move one selection that DOM focus follows, the selected
 // poster is the grid's one Tab stop, names say title and year and list items their place, and
@@ -87,7 +88,7 @@ interface GridState {
   readonly rem: number;
 }
 
-interface AxNode {
+type AxNode = {
   readonly nodeId: string;
   readonly parentId?: string;
   readonly ignored?: boolean;
@@ -95,9 +96,9 @@ interface AxNode {
   readonly name?: { readonly value?: string };
   readonly properties?: readonly {
     readonly name: string;
-    readonly value: { readonly value?: unknown };
+    readonly value: { readonly value?: Json };
   }[];
-}
+};
 
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;

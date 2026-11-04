@@ -11,7 +11,7 @@ import { defined } from "@mrstreamer/core/defined";
 
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
 const FFPROBE = FFMPEG === "ffmpeg" ? "ffprobe" : FFMPEG.replace(/ffmpeg(\.exe)?$/, "ffprobe$1");
-const dispose: (() => Promise<unknown>)[] = [];
+const dispose: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
   for (const close of dispose.splice(0).reverse()) await close();

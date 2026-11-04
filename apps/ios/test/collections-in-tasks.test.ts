@@ -38,7 +38,10 @@ const edges = vi.hoisted(() => ({
   }>,
   roster: new Set<() => void>(),
   /** Each subscription's login, as sources.ts keeps it while it is signed in. */
-  sources: new Map<string, { provider: { titleFile: (kind: string, id: string) => unknown } }>(),
+  sources: new Map<
+    string,
+    { provider: { titleFile: import("@mrstreamer/core/provider").Provider["titleFile"] } }
+  >(),
   /** What the metadata store answers: TMDB's metadata of each title, by kind and TMDB id. */
   known: null as ((kind: string, id: string) => TitleMetadata) | null,
   services: [] as ServiceTitles[],
@@ -89,7 +92,9 @@ vi.mock("../src/account.ts", async () => {
     onSavable: () => () => undefined,
     savable: (
       id: string,
-      source: { provider: { titleFile: (kind: string, id: string) => unknown } },
+      source: {
+        provider: { titleFile: import("@mrstreamer/core/provider").Provider["titleFile"] };
+      },
     ) => edges.sources.get(id) === source,
   };
 });

@@ -36,7 +36,7 @@ const scenario = vi.hoisted(() => ({
   /** Each read of the film's details, answered in turn; the last answers every later read. */
   details: [] as ((
     show: (details: import("../src/titles.ts").ShownDetails) => void,
-  ) => Promise<unknown>)[],
+  ) => ReturnType<typeof import("../src/titles.ts").detailsOf>)[],
   /** The providers saved: Settings' tests leave them out, the film's details list one. */
   members: [] as { entry: { id: string }; label: string }[],
   reads: 0,

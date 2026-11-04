@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { GuideRequest } from "@mrstreamer/core/provider";
@@ -80,7 +81,7 @@ const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (iOS)
 export function createGuides(
   secrets: SecretStore = keychainSecrets,
   owner: Pick<typeof guide, "configure" | "attach" | "forget" | "refresh"> = guide,
-  read: () => unknown = () => readJsonStrictly(FILE_NAME),
+  read: () => Json = () => readJsonStrictly(FILE_NAME),
   write: (value: GuidesFile) => void = (value) => writeJson(FILE_NAME, value),
   now: () => number = Date.now,
 ) {

@@ -295,7 +295,7 @@ export function providerFetch(fetchImpl: typeof fetch, login: ProviderLogin) {
         );
       }
     } catch (cause) {
-      throw withoutAddress(cause);
+      withoutAddress(cause);
     }
   };
 }
@@ -490,13 +490,13 @@ export function withoutAddresses(text: string): string {
   });
 }
 
-/** What was thrown, or when its message quotes an address, a TypeError saying it without one. */
-function withoutAddress(cause: unknown): unknown {
+/** Rethrows the cause, redacting addresses from its message when needed. */
+function withoutAddress(cause: unknown): never {
   const messages = [cause, cause instanceof Error ? cause.cause : null].map((each) =>
     each instanceof Error ? each.message : "",
   );
 
-  if (!messages.some((message) => message.includes("://"))) return cause;
+  if (!messages.some((message) => message.includes("://"))) throw cause;
 
-  return new TypeError(withoutAddresses(messages[0] ?? ""));
+  throw new TypeError(withoutAddresses(messages[0] ?? ""));
 }

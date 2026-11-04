@@ -495,7 +495,7 @@ describe("metadata closure and replacement boundaries", () => {
 
   it("closes before a delayed cache load without starting requests or dropping loaded data", async () => {
     vi.useFakeTimers();
-    const reading = Promise.withResolvers<unknown>();
+    const reading = Promise.withResolvers<MetadataFile | null>();
     const details = vi.fn<Tmdb["details"]>(async () => answer());
     const { store } = open(clientWith(details), null, { read: () => reading.promise });
     store.want([title()]);

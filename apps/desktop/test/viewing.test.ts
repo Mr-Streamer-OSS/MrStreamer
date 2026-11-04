@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { JsonObject } from "@mrstreamer/contracts/json";
+import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import type { OwnedId } from "@mrstreamer/contracts/subscription";
 import type { TitleProgress, Viewing } from "@mrstreamer/contracts/viewing";
@@ -193,7 +193,7 @@ async function viewingApp(options: FakeProviderOptions = {}) {
       await mkdir(dataDir, { recursive: true });
       await writeFile(join(dataDir, "preferences.json"), JSON.stringify(file));
     },
-    readPreferences: async (): Promise<unknown> =>
+    readPreferences: async (): Promise<Json> =>
       JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8")),
     /** Runs `use` on the database through a connection of its own, as another build's would be. */
     database: <A>(use: (db: DatabaseSync) => A): A => {

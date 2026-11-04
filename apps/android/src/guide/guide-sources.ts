@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import type { GuideRequest } from "@mrstreamer/core/provider";
@@ -80,17 +81,17 @@ const USER_AGENT = `MrStreamer/${Constants.expoConfig?.version ?? "0.0.0"} (Andr
  * The file's JSON, or null when there is none. Unlike storage.ts `readJson`, text that isn't JSON
  * throws: a damaged registry must not read as an empty one and be written over.
  */
-function readStrictly(name: string): unknown {
+function readStrictly(name: string): Json {
   const file = new DiskFile(Paths.document, name);
 
-  return file.exists ? (JSON.parse(file.textSync()) as unknown) : null;
+  return file.exists ? JSON.parse(file.textSync()) : null;
 }
 
 /** Builds the owner; the app has one (`guides` below), tests their own. */
 export function createGuides(
   secrets: SecretStore = sealedLinks,
   owner: Pick<typeof guide, "configure" | "attach" | "forget" | "refresh"> = guide,
-  read: () => unknown = () => readStrictly(FILE_NAME),
+  read: () => Json = () => readStrictly(FILE_NAME),
   write: (value: GuidesFile) => void = (value) => writeJson(FILE_NAME, value),
   now: () => number = Date.now,
 ) {

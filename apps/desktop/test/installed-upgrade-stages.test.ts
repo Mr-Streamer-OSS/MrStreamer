@@ -1,3 +1,4 @@
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 // The installed upgrade check must inherit stable's copies before playing anything, and resume
 // them after a restart. The window stands in for public reads and UI input; the stages are real.
 import { describe, expect, it } from "vitest";
@@ -64,9 +65,43 @@ function standIn(player: Player = PLAYER) {
 
   const actions: string[] = [];
 
-  const answers: Record<string, () => unknown> = {
-    "subscription.list": () => (removed ? [] : [{ id: "subscription" }]),
-    "preferences.get": () => state.preferences,
+  const answers: Record<
+    string,
+    () => Partial<
+      IpcOutput<
+        | "subscription.list"
+        | "preferences.get"
+        | "viewing.get"
+        | "watchlist.list"
+        | "viewing.progress"
+        | "downloads.list"
+      >
+    >
+  > = {
+    "subscription.list": () =>
+      removed
+        ? []
+        : [
+            {
+              id: "subscription",
+              kind: "xtream",
+              name: null,
+              server: "https://fake.example",
+              username: "fake",
+              needsSecret: false,
+              account: {
+                state: "active",
+                expiresAt: null,
+                maxConnections: null,
+                activeConnections: null,
+              },
+            },
+          ],
+    "preferences.get": () => ({
+      ...state.preferences,
+      revision: 1,
+      preferences: { ...defaultPreferences, ...state.preferences },
+    }),
     "viewing.get": () => ({ favourites: state.favourites }),
     "watchlist.list": () => state.watchlist,
     "viewing.progress": () => state.progress,
@@ -144,7 +179,7 @@ function standIn(player: Player = PLAYER) {
   };
 
   /** What the page answers each expression the stages evaluate in it. */
-  async function shown(expression: string): Promise<unknown> {
+  async function shown(expression: string) {
     if (expression.includes("innerText"))
       return "Remove it from this device? Subscription removed, copy kept";
 

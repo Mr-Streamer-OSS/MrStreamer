@@ -113,7 +113,7 @@ export interface MetadataDeps {
    * The kept file as it was last written, unchecked, or null when there is none. A file that
    * doesn't match is like none: everything is fetched again.
    */
-  readonly read: () => Promise<unknown>;
+  readonly read: () => Promise<Json>;
   /** Replaces the kept file, whole; a write that fails is tried again with the next. */
   readonly write: (file: MetadataFile) => Promise<void>;
   /** Null without a key: the store answers from disk and fetches nothing. */

@@ -146,7 +146,7 @@ const SERIES_DETAILS: ProviderDetails = {
 };
 
 /** TMDB's answers, as its API sends them, for a client with a stand-in fetch. */
-function tmdbAnswer(url: string): unknown {
+function tmdbAnswer(url: string) {
   const path = new URL(url).pathname;
   const about = /\/(movie|tv)\/(\d+)$/.exec(path);
 

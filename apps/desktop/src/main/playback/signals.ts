@@ -2,7 +2,9 @@
 const REPORT_WAIT_MS = 2000;
 
 /** Resolves once what an ffmpeg that has ended `sent` over loopback is here, or has had its time. */
-export function arrives(sent: Promise<unknown>): Promise<unknown> {
+export function arrives(
+  sent: Promise<void | [void | null, void | undefined]>,
+): Promise<void | [void | null, void | undefined]> {
   const { promise: late, resolve } = Promise.withResolvers<void>();
   const timer = setTimeout(resolve, REPORT_WAIT_MS);
 
