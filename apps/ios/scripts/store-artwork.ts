@@ -241,10 +241,7 @@ function uprightPng(info: Metadata, bytes: Buffer) {
   return info.format === "png" && (info.pages || 1) === 1 && (info.orientation || 1) === 1;
 }
 
-/**
- * Paper A with a supplied frame: the frame scaled into the picture box, the capture resized
- * into its cutout underneath. The manifest records the frame with its file and licence hashes.
- */
+/** Parse the supplied frame metadata before composition reads files or pixels. */
 function parseFrame(value: Json | undefined) {
   const supplied = object(value, "frame");
   knownKeys(
@@ -274,6 +271,7 @@ function parseFrame(value: Json | undefined) {
 
 type Frame = ReturnType<typeof parseFrame>;
 
+/** Scale the supplied frame and fit the capture underneath its cutout. */
 async function framed(slot: Slot, capture: Buffer, frame: Frame, box: Box) {
   const { frameSource, termsSource, left, top, width, height, cornerRadius } = frame;
   const licence = await inputFile(resolve(dirname(input.file), frame.licenceFile));
