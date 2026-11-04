@@ -76,6 +76,7 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
   }, []);
   const { play } = useLocalSearchParams<{ play?: string }>();
   const focused = useIsFocused();
+  const played = useRef(false);
 
   const intent = useMemo(() => (offline ? null : linkedIntent(play)), [play, offline]);
 
@@ -91,7 +92,7 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
 
     if (intent) {
       if (now.kind === "idle" || intentKey(now.intent) !== intentKey(intent)) player.play(intent);
-    } else if (now.kind === "idle") leave(offline);
+    } else if (now.kind === "idle" && !played.current) leave(offline);
   }, [intent, focused, offline, play]);
 
   const state = useStore(player.state);
@@ -103,7 +104,6 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
 
     return () => player.media.watch(false);
   }, [focused]);
-  const played = useRef(false);
   useEffect(() => {
     if (state.kind === "playing") played.current = true;
     else if (played.current && focused) leave(offline);

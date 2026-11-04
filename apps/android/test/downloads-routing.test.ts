@@ -465,3 +465,17 @@ it("ignores a retained provider parameter in OfflinePlay itself", () => {
   expect(scenario.played).toEqual([]);
   expect(container.textContent).toContain("Downloaded");
 });
+
+it("leaves only once when a stopped offline screen regains focus", () => {
+  player.state.set(playing({ kind: "file", path: "/private/copy", title: "Saved" }));
+  const container = window.document.createElement("div");
+  root = createRoot(container);
+  act(() => root?.render(createElement(OfflinePlay)));
+  scenario.focused = false;
+  act(() => root?.render(createElement(OfflinePlay)));
+  act(() => player.state.set({ kind: "idle" }));
+  expect(scenario.asked).toEqual([]);
+  scenario.focused = true;
+  act(() => root?.render(createElement(OfflinePlay)));
+  expect(scenario.asked).toEqual(["back"]);
+});
