@@ -119,6 +119,98 @@ class PlayerOwnerTest {
   private fun untilPhase(attempt: String, vararg phases: Phase) =
     until { recorder.of(attempt).lastOrNull()?.phase in phases }
 
+
+  @Test fun pendingSidecarSettlesOnceOnStop() = pendingStop(false)
+  @Test fun pendingSidecarSettlesOnceOnReplacement() = pendingStop(true)
+
+  private fun pendingStop(replace: Boolean) {
+    run {
+      val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+      val media = fixture("h264-aac.mp4")
+      try {
+        owner.admit(file("pending", media))
+        untilPhase("pending", Phase.PLAYING)
+        val completions = mutableListOf<Boolean>()
+        val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+        assertTrue(owner.setSidecar("pending", text, "en", 0.0, 1.0) { completions += it })
+        assertEquals(emptyList<Boolean>(), completions)
+        if (replace) owner.admit(file("later", media)) else {
+          assertTrue(owner.stop("pending"))
+          owner.admit(file("later", media))
+        }
+        untilPhase("later", Phase.PLAYING)
+        assertEquals(listOf(false), completions)
+        val later = mutableListOf<Boolean>()
+        assertTrue(owner.setSidecar("later", text, "en", 0.0, 1.0) { later += it })
+        until { later.isNotEmpty() }
+        assertEquals(listOf(true), later)
+        assertEquals(listOf(false), completions)
+        owner.stopAll()
+      } finally { media.delete() }
+    }
+  }
+
+  // The ExoPlayer boundary supplies a synchronous exception or an end notification while
+  // preparation is pending; subsequent playback still uses the real test ExoPlayer.
+  @Test fun pendingSidecarSettlesOnceOnEnd() = pendingEnd(true)
+  @Test fun pendingSidecarSettlesOnceOnSynchronousPrepareFailure() = pendingEnd(false)
+
+  private fun pendingEnd(ending: Boolean) {
+    run {
+      val real = TestExoPlayerBuilder(context)
+        .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)).build()
+      players += real
+      val listeners = mutableListOf<androidx.media3.common.Player.Listener>()
+      var failPrepare = false
+      var ended = false
+      val boundary = java.lang.reflect.Proxy.newProxyInstance(
+        ExoPlayer::class.java.classLoader, arrayOf(ExoPlayer::class.java),
+      ) { _, method, args ->
+        when {
+          method.name == "addListener" -> {
+            listeners += args!![0] as androidx.media3.common.Player.Listener
+            method.invoke(real, *args)
+          }
+          method.name == "prepare" && failPrepare -> {
+            failPrepare = false
+            throw IllegalStateException("Fixture prepare failure")
+          }
+          method.name == "getPlaybackState" && ended -> androidx.media3.common.Player.STATE_ENDED
+          else -> try { method.invoke(real, *(args ?: emptyArray())) }
+            catch (cause: java.lang.reflect.InvocationTargetException) { throw cause.targetException }
+        }
+      } as ExoPlayer
+      val owner = PlayerOwner(boundary, recorder)
+      val media = fixture("h264-aac.mp4")
+      try {
+        owner.admit(file("pending", media))
+        untilPhase("pending", Phase.PLAYING)
+        val completions = mutableListOf<Boolean>()
+        val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+        failPrepare = !ending
+        assertTrue(owner.setSidecar("pending", text, "en", 0.0, 1.0) { completions += it })
+        if (ending) {
+          assertEquals(emptyList<Boolean>(), completions)
+          ended = true
+          val events = androidx.media3.common.Player.Events(
+            androidx.media3.common.FlagSet.Builder().add(androidx.media3.common.Player.EVENT_PLAYBACK_STATE_CHANGED).build(),
+          )
+          listeners.forEach { it.onEvents(boundary, events) }
+          ended = false
+        }
+        assertEquals(listOf(false), completions)
+        owner.admit(file("later", media))
+        untilPhase("later", Phase.PLAYING)
+        val later = mutableListOf<Boolean>()
+        assertTrue(owner.setSidecar("later", text, "en", 0.0, 1.0) { later += it })
+        until { later.isNotEmpty() }
+        assertEquals(listOf(true), later)
+        assertEquals(listOf(false), completions)
+        owner.stopAll()
+      } finally { media.delete() }
+    }
+  }
+
   @Test fun downloadedTextUsesTheExistingOwnerAndReportsItsSelection() {
     val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
     val media = fixture("h264-aac.mp4")
