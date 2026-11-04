@@ -107,7 +107,7 @@ export function RemindersScreen() {
             />
           </View>
         ) : null}
-        {!days.length && !state.error ? (
+        {state.loaded && !days.length && !state.error ? (
           <View accessible style={{ gap: 6, paddingTop: 24, paddingHorizontal: 16 }}>
             <Text style={heading}>{t("No reminders yet.")}</Text>
             <Text style={note}>{t("Set one from a later programme's details.")}</Text>
@@ -213,7 +213,7 @@ function Row({
       <IconButton
         icon="close"
         color={colors.secondary}
-        label={t("Cancel reminder")}
+        label={t("Cancel reminder for {title}", { title: row.title })}
         onPress={onCancel}
       />
     </View>

@@ -384,7 +384,9 @@ export function LiveScreen() {
       id: "reminders",
       icon: "notifications-none" as const,
       label: t("Reminders"),
-      count: String(reminderState.rows.length),
+      count: reminderState.loaded
+        ? String(reminderState.rows.filter((row) => row.stop > Date.now()).length)
+        : undefined,
       onPress: () => router.push("/reminders"),
     },
     {

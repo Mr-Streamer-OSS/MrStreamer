@@ -32,10 +32,10 @@ export function reconcile(
 
   if (current === null) return { id: saved.id, status: "missing" };
 
-  if (current.title !== saved.title || current.start !== saved.start || current.stop !== saved.stop)
+  if (current.title !== saved.title || current.start !== saved.start)
     return { id: saved.id, status: "changed", changedTitle: current.title };
 
-  return { id: saved.id, status: "scheduled" };
+  return { id: saved.id, status: "scheduled", stop: current.stop };
 }
 
 export const rowStatus = (saved: Reminder, now: number) =>

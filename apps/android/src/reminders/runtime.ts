@@ -10,7 +10,8 @@ export const reminders = store<{
   rows: readonly Reminder[];
   permission: Permission | null;
   error: "read" | "update" | null;
-}>({ rows: [], permission: null, error: null });
+  loaded: boolean;
+}>({ rows: [], permission: null, error: null, loaded: false });
 
 let queue = Promise.resolve();
 
@@ -29,7 +30,20 @@ async function read() {
   try {
     const rows: Reminder[] = JSON.parse(await nativeReminders().list());
     const permission = await nativeReminders().permission();
-    reminders.set({ rows, permission, error: permission.failed ? "update" : null });
+    reminders.set((s) => {
+      const sameRows = JSON.stringify(s.rows) === JSON.stringify(rows);
+      const error = permission.readFailed ? "read" : permission.failed ? "update" : null;
+
+      if (
+        sameRows &&
+        JSON.stringify(s.permission) === JSON.stringify(permission) &&
+        s.loaded &&
+        s.error === error
+      )
+        return s;
+
+      return { rows: sameRows ? s.rows : rows, permission, loaded: true, error };
+    });
   } catch {
     reminders.set((s) => ({ ...s, error: "read" }));
     throw new Error("read");
@@ -38,6 +52,14 @@ async function read() {
 
 export const refreshReminders = () =>
   serialized(async () => {
+    let recoveryFailed = false;
+
+    try {
+      await nativeReminders().recover();
+    } catch {
+      recoveryFailed = true;
+    }
+
     await read();
     const state = sources.state.get();
 
@@ -47,28 +69,44 @@ export const refreshReminders = () =>
       const rows = reminders.get().rows;
       const revision = guide.listingRevision.get();
       const snapshot = guide.getSnapshot();
-      const patches = [];
+      let patches = [];
 
       for (const row of rows) {
         const present = state.sources.some((s) => s.id === row.sourceId);
+        let current;
 
-        const current =
-          present && row.stop > Date.now()
-            ? await guide.programmeAt(channelKey(row), row.start)
-            : undefined;
+        if (present && row.stop > Date.now()) {
+          try {
+            current = await guide.programmeAt(channelKey(row), row.start);
+          } catch {
+            // A failed lookup is unknown; other rows can still reconcile.
+          }
+        }
 
+        if (sources.state.get() !== state) break;
+
+        if (guide.listingRevision.get() !== revision || guide.getSnapshot() !== snapshot)
+          current = undefined;
         patches.push(reconcile(row, current, present, Date.now()));
       }
 
-      // Provider/catalogue changes during a read invalidate this reconciliation.
-      if (
-        sources.state.get() !== state ||
-        guide.listingRevision.get() !== revision ||
-        guide.getSnapshot() !== snapshot
-      )
-        return;
-      await nativeReminders().reconcile(JSON.stringify(patches));
+      // A later lookup may invalidate an earlier result. Keep independent removal/expiry
+      // patches, but retain prior guide status for the entire invalidated snapshot.
+      if (guide.listingRevision.get() !== revision || guide.getSnapshot() !== snapshot)
+        patches = rows.map((row) =>
+          reconcile(
+            row,
+            undefined,
+            state.sources.some((source) => source.id === row.sourceId),
+            Date.now(),
+          ),
+        );
+
+      if (sources.state.get() === state && patches.length)
+        await nativeReminders().reconcile(JSON.stringify(patches));
       await read();
+
+      if (recoveryFailed) reminders.set((s) => ({ ...s, error: "update" }));
     } catch {
       reminders.set((s) => ({ ...s, error: "update" }));
       throw new Error("update");
@@ -125,22 +163,37 @@ export function startReminders() {
       });
   };
 
-  const stops = [
-    sources.state.subscribe(refresh),
-    guide.listingRevision.subscribe(refresh),
-    guide.subscribe(refresh),
-  ];
+  let guideStops: (() => void)[] = [];
+
+  const watchGuide = () => {
+    if (reminders.get().rows.length && !guideStops.length) {
+      guideStops = [
+        sources.state.subscribe(refresh),
+        guide.listingRevision.subscribe(refresh),
+        guide.subscribe(refresh),
+      ];
+      void startGuide()
+        .then(refresh)
+        .catch(() => {
+          reminders.set((s) => ({ ...s, error: "update" }));
+        });
+    } else if (!reminders.get().rows.length) {
+      guideStops.forEach((stop) => stop());
+      guideStops = [];
+    }
+  };
+
+  const stops = [reminders.subscribe(watchGuide)];
+  watchGuide();
 
   const app = AppState.addEventListener("change", (state) => {
     if (state === "active") refresh();
   });
 
-  stops.push(() => app.remove());
-  void startGuide()
-    .then(refresh)
-    .catch(() => {
-      reminders.set((s) => ({ ...s, error: "update" }));
-    });
+  stops.push(
+    () => app.remove(),
+    () => guideStops.forEach((stop) => stop()),
+  );
   const clock = setInterval(refresh, 60_000);
   refresh();
 

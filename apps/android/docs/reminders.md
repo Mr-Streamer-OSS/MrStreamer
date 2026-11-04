@@ -36,7 +36,9 @@ There is no iOS 64-alarm limit here.
 
 The receiver reads the durable queue without JavaScript. Boot after unlock,
 clock/time-zone changes, package replacement and exact-alarm permission grants
-recheck delivery and scheduling. Revoked access keeps saved rows but suppresses
+recheck delivery and scheduling. The exact-alarm permission broadcast fires only
+on grant, not revocation. Foreground refresh also recovers directly from disk,
+even when the guide cannot answer. Revoked access keeps saved rows but suppresses
 alarms. The next foreground reconciliation also checks providers and programme
 identity against available guide data. A failed guide read retains prior state;
 a known changed or missing programme will not notify. Provider removal removes
@@ -44,9 +46,11 @@ its reminders when reconciliation completes. Receivers cannot fetch a fresh
 guide while JavaScript is stopped, so they use the last reconciled snapshot.
 
 Recovery posts once while the original programme is still on, with elapsed
-minutes in its notification, and silently removes ended reminders. Delivery is
-marked consumed before posting to prevent duplicate broadcasts. A process crash
-between that durable write and notification posting can lose that notification;
+minutes in its notification (Starting now within the first minute), and silently
+removes ended reminders. Each successful post is
+marked consumed independently; a failed post stays retryable and does not block
+other due reminders or the next alarm. A process crash between notification
+posting and its durable write can repeat the notification on recovery;
 Android provides no atomic transaction spanning disk and NotificationManager.
 Errors in storage or scheduling are reported in the app and remain retryable.
 
@@ -54,14 +58,19 @@ Errors in storage or scheduling are reported in the app and remain retryable.
 apply to closely spaced alarms. Doze, battery restrictions and OEM managers can
 delay delivery. Force stop cancels pending alarms and prevents receivers from
 running until the app is launched again; reminders remain on disk. See
-[alarm and idle behavior](<https://developer.android.com/reference/android/app/AlarmManager#setExactAndAllowWhileIdle(int,long,android.app.PendingIntent)>)
-and [Android 15 stopped-state changes](https://developer.android.com/about/versions/15/behavior-changes-all#stopped-state).
+[alarm and idle behavior](<https://developer.android.com/reference/android/app/AlarmManager#setExactAndAllowWhileIdle(int,long,android.app.PendingIntent)>),
+[package force-stop broadcast](https://developer.android.com/reference/android/content/Intent#ACTION_PACKAGE_RESTARTED)
+(which documents alarm removal since API 1), and [Android 15 stopped-state changes](https://developer.android.com/about/versions/15/behavior-changes-all#stopped-state).
 This is an exact scheduling request, not a promise of delivery at a guaranteed
 wall-clock second.
 
-Notification extras carry source id, channel id and start time. App navigation
+Unreadable rows are preserved on disk while valid rows remain usable; the app
+reports the partial read failure.
+
+Notification extras carry source id, channel id, start and stop times. App navigation
 returns to Live then opens that Programme; no playback action is invoked.
-Existing playback remains owned by the player.
+Ended taps and taps with no saved sources are discarded. Recents history intents
+do not replay a notification tap. Existing playback remains owned by the player.
 
 ## Qualification
 

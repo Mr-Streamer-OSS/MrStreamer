@@ -28,7 +28,10 @@ const theme = {
 
 export default function RootLayout() {
   const state = useStore(sources.state);
-  useReminderRouting(state.kind === "ready" && state.sources.length > 0);
+  useReminderRouting(
+    state.kind === "ready" && state.sources.length > 0,
+    state.kind === "ready" && state.sources.length === 0,
+  );
   useEffect(() => startReminders(), []);
 
   const localFile = useSyncExternalStore(player.state.subscribe, () => {

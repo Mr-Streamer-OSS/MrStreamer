@@ -9,6 +9,7 @@ export const t = catalogue(
     "Remind me": "Remind me",
     "Reminder set": "Reminder set",
     "Cancel reminder": "Cancel reminder",
+    "Cancel reminder for {title}": "Cancel reminder for {title}",
     Allow: "Allow",
     "{title} reminder wasn't set: Android has notifications off for Mr. Streamer.":
       "{title} reminder wasn't set: Android has notifications off for Mr. Streamer.",
@@ -41,6 +42,7 @@ export const t = catalogue(
       "Remind me": "Herinner me",
       "Reminder set": "Herinnering ingesteld",
       "Cancel reminder": "Herinnering annuleren",
+      "Cancel reminder for {title}": "Herinnering voor {title} annuleren",
       Allow: "Toestaan",
       "{title} reminder wasn't set: Android has notifications off for Mr. Streamer.":
         "Geen herinnering voor {title}: Android heeft meldingen voor Mr. Streamer uitgezet.",

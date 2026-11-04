@@ -32,6 +32,7 @@ describe("saved programme reminders", () => {
     expect(reconcile({ ...saved, status: "missing" }, saved, true, 100)).toEqual({
       id: "one",
       status: "scheduled",
+      stop: 400,
     });
   });
   it("groups in local day/start order and names exceptional row states", () => {
@@ -51,5 +52,13 @@ describe("saved programme reminders", () => {
     expect(reminderId({ sourceId: "a:b", channelId: "c" }, 1)).not.toBe(
       reminderId({ sourceId: "a", channelId: "b:c" }, 1),
     );
+  });
+});
+
+it("keeps an end-time correction eligible and updates its stop", () => {
+  expect(reconcile(saved, { ...saved, stop: 500 }, true, 100)).toEqual({
+    id: "one",
+    status: "scheduled",
+    stop: 500,
   });
 });

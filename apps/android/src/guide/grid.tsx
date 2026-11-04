@@ -874,7 +874,17 @@ const GridRow = memo(function GridRow({
   onProgramme: (channel: GridChannel, p: ScheduleItem) => void;
 }) {
   const reminderRows = useStore(reminders).rows;
-  const remindedIds = useMemo(() => new Set(reminderRows.map((row) => row.id)), [reminderRows]);
+
+  const remindedIds = useMemo(
+    () =>
+      new Set(
+        reminderRows
+          .filter((row) => row.status === "scheduled" && !row.delivered)
+          .map((row) => row.id),
+      ),
+    [reminderRows],
+  );
+
   useGuideStatus();
   useLocale();
   const { read, retry } = useGridRow(channel.key, day, active);

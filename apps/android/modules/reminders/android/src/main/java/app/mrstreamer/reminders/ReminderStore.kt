@@ -30,7 +30,7 @@ object ReminderStore {
   @Synchronized fun permission(context: Context): Map<String, Any> {
     val missing = notificationAccess(context) ?: if (exact(context)) "" else "exact"
     val canOpen = missing.isNotEmpty() && setting(context, missing).resolveActivity(context.packageManager) != null
-    return mapOf("missing" to missing, "failed" to health(context).getBoolean("failed", false), "canOpen" to canOpen)
+    return mapOf("missing" to missing, "failed" to health(context).getBoolean("failed", false), "readFailed" to raw(context).any { !valid(it) }, "canOpen" to canOpen)
   }
 
   /** The Android setting for [kind]: "exact", "channel" or the app's notifications page. */
@@ -69,6 +69,7 @@ object ReminderStore {
       val patch = byId[row.getString("id")] ?: return@mapNotNull row
       if (patch.optBoolean("remove")) return@mapNotNull null
       row.put("status", patch.getString("status"))
+      if (patch.has("stop")) row.put("stop", patch.getLong("stop"))
       if (patch.has("changedTitle")) row.put("changedTitle", patch.getString("changedTitle")) else row.remove("changedTitle")
       row
     }
@@ -76,17 +77,41 @@ object ReminderStore {
     recover(context)
   }
 
-  /** Drops ended reminders, notifies each one due by [now] once, and arms the next. [recovered]
-   * marks a delivery outside its own alarm, which always reads Started {minutes} min ago. */
-  @Synchronized fun recover(context: Context, now: Long = System.currentTimeMillis(), recovered: Boolean = true) {
+  /** Drops ended reminders, posts due rows independently and always attempts to arm the next.
+   * A failed post remains retryable; successful posts are persisted individually. */
+  @Synchronized fun recover(context: Context, now: Long = System.currentTimeMillis()) {
     val rows = read(context).filter { it.getLong("stop") > now }
-    val due = if (permission(context)["missing"] == "") rows.filter { pending(it) && it.getLong("start") <= now } else emptyList()
-    // Persist the delivered state before posting, so a repeated broadcast cannot notify twice.
-    due.forEach { it.put("delivered", true) }
-    write(context, rows)
-    due.forEach { notify(context, it, now, recovered) }
-    arm(context, rows)
-    health(context).edit().putBoolean("failed", false).commit()
+    var failure: Exception? = null
+    try {
+      write(context, rows)
+      if (permission(context)["missing"] == "") {
+        for (row in rows.filter { pending(it) && it.getLong("start") <= now }) {
+          try {
+            notify(context, row, now)
+            row.put("delivered", true)
+            try {
+              write(context, rows)
+            } catch (cause: Exception) {
+              row.put("delivered", false)
+              throw cause
+            }
+          } catch (cause: Exception) {
+            failure = cause
+          }
+        }
+      }
+    } catch (cause: Exception) {
+      failure = cause
+    } finally {
+      // Failed due rows retry on recovery rather than monopolizing the next alarm.
+      try {
+        arm(context, rows.filter { it.getLong("start") > now })
+      } catch (cause: Exception) {
+        failure = cause
+      }
+      health(context).edit().putBoolean("failed", failure != null).commit()
+    }
+    failure?.let { throw it }
   }
 
   /** Records that a background recovery failed, for the app to show until the next one succeeds. */
@@ -98,18 +123,33 @@ object ReminderStore {
 
   private fun disk(context: Context) = AtomicFile(File(context.noBackupFilesDir, "programme-reminders.json"))
 
-  private fun read(context: Context): List<JSONObject> {
+  private fun raw(context: Context): List<Any> {
     val file = disk(context)
     if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return emptyList()
     val array = JSONArray(file.openRead().bufferedReader().use { it.readText() })
-    return (0 until array.length()).map { array.getJSONObject(it) }
+    return (0 until array.length()).map { array.get(it) }
   }
+
+  /** Unreadable rows stay verbatim on disk and are reported through permission.readFailed.
+   * They cannot prevent valid rows from being listed, cancelled or delivered. */
+  private fun valid(value: Any): Boolean = try {
+    val row = value as JSONObject
+    listOf("id", "sourceId", "channelId", "channelName", "title").forEach { row.getString(it) }
+    row.getLong("start")
+    row.getLong("stop")
+    row.getBoolean("delivered")
+    check(row.getString("status") in listOf("scheduled", "changed", "missing"))
+    true
+  } catch (_: Exception) { false }
+
+  private fun read(context: Context): List<JSONObject> = raw(context).filter(::valid).map { it as JSONObject }
 
   private fun write(context: Context, rows: List<JSONObject>) {
     val file = disk(context)
+    val preserved = raw(context).filterNot(::valid)
     val stream = file.startWrite()
     try {
-      stream.write(JSONArray(rows).toString().toByteArray(Charsets.UTF_8))
+      stream.write(JSONArray(rows + preserved).toString().toByteArray(Charsets.UTF_8))
       file.finishWrite(stream)
     } catch (cause: Exception) {
       file.failWrite(stream)
@@ -170,12 +210,13 @@ object ReminderStore {
   }
 
   /** Posts [row]'s notification; its tap opens the app with the programme's identity as an extra. */
-  private fun notify(context: Context, row: JSONObject, now: Long, recovered: Boolean) {
+  private fun notify(context: Context, row: JSONObject, now: Long) {
     val id = row.getString("id")
     val identity = JSONObject()
       .put("sourceId", row.getString("sourceId"))
       .put("channelId", row.getString("channelId"))
       .put("start", row.getLong("start"))
+      .put("stop", row.getLong("stop"))
     val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: error("launch")
     launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     // A category per reminder keeps each notification's pending intent distinct.
@@ -186,7 +227,7 @@ object ReminderStore {
     val channel = row.getString("channelName")
     val dutch = row.optString("language") == "nl"
     val body = when {
-      recovered || minutes > 0 -> if (dutch) "$minutes min geleden begonnen op $channel" else "Started $minutes min ago on $channel"
+      minutes > 0 -> if (dutch) "$minutes min geleden begonnen op $channel" else "Started $minutes min ago on $channel"
       dutch -> "Begint nu op $channel"
       else -> "Starting now on $channel"
     }
@@ -203,18 +244,18 @@ object ReminderStore {
 
 /** The armed alarm: delivers what is due at its own time. */
 class ReminderAlarmReceiver : BroadcastReceiver() {
-  override fun onReceive(context: Context, intent: Intent) = recover(context, goAsync(), recovered = false)
+  override fun onReceive(context: Context, intent: Intent) = recover(context, goAsync())
 }
 
 /** Boot, clock, time zone, app update and exact-alarm grant: re-checks every reminder. */
 class ReminderRecoveryReceiver : BroadcastReceiver() {
-  override fun onReceive(context: Context, intent: Intent) = recover(context, goAsync(), recovered = true)
+  override fun onReceive(context: Context, intent: Intent) = recover(context, goAsync())
 }
 
-private fun recover(context: Context, pending: BroadcastReceiver.PendingResult, recovered: Boolean) {
+private fun recover(context: Context, pending: BroadcastReceiver.PendingResult) {
   Thread {
     try {
-      ReminderStore.recover(context.applicationContext, recovered = recovered)
+      ReminderStore.recover(context.applicationContext)
     } catch (_: Exception) {
       // The saved list is kept and retried at the next recovery; the app shows this failure.
       ReminderStore.failed(context)

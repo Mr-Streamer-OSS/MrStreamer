@@ -12,10 +12,11 @@ function parseReminderTap(json: string) {
       !value ||
       !("sourceId" in value) ||
       !("channelId" in value) ||
-      !("start" in value)
+      !("start" in value) ||
+      !("stop" in value)
     )
       return null;
-    const { sourceId, channelId, start } = value;
+    const { sourceId, channelId, start, stop } = value;
 
     if (
       typeof sourceId !== "string" ||
@@ -24,18 +25,21 @@ function parseReminderTap(json: string) {
       !channelId ||
       typeof start !== "number" ||
       !Number.isFinite(start) ||
-      start <= 0
+      start <= 0 ||
+      typeof stop !== "number" ||
+      !Number.isFinite(stop) ||
+      stop <= start
     )
       return null;
 
-    return { sourceId, channelId, start };
+    return { sourceId, channelId, start, stop };
   } catch {
     return null;
   }
 }
 
 /** Native extras bypass automatic URL routing, so cold and warm taps follow the same path. */
-export function useReminderRouting(ready: boolean) {
+export function useReminderRouting(ready: boolean, empty = false) {
   const navigation = useRootNavigationState();
   const [tap, setTap] = useState<ReturnType<typeof parseReminderTap>>(null);
   useEffect(() => {
@@ -59,10 +63,18 @@ export function useReminderRouting(ready: boolean) {
     return () => subscription.remove();
   }, []);
   useEffect(() => {
-    if (!ready || !navigation?.key || !tap) return;
+    if (!tap) return;
+
+    if (empty || tap.stop <= Date.now()) {
+      setTap(null);
+
+      return;
+    }
+
+    if (!ready || !navigation?.key) return;
     // Return the Live stack to its root before opening exactly one Programme above it.
     router.dismissTo("/");
     router.navigate(programmeHref("(live)", tap, tap.start), { withAnchor: true });
     setTap(null);
-  }, [ready, navigation?.key, tap]);
+  }, [ready, empty, navigation?.key, tap]);
 }

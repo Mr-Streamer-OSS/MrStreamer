@@ -3,6 +3,7 @@ import { requireNativeModule } from "expo";
 export interface Permission {
   readonly missing: "" | "notifications" | "channel" | "exact";
   readonly failed?: boolean;
+  readonly readFailed?: boolean;
   readonly canOpen: boolean;
 }
 

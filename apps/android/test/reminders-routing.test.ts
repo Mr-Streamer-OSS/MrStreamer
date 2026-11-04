@@ -14,7 +14,12 @@ vi.mock("expo-router", () => ({ router: route, useRootNavigationState: () => ({ 
 
 vi.mock("../src/reminders/native.ts", () => ({
   nativeReminders: () => ({
-    takeTap: async () => route.initial,
+    takeTap: async () => {
+      const tap = route.initial;
+      route.initial = null;
+
+      return tap;
+    },
     addListener: (_event: string, listener: typeof route.listener) => {
       route.listener = listener;
 
@@ -42,7 +47,14 @@ it("opens cold and repeated warm taps over Live using the same programme identit
   const container = window.document.createElement("div");
   window.document.body.append(container);
   const root = createRoot(container);
-  const tap = JSON.stringify({ sourceId: "source", channelId: "channel", start: 200 });
+
+  const tap = JSON.stringify({
+    sourceId: "source",
+    channelId: "channel",
+    start: 200,
+    stop: Number.MAX_SAFE_INTEGER,
+  });
+
   route.initial = tap;
 
   const Entry = ({ ready }: { ready: boolean }) => {
@@ -60,7 +72,21 @@ it("opens cold and repeated warm taps over Live using the same programme identit
       "/guide/programme?source=source&channel=channel&start=200",
       { withAnchor: true },
     );
-    await act(async () => route.listener?.({ json: tap }));
+
+    const warm = JSON.stringify({
+      sourceId: "warm",
+      channelId: "other",
+      start: 300,
+      stop: Number.MAX_SAFE_INTEGER,
+    });
+
+    route.initial = warm;
+    await act(async () => route.listener?.({ json: warm }));
+    expect(route.navigate).toHaveBeenLastCalledWith(
+      "/guide/programme?source=warm&channel=other&start=300",
+      { withAnchor: true },
+    );
+    await act(async () => route.listener?.({ json: warm }));
     expect(route.navigate).toHaveBeenCalledTimes(2);
     expect(route.dismissTo).toHaveBeenCalledTimes(2);
   } finally {

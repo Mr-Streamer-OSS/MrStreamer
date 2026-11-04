@@ -76,7 +76,11 @@ export function ReminderAction({
 }) {
   const state = useStore(reminders);
   const id = reminderId(identity, programme.start);
-  const saved = state.rows.some((row) => row.id === id);
+
+  const saved = state.rows.some(
+    (row) => row.id === id && row.status === "scheduled" && !row.delivered,
+  );
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState(false);
@@ -141,44 +145,46 @@ export function ReminderAction({
 
   return (
     <>
-      <View style={{ flexDirection: "row", gap: 8, paddingTop: 20, paddingHorizontal: inset }}>
-        <Press
-          accessibilityLabel={saved ? t("Cancel reminder") : t("Remind me")}
-          accessibilityState={{ disabled: busy }}
-          disabled={busy}
-          onPress={() => {
-            void press();
-          }}
-          style={{
-            flexGrow: 1,
-            flexBasis: 0,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            minHeight: 48,
-            paddingHorizontal: 16,
-            borderRadius: 12,
-            overflow: "hidden",
-            ...(saved
-              ? { backgroundColor: guideColors.track }
-              : { borderWidth: 1, borderColor: guideColors.outline }),
-          }}
-        >
-          <Icon name={saved ? "notifications" : "notifications-none"} size={20} />
-          <Text
+      {saved || programme.start > Date.now() ? (
+        <View style={{ flexDirection: "row", gap: 8, paddingTop: 20, paddingHorizontal: inset }}>
+          <Press
+            accessibilityLabel={saved ? t("Cancel reminder") : t("Remind me")}
+            accessibilityState={{ disabled: busy }}
+            disabled={busy}
+            onPress={() => {
+              void press();
+            }}
             style={{
-              color: colors.text,
-              fontSize: 15,
-              lineHeight: 18,
-              fontWeight: saved ? "700" : "500",
-              flexShrink: 1,
+              flexGrow: 1,
+              flexBasis: 0,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              minHeight: 48,
+              paddingHorizontal: 16,
+              borderRadius: 12,
+              overflow: "hidden",
+              ...(saved
+                ? { backgroundColor: guideColors.track }
+                : { borderWidth: 1, borderColor: guideColors.outline }),
             }}
           >
-            {saved ? t("Reminder set") : t("Remind me")}
-          </Text>
-        </Press>
-      </View>
+            <Icon name={saved ? "notifications" : "notifications-none"} size={20} />
+            <Text
+              style={{
+                color: colors.text,
+                fontSize: 15,
+                lineHeight: 18,
+                fontWeight: saved ? "700" : "500",
+                flexShrink: 1,
+              }}
+            >
+              {saved ? t("Reminder set") : t("Remind me")}
+            </Text>
+          </Press>
+        </View>
+      ) : null}
       {line ? (
         <View
           style={{
