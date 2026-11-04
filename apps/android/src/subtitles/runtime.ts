@@ -32,6 +32,16 @@ function fileBinding(id: string, path: string) {
   return JSON.stringify([id, path, file.size, file.modificationTime]);
 }
 
+/** The binding a record of the playing file must carry now, if that file has one. */
+function currentBinding() {
+  const bound = model?.state.get().title?.fileBinding;
+
+  if (!bound) return undefined;
+  const [id, path]: [string, string] = JSON.parse(bound);
+
+  return { bound, now: fileBinding(id, path) };
+}
+
 /** Read the actual persisted record for the checked next copy, never a provider-version guess. */
 export async function retainedFileSubtitle(row: { id: string; key: string }, path: string) {
   const transfers = requireNativeModule<TransferPort>("Transfers");
@@ -61,26 +71,17 @@ export function startSubtitles(
     secrets: sealedLinks,
     files: {
       read(key) {
-        const binding = model?.state.get().title?.fileBinding;
+        const binding = currentBinding();
 
-        if (binding) {
-          const [id, path]: [string, string] = JSON.parse(binding);
-
-          if (binding !== fileBinding(id, path)) throw new Error("read");
-        }
-
+        if (binding && binding.bound !== binding.now) throw new Error("read");
         const file = fileOf(key);
 
         return file.exists ? JSON.parse(file.textSync()) : null;
       },
       write(key, value) {
-        const binding = model?.state.get().title?.fileBinding;
+        const binding = currentBinding();
 
-        if (binding) {
-          const [id, path]: [string, string] = JSON.parse(binding);
-
-          if (value.fileBinding !== fileBinding(id, path)) throw new Error("read");
-        }
+        if (binding && value.fileBinding !== binding.now) throw new Error("read");
 
         const identity: unknown = JSON.parse(key);
         const current = sources.state.get();

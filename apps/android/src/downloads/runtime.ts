@@ -1,9 +1,5 @@
-import { episodesIn } from "@mrstreamer/mobile/series-download";
-import { seriesDownloads, seriesOwner } from "./series.ts";
-import { askReplace, type ReplacePrompt } from "./replace.ts";
-import { offlineNext } from "./offline-next.ts";
-import { Snapshot } from "./state.ts";
 import { type } from "arktype";
+import { episodesIn } from "@mrstreamer/mobile/series-download";
 import { router } from "expo-router";
 import { requireNativeModule } from "expo";
 import { Alert, AppState, PermissionsAndroid, Platform } from "react-native";
@@ -14,7 +10,16 @@ import { libraryDownloads, libraryIntents, type DownloadIntent } from "../librar
 import { player } from "../player/instance.ts";
 import { store } from "../platform/store.ts";
 import { t } from "./copy.ts";
-import { downloadState, type BulkTransferPort, type DownloadRow, type Action } from "./state.ts";
+import { offlineNext } from "./offline-next.ts";
+import { askReplace, type ReplacePrompt } from "./replace.ts";
+import { seriesDownloads, seriesOwner } from "./series.ts";
+import {
+  downloadState,
+  Snapshot,
+  type BulkTransferPort,
+  type DownloadRow,
+  type Action,
+} from "./state.ts";
 
 let owner: ReturnType<typeof createRuntime> | undefined;
 
@@ -27,6 +32,24 @@ function createRuntime() {
   const identity = (media: DownloadIntent["media"]) => JSON.stringify(media);
   const presentation = store(0);
   const prompt = store<ReplacePrompt | null>(null);
+
+  /** Why a copy's file can't be removed now: it is playing, or a retired reader still holds it. */
+  async function fileInUse(id: string): Promise<"playing" | "closing" | null> {
+    const path = await native.filePath(id);
+
+    if (!path) return null;
+    const current = player.state.get();
+
+    if (
+      current.kind === "playing" &&
+      current.intent.kind === "file" &&
+      current.intent.path === path
+    )
+      return "playing";
+    const release = await player.release((hold) => hold.kind === "file" && hold.path === path);
+
+    return release.some((r) => r.outcome !== "file-closed") ? "closing" : null;
+  }
 
   function tapAction(media: DownloadIntent["media"], operation: () => Promise<void>) {
     void model.change(async () => {
@@ -81,7 +104,6 @@ function createRuntime() {
     await syncPlayer();
 
     const series = details.value?.kind === "series" ? details.value : undefined;
-
     const seriesKey = series?.title?.key;
 
     const order =
@@ -203,23 +225,7 @@ function createRuntime() {
     series() {
       return seriesDownloads(
         native,
-        async (row) => {
-          const path = await native.filePath(row.id);
-          const current = player.state.get();
-
-          if (
-            current.kind === "playing" &&
-            current.intent.kind === "file" &&
-            current.intent.path === path
-          )
-            return false;
-
-          const released = await player.release(
-            (hold) => hold.kind === "file" && hold.path === path,
-          );
-
-          return released.every((entry) => entry.outcome === "file-closed");
-        },
+        async (row) => (await fileInUse(row.id)) === null,
         () => model.refresh(),
       );
     },
@@ -351,18 +357,9 @@ function createRuntime() {
       if (parsed instanceof type.errors) throw new Error("review");
 
       try {
-        const path = await native.filePath(row.id);
-        const current = player.state.get();
+        const inUse = await fileInUse(row.id);
 
-        if (
-          current.kind === "playing" &&
-          current.intent.kind === "file" &&
-          current.intent.path === path
-        )
-          return "playing";
-        const release = await player.release((hold) => hold.kind === "file" && hold.path === path);
-
-        if (release.some((r) => r.outcome !== "file-closed")) return "closing";
+        if (inUse) return inUse;
 
         return await native.admit(
           parsed.token,
@@ -399,30 +396,12 @@ function createRuntime() {
           async () => {
             // Retry repeats the reader checks too, because playback may have changed.
             if (action === "remove" || action === "cancel") {
-              const path = await native.filePath(row.id);
+              const inUse = await fileInUse(row.id);
 
-              if (path) {
-                const current = player.state.get();
+              if (inUse) {
+                refusal = inUse;
 
-                if (
-                  current.kind === "playing" &&
-                  current.intent.kind === "file" &&
-                  current.intent.path === path
-                ) {
-                  refusal = "playing";
-
-                  return;
-                }
-
-                const release = await player.release(
-                  (hold) => hold.kind === "file" && hold.path === path,
-                );
-
-                if (release.some((r) => r.outcome !== "file-closed")) {
-                  refusal = "closing";
-
-                  return;
-                }
+                return;
               }
             }
 

@@ -33,11 +33,12 @@ export interface RowStatus {
 export function isCopy(row: DownloadRow) {
   if (row.state === "removing") return row.total > 0 && row.bytes === row.total;
 
-  return (
-    row.state === "complete" ||
-    (row.state === "failed" && (row.reason === "missing" || row.reason === "file-changed"))
-  );
+  return row.state === "complete" || (row.state === "failed" && replaceable(row));
 }
+
+/** A failed copy whose file went missing or changed size, which Replace downloads anew. */
+export const replaceable = (row: DownloadRow) =>
+  row.reason === "missing" || row.reason === "file-changed";
 
 /** "1.2 GB of 2.8 GB", or null before anything arrived. */
 function received(row: DownloadRow) {
@@ -110,11 +111,7 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
     case "complete":
       return "play";
     case "failed":
-      return row.reason === "missing" || row.reason === "file-changed"
-        ? "replace"
-        : row.reason === "remove"
-          ? "remove"
-          : "retry";
+      return replaceable(row) ? "replace" : row.reason === "remove" ? "remove" : "retry";
     case "paused":
       return "resume";
     case "queued":
@@ -135,9 +132,7 @@ export function sheetChoices(row: DownloadRow, rows: readonly DownloadRow[]): Ro
     case "complete":
       return ["play", "delete"];
     case "failed":
-      return row.reason === "missing" || row.reason === "file-changed"
-        ? ["replace", "delete"]
-        : ["retry", "remove"];
+      return replaceable(row) ? ["replace", "delete"] : ["retry", "remove"];
     case "removing":
       return [];
     case "running":

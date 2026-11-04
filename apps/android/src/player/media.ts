@@ -1,4 +1,5 @@
 import { DEFAULT_NEXT_EPISODE_DELAY } from "@mrstreamer/contracts/preferences";
+import type { OfflineNext } from "../downloads/offline-next.ts";
 import { store, type Store } from "../platform/store.ts";
 import type { PlayIntent } from "./intent.ts";
 import type { NativePlayer, Track } from "./native.ts";
@@ -29,7 +30,7 @@ export interface MediaPersistence {
 }
 
 export interface MediaState {
-  readonly offline?: import("../downloads/offline-next.ts").OfflineNext | null;
+  readonly offline?: OfflineNext | null;
   readonly tracksKnown: boolean;
   readonly pip: boolean;
   readonly pipSupported: boolean;
@@ -54,9 +55,7 @@ export interface MediaModel {
   admitted(attempt: string): void;
   cancelNext(): void;
   playNext(): void;
-  registerOfflineNext(
-    resolve: (path: string) => Promise<import("../downloads/offline-next.ts").OfflineNext>,
-  ): () => void;
+  registerOfflineNext(resolve: (path: string) => Promise<OfflineNext>): () => void;
   registerNext(resolver: NextEpisodeResolver): () => void;
   retryPreferences(): void;
   dismissError(): void;
@@ -135,10 +134,7 @@ export function mediaModel(
 
   read();
   let resolver: NextEpisodeResolver | undefined;
-
-  let offlineResolver:
-    ((path: string) => Promise<import("../downloads/offline-next.ts").OfflineNext>) | undefined;
-
+  let offlineResolver: ((path: string) => Promise<OfflineNext>) | undefined;
   let attempt: string | undefined;
   let ended = false;
   let timer: ReturnType<typeof setInterval> | undefined;

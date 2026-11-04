@@ -74,6 +74,18 @@ async function files() {
   return seriesFiles(details.value, title, details.containers, "Source", { kind: "series" });
 }
 
+/** A series controller over a native port with no rows yet, whose admissions `admit` answers. */
+const controllerFor = (admit: () => Promise<string>) =>
+  seriesDownloads(
+    {
+      review: async () => JSON.stringify({ token: "review", snapshot: { rows: [], free: 1 } }),
+      admit,
+      endReview: async () => {},
+    },
+    async () => true,
+    async () => {},
+  );
+
 it("freezes exact counts and iOS order including Specials, then cancels only unqueued work", async () => {
   const all = await files();
   expect(all.map((f) => f.mediaId)).toEqual(["first", "second", "special"]);
@@ -86,15 +98,7 @@ it("freezes exact counts and iOS order including Specials, then cancels only unq
       }),
   );
 
-  const controller = seriesDownloads(
-    {
-      review: async () => JSON.stringify({ token: "review", snapshot: { rows: [], free: 1 } }),
-      admit,
-      endReview: vi.fn(async () => {}),
-    },
-    async () => true,
-    async () => {},
-  );
+  const controller = controllerFor(admit);
 
   const plan = await controller.plan(all);
   expect(plan).toMatchObject({ held: 0, add: 3, retry: 0, missing: 0 });
@@ -115,15 +119,7 @@ it("counts durable skips and failed additions separately, and stops at changed l
     .mockRejectedValueOnce(new Error("disk"))
     .mockResolvedValueOnce("login");
 
-  const controller = seriesDownloads(
-    {
-      review: async () => JSON.stringify({ token: "review", snapshot: { rows: [], free: 1 } }),
-      admit,
-      endReview: vi.fn(async () => {}),
-    },
-    async () => true,
-    async () => {},
-  );
+  const controller = controllerFor(admit);
 
   const plan = await controller.plan(all);
   expect(await controller.start(plan, false, () => null)).toMatchObject({

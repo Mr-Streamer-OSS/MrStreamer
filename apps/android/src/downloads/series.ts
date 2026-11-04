@@ -212,17 +212,21 @@ export function seriesDownloads(
 
       publish();
 
+      /** Ends the run before what isn't queued yet when there is a `reason`. */
+      const halt = (reason: SeriesResult["stopped"]) => {
+        if (!reason) return false;
+        result.stopped = reason;
+        result.unqueued = steps.length - done;
+
+        return true;
+      };
+
       try {
         for (const step of steps) {
           // Yield to navigation and Cancel remaining between admissions.
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
-          let reason = stopped ?? stands();
 
-          if (reason) {
-            result.stopped = reason;
-            result.unqueued = steps.length - done;
-            break;
-          }
+          if (halt(stopped ?? stands())) break;
 
           try {
             // A copy that is playing stays as it is, counted as changed meanwhile.
@@ -233,19 +237,11 @@ export function seriesDownloads(
               continue;
             }
 
-            reason = stopped ?? stands();
-
-            if (reason) {
-              result.stopped = reason;
-              result.unqueued = steps.length - done;
-              break;
-            }
-
+            if (halt(stopped ?? stands())) break;
             const outcome = await port.admit(plan.token, step.file.key, step.was);
 
             if (outcome === "stopped" || outcome === "login") {
-              result.stopped = outcome === "login" ? "login" : (stopped ?? "left");
-              result.unqueued = steps.length - done;
+              halt(outcome === "login" ? "login" : (stopped ?? "left"));
               break;
             }
 

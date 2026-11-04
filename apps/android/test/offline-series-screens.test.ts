@@ -195,6 +195,18 @@ const dialog = (container: HTMLElement) =>
 
 const seasonLabel = (n: number) => (n === 0 ? "Specials" : `Season ${n}`);
 
+/** The whole series' bulk row on Details for the fixture series `s`. */
+const seriesRow = (s: Awaited<ReturnType<typeof series>>, versionLabel = "Full HD") =>
+  createElement(SeriesDownloadRow, {
+    details: s.details,
+    version: s.title,
+    containers: s.containers,
+    seasonLabel,
+    versionLabel,
+    sourceLabel: "Source",
+    reader: () => "reader",
+  });
+
 it("reviews the whole series with Specials and exact counts, then reports what it queued", async () => {
   const s = await series();
 
@@ -203,17 +215,7 @@ it("reviews the whole series with Specials and exact counts, then reports what i
     async (_key, expected) => (expected === "missing" ? "replaced" : "added"),
   );
 
-  const shown = show(
-    createElement(SeriesDownloadRow, {
-      details: s.details,
-      version: s.title,
-      containers: s.containers,
-      seasonLabel,
-      versionLabel: "Full HD · English sound",
-      sourceLabel: "Source",
-      reader: () => "reader",
-    }),
-  );
+  const shown = show(seriesRow(s, "Full HD · English sound"));
 
   expect(shown.textContent).toContain("Whole series · 1 of 3 saved or queued");
   await press(shown, "Review series download");
@@ -256,17 +258,7 @@ it("cancels only what isn't queued yet, in Dutch, and says so", async () => {
       }),
   );
 
-  const shown = show(
-    createElement(SeriesDownloadRow, {
-      details: s.details,
-      version: s.title,
-      containers: s.containers,
-      seasonLabel,
-      versionLabel: "Full HD",
-      sourceLabel: "Source",
-      reader: () => "reader",
-    }),
-  );
+  const shown = show(seriesRow(s));
 
   expect(shown.textContent).toContain("Hele serie · 3 afleveringen");
   await press(shown, "Serie downloaden bekijken");
@@ -297,17 +289,7 @@ it("leaves changed files to their own Replace and a playing copy as it is", asyn
 
   playing.add("special");
 
-  const shown = show(
-    createElement(SeriesDownloadRow, {
-      details: s.details,
-      version: s.title,
-      containers: s.containers,
-      seasonLabel,
-      versionLabel: "Full HD",
-      sourceLabel: "Source",
-      reader: () => "reader",
-    }),
-  );
+  const shown = show(seriesRow(s));
 
   await press(shown, "Review series download");
   expect(dialog(shown)).toContain("1 saved file changed. Replace it in Downloads.");

@@ -1,6 +1,6 @@
 import type { DownloadPresentation, MediaIdentity } from "../library/intents.ts";
 import type { DownloadRow } from "./state.ts";
-import { rowStatus } from "./presentation.ts";
+import { replaceable, rowStatus } from "./presentation.ts";
 import { t } from "./copy.ts";
 
 type Message = Parameters<typeof t>[0];
@@ -24,11 +24,7 @@ function presented(row: DownloadRow): [string, LibraryAction, DownloadPresentati
     case "failed":
       return [
         rowStatus(row, false).text ?? t("File missing"),
-        row.reason === "missing" || row.reason === "file-changed"
-          ? "replace"
-          : row.reason === "remove"
-            ? "remove"
-            : "retry",
+        replaceable(row) ? "replace" : row.reason === "remove" ? "remove" : "retry",
         "retry",
       ];
     case "paused":

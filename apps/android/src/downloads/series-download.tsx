@@ -57,6 +57,10 @@ const outcome = store<Outcome | null>(null);
 
 const episodes = (count: number) => t("{count} episodes", { count });
 
+/** Why a bulk download can't start, when another series is still adding episodes. */
+const anotherRunning = () =>
+  seriesBusy.get() ? t("Episodes of another download are still being added.") : null;
+
 /** "5 queued. Cancelled before 3 episodes.", in iOS's order. */
 function seriesSummary(result: SeriesResult): string {
   const before = episodes(result.unqueued);
@@ -164,11 +168,7 @@ function BulkRow({
     try {
       setReview({ plan: await controller.plan(only), ...asked });
     } catch {
-      setRefusal(
-        seriesBusy.get()
-          ? t("Episodes of another download are still being added.")
-          : t("Couldn't read downloads."),
-      );
+      setRefusal(anotherRunning() ?? t("Couldn't read downloads."));
     }
   }
 
@@ -186,11 +186,7 @@ function BulkRow({
       .start(reviewed.plan, replace, stands)
       .then((result) => {
         if (!result) {
-          setRefusal(
-            seriesBusy.get()
-              ? t("Episodes of another download are still being added.")
-              : t("The version or its provider changed. Try again."),
-          );
+          setRefusal(anotherRunning() ?? t("The version or its provider changed. Try again."));
 
           return;
         }
