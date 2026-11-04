@@ -22,6 +22,8 @@ const port = vi.hoisted(() => ({
 vi.mock("../src/reminders/native.ts", () => ({ nativeReminders: () => port }));
 
 vi.mock("../src/guide/ui.tsx", () => ({
+  Button: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    h("button", { onClick: onPress }, label),
   guideColors: {},
   Icon: () => null,
   Press: ({ children, onPress }: { children: ReactNode; onPress: () => void }) =>
@@ -30,6 +32,9 @@ vi.mock("../src/guide/ui.tsx", () => ({
 
 vi.mock("react-native", () => ({
   AppState: { addEventListener: () => ({ remove: vi.fn() }) },
+  ScrollView: ({ children }: { children: ReactNode }) => h("div", {}, children),
+  useWindowDimensions: () => ({ width: 400 }),
+  AccessibilityInfo: { announceForAccessibility: vi.fn() },
   Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
   View: ({ children }: { children: ReactNode }) => h("div", {}, children),
   Platform: { OS: "android", Version: 36 },
@@ -53,6 +58,33 @@ vi.mock("../src/guide/runtime.ts", () => ({
   },
 }));
 
+vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
+
+vi.mock("../src/ui/focus.ts", () => ({
+  useKeyboardFocus: () => ({ focused: false, handlers: {} }),
+}));
+
+vi.mock("../src/guide/guide-native.ts", () => ({ nativeGuide: () => ({}) }));
+
+vi.mock("../src/guide/guide-sources.ts", () => ({ GUIDE_LIMIT: 10, MAPPING_MAX: 10 }));
+
+vi.mock("expo-router", () => ({ router: {}, useLocalSearchParams: () => ({}) }));
+
+vi.mock("../src/guide/schedule-screen.tsx", () => ({ ProgrammeDetails: () => null }));
+
+vi.mock("../src/live/ui.tsx", () => ({ Badge: () => null }));
+
+vi.mock("../src/navigation/screen.tsx", () => ({
+  Screen: ({ children }: { children: ReactNode }) => h("main", {}, children),
+}));
+
+vi.mock("../src/ui/icon-button.tsx", () => ({
+  IconButton: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    h("button", { onClick: onPress }, label),
+}));
+
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
+
 const { reminders, saveReminder, cancelReminder, refreshReminders, startReminders } =
   await import("../src/reminders/runtime.ts");
 
@@ -62,7 +94,7 @@ const saved: Reminder = {
   channelId: "c",
   channelName: "Channel",
   start: 200,
-  stop: Number.MAX_SAFE_INTEGER,
+  stop: Date.now() + 3600000,
   title: "News",
   status: "scheduled",
   delivered: false,
@@ -225,5 +257,160 @@ it("starts and subscribes to guide listings only while reminders exist", async (
   } finally {
     stop();
     await refreshReminders();
+  }
+});
+
+type Container = ReturnType<Window["document"]["createElement"]>;
+
+/** Mount the public reminder surfaces against the same native boundary as runtime tests. */
+async function surface(node: ReactNode, check: (container: Container) => Promise<void>) {
+  const window = new Window();
+  vi.stubGlobal("window", window);
+  vi.stubGlobal("document", window.document);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const module = "react-dom/client";
+
+  const { createRoot } = (await import(module)) as {
+    createRoot(container: Container): { render(node: ReactNode): void; unmount(): void };
+  };
+
+  const container = window.document.createElement("div");
+  const root = createRoot(container);
+
+  try {
+    await act(async () => root.render(node));
+    await check(container);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+    await window.happyDOM.close();
+  }
+}
+
+async function action(check: (container: Container) => Promise<void>) {
+  const { ReminderAction } = await import("../src/reminders/action.tsx");
+  await surface(
+    h(ReminderAction, {
+      identity: { sourceId: "p", channelId: "c" },
+      programme: {
+        title: "Future",
+        description: null,
+        start: Date.now() + 600000,
+        stop: Date.now() + 1200000,
+      },
+      channelName: "Channel",
+      inset: 16,
+    }),
+    check,
+  );
+}
+
+it("action saves visibly then cancels on the second press", async () => {
+  let rows: Reminder[] = [];
+  port.list.mockImplementation(async () => JSON.stringify(rows));
+  port.save.mockImplementation(async (json: string) => {
+    rows = [JSON.parse(json)];
+  });
+  port.cancel.mockImplementation(async () => {
+    rows = [];
+  });
+  reminders.set({ rows: [], permission: null, error: null, loaded: true });
+  await action(async (container) => {
+    await act(async () => container.querySelector("button")!.click());
+    expect(container.textContent).toContain("Reminder set");
+    expect(rows).toHaveLength(1);
+    await act(async () => container.querySelector("button")!.click());
+    expect(container.textContent).toBe("Remind me");
+    expect(rows).toEqual([]);
+  });
+});
+
+it("action shows a failed save without adding a reminder", async () => {
+  reminders.set({ rows: [], permission: null, error: null, loaded: true });
+  port.save.mockRejectedValue(new Error("disk"));
+  await action(async (container) => {
+    await act(async () => container.querySelector("button")!.click());
+    expect(container.textContent).toContain("Couldn't save. Try again.");
+    expect(container.textContent).not.toContain("Reminder set");
+    expect(reminders.get().rows).toEqual([]);
+  });
+});
+
+it.each(["notifications", "channel"])(
+  "action names %s refusal without Allow when no setting resolves",
+  async (missing) => {
+    port.permission.mockResolvedValue({ missing, canOpen: false });
+    await action(async (container) => {
+      await act(async () => container.querySelector("button")!.click());
+      expect(container.textContent).toContain("Android has notifications off");
+      expect([...container.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+        "Remind me",
+      ]);
+      expect(port.save).not.toHaveBeenCalled();
+    });
+  },
+);
+
+it("screen retains revoked reminders with Allow and reports a failed cancellation", async () => {
+  const { RemindersScreen } = await import("../src/reminders/screen.tsx");
+  port.permission.mockResolvedValue({ missing: "notifications", canOpen: true });
+  await refreshReminders();
+  port.cancel.mockRejectedValue(new Error("disk"));
+  await surface(h(RemindersScreen), async (container) => {
+    expect(container.textContent).toContain("News");
+    expect(container.textContent).toContain("Notifications are off.");
+    expect(container.textContent).toContain("Allow");
+
+    const cancel = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Cancel reminder for News",
+    )!;
+
+    await act(async () => cancel.click());
+    expect(container.textContent).toContain("Couldn't save. Try again.");
+    expect(container.textContent).toContain("News");
+    expect(reminders.get().rows).toEqual([saved]);
+  });
+});
+
+it("screen reports a failed read instead of an empty list", async () => {
+  const { RemindersScreen } = await import("../src/reminders/screen.tsx");
+  reminders.set({ rows: [], loaded: true, permission: null, error: null });
+  port.list.mockRejectedValue(new Error("disk"));
+  await expect(refreshReminders()).rejects.toThrow("read");
+  await surface(h(RemindersScreen), async (container) => {
+    expect(container.textContent).toContain("Couldn't read reminders. Try again.");
+    expect(container.textContent).not.toContain("No reminders yet.");
+  });
+});
+
+it("withholds stale source patches during lookup and removes the provider next pass", async () => {
+  const { sources } = await import("../src/bootstrap/sources.ts");
+  const previous = sources.state.get();
+  let release!: (value: null) => void;
+  let entered!: () => void;
+
+  const lookup = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+
+  port.programmeAt.mockImplementationOnce(() => {
+    entered();
+
+    return new Promise<null>((resolve) => {
+      release = resolve;
+    });
+  });
+
+  try {
+    const pending = refreshReminders();
+    await lookup;
+    sources.state.set({ kind: "ready", sources: [] });
+    release(null);
+    await pending;
+    expect(port.reconcile).not.toHaveBeenCalled();
+    await refreshReminders();
+    expect(JSON.parse(port.reconcile.mock.calls[0]![0])).toEqual([{ id: "one", remove: true }]);
+  } finally {
+    sources.state.set(previous);
   }
 });

@@ -278,4 +278,63 @@ class RemindersTest {
     assertEquals(1, notifications.allNotifications.size)
   }
 
+  @Test fun lateRecoveryNamesElapsedMinutesAndPostsOnce() {
+    val now = System.currentTimeMillis()
+    ReminderStore.save(context, row("late", now + 1000, now + 600000))
+    ReminderStore.recover(context, now + 181000)
+    assertEquals(1, notifications.allNotifications.size)
+    assertEquals("Started 3 min ago on Test channel", notifications.allNotifications.single().extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    assertTrue(JSONArray(ReminderStore.list(context)).getJSONObject(0).getBoolean("delivered"))
+    context.getSystemService(NotificationManager::class.java).cancelAll()
+    ReminderStore.recover(context, now + 241000)
+    assertEquals(0, notifications.allNotifications.size)
+  }
+
+  @Test fun invalidatedGuideRowsNeverPostAndProviderRemovalDropsItsRow() {
+    val now = System.currentTimeMillis()
+    for (id in listOf("changed", "missing", "removed")) ReminderStore.save(context, row(id, now + 1000, now + 600000))
+    ReminderStore.reconcile(context, """[{"id":"changed","status":"changed","changedTitle":"Film"},{"id":"missing","status":"missing"},{"id":"removed","remove":true}]""")
+    ReminderStore.recover(context, now + 121000)
+    val rows = JSONArray(ReminderStore.list(context))
+    assertEquals(2, rows.length())
+    assertEquals("changed", rows.getJSONObject(0).getString("status"))
+    assertEquals("Film", rows.getJSONObject(0).getString("changedTitle"))
+    assertEquals("missing", rows.getJSONObject(1).getString("status"))
+    assertFalse(rows.getJSONObject(0).getBoolean("delivered"))
+    assertFalse(rows.getJSONObject(1).getBoolean("delivered"))
+    assertEquals(0, notifications.allNotifications.size)
+    assertEquals(0, alarm.scheduledAlarms.size)
+  }
+
+  @Test @Config(sdk = [35]) fun missingAccessChoosesItsSettingsAndReportsUnresolvablePages() {
+    ShadowAlarmManager.setCanScheduleExactAlarms(true)
+    val manager = context.getSystemService(NotificationManager::class.java)
+    for ((kind, action) in listOf(
+      "notifications" to android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS,
+      "channel" to android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS,
+      "exact" to android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+    )) {
+      notifications.setNotificationsEnabled(kind != "notifications")
+      val channel = manager.getNotificationChannel(ReminderStore.CHANNEL)
+      channel.importance = if (kind == "channel") NotificationManager.IMPORTANCE_NONE else NotificationManager.IMPORTANCE_DEFAULT
+      manager.createNotificationChannel(channel)
+      ShadowAlarmManager.setCanScheduleExactAlarms(kind != "exact")
+      assertEquals(kind, ReminderStore.permission(context)["missing"])
+      assertEquals(false, ReminderStore.permission(context)["canOpen"])
+      val intent = ReminderStore.setting(context, kind)
+      assertEquals(action, intent.action)
+      if (kind == "exact") assertEquals("package:${context.packageName}", intent.data.toString())
+      else assertEquals(context.packageName, intent.getStringExtra(android.provider.Settings.EXTRA_APP_PACKAGE))
+      if (kind == "channel") assertEquals(ReminderStore.CHANNEL, intent.getStringExtra(android.provider.Settings.EXTRA_CHANNEL_ID))
+      val resolved = ResolveInfo().apply {
+        activityInfo = ActivityInfo().apply { packageName = "settings"; name = "SettingsActivity"; applicationInfo = context.applicationInfo }
+      }
+      shadowOf(context.packageManager).addResolveInfoForIntent(intent, resolved)
+      assertEquals(true, ReminderStore.permission(context)["canOpen"])
+      shadowOf(context.packageManager).removeResolveInfosForIntent(intent, "settings")
+      channel.importance = NotificationManager.IMPORTANCE_DEFAULT
+      manager.createNotificationChannel(channel)
+    }
+  }
+
 }
