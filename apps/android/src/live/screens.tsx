@@ -339,13 +339,7 @@ function LiveTop({
         contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", gap: 24 }}
       >
         {shortcuts.map((shortcut) => (
-          <Chip
-            key={shortcut.id}
-            {...shortcut}
-            label={
-              shortcut.id === "reminders" ? `${shortcut.label} ${shortcut.count}` : shortcut.label
-            }
-          />
+          <Chip key={shortcut.id} {...shortcut} />
         ))}
       </ScrollView>
     </View>
@@ -354,8 +348,8 @@ function LiveTop({
 
 /**
  * Live: every provider's channels together, opening on All of every country. Favourites, each
- * list and Find head it; Country is a sheet, and the status line names a provider still loading or
- * failed while what loaded shows at once.
+ * list, Reminders and Find head it; Country is a sheet, and the status line names a provider still
+ * loading or failed while what loaded shows at once.
  */
 export function LiveScreen() {
   useLocale();
@@ -377,13 +371,6 @@ export function LiveScreen() {
   const favourites = all.find((list) => list.id === FAVOURITES);
 
   const shortcuts = [
-    {
-      id: "reminders",
-      icon: "notifications-none" as const,
-      label: t("Reminders"),
-      count: String(reminderState.rows.length),
-      onPress: () => router.push("/reminders"),
-    },
     ...[...(favourites ? [favourites] : []), ...all.filter((list) => list.id !== FAVOURITES)].map(
       (list) => ({
         id: list.id,
@@ -393,6 +380,13 @@ export function LiveScreen() {
         onPress: () => openList(list),
       }),
     ),
+    {
+      id: "reminders",
+      icon: "notifications-none" as const,
+      label: t("Reminders"),
+      count: String(reminderState.rows.length),
+      onPress: () => router.push("/reminders"),
+    },
     {
       id: "find",
       icon: "search" as const,

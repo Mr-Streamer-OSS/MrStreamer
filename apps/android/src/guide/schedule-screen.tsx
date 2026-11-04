@@ -468,6 +468,7 @@ export function ProgrammeDetails({
           identity={identity}
           programme={value}
           channelName={guide.channel(key)?.title ?? ""}
+          inset={inset}
         />
       ) : null}
       {value?.description ? (

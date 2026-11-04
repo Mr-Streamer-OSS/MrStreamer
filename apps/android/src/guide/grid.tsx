@@ -1,4 +1,4 @@
-import { reminders, reminderId } from "./actions-reminders.ts";
+import { reminders, reminderId, reminderText } from "./actions-reminders.ts";
 import { formatDate } from "@mrstreamer/core/i18n";
 import { catalogue } from "@mrstreamer/mobile/language";
 import { router, useIsFocused, useLocalSearchParams, useSegments } from "expo-router";
@@ -974,6 +974,16 @@ const GridRow = memo(function GridRow({
             // The cell's own ground behind its words, so now's line passes under them.
             const ground = marked ? guideColors.current : guideColors.background;
 
+            // A set reminder's bell follows the cell's time.
+            const reminded = reminderState.rows.some(
+              (row) =>
+                row.id ===
+                reminderId(
+                  { sourceId: channel.sourceId, channelId: channel.channelId },
+                  item.start,
+                ),
+            );
+
             const title = {
               alignSelf: words < ROOM.title ? undefined : "flex-start",
               color: item.stop <= now ? guideColors.secondary : guideColors.text,
@@ -986,7 +996,7 @@ const GridRow = memo(function GridRow({
             return (
               <Press
                 key={item.start}
-                accessibilityLabel={`${channel.title}, ${programmeRange(item)}, ${item.title}${item.start <= now && item.stop > now ? `, ${t("Now")}` : ""}`}
+                accessibilityLabel={`${channel.title}, ${programmeRange(item)}, ${item.title}${item.start <= now && item.stop > now ? `, ${t("Now")}` : ""}${reminded ? `, ${reminderText("Reminder set")}` : ""}`}
                 accessibilityState={{ selected: marked }}
                 onPress={() => onProgramme(channel, item)}
                 style={{
@@ -1003,34 +1013,34 @@ const GridRow = memo(function GridRow({
                   backgroundColor: marked ? guideColors.current : undefined,
                 }}
               >
-                {reminderState.rows.some(
-                  (row) =>
-                    row.id ===
-                    reminderId(
-                      { sourceId: channel.sourceId, channelId: channel.channelId },
-                      item.start,
-                    ),
-                ) ? (
-                  <Icon name="notifications-active" size={14} />
-                ) : null}
                 {/* Too narrow for words, the cell is still a button with its whole label. */}
                 {words >= ROOM.time ? (
                   <>
                     <Text numberOfLines={1} style={title}>
                       {item.title}
                     </Text>
-                    <Text
-                      numberOfLines={1}
+                    <View
                       style={{
                         alignSelf: "flex-start",
-                        color: guideColors.secondary,
-                        fontSize: 12,
-                        lineHeight: 16,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
                         backgroundColor: ground,
                       }}
                     >
-                      {programmeRange(item)}
-                    </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          flexShrink: 1,
+                          color: guideColors.secondary,
+                          fontSize: 12,
+                          lineHeight: 16,
+                        }}
+                      >
+                        {programmeRange(item)}
+                      </Text>
+                      {reminded ? <Icon name="notifications" size={14} /> : null}
+                    </View>
                   </>
                 ) : words >= ROOM.title ? (
                   <Text numberOfLines={2} style={title}>

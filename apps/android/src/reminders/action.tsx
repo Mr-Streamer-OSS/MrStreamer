@@ -3,26 +3,74 @@ import { Text, View } from "react-native";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { currentLanguage } from "@mrstreamer/core/i18n";
 import { useStore } from "../platform/store.ts";
-import { t } from "../reminders/copy.ts";
-import { nativeReminders } from "../reminders/native.ts";
-import { reminderId } from "../reminders/rules.ts";
-import {
-  cancelReminder,
-  reminders,
-  requestReminderAccess,
-  saveReminder,
-} from "../reminders/runtime.ts";
+import { colors } from "../ui/theme.ts";
+import { t } from "./copy.ts";
+import { nativeReminders, type Permission } from "./native.ts";
+import { reminderId } from "./rules.ts";
+import { cancelReminder, reminders, requestReminderAccess, saveReminder } from "./runtime.ts";
 import type { ChannelIdentity } from "../guide/routes.ts";
-import { Button, Icon, Press, text } from "../guide/ui.tsx";
+import { Icon, Press, guideColors } from "../guide/ui.tsx";
+
+// Paper A's reminder action on a programme: Remind me, outlined, in the actions row beside Watch
+// live once that is wired; once set it reads Reminder set on #262626 and pressing it cancels.
+// A refusal or failure is one line under the actions, with Allow when Android has a setting to
+// open.
+
+/** Opens the Android setting `permission` names; a failure shows as `failed`. */
+export function Allow({
+  permission,
+  failed,
+}: {
+  permission: Permission;
+  failed: (message: string) => void;
+}) {
+  return (
+    <Press
+      onPress={() => {
+        void nativeReminders()
+          .openSetting(permission.missing)
+          .catch(() => failed(t("Couldn't update reminders. Try again.")));
+      }}
+      style={{
+        minHeight: 48,
+        flexShrink: 0,
+        justifyContent: "center",
+        paddingHorizontal: 12,
+        borderRadius: 24,
+        overflow: "hidden",
+      }}
+    >
+      <Text style={{ color: colors.text, fontSize: 15, lineHeight: 18, fontWeight: "700" }}>
+        {t("Allow")}
+      </Text>
+    </Press>
+  );
+}
+
+const refusal = (permission: Permission, title: string) =>
+  !permission.canOpen && permission.missing === "exact"
+    ? t("{title} reminder wasn't set: this phone doesn't let Mr. Streamer set exact alarms.", {
+        title,
+      })
+    : permission.missing === "exact"
+      ? t("{title} reminder wasn't set: Android has Alarms & reminders off for Mr. Streamer.", {
+          title,
+        })
+      : t("{title} reminder wasn't set: Android has notifications off for Mr. Streamer.", {
+          title,
+        });
 
 export function ReminderAction({
   identity,
   programme,
   channelName,
+  inset,
 }: {
   identity: ChannelIdentity;
   programme: Programme;
   channelName: string;
+  /** The programme's side padding: 16dp pushed, 24dp in a pane. */
+  inset: number;
 }) {
   const state = useStore(reminders);
   const id = reminderId(identity, programme.start);
@@ -31,6 +79,7 @@ export function ReminderAction({
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState(false);
   const permission = refused ? state.permission : null;
+  const started = t("{title} has started, so no reminder was set.", { title: programme.title });
 
   if (!saved && programme.start <= Date.now() && !error) return null;
 
@@ -48,7 +97,7 @@ export function ReminderAction({
       }
 
       if (programme.start <= Date.now()) {
-        setError(t("This programme has started"));
+        setError(started);
 
         return;
       }
@@ -62,7 +111,7 @@ export function ReminderAction({
       }
 
       if (programme.start <= Date.now()) {
-        setError(t("This programme has started"));
+        setError(started);
 
         return;
       }
@@ -79,59 +128,75 @@ export function ReminderAction({
         language: currentLanguage().locale.startsWith("nl") ? "nl" : "en",
       });
     } catch {
-      setError(
-        t(
-          !saved && programme.start <= Date.now()
-            ? "This programme has started"
-            : saved
-              ? "Couldn't cancel reminder. Try again."
-              : "Couldn't save. Try again.",
-        ),
-      );
+      setError(!saved && programme.start <= Date.now() ? started : t("Couldn't save. Try again."));
     } finally {
       setBusy(false);
     }
   };
 
+  const line = error ?? (permission?.missing ? refusal(permission, programme.title) : null);
+  const allow = permission?.missing && permission.canOpen ? permission : null;
+
   return (
-    <View style={{ paddingHorizontal: 16, paddingTop: 16 }}>
-      <Press
-        accessibilityLabel={saved ? t("Cancel reminder") : t("Remind me")}
-        disabled={busy}
-        onPress={() => {
-          void press();
-        }}
-        style={{ minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 }}
-      >
-        <Icon name={saved ? "notifications-active" : "notifications-none"} />
-        <Text style={text.heading}>{saved ? t("Reminder set") : t("Remind me")}</Text>
-      </Press>
-      {error ? (
-        <Text accessibilityLiveRegion="polite" style={text.note}>
-          {error}
-        </Text>
-      ) : null}
-      {permission?.missing ? (
-        <View>
-          <Text accessibilityLiveRegion="polite" style={text.note}>
-            {t(
-              permission.missing === "exact"
-                ? "Alarms & reminders is off"
-                : "Notifications are off",
-            )}
+    <>
+      <View style={{ flexDirection: "row", gap: 8, paddingTop: 20, paddingHorizontal: inset }}>
+        <Press
+          accessibilityLabel={saved ? t("Cancel reminder") : t("Remind me")}
+          accessibilityState={{ disabled: busy }}
+          disabled={busy}
+          onPress={() => {
+            void press();
+          }}
+          style={{
+            flexGrow: 1,
+            flexBasis: 0,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            minHeight: 48,
+            paddingHorizontal: 16,
+            borderRadius: 12,
+            overflow: "hidden",
+            ...(saved
+              ? { backgroundColor: guideColors.track }
+              : { borderWidth: 1, borderColor: guideColors.outline }),
+          }}
+        >
+          <Icon name={saved ? "notifications" : "notifications-none"} size={20} />
+          <Text
+            style={{
+              color: colors.text,
+              fontSize: 15,
+              lineHeight: 18,
+              fontWeight: saved ? "700" : "500",
+              flexShrink: 1,
+            }}
+          >
+            {saved ? t("Reminder set") : t("Remind me")}
           </Text>
-          {permission.canOpen ? (
-            <Button
-              label={t("Allow")}
-              onPress={() => {
-                void nativeReminders()
-                  .openSetting(permission.missing)
-                  .catch(() => setError(t("Couldn't update reminders. Try again.")));
-              }}
-            />
-          ) : null}
+        </Press>
+      </View>
+      {line ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingTop: allow ? 12 : 16,
+            paddingLeft: inset,
+            paddingRight: allow ? 4 : inset,
+          }}
+        >
+          <Text
+            accessibilityLiveRegion="polite"
+            style={{ flex: 1, color: colors.text, fontSize: 14, lineHeight: 20 }}
+          >
+            {line}
+          </Text>
+          {allow ? <Allow permission={allow} failed={setError} /> : null}
         </View>
       ) : null}
-    </View>
+    </>
   );
 }
