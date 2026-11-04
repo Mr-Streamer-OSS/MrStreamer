@@ -319,7 +319,7 @@ function Rows({
           icon={playing ? undefined : "check"}
           selected={!playing}
           label={t("Off")}
-          onPress={choose(() => player.media.text(null))}
+          onPress={choose(() => player.subtitles?.select(null) ?? player.media.text(null))}
         />
       ) : null}
       {type === "video" ? (
@@ -352,7 +352,7 @@ function Rows({
               type === "audio"
                 ? player.media.audio(track.id)
                 : type === "text"
-                  ? player.media.text(track.id)
+                  ? (player.subtitles?.select(track.id) ?? player.media.text(track.id))
                   : player.media.quality(track.id),
             )}
           />

@@ -1,3 +1,4 @@
+import { startSubtitles, readSubtitleTextSize, subtitleTextSize } from "../subtitles/runtime.ts";
 import { sources } from "../bootstrap/sources.ts";
 import { nativeCredentials } from "../platform/credentials.ts";
 import { nativePlayer } from "./native.ts";
@@ -35,3 +36,8 @@ sources.state.subscribe(() => {
   const saved = new Set(now.sources.map((source) => source.id));
   void player.release((hold) => hold.kind === "source" && !saved.has(hold.sourceId));
 });
+
+// Subtitle work follows playback even when Watch is closed or the offline route opens.
+player.subtitles = startSubtitles(player);
+
+if (readSubtitleTextSize()) void nativePlayer().setSubtitleSize?.(subtitleTextSize.get());
