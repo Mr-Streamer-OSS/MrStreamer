@@ -1,3 +1,6 @@
+import { fileSourceLabel } from "../downloads/file-source-label.ts";
+import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
+import { useSyncExternalStore } from "react";
 import { t as playerText } from "./copy.ts";
 import { t } from "@mrstreamer/core/i18n";
 import { router, usePathname } from "expo-router";
@@ -51,12 +54,15 @@ export function playPause(now: Playing): { icon: IconName; label: string; run: (
  * What plays, kept going between screens while Watch isn't showing: its picture, title, play or
  * pause and Close, which stops it. Tapping it opens Watch again. Paper A: over the navigation bar
  * on phones, and at the foot of the content beside the rail from 600dp. The root layout mounts it
- * over the destinations; it sets `footOverlay` to its height while it shows, so the screens under
+ * over destinations, Connect and Offline; it sets `footOverlay` to its height while it shows, so the screens under
  * it scroll behind it and their last row still clears it.
  */
 export function MiniPlayer() {
   const state = useStore(player.state);
-  const onWatch = usePathname() === "/watch";
+  useSyncExternalStore(onLanguageChange, currentLanguage);
+  const pathname = usePathname();
+  const onWatch = pathname === "/watch" || pathname === "/offline/play";
+  const standalone = pathname === "/connect" || pathname.startsWith("/offline");
   const insets = useSafeAreaInsets();
   const rail = layoutFor(useWindowDimensions().width) === "rail";
   const { focused, handlers } = useKeyboardFocus();
@@ -77,7 +83,7 @@ export function MiniPlayer() {
         ? t("Loading")
         : state.live
           ? "Live"
-          : null;
+          : fileSourceLabel(state.intent);
 
   return (
     <View
@@ -85,9 +91,9 @@ export function MiniPlayer() {
       style={{
         position: "absolute",
         // The rail is 88dp wide past the left inset (src/ui/navigation-bar.tsx).
-        left: rail ? 88 + insets.left : 0,
+        left: rail && !standalone ? 88 + insets.left : 0,
         right: 0,
-        bottom: rail ? insets.bottom : NAVIGATION_BAR + insets.bottom,
+        bottom: rail || standalone ? insets.bottom : NAVIGATION_BAR + insets.bottom,
         minHeight: HEIGHT,
         flexDirection: "row",
         alignItems: "center",

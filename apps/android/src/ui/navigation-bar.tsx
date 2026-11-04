@@ -55,8 +55,11 @@ export function NavigationRail({
   selected,
   onSelect,
   onOpen,
+  downloadsSelected = false,
   insets,
-}: Props & { onOpen: (screen: SharedScreen) => void }) {
+}: Props & { onOpen: (screen: SharedScreen) => void; downloadsSelected?: boolean }) {
+  const downloadsFocus = useKeyboardFocus();
+
   // Scrolls when the window is shorter than the rail, as a phone in landscape is (about 484dp of
   // rail against 360dp), and more so at large text, so Downloads and Settings stay reachable.
   return (
@@ -96,14 +99,30 @@ export function NavigationRail({
         ))}
       </View>
       <View style={{ flex: 1 }} />
-      <IconButton
-        icon="download"
-        label={t("Downloads")}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t("Downloads")}
+        accessibilityState={{ selected: downloadsSelected }}
         onPress={() => onOpen("downloads")}
-        color={colors.secondary}
-        width={56}
-        height={56}
-      />
+        {...downloadsFocus.handlers}
+        android_ripple={{ color: colors.ripple, borderless: true, radius: 28 }}
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: downloadsFocus.focused ? colors.focus : undefined,
+        }}
+      >
+        {/* White while Downloads is open over the destination, as Paper A's tablet frame. */}
+        <MaterialIcons
+          importantForAccessibility="no-hide-descendants"
+          name="download"
+          size={24}
+          color={downloadsSelected ? colors.text : colors.secondary}
+        />
+      </Pressable>
       <IconButton
         icon="settings"
         label={t("Settings")}

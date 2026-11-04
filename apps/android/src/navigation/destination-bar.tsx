@@ -1,6 +1,6 @@
 import { currentLanguage, onLanguageChange } from "@mrstreamer/core/i18n";
 import { useSyncExternalStore } from "react";
-import { router } from "expo-router";
+import { router, useSegments } from "expo-router";
 import type { BottomTabBarProps } from "expo-router/js-tabs";
 import { NavigationBar, NavigationRail } from "../ui/navigation-bar.tsx";
 import {
@@ -24,6 +24,7 @@ export function DestinationBar({
 }: BottomTabBarProps & { layout: NavigationLayout }) {
   useSyncExternalStore(onLanguageChange, currentLanguage);
   const focused = state.routes[state.index];
+  const downloadsSelected = useSegments().at(-1) === "downloads";
 
   const selected =
     DESTINATIONS.find(({ route }) => route === focused?.name)?.route ?? START_DESTINATION;
@@ -40,7 +41,11 @@ export function DestinationBar({
   const props = { destinations: DESTINATIONS, selected, onSelect, insets };
 
   return layout === "rail" ? (
-    <NavigationRail {...props} onOpen={(screen) => router.navigate(hrefOn(selected, screen))} />
+    <NavigationRail
+      {...props}
+      downloadsSelected={downloadsSelected}
+      onOpen={(screen) => router.navigate(hrefOn(selected, screen))}
+    />
   ) : (
     <NavigationBar {...props} />
   );

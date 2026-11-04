@@ -13,6 +13,7 @@ import type { Store } from "../src/platform/store.ts";
 // settings for them are checked here and their effect against the installed router.
 
 const scenario = vi.hoisted(() => ({
+  redirects: {} as Record<string, string | undefined>,
   width: 412,
   segments: ["(tabs)", "(live)"] as string[],
   asked: [] as string[],
@@ -29,6 +30,24 @@ const scenario = vi.hoisted(() => ({
   /** What the saved sources' store holds. */
   sources: { kind: "restoring" } as { kind: "restoring" } | { kind: "ready"; sources: object[] },
 }));
+
+// Native modules are supplied by Expo on-device; this DOM harness supplies their ports.
+// Keep the real Downloads runtime so rendering the root proves registration and cleanup.
+vi.mock("expo", () => ({
+  requireNativeModule: () => ({
+    restore: async () => JSON.stringify({ rows: [], free: 1 }),
+    snapshot: async () => JSON.stringify({ rows: [], free: 1 }),
+    blockSource: async () => {},
+  }),
+}));
+
+vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
+
+vi.mock("../src/player/instance.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+
+  return { player: { state: store({ kind: "idle" }), release: async () => [] } };
+});
 
 vi.mock("react-native", async () => {
   const { createElement: h } = await import("react");
@@ -68,6 +87,7 @@ vi.mock("react-native", async () => {
       );
 
   return {
+    AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
     View: view("div"),
     ScrollView: view("div"),
     Text: view("span"),
@@ -115,12 +135,26 @@ vi.mock("react-native-safe-area-context", async () => {
 });
 
 vi.mock("expo-router", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, Children, isValidElement } = await import("react");
 
   /** The root stack: a section for each screen its guards let through. */
   const Stack = Object.assign(({ children }: { children: ReactNode }) => children, {
-    Protected: ({ guard, children }: { guard: boolean; children: ReactNode }) =>
-      guard ? children : null,
+    Protected: ({
+      guard,
+      redirectTo,
+      children,
+    }: {
+      guard: boolean;
+      redirectTo?: string;
+      children: ReactNode;
+    }) => {
+      Children.forEach(children, (child) => {
+        if (isValidElement<{ name: string }>(child))
+          scenario.redirects[child.props.name] = redirectTo;
+      });
+
+      return guard ? children : null;
+    },
     Screen: ({ name }: { name: string }) => h("section", { "aria-label": name }),
   });
 
@@ -221,6 +255,7 @@ const { createRoot } = (await import(REACT_DOM)) as {
   };
 };
 
+const { libraryIntents } = await import("../src/library/intents.ts");
 const { default: RootLayout } = await import("../src/app/_layout.tsx");
 
 const { default: DestinationsLayout, unstable_settings } =
@@ -260,6 +295,8 @@ function pressBack() {
 }
 
 beforeEach(() => {
+  scenario.redirects = {};
+  scenario.sources = { kind: "restoring" };
   scenario.width = 412;
   scenario.segments = ["(tabs)", "(live)"];
   scenario.asked = [];
@@ -280,10 +317,16 @@ describe("the app", () => {
     expect(scenario.asked).toEqual(["restore"]);
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [] };
-    expect(screens()).toEqual(["connect"]);
+    expect(screens()).toEqual(["offline", "connect"]);
+    expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
+    expect(libraryIntents.state.get().download).toBeTypeOf("function");
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
-    expect(screens()).toEqual(["(tabs)", "watch"]);
+    expect(screens()).toEqual(["offline", "(tabs)", "watch"]);
+    expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
+    act(() => root?.unmount());
+    root = null;
+    expect(libraryIntents.state.get().download).toBeUndefined();
   });
 });
 

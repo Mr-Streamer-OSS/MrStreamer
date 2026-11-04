@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams, useSegments } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { FlatList, ScrollView, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -26,7 +26,7 @@ import * as storage from "../platform/storage.ts";
 import { browseCollection, type BrowseChoices, type BrowsedCollection } from "./browse.ts";
 import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
-import { libraryIntents, type MediaIdentity } from "./intents.ts";
+import { libraryDownloads, libraryIntents, type MediaIdentity } from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
 import {
   Artwork,
@@ -696,6 +696,19 @@ function mediaOf(title: Title, episode?: Episode, titleId = title.id): MediaIden
   };
 }
 
+const noDownloadSubscription = () => () => {};
+const noDownloadSnapshot = () => undefined;
+
+function useDownloadPresentation(media: MediaIdentity) {
+  const adapter = useStore(libraryDownloads.state);
+  useSyncExternalStore(
+    adapter?.subscribe ?? noDownloadSubscription,
+    adapter?.snapshot ?? noDownloadSnapshot,
+  );
+
+  return adapter?.read(media);
+}
+
 /** A movie's Play and Download, each only while its later owner handles it. */
 function MovieActions({
   title,
@@ -708,8 +721,10 @@ function MovieActions({
 }) {
   const { play, download } = useStore(libraryIntents.state);
 
-  if (!play && !download) return null;
   const media = mediaOf(title, undefined, titleId);
+  const saved = useDownloadPresentation(media);
+
+  if (!play && !download && !saved) return null;
 
   return (
     <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
@@ -729,7 +744,16 @@ function MovieActions({
           }
         />
       ) : null}
-      {download ? (
+      {saved ? (
+        <View style={{ gap: 4 }}>
+          <OutlinedButton
+            label={saved.label}
+            icon={saved.icon === "done" ? "play-arrow" : "download"}
+            onPress={saved.activate}
+          />
+          <Text style={{ color: colors.secondary }}>{saved.text}</Text>
+        </View>
+      ) : download ? (
         <OutlinedButton
           label={t("Download")}
           icon="download"
@@ -757,6 +781,7 @@ function EpisodeRow({
 }) {
   const { play, download } = useStore(libraryIntents.state);
   const media = () => mediaOf(title, episode, titleId);
+  const saved = useDownloadPresentation(media());
 
   return (
     <View
@@ -776,6 +801,7 @@ function EpisodeRow({
           {formatNumber(episode.number)}. {episode.title}
         </Text>
         {episode.duration ? <Text style={typeScale.small}>{runtime(episode.duration)}</Text> : null}
+        {saved ? <Text style={typeScale.small}>{saved.text}</Text> : null}
         {wide && episode.plot ? (
           <Text numberOfLines={2} style={typeScale.small}>
             {episode.plot}
@@ -798,9 +824,45 @@ function EpisodeRow({
           }
         />
       ) : null}
-      {download ? (
+      {saved ? (
+        <Press
+          label={`${saved.label}, S${episode.season} E${episode.number}, ${episode.title}`}
+          onPress={saved.activate}
+          style={{
+            minWidth: 48,
+            paddingHorizontal: 8,
+            height: 48,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {saved.icon === "stop" || saved.icon === "empty" ? (
+            <View
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                borderWidth: 2,
+                borderColor: colors.secondary,
+                borderTopColor: saved.progress > 0 ? colors.text : colors.secondary,
+                borderRightColor: saved.progress >= 0.25 ? colors.text : colors.secondary,
+                borderBottomColor: saved.progress >= 0.5 ? colors.text : colors.secondary,
+                borderLeftColor: saved.progress >= 0.75 ? colors.text : colors.secondary,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {saved.icon === "stop" ? <Icon name="stop" size={16} /> : null}
+            </View>
+          ) : saved.icon === "done" ? (
+            <Text style={{ color: colors.text }}>{saved.label}</Text>
+          ) : (
+            <Icon name="refresh" />
+          )}
+        </Press>
+      ) : download ? (
         <RowAction
-          icon="download"
+          icon="radio-button-unchecked"
           label={t("Download")}
           onPress={() => download({ action: "download", media: media() })}
         />

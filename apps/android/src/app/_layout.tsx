@@ -1,14 +1,17 @@
 import { DarkTheme, Stack, ThemeProvider } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { StatusBar } from "react-native";
 import { sources } from "../bootstrap/sources.ts";
+import { startDownloads } from "../downloads/runtime.ts";
+import { player } from "../player/instance.ts";
 import { MiniPlayer } from "../player/mini-player.tsx";
 import { useStore } from "../platform/store.ts";
 import { colors } from "../ui/theme.ts";
 
 // The app: Connect until a source is saved, then the destinations (`(tabs)`). Nothing shows until
 // the saved sources are read, so a returning viewer never sees Connect flash first. Watch opens
-// over the destinations, and the mini player keeps what plays in sight while Watch isn't showing.
+// over the destinations and hands notification links for files to OfflinePlay. Offline stays
+// available without a provider; a local copy also keeps its mini player while Connect is showing.
 
 const theme = {
   ...DarkTheme,
@@ -23,7 +26,26 @@ const theme = {
 
 export default function RootLayout() {
   const state = useStore(sources.state);
-  useEffect(() => void sources.restore(), []);
+
+  const localFile = useSyncExternalStore(player.state.subscribe, () => {
+    const state = player.state.get();
+
+    return state.kind === "playing" && state.intent.kind === "file";
+  });
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+
+    try {
+      stop = startDownloads();
+    } catch {
+      // A native Downloads startup failure must not prevent saved sources from restoring.
+    }
+
+    void sources.restore();
+
+    return stop;
+  }, []);
 
   if (state.kind === "restoring") return null;
   const signedIn = state.sources.length > 0;
@@ -34,15 +56,18 @@ export default function RootLayout() {
       <Stack
         screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
       >
-        <Stack.Protected guard={signedIn}>
+        <Stack.Screen name="offline" />
+        <Stack.Protected guard={signedIn} redirectTo="/connect">
           <Stack.Screen name="(tabs)" />
+        </Stack.Protected>
+        <Stack.Protected guard={signedIn || localFile} redirectTo="/connect">
           <Stack.Screen name="watch" options={{ animation: "fade" }} />
         </Stack.Protected>
-        <Stack.Protected guard={!signedIn}>
+        <Stack.Protected guard={!signedIn} redirectTo="/">
           <Stack.Screen name="connect" />
         </Stack.Protected>
       </Stack>
-      {signedIn ? <MiniPlayer /> : null}
+      {signedIn || localFile ? <MiniPlayer /> : null}
     </ThemeProvider>
   );
 }

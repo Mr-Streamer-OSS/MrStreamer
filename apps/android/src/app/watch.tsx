@@ -1,8 +1,18 @@
+import { fileSourceLabel } from "../downloads/file-source-label.ts";
+import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { t } from "@mrstreamer/core/i18n";
 import { router, useIsFocused, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import {
   AccessibilityInfo,
   AppState,
@@ -29,8 +39,8 @@ import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
 
 // Watch: what plays, full screen, as Paper A's Watch frame has it. It plays the intent in its
-// `play` param unless that already plays, so a Watch opened again from the mini player, a link or
-// a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
+// `play` param once per parameter change when focused and outside OfflinePlay. A Watch opened
+// again from the mini player, a link or a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
 // something else is shown, a media sheet is open or one of them has keyboard focus, and always
 // while TalkBack runs. Picture in picture shows the picture alone.
@@ -43,7 +53,8 @@ const CONTROL = "rgba(0, 0, 0, 0.5)";
 const HIDE_AFTER_MS = 4000;
 const JUMP_MS = 10_000;
 
-export default function Watch() {
+export default function Watch({ offline = false }: { offline?: boolean }) {
+  useSyncExternalStore(onLanguageChange, currentLanguage);
   useEffect(() => {
     player.media.reconcile();
 
@@ -64,30 +75,47 @@ export default function Watch() {
     };
   }, []);
   const { play } = useLocalSearchParams<{ play?: string }>();
-  const intent = useMemo(() => linkedIntent(play), [play]);
+  const focused = useIsFocused();
+  const played = useRef(false);
+  const handled = useRef<{ play: string | undefined } | null>(null);
+
+  const intent = useMemo(() => (offline ? null : linkedIntent(play)), [play, offline]);
+
   useEffect(() => {
+    if (!focused) return;
     const now = player.state.get();
 
+    if (!offline && !play && now.kind === "playing" && now.intent.kind === "file") {
+      router.replace("/offline/play");
+
+      return;
+    }
+
     if (intent) {
+      if (handled.current?.play === play) return;
+      handled.current = { play };
+
       if (now.kind === "idle" || intentKey(now.intent) !== intentKey(intent)) player.play(intent);
-    } else if (now.kind === "idle") leave();
-  }, [intent]);
+    } else {
+      handled.current = null;
+
+      if (now.kind === "idle" && !played.current) leave(offline);
+    }
+  }, [intent, focused, offline, play]);
 
   const state = useStore(player.state);
   // Stopped from elsewhere (a notification, Remove): nothing is left to watch. Only the showing
   // Watch leaves, so a screen opened over it is never the one taken away.
-  const focused = useIsFocused();
   const media = useStore(player.media.state);
   useEffect(() => {
     player.media.watch(focused);
 
     return () => player.media.watch(false);
   }, [focused]);
-  const played = useRef(false);
   useEffect(() => {
     if (state.kind === "playing") played.current = true;
-    else if (played.current && focused) leave();
-  }, [state.kind, focused]);
+    else if (played.current && focused) leave(offline);
+  }, [state.kind, focused, offline]);
   const insets = useSafeAreaInsets();
   const reader = useScreenReader();
   const [shown, setShown] = useState(true);
@@ -184,7 +212,7 @@ export default function Watch() {
                 backgroundImage: "linear-gradient(180deg, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0))",
               }}
             >
-              <IconButton icon="arrow-back" label={t("Back")} onPress={leave} />
+              <IconButton icon="arrow-back" label={t("Back")} onPress={() => leave(offline)} />
               <Text
                 accessibilityRole="header"
                 pointerEvents="none"
@@ -202,6 +230,11 @@ export default function Watch() {
               >
                 {state.kind === "playing" ? state.intent.title : ""}
               </Text>
+              {state.kind === "playing" && fileSourceLabel(state.intent) ? (
+                <Text style={{ color: DIM, fontSize: 14, paddingVertical: 13 }}>
+                  {fileSourceLabel(state.intent)}
+                </Text>
+              ) : null}
               {state.kind === "playing" && media.pipSupported ? (
                 <IconButton
                   icon="picture-in-picture"
@@ -254,12 +287,16 @@ export default function Watch() {
   );
 }
 
-/** Leaves Watch for the screen under it, or Live when a link opened the app here. */
-function leave() {
+/** Leaves for the screen under Watch, or Downloads for a file and Live for a provider link. */
+function leave(offline = false) {
+  const state = player.state.get();
   player.media.cancelNext();
 
   if (router.canGoBack()) router.back();
-  else router.replace("/");
+  else
+    router.replace(
+      offline || (state.kind === "playing" && state.intent.kind === "file") ? "/offline" : "/",
+    );
 }
 
 /** Whether TalkBack or another screen reader runs, as it turns on and off. */

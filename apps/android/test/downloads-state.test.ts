@@ -1,0 +1,157 @@
+import { expect, it, vi } from "vitest";
+import { downloadState, type TransferPort } from "../src/downloads/state.ts";
+
+/** A native port whose restore and snapshot both answer with `read`. */
+function port(read: () => Promise<string>): TransferPort {
+  return {
+    restore: read,
+    snapshot: read,
+    enqueue: vi.fn(),
+    cacheArtwork: vi.fn(),
+    command: vi.fn(),
+    path: vi.fn(),
+    filePath: vi.fn(),
+    blockSource: vi.fn(),
+  };
+}
+
+it("keeps the last queue after a failed read and allows a retry", async () => {
+  let broken = false;
+  const snapshot = { rows: [], free: 123 };
+
+  const read = async () => {
+    if (broken) throw new Error("read");
+
+    return JSON.stringify(snapshot);
+  };
+
+  const model = downloadState(port(read));
+  await model.refresh(true);
+  expect(model.state.get()).toMatchObject({ free: 123, error: null, loading: false });
+  broken = true;
+  await model.refresh();
+  expect(model.state.get()).toMatchObject({ free: 123, error: "read" });
+  broken = false;
+  await model.refresh();
+  expect(model.state.get().error).toBeNull();
+});
+
+it("reports a failed command and never publishes a successful save", async () => {
+  const read = vi.fn(async () => JSON.stringify({ rows: [], free: 123 }));
+
+  const model = downloadState(port(read));
+  await model.refresh();
+  read.mockClear();
+  await model.change(async () => {
+    throw new Error("write");
+  });
+  expect(model.state.get().error).toBe("write");
+  expect(read).not.toHaveBeenCalled();
+});
+
+it("rejects a damaged native snapshot rather than claiming an empty queue", async () => {
+  const read = async () => JSON.stringify({ rows: [{ state: "complete" }], free: 0 });
+
+  const model = downloadState(port(read));
+  await model.refresh(true);
+  expect(model.state.get().error).toBe("read");
+});
+
+it("keeps optional title facts and accepts ledgers created before facts were saved", async () => {
+  const old = {
+    id: "old",
+    key: "old",
+    sourceId: "source",
+    title: "Title",
+    sourceLabel: "Source",
+    kind: "movie",
+    mediaId: "one",
+    container: "mkv",
+    state: "queued",
+    bytes: 0,
+    total: 0,
+    reason: "",
+  };
+
+  const facts = {
+    ...old,
+    id: "new",
+    year: 2026,
+    duration: 2700,
+    season: 2,
+    episode: 3,
+    episodeName: "Crossing",
+  };
+
+  const read = async () => JSON.stringify({ rows: [old, facts], free: 10 });
+
+  const model = downloadState(port(read));
+  await model.refresh();
+  expect(model.state.get().error).toBeNull();
+  expect(model.state.get().rows).toEqual([old, facts]);
+});
+
+it("keeps mutation failure across polls, retries the action and avoids unchanged publications", async () => {
+  const model = downloadState(port(async () => JSON.stringify({ rows: [], free: 10 })));
+  await model.refresh();
+  const listener = vi.fn();
+  const unsubscribe = model.state.subscribe(listener);
+  await model.refresh();
+  expect(listener).not.toHaveBeenCalled();
+  let broken = true;
+
+  const operation = vi.fn(async () => {
+    if (broken) throw new Error("write");
+  });
+
+  await model.change(operation);
+  await model.refresh();
+  expect(model.state.get().error).toBe("write");
+  await model.change(async () => {});
+  expect(model.state.get().error).toBe("write");
+  broken = false;
+  await model.retry();
+  expect(operation).toHaveBeenCalledTimes(2);
+  expect(model.state.get().error).toBeNull();
+  unsubscribe();
+});
+
+it("accepts the row shape written by native add without exposing native authority", async () => {
+  const row = {
+    id: "id",
+    key: "key",
+    sourceId: "source",
+    sourceLabel: "Source",
+    title: "Title",
+    kind: "movie",
+    mediaId: "one",
+    container: "mkv",
+    state: "queued",
+    bytes: 0,
+    total: 0,
+    reason: "",
+    blocked: false,
+    binding: "native-only",
+    attempt: "native-only",
+    etag: "native-only",
+    modified: "native-only",
+  };
+
+  const model = downloadState(port(async () => JSON.stringify({ rows: [row], free: 10 })));
+  await model.refresh();
+  expect(model.state.get().error).toBeNull();
+  expect(model.state.get().rows[0]).not.toHaveProperty("binding");
+  expect(model.state.get().rows[0]).not.toHaveProperty("attempt");
+});
+
+it("restores process authority once and uses snapshots for later read retries", async () => {
+  const native = port(async () => JSON.stringify({ rows: [], free: 1 }));
+  const restore = vi.spyOn(native, "restore");
+  const snapshot = vi.spyOn(native, "snapshot");
+  const model = downloadState(native);
+  await model.refresh(true);
+  await model.refresh(true);
+  await model.retry();
+  expect(restore).toHaveBeenCalledOnce();
+  expect(snapshot).toHaveBeenCalledTimes(2);
+});
