@@ -78,6 +78,15 @@ class PlayerModule : Module() {
     AsyncFunction("setQuality") { attempt: String, trackId: String? -> owner().setQuality(attempt, trackId) }
       .runOnQueue(Queues.MAIN)
     AsyncFunction("setAudio") { attempt: String, trackId: String -> owner().setAudio(attempt, trackId) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setSubtitleInset") { fraction: Double -> owner().setSubtitleInset(fraction.toFloat()) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("setSubtitleSize") { size: Double -> owner().setSubtitleSize(size.toFloat()) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("unpackSubtitle") { bytes: List<Int> ->
+      try { Subtitles.unpack(bytes.map { it.toByte() }.toByteArray()).map { it.toInt() and 255 } }
+      catch (_: Exception) { throw IllegalArgumentException("Can't use this subtitle") }
+    }
+    AsyncFunction("setSidecar") { attempt: String, text: String, language: String, offset: Double, speed: Double ->
+      owner().setSidecar(attempt, text, language, offset, speed)
+    }.runOnQueue(Queues.MAIN)
     AsyncFunction("setText") { attempt: String, trackId: String? -> owner().setText(attempt, trackId) }.runOnQueue(Queues.MAIN)
     AsyncFunction("setNextAvailable") { attempt: String, available: Boolean ->
       val current = owner()

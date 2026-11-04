@@ -119,6 +119,30 @@ class PlayerOwnerTest {
   private fun untilPhase(attempt: String, vararg phases: Phase) =
     until { recorder.of(attempt).lastOrNull()?.phase in phases }
 
+  @Test fun downloadedTextUsesTheExistingOwnerAndReportsItsSelection() {
+    val owner = owner { it.setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO), FakeRenderer(C.TRACK_TYPE_TEXT)) }
+    val media = fixture("h264-aac.mp4")
+    try {
+      owner.admit(file("subtitle", media))
+      until { recorder.tracks["subtitle"]?.any { it.type == "video" } == true }
+      assertTrue(owner.pause("subtitle"))
+      assertTrue(owner.seek("subtitle", 500))
+      val text = "WEBVTT\n\n00:00:00.000 --> 00:00:03.000\nHello\n"
+      assertFalse(owner.setSidecar("other", text, "en", 0.0, 1.0))
+      assertTrue(owner.setSidecar("subtitle", text, "en", 0.1, 1.0))
+      until { recorder.tracks["subtitle"]?.any { it.id == Subtitles.TRACK && it.selected } == true }
+      assertFalse(owner.isPlaying)
+      assertEquals(500L, recorder.of("subtitle").last().positionMs)
+      assertTrue(owner.seek("subtitle", 1000))
+      assertTrue(owner.setText("subtitle", null))
+      until { recorder.tracks["subtitle"]?.none { it.type == "text" && it.selected } == true }
+      assertTrue(owner.setText("subtitle", Subtitles.TRACK))
+      until { recorder.tracks["subtitle"]?.any { it.id == Subtitles.TRACK && it.selected } == true }
+      owner.stop("subtitle")
+      until { recorder.releases.any { it.attempt == "subtitle" } }
+    } finally { media.delete() }
+  }
+
   @Test fun previewIsMutedAndNeverRequestsAudioFocus() {
     val player = TestExoPlayerBuilder(context)
       .setRenderers(FakeRenderer(C.TRACK_TYPE_VIDEO), FakeRenderer(C.TRACK_TYPE_AUDIO)).build()

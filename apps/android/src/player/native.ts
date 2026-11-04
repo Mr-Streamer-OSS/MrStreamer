@@ -118,6 +118,16 @@ export interface NativePlayer {
   /** A video track's id, or null to choose by itself again. */
   setQuality(attempt: string, trackId: string | null): Promise<boolean>;
   setAudio?(attempt: string, trackId: string): Promise<boolean>;
+  setSubtitleInset?(fraction: number): Promise<void>;
+  setSubtitleSize?(size: number): Promise<void>;
+  unpackSubtitle?(bytes: number[]): Promise<number[]>;
+  setSidecar?(
+    attempt: string,
+    text: string,
+    language: string,
+    offset: number,
+    speed: number,
+  ): Promise<boolean>;
   setText?(attempt: string, trackId: string | null): Promise<boolean>;
   setNextAvailable?(attempt: string, available: boolean): Promise<void>;
   setWatch?(visible: boolean): Promise<void>;
