@@ -2,8 +2,8 @@ import {
   DEFAULT_SUBTITLE_TIMING,
   SavedSubtitle,
   SubtitleTiming,
+  type DownloadedSubtitle,
 } from "@mrstreamer/contracts/online-subtitles";
-import type { DownloadedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { type } from "arktype";
 import { store } from "../platform/store.ts";
 import type { SecretStore } from "../guide/secrets.ts";
@@ -136,29 +136,27 @@ export function subtitleModel(options: {
 
     if (now.kind !== "playing" || now.attempt !== attempt || !value.subtitle) return false;
     applying = true;
+    let ok = false;
 
     try {
-      const ok = await native.setSidecar?.(
+      ok = !!(await native.setSidecar?.(
         now.attempt,
         asVtt(value.subtitle),
         value.subtitle.language,
         value.timing.offset,
         value.timing.speed,
-      );
-
-      if (attempt !== now.attempt) return false;
-
-      if (!ok) fail("timing");
-
-      return !!ok;
+      ));
     } catch {
-      if (attempt !== now.attempt) return false;
-      fail("timing");
-
-      return false;
+      // A refusal either way.
     } finally {
       applying = false;
     }
+
+    if (attempt !== now.attempt) return false;
+
+    if (!ok) fail("timing");
+
+    return ok;
   }
 
   async function restore() {

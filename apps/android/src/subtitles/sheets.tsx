@@ -29,20 +29,14 @@ import type { SubtitleFailureReason } from "./service.ts";
 /** The sheets Watch opens from the Subtitles sheet, in its one media sheet. */
 export type SubtitleSheet = "online" | "timing" | "frame-rate";
 
-const SUBTITLE_SHEETS: readonly string[] = [
-  "online",
-  "timing",
-  "frame-rate",
-] satisfies SubtitleSheet[];
-
-export const isSubtitleSheet = (sheet: string | null): sheet is SubtitleSheet =>
-  sheet !== null && SUBTITLE_SHEETS.includes(sheet);
-
 const TITLES = {
   online: "Online subtitles",
   timing: "Adjust timing",
   "frame-rate": "Frame rate",
 } as const satisfies Record<SubtitleSheet, string>;
+
+export const isSubtitleSheet = (sheet: string | null): sheet is SubtitleSheet =>
+  sheet !== null && Object.hasOwn(TITLES, sheet);
 
 export const subtitleSheetTitle = (sheet: SubtitleSheet) => t(TITLES[sheet]);
 
@@ -64,7 +58,8 @@ export function DownloadedRows({
   onOpen: (sheet: SubtitleSheet) => void;
 }) {
   const state = useStore(model.state);
-  const subtitle = state.saved?.subtitle;
+  const { saved } = state;
+  const subtitle = saved?.subtitle;
 
   if (!subtitle && !state.title) return null;
 
@@ -92,11 +87,11 @@ export function DownloadedRows({
           }}
         />
       ) : null}
-      {subtitle && state.shown && state.saved ? (
+      {saved?.subtitle && state.shown ? (
         <SheetRow
           icon="timer"
           label={t("Adjust timing")}
-          trailing={timingName(state.saved.timing)}
+          trailing={timingName(saved.timing)}
           onPress={() => onOpen("timing")}
         />
       ) : null}
@@ -588,7 +583,7 @@ export function KeyDialog({
 }
 
 /** "Shown 0.4 s later · 25 → 23.976 fps", or "Original timing" when neither changed. */
-export function timingName(timing: SubtitleTiming): string {
+function timingName(timing: SubtitleTiming): string {
   const offset =
     timing.offset < 0
       ? t("Shown {seconds} s earlier", { seconds: -timing.offset })

@@ -159,26 +159,17 @@ export function startSubtitles(player: PlayerOwner): SubtitleModel {
 
 const TextSize = type("0.5 <= number <= 2");
 export const subtitleTextSize = store(1);
-export const subtitleTextSizeError = store(false);
 
 export function readSubtitleTextSize() {
   try {
     const raw = preferences().read("subtitle-size.json");
     const parsed = raw === null ? 1 : TextSize(raw);
 
-    if (parsed instanceof type.errors) {
-      subtitleTextSizeError.set(true);
-
-      return false;
-    }
-
-    subtitleTextSizeError.set(false);
+    if (parsed instanceof type.errors) return false;
     subtitleTextSize.set(parsed);
 
     return true;
   } catch {
-    subtitleTextSizeError.set(true);
-
     return false;
   }
 }
@@ -186,7 +177,6 @@ export function readSubtitleTextSize() {
 export function setSubtitleTextSize(value: number) {
   if (TextSize(value) instanceof type.errors || !preferences().write("subtitle-size.json", value))
     return false;
-  subtitleTextSizeError.set(false);
   subtitleTextSize.set(value);
   void nativePlayer().setSubtitleSize?.(value);
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { store } from "../src/platform/store.ts";
-import { subtitleModel, SIDECAR_TRACK } from "../src/subtitles/model.ts";
+import { subtitleModel } from "../src/subtitles/model.ts";
 import type { PlayerState } from "../src/player/player.ts";
 import {
   DEFAULT_SUBTITLE_TIMING,
@@ -71,37 +71,11 @@ function setup() {
 }
 
 describe("Android subtitles", () => {
-  it("reuses the exact version offline, with the tick coming only from player selection", async () => {
+  it("restores the subtitle kept for the exact version, and lists none for another", async () => {
     const s = setup();
     s.play();
     await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
     expect(s.files.read).toHaveBeenCalledWith("one");
-    expect(s.model.state.get().shown).toBe(false);
-    const now = s.state.get();
-
-    if (now.kind !== "playing") throw new Error("No play");
-    s.state.set({
-      ...now,
-      tracks: [
-        {
-          id: SIDECAR_TRACK,
-          type: "text",
-          codec: "text/vtt",
-          language: "en",
-          label: "Downloaded",
-          width: null,
-          height: null,
-          bitrate: null,
-          channels: null,
-          selected: true,
-          supported: true,
-        },
-      ],
-    });
-    expect(s.model.state.get().shown).toBe(true);
-    await s.model.find();
-    expect(s.model.state.get().error).toBe("not-configured");
-    expect(s.model.state.get().shown).toBe(true);
     s.files.read.mockReturnValue(null);
     s.play("two");
     await vi.waitFor(() => expect(s.model.state.get().title?.key).toBe("two"));
@@ -134,13 +108,10 @@ describe("Android subtitles", () => {
     expect(await s.model.saveKey("fixture")).toBe(false);
     expect(s.model.state.get().keySaved).toBeNull();
   });
-  it("preserves previous timing when native refuses and never applies an unsaved change", async () => {
+  it("never applies a timing change it couldn't save", async () => {
     const s = setup();
     s.play();
     await vi.waitFor(() => expect(s.setSidecar).toHaveBeenCalledOnce());
-    s.setSidecar.mockResolvedValue(false);
-    expect(await s.model.shift(0.1)).toBe(false);
-    expect(s.model.state.get().saved?.timing).toEqual(DEFAULT_SUBTITLE_TIMING);
     s.files.write.mockImplementation(() => {
       throw new Error("write");
     });

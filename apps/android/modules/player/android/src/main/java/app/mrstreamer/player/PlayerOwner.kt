@@ -12,18 +12,19 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ByteArrayDataSource
 import androidx.media3.datasource.DataSource
-import androidx.media3.exoplayer.source.SingleSampleMediaSource
-import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.FileDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import java.io.File
 
 /** Where an attempt's media comes from: a saved source's provider, or a file on this phone. */
@@ -141,18 +142,8 @@ class PlayerOwner(
 
   private val main = Handler(player.applicationLooper)
   private var current: Current? = null
-  private var subtitleInset = 0.08f
-  fun setSubtitleInset(fraction: Float) {
-    if (!fraction.isFinite() || fraction !in 0f..0.8f) return
-    subtitleInset = fraction
-    views.forEach { it.subtitleView?.setBottomPaddingFraction(fraction) }
-  }
+  private var subtitleInset = SubtitleView.DEFAULT_BOTTOM_PADDING_FRACTION
   private var subtitleSize = 1f
-  fun setSubtitleSize(size: Float) {
-    if (!size.isFinite() || size !in 0.5f..2f) return
-    subtitleSize = size
-    views.forEach { it.subtitleView?.setFractionalTextSize(0.0533f * size) }
-  }
   private val views = ArrayDeque<PlayerView>()
   private val tick = object : Runnable {
     override fun run() {
@@ -174,7 +165,7 @@ class PlayerOwner(
           if (events.contains(Player.EVENT_TRACKS_CHANGED)) {
             val now = current
             if (now?.pickSidecar == true) {
-              val group = player.currentTracks.groups.firstOrNull { it.getTrackFormat(0).id?.substringAfterLast(':') == Subtitles.TRACK }
+              val group = player.currentTracks.groups.firstOrNull { it.getTrackFormat(0).isSidecar }
               if (group != null) {
                 now.pickSidecar = false
                 player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0)).build()
@@ -352,7 +343,7 @@ class PlayerOwner(
     if (current?.admission?.attempt != attempt) return false
     if (type == C.TRACK_TYPE_TEXT) current?.pickSidecar = false
     if (trackId == Subtitles.TRACK) {
-      val index = player.currentTracks.groups.indexOfFirst { it.getTrackFormat(0).id?.substringAfterLast(':') == Subtitles.TRACK }
+      val index = player.currentTracks.groups.indexOfFirst { it.getTrackFormat(0).isSidecar }
       return if (index < 0) false else selectTrack(attempt, type, "$index:0")
     }
     if (trackId == null) {
@@ -395,10 +386,28 @@ class PlayerOwner(
     current?.let { stop(it.admission.attempt) }
   }
 
+  /** Lifts cues by [fraction] of the picture's height, as the timing sheet does while it shows. */
+  fun setSubtitleInset(fraction: Float) {
+    if (!fraction.isFinite() || fraction !in 0f..0.8f) return
+    subtitleInset = fraction
+    views.forEach(::styleSubtitles)
+  }
+
+  /** Scales cues by [size] of Media3's default text size. */
+  fun setSubtitleSize(size: Float) {
+    if (!size.isFinite() || size !in 0.5f..2f) return
+    subtitleSize = size
+    views.forEach(::styleSubtitles)
+  }
+
+  private fun styleSubtitles(view: PlayerView) {
+    view.subtitleView?.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subtitleSize)
+    view.subtitleView?.setBottomPaddingFraction(subtitleInset)
+  }
+
   /** Shows the picture in [view], the newest of those attached. */
   fun attach(view: PlayerView) {
-    view.subtitleView?.setFractionalTextSize(0.0533f * subtitleSize)
-    view.subtitleView?.setBottomPaddingFraction(subtitleInset)
+    styleSubtitles(view)
     val previous = views.lastOrNull()
     views.remove(view)
     views.addLast(view)
@@ -526,7 +535,7 @@ class PlayerOwner(
         (0 until group.length).map { index ->
           val format: Format = group.getTrackFormat(index)
           Track(
-            id = if (format.id?.substringAfterLast(':') == Subtitles.TRACK) Subtitles.TRACK else "$groupIndex:$index",
+            id = if (format.isSidecar) Subtitles.TRACK else "$groupIndex:$index",
             type = type,
             codec = format.sampleMimeType,
             language = format.language?.takeIf { it != C.LANGUAGE_UNDETERMINED },

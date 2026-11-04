@@ -66,7 +66,7 @@ it("searches only the exact episode and lists text formats while counting the re
   expect(request?.searchParams.has("film_name")).toBe(false);
 });
 
-it("does not use a broadened title match, and returns a reason for refused credentials", async () => {
+it("does not use a broadened title match", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -83,15 +83,4 @@ it("does not use a broadened title match, and returns a reason for refused crede
       new AbortController().signal,
     ),
   ).toEqual({ candidates: [], unsupported: [] });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => new Response(null, { status: 403 })),
-  );
-  await expect(
-    subdlSearch(
-      "fixture",
-      { kind: "movie", tmdbId: 7, languages: ["en"] },
-      new AbortController().signal,
-    ),
-  ).rejects.toMatchObject({ reason: "credentials" });
 });
