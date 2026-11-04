@@ -7,6 +7,8 @@ import expo.modules.kotlin.modules.ModuleDefinition
 class RemindersModule : Module() {
   private val context get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
   private var pendingTap: String? = null
+
+  /** The notification tap that opened or resumed the app, handed to JS once. */
   private fun takeTap(): String? = synchronized(this) {
     val intent = appContext.currentActivity?.intent
     val json = pendingTap ?: intent?.getStringExtra("reminder")
@@ -14,19 +16,17 @@ class RemindersModule : Module() {
     intent?.removeExtra("reminder")
     json
   }
+
   override fun definition() = ModuleDefinition {
     Name("ProgrammeReminders")
     Events("tap")
     OnNewIntent { intent ->
-      intent.getStringExtra("reminder")?.let {
-        synchronized(this@RemindersModule) { pendingTap = it }
-        appContext.currentActivity?.intent = intent
-        sendEvent("tap", mapOf("json" to it))
-      }
+      val json = intent.getStringExtra("reminder") ?: return@OnNewIntent
+      synchronized(this@RemindersModule) { pendingTap = json }
+      appContext.currentActivity?.intent = intent
+      sendEvent("tap", mapOf("json" to json))
     }
-    AsyncFunction("takeTap") {
-      takeTap()
-    }
+    AsyncFunction("takeTap") { takeTap() }
     AsyncFunction("list") { ReminderStore.list(context) }
     AsyncFunction("permission") { ReminderStore.permission(context) }
     AsyncFunction("openSetting") { kind: String -> context.startActivity(ReminderStore.setting(context, kind)) }

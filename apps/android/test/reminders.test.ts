@@ -15,7 +15,7 @@ const saved = {
 };
 
 describe("saved programme reminders", () => {
-  it("retains unknown reads, disables changed and missing programmes, removes ended and removed providers", () => {
+  it("reconciles saved reminders with the guide and their providers", () => {
     expect(reconcile(saved, undefined, true, 100)).toEqual({ id: "one", status: "scheduled" });
     expect(reconcile(saved, { start: 200, stop: 400, title: "Film" }, true, 100)).toEqual({
       id: "one",
@@ -25,8 +25,6 @@ describe("saved programme reminders", () => {
     expect(reconcile(saved, null, true, 100)).toEqual({ id: "one", status: "missing" });
     expect(reconcile(saved, undefined, false, 100)).toEqual({ id: "one", remove: true });
     expect(reconcile(saved, undefined, true, 400)).toEqual({ id: "one", remove: true });
-  });
-  it("retains an existing refusal during failed guide reads and restores an unchanged programme", () => {
     expect(reconcile({ ...saved, status: "missing" }, undefined, true, 100)).toEqual({
       id: "one",
       status: "missing",

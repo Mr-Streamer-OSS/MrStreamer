@@ -4,19 +4,21 @@ import android.app.AlarmManager
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ResolveInfo
+import android.app.Notification
 import android.content.pm.ActivityInfo
-import org.junit.Before
+import android.content.pm.ResolveInfo
 import org.json.JSONArray
 import org.json.JSONObject
-import org.junit.Assert.*
 import org.junit.After
+import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowAlarmManager
 import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
@@ -67,7 +69,7 @@ class RemindersTest {
     ReminderStore.save(context, row("ended", now + 1000, now + 30000))
     ReminderStore.recover(context, now + 90000)
     assertEquals(2, notifications.allNotifications.size)
-    assertEquals("Started 0 min ago on Test channel", notifications.allNotifications.first().extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString())
+    assertEquals("Started 0 min ago on Test channel", notifications.allNotifications.first().extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     assertEquals(2, JSONArray(ReminderStore.list(context)).length())
     context.getSystemService(NotificationManager::class.java).cancelAll()
     ReminderStore.recover(context, now + 90000)
@@ -75,34 +77,25 @@ class RemindersTest {
     assertEquals(0, alarm.scheduledAlarms.size)
   }
 
-  @Test fun blockedNotificationsRefuseNewRemindersButRetainSavedOnes() {
+  /** Each access, notifications then exact alarms: off refuses new saves and disarms saved ones
+   * without dropping them; granted again re-arms them. */
+  @Test @Config(sdk = [35]) fun missingAccessRefusesNewRemindersAndRetainsSavedOnes() {
     val now = System.currentTimeMillis()
+    ShadowAlarmManager.setCanScheduleExactAlarms(true)
     ReminderStore.save(context, row("saved", now + 60000, now + 600000))
-    notifications.setNotificationsEnabled(false)
-    assertEquals("notifications", ReminderStore.permission(context)["missing"])
-    assertThrows(IllegalStateException::class.java) { ReminderStore.save(context, row("refused", now + 60000, now + 600000)) }
-    ReminderStore.recover(context)
-    assertEquals(1, JSONArray(ReminderStore.list(context)).length())
-    assertEquals(0, alarm.scheduledAlarms.size)
-    notifications.setNotificationsEnabled(true)
-    ReminderStore.recover(context)
-    assertEquals(1, alarm.scheduledAlarms.size)
+    for ((missing, allowed) in listOf<Pair<String, (Boolean) -> Unit>>(
+      "notifications" to { notifications.setNotificationsEnabled(it) },
+      "exact" to { ShadowAlarmManager.setCanScheduleExactAlarms(it) },
+    )) {
+      allowed(false)
+      assertEquals(missing, ReminderStore.permission(context)["missing"])
+      assertThrows(IllegalStateException::class.java) { ReminderStore.save(context, row("refused", now + 60000, now + 600000)) }
+      ReminderStore.recover(context)
+      assertEquals(1, JSONArray(ReminderStore.list(context)).length())
+      assertEquals(0, alarm.scheduledAlarms.size)
+      allowed(true)
+      ReminderStore.recover(context)
+      assertEquals(1, alarm.scheduledAlarms.size)
+    }
   }
-  @Test @Config(sdk = [35]) fun exactAccessRefusesNewSavesAndRecoversRetainedReminders() {
-    val now = System.currentTimeMillis()
-    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(false)
-    assertEquals("exact", ReminderStore.permission(context)["missing"])
-    assertThrows(IllegalStateException::class.java) { ReminderStore.save(context, row("refused", now + 60000, now + 600000)) }
-    assertEquals(0, JSONArray(ReminderStore.list(context)).length())
-    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true)
-    ReminderStore.save(context, row("saved", now + 60000, now + 600000))
-    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(false)
-    ReminderStore.recover(context)
-    assertEquals(1, JSONArray(ReminderStore.list(context)).length())
-    assertEquals(0, alarm.scheduledAlarms.size)
-    org.robolectric.shadows.ShadowAlarmManager.setCanScheduleExactAlarms(true)
-    ReminderStore.recover(context)
-    assertEquals(1, alarm.scheduledAlarms.size)
-  }
-
 }

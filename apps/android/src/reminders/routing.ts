@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { programmeHref } from "../guide/routes.ts";
 import { nativeReminders } from "./native.ts";
 
-export function parseReminderTap(json: string) {
+function parseReminderTap(json: string) {
   try {
     const value: unknown = JSON.parse(json);
 

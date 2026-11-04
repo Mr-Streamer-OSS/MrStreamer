@@ -47,18 +47,20 @@ export function Allow({
   );
 }
 
-const refusal = (permission: Permission, title: string) =>
-  !permission.canOpen && permission.missing === "exact"
-    ? t("{title} reminder wasn't set: this phone doesn't let Mr. Streamer set exact alarms.", {
+function refusal(permission: Permission, title: string) {
+  if (permission.missing !== "exact")
+    return t("{title} reminder wasn't set: Android has notifications off for Mr. Streamer.", {
+      title,
+    });
+
+  return permission.canOpen
+    ? t("{title} reminder wasn't set: Android has Alarms & reminders off for Mr. Streamer.", {
         title,
       })
-    : permission.missing === "exact"
-      ? t("{title} reminder wasn't set: Android has Alarms & reminders off for Mr. Streamer.", {
-          title,
-        })
-      : t("{title} reminder wasn't set: Android has notifications off for Mr. Streamer.", {
-          title,
-        });
+    : t("{title} reminder wasn't set: this phone doesn't let Mr. Streamer set exact alarms.", {
+        title,
+      });
+}
 
 export function ReminderAction({
   identity,

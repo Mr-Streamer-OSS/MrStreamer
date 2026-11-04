@@ -873,7 +873,8 @@ const GridRow = memo(function GridRow({
   onSchedule: (channel: GridChannel) => void;
   onProgramme: (channel: GridChannel, p: ScheduleItem) => void;
 }) {
-  const reminderState = useStore(reminders);
+  const reminderRows = useStore(reminders).rows;
+  const remindedIds = useMemo(() => new Set(reminderRows.map((row) => row.id)), [reminderRows]);
   useGuideStatus();
   useLocale();
   const { read, retry } = useGridRow(channel.key, day, active);
@@ -975,14 +976,7 @@ const GridRow = memo(function GridRow({
             const ground = marked ? guideColors.current : guideColors.background;
 
             // A set reminder's bell follows the cell's time.
-            const reminded = reminderState.rows.some(
-              (row) =>
-                row.id ===
-                reminderId(
-                  { sourceId: channel.sourceId, channelId: channel.channelId },
-                  item.start,
-                ),
-            );
+            const reminded = remindedIds.has(reminderId(channel, item.start));
 
             const title = {
               alignSelf: words < ROOM.title ? undefined : "flex-start",

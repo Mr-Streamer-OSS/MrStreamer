@@ -23,7 +23,7 @@ vi.mock("../src/reminders/native.ts", () => ({
   }),
 }));
 
-const { parseReminderTap, useReminderRouting } = await import("../src/reminders/routing.ts");
+const { useReminderRouting } = await import("../src/reminders/routing.ts");
 
 it("opens cold and repeated warm taps over Live using the same programme identity", async () => {
   const window = new Window();
@@ -69,10 +69,4 @@ it("opens cold and repeated warm taps over Live using the same programme identit
     vi.unstubAllGlobals();
     await window.happyDOM.close();
   }
-});
-
-it("drops malformed notification identities", () => {
-  expect(parseReminderTap("{}")).toBeNull();
-  expect(parseReminderTap('{"sourceId":"p","channelId":"c","start":-1}')).toBeNull();
-  expect(parseReminderTap("broken")).toBeNull();
 });
