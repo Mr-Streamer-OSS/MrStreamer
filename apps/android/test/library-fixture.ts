@@ -79,7 +79,6 @@ export function fixture(metadata?: MetadataPort, named = false) {
   const source = {
     id: "source",
     label: "Test provider",
-    reader: provider,
     catalogue: () => provider.onDemandCatalogue(),
     details: (kind: "movie" | "series", id: string) =>
       kind === "movie" ? provider.movieDetails(id) : provider.seriesDetails(id),
