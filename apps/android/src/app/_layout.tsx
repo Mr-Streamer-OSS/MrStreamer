@@ -13,8 +13,6 @@ import { colors } from "../ui/theme.ts";
 // over the destinations and hands notification links for files to OfflinePlay. Offline stays
 // available without a provider; a local copy also keeps its mini player while Connect is showing.
 
-export const unstable_settings = { anchor: "connect" };
-
 const theme = {
   ...DarkTheme,
   colors: {
@@ -41,7 +39,7 @@ export default function RootLayout() {
     try {
       stop = startDownloads();
     } catch {
-      // Downloads reports its native read failure when opened; sources still restore.
+      // A native Downloads startup failure must not prevent saved sources from restoring.
     }
 
     void sources.restore();

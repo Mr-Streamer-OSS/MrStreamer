@@ -1,6 +1,6 @@
 import { downloads } from "../../downloads/runtime.ts";
 import { t } from "../../downloads/copy.ts";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { Alert } from "react-native";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
@@ -20,11 +20,19 @@ export default function OfflinePlay() {
 
   const local = state.kind === "playing" && state.intent.kind === "file";
   const shown = useRef(local);
+  const exited = useRef(false);
+  const focused = useIsFocused();
+  const refused = !local && (!shown.current || state.kind === "playing");
 
   if (local) shown.current = true;
   useEffect(() => {
-    if (!shown.current) router.replace("/offline");
-  }, [local]);
+    if (local) exited.current = false;
+
+    if (focused && refused && !exited.current) {
+      exited.current = true;
+      router.replace("/offline");
+    }
+  }, [local, focused, refused]);
 
   const failed =
     state.kind === "playing" &&
@@ -55,7 +63,7 @@ export default function OfflinePlay() {
     }
   }
 
-  if (!shown.current) return null;
+  if (refused) return null;
 
   return (
     <>

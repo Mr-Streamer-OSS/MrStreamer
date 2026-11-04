@@ -39,7 +39,7 @@ import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
 
 // Watch: what plays, full screen, as Paper A's Watch frame has it. It plays the intent in its
-// `play` param when focused and outside OfflinePlay, unless that already plays. A Watch opened
+// `play` param once per parameter change when focused and outside OfflinePlay. A Watch opened
 // again from the mini player, a link or a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
 // something else is shown, a media sheet is open or one of them has keyboard focus, and always
@@ -77,6 +77,7 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
   const { play } = useLocalSearchParams<{ play?: string }>();
   const focused = useIsFocused();
   const played = useRef(false);
+  const handled = useRef<{ play: string | undefined } | null>(null);
 
   const intent = useMemo(() => (offline ? null : linkedIntent(play)), [play, offline]);
 
@@ -91,8 +92,15 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
     }
 
     if (intent) {
+      if (handled.current?.play === play) return;
+      handled.current = { play };
+
       if (now.kind === "idle" || intentKey(now.intent) !== intentKey(intent)) player.play(intent);
-    } else if (now.kind === "idle" && !played.current) leave(offline);
+    } else {
+      handled.current = null;
+
+      if (now.kind === "idle" && !played.current) leave(offline);
+    }
   }, [intent, focused, offline, play]);
 
   const state = useStore(player.state);

@@ -13,6 +13,7 @@ import type { Store } from "../src/platform/store.ts";
 // settings for them are checked here and their effect against the installed router.
 
 const scenario = vi.hoisted(() => ({
+  redirects: {} as Record<string, string | undefined>,
   width: 412,
   segments: ["(tabs)", "(live)"] as string[],
   asked: [] as string[],
@@ -134,12 +135,26 @@ vi.mock("react-native-safe-area-context", async () => {
 });
 
 vi.mock("expo-router", async () => {
-  const { createElement: h } = await import("react");
+  const { createElement: h, Children, isValidElement } = await import("react");
 
   /** The root stack: a section for each screen its guards let through. */
   const Stack = Object.assign(({ children }: { children: ReactNode }) => children, {
-    Protected: ({ guard, children }: { guard: boolean; children: ReactNode }) =>
-      guard ? children : null,
+    Protected: ({
+      guard,
+      redirectTo,
+      children,
+    }: {
+      guard: boolean;
+      redirectTo?: string;
+      children: ReactNode;
+    }) => {
+      Children.forEach(children, (child) => {
+        if (isValidElement<{ name: string }>(child))
+          scenario.redirects[child.props.name] = redirectTo;
+      });
+
+      return guard ? children : null;
+    },
     Screen: ({ name }: { name: string }) => h("section", { "aria-label": name }),
   });
 
@@ -280,6 +295,8 @@ function pressBack() {
 }
 
 beforeEach(() => {
+  scenario.redirects = {};
+  scenario.sources = { kind: "restoring" };
   scenario.width = 412;
   scenario.segments = ["(tabs)", "(live)"];
   scenario.asked = [];
@@ -301,10 +318,12 @@ describe("the app", () => {
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [] };
     expect(screens()).toEqual(["offline", "connect"]);
+    expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
     expect(libraryIntents.state.get().download).toBeTypeOf("function");
     act(() => root?.unmount());
     scenario.sources = { kind: "ready", sources: [{}] };
     expect(screens()).toEqual(["offline", "(tabs)", "watch"]);
+    expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
     act(() => root?.unmount());
     root = null;
     expect(libraryIntents.state.get().download).toBeUndefined();

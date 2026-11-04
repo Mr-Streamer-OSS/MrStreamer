@@ -19,6 +19,7 @@ const scenario = vi.hoisted(() => ({
   focused: true,
   canGoBack: true,
   rootRenders: 0,
+  redirects: {} as Record<string, string | undefined>,
   restore: vi.fn(async () => {}),
   start: vi.fn(() => () => {}),
 }));
@@ -80,7 +81,7 @@ vi.mock("react-native-safe-area-context", () => ({
 }));
 
 vi.mock("expo-router", async () => {
-  const { createElement: h, Fragment } = await import("react");
+  const { createElement: h, Fragment, Children, isValidElement } = await import("react");
 
   const Stack = Object.assign(
     ({ children }: { children?: ReactNode }) => {
@@ -90,8 +91,22 @@ vi.mock("expo-router", async () => {
     },
     {
       Screen: ({ name }: { name: string }) => h("span", { "data-route": name }),
-      Protected: ({ guard, children }: { guard: boolean; children?: ReactNode }) =>
-        guard ? h(Fragment, null, children) : null,
+      Protected: ({
+        guard,
+        redirectTo,
+        children,
+      }: {
+        guard: boolean;
+        redirectTo?: string;
+        children?: ReactNode;
+      }) => {
+        Children.forEach(children, (child) => {
+          if (isValidElement<{ name: string }>(child))
+            scenario.redirects[child.props.name] = redirectTo;
+        });
+
+        return guard ? h(Fragment, null, children) : null;
+      },
     },
   );
 
@@ -130,6 +145,7 @@ vi.mock("../src/player/instance.ts", async () => {
           error: null,
           next: null,
         }),
+        enterPip: vi.fn(),
         reconcile: vi.fn(),
         cancelNext: vi.fn(),
         watch: vi.fn(),
@@ -218,6 +234,7 @@ beforeEach(() => {
   scenario.focused = true;
   scenario.canGoBack = true;
   scenario.rootRenders = 0;
+  scenario.redirects = {};
   player.media.state.set({
     tracksKnown: false,
     automatic: true,
@@ -266,7 +283,8 @@ vi.mock("../src/downloads/runtime.ts", async () => {
   return { startDownloads: scenario.start, downloads: () => owner };
 });
 
-const { default: RootLayout, unstable_settings } = await import("../src/app/_layout.tsx");
+const rootModule = await import("../src/app/_layout.tsx");
+const { default: RootLayout } = rootModule;
 
 function renderRoot() {
   sourceState.set(
@@ -297,7 +315,7 @@ it("starts downloads during cold restore and keeps Offline outside provider guar
   expect(
     [...shown.querySelectorAll("[data-route]")].map((el) => el.getAttribute("data-route")),
   ).toEqual(["offline", "connect"]);
-  expect(unstable_settings.anchor).toBe("connect");
+  expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
   scenario.sources = [
     { id: "source", kind: "m3u", label: "Source", channels: { kind: "ready", rows: [] } },
   ];
@@ -371,7 +389,10 @@ it("reconciles offline Watch through PiP and restores its controls", () => {
   player.state.set(playing(file));
   scenario.pathname = "/offline/play";
   const shown = open(null);
-  expect(shown.querySelector('button[aria-label="Picture in picture"]')).not.toBeNull();
+  const pip = shown.querySelector('button[aria-label="Picture in picture"]');
+  expect(pip).not.toBeNull();
+  act(() => pip?.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  expect(player.media.enterPip).toHaveBeenCalledOnce();
   expect(player.media.reconcile).toHaveBeenCalled();
   expect(player.media.watch).toHaveBeenCalledWith(true);
   expect(shown.textContent).toContain("Downloaded");
@@ -448,7 +469,7 @@ it("keeps the file on last-provider removal, lands on Connect, and ignores posit
   player.state.set(playing(file));
   const shown = renderRoot();
   act(() => sourceState.set({ kind: "ready", sources: [] }));
-  expect(unstable_settings.anchor).toBe("connect");
+  expect(scenario.redirects).toEqual({ "(tabs)": "/connect", watch: "/connect", connect: "/" });
   expect(shown.querySelector('[data-route="(tabs)"]')).toBeNull();
   expect(shown.textContent).toContain("Saved");
   const renders = scenario.rootRenders;
@@ -478,4 +499,70 @@ it("leaves only once when a stopped offline screen regains focus", () => {
   scenario.focused = true;
   act(() => root?.render(createElement(OfflinePlay)));
   expect(scenario.asked).toEqual(["back"]);
+});
+
+it("does not seed Connect ahead of signed-in cold-start targets", () => {
+  expect(rootModule).not.toHaveProperty("unstable_settings.anchor");
+});
+
+it("R2a: a retained provider Watch regaining focus over a playing copy does not replay", () => {
+  scenario.params = { play: JSON.stringify(estuary) };
+  const container = window.document.createElement("div");
+  root = createRoot(container);
+  act(() => root?.render(createElement(Watch)));
+  expect(scenario.played).toHaveLength(1);
+  scenario.focused = false;
+  act(() => root?.render(createElement(Watch)));
+  const file: PlayIntent = { kind: "file", path: "/private/copy.mp4", title: "Saved movie" };
+  act(() => player.state.set(playing(file)));
+  scenario.focused = true;
+  act(() => root?.render(createElement(Watch)));
+  expect(scenario.played).toHaveLength(1);
+  expect(player.state.get()).toMatchObject({ intent: file });
+});
+
+it("R2b: a provider Watch stopped while covered leaves on refocus without replaying", () => {
+  scenario.params = { play: JSON.stringify(estuary) };
+  const container = window.document.createElement("div");
+  root = createRoot(container);
+  act(() => root?.render(createElement(Watch)));
+  scenario.focused = false;
+  act(() => root?.render(createElement(Watch)));
+  act(() => player.state.set({ kind: "idle" }));
+  scenario.focused = true;
+  act(() => root?.render(createElement(Watch)));
+  expect(scenario.asked).toEqual(["back"]);
+  expect(scenario.played).toHaveLength(1);
+  expect(player.state.get().kind).toBe("idle");
+});
+
+it("handles changed provider parameters and defers a new intent until first focus", () => {
+  scenario.focused = false;
+  open(estuary);
+  expect(scenario.played).toEqual([]);
+  scenario.focused = true;
+  act(() => root?.render(createElement(Watch)));
+  expect(scenario.played).toEqual([estuary]);
+  const next: PlayIntent = { ...estuary, title: "Next", channelId: "next" };
+  scenario.params = { play: JSON.stringify(next) };
+  act(() => root?.render(createElement(Watch)));
+  expect(scenario.played).toEqual([estuary, next]);
+});
+
+it("refuses a provider replacing a retained copy, and exits only once when focused", () => {
+  player.state.set(playing({ kind: "file", path: "/private/copy", title: "Saved" }));
+  const container = window.document.createElement("div");
+  root = createRoot(container);
+  act(() => root?.render(createElement(OfflinePlay)));
+  scenario.focused = false;
+  act(() => root?.render(createElement(OfflinePlay)));
+  act(() => player.state.set(playing(estuary)));
+  expect(container.textContent).not.toContain("Estuary Max");
+  expect(scenario.asked).toEqual([]);
+  scenario.focused = true;
+  act(() => root?.render(createElement(OfflinePlay)));
+  act(() => player.state.set(playing(estuary, { positionMs: 1000 })));
+  expect(scenario.asked).toEqual(["replace /offline"]);
+  expect(player.state.get()).toMatchObject({ intent: estuary });
+  expect(scenario.played).toEqual([]);
 });
