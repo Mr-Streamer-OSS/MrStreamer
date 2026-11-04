@@ -10,7 +10,8 @@ import { colors } from "../ui/theme.ts";
 
 // The app: Connect until a source is saved, then the destinations (`(tabs)`). Nothing shows until
 // the saved sources are read, so a returning viewer never sees Connect flash first. Watch opens
-// over the destinations, and the mini player keeps what plays in sight while Watch isn't showing.
+// over the destinations. Offline stays available without a provider; a local copy also keeps its
+// mini player while Connect is showing.
 
 const theme = {
   ...DarkTheme,

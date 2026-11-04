@@ -313,7 +313,7 @@ it("refuses provider playback on the unprotected file route and returns to Downl
   expect(scenario.played).toEqual([]);
 });
 
-it("reconciles offline Watch through PiP and keeps the mini surface hidden", () => {
+it("reconciles offline Watch through PiP without replaying the file", () => {
   const file: PlayIntent = { kind: "file", path: "/private/copy.mp4", title: "Saved movie" };
   player.state.set(playing(file));
   scenario.pathname = "/offline/play";
