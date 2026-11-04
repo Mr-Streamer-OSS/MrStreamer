@@ -44,13 +44,34 @@ export function useReminderRouting(ready: boolean, empty = false) {
   const [tap, setTap] = useState<ReturnType<typeof parseReminderTap>>(null);
   useEffect(() => {
     const native = nativeReminders();
-    const accept = (json: string) => setTap(parseReminderTap(json));
+
+    const accept = async (json: string) => {
+      const tap = parseReminderTap(json);
+
+      if (!tap) return;
+
+      try {
+        const rows: import("./rules.ts").Reminder[] = JSON.parse(await native.list());
+
+        const saved = rows.find(
+          (row) =>
+            row.sourceId === tap.sourceId &&
+            row.channelId === tap.channelId &&
+            row.start === tap.start,
+        );
+
+        setTap(saved ? { ...tap, stop: saved.stop } : tap);
+      } catch {
+        // The current stop is unknown; retain the notification's last known airtime.
+        setTap(tap);
+      }
+    };
 
     const consume = () =>
       native
         .takeTap()
         .then((json) => {
-          if (json) accept(json);
+          if (json) return accept(json);
         })
         .catch(() => {});
 

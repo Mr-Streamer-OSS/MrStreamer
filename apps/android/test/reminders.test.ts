@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { groups, reconcile, reminderId, rowStatus } from "../src/reminders/rules.ts";
+import {
+  bellIds,
+  reminderCount,
+  groups,
+  reconcile,
+  reminderId,
+  rowStatus,
+} from "../src/reminders/rules.ts";
 
 const saved = {
   id: "one",
@@ -61,4 +68,20 @@ it("keeps an end-time correction eligible and updates its stop", () => {
     status: "scheduled",
     stop: 500,
   });
+});
+
+it("shows bells only for scheduled undelivered reminders", () => {
+  expect([
+    ...bellIds([
+      saved,
+      { ...saved, id: "delivered", delivered: true },
+      { ...saved, id: "missing", status: "missing" },
+      { ...saved, id: "changed", status: "changed" },
+    ]),
+  ]).toEqual(["one"]);
+});
+
+it("withholds the Live count until read and excludes ended rows", () => {
+  expect(reminderCount({ rows: [saved], loaded: false }, 300)).toBeUndefined();
+  expect(reminderCount({ rows: [saved, { ...saved, stop: 300 }], loaded: true }, 300)).toBe("1");
 });

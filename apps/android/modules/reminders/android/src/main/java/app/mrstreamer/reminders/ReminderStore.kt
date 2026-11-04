@@ -22,6 +22,10 @@ object ReminderStore {
   const val CHANNEL = "programme-reminders"
   private const val HEALTH = "reminder-health"
 
+  // Successful posts whose delivery flag still needs to reach disk in this process.
+  private val posted = mutableSetOf<String>()
+  private var armedAt: Long? = null
+
   /** Every saved reminder, as the JSON list JS reads. */
   @Synchronized fun list(context: Context): String = JSONArray(read(context)).toString()
 
@@ -65,7 +69,9 @@ object ReminderStore {
   @Synchronized fun reconcile(context: Context, json: String) {
     val patches = JSONArray(json)
     val byId = (0 until patches.length()).map { patches.getJSONObject(it) }.associateBy { it.getString("id") }
-    val rows = read(context).mapNotNull { row ->
+    val old = read(context)
+    val before = JSONArray(old).toString()
+    val rows = old.mapNotNull { row ->
       val patch = byId[row.getString("id")] ?: return@mapNotNull row
       if (patch.optBoolean("remove")) return@mapNotNull null
       row.put("status", patch.getString("status"))
@@ -73,24 +79,31 @@ object ReminderStore {
       if (patch.has("changedTitle")) row.put("changedTitle", patch.getString("changedTitle")) else row.remove("changedTitle")
       row
     }
-    write(context, rows)
-    recover(context)
+    if (JSONArray(rows).toString() != before) write(context, rows)
   }
 
   /** Drops ended reminders, posts due rows independently and always attempts to arm the next.
    * A failed post remains retryable; successful posts are persisted individually. */
-  @Synchronized fun recover(context: Context, now: Long = System.currentTimeMillis()) {
-    val rows = read(context).filter { it.getLong("stop") > now }
+  @Synchronized fun recover(context: Context, now: Long = System.currentTimeMillis(), forceArm: Boolean = false) {
+    if (forceArm) armedAt = null
+    val old = read(context)
+    val rows = old.filter { it.getLong("stop") > now }
     var failure: Exception? = null
     try {
-      write(context, rows)
-      if (permission(context)["missing"] == "") {
+      val expired = raw(context).any { !valid(it) && it is JSONObject && it.optLong("stop", Long.MAX_VALUE) <= now }
+      if (rows.size != old.size || expired) write(context, rows, now)
+      if (notificationAccess(context) == null && exact(context)) {
         for (row in rows.filter { pending(it) && it.getLong("start") <= now }) {
           try {
-            notify(context, row, now)
+            val id = row.getString("id")
+            if (id !in posted) {
+              notify(context, row, now)
+              posted.add(id)
+            }
             row.put("delivered", true)
             try {
-              write(context, rows)
+              write(context, rows, now)
+              posted.remove(id)
             } catch (cause: Exception) {
               row.put("delivered", false)
               throw cause
@@ -103,9 +116,8 @@ object ReminderStore {
     } catch (cause: Exception) {
       failure = cause
     } finally {
-      // Failed due rows retry on recovery rather than monopolizing the next alarm.
       try {
-        arm(context, rows.filter { it.getLong("start") > now })
+        arm(context, rows, now = now)
       } catch (cause: Exception) {
         failure = cause
       }
@@ -144,9 +156,9 @@ object ReminderStore {
 
   private fun read(context: Context): List<JSONObject> = raw(context).filter(::valid).map { it as JSONObject }
 
-  private fun write(context: Context, rows: List<JSONObject>) {
+  private fun write(context: Context, rows: List<JSONObject>, now: Long = System.currentTimeMillis()) {
     val file = disk(context)
-    val preserved = raw(context).filterNot(::valid)
+    val preserved = raw(context).filter { !valid(it) && !(it is JSONObject && it.optLong("stop", Long.MAX_VALUE) <= now) }
     val stream = file.startWrite()
     try {
       stream.write(JSONArray(rows + preserved).toString().toByteArray(Charsets.UTF_8))
@@ -196,17 +208,22 @@ object ReminderStore {
     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
   )
 
-  /** One exact alarm for the soonest pending start, whatever the list's size. Without access it is
-   * cleared, or refused when [required]. Scheduling failures propagate. */
-  private fun arm(context: Context, rows: List<JSONObject>, required: Boolean = false) {
-    val access = exact(context) && notificationAccess(context) == null
+  /** One exact alarm for the next start or retry, whatever the list's size. Without exact-alarm
+   * access it is cleared, or refused when [required]. Scheduling failures propagate. */
+  private fun arm(context: Context, rows: List<JSONObject>, required: Boolean = false, now: Long = System.currentTimeMillis()) {
+    val access = exact(context)
     check(access || !required) { "permission" }
-    val next = rows.filter(::pending).minOfOrNull { it.getLong("start") }
+    val next = rows.filter { pending(it) && it.getLong("stop") > now }.minOfOrNull {
+      if (it.getLong("start") > now) it.getLong("start") else minOf(it.getLong("stop"), now + 60000)
+    }
     if (!access || next == null) {
       alarms(context).cancel(alarmIntent(context))
+      armedAt = null
       return
     }
-    alarms(context).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, maxOf(System.currentTimeMillis(), next), alarmIntent(context))
+    if (armedAt == next && next > now) return
+    alarms(context).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, alarmIntent(context))
+    armedAt = next
   }
 
   /** Posts [row]'s notification; its tap opens the app with the programme's identity as an extra. */
@@ -255,7 +272,7 @@ class ReminderRecoveryReceiver : BroadcastReceiver() {
 private fun recover(context: Context, pending: BroadcastReceiver.PendingResult) {
   Thread {
     try {
-      ReminderStore.recover(context.applicationContext)
+      ReminderStore.recover(context.applicationContext, forceArm = true)
     } catch (_: Exception) {
       // The saved list is kept and retried at the next recovery; the app shows this failure.
       ReminderStore.failed(context)

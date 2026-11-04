@@ -34,6 +34,7 @@ export const t = catalogue(
     "No longer in the guide · won't notify": "No longer in the guide · won't notify",
     "Couldn't read reminders. Try again.": "Couldn't read reminders. Try again.",
     "Couldn't update reminders. Try again.": "Couldn't update reminders. Try again.",
+    "Some saved reminders couldn't be read.": "Some saved reminders couldn't be read.",
     "Try again": "Try again",
   },
   {
@@ -70,6 +71,8 @@ export const t = catalogue(
       "Couldn't read reminders. Try again.": "Herinneringen lezen mislukt. Probeer het opnieuw.",
       "Couldn't update reminders. Try again.":
         "Herinneringen bijwerken mislukt. Probeer het opnieuw.",
+      "Some saved reminders couldn't be read.":
+        "Sommige opgeslagen herinneringen konden niet worden gelezen.",
       "Try again": "Probeer opnieuw",
     },
   },

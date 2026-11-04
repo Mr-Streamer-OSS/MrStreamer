@@ -35,6 +35,17 @@ class RemindersTest {
       super.notify(tag, id, notification)
     }
   }
+  @Implements(NotificationManager::class)
+  class BlockingWriteNotifications : ShadowNotificationManager() {
+    companion object { var posts = 0 }
+    @Implementation override fun notify(tag: String?, id: Int, notification: Notification) {
+      posts++
+      super.notify(tag, id, notification)
+      val blocked = File(RuntimeEnvironment.getApplication().noBackupFilesDir, "programme-reminders.json.new")
+      blocked.mkdirs()
+      File(blocked, "block").writeText("block")
+    }
+  }
   @Implements(AlarmManager::class)
   class ThrowingAlarms : ShadowAlarmManager() {
     companion object { var failNext = false }
@@ -53,6 +64,7 @@ class RemindersTest {
     .put("status", "scheduled").put("delivered", false).put("start", start).put("stop", stop).toString()
 
   @Before fun launcher() {
+    ReminderStore.recover(context)
     val resolved = ResolveInfo().apply {
       activityInfo = ActivityInfo().apply {
         packageName = context.packageName
@@ -99,8 +111,7 @@ class RemindersTest {
     assertEquals(0, alarm.scheduledAlarms.size)
   }
 
-  /** Each access, notifications then exact alarms: off refuses new saves and disarms saved ones
-   * without dropping them; granted again re-arms them. */
+  /** Each access, notifications then exact alarms: off refuses new saves without dropping saved ones; notification access does not disarm them. */
   @Test @Config(sdk = [35]) fun missingAccessRefusesNewRemindersAndRetainsSavedOnes() {
     val now = System.currentTimeMillis()
     ShadowAlarmManager.setCanScheduleExactAlarms(true)
@@ -114,7 +125,7 @@ class RemindersTest {
       assertThrows(IllegalStateException::class.java) { ReminderStore.save(context, row("refused", now + 60000, now + 600000)) }
       ReminderStore.recover(context)
       assertEquals(1, JSONArray(ReminderStore.list(context)).length())
-      assertEquals(0, alarm.scheduledAlarms.size)
+      assertEquals(if (missing == "notifications") 1 else 0, alarm.scheduledAlarms.size)
       allowed(true)
       ReminderStore.recover(context)
       assertEquals(1, alarm.scheduledAlarms.size)
@@ -178,6 +189,93 @@ class RemindersTest {
     assertEquals(2, retained.length())
     assertEquals(42, retained.getInt(0))
     assertEquals(invalid.toString(), retained.getJSONObject(1).toString())
+  }
+
+  @Test fun nativeGuidePatchUpdatesEndTime() {
+    val now = System.currentTimeMillis()
+    ReminderStore.save(context, row("one", now + 60000, now + 120000))
+    ReminderStore.reconcile(context, """[{"id":"one","status":"scheduled","stop":${now + 240000}}]""")
+    assertEquals(now + 240000, JSONArray(ReminderStore.list(context)).getJSONObject(0).getLong("stop"))
+  }
+  @Test fun recentsClearsWarmAndColdPendingTaps() {
+    val taps = ReminderTaps()
+    val warm = Intent().putExtra("reminder", "warm")
+    assertEquals("warm", taps.accept(warm))
+    val history = Intent().putExtra("reminder", "old").addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+    assertNull(taps.accept(history))
+    assertNull(taps.take(Intent()))
+    assertNull(taps.take(history))
+    taps.accept(warm)
+    assertNull(taps.take(Intent().addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)))
+  }
+  @Test fun idleRecoveryDoesNotCreateRewriteOrRearm() {
+    val file = File(context.noBackupFilesDir, "programme-reminders.json")
+    ReminderStore.recover(context)
+    assertFalse(file.exists())
+    val now = System.currentTimeMillis()
+    ReminderStore.save(context, row("one", now + 60000, now + 600000))
+    file.setLastModified(1000)
+    val scheduled = alarm.peekNextScheduledAlarm()
+    ReminderStore.recover(context)
+    assertSame(scheduled, alarm.peekNextScheduledAlarm())
+    assertEquals(1000L, file.lastModified())
+  }
+  @Test fun unreadableRowsWithPastEndExpireWhileUnknownEndIsPreserved() {
+    val file = File(context.noBackupFilesDir, "programme-reminders.json")
+    file.writeText(JSONArray().put(JSONObject().put("stop", System.currentTimeMillis() - 1)).put(42).toString())
+    ReminderStore.recover(context)
+    assertEquals("[42]", file.readText())
+  }
+  @Test @Config(shadows = [ThrowingNotifications::class])
+  fun failedPostArmsExactRetryNoLaterThanEnd() {
+    val now = System.currentTimeMillis()
+    ReminderStore.save(context, row("one", now + 1000, now + 30000))
+    assertThrows(IllegalStateException::class.java) { ReminderStore.recover(context, now + 2000) }
+    assertEquals(now + 30000, requireNotNull(alarm.peekNextScheduledAlarm()).triggerAtTime)
+  }
+  @Test fun recoveryBroadcastPostsOnceAndArmsNext() {
+    val now = System.currentTimeMillis()
+    val file = File(context.noBackupFilesDir, "programme-reminders.json")
+    file.writeText(JSONArray().put(JSONObject(row("due", now - 1000, now + 600000)))
+      .put(JSONObject(row("next", now + 120000, now + 600000))).toString())
+    fun broadcast() {
+      context.sendBroadcast(Intent(context, ReminderRecoveryReceiver::class.java).setAction(Intent.ACTION_TIME_CHANGED))
+      shadowOf(android.os.Looper.getMainLooper()).idle()
+      val deadline = System.nanoTime() + 5_000_000_000L
+      while (!JSONArray(ReminderStore.list(context)).getJSONObject(0).getBoolean("delivered") && System.nanoTime() < deadline) Thread.yield()
+      assertTrue(JSONArray(ReminderStore.list(context)).getJSONObject(0).getBoolean("delivered"))
+    }
+    broadcast()
+    assertEquals(1, notifications.allNotifications.size)
+    assertEquals(now + 120000, requireNotNull(alarm.peekNextScheduledAlarm()).triggerAtTime)
+    context.getSystemService(NotificationManager::class.java).cancelAll()
+    broadcast()
+    ReminderStore.recover(context)
+    assertEquals(0, notifications.allNotifications.size)
+  }
+
+  @Test @Config(shadows = [BlockingWriteNotifications::class])
+  fun successfulPostWithFailedWriteIsNotRepeatedInProcess() {
+    val now = System.currentTimeMillis()
+    BlockingWriteNotifications.posts = 0
+    ReminderStore.save(context, row("persistence", now + 1000, now + 600000))
+    repeat(2) { assertThrows(Exception::class.java) { ReminderStore.recover(context, now + 2000) } }
+    assertEquals(1, BlockingWriteNotifications.posts)
+    File(context.noBackupFilesDir, "programme-reminders.json.new").deleteRecursively()
+    ReminderStore.recover(context, now + 2000)
+    assertTrue(JSONArray(ReminderStore.list(context)).getJSONObject(0).getBoolean("delivered"))
+    assertEquals(1, BlockingWriteNotifications.posts)
+  }
+  @Test fun notificationsOffKeepsAlarmAndUndeliveredRowForLateRecovery() {
+    val now = System.currentTimeMillis()
+    ReminderStore.save(context, row("one", now + 1000, now + 600000))
+    notifications.setNotificationsEnabled(false)
+    ReminderStore.recover(context, now + 2000)
+    assertFalse(JSONArray(ReminderStore.list(context)).getJSONObject(0).getBoolean("delivered"))
+    assertEquals(1, alarm.scheduledAlarms.size)
+    notifications.setNotificationsEnabled(true)
+    ReminderStore.recover(context, now + 62000)
+    assertEquals(1, notifications.allNotifications.size)
   }
 
 }

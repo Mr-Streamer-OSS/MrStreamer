@@ -38,8 +38,8 @@ The receiver reads the durable queue without JavaScript. Boot after unlock,
 clock/time-zone changes, package replacement and exact-alarm permission grants
 recheck delivery and scheduling. The exact-alarm permission broadcast fires only
 on grant, not revocation. Foreground refresh also recovers directly from disk,
-even when the guide cannot answer. Revoked access keeps saved rows but suppresses
-alarms. The next foreground reconciliation also checks providers and programme
+even when the guide cannot answer. Revoked exact-alarm access keeps saved rows but suppresses alarms. Notification
+access being off keeps exact alarms armed; a due row remains undelivered. The next foreground reconciliation also checks providers and programme
 identity against available guide data. A failed guide read retains prior state;
 a known changed or missing programme will not notify. Provider removal removes
 its reminders when reconciliation completes. Receivers cannot fetch a fresh
@@ -48,8 +48,9 @@ guide while JavaScript is stopped, so they use the last reconciled snapshot.
 Recovery posts once while the original programme is still on, with elapsed
 minutes in its notification (Starting now within the first minute), and silently
 removes ended reminders. Each successful post is
-marked consumed independently; a failed post stays retryable and does not block
-other due reminders or the next alarm. A process crash between notification
+marked consumed independently; a failed post arms one exact retry at the earlier
+of its end or 60 seconds later and does not block other due reminders. A successful
+post whose write fails is not posted again in the same process; persistence is retried. A process crash between notification
 posting and its durable write can repeat the notification on recovery;
 Android provides no atomic transaction spanning disk and NotificationManager.
 Errors in storage or scheduling are reported in the app and remain retryable.
@@ -65,7 +66,8 @@ This is an exact scheduling request, not a promise of delivery at a guaranteed
 wall-clock second.
 
 Unreadable rows are preserved on disk while valid rows remain usable; the app
-reports the partial read failure.
+reports the partial read separately from retryable read and update errors. A preserved
+row with a readable end time expires when that time passes.
 
 Notification extras carry source id, channel id, start and stop times. App navigation
 returns to Live then opens that Programme; no playback action is invoked.

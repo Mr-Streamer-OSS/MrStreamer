@@ -1,3 +1,4 @@
+import { bellIds } from "../reminders/rules.ts";
 import { reminders, reminderId, reminderText } from "./actions-reminders.ts";
 import { formatDate } from "@mrstreamer/core/i18n";
 import { catalogue } from "@mrstreamer/mobile/language";
@@ -875,15 +876,7 @@ const GridRow = memo(function GridRow({
 }) {
   const reminderRows = useStore(reminders).rows;
 
-  const remindedIds = useMemo(
-    () =>
-      new Set(
-        reminderRows
-          .filter((row) => row.status === "scheduled" && !row.delivered)
-          .map((row) => row.id),
-      ),
-    [reminderRows],
-  );
+  const remindedIds = useMemo(() => bellIds(reminderRows), [reminderRows]);
 
   useGuideStatus();
   useLocale();

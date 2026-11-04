@@ -55,3 +55,13 @@ export function groups(rows: readonly Reminder[]) {
 
   return [...days].map(([day, rows]) => ({ day, rows }));
 }
+
+/** Saved identities that should show the Guide's reminder bell. */
+export const bellIds = (rows: readonly Reminder[]) =>
+  new Set(rows.flatMap((row) => (row.status === "scheduled" && !row.delivered ? [row.id] : [])));
+
+/** Live has no count until the first successful read. */
+export const reminderCount = (
+  state: { loaded: boolean; rows: readonly Reminder[] },
+  now: number,
+) => (state.loaded ? String(state.rows.filter((row) => row.stop > now).length) : undefined);

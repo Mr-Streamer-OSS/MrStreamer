@@ -90,6 +90,11 @@ export function RemindersScreen() {
             ) : null}
           </View>
         ) : null}
+        {permission?.readFailed ? (
+          <Text accessibilityLiveRegion="polite" style={[note, { padding: 16 }]}>
+            {t("Some saved reminders couldn't be read.")}
+          </Text>
+        ) : null}
         {state.error ? (
           <View
             style={{ gap: 12, paddingTop: 24, paddingHorizontal: 16, alignItems: "flex-start" }}

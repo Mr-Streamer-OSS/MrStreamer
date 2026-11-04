@@ -14,6 +14,9 @@ const port = vi.hoisted(() => ({
   recover: vi.fn(),
   programmeAt: vi.fn(),
   revision: vi.fn(),
+  subscribe: vi.fn(),
+  listingSubscribe: vi.fn(),
+  start: vi.fn(),
 }));
 
 vi.mock("../src/reminders/native.ts", () => ({ nativeReminders: () => port }));
@@ -26,6 +29,7 @@ vi.mock("../src/guide/ui.tsx", () => ({
 }));
 
 vi.mock("react-native", () => ({
+  AppState: { addEventListener: () => ({ remove: vi.fn() }) },
   Text: ({ children }: { children: ReactNode }) => h("span", {}, children),
   View: ({ children }: { children: ReactNode }) => h("div", {}, children),
   Platform: { OS: "android", Version: 36 },
@@ -40,14 +44,16 @@ vi.mock("../src/bootstrap/sources.ts", async () => ({
 }));
 
 vi.mock("../src/guide/runtime.ts", () => ({
+  startGuide: port.start,
   guide: {
+    subscribe: port.subscribe,
     programmeAt: port.programmeAt,
-    listingRevision: { get: port.revision },
+    listingRevision: { get: port.revision, subscribe: port.listingSubscribe },
     getSnapshot: () => "stable",
   },
 }));
 
-const { reminders, saveReminder, cancelReminder, refreshReminders } =
+const { reminders, saveReminder, cancelReminder, refreshReminders, startReminders } =
   await import("../src/reminders/runtime.ts");
 
 const saved: Reminder = {
@@ -170,4 +176,54 @@ it("keeps provider-removal patches when the guide snapshot changes mid-read", as
     { id: "valid", status: "scheduled" },
     { id: "gone", remove: true },
   ]);
+});
+
+it("applies known invalidations before an overdue reminder can post", async () => {
+  port.programmeAt.mockResolvedValue(null);
+  let invalidated = false;
+  port.reconcile.mockImplementation(async () => {
+    invalidated = true;
+  });
+  port.recover.mockImplementation(async () => {
+    expect(invalidated).toBe(true);
+  });
+  await refreshReminders();
+});
+
+it("keeps partial reads separate from update failures and preserves whole-read labels", async () => {
+  port.permission.mockResolvedValue({
+    missing: "",
+    canOpen: false,
+    readFailed: true,
+    failed: true,
+  });
+  await refreshReminders();
+  expect(reminders.get()).toMatchObject({ error: "update", permission: { readFailed: true } });
+  port.list.mockRejectedValue(new Error("disk"));
+  port.recover.mockRejectedValue(new Error("post"));
+  await expect(refreshReminders()).rejects.toThrow("read");
+  expect(reminders.get().error).toBe("read");
+});
+
+it("starts and subscribes to guide listings only while reminders exist", async () => {
+  const unsubscribe = vi.fn();
+  port.listingSubscribe.mockReturnValue(unsubscribe);
+  port.subscribe.mockReturnValue(vi.fn());
+  port.start.mockResolvedValue(undefined);
+  reminders.set({ rows: [], permission: null, error: null, loaded: true });
+  port.list.mockResolvedValue("[]");
+  const stop = startReminders();
+
+  try {
+    expect(port.start).not.toHaveBeenCalled();
+    reminders.set((s) => ({ ...s, rows: [saved] }));
+    expect(port.start).toHaveBeenCalledOnce();
+    expect(port.listingSubscribe).toHaveBeenCalledOnce();
+    expect(port.subscribe).not.toHaveBeenCalled();
+    reminders.set((s) => ({ ...s, rows: [] }));
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+    await refreshReminders();
+  }
 });

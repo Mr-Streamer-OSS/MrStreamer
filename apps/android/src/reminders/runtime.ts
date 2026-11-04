@@ -32,7 +32,7 @@ async function read() {
     const permission = await nativeReminders().permission();
     reminders.set((s) => {
       const sameRows = JSON.stringify(s.rows) === JSON.stringify(rows);
-      const error = permission.readFailed ? "read" : permission.failed ? "update" : null;
+      const error = permission.failed ? "update" : null;
 
       if (
         sameRows &&
@@ -52,64 +52,71 @@ async function read() {
 
 export const refreshReminders = () =>
   serialized(async () => {
-    let recoveryFailed = false;
+    let failure: "read" | "update" | null = null;
 
     try {
-      await nativeReminders().recover();
-    } catch {
-      recoveryFailed = true;
-    }
+      await read();
+      const state = sources.state.get();
 
-    await read();
-    const state = sources.state.get();
+      if (state.kind === "ready") {
+        const rows = reminders.get().rows;
+        const revision = guide.listingRevision.get();
+        const snapshot = guide.getSnapshot();
+        let patches = [];
 
-    if (state.kind !== "ready") return;
+        for (const row of rows) {
+          const present = state.sources.some((s) => s.id === row.sourceId);
+          let current;
 
-    try {
-      const rows = reminders.get().rows;
-      const revision = guide.listingRevision.get();
-      const snapshot = guide.getSnapshot();
-      let patches = [];
-
-      for (const row of rows) {
-        const present = state.sources.some((s) => s.id === row.sourceId);
-        let current;
-
-        if (present && row.stop > Date.now()) {
-          try {
-            current = await guide.programmeAt(channelKey(row), row.start);
-          } catch {
-            // A failed lookup is unknown; other rows can still reconcile.
+          if (present && row.stop > Date.now()) {
+            try {
+              current = await guide.programmeAt(channelKey(row), row.start);
+            } catch {
+              // A failed lookup is unknown; other rows can still reconcile.
+            }
           }
+
+          if (sources.state.get() !== state) break;
+
+          if (guide.listingRevision.get() !== revision || guide.getSnapshot() !== snapshot)
+            current = undefined;
+          patches.push(reconcile(row, current, present, Date.now()));
         }
 
-        if (sources.state.get() !== state) break;
-
+        // A later lookup may invalidate an earlier result. Keep independent removal/expiry
+        // patches, but retain prior guide status for the entire invalidated snapshot.
         if (guide.listingRevision.get() !== revision || guide.getSnapshot() !== snapshot)
-          current = undefined;
-        patches.push(reconcile(row, current, present, Date.now()));
+          patches = rows.map((row) =>
+            reconcile(
+              row,
+              undefined,
+              state.sources.some((source) => source.id === row.sourceId),
+              Date.now(),
+            ),
+          );
+
+        if (sources.state.get() === state && patches.length)
+          await nativeReminders().reconcile(JSON.stringify(patches));
+      }
+    } catch (cause) {
+      failure = cause instanceof Error && cause.message === "read" ? "read" : "update";
+    } finally {
+      try {
+        await nativeReminders().recover();
+      } catch {
+        failure ??= "update";
       }
 
-      // A later lookup may invalidate an earlier result. Keep independent removal/expiry
-      // patches, but retain prior guide status for the entire invalidated snapshot.
-      if (guide.listingRevision.get() !== revision || guide.getSnapshot() !== snapshot)
-        patches = rows.map((row) =>
-          reconcile(
-            row,
-            undefined,
-            state.sources.some((source) => source.id === row.sourceId),
-            Date.now(),
-          ),
-        );
+      try {
+        await read();
+      } catch {
+        failure = "read";
+      }
+    }
 
-      if (sources.state.get() === state && patches.length)
-        await nativeReminders().reconcile(JSON.stringify(patches));
-      await read();
-
-      if (recoveryFailed) reminders.set((s) => ({ ...s, error: "update" }));
-    } catch {
-      reminders.set((s) => ({ ...s, error: "update" }));
-      throw new Error("update");
+    if (failure) {
+      reminders.set((s) => ({ ...s, error: failure }));
+      throw new Error(failure);
     }
   });
 
@@ -167,11 +174,7 @@ export function startReminders() {
 
   const watchGuide = () => {
     if (reminders.get().rows.length && !guideStops.length) {
-      guideStops = [
-        sources.state.subscribe(refresh),
-        guide.listingRevision.subscribe(refresh),
-        guide.subscribe(refresh),
-      ];
+      guideStops = [sources.state.subscribe(refresh), guide.listingRevision.subscribe(refresh)];
       void startGuide()
         .then(refresh)
         .catch(() => {

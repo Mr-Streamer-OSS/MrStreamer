@@ -1,3 +1,4 @@
+import { reminderCount } from "../reminders/rules.ts";
 import { reminders } from "../reminders/runtime.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { router, useLocalSearchParams } from "expo-router";
@@ -384,9 +385,7 @@ export function LiveScreen() {
       id: "reminders",
       icon: "notifications-none" as const,
       label: t("Reminders"),
-      count: reminderState.loaded
-        ? String(reminderState.rows.filter((row) => row.stop > Date.now()).length)
-        : undefined,
+      count: reminderCount(reminderState, Date.now()),
       onPress: () => router.push("/reminders"),
     },
     {
