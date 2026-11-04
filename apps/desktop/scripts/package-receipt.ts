@@ -62,7 +62,7 @@ export const Artifact = type({
 
 export interface PackageGitHub {
   readonly repository: string;
-  json(path: string): Promise<Json | undefined>;
+  json(path: string): Promise<Json>;
   bytes(path: string): Promise<Uint8Array>;
 }
 

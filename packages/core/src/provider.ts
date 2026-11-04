@@ -490,7 +490,10 @@ export function withoutAddresses(text: string): string {
   });
 }
 
-/** Rethrows the cause, redacting addresses from its message when needed. */
+/**
+ * Rethrows the cause unless its message or nested cause's message contains an address.
+ * Otherwise throws a new TypeError with the redacted outer message, without the original cause.
+ */
 function withoutAddress(cause: unknown): never {
   const messages = [cause, cause instanceof Error ? cause.cause : null].map((each) =>
     each instanceof Error ? each.message : "",

@@ -951,6 +951,12 @@ function seriesFacts(
   const at = (id: string, season: number, number: number) =>
     listed(subscriptionId, id, season, number);
 
+  const title = byIds(indexCatalogue([{ subscriptionId, catalogue }], "en"), "series", [
+    { subscriptionId, id: "2" },
+  ])[0];
+
+  if (!title) throw new Error("Series details fixture is missing series 2");
+
   return {
     kind: "series",
     plot: null,
@@ -961,9 +967,7 @@ function seriesFacts(
     backdropUrl: null,
     originalTitle: null,
     releaseDate: null,
-    title: byIds(indexCatalogue([{ subscriptionId, catalogue }], "en"), "series", [
-      { subscriptionId, id: "2" },
-    ])[0]!,
+    title,
     seasons: [
       {
         number: 1,

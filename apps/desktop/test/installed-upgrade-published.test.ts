@@ -113,9 +113,11 @@ function published() {
 
       if (page) return structuredClone(releases.slice((+page - 1) * 100, +page * 100));
 
-      if (!(path in json)) throw new Error(`Unexpected API request ${path}`);
+      const reply = json[path];
 
-      return structuredClone(json[path]);
+      if (reply === undefined) throw new Error(`Unexpected API request ${path}`);
+
+      return structuredClone(reply);
     }),
     bytes: async (path) => {
       const id = Number(path.split("/").at(-1));

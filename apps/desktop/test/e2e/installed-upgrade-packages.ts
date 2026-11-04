@@ -113,7 +113,7 @@ export interface GitHub {
   /** owner/name of the repository the workflow runs in. */
   readonly repository: string;
   /** GET `/repos/{repository}{path}` as JSON. */
-  json(path: string): Promise<Json | undefined>;
+  json(path: string): Promise<Json>;
   /** GET `/repos/{repository}{path}` as bytes, following a redirect without the token. */
   bytes(path: string, accept?: string): Promise<Uint8Array>;
 }

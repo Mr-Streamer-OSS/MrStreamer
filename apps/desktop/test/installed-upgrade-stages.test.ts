@@ -1,9 +1,9 @@
 // The installed upgrade check must inherit stable's copies before playing anything, and resume
 // them after a restart. The window stands in for public reads and UI input; the stages are real.
 import { describe, expect, it } from "vitest";
-import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import { defaultPreferences, type Preferences } from "@mrstreamer/contracts/preferences";
 import type { Download } from "../../../packages/contracts/src/downloads.ts";
-import type { IpcOutput } from "../../../packages/contracts/src/ipc.ts";
+import type { IpcOutput, PreferenceSnapshot } from "../../../packages/contracts/src/ipc.ts";
 import { SUBTITLE_CUE, SUBTITLE_TIMING } from "./e2e/installed-subtitles.ts";
 import {
   upgradeToCandidate,
@@ -65,19 +65,23 @@ function standIn(player: Player = PLAYER) {
 
   const actions: string[] = [];
 
-  const answers: Record<
-    string,
-    () => Partial<
-      IpcOutput<
+  const answers: {
+    [
+      M in
         | "subscription.list"
         | "preferences.get"
         | "viewing.get"
         | "watchlist.list"
         | "viewing.progress"
         | "downloads.list"
-      >
-    >
-  > = {
+    ]: () => M extends "preferences.get"
+      ? Preferences | PreferenceSnapshot
+      : M extends "viewing.get"
+        ? Pick<IpcOutput<M>, "favourites">
+        : M extends "downloads.list"
+          ? Pick<IpcOutput<M>, "items">
+          : IpcOutput<M>;
+  } = {
     "subscription.list": () =>
       removed
         ? []
@@ -97,7 +101,7 @@ function standIn(player: Player = PLAYER) {
               },
             },
           ],
-    "preferences.get": () => ({ preferences: { ...defaultPreferences, ...state.preferences } }),
+    "preferences.get": () => ({ ...defaultPreferences, ...state.preferences }),
     "viewing.get": () => ({ favourites: state.favourites }),
     "watchlist.list": () => state.watchlist,
     "viewing.progress": () => state.progress,
@@ -168,7 +172,13 @@ function standIn(player: Player = PLAYER) {
     async capture(name: string) {
       actions.push(`Capture ${name}`);
     },
-    read: async (method, ..._args) => answers[method]!() as IpcOutput<typeof method>,
+    read: async (method, ..._args) => {
+      const answer = Object.entries(answers).find(([name]) => name === method)?.[1];
+
+      if (!answer) throw new Error(`Unexpected stage read ${method}`);
+
+      return answer() as IpcOutput<typeof method>;
+    },
     video: () =>
       Promise.resolve({ time, width: 640, audio: 1000, paused: false, title: playing !== null }),
     page: page as Driver["page"],

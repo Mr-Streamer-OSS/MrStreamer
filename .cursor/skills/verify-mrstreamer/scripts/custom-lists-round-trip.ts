@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import {
   FIRST,
   SECOND,
@@ -79,9 +79,12 @@ function onDisk(profile: string, account: string) {
 
 /** What preferences.json remembers of discovery, read-only. */
 async function remembered(profile: string): Promise<Json> {
-  const file: JsonObject = JSON.parse(await readFile(join(profile, "preferences.json"), "utf8"));
+  const file: Json = JSON.parse(await readFile(join(profile, "preferences.json"), "utf8"));
 
-  return file["rememberedLiveBrowse"] ?? null;
+  if (file === null || typeof file !== "object" || Array.isArray(file))
+    throw new Error("Expected preferences.json to contain an object");
+
+  return "rememberedLiveBrowse" in file ? (file.rememberedLiveBrowse ?? null) : null;
 }
 
 /** Removes the second subscription from Settings with Also delete ticked: the same in both builds. */
