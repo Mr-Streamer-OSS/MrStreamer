@@ -144,8 +144,9 @@ onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile
   it goes only to the native player. Each `play` is a new attempt that replaces the one before;
   commands and observations name their attempt, so nothing late from a replaced one acts on its
   successor. `player.state` holds what the native player observed (phase, position, duration,
-  buffer, live and seekable, speed, failure) and the tracks the media declares, each saying
-  renderer support, not proof of decoded picture or sound; `capabilities()` lists the decoders the phone declares. Live
+  buffer, live and seekable, speed, failure) and the tracks the media declares, with renderer
+  support for each. Neither renderer support nor decoder declarations prove decoded picture or
+  sound. `capabilities()` lists the decoders the phone declares. Live
   plays at its live edge and doesn't seek or change speed: going back is catch-up's. `setQuality`
   chooses a video track wherever there are several. `retry()` plays a failed attempt again with
   its address worked out afresh, from the position it reached, and `onSettled(listener)` reports

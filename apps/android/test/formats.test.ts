@@ -152,6 +152,24 @@ test("public series episodes and archives serve silent provenance bytes and reta
   expect(
     (await fetch(`${fixture.url}${archive.replace(String(channel.stream_id), "999999")}`)).status,
   ).toBe(404);
+}, 30000);
+
+test("failed media reads keep HTTP status, unknown identity and completed empty responses", async () => {
+  for (const path of [
+    "/files/0/movie/987654",
+    "/timeshift/fixture/fixture-pass/1/2026-11-05:12-00/1.ts",
+  ]) {
+    const response = await fetch(`${fixture.url}${path}`);
+    expect(response.status).toBe(404);
+    await response.arrayBuffer();
+  }
+
+  const { events } = await (await fetch(`${fixture.control}/state`)).json();
+  const closed = events.filter((event: { event: string }) => event.event === "closed").slice(-2);
+  expect(closed).toEqual([
+    expect.objectContaining({ fixture: "unknown", status: 404, completed: true, exhausted: false }),
+    expect.objectContaining({ status: 404, bytes: 0, completed: true, exhausted: false }),
+  ]);
 });
 
 test("advertised movie matrix equals public catalogue and documented named files", async () => {

@@ -314,7 +314,7 @@ export async function startFormats(options: {
       requestId: ++sequence,
       fixture:
         file?.name ??
-        (fileMatch
+        (fileMatch?.[1] === "series"
           ? `episode/${fileMatch[2]}`
           : channelMatch
             ? `${channelMatch[1]}/${channel?.streamId === 7998 ? "network/continuing.ts" : (channel?.fixture ?? "unknown")}`
