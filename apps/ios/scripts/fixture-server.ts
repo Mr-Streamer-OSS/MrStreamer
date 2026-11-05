@@ -121,8 +121,8 @@ const CHANNELS = 6000;
 /** A channel counts as playing while it was asked for this recently. */
 const PLAYING_MS = 6_000;
 
-const port = Number(process.argv[2] ?? 8791);
-const controlPort = Number(process.argv[3] ?? 8792);
+let port = Number(process.argv[2] ?? 8791);
+let controlPort = Number(process.argv[3] ?? 8792);
 const root = join(import.meta.dirname, "../../..");
 const out = resolve(process.env.FIXTURE_OUT ?? join(root, ".local/ios-fixture"));
 const fixtures = join(root, "apps/desktop/test/fixtures");
@@ -431,7 +431,7 @@ function playlistStatus(
 const listed = (id: string) => (lists.unlisted(id) ? undefined : channels.get(id));
 const playlistType = "application/vnd.apple.mpegurl";
 
-createServer((request, response) => {
+const server = createServer((request, response) => {
   const path = request.url ?? "/";
   const url = new URL(path, "http://fixture.test");
   const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.m3u8$/.exec(url.pathname);
@@ -584,9 +584,9 @@ createServer((request, response) => {
     upstream.on("error", () => answer(response, 502, "text/plain", ""));
     request.pipe(upstream);
   }, wait);
-}).listen(port, "127.0.0.1");
+});
 
-createServer((request, response) => {
+const controlServer = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://control.test");
 
   const json = (
@@ -680,7 +680,38 @@ createServer((request, response) => {
   }
 
   answer(response, 404, "text/plain", "");
-}).listen(controlPort, "127.0.0.1");
+});
+
+// Let the listener own an ephemeral port from allocation onward. Readiness is published only
+// after both binds complete; a failed bind must also release the already-started services.
+try {
+  for (const [listener, requested] of [
+    [server, port],
+    [controlServer, controlPort],
+  ] as const) {
+    await new Promise<void>((resolve, reject) => {
+      listener.once("error", reject);
+      listener.listen(requested, "127.0.0.1", () => {
+        listener.removeListener("error", reject);
+        resolve();
+      });
+    });
+  }
+  const address = server.address();
+  const controlAddress = controlServer.address();
+  if (
+    !address ||
+    typeof address === "string" ||
+    !controlAddress ||
+    typeof controlAddress === "string"
+  )
+    throw new Error("fixture listeners have no TCP addresses");
+  port = address.port;
+  controlPort = controlAddress.port;
+} catch (error) {
+  console.error(error);
+  process.exit(1);
+}
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),

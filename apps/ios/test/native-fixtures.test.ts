@@ -1,10 +1,9 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Agent, request } from "node:http";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { catchUpPlaylist } from "../scripts/native-fixtures/catch-up.ts";
@@ -17,15 +16,6 @@ import { peak } from "../scripts/native-fixtures/media.ts";
 const login = { username: "fixture", password: "fixture-pass" };
 const root = join(import.meta.dirname, "../../..");
 const MINUTE = 60_000;
-
-/** A port nothing listens on now. */
-const freePort = () =>
-  new Promise<number>((resolve) => {
-    const server = createServer().listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === "object" && address ? address.port : 0));
-    });
-  });
 
 const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 
@@ -70,10 +60,8 @@ describe("the native verification fixture", () => {
   const text = async (url: string) => (await fetch(url)).text();
 
   beforeAll(async () => {
-    out = mkdtempSync(join(tmpdir(), "native-fixture-"));
-    const [port, controlPort] = [await freePort(), await freePort()];
-    panel = `http://127.0.0.1:${port}`;
-    control = `http://127.0.0.1:${controlPort}`;
+    mkdirSync(join(root, ".local"), { recursive: true });
+    out = mkdtempSync(join(root, ".local/native-fixture-"));
 
     // The default fixture, whatever FIXTURE_ settings the shell running the tests has, but for
     // the media cache CI gives, which serves the same media without encoding it again.
@@ -83,31 +71,55 @@ describe("the native verification fixture", () => {
       ),
     );
 
-    server = spawn(
-      process.execPath,
-      [join(root, "apps/ios/scripts/fixture-server.ts"), String(port), String(controlPort)],
-      {
-        // Filtering drops the NODE_ENV type the app's ProcessEnv requires, though not its value.
-        env: { ...env, NODE_ENV: process.env.NODE_ENV, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
-        stdio: ["ignore", "pipe", "inherit"],
-      },
-    );
-    await new Promise<void>((resolve, reject) => {
-      server.once("exit", (code) => reject(new Error(`fixture server exited with ${code}`)));
-      server.stdout?.on("data", (chunk: Buffer) => {
-        if (chunk.toString().includes("fixture panel")) resolve();
-      });
+    server = spawn(process.execPath, [join(root, "apps/ios/scripts/fixture-server.ts"), "0", "0"], {
+      // Filtering drops the NODE_ENV type the app's ProcessEnv requires, though not its value.
+      env: { ...env, NODE_ENV: process.env.NODE_ENV, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
+      stdio: ["ignore", "pipe", "inherit"],
     });
+    const lines = createInterface({ input: server.stdout! });
+    let cleanup = () => {};
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const failed = (error: Error) => reject(error);
+        const exited = (code: number | null, signal: NodeJS.Signals | null) =>
+          reject(new Error(`fixture server exited with ${code ?? signal}`));
+        const ready = (line: string) => {
+          const addresses =
+            /^fixture panel (http:\/\/127\.0\.0\.1:\d+) .*; control (http:\/\/127\.0\.0\.1:\d+)$/.exec(
+              line,
+            );
+          if (!addresses) return;
+          panel = addresses[1]!;
+          control = addresses[2]!;
+          resolve();
+        };
+        server.once("error", failed);
+        server.once("exit", exited);
+        lines.on("line", ready);
+        cleanup = () => {
+          server.removeListener("error", failed);
+          server.removeListener("exit", exited);
+          lines.removeListener("line", ready);
+        };
+      });
+    } catch (error) {
+      await stop();
+      throw error;
+    } finally {
+      cleanup();
+      lines.close();
+      server.stdout?.resume();
+    }
   }, 300_000);
-  afterAll(async () => {
+  async function stop() {
     if (server?.pid && server.exitCode === null && server.signalCode === null) {
       const exited = new Promise((resolve) => server.once("exit", resolve));
       server.kill();
       await exited;
     }
-
     if (out) rmSync(out, { recursive: true, force: true });
-  });
+  }
+  afterAll(stop);
 
   it("lists a Live channel whose English and Dutch sound and subtitles a player can choose", async () => {
     const { channels } = await provider().liveCatalogue();
