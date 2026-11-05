@@ -90,11 +90,15 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
     if (resolving != null) { browseState("failed"); return }
     devices.clear()
     val listener = object : NsdManager.DiscoveryListener {
-      override fun onDiscoveryStarted(type: String) = browseState()
+      override fun onDiscoveryStarted(type: String) { main.post { if (browser === this) browseState() } }
       override fun onDiscoveryStopped(type: String) {}
-      override fun onStartDiscoveryFailed(type: String, code: Int) { stopBrowsing(); browseState("failed") }
+      override fun onStartDiscoveryFailed(type: String, code: Int) { main.post {
+        if (browser === this) { stopBrowsing(); browseState("failed") }
+      } }
       override fun onStopDiscoveryFailed(type: String, code: Int) {}
-      override fun onServiceLost(info: NsdServiceInfo) { devices.remove(info.serviceName); browseState() }
+      override fun onServiceLost(info: NsdServiceInfo) { main.post {
+        if (browser === this) { devices.remove(info.serviceName); browseState() }
+      } }
       override fun onServiceFound(info: NsdServiceInfo) {
         if (browser !== this || devices.size >= 64) return
         main.post {
