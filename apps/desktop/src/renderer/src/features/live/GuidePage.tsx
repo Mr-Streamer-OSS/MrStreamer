@@ -917,7 +917,10 @@ export function GuidePage({ active }: { active: boolean }) {
                           aria-label={t("Search the guide")}
                           title={t("Search the guide")}
                           data-guide-search-opener
-                          onClick={() => openGuideSearch(text.trim())}
+                          onClick={(event) => {
+                            event.currentTarget.focus();
+                            openGuideSearch(text.trim());
+                          }}
                         >
                           <CalendarSearch />
                         </Button>

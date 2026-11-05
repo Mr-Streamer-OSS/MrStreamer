@@ -127,7 +127,7 @@ Each match shows its day, start time, channel and title, then what the guide say
 
 **Save search** keeps the words and filters under the words' name, up to 20 per subscription; saving the same words and name replaces its filters. Distinct words with the same shortened name get a numbered name. Today, Tomorrow, Before today and Next 7 days stay relative to the day you apply the saved search. Click a saved search to search it again, and the cross beside it to remove it. If a save fails, the saved searches stay as they were and Mr. Streamer says so, with **Retry**. If the saved searches can't be read, Mr. Streamer says so and saves nothing over them.
 
-Down or Enter in the field moves to the matches. Up and Down move between them, Home and End jump, and Enter opens one: its description, **Watch** while it's on and **Remind me** before it starts. Escape goes back to the field, clears it, and then closes guide search, returning focus to its opener.
+Down or Enter in the field moves to the matches. Up and Down move between them, Home and End jump, and Enter opens one: its description, **Watch** while it's on and **Remind me** before it starts. Escape goes back to the field, clears it, and then closes guide search, returning focus to its opener. When opened with the header calendar, focus returns to that calendar.
 
 ## Reminders
 

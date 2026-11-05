@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import { guideSearchScenario, searchGuide } from "./guide-search.ts";
 import { type as arkType } from "arktype";
 // Drives the built Electron app through its window. Fixtures replace only provider and TMDB APIs.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -89,6 +90,7 @@ const scenarios = [
   "hls-compatibility-catchup",
   "live-categories",
   "guide-grid",
+  "guide-search",
   "guide-grid-cells",
   "guide-grid-scroll",
   "reminders",
@@ -126,6 +128,8 @@ const gridded = (channel: FakeChannel): FakeChannel =>
 /** What a scenario's fake provider serves beyond its channel and title counts. */
 function scenarioProvider(scenario: Scenario): FakeProviderOptions {
   switch (scenario) {
+    case "guide-search":
+      return { channelOf: guided };
     case "guide-grid":
       return { guideHours: { past: 6, ahead: 24 }, channelOf: gridded };
     case "guide-grid-cells":
@@ -326,6 +330,8 @@ async function run(scenario: Scenario, prior?: string) {
       live: true,
       ...scenarioProvider(scenario),
     });
+
+    if (scenario === "guide-search") provider.serveGuide(searchGuide());
 
     if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
 
@@ -1159,6 +1165,7 @@ async function run(scenario: Scenario, prior?: string) {
         playlist!,
       );
     } else if (
+      scenario === "guide-search" ||
       scenario === "guide-grid" ||
       scenario === "guide-grid-cells" ||
       scenario === "guide-grid-scroll"
@@ -1178,7 +1185,8 @@ async function run(scenario: Scenario, prior?: string) {
         quit,
       };
 
-      if (scenario === "guide-grid")
+      if (scenario === "guide-search") await guideSearchScenario(driver);
+      else if (scenario === "guide-grid")
         await guideGridScenario(driver, {
           streams: () => ({
             requests: provider!.streamRequests(),
