@@ -414,23 +414,42 @@ function searchable(
   guides: Guides,
   channels: MappedChannels,
   at: number,
+  includePast = false,
 ): Promise<readonly ReadonlyMap<number, LiveChannel>[]> {
-  return remembered(shownBy, guides, channels, at, slicer(), async (slice) => {
-    const shown = guides.parts.map(() => new Map<number, LiveChannel>());
+  return remembered(
+    includePast ? shownWithPast : shownBy,
+    guides,
+    channels,
+    at,
+    slicer(),
+    async (slice) => {
+      const shown = guides.parts.map(() => new Map<number, LiveChannel>());
 
-    for (const channel of channels.all) {
-      const found = channel.adult ? undefined : shownChannel(guides, channels, channel.id, at);
-      const keys = found && shown[guides.parts.indexOf(found.part)];
+      for (const channel of channels.all) {
+        const found = channel.adult
+          ? undefined
+          : (shownChannel(guides, channels, channel.id, at) ??
+            (includePast
+              ? shownChannel(guides, channels, channel.id, Number.NEGATIVE_INFINITY)
+              : undefined));
 
-      if (found && keys && !keys.has(found.channel.key)) keys.set(found.channel.key, channel);
-      const rest = slice();
+        const keys = found && shown[guides.parts.indexOf(found.part)];
 
-      if (rest) await rest;
-    }
+        if (found && keys && !keys.has(found.channel.key)) keys.set(found.channel.key, channel);
+        const rest = slice();
 
-    return shown;
-  });
+        if (rest) await rest;
+      }
+
+      return shown;
+    },
+  );
 }
+
+const shownWithPast = new WeakMap<
+  Guides,
+  WeakMap<MappedChannels, Remembered<readonly ReadonlyMap<number, LiveChannel>[]>>
+>();
 
 const shownBy = new WeakMap<
   Guides,
@@ -792,7 +811,7 @@ export async function searchPageAt(
   guides: Guides,
   channels: MappedChannels,
   input: GuideSearchPageInput,
-  _at: number,
+  at: number,
   search: GuideSearching,
   signal: AbortSignal,
 ): Promise<GuideSearchPage> {
@@ -808,7 +827,7 @@ export async function searchPageAt(
     ? { ...channels, all: channels.all.filter((channel) => only.includes(channel.id)) }
     : channels;
 
-  const shown = await searchable(guides, selected, Number.NEGATIVE_INFINITY);
+  const shown = await searchable(guides, selected, at, true);
   const matches: ProgrammeMatch[] = [];
 
   for (const [place, part] of guides.parts.entries()) {

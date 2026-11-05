@@ -428,12 +428,12 @@ function time(value: string | undefined): number | null {
   return Date.UTC(y, mo - 1, d, h, mi, s) - offset * 60_000;
 }
 
-/** Direct programme children only: comments and CDATA never supply markup. */
+/** Direct programme children only: comments, processing instructions and CDATA never supply markup. */
 function metadataChildren(body: string): { name: string; attrs: string; value: string }[] {
   const children: { name: string; attrs: string; value: string }[] = [];
 
   const tokens =
-    /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?([\w-]+)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+    /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?([\w-]+)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
 
   let depth = 0;
   let child: { name: string; attrs: string; from: number } | undefined;

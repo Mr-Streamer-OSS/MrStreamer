@@ -200,12 +200,13 @@ export function GuideSearch({
   const setText = (query: string) => useGuideSearch.setState({ query });
   const [dayFilter, setDays] = useState<Days & { days?: SavedGuideQuery["days"] }>({ days: "any" });
 
+  const now = useNow();
+
   const days = dayFilter.days
-    ? dayChoices(Date.now()).find((choice) => choice.token === dayFilter.days)!.days
+    ? dayChoices(now).find((choice) => choice.token === dayFilter.days)!.days
     : dayFilter;
 
   const [chosenChannels, setChannels] = useState<Channels>(undefined);
-  const now = useNow();
   const field = useRef<HTMLInputElement>(null);
   const rows = useRef<HTMLUListElement>(null);
   const labels = useId();
@@ -568,7 +569,8 @@ function SavedSearches({
   });
 
   const list = saved.data ?? [];
-  const replaces = list.some((each) => each.name === current.name && each.query === current.query);
+  const existing = list.find((each) => each.query === current.query);
+  const replaces = existing !== undefined;
   const full = list.length >= MOST_SAVED && !replaces;
 
   const same = (each: SavedGuideQuery) =>
@@ -578,7 +580,7 @@ function SavedSearches({
     sameChannels(each.channels, current.channels);
 
   const uniqueName = () => {
-    if (replaces) return current.name;
+    if (existing) return existing.name;
     let name = current.name;
 
     for (let suffix = 2; list.some((each) => each.name === name); suffix++) {
@@ -627,9 +629,7 @@ function SavedSearches({
             disabled={!saved.isSuccess || current.query === "" || full || write.isPending}
             onClick={() =>
               write.mutate([
-                ...list.filter(
-                  (each) => !(each.name === current.name && each.query === current.query),
-                ),
+                ...list.filter((each) => each.query !== current.query),
                 { ...current, name: uniqueName() },
               ])
             }

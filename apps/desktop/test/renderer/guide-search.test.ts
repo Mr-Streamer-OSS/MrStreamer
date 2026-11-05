@@ -267,6 +267,18 @@ it("saves named days and distinct queries whose shortened names collide", async 
   expect(queries).toHaveLength(2);
   expect(new Set(queries?.map((each) => each.name)).size).toBe(2);
   expect(queries?.map((each) => each.query)).toEqual([prefix + "one", prefix + "two"]);
+  ipc.always("guide.setSavedQueries", queries!);
+  await view.click(view.button("Save search"));
+  await settled();
+  await view.click(view.button("Tomorrow"));
+  await view.click(view.button("Save search"));
+  const updated = ipc.argsOf("guide.setSavedQueries").at(-1)?.queries;
+  expect(updated).toHaveLength(2);
+  expect(updated?.[1]).toMatchObject({
+    name: queries![1]!.name,
+    query: prefix + "two",
+    days: "tomorrow",
+  });
 });
 
 it("uses seven calendar days across the autumn DST change and resolves saved Today on apply", async () => {
@@ -288,6 +300,7 @@ it("uses seven calendar days across the autumn DST change and resolves saved Tod
     await view.click(view.button("Save search"));
     await settled();
     vi.setSystemTime(new Date(2026, 9, 26, 12));
+    await settled(60_000);
     await view.click(view.button("rally"));
     await settled();
     expect(ipc.argsOf("guide.searchPage").at(-1)).toMatchObject({

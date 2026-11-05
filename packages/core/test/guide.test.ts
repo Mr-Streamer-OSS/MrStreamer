@@ -1560,6 +1560,11 @@ it.each([
       episode: { season: 1, episode: 4, part: 0 },
     },
   ],
+  [
+    "processing instructions",
+    '<?provider <episode-num system="xmltv_ns">0.1.</episode-num><previously-shown/> ?>',
+    undefined,
+  ],
   ["empty premiere", "<premiere></premiere>", { premiere: "" }],
 ])("keeps honest XMLTV metadata: %s", (_name, extra, metadata) => {
   const found: XmltvProgramme[] = [];
@@ -1574,12 +1579,12 @@ it.each([
   expect(found[0]?.metadata).toEqual(metadata);
 });
 
-it("searches retained ended channels without falling through to a later source", async () => {
+it("searches the currently shown guide and falls back to retained ended channels", async () => {
   const own = await index(
     tv(programme("one.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Past news")),
   );
 
-  const external = await index(tv(later("one.test", "Wrong news")));
+  const external = await index(tv(later("one.test", "Current news")));
 
   const guides = guidesOf(
     [
@@ -1606,7 +1611,9 @@ it("searches retained ended channels without falling through to a later source",
       stopNever,
     );
 
-    expect(result.matches.map((m) => m.programme.title)).toEqual(["Past news"]);
+    expect(result.matches.map((m) => m.programme.title)).toEqual(
+      dates.until ? [] : ["Current news"],
+    );
   }
 
   expect(
