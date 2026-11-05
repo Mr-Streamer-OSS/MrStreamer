@@ -13,12 +13,15 @@ const root = resolve(import.meta.dirname, "../../..");
 const desktop = join(root, "apps/desktop/test/fixtures");
 const native = join(root, "apps/android/modules/player/android/src/test/resources/media");
 
-const nativeHls = readdirSync(native, { recursive: true, encoding: "utf8" }).filter(
-  (name) => typeof name === "string" && /^(hls|hls-ladder)\/.*\.(m3u8|m2ts)$/.test(name),
+const nativeHls = readdirSync(native, { recursive: true, encoding: "utf8" }).filter((name) =>
+  /^(hls|hls-ladder)\/.*\.(m3u8|m2ts)$/.test(name),
 );
 
-/** Exhaustive named file inventory. HLS/catch-up journeys are listed separately in formats.md. */
-export function formatFiles() {
+/**
+ * Exhaustive named file inventory, each with its panel movie id. HLS/catch-up journeys are listed
+ * separately in formats.md.
+ */
+function formatFiles() {
   return [
     ...[desktop, join(desktop, "codecs"), native].flatMap((directory) =>
       readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
@@ -35,7 +38,7 @@ export function formatFiles() {
     ...nativeHls
       .filter((name) => name.endsWith(".m3u8"))
       .map((name) => ({ name: `native/${name}`, path: join(native, name) })),
-  ];
+  ].map((file, index) => ({ ...file, id: 9000 + index }));
 }
 
 export interface LinkConditions {
@@ -126,9 +129,9 @@ export async function startFormats(options: {
 
       return {
         ...all,
-        movies: files.map((file, index) => ({
+        movies: files.map((file) => ({
           ...template,
-          id: 9000 + index,
+          id: file.id,
           name: file.name,
           container: extname(file.path).slice(1).replace("mpegts", "ts").replace("m2ts", "ts"),
           fixture: "title-h264-aac.mp4",
@@ -152,7 +155,7 @@ export async function startFormats(options: {
     },
   });
 
-  files.forEach((file, index) => panel.replaceMovieFile(9000 + index, bytes(file.path)));
+  files.forEach((file) => panel.replaceMovieFile(file.id, bytes(file.path)));
   let link: LinkConditions = { startupMs: 0, kbps: 0, stalled: false };
   let active = 0;
   let held = 0;
@@ -287,11 +290,7 @@ export async function startFormats(options: {
     control: address(control),
     noRanges: !!options.noRanges,
     sound: process.env.FIXTURE_SOUND === "1",
-    files: files.map(({ name }, index) => ({
-      name,
-      id: 9000 + index,
-      qualification: "unqualified",
-    })),
+    files: files.map(({ name, id }) => ({ name, id, qualification: "unqualified" })),
   };
 
   writeFileSync(join(options.out, "session.json"), JSON.stringify(identity, null, 2));
