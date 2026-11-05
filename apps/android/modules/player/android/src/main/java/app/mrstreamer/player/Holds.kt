@@ -2,10 +2,17 @@ package app.mrstreamer.player
 
 import android.net.Uri
 import android.os.Handler
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorInput
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.PositionHolder
+import androidx.media3.extractor.ts.TsExtractor
 import java.io.IOException
 
 /**
@@ -107,4 +114,49 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
       }
     }
   }
+}
+
+/**
+ * A progressive HTTP source probes Range on its first read, without opening another connection.
+ * If the provider ignores it, only TS extraction loses its length: this avoids the duration-tail
+ * probe and publishes an unseekable map. The loader keeps the real length and ordinary retry reads;
+ * other containers, local files, HLS and providers answering 206 keep their normal extraction.
+ */
+@UnstableApi
+internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private val extractors: ExtractorsFactory) {
+  private var ignoredRange = false
+
+  val readers = DataSource.Factory {
+    val reader = upstream.createDataSource()
+    object : DataSource by reader {
+      override fun open(dataSpec: DataSpec): Long {
+        val probe = dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong() &&
+          dataSpec.httpMethod == DataSpec.HTTP_METHOD_GET
+        val request = if (probe) dataSpec.withRequestHeaders(
+          dataSpec.httpRequestHeaders.filterKeys { !it.equals("Range", ignoreCase = true) } +
+            ("Range" to "bytes=0-"),
+        ) else dataSpec
+        val length = reader.open(request)
+        if (probe) ignoredRange = reader.responseCode == 200 && length != C.LENGTH_UNSET.toLong()
+        return length
+      }
+    }
+  }
+
+  val factory = object : ExtractorsFactory by extractors {
+    override fun createExtractors(): Array<Extractor> = wrap(extractors.createExtractors())
+    override fun createExtractors(uri: Uri, headers: Map<String, List<String>>): Array<Extractor> =
+      wrap(extractors.createExtractors(uri, headers))
+  }
+
+  private fun wrap(candidates: Array<Extractor>): Array<Extractor> = candidates.map { extractor ->
+    if (extractor !is TsExtractor) extractor else object : Extractor by extractor {
+      override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int = extractor.read(
+        if (ignoredRange) object : ExtractorInput by input {
+          override fun getLength(): Long = C.LENGTH_UNSET.toLong()
+        } else input,
+        seekPosition,
+      )
+    }
+  }.toTypedArray()
 }
