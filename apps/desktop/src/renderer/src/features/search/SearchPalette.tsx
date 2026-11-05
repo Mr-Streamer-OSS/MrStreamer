@@ -89,7 +89,7 @@ export function SearchPalette() {
         <Dialog.Popup
           ref={popup}
           finalFocus={finalFocus}
-          className="fixed top-[12vh] left-1/2 z-50 w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-3xl bg-black text-white shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0"
+          className="fixed top-[12vh] left-1/2 z-50 flex max-h-[calc(88vh-1rem)] w-[40rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-3xl bg-black text-white shadow-2xl ring-1 ring-white/10 outline-none transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0"
         >
           <Dialog.Title className="sr-only">{t("Search")}</Dialog.Title>
           <Palette />
@@ -324,8 +324,9 @@ function Palette() {
   }
 
   return (
-    <div onKeyDown={onKey}>
-      <div className="flex items-center gap-3 border-b border-border px-5">
+    // Inside the window: the field and notes keep their height, the results scroll in what is left.
+    <div onKeyDown={onKey} className="flex min-h-0 flex-col">
+      <div className="flex flex-none items-center gap-3 border-b border-border px-5">
         <Search className="size-5 text-muted-foreground" />
         <input
           autoFocus
@@ -369,7 +370,7 @@ function Palette() {
           id={resultsId}
           role="tree"
           aria-label={t("Search results")}
-          className="max-h-[28rem] overflow-y-auto overscroll-contain p-2"
+          className="max-h-[28rem] min-h-0 overflow-y-auto overscroll-contain p-2"
         >
           {results.map((result, index) => {
             if (result.kind === "title") {

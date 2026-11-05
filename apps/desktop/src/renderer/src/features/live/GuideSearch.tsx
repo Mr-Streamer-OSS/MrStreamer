@@ -310,55 +310,59 @@ export function GuideSearch({
         event.preventDefault();
       }}
     >
-      <div className="flex h-14 flex-none items-center gap-3 px-9 pt-2 pb-3">
-        <h1
-          id={`${labels}-title`}
-          className="flex-none text-xl font-semibold tracking-tight whitespace-nowrap"
-        >
-          {t("Search the guide")}
-        </h1>
-        <SearchField
-          ref={field}
-          autoFocus
-          value={text}
-          maxLength={512}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
+      {/* One line when it fits; with long words or larger text the field and count wrap below the
+          title, while Close stays beside it. */}
+      <div className="flex min-h-14 flex-none items-start gap-3 px-9 pt-2 pb-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+          <h1
+            id={`${labels}-title`}
+            className="min-w-0 text-xl leading-9 font-semibold tracking-tight"
+          >
+            {t("Search the guide")}
+          </h1>
+          <SearchField
+            ref={field}
+            autoFocus
+            value={text}
+            maxLength={512}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
 
-            if (event.key === "Escape" && text !== "") setText("");
-            else if ((event.key === "ArrowDown" || event.key === "Enter") && matches.length)
-              focusRow(0);
-            else return;
-            event.preventDefault();
-          }}
-          placeholder={t("Programme title")}
-          aria-label={t("Search every guide day")}
-          className="w-[22rem] min-w-[10rem] shrink"
-        />
-        <span
-          role="status"
-          className="flex-none text-[0.8125rem] whitespace-nowrap text-muted-foreground"
-        >
-          {searching
-            ? t("Searching")
-            : failed
-              ? `${t("Guide")}: ${t("Service unavailable")}`
-              : query && settled && results.isSuccess
-                ? matches.length === 0
-                  ? t("No matches")
-                  : results.hasNextPage
-                    ? t("{count} programmes so far", { count: matches.length })
-                    : t("{count} programmes", { count: matches.length })
-                : ""}
-        </span>
+              if (event.key === "Escape" && text !== "") setText("");
+              else if ((event.key === "ArrowDown" || event.key === "Enter") && matches.length)
+                focusRow(0);
+              else return;
+              event.preventDefault();
+            }}
+            placeholder={t("Programme title")}
+            aria-label={t("Search every guide day")}
+            className="max-w-[22rem] min-w-[10rem] flex-[1_1_14rem]"
+          />
+          <span
+            role="status"
+            className="flex-none text-[0.8125rem] whitespace-nowrap text-muted-foreground"
+          >
+            {searching
+              ? t("Searching")
+              : failed
+                ? `${t("Guide")}: ${t("Service unavailable")}`
+                : query && settled && results.isSuccess
+                  ? matches.length === 0
+                    ? t("No matches")
+                    : results.hasNextPage
+                      ? t("{count} programmes so far", { count: matches.length })
+                      : t("{count} programmes", { count: matches.length })
+                  : ""}
+          </span>
+        </div>
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label={t("Close guide search")}
           title={t("Close guide search")}
           onClick={closeGuideSearch}
-          className="ml-auto"
+          className="mt-0.5 flex-none"
         >
           <X />
         </Button>
@@ -462,7 +466,12 @@ export function GuideSearch({
           </p>
         )}
         {matches.length > 0 && (
-          <ul ref={rows} aria-label={t("Matches in the guide")} onKeyDown={onRowsKey}>
+          <ul
+            ref={rows}
+            aria-label={t("Matches in the guide")}
+            onKeyDown={onRowsKey}
+            className="@container"
+          >
             {matches.map((match) => (
               <MatchRow
                 key={`${ownedKey(match.channel)}:${match.programme.start}`}
@@ -657,6 +666,8 @@ function SavedSearches({
 /**
  * One match: its day, start, channel, title and what the guide says of the episode. Enter or a
  * press opens its description, with Watch while it is on, Remind me before, or when it aired.
+ *   In a list at least 42rem wide these are columns on one line. Narrower, as in a small window
+ * or with larger text, the title and episode come first and wrap, over the day, start and channel.
  */
 function MatchRow({
   match,
@@ -686,22 +697,26 @@ function MatchRow({
           .filter(Boolean)
           .join(", ")}
         onClick={() => setOpen((was) => !was)}
-        className="flex h-8 w-full items-center text-left text-[0.8125rem] outline-none hover:bg-white/6 focus-visible:bg-white/10"
+        className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-x-3 py-1.5 text-left text-[0.8125rem] outline-none [grid-template-areas:'title_title_title_flag'_'day_time_channel_flag'] hover:bg-white/6 focus-visible:bg-white/10 @2xl:h-8 @2xl:grid-cols-[6rem_4.375rem_10rem_minmax(0,1fr)_6rem] @2xl:gap-x-0 @2xl:py-0 @2xl:[grid-template-areas:'day_time_channel_title_flag']"
       >
-        <span className="w-24 flex-none text-foreground">{day}</span>
-        <span className="w-[4.375rem] flex-none text-foreground tabular-nums">{time}</span>
-        <span className="w-40 flex-none truncate pr-3 text-muted-foreground">{channel.title}</span>
-        <span className="min-w-0 flex-1 truncate">
+        <span className="text-muted-foreground [grid-area:day] @2xl:text-foreground">{day}</span>
+        <span className="text-muted-foreground tabular-nums [grid-area:time] @2xl:text-foreground">
+          {time}
+        </span>
+        <span className="truncate text-muted-foreground [grid-area:channel] @2xl:pr-3">
+          {channel.title}
+        </span>
+        <span className="min-w-0 break-words [grid-area:title] @2xl:truncate">
           <span className="text-foreground">{programme.title}</span>
           {episode && <span className="ml-2 text-xs text-muted-foreground">{episode}</span>}
         </span>
-        <span className="flex w-24 flex-none items-center justify-end gap-1.5 text-xs text-muted-foreground">
+        <span className="flex items-center justify-end gap-1.5 text-xs text-muted-foreground [grid-area:flag]">
           {on && t("On now")}
           {reminded && <Bell role="img" aria-label={t("Reminder set")} className="size-3.5" />}
         </span>
       </button>
       {open && (
-        <div className="pb-3 pl-[20.375rem]">
+        <div className="pb-3 @2xl:pl-[20.375rem]">
           {programme.description && (
             <p className="max-w-[40rem] text-[0.8125rem] leading-relaxed text-muted-foreground">
               {programme.description}

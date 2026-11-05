@@ -8,6 +8,71 @@ const named = (selector: string, text: string) =>
 const rows = "document.querySelectorAll('[data-guide-row]').length";
 const field = "document.querySelector('section input')";
 
+/** The fixture's channel, as rows name it. */
+const CHANNEL = "H.264 + AAC";
+
+/**
+ * Whether ⌘K's guide row, brought into view the way a viewer scrolls the results, lies inside the
+ * window where a pointer lands on it.
+ */
+const PRESSABLE = `(async () => {
+  const row = document.querySelector('[data-guide-search]');
+  row.scrollIntoView({ block: 'nearest' });
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const box = row.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+  return box.top >= 0 && box.bottom <= innerHeight && !!hit && row.contains(hit);
+})()`;
+
+/**
+ * What the open guide search hides: a field or button reaching outside the window or a box that
+ * clips it, and a row whose programme title or channel is cut. Text is measured as painted, so the
+ * check holds whatever elements the row is built from.
+ */
+const LAYOUT = `(() => {
+  const problems = [];
+  const section = document.querySelector('[data-guide-row]').closest('section');
+  const cut = (box, from) => {
+    if (box.left < -0.5 || box.right > innerWidth + 0.5) return true;
+    for (let parent = from; parent && parent !== document.documentElement; parent = parent.parentElement) {
+      if (getComputedStyle(parent).overflowX === 'visible') continue;
+      const edge = parent.getBoundingClientRect();
+      if (box.left < edge.left - 0.5 || box.right > edge.right + 0.5) return true;
+    }
+    return false;
+  };
+  const name = e => e.getAttribute('aria-label') || e.placeholder || e.textContent.trim();
+  for (const control of section.querySelectorAll('input, button:not([data-guide-row])'))
+    if (control.checkVisibility() && cut(control.getBoundingClientRect(), control.parentElement))
+      problems.push('"' + name(control) + '" reaches outside the window');
+  const text = (row, test) => {
+    const walk = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode(); node; node = walk.nextNode())
+      if (test(node.data.trim())) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return { box: range.getBoundingClientRect(), from: node.parentElement, data: node.data.trim() };
+      }
+  };
+  const rows = [...section.querySelectorAll('[data-guide-row]')];
+  const titles = [], channels = [];
+  for (const row of rows) {
+    const title = text(row, data => data.startsWith('Weekly '));
+    const channel = text(row, data => data === ${JSON.stringify(CHANNEL)});
+    if (!title || title.box.width === 0 || cut(title.box, title.from)) titles.push(title?.data ?? '?');
+    if (!channel || channel.box.width === 0 || cut(channel.box, channel.from)) channels.push(title?.data ?? '?');
+  }
+  if (titles.length) problems.push(titles.length + ' of ' + rows.length + ' titles are cut, such as ' + titles[0]);
+  if (channels.length) problems.push(channels.length + ' of ' + rows.length + ' channels are cut, such as on ' + channels[0]);
+  return {
+    problems,
+    rows: rows.length,
+    scrollWidth: document.documentElement.scrollWidth,
+    field: section.querySelector('input').getBoundingClientRect().toJSON(),
+    firstRow: rows[0].getBoundingClientRect().toJSON(),
+  };
+})()`;
+
 /** A multi-page guide with past, current and future airings and optional episode facts. */
 export function searchGuide(): string {
   const stamp = (n: number) =>
@@ -53,6 +118,26 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
       });
     await d.send("Input.insertText", { text });
     await d.wait(async () => (await d.evaluate<number>(rows)) > 0);
+  };
+
+  /** Ctrl K, "Weekly", until the row that searches every guide day is listed and settled. */
+  const palette = async () => {
+    for (const type of ["rawKeyDown", "keyUp"])
+      await d.send("Input.dispatchKeyEvent", {
+        type,
+        key: "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 75,
+        modifiers: 2,
+      });
+    await d.wait(() => d.exists("document.querySelector('[role=dialog] input[role=combobox]')"));
+    await d.send("Input.insertText", { text: "Weekly" });
+    await d.wait(() => d.exists("document.querySelector('[data-guide-search]')"));
+    await d.wait(() =>
+      d.evaluate<boolean>(
+        "document.querySelector('[role=dialog]').getAnimations({ subtree: true }).every(a => a.playState !== 'running')",
+      ),
+    );
   };
 
   await d.click("Open Live TV", named("header button", "Live TV"));
@@ -127,23 +212,17 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
   await d.wait(() => d.exists("document.activeElement?.matches('[data-guide-search-opener]')"));
   d.observed.escapeRestoresOpener = true;
 
-  for (const type of ["rawKeyDown", "keyUp"])
-    await d.send("Input.dispatchKeyEvent", {
-      type,
-      key: "k",
-      code: "KeyK",
-      windowsVirtualKeyCode: 75,
-      modifiers: 2,
-    });
-  await d.wait(() => d.exists("document.querySelector('[role=dialog] input[role=combobox]')"));
-  await d.send("Input.insertText", { text: "Weekly" });
-  await d.wait(() => d.exists("document.querySelector('[data-guide-search]')"));
+  await palette();
   await d.capture("palette-guide-last-row");
   await d.click("Palette guide search", "document.querySelector('[data-guide-search]')");
   await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
   expect(await d.exists(`${field}.value === 'Weekly'`), "Palette preserves typed words");
   d.observed.paletteSeed = "Weekly";
   await d.capture("guide-from-palette");
+
+  // Every language at the smallest window with text enlarged by a quarter: ⌘K's guide row is
+  // pressed by pointer, and the panel keeps its controls, titles and channels inside the window.
+  const problems: string[] = [];
 
   for (const locale of ["en_US", "nl_NL", "fr_FR", "de_DE", "es_ES"]) {
     await d.quit();
@@ -154,6 +233,7 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
       deviceScaleFactor: 1,
       mobile: false,
     });
+    await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
     // Text enlargement is a rendering probe; application state still changes through controls.
     await d.evaluate("document.documentElement.style.fontSize = '125%'");
 
@@ -162,15 +242,41 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
     );
 
     await d.click("Open localized Live TV", named("header button", translate(language, "Live TV")));
-    await d.click(
-      "Localized header calendar",
-      "document.querySelector('[data-guide-search-opener]')",
-    );
-    await search("Weekly");
-    await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
-    d.observed[`layout-${locale}`] = await d.evaluate(
-      `({lang:document.documentElement.lang, width:innerWidth,height:innerHeight, font:getComputedStyle(document.documentElement).fontSize, buttons:[...document.querySelectorAll('section button')].map(e=>({text:e.textContent,label:e.getAttribute('aria-label'),disabled:e.disabled,rect:e.getBoundingClientRect().toJSON()}))})`,
-    );
+    await palette();
+    const pressable = await d.evaluate<boolean>(PRESSABLE);
+
+    await d.capture(`palette-${locale}-960-text125`);
+
+    if (pressable) {
+      await d.click(
+        "Localized palette guide search",
+        "document.querySelector('[data-guide-search]')",
+      );
+      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+      expect(await d.exists(`${field}.value === 'Weekly'`), "Palette preserves typed words");
+    } else {
+      problems.push(`${locale}: ⌘K's guide row can't be pressed inside the window`);
+      await d.key("Escape", 27);
+      await d.wait(async () => !(await d.exists("document.querySelector('[role=dialog]')")));
+      await d.click(
+        "Localized header calendar",
+        "document.querySelector('[data-guide-search-opener]')",
+      );
+      await search("Weekly");
+      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+    }
+
+    const layout = await d.evaluate<{ problems: string[] }>(LAYOUT);
+
+    problems.push(...layout.problems.map((problem) => `${locale}: ${problem}`));
+    d.observed[`layout-${locale}`] = {
+      lang: language,
+      font: await d.evaluate<string>("getComputedStyle(document.documentElement).fontSize"),
+      ...layout,
+    };
     await d.capture(`guide-${locale}-960-text125`);
   }
+
+  d.observed.layoutProblems = problems;
+  expect(problems.length === 0, `Readable at 960 × 600 with 125% text:\n${problems.join("\n")}`);
 }
