@@ -1,3 +1,4 @@
+import type { Viewing } from "@mrstreamer/contracts/viewing";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { draftOf } from "../live/model.ts";
 import { sources } from "../bootstrap/sources.ts";
@@ -37,10 +38,10 @@ export const viewingFailure = store<{
 // Once the viewer dismisses a refused progress save, later refusals stay quiet until one is kept.
 let progressQuiet = false;
 
-function attempt<Result>(
+function attempt(
   kind: "progress" | "watchlist" | "episode",
   message: string,
-  work: () => Promise<Result>,
+  work: () => Promise<Viewing | void>,
   target: string = kind,
 ) {
   const failure = { kind, message, target, retry: () => retry() };
