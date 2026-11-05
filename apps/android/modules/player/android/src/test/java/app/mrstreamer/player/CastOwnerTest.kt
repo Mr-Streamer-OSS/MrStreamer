@@ -25,8 +25,7 @@ class CastOwnerTest {
       override fun tracks(attempt: String, tracks: List<Track>) {}
       override fun released(release: Release) { releases.add(release) }
     })
-    val scratch = File(requireNotNull(System.getProperty("cast.scratch"))).apply { mkdirs() }
-    val file = File.createTempFile("cast-owner", ".mp4", scratch)
+    val file = File.createTempFile("cast-owner", ".mp4", context.cacheDir)
     javaClass.classLoader!!.getResourceAsStream("media/h264-aac.mp4")!!.use { input -> file.outputStream().use { input.copyTo(it) } }
     var close: (() -> Unit)? = null
     try {

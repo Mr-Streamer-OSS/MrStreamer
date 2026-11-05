@@ -14,6 +14,17 @@ import {
 import { tvPath } from "../cast/media.ts";
 import type { Admission, NativePlayer, Observation } from "./native.ts";
 
+/** The phase the player reports for what the TV says it does. */
+const PHASES = {
+  playing: "playing",
+  paused: "paused",
+  loading: "buffering",
+  ended: "ended",
+  failed: "failed",
+  stopped: "failed",
+  taken: "failed",
+} as const satisfies Record<TvStatus["state"], Observation["phase"]>;
+
 export type OutputState =
   | { readonly kind: "local" }
   | { readonly kind: "connecting"; readonly tv: Tv }
@@ -29,7 +40,12 @@ export type OutputState =
        */
       readonly detached: boolean;
     }
-  | { readonly kind: "refused"; readonly tv: Tv; readonly reason: string };
+  | {
+      readonly kind: "refused";
+      readonly tv: Tv;
+      /** Why, before anything reached the TV; "unavailable" when it couldn't be connected. */
+      readonly reason: TvRefused["refusal"] | "unavailable";
+    };
 
 /** One output of the admitted player. UI state never contains a source or relay address. */
 export interface CastOutput {
@@ -118,26 +134,15 @@ export function playerOutput(
 
   function observe(status: TvStatus) {
     if (!last || !admission || !remote) return;
+    const phase = PHASES[status.state];
     last = {
       ...last,
-      phase:
-        status.state === "playing"
-          ? "playing"
-          : status.state === "paused"
-            ? "paused"
-            : status.state === "loading"
-              ? "buffering"
-              : status.state === "ended"
-                ? "ended"
-                : "failed",
+      phase,
       positionMs: Math.max(0, status.time * 1000),
       durationMs: status.duration === null ? null : status.duration * 1000,
       bufferedMs: 0,
       speed: 1,
-      failure:
-        status.state === "failed" || status.state === "stopped" || status.state === "taken"
-          ? { kind: "network", code: "CAST_ENDED", status: null }
-          : null,
+      failure: phase === "failed" ? { kind: "network", code: "CAST_ENDED", status: null } : null,
     };
 
     void local.remotePosition?.(admission.attempt, last.positionMs);
@@ -195,16 +200,7 @@ export function playerOutput(
         if (!budget) throw new TvRefused("budget");
 
         if (!active()) throw new Error("Output changed");
-        relay = await serveOnRelay(
-          request.attempt,
-          budget,
-          request.url,
-          path.kind === "hls"
-            ? { hls: true, strict: false }
-            : { hls: false, contentType: path.contentType },
-          null,
-          controller.signal,
-        );
+        relay = await serveOnRelay(request.attempt, request.url, path, controller.signal);
 
         if (!active()) {
           await close();
@@ -226,9 +222,7 @@ export function playerOutput(
             segments: relay.segments,
             live: request.mode === "live",
             title: request.title ?? "",
-            subtitle: "",
             from: last.positionMs / 1000,
-            paused: false,
           },
           (status) => {
             if (!active()) return;
@@ -335,15 +329,13 @@ export function playerOutput(
     },
   };
 
-  onLeftApp((done) => {
+  onLeftApp(() => {
     const now = state.get();
 
     if (now.kind === "remote" || now.kind === "connecting")
       state.set({ kind: "stopped", tv: now.tv, reason: "foreground", detached: remote });
     observe({ state: "failed", time: (last?.positionMs ?? 0) / 1000, duration: null });
-    void close()
-      .finally(done)
-      .catch(() => {});
+    void close().catch(() => {});
   });
 
   type EventBridge = (event: string, listener: (value: never) => void) => { remove(): void };

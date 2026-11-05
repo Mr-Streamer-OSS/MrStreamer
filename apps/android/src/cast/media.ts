@@ -1,14 +1,12 @@
-import { languageCode } from "@mrstreamer/core/ondemand/tracks";
-
 // What a TV gets of a stream, decided on the phone: the first media profile a Cast Default Media
 // Receiver is given, and each HLS playlist rewritten so the TV reads only the phone's relay. For
-// cast.ts, which serves them.
+// sender.ts, which serves them.
 //
 // The TV never sees a provider's address. Every URI a playlist names becomes an opaque path under
 // the relay's token for this load; tags whose URIs the first slice doesn't relay are dropped. A
 // stream with a key is refused, whenever its key appears, since the receiver would have to fetch
-// it from the provider. Subtitles are left out of the first slice, and of a title's sound tracks
-// only the chosen one goes, so the TV can't pick another the viewer didn't.
+// it from the provider. Subtitles are left out of the first slice, and of each sound group only
+// its default track goes, else its first.
 
 /** Why a stream can't play on a TV, said before anything reaches it. */
 export type Refusal =
@@ -21,7 +19,7 @@ export type Refusal =
   /** A channel that isn't HLS, which the relay doesn't carry. */
   | "stream";
 
-/** How a source goes to the TV: through a format session as HLS, as it is, or not at all. */
+/** How a source goes to the TV: as HLS, as a file it reads in ranges, or not at all. */
 export type TvPath =
   | { readonly kind: "file"; readonly contentType: string }
   | { readonly kind: "hls" }
@@ -93,8 +91,8 @@ const written = (values: Map<string, string>) =>
  * picture is outside it or none of its sounds is in it. A variant that names no codecs is let
  * through: the TV decides.
  */
-function profiled(codecs: string | null, strict: boolean): string | null | undefined {
-  if (codecs === null) return strict ? null : undefined;
+function profiled(codecs: string | null): string | null | undefined {
+  if (codecs === null) return undefined;
 
   // Text tracks, such as WebVTT or TTML, are left out with the subtitles.
   const named = codecs
@@ -117,10 +115,6 @@ function profiled(codecs: string | null, strict: boolean): string | null | undef
 
   if (!picturesFit || (sounds.length > 0 && fitting.length === 0)) return null;
 
-  // The format session's sound tracks share one group whose renditions don't say their codec, so
-  // the chosen one could be the AC-3 one: a file with any sound outside the profile is refused.
-  if (strict && fitting.length < sounds.length) return null;
-
   return [...pictures, ...fitting].join(",");
 }
 
@@ -133,17 +127,12 @@ function fitsScreen(resolution: string | undefined): boolean {
 
 /**
  * Rewrites one playlist read from `base`, its address after any redirect, for the TV. `route`
- * turns each URI it names into the relay's path for it, made once per playlist read. `sound` is
- * the chosen sound's language code: of each sound group only the track in it goes, else the group's
- * default, else its first. `strict` refuses a variant that names no codecs, as the format
- * session's own playlist names every codec it can.
+ * turns each URI it names into the relay's path for it, made once per playlist read.
  */
 export function rewritePlaylist(
   text: string,
   base: string,
   route: (url: string, kind: RouteKind) => string,
-  sound: string | null,
-  strict = false,
 ): Rewritten {
   const lines = text.replace(/^﻿/, "").split(/\r?\n/);
 
@@ -166,7 +155,7 @@ export function rewritePlaylist(
   let variants = 0;
   /** The STREAM-INF waiting for its URI line, or "skip" for one whose URI is left out. */
   let pending: string | "skip" | null = null;
-  const sounds = soundsKept(lines, sound);
+  const sounds = soundsKept(lines);
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -204,7 +193,7 @@ export function rewritePlaylist(
         continue;
       case "#EXT-X-STREAM-INF": {
         master = true;
-        const codecs = profiled(unquoted(values.get("CODECS")), strict);
+        const codecs = profiled(unquoted(values.get("CODECS")));
 
         if (codecs === null || !fitsScreen(values.get("RESOLUTION"))) {
           pending = "skip";
@@ -257,8 +246,8 @@ export function rewritePlaylist(
   return { kind: "playlist", text: `${out.join("\n")}\n`, variant, segments };
 }
 
-/** The EXT-X-MEDIA sound lines kept: one per group, in the language chosen when one is. */
-function soundsKept(lines: readonly string[], sound: string | null): Set<string> {
+/** The EXT-X-MEDIA sound lines kept: one per group, its default, else its first. */
+function soundsKept(lines: readonly string[]): Set<string> {
   const groups = new Map<string, Array<{ line: string; values: Map<string, string> }>>();
 
   for (const line of lines) {
@@ -273,16 +262,8 @@ function soundsKept(lines: readonly string[], sound: string | null): Set<string>
   const kept = new Set<string>();
 
   for (const members of groups.values()) {
-    const isDefault = ({ values }: (typeof members)[number]) =>
-      unquoted(values.get("DEFAULT")) === "YES";
-
-    // As the phone decides: in the language, its default track first; else the default.
-    const spoken =
-      sound === null
-        ? []
-        : members.filter(({ values }) => languageCode(unquoted(values.get("LANGUAGE"))) === sound);
-
-    const chosen = spoken.find(isDefault) ?? spoken[0] ?? members.find(isDefault) ?? members[0];
+    const chosen =
+      members.find(({ values }) => unquoted(values.get("DEFAULT")) === "YES") ?? members[0];
 
     if (chosen) kept.add(chosen.line);
   }

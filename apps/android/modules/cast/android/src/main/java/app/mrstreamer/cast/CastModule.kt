@@ -159,12 +159,12 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
       if (channels.containsKey(id)) stops[id] = Base64.decode(data, Base64.NO_WRAP)
     }
     Function("disconnect") { id: String -> closeChannel(id) }
-    AsyncFunction("serve") { attempt: String, budget: Boolean, playlist: Boolean, promise: Promise ->
+    AsyncFunction("serve") { attempt: String, playlist: Boolean, promise: Promise ->
       main.post {
         val owner = PlayerHost.existing()
-        val admission = if (foreground) owner?.reserveOutput(attempt, budget) { main.post { cleanup(false) } } else null
+        val admission = if (foreground) owner?.reserveOutput(attempt) { main.post { cleanup(false) } } else null
         val released = admission?.let { owner?.outputReader(attempt) }
-        if (admission == null || released == null) promise.reject("CAST_ADMISSION", "Output unavailable or provider overlap budget unknown", null)
+        if (admission == null || released == null) promise.reject("CAST_ADMISSION", "Output unavailable", null)
         else {
           val epoch = generation
           io.execute {
@@ -218,7 +218,6 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
       answers[request]?.complete(body); Unit
     }
     AsyncFunction("revoke") { token: String -> relays[token]?.let { relay -> relay.revoke(); relays.remove(token, relay) }; Unit }
-    Function("endBackground") { Unit }
     OnDestroy {
       main.post { cleanup(); application?.unregisterActivityLifecycleCallbacks(this@CastModule); io.shutdown(); writes.shutdown() }
     }

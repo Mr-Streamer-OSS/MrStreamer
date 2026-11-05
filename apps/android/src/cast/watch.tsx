@@ -596,8 +596,6 @@ function VolumeRow({ level, muted }: { level: number; muted: boolean }) {
   const at = (event: GestureResponderEvent) =>
     width > 0 ? Math.min(1, Math.max(0, (event.nativeEvent.pageX - origin.current) / width)) : 0;
 
-  const send = (to: number) => player.cast.setVolume(Math.min(1, Math.max(0, to)));
-
   return (
     <View
       style={{
@@ -621,7 +619,7 @@ function VolumeRow({ level, muted }: { level: number; muted: boolean }) {
         accessibilityValue={{ min: 0, max: 100, now: Math.round(shown * 100) }}
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={({ nativeEvent }) =>
-          send(level + (nativeEvent.actionName === "increment" ? 0.1 : -0.1))
+          player.cast.setVolume(level + (nativeEvent.actionName === "increment" ? 0.1 : -0.1))
         }
         {...handlers}
         onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}
@@ -634,7 +632,7 @@ function VolumeRow({ level, muted }: { level: number; muted: boolean }) {
         onResponderMove={(event) => setDragging(at(event))}
         onResponderRelease={(event) => {
           setDragging(null);
-          send(at(event));
+          player.cast.setVolume(at(event));
         }}
         onResponderTerminate={() => setDragging(null)}
         style={{ flex: 1, height: 48, justifyContent: "center" }}
@@ -698,8 +696,8 @@ function OnTvSubtitles({ now, onPlayHere }: { now: Playing; onPlayHere: () => vo
   );
 }
 
-/** A refusal's reason, said before anything reached the TV. */
-function refusal(reason: string): string | null {
+/** A refusal's reason, said before anything reached the TV; null when it couldn't connect. */
+function refusal(reason: Extract<OutputState, { kind: "refused" }>["reason"]): string | null {
   switch (reason) {
     case "format":
       return t("This file type can't play on a TV.");
@@ -715,7 +713,7 @@ function refusal(reason: string): string | null {
       return coreT("The connection to the provider failed.");
     case "budget":
       return t("The provider allows no other stream right now.");
-    default:
+    case "unavailable":
       return null;
   }
 }
@@ -733,12 +731,14 @@ export function TvDialog() {
     if (quiet) void settle();
   }, [quiet]);
 
+  const refused = output.kind === "refused" ? refusal(output.reason) : null;
+
   const shown =
     output.kind === "refused"
-      ? refusal(output.reason)
+      ? refused
         ? {
             title: t("Can't play on {tv}", { tv: output.tv.name }),
-            body: `${refusal(output.reason)} ${t("It still plays on this phone.")}`,
+            body: `${refused} ${t("It still plays on this phone.")}`,
           }
         : connectFailed(output.tv)
       : output.kind === "stopped" && !output.detached && !quiet

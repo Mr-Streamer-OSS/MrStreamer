@@ -2,24 +2,19 @@ import { describe, expect, it } from "vitest";
 import { rewritePlaylist, type RouteKind } from "../src/cast/media.ts";
 
 // What a TV is given of a stream: playlists rewritten so every address it reads is the relay's,
-// keys refused, sound narrowed to the chosen track, and the first profile's limits.
+// keys refused, sound narrowed to one track per group, and the first profile's limits.
 
 const PROVIDER = "http://provider.example:8080/live/user/secret/1.m3u8";
 
 /** Rewrites `text`, numbering each relayed URI and keeping what each stands for. */
-function rewrite(text: string, sound: string | null = null) {
+function rewrite(text: string) {
   const routes: Array<{ url: string; kind: RouteKind }> = [];
 
-  const result = rewritePlaylist(
-    text,
-    PROVIDER,
-    (url, kind) => {
-      routes.push({ url, kind });
+  const result = rewritePlaylist(text, PROVIDER, (url, kind) => {
+    routes.push({ url, kind });
 
-      return `${routes.length}.${kind === "playlist" ? "m3u8" : "ts"}`;
-    },
-    sound,
-  );
+    return `${routes.length}.${kind === "playlist" ? "m3u8" : "ts"}`;
+  });
 
   return { result, routes };
 }
@@ -67,7 +62,7 @@ describe("rewritePlaylist", () => {
     expect(keyed("#EXT-X-KEY:METHOD=NONE").kind).toBe("playlist");
   });
 
-  it("keeps only the chosen sound and no subtitles in a title's master playlist", () => {
+  it("keeps only each sound group's default track and no subtitles in a master playlist", () => {
     const { result } = rewrite(
       [
         "#EXTM3U",
@@ -78,13 +73,12 @@ describe("rewritePlaylist", () => {
         '#EXT-X-STREAM-INF:BANDWIDTH=4000000,CODECS="avc1.640028,mp4a.40.2",AUDIO="audio",SUBTITLES="subs"',
         "v.m3u8",
       ].join("\n"),
-      "nl",
     );
 
     if (result.kind !== "playlist") throw new Error(result.kind);
-    // Of the two Dutch tracks, the default one, as the phone would pick.
-    expect(result.text).toContain("Nederlands 3");
-    expect(result.text).not.toMatch(/English 1|Commentaar 2/);
+    // Of the two defaults in the group, the first.
+    expect(result.text).toContain("English 1");
+    expect(result.text).not.toMatch(/Commentaar 2|Nederlands 3/);
     expect(result.text).not.toMatch(/SUBTITLES/);
     expect(result.variant).toMatch(/\.m3u8$/);
   });
@@ -106,25 +100,13 @@ describe("rewritePlaylist", () => {
       kind: "refused",
       refusal: "codec",
     });
-    // The format session names every codec it can: a variant naming none is outside the profile.
-    const unnamed = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n";
-    expect(rewritePlaylist(unnamed, PROVIDER, () => "1.m3u8", null, true)).toEqual({
-      kind: "refused",
-      refusal: "codec",
-    });
-    expect(rewritePlaylist(unnamed, PROVIDER, () => "1.m3u8", null).kind).toBe("playlist");
+    // A variant naming no codecs is left to the TV.
+    expect(rewrite("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nv.m3u8\n").result.kind).toBe(
+      "playlist",
+    );
     // A channel with an AAC sound beside an AC-3 one still goes, naming only what the TV plays.
     const mixed = only("avc1.640028,mp4a.40.2,ac-3");
     expect(mixed.kind === "playlist" && mixed.text).toContain('CODECS="avc1.640028,mp4a.40.2"');
-
-    // A Matroska file's renditions don't say which is the AC-3 one: it is refused.
-    const file =
-      '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028,mp4a.40.2,ac-3"\nv.m3u8\n';
-
-    expect(rewritePlaylist(file, PROVIDER, () => "1.m3u8", null, true)).toEqual({
-      kind: "refused",
-      refusal: "codec",
-    });
   });
 
   it("refuses what isn't a playlist, and one that names a file on the phone", () => {

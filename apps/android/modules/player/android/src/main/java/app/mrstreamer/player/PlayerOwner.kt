@@ -250,12 +250,13 @@ class PlayerOwner(
     )
   }
 
-  /** Reserves the same hold for a bounded relay. Unknown provider overlap budgets are refused. */
-  fun reserveOutput(attempt: String, budget: Boolean = false, onRetire: () -> Unit = {}): Admission? = synchronized(LocalFiles) {
+  /**
+   * Reserves the same hold for one bounded relay. The output owner checks fresh provider
+   * accounting before it asks for a provider source's serial relay reader.
+   */
+  fun reserveOutput(attempt: String, onRetire: () -> Unit = {}): Admission? = synchronized(LocalFiles) {
     val now = current ?: return null
     if (now.admission.attempt != attempt || now.stopped || now.outputLease || now.admission.preview) return null
-    // JS checks fresh provider accounting before granting one serial relay reader.
-    if (now.admission.hold !is HoldRef.LocalFile && !budget) return null
     if (!now.hold.opened()) return null
     now.outputLease = true
     now.outputEnd = onRetire

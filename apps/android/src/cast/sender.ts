@@ -1,5 +1,5 @@
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
-import { rewritePlaylist, type Refusal, type RouteKind } from "./media.ts";
+import { rewritePlaylist, type Refusal, type RouteKind, type TvPath } from "./media.ts";
 import { store, useStore, type Store } from "../platform/store.ts";
 import { defined } from "@mrstreamer/core/defined";
 
@@ -52,10 +52,8 @@ export interface TvMedia {
   /** The segment format of an HLS stream; null for a file. */
   readonly segments: "fmp4" | "ts" | null;
   readonly title: string;
-  readonly subtitle: string;
   /** Seconds to start a title from. */
   readonly from: number;
-  readonly paused: boolean;
 }
 
 /** What one load plays, until it is stopped or the link goes. */
@@ -71,6 +69,7 @@ export interface TvLoaded {
 export interface TvLink {
   readonly tv: Tv;
   readonly volume: Pick<Store<Volume | null>, "get" | "subscribe">;
+  /** Sets the TV's level, from 0 to 1. */
   setVolume(level: number): void;
   /**
    * Loads `media`; rejects when the TV refuses it or doesn't answer, or at once when `signal`
@@ -124,7 +123,6 @@ interface CastModule {
   /** Serves only the existing player's admitted source, retaining its exact native hold. */
   serve(
     attempt: string,
-    budget: boolean,
     playlist: boolean,
   ): Promise<{ readonly address: string; readonly token: string } | null>;
   /** Adds routes to a token. */
@@ -135,8 +133,6 @@ interface CastModule {
   answer(request: string, body: string | null): void;
   /** Removes the token and resolves once every request under it, to the TV and upstream, ended. */
   revoke(token: string): Promise<void>;
-  /** Acknowledges native foreground cleanup. */
-  endBackground(): void;
   addListener(
     event: "onBrowse",
     listener: Listener<{ state: "searching" | "denied" | "failed"; tvs: Tv[] }>,
@@ -204,8 +200,8 @@ const channels = new Map<string, { read: (bytes: Uint8Array) => void; closed: ()
 /** Each served token's playlist rewriting. */
 const relays = new Map<string, (url: string, body: string) => string | null>();
 
-/** Told when the app left the foreground with a TV connected. */
-let leaving: ((done: () => void) => void) | null = null;
+/** Told when native cleanup stopped the route as the app left the foreground. */
+let leaving: (() => void) | null = null;
 
 function listen(module: CastModule) {
   module.addListener("onBrowse", ({ state, tvs }) => {
@@ -225,18 +221,7 @@ function listen(module: CastModule) {
       module.answer(request, answer);
     }
   });
-  module.addListener("onBackground", () => {
-    let done = false;
-
-    const release = () => {
-      if (done) return;
-      done = true;
-      module.endBackground();
-    };
-
-    if (leaving) leaving(release);
-    else release();
-  });
+  module.addListener("onBackground", () => leaving?.());
 }
 
 // --- The relay -------------------------------------------------------------------------------
@@ -260,29 +245,21 @@ const extension = (url: string, fallback: string) =>
   /\.([a-z0-9]{2,4})$/i.exec(url.replace(/[?#].*$/, ""))?.[1]?.toLowerCase() ?? fallback;
 
 /**
- * Serves `url` for one load: a file as it is, an HLS stream with each playlist rewritten as it is
- * read. An HLS stream's playlist, and its first variant's, are read once first, so a stream the
- * TV can't be given is refused before anything reaches it. `sound` is the chosen sound's
- * language. Rejects with `TvRefused`.
+ * Serves admitted `attempt`, read from `url`, for one load: a file as it is, an HLS stream with
+ * each playlist rewritten as it is read. An HLS stream's playlist, and its first variant's, are
+ * read once first, so a stream the TV can't be given is refused before anything reaches it.
+ * Rejects with `TvRefused`.
  */
 export async function serveOnRelay(
   attempt: string,
-  budget: boolean,
   url: string,
-  kind:
-    | {
-        readonly hls: true;
-        /** The format session's own playlist, which names the codecs of everything it can. */
-        readonly strict: boolean;
-      }
-    | { readonly hls: false; readonly contentType: string },
-  sound: string | null,
+  path: Exclude<TvPath, { kind: "refused" }>,
   signal: AbortSignal,
 ): Promise<Relay> {
   const module = native();
 
   if (!module) throw new TvRefused("network");
-  const served = await module.serve(attempt, budget, kind.hls);
+  const served = await module.serve(attempt, path.kind === "hls");
 
   if (!served) throw new TvRefused("network");
   const { token } = served;
@@ -302,12 +279,12 @@ export async function serveOnRelay(
     throw new Error("Cast cancelled");
   } else signal.addEventListener("abort", abort, { once: true });
 
-  if (!kind.hls) {
+  if (path.kind === "file") {
     signal.removeEventListener("abort", abort);
 
     return {
       address: `${served.address}0.${extension(url, "mp4")}`,
-      contentType: kind.contentType,
+      contentType: path.contentType,
       segments: null,
       revoke,
     };
@@ -338,7 +315,7 @@ export async function serveOnRelay(
       return path;
     };
 
-    const rewritten = rewritePlaylist(body, base, route, sound, kind.hls && kind.strict);
+    const rewritten = rewritePlaylist(body, base, route);
 
     if (rewritten.kind === "playlist") {
       module.route(token, made);
@@ -393,10 +370,8 @@ export async function serveOnRelay(
 
 // --- Background ------------------------------------------------------------------------------
 
-/**
- * Told when native visibility cleanup has stopped the route. The output owner registers it.
- */
-export function onLeftApp(listener: ((done: () => void) => void) | null) {
+/** Told when native visibility cleanup has stopped the route. The output owner registers it. */
+export function onLeftApp(listener: () => void) {
   native();
   leaving = listener;
 }
@@ -917,7 +892,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     setVolume(level) {
       send(PLATFORM, NAMESPACE.receiver, {
         type: "SET_VOLUME",
-        volume: { level: Math.min(1, Math.max(0, level)) },
+        volume: { level },
         requestId: ++requests,
       });
 
@@ -955,9 +930,9 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
             : loaded.segments === "ts"
               ? { hlsSegmentFormat: "ts", hlsVideoSegmentFormat: "mpeg2_ts" }
               : {}),
-          metadata: { metadataType: 0, title: loaded.title, subtitle: loaded.subtitle },
+          metadata: { metadataType: 0, title: loaded.title },
         },
-        autoplay: !loaded.paused,
+        autoplay: true,
         ...defined({ currentTime: loaded.live ? undefined : loaded.from }),
       });
 

@@ -44,8 +44,15 @@ not depend on JavaScript running. Buffered receiver media cannot be retracted, i
 process death. TLS encryption on the Cast socket does not authenticate the receiver: this is a
 trusted-LAN route, not pairing. Normal upstream HTTPS validation is unchanged.
 
+Watch and the mini player follow `player.cast.state` through `apps/android/src/cast/watch.tsx`,
+after Paper A's Android Cast page. The Cast button opens Play on TV, which stays on Connecting
+until the TV reports PLAYING. On a TV, Watch keeps play, pause, the jumps where it seeks, the
+seek bar and Subtitles, which says downloaded subtitles don't play on the TV. Refusals and failed
+connections are a dialog over a phone that still plays; a TV that stopped after taking over
+offers Play here and, unless it couldn't play it, the same TV again. A build without the Cast
+module shows none of it.
+
 Source tests use protocol/upstream stand-ins and JVM socket/file contracts on forge. Compilation
 proves source integration only. No Android device, actual NSD discovery, receiver launch,
 audible/moving playback, live rollover, receiver commands/volume/tracks, installed lifecycle,
-Wi-Fi loss, buffered-stop interval or final APK packaging is qualified by these checks. The
-separate Watch designer owns user-facing wiring and the accepted Paper design.
+Wi-Fi loss, buffered-stop interval or final APK packaging is qualified by these checks.

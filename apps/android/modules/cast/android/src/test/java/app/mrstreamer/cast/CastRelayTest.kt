@@ -1,14 +1,12 @@
 package app.mrstreamer.cast
 
 import java.net.*
-import java.io.File
 import java.nio.file.Files
 
 /** Runs the production native relay on loopback with an owned file, never an Android device. */
 class CastRelayTest {
 @org.junit.Test fun capability() {
-  val scratch = File(requireNotNull(System.getProperty("cast.scratch"))).apply { mkdirs() }
-  val file = Files.createTempFile(scratch.toPath(), "cast-contract", ".mp4").toFile()
+  val file = Files.createTempFile("cast-contract", ".mp4").toFile()
   file.writeText("0123ftyp89ab")
   var released = false
   val relay = Relay(InetAddress.getLoopbackAddress(), file.toURI().toString(), emptyMap(), false, { _, _ -> null }, { released = true })

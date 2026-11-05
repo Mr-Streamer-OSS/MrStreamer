@@ -93,7 +93,7 @@ function setup() {
   };
 
   // What native foreground cleanup calls, as the output owner registered it.
-  const leave = sender.leave.mock.lastCall?.[0] as (done: () => void) => void;
+  const leave = sender.leave.mock.lastCall?.[0] as () => void;
 
   return {
     ...output,
@@ -201,15 +201,15 @@ it("says a TV that stopped after taking over left the phone detached until Play 
 
   const left = setup();
   await onTv(left);
-  const done = vi.fn();
-  left.leave(done);
+  left.leave();
   expect(left.cast.state.get()).toEqual({
     kind: "stopped",
     tv,
     reason: "foreground",
     detached: true,
   });
-  await vi.waitFor(() => expect(done).toHaveBeenCalledOnce());
+  // Leaving drains the relay without waiting for the viewer.
+  await vi.waitFor(() => expect(left.revoke).toHaveBeenCalledOnce());
   expect(await left.cast.playHere()).toBe(true);
   expect(left.cast.state.get()).toEqual({ kind: "local" });
 });
@@ -237,7 +237,7 @@ it("says a TV that stopped before PLAYING never took the phone's output, and can
 
   const left = setup();
   const { selected: leaving } = await connecting(left);
-  left.leave(() => {});
+  left.leave();
   expect(await leaving).toBe(false);
   expect(left.cast.state.get()).toEqual({
     kind: "stopped",
