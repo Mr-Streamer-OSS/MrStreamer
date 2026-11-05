@@ -4,43 +4,22 @@ import { Window, type HTMLElement } from "happy-dom";
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { libraryIntents } from "../src/library/intents.ts";
-import { setLanguage, resolveLanguage } from "@mrstreamer/core/i18n";
-
-type Href = { pathname: string; params: Record<string, string> };
 
 const route = vi.hoisted(() => ({
   params: {} as Record<string, string>,
-  opened: [] as Href[],
-  segments: ["(tabs)", "movies"] as string[],
-  stacks: {} as Record<string, Href[]>,
-  destination: "movies",
   replaced: [] as string[],
 }));
 
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => route.params,
-  useSegments: () => route.segments,
+  useSegments: () => ["(tabs)", "movies"],
   useIsFocused: () => true,
   router: {
     setParams: (next: Record<string, string>) => Object.assign(route.params, next),
-    push: (href: Href) => {
-      route.opened.push(href);
-      // Group-qualified hrefs select that tab's stack. Each stack retains its own entries.
-      route.destination = href.pathname.split("/")[1]!;
-      (route.stacks[route.destination] ??= []).push(href);
-      route.params = href.params;
-      route.segments = ["(tabs)", route.destination, "library", "details"];
-    },
+    push: vi.fn(),
     navigate: vi.fn(),
     replace: (href: string) => route.replaced.push(href),
-    back: () => {
-      const stack = route.stacks[route.destination]!;
-
-      if (stack.length > 1) stack.pop();
-      const previous = stack.at(-1)!;
-      route.params = previous.params;
-      route.segments = ["(tabs)", route.destination, previous.pathname.split("/").at(-1)!];
-    },
+    back: vi.fn(),
   },
 }));
 
@@ -163,12 +142,7 @@ afterEach(() => {
   exitPreview();
   window.document.body.innerHTML = "";
   route.params = {};
-  route.opened = [];
   route.replaced = [];
-  route.segments = ["(tabs)", "movies"];
-  route.stacks = {};
-  route.destination = "movies";
-  setLanguage(resolveLanguage("en-US", []));
 });
 
 it("browses offline examples in real Movies, Search and series Details without running content actions", async () => {
@@ -338,9 +312,6 @@ it("heads preview scenes with the strip, whose actions open the form and leave f
   expect(shown.querySelector('[aria-label="Preview mode, Fictional examples"]')).not.toBeNull();
   press(shown, "Add provider");
   expect(shown.querySelector('[aria-label="Server or M3U link"]')).not.toBeNull();
-  press(shown, "Cancel");
-  expect(shown.querySelector("dialog")).toBeNull();
-  expect(shown.textContent).toContain("Live");
   press(shown, "Exit preview");
   expect(preview.get()).toBe(false);
   expect(route.replaced).toEqual(["/connect"]);

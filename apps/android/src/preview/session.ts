@@ -1,3 +1,4 @@
+import type { PlayIntent } from "../player/intent.ts";
 import { store } from "../platform/store.ts";
 
 /** What an example was asked to do; the Add provider sheet is titled for it. */
@@ -13,6 +14,10 @@ export const preview = store(false);
 export const providerPrompt = store<ProviderAction | "add" | null>(null);
 export const exampleId = "example:627";
 export const isExample = (id: string) => id === exampleId || id.startsWith(`${exampleId}:`);
+
+/** The source a play intent needs a provider for; a local file names none. */
+export const playSource = (intent: PlayIntent) =>
+  intent.kind === "file" ? undefined : intent.sourceId;
 
 export function enterPreview() {
   providerPrompt.set(null);

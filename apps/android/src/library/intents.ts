@@ -1,4 +1,4 @@
-import { providerRequired } from "../preview/session.ts";
+import { playSource, providerRequired } from "../preview/session.ts";
 import type { TitleVersion } from "@mrstreamer/contracts/ondemand";
 import type { PlayIntent } from "../player/intent.ts";
 import { store } from "../platform/store.ts";
@@ -30,19 +30,17 @@ export function intentRegistry(
   return {
     state,
     register(registered: IntentHandlers) {
+      const { play, download } = registered;
       const handlers = { ...registered };
 
-      if (admit && registered.play)
-        handlers.play = (...args) => {
-          const [intent] = args;
+      // Forwards the caller's exact arguments, so owners see the same call they were made.
+      if (admit && play)
+        handlers.play = (...args) =>
+          admit(playSource(args[0]), "play") ? play(...args) : undefined;
 
-          if (admit(intent.kind === "file" ? undefined : intent.sourceId, "play"))
-            return registered.play?.(...args);
-        };
-
-      if (admit && registered.download)
+      if (admit && download)
         handlers.download = (intent) => {
-          if (admit(intent.media.sourceId, "download")) registered.download?.(intent);
+          if (admit(intent.media.sourceId, "download")) download(intent);
         };
 
       state.set((current) => ({ ...current, ...handlers }));

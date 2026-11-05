@@ -43,7 +43,13 @@ import * as storage from "../platform/storage.ts";
 import { browseCollection, type BrowseChoices, type BrowsedCollection } from "./browse.ts";
 import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
-import { libraryDownloads, libraryIntents, libraryViewing, type MediaIdentity } from "./intents.ts";
+import {
+  libraryDownloads,
+  libraryIntents,
+  libraryViewing,
+  type MediaIdentity,
+  type ViewingPresentationAdapter,
+} from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
 import {
   Artwork,
@@ -727,7 +733,7 @@ function useDownloadPresentation(media: MediaIdentity) {
 }
 
 /** Rereads viewing actions after a committed change; refused writes retain their prior label. */
-function useViewingPresentation(): import("./intents.ts").ViewingPresentationAdapter | undefined {
+function useViewingPresentation(): ViewingPresentationAdapter | undefined {
   const adapter = useStore(libraryViewing.state);
   useSyncExternalStore(
     adapter?.subscribe ?? noDownloadSubscription,
@@ -756,10 +762,7 @@ function useViewingPresentation(): import("./intents.ts").ViewingPresentationAda
             providerRequired("save");
           },
         }),
-        series: (
-          _title: Title,
-          details: import("@mrstreamer/contracts/ondemand").SeriesDetails,
-        ) => {
+        series: (_, details) => {
           const episode = details.seasons[0]?.episodes[0];
 
           return episode ? { episode, resumeAt: 0, resumed: false } : undefined;
