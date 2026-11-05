@@ -428,12 +428,56 @@ function time(value: string | undefined): number | null {
   return Date.UTC(y, mo - 1, d, h, mi, s) - offset * 60_000;
 }
 
+/** Direct programme children only: comments and CDATA never supply markup. */
+function metadataChildren(body: string): { name: string; attrs: string; value: string }[] {
+  const children: { name: string; attrs: string; value: string }[] = [];
+
+  const tokens =
+    /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?([\w-]+)\b((?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+
+  let depth = 0;
+  let child: { name: string; attrs: string; from: number } | undefined;
+
+  for (const token of body.matchAll(tokens)) {
+    if (!token[1]) continue;
+    const closing = token[0].startsWith("</");
+    const empty = token[0].endsWith("/>");
+
+    if (closing) {
+      depth--;
+
+      if (depth === 0 && child) {
+        children.push({
+          name: child.name,
+          attrs: child.attrs,
+          value: body.slice(child.from, token.index),
+        });
+        child = undefined;
+      }
+    } else if (depth === 0 && empty) {
+      children.push({ name: token[1], attrs: token[2] ?? "", value: "" });
+    } else {
+      if (depth === 0)
+        child = { name: token[1], attrs: token[2] ?? "", from: token.index + token[0].length };
+
+      if (!empty) depth++;
+    }
+  }
+
+  return children;
+}
+
 /** Optional fields never make an otherwise readable programme fail. */
 function metadataOf(body: string): ProgrammeMetadata | undefined {
-  const bounded = (tag: string, max: number) => {
-    const value = text(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(body)?.[1]);
+  const children = metadataChildren(body);
 
-    return value && value.length <= max ? value : undefined;
+  const bounded = (tag: string, max: number) => {
+    const child = children.find((each) => each.name === tag);
+
+    if (!child) return undefined;
+    const value = text(child.value) ?? "";
+
+    return value.length <= max ? value : undefined;
   };
 
   const subtitle = bounded("sub-title", 512);
@@ -442,53 +486,57 @@ function metadataOf(body: string): ProgrammeMetadata | undefined {
   let episode: ProgrammeMetadata["episode"];
   let invalid = false;
 
-  for (const match of body.matchAll(/<episode-num(?:\s([^>]*))?>([\s\S]*?)<\/episode-num>/g)) {
-    const system = [...(match[1] ?? "").matchAll(ATTRIBUTE)].find((m) => m[1] === "system");
-    const scheme = decode(system?.[2] ?? system?.[3] ?? "").trim();
-    const value = text(match[2]);
+  for (const child of children.filter((each) => each.name === "episode-num")) {
+    const system = [...child.attrs.matchAll(ATTRIBUTE)].find((m) => m[1] === "system");
+    const scheme = decode(system?.[2] ?? system?.[3] ?? "onscreen").trim();
+    const value = text(child.value);
 
-    if (!scheme || scheme.length > 64 || !value || value.length > 256 || episodes.length >= 8) {
-      invalid = true;
+    if (!scheme || scheme.length > 64 || !value || value.length > 256) {
+      if (scheme === "xmltv_ns") invalid = true;
       continue;
     }
 
-    episodes.push({ system: scheme, value });
+    if (episodes.length < 8) episodes.push({ system: scheme, value });
 
     if (scheme !== "xmltv_ns") continue;
 
-    const tuple = /^(\d+)(?:\/(\d+))?\.(\d+)(?:\/(\d+))?\.(\d+)(?:\/(\d+))?$/.exec(
-      value.replace(/\s/g, ""),
-    );
+    // Whitespace around separators is permitted; whitespace inside a number is not.
+    const tuple =
+      /^(\d+)(?:\s*\/\s*(\d+))?\s*\.\s*(\d+)(?:\s*\/\s*(\d+))?\s*\.\s*(?:(\d+)(?:\s*\/\s*(\d+))?)?$/.exec(
+        value.trim(),
+      );
 
     if (!tuple) {
       invalid = true;
       continue;
     }
 
-    const parts = [1, 3, 5].map((i) => Number(tuple[i]));
+    const parts = [1, 3, 5].map((i) => (tuple[i] === undefined ? undefined : Number(tuple[i])));
 
     if (
       parts.some(
         (n, i) =>
-          !Number.isSafeInteger(n) ||
-          (tuple[2 * i + 2] !== undefined && n >= Number(tuple[2 * i + 2])),
+          n !== undefined &&
+          (!Number.isSafeInteger(n) ||
+            (tuple[2 * i + 2] !== undefined &&
+              (!Number.isSafeInteger(Number(tuple[2 * i + 2])) || n >= Number(tuple[2 * i + 2])))),
       )
     ) {
       invalid = true;
       continue;
     }
 
-    const parsed = { season: parts[0]!, episode: parts[1]!, part: parts[2]! };
+    const parsed = { season: parts[0]!, episode: parts[1]!, ...defined({ part: parts[2] }) };
 
     if (episode && JSON.stringify(episode) !== JSON.stringify(parsed)) invalid = true;
     episode = parsed;
   }
 
-  const repeatTag = /<previously-shown(?:\s([^>]*))?\s*\/?>/.exec(body);
+  const repeatTag = children.find((each) => each.name === "previously-shown");
   const repeat: { start?: string; channel?: string } = {};
 
   if (repeatTag)
-    for (const m of (repeatTag[1] ?? "").matchAll(ATTRIBUTE)) {
+    for (const m of repeatTag.attrs.matchAll(ATTRIBUTE)) {
       const value = decode(m[2] ?? m[3] ?? "");
 
       if (m[1] === "start" && value.length <= 64) repeat.start = value;

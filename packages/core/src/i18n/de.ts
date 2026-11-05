@@ -1552,6 +1552,7 @@ export const de: Translation = {
   "Close guide search": "Suche im Programmführer schließen",
   Subscription: "Abonnement",
   Days: "Tage",
+  "This list": "Diese Liste",
   "Any day": "Jeder Tag",
   "Before today": "Vor heute",
   Today: "Heute",

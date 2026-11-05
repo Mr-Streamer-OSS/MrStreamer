@@ -1609,6 +1609,7 @@ export const fr: Translation = {
   "Close guide search": "Fermer la recherche dans le guide",
   Subscription: "Abonnement",
   Days: "Jours",
+  "This list": "Cette liste",
   "Any day": "Tous les jours",
   "Before today": "Avant aujourd'hui",
   Today: "Aujourd'hui",

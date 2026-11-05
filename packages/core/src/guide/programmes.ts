@@ -792,11 +792,14 @@ export async function searchPageAt(
   guides: Guides,
   channels: MappedChannels,
   input: GuideSearchPageInput,
-  at: number,
+  _at: number,
   search: GuideSearching,
   signal: AbortSignal,
 ): Promise<GuideSearchPage> {
   const { channels: only, after, limit } = input;
+  const words = searchWords(input.query);
+
+  if (input.query.trim() !== "" && words.length === 0) return { matches: [], next: null };
   const from = input.from ?? -8_000_000_000_000_000;
 
   if (input.until !== undefined && input.until <= from) return { matches: [], next: null };
@@ -805,7 +808,7 @@ export async function searchPageAt(
     ? { ...channels, all: channels.all.filter((channel) => only.includes(channel.id)) }
     : channels;
 
-  const shown = await searchable(guides, selected, at);
+  const shown = await searchable(guides, selected, Number.NEGATIVE_INFINITY);
   const matches: ProgrammeMatch[] = [];
 
   for (const [place, part] of guides.parts.entries()) {
@@ -817,7 +820,7 @@ export async function searchPageAt(
     const found = await search.first(
       {
         path: part.path,
-        words: searchWords(input.query),
+        words,
         at: Math.max(from, after?.start ?? from),
         from,
         channels: [...keys.keys()],

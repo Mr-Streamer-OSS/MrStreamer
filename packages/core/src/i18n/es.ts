@@ -1610,6 +1610,7 @@ export const es: Translation = {
   "Close guide search": "Cerrar la búsqueda en la guía",
   Subscription: "Suscripción",
   Days: "Días",
+  "This list": "Esta lista",
   "Any day": "Cualquier día",
   "Before today": "Antes de hoy",
   Today: "Hoy",

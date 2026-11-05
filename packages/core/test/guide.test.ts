@@ -2,6 +2,7 @@ import { type } from "arktype";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -1526,4 +1527,158 @@ describe("available-horizon guide reads", () => {
     );
     expect(guide.programmes).toBe(4);
   });
+});
+
+it.each([
+  [
+    "description markup",
+    '<desc><![CDATA[<episode-num system="xmltv_ns">0.1.0</episode-num><previously-shown/>]]></desc><!-- <premiere/> -->',
+    undefined,
+  ],
+  [
+    "spaced digits",
+    '<episode-num system="xmltv_ns">1 2.0.0</episode-num>',
+    { episodes: [{ system: "xmltv_ns", value: "1 2.0.0" }] },
+  ],
+  [
+    "optional part",
+    '<episode-num system="xmltv_ns">1.4.</episode-num><premiere/>',
+    {
+      episodes: [{ system: "xmltv_ns", value: "1.4." }],
+      episode: { season: 1, episode: 4 },
+      premiere: "",
+    },
+  ],
+  [
+    "unrelated overflow before identity",
+    "<episode-num>screen</episode-num>".repeat(9) +
+      '<episode-num system="external">' +
+      "x".repeat(257) +
+      '</episode-num><episode-num system="xmltv_ns">1.4.0</episode-num>',
+    {
+      episodes: Array.from({ length: 8 }, () => ({ system: "onscreen", value: "screen" })),
+      episode: { season: 1, episode: 4, part: 0 },
+    },
+  ],
+  ["empty premiere", "<premiere></premiere>", { premiere: "" }],
+])("keeps honest XMLTV metadata: %s", (_name, extra, metadata) => {
+  const found: XmltvProgramme[] = [];
+
+  const reader = xmltvReader(
+    { channel() {}, programme: (entry) => found.push(entry) },
+    GUIDE_LIMITS.bytes,
+  );
+
+  reader.push(Buffer.from(tv(later("one.test").replace("</programme>", extra + "</programme>"))));
+  reader.end();
+  expect(found[0]?.metadata).toEqual(metadata);
+});
+
+it("searches retained ended channels without falling through to a later source", async () => {
+  const own = await index(
+    tv(programme("one.test", stamp(NOON - 2 * HOUR), stamp(NOON - HOUR), "Past news")),
+  );
+
+  const external = await index(tv(later("one.test", "Wrong news")));
+
+  const guides = guidesOf(
+    [
+      { source: OWN_GUIDE, origin: null, index: own.guide, path: own.target },
+      {
+        source: "external",
+        origin: "https://example.test",
+        index: external.guide,
+        path: external.target,
+      },
+    ],
+    new Map([["external", "https://example.test"]]),
+  );
+
+  const channels = catalogueOf({ a: ["one.test"] });
+
+  for (const dates of [{}, { until: NOON }]) {
+    const result = await searchPageAt(
+      guides,
+      channels,
+      { subscriptionId: "s", query: "news", limit: 10, ...dates },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    expect(result.matches.map((m) => m.programme.title)).toEqual(["Past news"]);
+  }
+
+  expect(
+    (
+      await searchPageAt(
+        guides,
+        channels,
+        { subscriptionId: "s", query: "!!!", limit: 10 },
+        NOON,
+        inProcess,
+        stopNever,
+      )
+    ).matches,
+  ).toEqual([]);
+});
+
+it("reads offline version-2 guides and carries their retained past into the next index", async () => {
+  const old = await index(
+    tv(programme("one.test", stamp(NOON - HOUR * 2), stamp(NOON - HOUR), "Kept news")),
+  );
+
+  old.guide.close();
+  opened.splice(opened.indexOf(old.guide), 1);
+  const db = new DatabaseSync(old.target);
+  db.exec("alter table programme drop column metadata; pragma user_version = 2;");
+  db.close();
+  const reopened = await openGuideIndex(old.target);
+  expect(reopened).not.toBeNull();
+
+  if (!reopened) throw new Error("Old guide unavailable");
+  opened.push(reopened);
+
+  const read = await searchPageAt(
+    ownGuide(reopened, old.target),
+    catalogueOf({ a: ["one.test"] }),
+    { subscriptionId: "s", query: "news", limit: 10 },
+    NOON,
+    inProcess,
+    stopNever,
+  );
+
+  expect(read.matches[0]?.programme).toMatchObject({ title: "Kept news" });
+  expect(read.matches[0]?.programme.metadata).toBeUndefined();
+  const next = await index(tv(later("one.test", "New news")), { previous: old.target });
+
+  const carried = await searchPageAt(
+    ownGuide(next.guide, next.target),
+    catalogueOf({ a: ["one.test"] }),
+    { subscriptionId: "s", query: "news", limit: 10 },
+    NOON,
+    inProcess,
+    stopNever,
+  );
+
+  expect(carried.matches.map((m) => m.programme.title)).toEqual(["Kept news", "New news"]);
+});
+
+it("keeps programmes readable when stored optional metadata has an invalid shape", async () => {
+  const own = await index(tv(later("one.test", "Readable")));
+  const db = new DatabaseSync(own.target);
+  db.prepare("update programme set metadata = ?").run(JSON.stringify({ episodes: {} }));
+  db.close();
+
+  const read = await searchPageAt(
+    ownGuide(own.guide, own.target),
+    catalogueOf({ a: ["one.test"] }),
+    { subscriptionId: "s", query: "Readable", limit: 10 },
+    NOON,
+    inProcess,
+    stopNever,
+  );
+
+  expect(read.matches[0]?.programme.title).toBe("Readable");
+  expect(read.matches[0]?.programme.metadata).toBeUndefined();
 });

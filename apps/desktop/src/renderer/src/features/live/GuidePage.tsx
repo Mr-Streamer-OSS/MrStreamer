@@ -87,7 +87,7 @@ import { rowPlays, searchChannelRows } from "./search-rows.ts";
 import { BrowseFilters } from "./BrowseFilters.tsx";
 import { ChannelTable } from "./ChannelTable.tsx";
 import { GuideGrid, type GridKeys } from "./GuideGrid.tsx";
-import { closeGuideSearch, GuideSearch, useGuideSearch } from "./GuideSearch.tsx";
+import { closeGuideSearch, openGuideSearch, GuideSearch, useGuideSearch } from "./GuideSearch.tsx";
 import { ListPicker, listKey } from "./ListPicker.tsx";
 import {
   resolveDiscovery,
@@ -916,10 +916,8 @@ export function GuidePage({ active }: { active: boolean }) {
                           size="icon"
                           aria-label={t("Search the guide")}
                           title={t("Search the guide")}
-                          disabled={channels.length === 0}
-                          onClick={() =>
-                            useGuideSearch.setState({ open: true, query: text.trim() })
-                          }
+                          data-guide-search-opener
+                          onClick={() => openGuideSearch(text.trim())}
                         >
                           <CalendarSearch />
                         </Button>

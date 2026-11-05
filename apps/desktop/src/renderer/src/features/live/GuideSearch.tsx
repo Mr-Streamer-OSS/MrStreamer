@@ -9,12 +9,12 @@
 // saved searches are its own. Changing the words or a filter starts again from the first page.
 // A save that fails keeps what was saved before and says so, with Retry. Saved searches that
 // can't be read are not shown as none, and nothing is saved over them.
-//   Episode numbers show only as the guide gives them. A full xmltv_ns number reads S1 E4; other
+//   Episode numbers show only as the guide gives them. A valid xmltv_ns season and episode reads S1 E4; other
 // numbering shows as written, when the guide gives one meant for the screen. Nothing here takes a
 // missing repeat mark, a premiere or a new-show mark as proof that an episode is new.
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, X } from "lucide-react";
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { create } from "zustand";
 import type {
   GuideSearchPageInput,
@@ -56,18 +56,28 @@ export const useGuideSearch = create<{ readonly open: boolean; readonly query: s
 }));
 
 /** Opens guide search in Live TV for `query`, as from ⌘K's last row. */
+let opener: HTMLElement | null = null;
+
 export function openGuideSearch(query: string): void {
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   useGuideSearch.setState({ open: true, query });
   openView("live");
 }
 
 export function closeGuideSearch(): void {
   useGuideSearch.setState({ open: false });
+  requestAnimationFrame(() => {
+    const target = opener?.isConnected
+      ? opener
+      : document.querySelector<HTMLElement>("[data-guide-search-opener]");
+
+    target?.focus();
+  });
 }
 
 /**
  * "S1 E4 · Part 2 · The Final Lap · Shown before · Premiere": what the guide says of an episode,
- * or "" when it says nothing. The season and episode come only from a complete xmltv_ns number;
+ * or "" when it says nothing. The season and episode come only from valid xmltv_ns season and episode numbers;
  * without one, a number the guide meant for the screen shows as written.
  */
 export function episodeLine(metadata: ProgrammeMetadata | undefined): string {
@@ -79,10 +89,12 @@ export function episodeLine(metadata: ProgrammeMetadata | undefined): string {
     episode
       ? t("S{season} E{episode}", { season: episode.season + 1, episode: episode.episode + 1 })
       : onscreen,
-    episode && episode.part > 0 ? t("Part {part}", { part: episode.part + 1 }) : undefined,
+    episode && episode.part !== undefined && episode.part > 0
+      ? t("Part {part}", { part: episode.part + 1 })
+      : undefined,
     metadata.subtitle,
     metadata.repeat ? t("Shown before") : undefined,
-    metadata.premiere ? t("Premiere") : undefined,
+    metadata.premiere !== undefined ? t("Premiere") : undefined,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -93,16 +105,31 @@ type Days = Pick<GuideSearchPageInput, "from" | "until">;
 type Channels = string[] | undefined;
 
 /** The day filters, as of `now`: every kept day, before today, today, tomorrow and a week. */
-function dayChoices(now: number): readonly { readonly label: string; readonly days: Days }[] {
+function dayChoices(now: number): readonly {
+  readonly token: NonNullable<SavedGuideQuery["days"]>;
+  readonly label: string;
+  readonly days: Days;
+}[] {
   const today = new Date(now).setHours(0, 0, 0, 0);
   const tomorrow = endOfDay(now);
 
   return [
-    { label: t("Any day"), days: {} },
-    { label: t("Before today"), days: { until: today } },
-    { label: t("Today"), days: { from: today, until: tomorrow } },
-    { label: t("Tomorrow"), days: { from: tomorrow, until: endOfDay(tomorrow + 1) } },
-    { label: t("Next 7 days"), days: { from: today, until: endOfDay(today + 6 * DAY_MS) } },
+    { token: "any", label: t("Any day"), days: {} },
+    { token: "before", label: t("Before today"), days: { until: today } },
+    { token: "today", label: t("Today"), days: { from: today, until: tomorrow } },
+    {
+      token: "tomorrow",
+      label: t("Tomorrow"),
+      days: { from: tomorrow, until: endOfDay(tomorrow + 1) },
+    },
+    {
+      token: "week",
+      label: t("Next 7 days"),
+      days: {
+        from: today,
+        until: new Date(new Date(today).setDate(new Date(today).getDate() + 7)).getTime(),
+      },
+    },
   ];
 }
 
@@ -171,7 +198,12 @@ export function GuideSearch({
 
   const text = useGuideSearch((state) => state.query);
   const setText = (query: string) => useGuideSearch.setState({ query });
-  const [days, setDays] = useState<Days>({});
+  const [dayFilter, setDays] = useState<Days & { days?: SavedGuideQuery["days"] }>({ days: "any" });
+
+  const days = dayFilter.days
+    ? dayChoices(Date.now()).find((choice) => choice.token === dayFilter.days)!.days
+    : dayFilter;
+
   const [chosenChannels, setChannels] = useState<Channels>(undefined);
   const now = useNow();
   const field = useRef<HTMLInputElement>(null);
@@ -200,8 +232,14 @@ export function GuideSearch({
       }
     : null;
 
+  const identity = JSON.stringify(input);
+  const [pagination, setPagination] = useState({ identity, revision: 0 });
+
+  if (pagination.identity !== identity)
+    setPagination({ identity, revision: pagination.revision + 1 });
+
   const results = useInfiniteQuery({
-    queryKey: ["guide", "searchPage", input],
+    queryKey: ["guide", "searchPage", input, pagination.revision],
     queryFn: ({ pageParam, signal }) =>
       searchCall(
         "guide.searchPage",
@@ -209,6 +247,8 @@ export function GuideSearch({
         signal,
         "guide-search",
       ),
+    gcTime: 0,
+    staleTime: 0,
     initialPageParam: null as GuideSearchPageInput["after"] | null,
     getNextPageParam: (last) => last.next,
     enabled: input !== null && asked !== "",
@@ -219,6 +259,10 @@ export function GuideSearch({
 
   const searching = query !== "" && input !== null && (!settled || results.isPending);
   const failed = settled && results.isError && !results.isFetchNextPageError;
+
+  useEffect(() => {
+    if (!opener) opener = document.querySelector<HTMLElement>("[data-guide-search-opener]");
+  }, []);
 
   const choices = dayChoices(now);
   const knownDays = choices.some((choice) => sameDays(choice.days, days));
@@ -259,7 +303,9 @@ export function GuideSearch({
       className="flex min-h-0 flex-1 flex-col"
       onKeyDown={(event) => {
         if (event.key !== "Escape" || event.isDefaultPrevented()) return;
-        closeGuideSearch();
+
+        if (document.activeElement !== field.current) field.current?.focus();
+        else closeGuideSearch();
         event.preventDefault();
       }}
     >
@@ -336,7 +382,7 @@ export function GuideSearch({
             <Chip
               key={choice.label}
               pressed={sameDays(choice.days, days)}
-              onClick={() => setDays(choice.days)}
+              onClick={() => setDays({ days: choice.token })}
             >
               {choice.label}
             </Chip>
@@ -362,7 +408,7 @@ export function GuideSearch({
               disabled={thisList === undefined}
               onClick={() => setChannels(thisList)}
             >
-              {list}
+              {list === t("All channels") ? t("This list") : list}
             </Chip>
           )}
           {custom && (
@@ -383,11 +429,16 @@ export function GuideSearch({
             current={{
               name: query.slice(0, 80),
               query,
-              ...defined({ from: days.from, until: days.until, channels: chosenChannels }),
+              ...defined({
+                days: dayFilter.days,
+                from: dayFilter.days ? undefined : days.from,
+                until: dayFilter.days ? undefined : days.until,
+                channels: chosenChannels,
+              }),
             }}
             onApply={(saved) => {
               setText(saved.query);
-              setDays(defined({ from: saved.from, until: saved.until }));
+              setDays(defined({ days: saved.days, from: saved.from, until: saved.until }));
               setChannels(saved.channels);
             }}
           />
@@ -491,7 +542,7 @@ function Chip({
 
 /**
  * The subscription's saved searches, each applied with a press, and Save search for what is
- * asked now: one of the same name is replaced.
+ * asked now: the same query and name are replaced; colliding names receive a suffix.
  */
 function SavedSearches({
   subscriptionId,
@@ -517,13 +568,26 @@ function SavedSearches({
   });
 
   const list = saved.data ?? [];
-  const replaces = list.some((each) => each.name === current.name);
+  const replaces = list.some((each) => each.name === current.name && each.query === current.query);
   const full = list.length >= MOST_SAVED && !replaces;
 
   const same = (each: SavedGuideQuery) =>
     each.query === current.query &&
+    (each.days ?? "any") === (current.days ?? "any") &&
     sameDays(each, current) &&
     sameChannels(each.channels, current.channels);
+
+  const uniqueName = () => {
+    if (replaces) return current.name;
+    let name = current.name;
+
+    for (let suffix = 2; list.some((each) => each.name === name); suffix++) {
+      const ending = " (" + suffix + ")";
+      name = current.name.slice(0, 80 - ending.length) + ending;
+    }
+
+    return name;
+  };
 
   return (
     <FilterRow label={t("Saved")}>
@@ -562,7 +626,12 @@ function SavedSearches({
             size="sm"
             disabled={!saved.isSuccess || current.query === "" || full || write.isPending}
             onClick={() =>
-              write.mutate([...list.filter((each) => each.name !== current.name), current])
+              write.mutate([
+                ...list.filter(
+                  (each) => !(each.name === current.name && each.query === current.query),
+                ),
+                { ...current, name: uniqueName() },
+              ])
             }
           >
             {t("Save search")}

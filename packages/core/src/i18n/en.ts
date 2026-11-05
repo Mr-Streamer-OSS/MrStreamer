@@ -1506,6 +1506,7 @@ export const en = {
   "Close guide search": "Close guide search",
   Subscription: "Subscription",
   Days: "Days",
+  "This list": "This list",
   "Any day": "Any day",
   "Before today": "Before today",
   Today: "Today",

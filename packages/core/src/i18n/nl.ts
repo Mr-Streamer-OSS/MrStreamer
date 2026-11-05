@@ -1537,6 +1537,7 @@ export const nl: Translation = {
   "Close guide search": "Zoeken in de gids sluiten",
   Subscription: "Abonnement",
   Days: "Dagen",
+  "This list": "Deze lijst",
   "Any day": "Elke dag",
   "Before today": "Voor vandaag",
   Today: "Vandaag",

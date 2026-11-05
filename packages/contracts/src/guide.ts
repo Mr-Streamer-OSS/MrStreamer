@@ -274,8 +274,8 @@ export interface ProgrammeMetadata {
   readonly guide?: string;
   readonly subtitle?: string;
   readonly episodes?: readonly { readonly system: string; readonly value: string }[];
-  /** Complete valid zero-based xmltv_ns tuple. Raw forms alone confer no eligibility. */
-  readonly episode?: { readonly season: number; readonly episode: number; readonly part: number };
+  /** Valid zero-based xmltv_ns season and episode; part stays absent when unspecified. */
+  readonly episode?: { readonly season: number; readonly episode: number; readonly part?: number };
   readonly repeat?: { readonly start?: string; readonly channel?: string };
   readonly premiere?: string;
 }

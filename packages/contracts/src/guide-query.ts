@@ -13,7 +13,12 @@ export const GuideQuery = lazy(() =>
 
 export type GuideQuery = Infer<typeof GuideQuery>;
 
-export const SavedGuideQuery = lazy(() => GuideQuery().merge({ name: "0 < string <= 80" }));
+export const SavedGuideQuery = lazy(() =>
+  GuideQuery().merge({
+    name: "0 < string <= 80",
+    "days?": '"any" | "before" | "today" | "tomorrow" | "week"',
+  }),
+);
 
 export type SavedGuideQuery = Infer<typeof SavedGuideQuery>;
 

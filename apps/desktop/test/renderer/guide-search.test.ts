@@ -148,6 +148,18 @@ it("searches every kept day a page at a time, from the first page again after a 
   expect(narrowed).not.toHaveProperty("after");
   expect(narrowed.channels).toEqual(["1", "2"]);
   expect(view.rows()).toEqual([]);
+  const revisit = ipc.hold("guide.searchPage");
+  await view.click(view.button("All channels"));
+  expect(view.rows()).toEqual([]);
+  revisit.resolve({ matches: [match(MERIDIAN, NOW)], next: null });
+  await settled();
+  expect(view.rows()).toHaveLength(1);
+  expect(
+    ipc
+      .argsOf("guide.searchPage")
+      .slice(3)
+      .every((input) => !("after" in input)),
+  ).toBe(true);
 });
 
 it("shows episode numbers only as the guide gives them, and never calls an episode new", async () => {
@@ -225,4 +237,65 @@ it("keeps the saved searches when a save fails, and saves nothing over ones it c
   await unreadable.type("rally");
   expect(unreadable.container.textContent).toContain("Saved searches couldn't be read.");
   expect(unreadable.button("Save search")).toBeUndefined();
+});
+
+it("returns Escape from filters and save controls to the field before clearing or closing", async () => {
+  const view = await panel();
+  await view.type("rally");
+
+  for (const name of ["Today", "Save search"]) {
+    act(() => view.button(name).focus());
+    await view.press("Escape");
+    expect(document.activeElement).toBe(view.field());
+    expect(useGuideSearch.getState()).toMatchObject({ open: true, query: "rally" });
+  }
+});
+
+it("saves named days and distinct queries whose shortened names collide", async () => {
+  const view = await panel();
+  const prefix = "a".repeat(80);
+  await view.type(prefix + "one");
+  await view.click(view.button("Today"));
+  ipc.always("guide.setSavedQueries", [{ name: prefix, query: prefix + "one", days: "today" }]);
+  await view.click(view.button("Save search"));
+  await settled();
+  expect(ipc.argsOf("guide.setSavedQueries")[0]?.queries[0]).toMatchObject({ days: "today" });
+  expect(ipc.argsOf("guide.setSavedQueries")[0]?.queries[0]).not.toHaveProperty("from");
+  await view.type(prefix + "two");
+  await view.click(view.button("Save search"));
+  const queries = ipc.argsOf("guide.setSavedQueries")[1]?.queries;
+  expect(queries).toHaveLength(2);
+  expect(new Set(queries?.map((each) => each.name)).size).toBe(2);
+  expect(queries?.map((each) => each.query)).toEqual([prefix + "one", prefix + "two"]);
+});
+
+it("uses seven calendar days across the autumn DST change and resolves saved Today on apply", async () => {
+  const previous = process.env["TZ"];
+  process.env["TZ"] = "Europe/Brussels";
+
+  try {
+    vi.setSystemTime(new Date(2026, 9, 24, 12));
+    const view = await panel();
+    ipc.always("guide.searchPage", { matches: [], next: null });
+    await view.type("rally");
+    await view.click(view.button("Next 7 days"));
+    expect(ipc.argsOf("guide.searchPage").at(-1)).toMatchObject({
+      from: new Date(2026, 9, 24).getTime(),
+      until: new Date(2026, 9, 31).getTime(),
+    });
+    await view.click(view.button("Today"));
+    ipc.always("guide.setSavedQueries", [{ name: "rally", query: "rally", days: "today" }]);
+    await view.click(view.button("Save search"));
+    await settled();
+    vi.setSystemTime(new Date(2026, 9, 26, 12));
+    await view.click(view.button("rally"));
+    await settled();
+    expect(ipc.argsOf("guide.searchPage").at(-1)).toMatchObject({
+      from: new Date(2026, 9, 26).getTime(),
+      until: new Date(2026, 9, 27).getTime(),
+    });
+  } finally {
+    if (previous === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = previous;
+  }
 });

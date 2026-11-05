@@ -17,13 +17,13 @@
 //
 // A file is never changed once written: it is replaced by another. So it is read without locks,
 // by as many connections as like, the main process's and a search worker's.
+import { type } from "arktype";
 import { rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import {
-  type ProgrammeMetadata,
   GUIDE_RANGE,
   GUIDE_SCHEDULE,
   type GuideFailure,
@@ -37,7 +37,7 @@ import { GUIDE_KEPT, GUIDE_LIMITS, type GuideLimits } from "./limits.ts";
 import { xmltvReader } from "./xmltv.ts";
 
 /**
- * The layout of the files this release writes. A file of another is read as no guide. 2: rows
+ * The layout of the files this release writes. Versions 2 and 3 remain readable. 2: rows
  * within `GUIDE_KEPT`. 3: bounded optional XMLTV metadata.
  */
 const VERSION = 3;
@@ -351,7 +351,9 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
   db.prepare("attach database ? as old").run(`${pathToFileURL(previous).href}?mode=ro`);
 
   try {
-    if (db.prepare("pragma old.user_version").get()?.["user_version"] !== VERSION) return;
+    const version = db.prepare("pragma old.user_version").get()?.["user_version"];
+
+    if (version !== 2 && version !== VERSION) return;
     db.exec(`
       begin;
       create temp table opening as
@@ -370,7 +372,7 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
       `
       insert or ignore into programme (channel, start, stop, title, description, metadata)
       select opening.key, programme.start, min(programme.stop, opening.start), title.key,
-        programme.description, programme.metadata
+        programme.description, ${version === 2 ? "null" : "programme.metadata"}
       from temp.opening as opening
       join old.channel as was on was.id = opening.id
       join old.programme as programme on programme.channel = was.key
@@ -500,7 +502,9 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
   }
 
   try {
-    if (db.prepare("pragma user_version").get()?.["user_version"] !== VERSION) {
+    const version = db.prepare("pragma user_version").get()?.["user_version"];
+
+    if (version !== 2 && version !== VERSION) {
       db.close();
 
       return null;
@@ -571,7 +575,7 @@ function reader(
         -9007199254740991
       )`;
 
-  const described = `select ${columns}, programme.description, programme.metadata ${from}`;
+  const described = `select ${columns}, programme.description, ${metadataColumn(db)} as metadata ${from}`;
   // Every read is bounded in SQL, before a row is made: the one that may have ended comes first.
   // A row is a few kilobytes at most and a minute of time at least (`GUIDE_KEPT`).
   const listing = db.prepare(`${described} order by programme.start limit 3`);
@@ -581,7 +585,7 @@ function reader(
   );
 
   const selected = `
-    select ${columns}, programme.description, programme.metadata
+    select ${columns}, programme.description, ${metadataColumn(db)} as metadata
     from programme join title on title.key = programme.title
     where programme.channel = :channel`;
 
@@ -601,7 +605,7 @@ function reader(
   );
 
   const detail = db.prepare(`
-    select ${columns}, programme.description, programme.metadata
+    select ${columns}, programme.description, ${metadataColumn(db)} as metadata
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
 
@@ -794,7 +798,7 @@ export function searchFirst(search: FirstSearch): FirstFound {
     );
 
     const described = db.prepare(
-      "select description, metadata from programme where channel = ? and start = ?",
+      `select description, ${metadataColumn(db)} as metadata from programme where channel = ? and start = ?`,
     );
 
     return best.map(({ channel, start, stop, title }) => {
@@ -931,7 +935,11 @@ function matching(
 
   // In stretches of time, from what can still be on at `at`: a search that found enough in the
   // first reads no later one. A search bounded from the start reads its one stretch.
-  const ahead = Number.isFinite(before()) ? [] : STRETCHES.map((each) => at + each);
+  const ahead =
+    Number.isFinite(before()) || at <= -8_000_000_000_000_000
+      ? []
+      : STRETCHES.map((each) => at + each);
+
   const edges = [at - LONG_MS, ...ahead];
 
   for (const [step, from] of edges.entries()) {
@@ -987,12 +995,33 @@ function programmeOf(row: Record<string, SQLOutputValue>): Programme {
   };
 }
 
+/** Version 2 has the same programme layout without optional metadata. */
+function metadataColumn(db: DatabaseSync): string {
+  return db.prepare("pragma user_version").get()?.["user_version"] === 2
+    ? "null"
+    : "programme.metadata";
+}
+
+const Metadata = type({
+  "guide?": "string <= 1024",
+  "subtitle?": "string <= 512",
+  "premiere?": "string <= 512",
+  "episodes?": type({ system: "string <= 64", value: "string <= 256" }).array().atMostLength(8),
+  "episode?": {
+    season: "number.safe >= 0",
+    episode: "number.safe >= 0",
+    "part?": "number.safe >= 0",
+  },
+  "repeat?": { "start?": "string <= 64", "channel?": "string <= 256" },
+});
+
 function metadataOf(value: SQLOutputValue | undefined): Pick<Programme, "metadata"> {
-  if (value !== String(value)) return {};
+  if (!type.keywords.string.root.allows(value)) return {};
 
   try {
-    // This immutable versioned index is written only by buildGuideIndex, from bounded XMLTV facts.
-    return { metadata: JSON.parse(String(value)) as ProgrammeMetadata };
+    const metadata: unknown = JSON.parse(value);
+
+    return Metadata.allows(metadata) ? { metadata } : {};
   } catch {
     return {};
   }
