@@ -143,13 +143,16 @@ function answerAsTv(channel: string, message: Sent) {
   }
 }
 
+let lastChannel = "";
 const armStop = vi.fn();
 
 Object.assign(globalThis, {
   expo: {
     modules: {
       Cast: {
-        connect: async () => {},
+        connect: async (channel: string) => {
+          lastChannel = channel;
+        },
         write: (channel: string, data: string) => {
           for (const message of readFrames(Buffer.from(data, "base64"))) {
             sent.push(message);
@@ -219,3 +222,37 @@ it("does not LAUNCH when the preflight callback refuses", async () => {
   ).rejects.toThrow();
   expect(sent.some((message) => message.payload.type === "LAUNCH")).toBe(false);
 });
+
+it.each(["CANCELLED", "INTERRUPTED"])(
+  "terminal IDLE/%s ignores numeric zero after confirmed progress",
+  async (idleReason) => {
+    tvState = "PLAYING";
+    const { connectTv } = await import("../src/cast/sender.ts");
+    const link = await connectTv({ id: "tv", name: "TV", model: null });
+    const statuses: import("../src/cast/sender.ts").TvStatus[] = [];
+
+    try {
+      await link.load(
+        {
+          address: "http://relay.invalid/0.mp4",
+          contentType: "video/mp4",
+          segments: null,
+          live: false,
+          title: "Fixture",
+          from: 43,
+        },
+        (status) => statuses.push(status),
+        new AbortController().signal,
+      );
+      expect(statuses.at(-1)?.time).toBe(43);
+      const channel = lastChannel;
+      tvSays(channel, "t1", MEDIA, {
+        type: "MEDIA_STATUS",
+        status: [{ mediaSessionId: 1, playerState: "IDLE", idleReason, currentTime: 0 }],
+      });
+      expect(statuses.at(-1)).toMatchObject({ state: "stopped", time: null });
+    } finally {
+      await link.close(false);
+    }
+  },
+);

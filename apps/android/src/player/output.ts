@@ -32,7 +32,8 @@ export type OutputState =
   | {
       readonly kind: "stopped";
       readonly tv: Tv;
-      readonly reason: "lost" | "foreground" | "ended" | "failed" | "stopped" | "taken" | "restore";
+      readonly reason:
+        "lost" | "foreground" | "ended" | "failed" | "stopped" | "taken" | "restore" | "returning";
       /**
        * Whether the TV had taken over, so the phone shows nothing until `playHere()` returns it.
        * False when it stopped before confirmed PLAYING: the phone still plays, and `cancel()`
@@ -202,7 +203,19 @@ export function playerOutput(
           progress.stage = "preflight";
 
           if (!active()) throw new Error("Output changed");
-          relay = await serveOnRelay(request.attempt, request.url, path, controller.signal);
+          const served = await serveOnRelay(request.attempt, request.url, path, controller.signal);
+
+          if (!active()) {
+            await served.revoke();
+            throw new Error("Output changed");
+          }
+
+          relay = served;
+          void served.failed?.then(() => {
+            if (relay !== served) return;
+            state.set({ kind: "stopped", tv, reason: "failed", detached: remote });
+            void close().catch(() => {});
+          });
 
           if (!active()) throw new Error("Output changed");
           progress.stage = "connect";
@@ -302,6 +315,8 @@ export function playerOutput(
         return true;
       } catch (cause) {
         const current = active();
+
+        if (!current) return false;
         let drained = false;
 
         try {
@@ -352,19 +367,38 @@ export function playerOutput(
       const position = last?.positionMs ?? 0;
       const previous = state.get();
 
-      if (previous.kind !== "local")
-        state.set({ kind: "stopped", tv: previous.tv, reason: "restore", detached: remote });
-      await close();
+      if (!remote) {
+        await close();
 
-      if (!request || admission !== request) return false;
-      const accepted = (await local.localOutput?.(request.attempt, position)) ?? false;
-
-      if (accepted) {
-        remote = false;
+        if (admission !== request) return false;
         state.set({ kind: "local" });
+
+        return true;
       }
 
-      return accepted;
+      if (previous.kind === "local") return false;
+      state.set({ kind: "stopped", tv: previous.tv, reason: "returning", detached: true });
+
+      try {
+        await close();
+
+        if (!request || admission !== request) return false;
+        const accepted = (await local.localOutput?.(request.attempt, position)) ?? false;
+
+        if (admission !== request) return false;
+
+        if (accepted) {
+          remote = false;
+          state.set({ kind: "local" });
+        } else state.set({ kind: "stopped", tv: previous.tv, reason: "restore", detached: true });
+
+        return accepted;
+      } catch {
+        if (admission === request)
+          state.set({ kind: "stopped", tv: previous.tv, reason: "restore", detached: true });
+
+        return false;
+      }
     },
     setVolume(level) {
       if (Number.isFinite(level)) link?.setVolume(Math.max(0, Math.min(1, level)));

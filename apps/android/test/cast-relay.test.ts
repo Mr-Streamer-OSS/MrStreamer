@@ -56,3 +56,90 @@ it("preflights a large VOD playlist in bounded route batches with stable playlis
     await relay.revoke();
   }
 });
+
+it("keeps every URI in mixed old/fresh refreshes available beyond the route cap, and safely fails an oversized refresh", async () => {
+  vi.resetModules();
+  const routes = new Map<string, { url: string; playlist: boolean; pinned: boolean }>();
+  let playlist!: (event: { request: string; token: string; url: string; body: string }) => void;
+  const answer = vi.fn();
+
+  const manifest = (start: number, count: number) =>
+    "#EXTM3U\n" + Array.from({ length: count }, (_, i) => `#EXTINF:2,\n${start + i}.ts`).join("\n");
+
+  Object.assign(globalThis, {
+    expo: {
+      modules: {
+        Cast: {
+          addListener(name: string, callback: typeof playlist) {
+            if (name === "onPlaylist") playlist = callback;
+
+            return { remove() {} };
+          },
+          serve: async () => ({ token: "roll", address: "http://relay.invalid/roll/" }),
+          route(
+            _token: string,
+            batch: { id: string; url: string; playlist: boolean; pinned: boolean }[],
+          ) {
+            expect(batch.length).toBeLessThanOrEqual(4096);
+
+            for (const item of batch) {
+              if (!routes.has(item.id) && routes.size >= 65535) {
+                const first = [...routes].find(([, route]) => !route.pinned);
+
+                if (first) routes.delete(first[0]);
+              }
+
+              routes.delete(item.id);
+              routes.set(item.id, item);
+            }
+          },
+          read: async () => ({
+            url: "http://provider.invalid/live.m3u8",
+            body: manifest(0, 40000),
+          }),
+          revoke: async () => {},
+          answer,
+        },
+      },
+    },
+  });
+  const { serveOnRelay } = await import("../src/cast/sender.ts");
+
+  const relay = await serveOnRelay(
+    "one",
+    "http://provider.invalid/live.m3u8",
+    { kind: "hls" },
+    new AbortController().signal,
+  );
+
+  const refresh = (body: string) => {
+    expect(() =>
+      playlist({
+        request: "refresh",
+        token: "roll",
+        url: "http://provider.invalid/live.m3u8",
+        body,
+      }),
+    ).not.toThrow();
+
+    return answer.mock.lastCall?.[1] as string | null;
+  };
+
+  try {
+    refresh(manifest(40000, 26000));
+
+    const current = refresh(
+      manifest(1000, 1) + "\n" + manifest(66000, 2000).replace("#EXTM3U\n", ""),
+    );
+
+    expect(current).not.toBeNull();
+
+    for (const uri of current!.split("\n").filter((line) => line && !line.startsWith("#")))
+      expect(routes.has(uri.split(".")[0]!)).toBe(true);
+    expect(routes.size).toBeLessThanOrEqual(65535);
+    expect(refresh(manifest(100000, 65536))).toBeNull();
+    await expect(relay.failed).resolves.toBeUndefined();
+  } finally {
+    await relay.revoke();
+  }
+});

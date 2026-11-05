@@ -154,4 +154,80 @@ class CastRelayTest {
     } finally { deferred.close(); relay.revoke(); file.delete() }
   }
 
+  @org.junit.Test fun currentManifestUrisSurviveMixedRollover() {
+    val upstream = ServerSocket(0, 4, InetAddress.getLoopbackAddress())
+    val worker = Thread {
+      repeat(3) { upstream.accept().use { socket ->
+        val reader = socket.getInputStream().bufferedReader()
+        while (!reader.readLine().isNullOrEmpty()) {}
+        socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".toByteArray())
+      } }
+    }.apply { isDaemon = true; start() }
+    val source = "http://127.0.0.1:${upstream.localPort}/segment"
+    val manifest = "#EXTM3U\n1000.ts\n68000.ts"
+    val relay = Relay(InetAddress.getLoopbackAddress(), source, emptyMap(), true, { _, _ -> manifest }, {})
+    try {
+      relay.route("1", source, true)
+      relay.route("2", source, false, true)
+      for (id in 3..66000) relay.route(id.toString(), source, false)
+      relay.route("1000", source, false)
+      for (id in 66001..68000) relay.route(id.toString(), source, false)
+      val returned = URL(relay.address + "0.m3u8").readText()
+      check(returned == manifest)
+      for (uri in returned.lines().filter { it.isNotEmpty() && !it.startsWith("#") })
+        check(URL(relay.address + uri).readText() == "ok") { "Current manifest URI unavailable" }
+    } finally { relay.revoke(); upstream.close(); worker.join(3000) }
+  }
+
+  @org.junit.Test fun replacingResponseKeepsConcurrentDirectPreflight() {
+    val upstream = ServerSocket(0, 4, InetAddress.getLoopbackAddress())
+    val oldReady = java.util.concurrent.CountDownLatch(1)
+    val preflightReady = java.util.concurrent.CountDownLatch(1)
+    val finish = java.util.concurrent.CountDownLatch(1)
+    val workers = java.util.concurrent.CopyOnWriteArrayList<Thread>()
+    val accept = Thread {
+      repeat(3) { index ->
+        val socket = upstream.accept()
+        workers.add(Thread {
+          socket.use {
+            val reader = it.getInputStream().bufferedReader()
+            val request = reader.readLine()
+            while (!reader.readLine().isNullOrEmpty()) {}
+            if (request.contains("/playlist")) {
+              it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\n".toByteArray())
+              it.getOutputStream().flush()
+              preflightReady.countDown()
+              check(finish.await(15, java.util.concurrent.TimeUnit.SECONDS))
+              it.getOutputStream().write("#EXTM3U\n".toByteArray())
+            } else if (index == 0) {
+              it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 16777216\r\nConnection: close\r\n\r\n".toByteArray())
+              it.getOutputStream().flush()
+              oldReady.countDown()
+              runCatching { it.getOutputStream().write(ByteArray(16 * 1024 * 1024)) }
+            } else it.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".toByteArray())
+          }
+        }.apply { isDaemon = true; start() })
+      }
+    }.apply { isDaemon = true; start() }
+    val source = "http://127.0.0.1:${upstream.localPort}"
+    val relay = Relay(InetAddress.getLoopbackAddress(), "$source/playlist", emptyMap(), true, { _, body -> body }, {})
+    relay.route("1", "$source/media", false)
+    val url = URL(relay.address + "1.ts")
+    val old = Socket(url.host, url.port)
+    val result = java.util.concurrent.CompletableFuture<String?>()
+    var read: Thread? = null
+    try {
+      old.getOutputStream().write("GET ${url.path} HTTP/1.1\r\nHost: test\r\n\r\n".toByteArray())
+      check(oldReady.await(3, java.util.concurrent.TimeUnit.SECONDS))
+      read = Thread { try { result.complete(relay.read("0")?.second) } catch (cause: Exception) { result.completeExceptionally(cause) } }.apply { start() }
+      check(preflightReady.await(3, java.util.concurrent.TimeUnit.SECONDS))
+      val next = url.openConnection().apply { readTimeout = 10000 }
+      check(next.getInputStream().use { it.readBytes().toString(Charsets.US_ASCII) } == "ok")
+      finish.countDown()
+      check(result.get(3, java.util.concurrent.TimeUnit.SECONDS) == "#EXTM3U\n")
+    } finally {
+      finish.countDown(); old.close(); relay.revoke(); upstream.close(); read?.join(3000); accept.join(3000); workers.forEach { it.join(3000) }
+    }
+  }
+
 }

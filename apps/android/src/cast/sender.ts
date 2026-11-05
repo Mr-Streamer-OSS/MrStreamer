@@ -51,6 +51,7 @@ export interface TvMedia {
   readonly live: boolean;
   /** The segment format of an HLS stream; null for a file. */
   readonly segments: "fmp4" | "ts" | null;
+  readonly failed?: Promise<void>;
   readonly title: string;
   /** Seconds to start a title from. */
   readonly from: number;
@@ -218,6 +219,9 @@ function listen(module: CastModule) {
 
     try {
       answer = relays.get(token)?.(url, body) ?? null;
+    } catch {
+      // No private upstream error may escape the native event callback.
+      answer = null;
     } finally {
       module.answer(request, answer);
     }
@@ -234,6 +238,7 @@ export interface Relay {
   readonly contentType: string;
   /** An HLS stream's segment format, as its first variant says; null for a file. */
   readonly segments: "fmp4" | "ts" | null;
+  readonly failed?: Promise<void>;
   /** Ends every request under it; resolves once they all ended. */
   revoke(): Promise<void>;
 }
@@ -301,6 +306,12 @@ export async function serveOnRelay(
     };
   }
 
+  let fail!: () => void;
+
+  const failed = new Promise<void>((resolve) => {
+    fail = resolve;
+  });
+
   let next = 1;
   /**
    * Each address a playlist named and its path, so a refreshed playlist names the same ones; as
@@ -339,15 +350,36 @@ export async function serveOnRelay(
 
       if (required.size > ROUTES_KEPT) throw new TvRefused("unreadable");
 
-      for (let index = 0; index < made.length; index += 4096)
-        module.route(token, made.slice(index, index + 4096));
+      // Refresh existing current references before adding anything that can evict them.
+      const retained: RelayRoute[] = [];
+
+      for (const key of referenced) {
+        const path = known.get(key);
+
+        if (!path) continue;
+        known.delete(key);
+        known.set(key, path);
+        const space = key.indexOf(" ");
+        const kind = key.slice(0, space);
+        retained.push({
+          id: path.split(".")[0]!,
+          url: key.slice(space + 1),
+          playlist: kind === "playlist",
+          pinned: kind !== "media",
+        });
+      }
+
+      const registering = [...retained, ...made];
+
+      for (let index = 0; index < registering.length; index += 4096)
+        module.route(token, registering.slice(index, index + 4096));
 
       for (const [key, path] of fresh) known.set(key, path);
 
       for (const key of known.keys()) {
         if (known.size <= ROUTES_KEPT) break;
 
-        if (key.startsWith("media ")) known.delete(key);
+        if (key.startsWith("media ") && !referenced.has(key)) known.delete(key);
       }
     }
 
@@ -355,9 +387,18 @@ export async function serveOnRelay(
   };
 
   relays.set(token, (base, body) => {
-    const rewritten = rewrite(base, body);
+    try {
+      const rewritten = rewrite(base, body);
 
-    return rewritten.kind === "playlist" ? rewritten.text : null;
+      if (rewritten.kind === "playlist" && rewritten.text.length <= 1_048_576)
+        return rewritten.text;
+    } catch {
+      /* Refuse safely and notify the current output owner. */
+    }
+
+    fail();
+
+    return null;
   });
 
   try {
@@ -383,6 +424,7 @@ export async function serveOnRelay(
       address: `${served.address}0.m3u8`,
       contentType: "application/x-mpegURL",
       segments: first.segments ?? "ts",
+      failed,
       revoke,
     };
   } catch (cause) {
@@ -795,7 +837,10 @@ export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Pro
       if (state === "ended" || state === "failed") media.over = true;
       media.status({
         state,
-        time: typeof status["currentTime"] === "number" ? Math.max(0, status["currentTime"]) : null,
+        time:
+          state !== "stopped" && state !== "taken" && typeof status["currentTime"] === "number"
+            ? Math.max(0, status["currentTime"])
+            : null,
         duration: numberOr(info["duration"], null),
       });
     }

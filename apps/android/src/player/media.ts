@@ -187,7 +187,11 @@ export function mediaModel(
   function playNext() {
     const output = owner.cast.state.get();
 
-    if (output.kind === "remote" || (output.kind === "stopped" && output.detached)) {
+    if (
+      output.kind === "connecting" ||
+      output.kind === "remote" ||
+      (output.kind === "stopped" && output.detached)
+    ) {
       cancelNext();
       patch({ error: "output" });
 
@@ -344,7 +348,11 @@ export function mediaModel(
 
     const output = owner.cast.state.get();
 
-    if (output.kind === "remote" || (output.kind === "stopped" && output.detached)) {
+    if (
+      output.kind === "connecting" ||
+      output.kind === "remote" ||
+      (output.kind === "stopped" && output.detached)
+    ) {
       cancelNext();
 
       return;

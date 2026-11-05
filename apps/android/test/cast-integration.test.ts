@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { NativePlayer, Observation } from "../src/player/native.ts";
 import type { TvStatus, TvMedia } from "../src/cast/sender.ts";
+import { intentRegistry } from "../src/library/intents.ts";
+import { startEntries } from "../src/play-entry/entries.ts";
 import { playerOwner } from "../src/player/player.ts";
 
 const sender = vi.hoisted(() => ({ connect: vi.fn(), serve: vi.fn() }));
@@ -133,20 +135,65 @@ it.each(["title", "file"] as const)(
     } satisfies Observation);
     owner.media.watch(true);
     expect(await owner.cast.select({ id: "tv", name: "TV", model: null })).toBe(true);
+    const intents = intentRegistry();
+    const open = vi.fn();
+
+    const cleanup = startEntries({
+      intents,
+      player: owner,
+      library: () => {
+        throw new Error("Live pick needs no library details");
+      },
+      open,
+      refused: vi.fn(),
+      progress: async () => [],
+      subscribe: () => () => {},
+    });
+
+    try {
+      await intents.state.get().play?.({
+        kind: "catch-up",
+        sourceId: "source",
+        channelId: "other",
+        title: "Other channel",
+        window: { start: 0, end: 1000 },
+        days: 1,
+      });
+      expect(open).not.toHaveBeenCalled();
+      expect(owner.state.get()).toMatchObject({
+        attempt,
+        intent: kind === "title" ? episode : { kind: "file", path: "/test.mp4", title: "First" },
+      });
+      expect(() =>
+        owner.play({
+          kind: "catch-up",
+          sourceId: "source",
+          channelId: "other",
+          title: "Other",
+          window: { start: 0, end: 1000 },
+          days: 1,
+        }),
+      ).toThrow();
+    } finally {
+      cleanup();
+    }
+
     report({ state: "ended", time: null, duration: null });
     await vi.advanceTimersByTimeAsync(20000);
     expect(owner.media.state.get().remaining).toBeNull();
     expect(local.admit).toHaveBeenCalledOnce();
     owner.media.playNext();
     expect(owner.media.state.get().error).toBe("output");
-    owner.play({
-      kind: "catch-up",
-      sourceId: "source",
-      channelId: "one",
-      title: "Start",
-      window: { start: 0, end: 1000 },
-      days: 1,
-    });
+    expect(() =>
+      owner.play({
+        kind: "catch-up",
+        sourceId: "source",
+        channelId: "one",
+        title: "Start",
+        window: { start: 0, end: 1000 },
+        days: 1,
+      }),
+    ).toThrow();
     await vi.advanceTimersByTimeAsync(0);
     expect(local.admit).toHaveBeenCalledOnce();
     expect(owner.media.state.get().error).toBe("output");
@@ -154,5 +201,49 @@ it.each(["title", "file"] as const)(
     owner.media.playNext();
     await vi.advanceTimersByTimeAsync(0);
     expect(local.admit).toHaveBeenCalledTimes(2);
+    const next = owner.state.get();
+
+    if (next.kind !== "playing") throw new Error("Expected next admission");
+    emit("onState", {
+      attempt: next.attempt,
+      phase: "playing",
+      positionMs: 0,
+      durationMs: 100000,
+      bufferedMs: 0,
+      live: false,
+      seekable: true,
+      speed: 1,
+      failure: null,
+    });
+    expect(await owner.cast.select({ id: "tv", name: "TV", model: null })).toBe(true);
+
+    const cleanupPick = startEntries({
+      intents,
+      player: owner,
+      library: () => {
+        throw new Error("Live needs no details");
+      },
+      open,
+      refused: vi.fn(),
+      progress: async () => [],
+      subscribe: () => () => {},
+    });
+
+    try {
+      const live = {
+        kind: "live",
+        sourceId: "source",
+        channelId: "other",
+        title: "Other",
+      } as const;
+
+      await intents.state.get().play?.(live);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(open).toHaveBeenCalledWith(live);
+      expect(local.admit).toHaveBeenCalledTimes(3);
+      expect(owner.state.get()).toMatchObject({ intent: live });
+    } finally {
+      cleanupPick();
+    }
   },
 );

@@ -17,6 +17,9 @@ import type {
 import { mediaModel, type MediaModel, type MediaPersistence } from "./media.ts";
 import type { Resolve } from "./resolve.ts";
 
+/** No new attempt was created; callers must keep the current playback and route. */
+export class PlaybackRefused extends Error {}
+
 // The app's one player, for Watch, the mini player and whatever plays next: it turns an intent
 // into one attempt at a time on the native player (modules/player). play() replaces what plays;
 // each attempt has its own id, so an observation or a working out of its address that arrives
@@ -356,10 +359,15 @@ export function playerOwner(
     play(intent) {
       const output = cast.state.get();
 
-      if (output.kind === "remote" || (output.kind === "stopped" && output.detached)) {
+      if (
+        intent.kind === "catch-up" &&
+        (output.kind === "connecting" ||
+          output.kind === "remote" ||
+          (output.kind === "stopped" && output.detached))
+      ) {
         owner.media.refuseOutput();
 
-        return playing()?.attempt ?? "";
+        throw new PlaybackRefused();
       }
 
       void endPreview();

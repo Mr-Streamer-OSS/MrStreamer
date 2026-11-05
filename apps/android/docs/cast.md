@@ -5,7 +5,7 @@ Android owns its open sender in `apps/android/src/cast/` and its platform networ
 Google sender SDK or new dependency. Cast native sources compile with the existing player
 module and are registered beside Player so they share its one admission and reader hold.
 
-The chooser and Move to another TV list call `browseTvs()` and disposes its returned stop function when it closes.
+The chooser and Move to another TV list call `browseTvs()` and dispose its returned stop function when it closes.
 `useTvSearch()` reports searching, actual platform denial or failure. NSD names and models are
 untrusted receiver declarations. The target36 route adds no speculative permission prompt.
 
@@ -57,4 +57,14 @@ proves source integration only. No Android device, actual NSD discovery, receive
 audible/moving playback, live rollover, receiver commands/volume/tracks, installed lifecycle,
 Wi-Fi loss, buffered-stop interval or final APK packaging is qualified by these checks.
 
-Foreground exit retains the admitted source for explicit Play here after readers drain. Remote completion never starts the next episode locally. Next and Play from start visibly refuse while remote; Live favourites keep the listed channel identity. Multiple selected audio choices refuse before transfer; where track identity is unknown the chooser discloses receiver-default audio. Refusals name this route’s limits, not receiver incompatibility. TCP/TLS opens before preflight to select the LAN address, but LAUNCH follows budget and media preflight. Playlist and initialization routes are pinned; only media routes roll over in the bounded 65536-route map. Oversized single playlists refuse before LAUNCH.
+Foreground exit retains the admitted source for explicit Play here after readers drain.
+Remote completion never starts the next episode locally. Next and Play from start visibly refuse while remote or returning.
+An explicit new channel, title or download replaces the TV output through the existing owner; Live favourites keep the listed
+channel identity. Titles with more than one audio track refuse before transfer, including
+when the selected track is the default. Where track identity is unknown the chooser discloses
+receiver-default audio. Refusals name this route's limits, not receiver incompatibility.
+TCP/TLS opens before preflight to select the LAN address, but LAUNCH follows budget and media
+preflight. Playlist and initialization routes are pinned; current manifest references are
+refreshed before fresh routes across bounded batches. Only unreferenced media routes roll over
+in the bounded 65536-route map. Oversized single playlists refuse before LAUNCH; a failed live
+rewrite stops the output safely.

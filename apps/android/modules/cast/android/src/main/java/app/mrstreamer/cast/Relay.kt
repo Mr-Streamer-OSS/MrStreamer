@@ -22,7 +22,7 @@ internal class Relay(
   private val sockets = ConcurrentHashMap.newKeySet<Socket>()
   private val upstreams = ConcurrentHashMap.newKeySet<HttpURLConnection>()
   private val requests = ConcurrentHashMap<String, Socket>()
-  @Volatile private var serving: Socket? = null
+  private val responses = ConcurrentHashMap<Socket, HttpURLConnection>()
   private val incoming = ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, ArrayBlockingQueue(8))
   private val pool = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue(8))
   private val retirement = Object()
@@ -51,15 +51,15 @@ internal class Relay(
               val old = requests.put(parsed.id, socket)
               if (old != null) {
                 runCatching { old.close() }
-                if (serving === old) upstreams.forEach { it.disconnect() }
+                responses.remove(old)?.disconnect()
               }
             }
             pool.execute {
-              try { reading { check(!socket.isClosed); serving = socket; serve(socket, parsed) } }
+              try { reading { check(!socket.isClosed); serve(socket, parsed) } }
               catch (_: Exception) {}
-              finally { serving = null; requests.remove(parsed.id, socket); sockets.remove(socket); socket.close() }
+              finally { requests.remove(parsed.id, socket); sockets.remove(socket); socket.close() }
             }
-          } catch (_: Exception) { sockets.remove(socket); socket.close() }
+          } catch (_: Exception) { requests.entries.removeIf { it.value === socket }; sockets.remove(socket); socket.close() }
         } }
         catch (_: RejectedExecutionException) { sockets.remove(socket); socket.close() }
       }
@@ -87,17 +87,21 @@ internal class Relay(
       val disposable = routes.entries.firstOrNull { it.key != "0" && !it.value.pinned }?.key ?: error("Route limit")
       routes.remove(disposable)
     }
+    routes.remove(id)
     routes[id] = Route(url, playlist, pinned)
   }
-  private fun open(url: String, range: String?): HttpURLConnection {
+  private fun open(url: String, range: String?, response: Socket? = null): HttpURLConnection {
     var current = URL(url)
     val origin = URL(source)
     repeat(6) {
       require(current.protocol in listOf("http", "https"))
       require(origin.protocol != "https" || current.protocol == "https")
       val connection = synchronized(retirement) {
-        check(active)
-        (current.openConnection() as HttpURLConnection).also { upstreams.add(it) }
+        check(active && (response == null || !response.isClosed))
+        (current.openConnection() as HttpURLConnection).also {
+          upstreams.add(it)
+          if (response != null) responses[response] = it
+        }
       }
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 6000
@@ -196,7 +200,7 @@ internal class Relay(
       head("200 OK", "Content-Type: application/x-mpegURL\r\nContent-Length: ${bytes.size}\r\n")
       if (request[0] != "HEAD") output.write(bytes)
     } else {
-      val connection = open(route.url, range)
+      val connection = open(route.url, range, socket)
       try {
         val extras = listOf("Content-Length", "Content-Range", "Accept-Ranges").mapNotNull { key -> connection.getHeaderField(key)?.takeIf { !it.contains('\r') && !it.contains('\n') }?.let { "$key: $it\r\n" } }.joinToString("")
         head(if (connection.responseCode == 206) "206 Partial Content" else "200 OK", "Content-Type: application/octet-stream\r\n$extras")
@@ -204,7 +208,7 @@ internal class Relay(
           val buffer = ByteArray(32768)
           while (active) { val count = stream.read(buffer); if (count < 0) break; output.write(buffer, 0, count) }
         }
-      } finally { connection.disconnect(); upstreams.remove(connection) }
+      } finally { responses.remove(socket, connection); connection.disconnect(); upstreams.remove(connection) }
     }
   }
   fun revoke() {

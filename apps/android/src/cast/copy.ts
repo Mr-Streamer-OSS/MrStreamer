@@ -7,6 +7,18 @@ import { catalogue } from "@mrstreamer/mobile/language";
  */
 export const t = catalogue(
   {
+    "Couldn't return playback to this phone. Try Play here again.":
+      "Couldn't return playback to this phone. Try Play here again.",
+    "Returning playback to this phone.": "Returning playback to this phone.",
+    "Something else plays on {tv}.": "Something else plays on {tv}.",
+    "Can't change playback on the TV": "Can't change playback on the TV",
+    "Play here before playing something else.": "Play here before playing something else.",
+    "The TV uses its default audio when the phone can't identify the selected track.":
+      "The TV uses its default audio when the phone can't identify the selected track.",
+    "Mr. Streamer can't preserve the selected audio on this TV route.":
+      "Mr. Streamer can't preserve the selected audio on this TV route.",
+    "The TV connected but didn't report playback.": "The TV connected but didn't report playback.",
+    "Play from start": "Play from start",
     "Play on TV": "Play on TV",
     "Looking for TVs on this Wi-Fi": "Looking for TVs on this Wi-Fi",
     "Looking for more on this Wi-Fi": "Looking for more on this Wi-Fi",
@@ -42,22 +54,36 @@ export const t = catalogue(
     "Play on {tv}": "Play on {tv}",
     "Can't play on {tv}": "Can't play on {tv}",
     "Couldn't connect to {tv}": "Couldn't connect to {tv}",
-    "This file type can't play on a TV.": "Mr. Streamer can’t send this file type to a TV yet.",
-    "Its stream is protected, so it can't play on a TV.":
-      "Mr. Streamer can’t send this protected stream through this TV route.",
-    "Its picture or sound can't play on a TV.":
-      "Mr. Streamer can’t send this picture or sound through this TV route yet.",
-    "This channel's stream can't play on a TV.":
-      "Mr. Streamer can’t send this channel to a TV yet.",
+    "Mr. Streamer can't send this file type to a TV yet.":
+      "Mr. Streamer can't send this file type to a TV yet.",
+    "Mr. Streamer can't send this protected stream through this TV route.":
+      "Mr. Streamer can't send this protected stream through this TV route.",
+    "Mr. Streamer can't send this picture or sound through this TV route yet.":
+      "Mr. Streamer can't send this picture or sound through this TV route yet.",
+    "Mr. Streamer can't send this channel to a TV yet.":
+      "Mr. Streamer can't send this channel to a TV yet.",
     "Connect this phone to Wi-Fi to play on a TV.": "Connect this phone to Wi-Fi to play on a TV.",
-    "The provider allows no other stream right now.":
-      "Mr. Streamer can’t confirm room for another provider stream.",
+    "Mr. Streamer can't confirm room for another provider stream.":
+      "Mr. Streamer can't confirm room for another provider stream.",
     "Downloaded subtitles don't play on the TV.": "Downloaded subtitles don't play on the TV.",
     "{track} shows again when it plays here.": "{track} shows again when it plays here.",
     "Subtitle choices aren't available on the TV.": "Subtitle choices aren't available on the TV.",
   },
   {
     "nl-NL": {
+      "Couldn't return playback to this phone. Try Play here again.":
+        "Kon niet terugkeren naar deze telefoon. Probeer Hier afspelen opnieuw.",
+      "Returning playback to this phone.": "Afspelen terugzetten naar deze telefoon.",
+      "Something else plays on {tv}.": "Er speelt iets anders op {tv}.",
+      "Can't change playback on the TV": "Kan het afspelen op de tv niet wijzigen",
+      "Play here before playing something else.": "Speel hier af voordat je iets anders afspeelt.",
+      "The TV uses its default audio when the phone can't identify the selected track.":
+        "De tv gebruikt zijn standaardaudio als de telefoon het geselecteerde spoor niet kan bepalen.",
+      "Mr. Streamer can't preserve the selected audio on this TV route.":
+        "Mr. Streamer kan de geselecteerde audio niet behouden via deze tv-route.",
+      "The TV connected but didn't report playback.":
+        "De tv is verbonden maar heeft geen afspelen gemeld.",
+      "Play from start": "Vanaf begin afspelen",
       "Play on TV": "Afspelen op tv",
       "Looking for TVs on this Wi-Fi": "Tv's zoeken op dit wifinetwerk",
       "Looking for more on this Wi-Fi": "Meer zoeken op dit wifinetwerk",
@@ -94,17 +120,17 @@ export const t = catalogue(
       "Play on {tv}": "Afspelen op {tv}",
       "Can't play on {tv}": "Kan niet afspelen op {tv}",
       "Couldn't connect to {tv}": "Kan geen verbinding maken met {tv}",
-      "This file type can't play on a TV.":
+      "Mr. Streamer can't send this file type to a TV yet.":
         "Mr. Streamer kan dit bestandstype nog niet naar een tv sturen.",
-      "Its stream is protected, so it can't play on a TV.":
+      "Mr. Streamer can't send this protected stream through this TV route.":
         "Mr. Streamer kan deze beveiligde stream niet via deze tv-route sturen.",
-      "Its picture or sound can't play on a TV.":
+      "Mr. Streamer can't send this picture or sound through this TV route yet.":
         "Mr. Streamer kan dit beeld of geluid nog niet via deze tv-route sturen.",
-      "This channel's stream can't play on a TV.":
+      "Mr. Streamer can't send this channel to a TV yet.":
         "Mr. Streamer kan dit kanaal nog niet naar een tv sturen.",
       "Connect this phone to Wi-Fi to play on a TV.":
         "Verbind deze telefoon met wifi om op een tv af te spelen.",
-      "The provider allows no other stream right now.":
+      "Mr. Streamer can't confirm room for another provider stream.":
         "Mr. Streamer kan niet bevestigen dat er ruimte is voor nog een providerstream.",
       "Downloaded subtitles don't play on the TV.":
         "Gedownloade ondertiteling speelt niet op de tv.",

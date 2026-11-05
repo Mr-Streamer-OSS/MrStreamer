@@ -297,20 +297,32 @@ it.each(["stopped", "taken"] as const)(
   },
 );
 
-it("refuses a selected non-default Dutch audio choice before opening the receiver", async () => {
-  const f = setup();
-  await f.ready();
-  f.tracks({
-    attempt: "one",
-    tracks: [
-      { id: "en", type: "audio", selected: false },
-      { id: "nl", type: "audio", selected: true },
-    ],
-  });
-  expect(await f.cast.select(tv)).toBe(false);
-  expect(sender.connect).not.toHaveBeenCalled();
-  expect(f.local.remoteOutput).not.toHaveBeenCalled();
-});
+it.each(["en", "nl"])(
+  "refuses multiple audio tracks with %s selected, including the default",
+  async (selected) => {
+    const f = setup();
+    await f.ready();
+    f.tracks({
+      attempt: "one",
+      tracks: [
+        { id: "en", type: "audio", selected: selected === "en" },
+        { id: "nl", type: "audio", selected: selected === "nl" },
+      ],
+    });
+    vi.useFakeTimers();
+
+    try {
+      const selecting = f.cast.select(tv);
+      await vi.advanceTimersByTimeAsync(8001);
+      expect(await selecting).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(sender.connect).not.toHaveBeenCalled();
+    expect(f.local.remoteOutput).not.toHaveBeenCalled();
+  },
+);
 
 it("names LOAD failure as playback failure after successful preflight and connection", async () => {
   const f = setup();
@@ -362,4 +374,80 @@ it("names missing PLAYING after accepted LOAD as playback failure", async () => 
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("keeps a delayed successful restore neutral and detached until accepted", async () => {
+  const f = setup();
+  await onTv(f);
+  let finish!: () => void;
+  f.revoke.mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const returning = f.cast.playHere();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  expect(f.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "returning", detached: true });
+  expect(f.local.localOutput).not.toHaveBeenCalled();
+  finish();
+  expect(await returning).toBe(true);
+  expect(f.cast.state.get()).toEqual({ kind: "local" });
+});
+
+it("dismissing a pre-transfer refusal leaves the already playing phone alone", async () => {
+  const f = setup(
+    true,
+    vi.fn(async () => false),
+  );
+
+  await f.ready();
+  expect(await f.cast.select(tv)).toBe(false);
+  expect(await f.cast.playHere()).toBe(true);
+  expect(f.local.localOutput).not.toHaveBeenCalled();
+  expect(f.cast.state.get()).toEqual({ kind: "local" });
+});
+
+it("a late restore acknowledgement cannot overwrite a newer local admission", async () => {
+  const f = setup();
+  await onTv(f);
+  let finish!: (accepted: boolean) => void;
+  f.local.localOutput.mockImplementation(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const returning = f.cast.playHere();
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+  await f.native.admit({
+    attempt: "two",
+    url: "file:///two.mp4",
+    headers: {},
+    mode: "file",
+    format: "progressive",
+    startMs: 0,
+  });
+  finish(true);
+  expect(await returning).toBe(false);
+  expect(f.cast.state.get()).toEqual({ kind: "local" });
+});
+
+it("a failed live rewrite stops remote output without transferring commands locally", async () => {
+  const f = setup();
+  const failure = Promise.withResolvers<void>();
+  sender.serve.mockResolvedValue({
+    address: "http://relay.invalid/0.m3u8",
+    contentType: "application/x-mpegURL",
+    segments: "ts",
+    failed: failure.promise,
+    revoke: f.revoke,
+  });
+  await onTv(f);
+  failure.resolve();
+  await vi.waitFor(() =>
+    expect(f.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "failed", detached: true }),
+  );
+  expect(await f.native.resume("one")).toBe(false);
+  expect(f.local.resume).not.toHaveBeenCalled();
 });

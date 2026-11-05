@@ -33,25 +33,45 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
   private val answers = ConcurrentHashMap<String, CompletableFuture<String?>>()
   private var browser: NsdManager.DiscoveryListener? = null
   private val resolves = java.util.ArrayDeque<Pair<NsdServiceInfo, Int>>()
-  private var resolving = false
+  private var resolving: NsdManager.ResolveListener? = null
+  private var resolveSequence = 0L
   @Suppress("DEPRECATION")
   private fun resolveNext() {
-    if (resolving || browser == null || resolves.isEmpty()) return
+    if (resolving != null || browser == null || resolves.isEmpty()) return
     val (info, retry) = resolves.removeFirst()
     val mine = browser
-    resolving = true
-    nsd.resolveService(info, object : NsdManager.ResolveListener {
+    val sequence = ++resolveSequence
+    val listener = object : NsdManager.ResolveListener {
+      private fun complete(action: () -> Unit) {
+        if (resolving !== this) return
+        resolving = null
+        if (sequence == resolveSequence && browser === mine) action()
+        resolveNext()
+      }
       override fun onResolveFailed(info: NsdServiceInfo, code: Int) { main.post {
-        resolving = false
-        if (browser === mine && code == 3 && retry < 2 && resolves.size < 64) resolves.addLast(info to (retry + 1))
-        main.postDelayed({ resolveNext() }, if (code == 3) 100L else 0L)
+        complete {
+          if (code == 3 && retry < 2 && resolves.size < 64) resolves.addLast(info to (retry + 1))
+        }
       } }
       override fun onServiceResolved(info: NsdServiceInfo) { main.post {
-        resolving = false
-        if (browser === mine && privateV4(info.host) && devices.size < 64) { devices[info.serviceName] = info; browseState() }
-        resolveNext()
+        complete {
+          if (privateV4(info.host) && devices.size < 64) { devices[info.serviceName] = info; browseState() }
+        }
       } }
-    })
+    }
+    resolving = listener
+    try { nsd.resolveService(info, listener) }
+    catch (_: Exception) {
+      resolving = null
+      stopBrowsing()
+      browseState("failed")
+      return
+    }
+    main.postDelayed({
+      if (resolving !== listener || sequence != resolveSequence) return@postDelayed
+      stopBrowsing()
+      browseState("failed")
+    }, 5000)
   }
   private var application: Application? = null
   private val visible = mutableSetOf<Activity>()
@@ -67,6 +87,7 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
   @Suppress("DEPRECATION")
   private fun browse() {
     if (browser != null || !foreground) return
+    if (resolving != null) { browseState("failed"); return }
     devices.clear()
     val listener = object : NsdManager.DiscoveryListener {
       override fun onDiscoveryStarted(type: String) = browseState()
@@ -90,6 +111,13 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
     val listener = browser ?: return
     browser = null
     resolves.clear()
+    resolveSequence++
+    val old = resolving
+    // Before API 34 there is no cancellation API: retain the occupied slot until its callback.
+    // A new chooser can retry discovery, but never overlap an uncancellable old resolve.
+    if (old != null && android.os.Build.VERSION.SDK_INT >= 34) {
+      if (runCatching { nsd.stopServiceResolution(old) }.isSuccess) resolving = null
+    }
     runCatching { nsd.stopServiceDiscovery(listener) }
   }
   private fun closeChannel(id: String) {

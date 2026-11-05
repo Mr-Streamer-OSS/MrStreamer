@@ -438,7 +438,7 @@ describe("when the TV can't or doesn't play it", () => {
     const shown = mount(() => createElement(Watch));
     expect(shown.textContent).toContain("Can't play on Lounge TV");
     expect(shown.textContent).toContain(
-      "Mr. Streamer can’t send this protected stream through this TV route. It still plays on this phone.",
+      "Mr. Streamer can't send this protected stream through this TV route. It still plays on this phone.",
     );
     expect(labels(shown)).toContain("Picture in picture");
 

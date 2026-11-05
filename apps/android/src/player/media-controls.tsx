@@ -1,3 +1,4 @@
+import { t as castT } from "../cast/copy.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
@@ -478,8 +479,8 @@ export function MediaDialog({ error }: { error: MediaState["error"] }) {
   if (error === "output")
     return (
       <PlayerDialog
-        title="Can't change playback on the TV"
-        body="Play here before choosing another episode or playing from start."
+        title={castT("Can't change playback on the TV")}
+        body={castT("Play here before playing something else.")}
         closeLabel={t("OK")}
         onClose={dismiss}
         actions={<TextButton label={t("OK")} strong onPress={dismiss} />}

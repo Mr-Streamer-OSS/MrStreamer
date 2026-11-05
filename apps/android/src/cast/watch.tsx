@@ -1,4 +1,3 @@
-import { Alert } from "react-native";
 import { Star } from "../player/media-controls.tsx";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { t as coreT } from "@mrstreamer/core/i18n";
@@ -103,9 +102,11 @@ export function tvLine(output: OutputState): string | null {
     case "failed":
       return t("{tv} couldn't play it.", { tv });
     case "restore":
-      return "Couldn’t return playback to this phone. Try Play here again.";
+      return t("Couldn't return playback to this phone. Try Play here again.");
+    case "returning":
+      return t("Returning playback to this phone.");
     case "taken":
-      return `Something else plays on ${tv}.`;
+      return t("Something else plays on {tv}.", { tv });
     case "stopped":
     case "ended":
       return t("{tv} stopped playing it.", { tv });
@@ -133,7 +134,15 @@ export function TvStoppedPanel({ output }: { output: Extract<OutputState, { kind
         ? t("{tv} stops when you leave Mr. Streamer.", { tv })
         : t("It can still play on this phone.");
 
-  return <Panel title={t("TV stopped")} line={line} live />;
+  return (
+    <Panel
+      title={
+        output.reason === "returning" ? t("Returning playback to this phone.") : t("TV stopped")
+      }
+      line={line}
+      live
+    />
+  );
 }
 
 /** Paper A: a 32dp TV, an 18sp bold title and a 14sp line, centred. */
@@ -177,15 +186,11 @@ export function OnTvRow({ onOpen }: { onOpen: (sheet: TvSheet) => void }) {
   const now = useStore(player.state);
   const media = useStore(player.media.state);
 
-  const refuse = () =>
-    Alert.alert(
-      "Can't change playback on the TV",
-      "Play here before choosing another episode or playing from start.",
-    );
+  const refuse = () => player.media.refuseOutput();
 
   return (
     <View style={{ minHeight: 48, flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
-      {media.next || (now.kind === "playing" && now.intent.kind === "file") ? (
+      {media.next || media.offline?.kind === "ready" ? (
         <TextControl
           icon="skip-next"
           label={playerT("Next episode")}
@@ -194,7 +199,7 @@ export function OnTvRow({ onOpen }: { onOpen: (sheet: TvSheet) => void }) {
       ) : null}
       {now.kind === "playing" && now.intent.kind === "live" ? (
         <>
-          <TextControl icon="replay" label="Play from start" onPress={refuse} />
+          <TextControl icon="replay" label={t("Play from start")} onPress={refuse} />
           <Star intent={now.intent} />
         </>
       ) : null}
@@ -541,7 +546,7 @@ function ForegroundRule({ indented = false }: { indented?: boolean }) {
         {t("Leaving the app stops playback on the TV.")}
       </Text>
       <Text style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
-        The TV uses its default audio when the phone can’t identify the selected track.
+        {t("The TV uses its default audio when the phone can't identify the selected track.")}
       </Text>
     </View>
   );
@@ -732,23 +737,23 @@ function OnTvSubtitles({ now, onPlayHere }: { now: Playing; onPlayHere: () => vo
 function refusal(reason: Extract<OutputState, { kind: "refused" }>["reason"]): string | null {
   switch (reason) {
     case "audio":
-      return "Mr. Streamer can’t preserve the selected audio on this TV route. It still plays on this phone.";
+      return t("Mr. Streamer can't preserve the selected audio on this TV route.");
     case "playback":
-      return "The TV connected but didn’t report playback. It still plays on this phone.";
+      return t("The TV connected but didn't report playback.");
     case "format":
-      return t("This file type can't play on a TV.");
+      return t("Mr. Streamer can't send this file type to a TV yet.");
     case "protected":
-      return t("Its stream is protected, so it can't play on a TV.");
+      return t("Mr. Streamer can't send this protected stream through this TV route.");
     case "codec":
-      return t("Its picture or sound can't play on a TV.");
+      return t("Mr. Streamer can't send this picture or sound through this TV route yet.");
     case "stream":
-      return t("This channel's stream can't play on a TV.");
+      return t("Mr. Streamer can't send this channel to a TV yet.");
     case "network":
       return t("Connect this phone to Wi-Fi to play on a TV.");
     case "unreadable":
       return coreT("The connection to the provider failed.");
     case "budget":
-      return t("The provider allows no other stream right now.");
+      return t("Mr. Streamer can't confirm room for another provider stream.");
     case "unavailable":
       return null;
   }
