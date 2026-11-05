@@ -38,7 +38,7 @@ import org.robolectric.shadows.ShadowLooper
 // PlayerOwner's public behaviour over a real ExoPlayer reading real files (src/test/resources/media,
 // made with ffmpeg as its README says). Robolectric has no decoders: the fake renderers accept every
 // picture and sound track, so these prove reading, attempt identity, commands and release, and
-// leave decoding to a device (Capabilities and each attempt's reported tracks say what it decodes).
+// leave decoding to a device (Capabilities declares decoders; reported tracks declare renderer support).
 
 // Android 14's Robolectric runs on the JDK 17 the Mac mini builds with; 15 and later need 21.
 @UnstableApi
