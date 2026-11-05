@@ -217,7 +217,7 @@ fictional local examples. Preview mode is an in-memory browsing session. It inst
 account, credential or playable media and needs no provider or TMDB requests. Example content
 actions, Cast, reminders, favourites and Watchlist offer Add provider before their owners run.
 A Preview mode strip on every destination offers Add provider and Exit preview.
-Personal list edits and destructive download actions also require a provider while previewing.
+Personal list edits and download queue changes also require a provider while previewing.
 Real downloaded files still play through OfflinePlay without a provider. Preview never mounts the
 first-run statistics prompt or records its feature visits, and muted autoplay refuses examples silently.
 Cancelling the provider form leaves the browse tree mounted; connecting normally removes the

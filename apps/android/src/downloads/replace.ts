@@ -13,7 +13,7 @@ export type ReplacePrompt =
 
 export interface ReplaceOwner {
   readonly prompt: Store<ReplacePrompt | null>;
-  /** Native's answer, or why it didn't ask: the copy is playing or still closing. */
+  /** Native's answer, or a refusal: playing, closing, or provider-required in preview. */
   replace(row: DownloadRow): Promise<string>;
 }
 
