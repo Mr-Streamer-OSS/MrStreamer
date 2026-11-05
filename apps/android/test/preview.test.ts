@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { discover } from "../src/live/discovery.ts";
-import { identity, resolve } from "../src/live/model.ts";
+import { draftOf, remove, identity, resolve } from "../src/live/model.ts";
 import { listsOwner } from "../src/live/store.ts";
 import { guide } from "../src/guide/guide.ts";
 import { libraryIntents } from "../src/library/intents.ts";
@@ -111,4 +111,82 @@ it("refuses example play and deep links before stream resolution or native sessi
   expect(admit).not.toHaveBeenCalled();
   expect(command).not.toHaveBeenCalled();
   await owner.stop();
+});
+
+it("preserves old lists and refuses every preview list write, including stale example creation", () => {
+  const entry = { sourceId: "removed", channelId: "1", title: "Old" };
+
+  const saved = {
+    version: 1,
+    lists: [
+      { id: "favourites", name: "Favourites", entries: [entry] },
+      { id: "trip", name: "Trip", entries: [entry] },
+    ],
+  };
+
+  const sources = { kind: "ready", sources: [] } as const;
+  const writeJson = vi.fn();
+  const lists = listsOwner({ readJson: () => saved, writeJson }, () => sources);
+  lists.read();
+  const before = lists.state.get();
+  const draft = draftOf(before.lists[0]!, sources);
+  enterPreview();
+  const example = identity(discover(sources).rows[0]!);
+
+  for (const action of [
+    () => lists.create("New"),
+    () => lists.create("Example", example),
+    () => lists.rename("trip", "Renamed"),
+    () => lists.delete("trip"),
+    () => lists.commit(remove(draft, 0)),
+    () => lists.member("favourites", entry, false),
+  ]) {
+    providerPrompt.set(null);
+    expect(action()).toBeFalsy();
+    expect(providerPrompt.get()).toBe("save");
+    expect(lists.state.get()).toBe(before);
+    expect(writeJson).not.toHaveBeenCalled();
+  }
+
+  exitPreview();
+  lists.commit(remove(draft, 0));
+  expect(writeJson).toHaveBeenCalledOnce();
+  providerPrompt.set(null);
+  expect(lists.create("Stale", example)).toBeFalsy();
+  expect(providerPrompt.get()).toBe("save");
+  expect(writeJson).toHaveBeenCalledOnce();
+});
+
+it("keeps programme identity across schedule, detail, search and listings and rejects unknowns", async () => {
+  enterPreview();
+  const key = `${exampleId}:1`;
+  const now = Date.now();
+  const page = await guide.schedule(key, { from: now, until: now + 86400000 });
+  const selected = page.programmes[1]!;
+  const { detail, ...facts } = selected;
+  expect(await guide.programme(detail)).toEqual(facts);
+  expect(await guide.programmeAt(key, selected.start + 1)).toEqual(facts);
+  expect(
+    (await guide.schedule(key, { from: selected.start, until: selected.stop })).programmes[0],
+  ).toEqual(selected);
+  expect((await guide.search(selected.title, [key])).found).toContainEqual({
+    key,
+    programme: selected,
+  });
+  expect((await guide.listings([key])).get(key)?.now).toEqual(
+    await guide.programme(page.programmes[0]!.detail),
+  );
+  expect(await guide.programmeAt("unknown", now)).toBeNull();
+
+  for (const token of [
+    `unknown|${selected.start}`,
+    `${key}|`,
+    `${key}|1`,
+    `${key}|${selected.start}|extra`,
+  ])
+    expect(await guide.programme(token)).toBeNull();
+  expect((await guide.schedule("unknown", { from: now, until: now + 1000 })).programmes).toEqual(
+    [],
+  );
+  expect((await guide.search("", ["unknown"])).found).toEqual([]);
 });

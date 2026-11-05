@@ -1,3 +1,4 @@
+import { enterPreview, exitPreview, providerPrompt } from "../src/preview/session.ts";
 import { expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -172,3 +173,41 @@ it.each([false, true])(
     mocks.playerState.intent.kind = "file";
   },
 );
+
+it("refuses destructive real-download actions in preview before reading or writing native state", async () => {
+  const owner = downloads();
+
+  const row = {
+    id: "copy",
+    key: "copy",
+    sourceId: "real",
+    title: "Copy",
+    sourceLabel: "Real",
+    kind: "movie",
+    mediaId: "1",
+    container: "mp4",
+    state: "complete",
+    bytes: 1,
+    total: 1,
+    reason: "",
+  } as const;
+
+  const native = vi.spyOn(owner.native, "filePath");
+  mocks.command.mockClear();
+  mocks.review.mockClear();
+  mocks.release.mockClear();
+  enterPreview();
+
+  try {
+    await owner.command(row, "remove");
+    expect(providerPrompt.get()).toBe("download");
+    await owner.replace(row);
+    expect(native).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+  } finally {
+    native.mockRestore();
+    exitPreview();
+  }
+});

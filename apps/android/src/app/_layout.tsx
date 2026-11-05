@@ -14,7 +14,7 @@ import { MiniPlayer } from "../player/mini-player.tsx";
 import { useStore } from "../platform/store.ts";
 import { colors } from "../ui/theme.ts";
 
-// The app: Connect until a source is saved, then the destinations (`(tabs)`). Nothing shows until
+// The app: Connect until a source is saved or Explore admits the destinations (`(tabs)`). Nothing shows until
 // the saved sources are read, so a returning viewer never sees Connect flash first. Watch opens
 // over the destinations and hands notification links for files to OfflinePlay. Offline stays
 // available without a provider; a local copy also keeps its mini player while Connect is showing.
@@ -35,7 +35,7 @@ export default function RootLayout() {
   const state = useStore(sources.state);
   const browsing = useStore(preview);
   useEffect(() => {
-    if (state.kind === "ready" && state.sources.length > 0) exitPreview();
+    if (preview.get() && state.kind === "ready" && state.sources.length > 0) exitPreview();
   }, [state]);
   useReminderRouting(
     state.kind === "ready" && state.sources.length > 0,

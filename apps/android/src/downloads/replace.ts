@@ -27,6 +27,8 @@ export function replaceNow(owner: ReplaceOwner, row: DownloadRow) {
   owner
     .replace(row)
     .then((reason) => {
+      if (reason === "provider-required") return;
+
       if (reason === "playing" || reason === "closing")
         owner.prompt.set({ kind: "refused", row, reason });
       else if (reason !== "replaced") owner.prompt.set({ kind: "failed", row });

@@ -78,7 +78,7 @@ export function programmes(from: number): readonly Programme[] {
   return Array.from({ length: 26 }, (_, i) => ({
     start: start + i * hour,
     stop: start + (i + 1) * hour,
-    title: `${["Coastal stories", "Beyond the meadow", "Night sky"][i % 3]} · Example`,
+    title: `${["Coastal stories", "Beyond the meadow", "Night sky"][(((start / hour + i) % 3) + 3) % 3]} · Example`,
     description: "Fictional local programme. No stream or reminder is included.",
   }));
 }

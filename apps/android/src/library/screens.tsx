@@ -1,3 +1,4 @@
+import { t as homeT } from "../home/copy.ts";
 import { preview, providerRequired, isExample } from "../preview/session.ts";
 import { t as previewCopy } from "../preview/copy.ts";
 import { stopSeriesDownloads } from "../downloads/series.ts";
@@ -751,13 +752,13 @@ function useViewingPresentation(): ViewingPresentationAdapter | undefined {
           providerRequired("play");
         },
         watchlist: () => ({
-          label: "Add to Watchlist",
+          label: homeT("Add to Watchlist"),
           activate: () => {
             providerRequired("save");
           },
         }),
         episode: () => ({
-          label: "Mark watched",
+          label: homeT("Mark watched"),
           activate: () => {
             providerRequired("save");
           },

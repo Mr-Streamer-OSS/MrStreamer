@@ -405,6 +405,8 @@ function createRuntime() {
       return lease(screen);
     },
     async replace(row: DownloadRow) {
+      if (providerRequired("download", row.sourceId)) return "provider-required";
+
       const review: unknown = JSON.parse(
         await native.review(JSON.stringify([{ ...row, artwork: undefined }])),
       );
@@ -443,6 +445,8 @@ function createRuntime() {
       player.play({ kind: "file", path, title: row.title });
     },
     async command(row: DownloadRow, action: Action) {
+      if (providerRequired("download", row.sourceId)) return null;
+
       if (removing.has(row.id)) return null;
       removing.add(row.id);
 

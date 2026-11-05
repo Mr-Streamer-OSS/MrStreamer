@@ -61,7 +61,7 @@ function onAir(programme: Programme | null, now = Date.now()) {
 
 /** Plays a channel, as Live's rows do, and opens Watch. */
 function watch(intent: PlayIntent) {
-  if (providerRequired("play", playSource(intent))) return;
+  if (intent.kind !== "file" && providerRequired("play", playSource(intent))) return;
   player.play(intent);
   router.push(watchHref(intent));
 }
@@ -519,7 +519,7 @@ export function HomeScreen() {
               onHold={() => hold(identity(row))}
               actions={[
                 { name: "activate", label: live("Play"), run: () => watchChannel(row) },
-                { name: "lists", label: live("Lists"), run: () => setListing(identity(row)) },
+                { name: "lists", label: live("Lists"), run: () => hold(identity(row)) },
               ]}
             />
           ))}

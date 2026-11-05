@@ -127,8 +127,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
     if (!draft) return;
 
     try {
-      lists.commit(draft);
-      close();
+      if (lists.commit(draft) !== false) close();
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : "";
 
@@ -152,7 +151,7 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
       if (at < 0) return;
 
       try {
-        lists.commit(remove(start, at));
+        if (lists.commit(remove(start, at)) === false) return;
         setFailed(null);
       } catch {
         setFailed({ kind: "other", message: t("{name} wasn't changed", { name }), retry: attempt });
@@ -163,10 +162,9 @@ export function ListScreen({ favourites = false }: { favourites?: boolean }) {
   };
 
   const deleteNow = () => {
-    setDialog(null);
-
     try {
-      lists.delete(id);
+      if (lists.delete(id) === false) return;
+      setDialog(null);
       close();
       router.back();
     } catch {

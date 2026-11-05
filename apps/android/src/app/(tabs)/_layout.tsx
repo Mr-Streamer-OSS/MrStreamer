@@ -1,3 +1,5 @@
+import { preview } from "../../preview/session.ts";
+import { useStore } from "../../platform/store.ts";
 import { PreviewBack, PreviewFrame } from "../../preview/controls.tsx";
 import { lazy, Suspense, useSyncExternalStore } from "react";
 import * as Native from "react-native";
@@ -20,12 +22,13 @@ export const unstable_settings = { anchor: START_DESTINATION };
 // Connect). While previewing, each destination's scene sits under the Preview mode strip.
 export default function DestinationsLayout() {
   useSyncExternalStore(onLanguageChange, currentLanguage);
+  const browsing = useStore(preview);
   const layout = layoutFor(useWindowDimensions().width);
 
   return (
     <>
       <PreviewBack />
-      {"Platform" in Native && Native.Platform.OS === "android" ? (
+      {!browsing && "Platform" in Native && Native.Platform.OS === "android" ? (
         <Suspense fallback={null}>
           <Preferences />
         </Suspense>

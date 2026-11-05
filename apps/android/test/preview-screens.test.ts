@@ -23,6 +23,10 @@ vi.mock("expo-router", () => ({
   },
 }));
 
+vi.mock("../src/player/instance.ts", () => ({ player: {} }));
+
+vi.mock("../src/live/runtime.ts", () => ({ lists: {} }));
+
 const bootstrap = vi.hoisted(() => ({ sources: {} }));
 
 vi.mock("../src/bootstrap/sources.ts", () => bootstrap);
@@ -56,6 +60,7 @@ vi.mock("react-native", async () => {
     accessibilityRole?: string;
     accessibilityState?: { selected?: boolean; checked?: boolean };
     onPress?(): void;
+    onLongPress?(): void;
     onChangeText?(value: string): void;
     value?: string;
     visible?: boolean;
@@ -70,12 +75,14 @@ vi.mock("react-native", async () => {
         "aria-selected": p.accessibilityState?.selected,
         "aria-checked": p.accessibilityState?.checked,
         onClick: p.onPress,
+        onContextMenu: p.onLongPress,
       },
       p.children,
     );
 
   return {
     View: view("div"),
+    KeyboardAvoidingView: view("div"),
     Text: view("span"),
     ScrollView: view("div"),
     Pressable: view("button"),
@@ -130,7 +137,10 @@ function show(node: ReactNode) {
 
 function press(container: ReturnType<typeof show>, label: string) {
   const button = Array.from(container.querySelectorAll("button")).find(
-    (b) => b.getAttribute("aria-label") === label,
+    (b) =>
+      b.getAttribute("aria-label") === label ||
+      b.textContent === label ||
+      b.getAttribute("aria-label")?.startsWith(`${label},`),
   );
 
   if (!button) throw new Error(`Missing ${label}`);
@@ -143,6 +153,7 @@ afterEach(() => {
   window.document.body.innerHTML = "";
   route.params = {};
   route.replaced = [];
+  Reflect.deleteProperty(bootstrap.sources, "connect");
 });
 
 it("browses offline examples in real Movies, Search and series Details without running content actions", async () => {
@@ -316,4 +327,65 @@ it("heads preview scenes with the strip, whose actions open the form and leave f
   expect(preview.get()).toBe(false);
   expect(route.replaced).toEqual(["/connect"]);
   expect(shown.querySelector('[aria-label="Preview mode, Fictional examples"]')).toBeNull();
+});
+
+it("keeps a refused list name dialog open without claiming a save", async () => {
+  const { NameDialog } = await import("../src/live/ui.tsx");
+  const close = vi.fn();
+  const save = vi.fn(() => false);
+
+  const shown = show(
+    createElement(NameDialog, {
+      title: "Rename list",
+      initial: "Trip",
+      confirm: "Save",
+      failed: () => "Failed",
+      onClose: close,
+      onSave: save,
+    }),
+  );
+
+  press(shown, "Save");
+  expect(save).toHaveBeenCalledWith("Trip");
+  expect(close).not.toHaveBeenCalled();
+  expect(shown.textContent).not.toContain("Failed");
+});
+
+it("translates example detail viewing actions and source labels into Dutch", async () => {
+  const { setLanguage } = await import("@mrstreamer/mobile/language");
+  setLanguage({ locale: "nl-NL", formats: "nl-NL" });
+
+  try {
+    enterPreview();
+    const movie = exampleLibrary.search("series", "orbit").titles[0]!;
+    route.params = { kind: "series", title: movie.key };
+    const shown = show(createElement(DetailsScreen, { model: exampleLibrary }));
+    await act(async () => {});
+    expect(exampleLibrary.sourceLabel(movie.subscriptionId)).toBe("Voorbeeld");
+    press(shown, "Toevoegen aan kijklijst");
+    expect(providerPrompt.get()).toBe("save");
+    const episode = shown.querySelector('[aria-label*="A new horizon 1"]');
+    expect(episode).not.toBeNull();
+    act(() => episode?.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true })));
+    press(shown, "Markeren als bekeken");
+    expect(providerPrompt.get()).toBe("save");
+  } finally {
+    setLanguage({ locale: "en-US", formats: "en-US" });
+  }
+});
+
+it("successful provider connection leaves examples and dismisses the preview form", async () => {
+  const { ProviderRequiredSheet } = await import("../src/preview/controls.tsx");
+  const { preview } = await import("../src/preview/session.ts");
+  const connect = vi.fn(async () => ({ kind: "connected", id: "real" }));
+  Object.assign(bootstrap.sources, { connect });
+  enterPreview();
+  providerPrompt.set("add");
+  const shown = show(createElement(ProviderRequiredSheet));
+  await act(async () => press(shown, "Connect"));
+  expect(connect).toHaveBeenCalledOnce();
+  expect(preview.get()).toBe(false);
+  expect(providerPrompt.get()).toBeNull();
+  expect(shown.querySelector("dialog")).toBeNull();
+  expect(route.replaced).toEqual(["/"]);
 });

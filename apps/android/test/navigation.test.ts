@@ -15,6 +15,8 @@ import type { Store } from "../src/platform/store.ts";
 const scenario = vi.hoisted(() => ({
   redirects: {} as Record<string, string | undefined>,
   width: 412,
+  android: false,
+  preferences: 0,
   segments: ["(tabs)", "(live)"] as string[],
   asked: [] as string[],
   /** What the tabs layout gave the navigator, but its children and bar. */
@@ -40,8 +42,29 @@ vi.mock("expo", () => ({
     restore: async () => JSON.stringify({ rows: [], free: 1 }),
     snapshot: async () => JSON.stringify({ rows: [], free: 1 }),
     blockSource: async () => {},
+    filePath: async () => null,
   }),
 }));
+
+vi.mock("../src/settings/consent-prompt.tsx", async () => {
+  const { createElement, useEffect } = await import("react");
+
+  return {
+    default: () => {
+      useEffect(() => {
+        scenario.preferences++;
+      }, []);
+
+      return createElement("p", null, "Statistics consent");
+    },
+  };
+});
+
+vi.mock("../src/app/watch.tsx", async () => {
+  const { createElement } = await import("react");
+
+  return { default: () => createElement("p", null, "Playing screen") };
+});
 
 vi.mock("../src/library/runtime.ts", () => ({ library: vi.fn() }));
 
@@ -64,7 +87,13 @@ vi.mock("../src/home/index.ts", () => ({
 vi.mock("../src/player/instance.ts", async () => {
   const { store } = await import("../src/platform/store.ts");
 
-  return { player: { state: store({ kind: "idle" }), release: async () => [] } };
+  return {
+    player: {
+      state: store<import("../src/player/player.ts").PlayerState>({ kind: "idle" }),
+      stop: vi.fn(async () => {}),
+      release: async () => [],
+    },
+  };
 });
 
 vi.mock("react-native", async () => {
@@ -105,12 +134,20 @@ vi.mock("react-native", async () => {
       );
 
   return {
+    Platform: {
+      get OS() {
+        return scenario.android ? "android" : "test";
+      },
+      Version: 34,
+    },
     AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
     View: view("div"),
     ScrollView: view("div"),
     Text: view("span"),
     Pressable: view("button"),
     StatusBar: () => null,
+    TextInput: view("input"),
+    KeyboardAvoidingView: view("div"),
     AccessibilityInfo: {
       sendAccessibilityEvent: (view: { textContent: string }, event: string) =>
         void scenario.asked.push(`${event} ${view.textContent}`),
@@ -515,4 +552,126 @@ describe("a sheet", () => {
     act(() => root?.render(sheet(false)));
     expect(labels(shown, "dialog")).toEqual([]);
   });
+});
+
+it("exits preview when real sources arrive but preserves a stale-link form on later roster events", async () => {
+  const { enterPreview, exitPreview, preview, providerPrompt } =
+    await import("../src/preview/session.ts");
+
+  try {
+    scenario.sources = { kind: "ready", sources: [] };
+    enterPreview();
+    show(createElement(RootLayout));
+    expect(preview.get()).toBe(true);
+    scenario.sources = { kind: "ready", sources: [{}] };
+    act(() => root?.render(createElement(RootLayout)));
+    expect(preview.get()).toBe(false);
+    act(() => providerPrompt.set("add"));
+    scenario.sources = { kind: "ready", sources: [{}] };
+    act(() => root?.render(createElement(RootLayout)));
+    expect(providerPrompt.get()).toBe("add");
+  } finally {
+    act(exitPreview);
+  }
+});
+
+it("keeps the consent component unmounted in preview and mounts it after leaving", async () => {
+  const { enterPreview, exitPreview } = await import("../src/preview/session.ts");
+  scenario.android = true;
+  scenario.preferences = 0;
+
+  try {
+    enterPreview();
+    const shown = show(createElement(DestinationsLayout));
+    await act(async () => {});
+    expect(scenario.preferences).toBe(0);
+    expect(shown.textContent).not.toContain("Statistics consent");
+    await act(async () => exitPreview());
+    expect(scenario.preferences).toBe(1);
+    expect(shown.textContent).toContain("Statistics consent");
+  } finally {
+    scenario.android = false;
+    act(exitPreview);
+  }
+});
+
+it("admits the local-file watch route and displays OfflinePlay during preview", async () => {
+  const { enterPreview, exitPreview, providerPrompt } = await import("../src/preview/session.ts");
+  const { player } = await import("../src/player/instance.ts");
+  const { default: OfflinePlay } = await import("../src/app/offline/play.tsx");
+  scenario.sources = { kind: "ready", sources: [] };
+  enterPreview();
+  player.state.set({
+    kind: "playing",
+    intent: { kind: "file", path: "/copy.mp4", title: "My copy" },
+    attempt: "local",
+    phase: "playing",
+    positionMs: 0,
+    durationMs: 1000,
+    bufferedMs: 0,
+    live: false,
+    seekable: true,
+    speed: 1,
+    failure: null,
+    tracks: [],
+  });
+
+  try {
+    const shown = show(
+      createElement("div", null, createElement(RootLayout), createElement(OfflinePlay)),
+    );
+
+    expect(labels(shown, "section")).toContain("watch");
+    expect(shown.textContent).toContain("Playing screen");
+    expect(providerPrompt.get()).toBeNull();
+  } finally {
+    act(() => {
+      player.state.set({ kind: "idle" });
+      exitPreview();
+    });
+  }
+});
+
+it("refuses deleting an unreadable offline copy in preview before stopping playback or reading its path", async () => {
+  const { enterPreview, exitPreview, providerPrompt } = await import("../src/preview/session.ts");
+  const { player } = await import("../src/player/instance.ts");
+  const { default: OfflinePlay } = await import("../src/app/offline/play.tsx");
+  const { downloads } = await import("../src/downloads/runtime.ts");
+  const path = vi.spyOn(downloads().native, "filePath");
+  vi.mocked(player.stop).mockClear();
+  enterPreview();
+  player.state.set({
+    kind: "playing",
+    intent: { kind: "file", path: "/missing.mp4", title: "My copy" },
+    attempt: "local",
+    phase: "failed",
+    positionMs: 0,
+    durationMs: null,
+    bufferedMs: 0,
+    live: false,
+    seekable: false,
+    speed: 1,
+    failure: { kind: "native", failure: { kind: "file-missing", code: "missing", status: null } },
+    tracks: [],
+  });
+
+  try {
+    const shown = show(createElement(OfflinePlay));
+
+    const remove = Array.from(shown.querySelectorAll("button")).find(
+      (b) => b.textContent === "Delete download",
+    );
+
+    expect(remove).toBeDefined();
+    await act(async () => remove?.click());
+    expect(providerPrompt.get()).toBe("download");
+    expect(player.stop).not.toHaveBeenCalled();
+    expect(path).not.toHaveBeenCalled();
+  } finally {
+    path.mockRestore();
+    act(() => {
+      player.state.set({ kind: "idle" });
+      exitPreview();
+    });
+  }
 });

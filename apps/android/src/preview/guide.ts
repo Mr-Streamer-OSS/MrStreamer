@@ -12,8 +12,15 @@ export function presentationGuide(
     title: r.title,
   }));
 
-  const page = (key: string, from: number): DayPage => ({
-    programmes: programmes(from).map((p) => ({ ...p, detail: `${key}|${p.start}` })),
+  const known = (key: string) => rows.some((row) => row.key === key);
+
+  const page = (key: string, from: number, until = Infinity): DayPage => ({
+    programmes:
+      known(key) && Number.isFinite(from)
+        ? programmes(from)
+            .filter((p) => p.start < until)
+            .map((p) => ({ ...p, detail: `${key}|${p.start}` }))
+        : [],
     cursor: null,
   });
 
@@ -43,15 +50,27 @@ export function presentationGuide(
       );
     },
     schedule: async (...args) =>
-      preview.get() ? page(args[0], args[1].from) : real.schedule(...args),
+      preview.get() ? page(args[0], args[1].from, args[1].until) : real.schedule(...args),
     programme: async (...args) => {
       if (!preview.get()) return real.programme(...args);
-      const start = Number(args[0].split("|").at(-1));
+      const [key, token, extra] = args[0].split("|");
+      const start = Number(token);
 
-      return Number.isFinite(start) ? (programmes(start)[0] ?? null) : null;
+      return key &&
+        known(key) &&
+        token === String(start) &&
+        extra === undefined &&
+        Number.isSafeInteger(start) &&
+        start % 3600000 === 0
+        ? (programmes(start)[0] ?? null)
+        : null;
     },
     programmeAt: async (...args) =>
-      preview.get() ? (programmes(args[1])[0] ?? null) : real.programmeAt(...args),
+      preview.get()
+        ? known(args[0]) && Number.isFinite(args[1])
+          ? (programmes(args[1])[0] ?? null)
+          : null
+        : real.programmeAt(...args),
     search: async (...args) =>
       preview.get()
         ? {

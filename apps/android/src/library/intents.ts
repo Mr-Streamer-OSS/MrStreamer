@@ -36,7 +36,7 @@ export function intentRegistry(
       // Forwards the caller's exact arguments, so owners see the same call they were made.
       if (admit && play)
         handlers.play = (...args) =>
-          admit(playSource(args[0]), "play") ? play(...args) : undefined;
+          args[0].kind === "file" || admit(playSource(args[0]), "play") ? play(...args) : undefined;
 
       if (admit && download)
         handlers.download = (intent) => {

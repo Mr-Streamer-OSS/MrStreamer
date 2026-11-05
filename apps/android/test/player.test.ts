@@ -1,3 +1,4 @@
+import { enterPreview, exitPreview, providerPrompt, exampleId } from "../src/preview/session.ts";
 import { describe, expect, it, vi } from "vitest";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { intentKey, linkedIntent, type PlayIntent } from "../src/player/intent.ts";
@@ -409,4 +410,46 @@ describe("watch links", () => {
     expect(intentKey(title)).not.toBe(intentKey({ ...title, container: "mp4" }));
     expect(intentKey({ ...title, resumeAt: 5 })).toBe(intentKey(title));
   });
+});
+
+it("silently refuses autoplay examples and preview sessions before resolution or admission", async () => {
+  const native = fakeNative();
+  const resolve = vi.fn(async () => request());
+  const owner = playerOwner(native.module, resolve);
+
+  try {
+    enterPreview();
+    expect(owner.preview(live("1"))).toBeNull();
+    expect(providerPrompt.get()).toBeNull();
+    exitPreview();
+    expect(
+      owner.preview({ kind: "live", channelId: "1", title: "Example", sourceId: exampleId }),
+    ).toBeNull();
+    expect(providerPrompt.get()).toBeNull();
+    expect(resolve).not.toHaveBeenCalled();
+    expect(native.admitted).toEqual([]);
+  } finally {
+    exitPreview();
+    await owner.stop();
+  }
+});
+
+it("admits real local files while exploring without a provider prompt", async () => {
+  const native = fakeNative();
+  const resolve = vi.fn(async () => request("file:///copy.mp4"));
+  const owner = playerOwner(native.module, resolve);
+
+  try {
+    enterPreview();
+    const intent = { kind: "file", path: "/copy.mp4", title: "My copy" } as const;
+    const attempt = owner.play(intent);
+    await flush();
+    expect(owner.state.get()).toMatchObject({ kind: "playing", intent });
+    expect(native.admitted).toHaveLength(1);
+    expect(native.admitted[0]?.attempt).toBe(attempt);
+    expect(providerPrompt.get()).toBeNull();
+  } finally {
+    exitPreview();
+    await owner.stop();
+  }
 });

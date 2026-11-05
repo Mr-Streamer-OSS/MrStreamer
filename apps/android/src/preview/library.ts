@@ -1,3 +1,4 @@
+import { t } from "./copy.ts";
 import { collections } from "@mrstreamer/core/ondemand/collections";
 import { libraryModel, type LibraryModel } from "../library/model.ts";
 import { details, titles } from "./catalogue.ts";
@@ -33,7 +34,7 @@ export const exampleLibrary: LibraryModel = {
     providerFailed: false,
     metadataFailed: false,
   }),
-  sourceLabel: () => "Example",
+  sourceLabel: () => t("Example"),
 };
 
 exampleLibrary.state.set({ loading: false, failures: [], needsLogin: [], revision: 0 });
