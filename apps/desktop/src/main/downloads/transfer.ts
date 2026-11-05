@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // One download's transfer: the provider's file, streamed into a partial file on disk as it
 // arrives, never held in memory. It goes on from bytes already there only when the provider's
@@ -394,9 +395,7 @@ function ifRangeOf(mark: string): string | null {
 /** What a failed write says of the disk or the folder, or null when it was something else. */
 function writeFailure(cause: unknown): TransferOutcome | null {
   const code =
-    type.keywords.object.root.allows(cause) &&
-    !type.keywords.Function.allows(cause) &&
-    "code" in cause
+    type.keywords.object.root.allows(cause) && !isCallable(cause) && "code" in cause
       ? cause.code
       : null;
 

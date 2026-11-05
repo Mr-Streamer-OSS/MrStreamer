@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type { Json } from "@mrstreamer/contracts/json";
@@ -4688,11 +4689,7 @@ function listen(
     http.listen(0, host, () => {
       const address = http.address();
 
-      if (
-        address &&
-        type.keywords.object.root.allows(address) &&
-        !type.keywords.Function.allows(address)
-      )
+      if (address && type.keywords.object.root.allows(address) && !isCallable(address))
         resolve({ server: http, port: address.port });
       else reject(new Error("Stream proxy has no TCP address."));
     });

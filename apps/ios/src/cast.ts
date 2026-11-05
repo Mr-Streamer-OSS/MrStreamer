@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
@@ -610,9 +611,7 @@ function fromBase64(text: string): Uint8Array {
 }
 
 const isRecord = (value: Json | undefined): value is JsonObject =>
-  arkType.keywords.object.root.allows(value) &&
-  !arkType.keywords.Function.allows(value) &&
-  !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): JsonObject {

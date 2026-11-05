@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 // A Vitest reporter that writes the seconds each test file took, by its path from the root, in
 // the form test/durations.json keeps for test/sequencer.ts. A file's seconds cover its import,
 // setup, hooks and tests, which the JSON report's times leave out. CI's Test job adds it to the
@@ -21,11 +20,8 @@ export default class TestDurations implements Reporter {
   onTestRunEnd(modules: readonly TestModule[]) {
     const config = this.#vitest?.config;
 
-    const output = arkType("object")
-      .narrow((value) => !(value instanceof Function))
-      .allows(config?.outputFile)
-      ? config.outputFile["durations"]
-      : "";
+    const files: { durations?: string } = Object(config?.outputFile);
+    const output = config?.outputFile === files ? files.durations : "";
 
     if (!config || !output) throw new Error("Pass --outputFile.durations=<file>");
 

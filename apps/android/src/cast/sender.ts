@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind, type TvPath } from "./media.ts";
 import { store, useStore, type Store } from "../platform/store.ts";
@@ -268,7 +270,8 @@ export async function serveOnRelay(
 
   const served = await module.serve(attempt, path.kind === "hls").catch((cause: unknown) => {
     throw new TvRefused(
-      typeof cause === "object" &&
+      type.keywords.object.root.allows(cause) &&
+        !isCallable(cause) &&
         cause !== null &&
         "code" in cause &&
         cause.code === "CAST_NETWORK"
@@ -635,7 +638,7 @@ function fromBase64(text: string): Uint8Array {
 }
 
 const isRecord = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  value !== null && value === Object(value) && !Array.isArray(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): JsonObject {
@@ -649,7 +652,7 @@ function payloadOf(message: CastMessage): JsonObject {
 }
 
 const numberOr = <T>(value: Json | undefined, fallback: T) =>
-  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  type.keywords.number.root.allows(value) && Number.isFinite(value) ? value : fallback;
 
 /** A media status's `playerState`, and `idleReason` when idle, as a `TvStatus` state. */
 function stateOf(player: Json | undefined, idle: Json | undefined): TvStatus["state"] {
@@ -710,7 +713,7 @@ export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Pro
   const send = (to: string, namespace: string, payload: Payload) => {
     if (!open) return;
 
-    if (payload.type === "LOAD" && typeof payload["sessionId"] === "string") {
+    if (payload.type === "LOAD" && type.keywords.string.root.allows(payload["sessionId"])) {
       module.armStop(
         channel,
         toBase64(
@@ -838,7 +841,9 @@ export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Pro
       media.status({
         state,
         time:
-          state !== "stopped" && state !== "taken" && typeof status["currentTime"] === "number"
+          state !== "stopped" &&
+          state !== "taken" &&
+          type.keywords.number.root.allows(status["currentTime"])
             ? Math.max(0, status["currentTime"])
             : null,
         duration: numberOr(info["duration"], null),
@@ -922,8 +927,8 @@ export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Pro
 
     if (
       launched["type"] !== "RECEIVER_STATUS" ||
-      typeof app?.["transportId"] !== "string" ||
-      typeof app["sessionId"] !== "string"
+      !type.keywords.string.root.allows(app?.["transportId"]) ||
+      !type.keywords.string.root.allows(app["sessionId"])
     ) {
       throw new Error("The TV didn't start its player.");
     }

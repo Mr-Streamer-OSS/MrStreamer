@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
@@ -24,11 +25,7 @@ type LaunchFailure = {
 };
 
 function record(value: unknown): value is JsonObject {
-  return (
-    arkType.keywords.object.root.allows(value) &&
-    !arkType.keywords.Function.allows(value) &&
-    !Array.isArray(value)
-  );
+  return arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 }
 
 // Later samples are allowlisted and bounded. The primary rejected URL stays exact.

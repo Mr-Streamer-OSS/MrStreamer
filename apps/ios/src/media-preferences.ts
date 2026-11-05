@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { QUALITIES, type LiveChannel, type Quality } from "@mrstreamer/contracts/library";
@@ -53,9 +54,7 @@ let checkpointed = false;
 let cached: Store<MediaPreferences> | undefined;
 
 const record = (value: Json | undefined): value is JsonObject =>
-  arkType.keywords.object.root.allows(value) &&
-  !arkType.keywords.Function.allows(value) &&
-  !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 const knownLanguage = (value: Json | undefined) =>
   TITLE_LANGUAGES.find(({ code }) => code === value)?.code;

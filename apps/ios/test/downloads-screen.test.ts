@@ -1,4 +1,4 @@
-import { type as arkType } from "arktype";
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { createRoot, document } from "./dom.ts";
 import * as React from "react";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -46,7 +46,7 @@ vi.mock("react-native", async () => {
     ) => {
       if (props.testID) scenario.pressables.set(props.testID, props);
 
-      const children = arkType.keywords.Function.allows(props.children)
+      const children = isCallable(props.children)
         ? (props.children as (state: { pressed: boolean }) => React.ReactNode)({ pressed: false })
         : props.children;
 

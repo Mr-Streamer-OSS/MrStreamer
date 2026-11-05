@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // Website analytics in a production-configured build, against an isolated loopback capture.
@@ -575,7 +576,7 @@ app.on('window-all-closed', () => app.quit());
         const body: unknown = JSON.parse(c.raw);
 
         if (
-          !(arkType.keywords.object.root.allows(body) && !arkType.keywords.Function.allows(body)) ||
+          !(arkType.keywords.object.root.allows(body) && !isCallable(body)) ||
           !("properties" in body)
         )
           return [undefined];
@@ -583,7 +584,7 @@ app.on('window-all-closed', () => app.quit());
 
         return [
           arkType.keywords.object.root.allows(properties) &&
-          !arkType.keywords.Function.allows(properties) &&
+          !isCallable(properties) &&
           "feature_name" in properties
             ? properties.feature_name
             : undefined,
@@ -1070,9 +1071,7 @@ app.on('window-all-closed', () => app.quit());
       const body: Json = JSON.parse(entry.raw);
 
       const jsonObject = (value: Json | undefined): value is JsonObject =>
-        arkType.keywords.object.root.allows(value) &&
-        !arkType.keywords.Function.allows(value) &&
-        !Array.isArray(value);
+        arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
       if (!jsonObject(body)) throw new Error("Malformed body.");
       const { api_key, event, distinct_id, properties, ...rest } = body;

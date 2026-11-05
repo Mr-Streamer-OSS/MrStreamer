@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "../../../packages/contracts/src/json.ts";
 // The made-up subscription the marketing captures show, and the public-domain footage it plays.
@@ -479,11 +480,7 @@ function about(url: URL, body: Json): Json {
   const id = Number(/^\/3\/tv\/(\d+)$/.exec(url.pathname)?.[1]);
   const title = titles.find((each) => each.tmdbId === id);
 
-  if (
-    !title ||
-    !(arkType.keywords.object.root.allows(body) && !arkType.keywords.Function.allows(body))
-  )
-    return body;
+  if (!title || !(arkType.keywords.object.root.allows(body) && !isCallable(body))) return body;
   const opened = url.searchParams.get("append_to_response") === "credits";
 
   const listed = {

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Loopback HLS compatibility fixture, shared by public-service and built-app verification.
 import { createServer } from "node:http";
@@ -107,7 +108,7 @@ export async function startFakeHls(
     if (override)
       return response
         .writeHead(override.status ?? 200, override.headers)
-        .end(arkType.keywords.Function.allows(override.body) ? override.body() : override.body);
+        .end(isCallable(override.body) ? override.body() : override.body);
 
     if (path === "/list.m3u")
       return response.end(

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { Window } from "happy-dom";
 import { createContext, runInContext } from "node:vm";
@@ -119,7 +120,7 @@ function standIn(collapsed = true) {
         if (
           result &&
           arkType.keywords.object.root.allows(result) &&
-          !arkType.keywords.Function.allows(result) &&
+          !isCallable(result) &&
           "events" in result
         )
           app.onSnapshot();

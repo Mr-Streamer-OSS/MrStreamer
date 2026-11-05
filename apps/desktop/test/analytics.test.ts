@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
@@ -75,7 +76,7 @@ async function captureServer(status: number | (() => number) = 200) {
 
     if (!(
       type.keywords.object.root.allows(payload) &&
-      !type.keywords.Function.allows(payload) &&
+      !isCallable(payload) &&
       "event" in payload &&
       payload.event === "app_version_observed"
     ))

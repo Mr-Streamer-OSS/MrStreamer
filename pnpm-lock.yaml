@@ -150,9 +150,6 @@ importers:
 
   apps/marketing:
     dependencies:
-      arktype:
-        specifier: 2.2.9
-        version: 2.2.9
       web-vitals:
         specifier: 6.2.3
         version: 6.2.3

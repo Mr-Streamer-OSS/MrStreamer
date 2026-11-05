@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { JsonValue } from "@mrstreamer/contracts/json-value";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { type, type Type } from "arktype";
@@ -108,6 +109,8 @@ import { defined } from "@mrstreamer/core/defined";
 // server announced. A file left beside an unfinished record is deleted before it is authorized
 // again. Resume data an earlier build kept in `download:<id>` is handed to the native side at
 // launch, then removed.
+
+const DownloadEntry = lazy(() => JsonValue.and("object"));
 
 const FILE = "downloads.json";
 
@@ -1332,7 +1335,7 @@ function load() {
   const entries =
     valid &&
     type.keywords.object.root.allows(read) &&
-    !type.keywords.Function.allows(read) &&
+    !isCallable(read) &&
     !Array.isArray(read) &&
     "items" in read &&
     Array.isArray(read.items)
@@ -1340,7 +1343,7 @@ function load() {
       : [];
 
   for (const item of entries) {
-    if (!JsonValue.and("object").allows(item)) continue;
+    if (!DownloadEntry().allows(item)) continue;
     const record = Stored()(item);
 
     if (record instanceof type.errors) unreadable.push(item);

@@ -65,6 +65,8 @@ import {
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { defined } from "@mrstreamer/core/defined";
 
+const RegistryEntryValue = lazy(() => JsonValue.and("object"));
+
 const AccountRecord = lazy(() =>
   type({
     state: "'active' | 'expired' | 'banned' | 'disabled' | 'unknown'",
@@ -1050,7 +1052,7 @@ async function readRegistry(path: string): Promise<{
     Array.isArray(data.subscriptions)
   ) {
     for (const entry of data.subscriptions) {
-      if (JsonValue.and("object").allows(entry)) entries.push(entry);
+      if (RegistryEntryValue().allows(entry)) entries.push(entry);
     }
   }
 

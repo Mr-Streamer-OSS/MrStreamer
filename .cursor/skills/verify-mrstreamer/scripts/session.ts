@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Shared ownership and process cleanup for the desktop and website verification helpers.
 import { execFileSync, type ChildProcess } from "node:child_process";
@@ -59,7 +60,7 @@ export async function freePort() {
 }
 
 export function record(value: unknown): value is Record<string, unknown> {
-  return arkType.keywords.object.root.allows(value) && !arkType.keywords.Function.allows(value);
+  return arkType.keywords.object.root.allows(value) && !isCallable(value);
 }
 
 /** Graceful quit first; escalation targets only the app or process group this run created. */

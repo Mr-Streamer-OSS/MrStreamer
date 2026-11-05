@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import type { PESPrivateData } from "mpegts.js/d.ts/src/demux/pes-private-data";
@@ -60,12 +61,12 @@ const EngineFailure = lazy(() =>
   arkType({
     kind: "'network' | 'media' | 'unsupported' | 'wrong-container'",
     detail: "string",
-  }).narrow((value) => !(value instanceof Function)),
+  }).narrow((value) => !isCallable(value)),
 );
 
 const PrivatePacket = lazy(() =>
   arkType({ pid: "number | number.NaN", data: arkType.instanceOf(Uint8Array) }).narrow(
-    (value) => !(value instanceof Function),
+    (value) => !isCallable(value),
   ),
 );
 

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // Packs the built site as Vercel's Build Output API, version 3, in .vercel/output/, and checks
@@ -195,7 +196,7 @@ try {
   const parsed: Json = JSON.parse(json);
 
   if (
-    !(arkType.keywords.object.root.allows(parsed) && !arkType.keywords.Function.allows(parsed)) ||
+    !(arkType.keywords.object.root.allows(parsed) && !isCallable(parsed)) ||
     Array.isArray(parsed)
   )
     throw new Error("Invalid app metadata");
@@ -233,7 +234,7 @@ const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/scri
   .find(
     (data): data is JsonObject =>
       arkType.keywords.object.root.allows(data) &&
-      !arkType.keywords.Function.allows(data) &&
+      !isCallable(data) &&
       "@type" in data &&
       data["@type"] === "FAQPage",
   );
@@ -242,9 +243,7 @@ if (!faq) {
   problems.push(`${LISTED["/"]} holds no FAQPage data that reads.`);
 } else {
   const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map((question: Json) =>
-    arkType.keywords.object.root.allows(question) &&
-    !arkType.keywords.Function.allows(question) &&
-    "name" in question
+    arkType.keywords.object.root.allows(question) && !isCallable(question) && "name" in question
       ? question.name
       : undefined,
   );

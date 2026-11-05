@@ -459,12 +459,7 @@ export function verifyPackage(
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
 export function isRecord(value: Json | undefined): value is JsonObject {
-  return (
-    value !== null &&
-    value === Object(value) &&
-    !(value instanceof Function) &&
-    !Array.isArray(value)
-  );
+  return value !== null && value === Object(value) && !Array.isArray(value);
 }
 
 /** The release file `release` wrote, with the package once `verify` added it. */

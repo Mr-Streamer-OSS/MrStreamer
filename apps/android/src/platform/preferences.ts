@@ -1,6 +1,9 @@
+import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import { readJsonStrict, writeJson } from "./storage.ts";
+
+const LanguagePreference = lazy(() => type({ choice: "string" }));
 
 export interface PreferenceFiles {
   read(name: string): Json;
@@ -29,8 +32,7 @@ export function preferences(files: PreferenceFiles = { read: readJsonStrict, wri
 
       if (value === null) return undefined;
 
-      if (!type({ choice: "string" }).allows(value))
-        throw new Error("Language preference unavailable.");
+      if (!LanguagePreference().allows(value)) throw new Error("Language preference unavailable.");
 
       return value.choice;
     },

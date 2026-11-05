@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Performance-only persisted copies and slow HTTP boundary. Neither replaces app IPC or state.
 import { randomUUID } from "node:crypto";
@@ -16,9 +17,7 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !registry ||
-    !(
-      arkType.keywords.object.root.allows(registry) && !arkType.keywords.Function.allows(registry)
-    ) ||
+    !(arkType.keywords.object.root.allows(registry) && !isCallable(registry)) ||
     !("subscriptions" in registry) ||
     !Array.isArray(registry.subscriptions)
   )
@@ -27,7 +26,7 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !owner ||
-    !(arkType.keywords.object.root.allows(owner) && !arkType.keywords.Function.allows(owner)) ||
+    !(arkType.keywords.object.root.allows(owner) && !isCallable(owner)) ||
     !("id" in owner) ||
     !arkType.keywords.string.root.allows(owner.id) ||
     !("key" in owner) ||

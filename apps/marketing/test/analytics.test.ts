@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { renderPage } from "../scripts/pages.ts";
@@ -513,38 +514,53 @@ describe("website analytics", () => {
     expect(footer()).toBe("Site analytics: off. What's counted");
   });
 
-  it("count a collapsed FAQ question once it is open and in view, and only once", () => {
+  it("keeps page analytics and its off switch working without an observer", () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    start(home);
+    expect(events().some(([event]) => event === "$pageview")).toBe(true);
+    expect(events().filter(([event]) => event === "feature_section_viewed")).toEqual([]);
+    button()?.click();
+    expect(footer()).toBe("Site analytics: off. Turn on What's counted");
+  });
+
+  it("count a collapsed FAQ question with a foreign observer once it is open and in view, and only once", () => {
     // An observer that reports what the test says is in view, for the parts it watches.
     const watched = new Set<Element>();
     let inView = (_target: Element): void => {};
 
-    vi.stubGlobal(
-      "IntersectionObserver",
-      class implements IntersectionObserver {
-        readonly root = null;
-        readonly rootMargin = "0px";
-        readonly scrollMargin = "0px";
-        readonly thresholds = [0];
-        constructor(callback: IntersectionObserverCallback) {
-          inView = (target) => {
-            if (watched.has(target))
-              callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this);
-          };
-        }
-        observe(target: Element) {
-          watched.add(target);
-        }
-        unobserve(target: Element) {
-          watched.delete(target);
-        }
-        disconnect() {
-          watched.clear();
-        }
-        takeRecords() {
-          return [];
-        }
-      },
+    const Observer = class implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = "0px";
+      readonly scrollMargin = "0px";
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) {
+        inView = (target) => {
+          if (watched.has(target))
+            callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this);
+        };
+      }
+      observe(target: Element) {
+        watched.add(target);
+      }
+      unobserve(target: Element) {
+        watched.delete(target);
+      }
+      disconnect() {
+        watched.clear();
+      }
+      takeRecords() {
+        return [];
+      }
+    };
+
+    const foreign: (observer: typeof Observer) => typeof Observer = runInNewContext(
+      "(Observer) => function (...args) { return Reflect.construct(Observer, args); }",
     );
+
+    vi.stubGlobal("IntersectionObserver", foreign(Observer));
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });

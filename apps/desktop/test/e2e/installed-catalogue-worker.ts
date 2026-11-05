@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
@@ -55,9 +56,7 @@ export interface ProbeOptions {
 const installed = new WeakSet<MainTransport>();
 
 const object = (value: Json | undefined): value is Record<string, Json | undefined> =>
-  arkType.keywords.object.root.allows(value) &&
-  !arkType.keywords.Function.allows(value) &&
-  !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 function errorText(cause: unknown): string {
   if (cause instanceof Error) return cause.message;

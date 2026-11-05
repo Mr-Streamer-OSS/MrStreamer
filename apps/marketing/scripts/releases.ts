@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { buildFeed } from "../../../packages/contracts/src/update-feed.ts";
 
@@ -56,8 +57,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
       if (!Array.isArray(rows)) return null;
 
       for (const row of rows) {
-        if (!(arkType.keywords.object.root.allows(row) && !arkType.keywords.Function.allows(row)))
-          return null;
+        if (!(arkType.keywords.object.root.allows(row) && !isCallable(row))) return null;
 
         if (!("draft" in row) || !("prerelease" in row)) return null;
 
@@ -83,9 +83,7 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
 
         for (const asset of row.assets) {
           if (
-            !(
-              arkType.keywords.object.root.allows(asset) && !arkType.keywords.Function.allows(asset)
-            ) ||
+            !(arkType.keywords.object.root.allows(asset) && !isCallable(asset)) ||
             !("name" in asset) ||
             !arkType.keywords.string.root.allows(asset.name)
           )

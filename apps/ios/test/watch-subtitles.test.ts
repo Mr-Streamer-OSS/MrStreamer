@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { keychain as keychainStore } from "./keychain.ts";
 import { createRoot, document, Event } from "./dom.ts";
@@ -54,9 +55,7 @@ vi.mock("react-native", async () => ({
       .flat(9)
       .reduce<number | undefined>(
         (found, each) =>
-          arkType.keywords.object.root.allows(each) &&
-          !arkType.keywords.Function.allows(each) &&
-          "fontSize" in each
+          arkType.keywords.object.root.allows(each) && !isCallable(each) && "fontSize" in each
             ? (each as { fontSize: number }).fontSize
             : found,
         undefined,

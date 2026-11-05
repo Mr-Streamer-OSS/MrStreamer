@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Compose candidates only. Native captures and inspected Apple frames stay in .local/.
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
@@ -56,7 +57,7 @@ function knownKeys(value: JsonObject, keys: readonly string[], label: string) {
 function object(value: Json | undefined, label: string): JsonObject {
   if (
     !value ||
-    !(arkType.keywords.object.root.allows(value) && !arkType.keywords.Function.allows(value)) ||
+    !(arkType.keywords.object.root.allows(value) && !isCallable(value)) ||
     Array.isArray(value)
   )
     throw new Error(`${label} must be an object`);

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
@@ -38,9 +39,7 @@ export function versionMemory(storage: {
   }
 
   let picks: Record<string, unknown> =
-    type.keywords.object.root.allows(raw) &&
-    !type.keywords.Function.allows(raw) &&
-    !Array.isArray(raw)
+    type.keywords.object.root.allows(raw) && !isCallable(raw) && !Array.isArray(raw)
       ? Object.fromEntries(Object.entries(raw))
       : {};
 

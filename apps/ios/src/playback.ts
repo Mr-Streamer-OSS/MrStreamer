@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
@@ -1619,9 +1620,7 @@ function observe(event: PlaybackObservation) {
 function bridgeCode(cause: unknown): string | null {
   for (
     let depth = 0;
-    depth < 4 &&
-    arkType.keywords.object.root.allows(cause) &&
-    !arkType.keywords.Function.allows(cause);
+    depth < 4 && arkType.keywords.object.root.allows(cause) && !isCallable(cause);
     depth++
   ) {
     if ("code" in cause && cause.code === "ERR_OBSERVED_NOT_DRAINED") return cause.code;

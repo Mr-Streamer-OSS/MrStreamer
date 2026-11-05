@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { createRoot, document } from "./dom.ts";
 import * as React from "react";
@@ -1134,11 +1135,7 @@ describe("Live on iPad and Duo windows", () => {
 
   const pushes = () =>
     state.did.filter(
-      (did) =>
-        arkType.keywords.object.root.allows(did) &&
-        !arkType.keywords.Function.allows(did) &&
-        did &&
-        "type" in did,
+      (did) => arkType.keywords.object.root.allows(did) && !isCallable(did) && did && "type" in did,
     );
 
   afterEach(async () => {

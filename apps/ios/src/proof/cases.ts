@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // What the iOS app needs from the shared packages, run as plain functions so the same files run on
 // Hermes in the app and in Node on the workbench. scripts/proof-server.ts runs them in Node, takes
@@ -90,7 +91,7 @@ export async function outcome(request: () => Promise<ProofResponse>): Promise<Ob
                       ? "bigint"
                       : type.keywords.symbol.allows(error)
                         ? "symbol"
-                        : type.keywords.Function.allows(error)
+                        : isCallable(error)
                           ? "function"
                           : "object",
     };

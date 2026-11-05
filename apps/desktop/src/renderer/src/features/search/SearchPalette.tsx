@@ -1,3 +1,4 @@
+import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 import { useSearchUsage } from "../../app/analytics.ts";
 import { Dialog } from "@base-ui/react/dialog";
@@ -49,6 +50,8 @@ import { ReminderButton } from "../reminders/ReminderButton.tsx";
  * and later today. Opens with ⌘K or Ctrl K, on what Movies or Series searched for, if anything.
  * A programme to come opens to its description and Remind me; one with a reminder shows a bell.
  */
+const CachedStaleTime = lazy(() => type("number | number.NaN"));
+
 export function SearchPalette() {
   const open = useUi((state) => state.searchOpen);
   // What had the keyboard as search opened, as a control of the details that stay open under it,
@@ -128,7 +131,7 @@ function Palette() {
         return (
           cached?.state.status === "success" &&
           cached.state.fetchStatus === "idle" &&
-          type("number | number.NaN").allows(options.staleTime) &&
+          CachedStaleTime().allows(options.staleTime) &&
           !cached.isStaleByTime(options.staleTime)
         );
       },

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import {
@@ -470,9 +471,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const disk = new DiskFile(native.root, "documents", "downloads.json");
 
     const stored: unknown = JSON.parse(disk.textSync(), (key, value: Json) =>
-      key === "about" &&
-      arkType.keywords.object.root.allows(value) &&
-      !arkType.keywords.Function.allows(value)
+      key === "about" && arkType.keywords.object.root.allows(value) && !isCallable(value)
         ? { ...value, originalLanguage: "fr" }
         : value,
     );

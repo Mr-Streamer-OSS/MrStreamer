@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // The prior stable release and this build on one profile, each driven through its own window.
 // This build makes a list holding channels of two subscriptions and chooses it in Live TV. The
@@ -84,7 +85,7 @@ async function remembered(profile: string): Promise<Json> {
 
   if (
     file === null ||
-    !(arkType.keywords.object.root.allows(file) && !arkType.keywords.Function.allows(file)) ||
+    !(arkType.keywords.object.root.allows(file) && !isCallable(file)) ||
     Array.isArray(file)
   )
     throw new Error("Expected preferences.json to contain an object");
@@ -192,7 +193,7 @@ export async function customListRoundTripScenario(
   const executable =
     priorDoctor &&
     arkType.keywords.object.root.allows(priorDoctor) &&
-    !arkType.keywords.Function.allows(priorDoctor) &&
+    !isCallable(priorDoctor) &&
     "executable" in priorDoctor
       ? String(priorDoctor.executable)
       : "";

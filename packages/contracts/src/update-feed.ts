@@ -259,10 +259,5 @@ function isNames(value: unknown): value is string[] {
 }
 
 function isRecord(value: Json | undefined): value is JsonObject {
-  return (
-    value !== null &&
-    value === Object(value) &&
-    !(value instanceof Function) &&
-    !Array.isArray(value)
-  );
+  return value !== null && value === Object(value) && !Array.isArray(value);
 }

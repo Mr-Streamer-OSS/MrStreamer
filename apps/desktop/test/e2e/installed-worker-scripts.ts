@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
@@ -7,9 +8,7 @@ import { pathToFileURL } from "node:url";
 import { parseAst } from "vite";
 
 const isObject = (value: Json | undefined): value is JsonObject =>
-  arkType.keywords.object.root.allows(value) &&
-  !arkType.keywords.Function.allows(value) &&
-  !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 function object(value: Json | undefined): JsonObject {
   if (!isObject(value)) throw new Error("Invalid ASAR manifest object");

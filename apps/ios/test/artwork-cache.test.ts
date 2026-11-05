@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { Window, type Element } from "happy-dom";
 import { readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
@@ -93,7 +94,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!(arkType.keywords.object.root.allows(address) && !arkType.keywords.Function.allows(address)))
+  if (!(arkType.keywords.object.root.allows(address) && !isCallable(address)))
     throw new Error("No address");
   origin = `http://127.0.0.1:${address.port}`;
 });

@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Measures what a download holds in memory while it transfers a large file, and that what it
 // writes is the file, through the transfer the app uses (src/main/downloads/transfer.ts) and the
@@ -90,9 +91,7 @@ if (process.argv[2] === "serve") {
   server.listen(0, "127.0.0.1", () => {
     const address = server.address();
     process.send?.(
-      arkType.keywords.object.root.allows(address) &&
-        !arkType.keywords.Function.allows(address) &&
-        address
+      arkType.keywords.object.root.allows(address) && !isCallable(address) && address
         ? address.port
         : 0,
     );

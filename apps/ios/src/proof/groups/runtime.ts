@@ -1,4 +1,4 @@
-import { type as arkType } from "arktype";
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type Observed, type ProofCase } from "../cases.ts";
 
 export const cases: readonly ProofCase[] = [
@@ -32,9 +32,9 @@ export const cases: readonly ProofCase[] = [
         cryptoSubtle: crypto?.subtle !== undefined,
         AbortSignalTimeout: "timeout" in AbortSignal,
         AbortSignalAny: "any" in AbortSignal,
-        PromiseWithResolvers: arkType.keywords.Function.allows(Promise.withResolvers),
-        MapGroupBy: arkType.keywords.Function.allows(Map.groupBy),
-        ArrayToSorted: arkType.keywords.Function.allows(Array.prototype.toSorted),
+        PromiseWithResolvers: isCallable(Promise.withResolvers),
+        MapGroupBy: isCallable(Map.groupBy),
+        ArrayToSorted: isCallable(Array.prototype.toSorted),
         IntlDisplayNames: Intl.DisplayNames !== undefined,
         IntlListFormat: Intl.ListFormat !== undefined,
         IntlPluralRules: Intl.PluralRules !== undefined,
@@ -60,8 +60,8 @@ export const cases: readonly ProofCase[] = [
       };
 
       return {
-        canParse: arkType.keywords.Function.allows(URL.canParse),
-        parse: arkType.keywords.Function.allows(URL.parse),
+        canParse: isCallable(URL.canParse),
+        parse: isCallable(URL.parse),
         relative: attempt(() => new URL("../ok?a=1", "http://line.test:8080/live/user/pass/1.ts")),
         absolutePath: attempt(() => new URL("/ok", "https://line.test/player_api.php?x=1")),
         otherHost: attempt(() => new URL("http://cdn.test/a b", "https://line.test/")),

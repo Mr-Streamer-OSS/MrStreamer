@@ -94,6 +94,8 @@ import { WATCHLIST_TABLES } from "./watchlist-store.ts";
 import { CUSTOM_LIST_MEMBERS_TABLE, prepareCustomLists } from "./custom-lists-store.ts";
 import { lazy } from "@mrstreamer/contracts/lazy";
 
+const RemovedAt = lazy(() => type("number | number.NaN"));
+
 const SCHEMA = `
   create table if not exists events (
     sequence integer primary key autoincrement,
@@ -627,9 +629,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       const seriesId = title.kind === "episode" ? title.seriesId : null;
       const removed = statements.removedAt.get(account, titleKey(title), seriesId);
 
-      return type("number | number.NaN").allows(removed?.["removed_at"])
-        ? removed["removed_at"]
-        : null;
+      return RemovedAt().allows(removed?.["removed_at"]) ? removed["removed_at"] : null;
     },
     saveRow: (row) => saveTitle(db, account, row),
     remove: (_title, keys, at) => {

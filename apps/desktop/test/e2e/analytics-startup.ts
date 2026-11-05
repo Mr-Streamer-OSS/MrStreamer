@@ -102,6 +102,17 @@ function install(profile: string, delayMs: number) {
   const started = performance.now();
   const preferenceReads: { startedMs: number; enabled: boolean | null }[] = [];
 
+  /** Recognizes callable capabilities across realms without executing the candidate. */
+  function isCallable(value: unknown): value is Function {
+    try {
+      Function.prototype.toString.call(value);
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const preferenceUpdates: {
     startedMs: number;
     endedMs: number | null;
@@ -137,7 +148,7 @@ function install(profile: string, delayMs: number) {
               endedMs: null as number | null,
               requested:
                 patch === Object(patch) &&
-                !(patch instanceof Function) &&
+                !isCallable(patch) &&
                 (patchFields.analyticsEnabled === true || patchFields.analyticsEnabled === false)
                   ? patchFields.analyticsEnabled
                   : null,
@@ -155,13 +166,13 @@ function install(profile: string, delayMs: number) {
 
             const fields: { ok?: unknown; error?: unknown; value?: unknown } = Object(reply);
 
-            if (reply === Object(reply) && !(reply instanceof Function)) {
+            if (reply === Object(reply) && !isCallable(reply)) {
               if (fields.ok === true || fields.ok === false) update.ok = fields.ok;
               const failure: { detail?: unknown } = Object(fields.error);
 
               if (
                 fields.error === Object(fields.error) &&
-                !(fields.error instanceof Function) &&
+                !isCallable(fields.error) &&
                 failure.detail === "Analytics preference could not be saved."
               )
                 update.error = failure.detail;
@@ -170,9 +181,9 @@ function install(profile: string, delayMs: number) {
 
               if (
                 fields.value === Object(fields.value) &&
-                !(fields.value instanceof Function) &&
+                !isCallable(fields.value) &&
                 result.preferences === Object(result.preferences) &&
-                !(result.preferences instanceof Function) &&
+                !isCallable(result.preferences) &&
                 (preferences.analyticsEnabled === true || preferences.analyticsEnabled === false)
               )
                 sample.enabled = preferences.analyticsEnabled;
@@ -227,7 +238,7 @@ function install(profile: string, delayMs: number) {
 
           if (
             parsed === Object(parsed) &&
-            !(parsed instanceof Function) &&
+            !isCallable(parsed) &&
             (fields.format === 1 || fields.format === 2)
           )
             sample.format = fields.format;

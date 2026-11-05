@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
@@ -528,7 +529,7 @@ async function readIndex(): Promise<readonly Row[]> {
 
       if (
         arkType.keywords.object.root.allows(value) &&
-        !arkType.keywords.Function.allows(value) &&
+        !isCallable(value) &&
         "version" in value &&
         value.version === VERSION &&
         "entries" in value &&

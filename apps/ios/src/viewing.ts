@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import { AppFailure } from "@mrstreamer/contracts/errors";
@@ -104,7 +105,7 @@ const read: unknown = json;
 function snapshot(): ViewingSnapshot | null {
   return read &&
     arkType.keywords.object.root.allows(read) &&
-    !arkType.keywords.Function.allows(read) &&
+    !isCallable(read) &&
     "version" in read &&
     read.version === 1
     ? (read as ViewingSnapshot)
@@ -115,7 +116,7 @@ function snapshot(): ViewingSnapshot | null {
 const kept = readMembership(
   json &&
     arkType.keywords.object.root.allows(json) &&
-    !arkType.keywords.Function.allows(json) &&
+    !isCallable(json) &&
     "favouriteMembership" in json
     ? json.favouriteMembership
     : undefined,

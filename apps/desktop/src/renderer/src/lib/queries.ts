@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // React Query bindings for the IPC contract. Components read data through these hooks only.
 // Whatever a provider lists is asked for with the subscription it belongs to, and cached under
@@ -111,7 +112,7 @@ export const queries = {
         }
       },
       structuralSharing: (previous, next) => {
-        if (type.keywords.object.root.allows(next) && !type.keywords.Function.allows(next)) {
+        if (type.keywords.object.root.allows(next) && !isCallable(next)) {
           const read = viewingReads.get(next);
 
           if (read) {

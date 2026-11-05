@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
@@ -253,9 +254,7 @@ const REFUSALS: Readonly<Record<string, Refusal>> = {
 /** What a rejection of the native side says, or null when it isn't one of its refusals. */
 export function refusalOf(cause: unknown): Refusal | null {
   const code =
-    type.keywords.object.root.allows(cause) &&
-    !type.keywords.Function.allows(cause) &&
-    "code" in cause
+    type.keywords.object.root.allows(cause) && !isCallable(cause) && "code" in cause
       ? String(cause.code)
       : "";
 
@@ -315,8 +314,7 @@ function parsed<T>(parse: Type<T>, value: Json | undefined): Type<T>["infer"] {
 }
 
 function fenceOf(value: Json | undefined): Fence {
-  const body =
-    type.keywords.object.root.allows(value) && !type.keywords.Function.allows(value) ? value : {};
+  const body = type.keywords.object.root.allows(value) && !isCallable(value) ? value : {};
 
   const durable = "durable" in body ? body.durable : null;
 
@@ -443,8 +441,7 @@ export const transfers = {
       20_000,
     );
 
-    const answer =
-      type.keywords.object.root.allows(body) && !type.keywords.Function.allows(body) ? body : {};
+    const answer = type.keywords.object.root.allows(body) && !isCallable(body) ? body : {};
 
     const epoch = "queueEpoch" in answer ? answer.queueEpoch : null;
 

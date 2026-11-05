@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // Build an export from known fields, never by copying or trying to scrub a raw log. Older or
 // damaged records can contain anything, so even string fields have an explicit set of values.
@@ -110,10 +111,7 @@ function record(line: string): string | null {
     return null;
   }
 
-  if (
-    !(type.keywords.object.root.allows(value) && !type.keywords.Function.allows(value)) ||
-    Array.isArray(value)
-  )
+  if (!(type.keywords.object.root.allows(value) && !isCallable(value)) || Array.isArray(value))
     return null;
   const raw = value as Record<string, unknown>;
   const known = Object.entries(FIELDS).find(([key]) => key === raw["op"]);
@@ -251,7 +249,7 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
 
           return (
             type.keywords.object.root.allows(value) &&
-            !type.keywords.Function.allows(value) &&
+            !isCallable(value) &&
             "outcome" in value &&
             value.outcome !== "ok" &&
             value.outcome !== "interrupted" &&

@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // The site's download links: where each installer of the current stable release is, and how
 // the page shows it. README.md, Downloads, has the whole account.
@@ -61,10 +60,15 @@ function stableOf(feed: Json | undefined): { version: string; listed: Json | und
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
 
-  if (!arkType.keywords.string.root.allows(version) || !/^\d+\.\d+\.\d+$/.test(version))
-    return null;
+  try {
+    const text = String.prototype.valueOf.call(version);
 
-  return files === `${RELEASES}/download/v${version}` ? { version, listed } : null;
+    if (text !== version || !/^\d+\.\d+\.\d+$/.test(text)) return null;
+
+    return files === `${RELEASES}/download/v${text}` ? { version: text, listed } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -114,7 +118,8 @@ export async function verifiedDownloads(
   const stable =
     released &&
     /^\d+\.\d+\.\d+$/.test(released.version) &&
-    arkType("number | number.NaN").allows(published) &&
+    published !== null &&
+    published !== undefined &&
     Number.isFinite(published)
       ? { version: released.version }
       : stableOf(feed);
@@ -149,10 +154,17 @@ export function showFeedDownloads(page: ParentNode, feed: Json | undefined): voi
   const downloads = listedDownloads(feed);
 
   if (minimum !== undefined) {
-    const generated =
-      isRecord(feed) && arkType.keywords.string.root.allows(feed["generated"])
-        ? Date.parse(feed["generated"])
-        : NaN;
+    let generated = NaN;
+
+    if (isRecord(feed)) {
+      try {
+        const text = String.prototype.valueOf.call(feed["generated"]);
+
+        if (text === feed["generated"]) generated = Date.parse(text);
+      } catch {
+        // An unreadable timestamp cannot supersede the build's verified release.
+      }
+    }
 
     if (
       !Number.isFinite(generated) ||
@@ -276,9 +288,5 @@ export function writeDownloads(
 }
 
 function isRecord(value: Json | undefined): value is JsonObject {
-  return (
-    arkType.keywords.object.root.allows(value) &&
-    !arkType.keywords.Function.allows(value) &&
-    !Array.isArray(value)
-  );
+  return value !== null && value === Object(value) && !Array.isArray(value);
 }

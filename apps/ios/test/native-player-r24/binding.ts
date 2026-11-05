@@ -1,4 +1,4 @@
-import { type as arkType } from "arktype";
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 // Runs the installed production JS binding. Native methods are the mocked boundary here;
 // this check covers the nonthrowing Expo setter workaround, not Swift behavior.
 import assert from "node:assert/strict";
@@ -143,9 +143,9 @@ assert.equal(writes, 2);
 const exports = module.namespace;
 const useVideoPlayer = "useVideoPlayer" in exports ? exports.useVideoPlayer : undefined;
 
-assert.equal(arkType.keywords.Function.allows(useVideoPlayer), true);
+assert.equal(isCallable(useVideoPlayer), true);
 
-if (!arkType.keywords.Function.allows(useVideoPlayer)) throw new Error("fixture-hook-missing");
+if (!isCallable(useVideoPlayer)) throw new Error("fixture-hook-missing");
 
 const createHookPlayer = useVideoPlayer;
 const hookPlayer: unknown = useVideoPlayer(null);

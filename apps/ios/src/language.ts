@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { InterfaceLanguage, LanguageChoice } from "@mrstreamer/contracts/language";
 import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
@@ -30,9 +31,7 @@ function savedChoice(): string | undefined {
   const saved = readJson(FILE);
 
   const choice =
-    arkType.keywords.object.root.allows(saved) &&
-    !arkType.keywords.Function.allows(saved) &&
-    "choice" in saved
+    arkType.keywords.object.root.allows(saved) && !isCallable(saved) && "choice" in saved
       ? saved.choice
       : undefined;
 

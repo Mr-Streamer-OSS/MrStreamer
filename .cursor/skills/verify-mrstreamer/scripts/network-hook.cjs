@@ -1,4 +1,31 @@
-const { type: arkType } = require("arktype");
+/** Recognizes callable capabilities across realms without executing the candidate. */
+function isCallable(value) {
+  try {
+    Function.prototype.toString.call(value);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Socket paths, host names and fetch URLs use primitive strings, not boxed values.
+function isAddress(value) {
+  try {
+    return value === String.prototype.valueOf.call(value);
+  } catch {
+    return false;
+  }
+}
+
+// A UDP overload's positive numeric port. Intrinsic extraction never invokes a callback argument.
+function isPort(value) {
+  try {
+    return value === Number.prototype.valueOf.call(value) && value > 0;
+  } catch {
+    return false;
+  }
+}
 
 // Loaded into the verified app's main process with NODE_OPTIONS=--require, for the downloads
 // scenarios only. It records every outbound TCP connection and UDP send main makes, so the proof
@@ -22,19 +49,15 @@ const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (...args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
 
-  if (
-    first &&
-    arkType.keywords.object.root.allows(first) &&
-    !arkType.keywords.Function.allows(first)
-  ) {
+  if (first && first === Object(first) && !isCallable(first)) {
     if (first.path) write({ kind: "ipc", path: String(first.path) });
     else write({ kind: "tcp", host: first.host ?? "localhost", port: Number(first.port) });
-  } else if (arkType.keywords.string.root.allows(first) && Number.isNaN(Number(first))) {
+  } else if (isAddress(first) && Number.isNaN(Number(first))) {
     write({ kind: "ipc", path: first });
   } else {
     write({
       kind: "tcp",
-      host: arkType.keywords.string.root.allows(args[1]) ? args[1] : "localhost",
+      host: isAddress(args[1]) ? args[1] : "localhost",
       port: Number(first),
     });
   }
@@ -45,11 +68,9 @@ net.Socket.prototype.connect = function (...args) {
 const send = dgram.Socket.prototype.send;
 
 dgram.Socket.prototype.send = function (...args) {
-  const address = args.find((arg, index) => index > 0 && arkType.keywords.string.root.allows(arg));
+  const address = args.find((arg, index) => index > 0 && isAddress(arg));
 
-  const port = args.find(
-    (arg, index) => index > 0 && arkType("number | number.NaN").allows(arg) && arg > 0,
-  );
+  const port = args.find((arg, index) => index > 0 && isPort(arg));
 
   write({ kind: "udp", host: address ?? "unknown", port: port ?? null });
 
@@ -61,11 +82,7 @@ dgram.Socket.prototype.send = function (...args) {
 let fetchInstalled = globalThis.fetch;
 
 const fetchHooked = (input, init) => {
-  const href = arkType.keywords.string.root.allows(input)
-    ? input
-    : input instanceof URL
-      ? input.href
-      : input.url;
+  const href = isAddress(input) ? input : input instanceof URL ? input.href : input.url;
 
   const url = URL.parse(href);
 

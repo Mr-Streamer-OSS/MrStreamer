@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 // Whether text the app keeps on disk could give a subscription's login away. The saved copies of
@@ -111,7 +112,7 @@ export function holds(value: Json | undefined, login: Login): boolean {
 
   return (
     arkType.keywords.object.root.allows(value) &&
-    !arkType.keywords.Function.allows(value) &&
+    !isCallable(value) &&
     Object.values(value).some((each: Json | undefined) => holds(each, login))
   );
 }
