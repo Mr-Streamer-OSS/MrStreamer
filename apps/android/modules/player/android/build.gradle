@@ -10,6 +10,9 @@ version = '0.1.0'
 def media3 = '1.11.1'
 
 android {
+  // Cast compiles with the player so both share its one admission and reader hold.
+  sourceSets.main.java.srcDir "../../cast/android/src/main/java"
+  sourceSets.test.java.srcDir "../../cast/android/src/test/java"
   namespace "app.mrstreamer.playback"
   defaultConfig {
     versionCode 1

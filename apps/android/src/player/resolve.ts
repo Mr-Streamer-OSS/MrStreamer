@@ -20,7 +20,10 @@ import type { Admission, PlaybackMode, StreamFormat } from "./native.ts";
 /** An admission without its attempt: what an intent plays. */
 export type StreamRequest = Omit<Admission, "attempt">;
 
-export type Resolve = (intent: PlayIntent, signal: AbortSignal) => Promise<StreamRequest>;
+export type Resolve = ((intent: PlayIntent, signal: AbortSignal) => Promise<StreamRequest>) & {
+  /** Fresh provider accounting before one extra bounded relay reader. Unknown budgets refuse. */
+  readonly canOverlap?: (sourceId: string, signal: AbortSignal) => Promise<boolean>;
+};
 
 export interface ResolvePlatform {
   readonly credentials: Credentials;
@@ -202,7 +205,7 @@ async function playlistStream(
 
 /** Resolves intents for the sources whose logins `platform.credentials` holds. */
 export function sourceStreams(platform: ResolvePlatform): Resolve {
-  return async (intent, signal) => {
+  const resolve: Resolve = async (intent, signal) => {
     if (intent.kind === "file") {
       return {
         url: `file://${intent.path.split("/").map(encodeURIComponent).join("/")}`,
@@ -291,4 +294,27 @@ export function sourceStreams(platform: ResolvePlatform): Resolve {
       archiveStartMs(archive.start),
     );
   };
+
+  return Object.assign(resolve, {
+    async canOverlap(sourceId: string, signal: AbortSignal) {
+      const authority = await platform.credentials.read(sourceId);
+      signal.throwIfAborted();
+
+      if (authority?.kind !== "xtream") return false;
+
+      const account = await xtreamProvider(authority, {
+        userAgent: platform.userAgent,
+        fetch: platform.fetch,
+      }).authenticate(signal);
+
+      signal.throwIfAborted();
+
+      return (
+        account.state === "active" &&
+        account.maxConnections !== null &&
+        account.activeConnections !== null &&
+        account.maxConnections - account.activeConnections >= 1
+      );
+    },
+  });
 }

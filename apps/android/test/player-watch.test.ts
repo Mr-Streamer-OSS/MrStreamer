@@ -194,6 +194,8 @@ vi.mock("../src/player/instance.ts", async () => {
       retry() {
         scenario.retries++;
       },
+      // Nothing on a TV: Watch and the mini player read its output and leave it alone.
+      cast: { state: store({ kind: "local" }), volume: store(null) },
     },
   };
 });

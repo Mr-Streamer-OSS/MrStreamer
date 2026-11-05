@@ -37,7 +37,7 @@ export interface MediaState {
   readonly automatic: boolean;
   readonly next: NextEpisode | null;
   readonly remaining: number | null;
-  readonly error: keyof MediaPreferences | "save" | "read" | null;
+  readonly error: keyof MediaPreferences | "save" | "read" | "output" | null;
 }
 
 /** The designer reads this store with useStore, and invokes these actions on the existing player. */
@@ -56,6 +56,7 @@ export interface MediaModel {
   cancelNext(): void;
   refreshOfflineNext(): void;
   playNext(): void;
+  refuseOutput(): void;
   registerOfflineNext(resolve: (path: string) => Promise<OfflineNext>): () => void;
   registerNext(resolver: NextEpisodeResolver): () => void;
   retryPreferences(): void;
@@ -184,6 +185,19 @@ export function mediaModel(
   }
 
   function playNext() {
+    const output = owner.cast.state.get();
+
+    if (
+      output.kind === "connecting" ||
+      output.kind === "remote" ||
+      (output.kind === "stopped" && output.detached)
+    ) {
+      cancelNext();
+      patch({ error: "output" });
+
+      return;
+    }
+
     const next = state.get().next;
     cancelNext();
 
@@ -331,6 +345,18 @@ export function mediaModel(
     }
 
     if (now.phase === "paused" || now.phase === "failed") cancelNext();
+
+    const output = owner.cast.state.get();
+
+    if (
+      output.kind === "connecting" ||
+      output.kind === "remote" ||
+      (output.kind === "stopped" && output.detached)
+    ) {
+      cancelNext();
+
+      return;
+    }
 
     if (now.phase === "ended" && !ended) {
       ended = true;
@@ -576,6 +602,7 @@ export function mediaModel(
     cancelNext,
     refreshOfflineNext,
     playNext,
+    refuseOutput: () => patch({ error: "output" }),
     registerOfflineNext(value) {
       offlineResolver = value;
 

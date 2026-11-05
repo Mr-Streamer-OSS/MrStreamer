@@ -1,3 +1,4 @@
+import { t as castT } from "../cast/copy.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
@@ -137,7 +138,7 @@ function TextControl({
 }
 
 /** Live's star for the channel that plays, as its row in Live has it. */
-function Star({ intent }: { intent: Extract<Playing["intent"], { kind: "live" }> }) {
+export function Star({ intent }: { intent: Extract<Playing["intent"], { kind: "live" }> }) {
   const saved = useStore(lists.state);
   const { focused, handlers } = useKeyboardFocus();
 
@@ -474,6 +475,17 @@ export function MediaDialog({ error }: { error: MediaState["error"] }) {
   const dismiss = () => player.media.dismissError();
 
   if (!error) return null;
+
+  if (error === "output")
+    return (
+      <PlayerDialog
+        title={castT("Can't change playback on the TV")}
+        body={castT("Play here before playing something else.")}
+        closeLabel={t("OK")}
+        onClose={dismiss}
+        actions={<TextButton label={t("OK")} strong onPress={dismiss} />}
+      />
+    );
   const [title, body] = DIALOGS[error];
 
   return (

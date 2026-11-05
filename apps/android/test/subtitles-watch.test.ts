@@ -170,6 +170,7 @@ vi.mock("../src/player/instance.ts", async () => {
       return "attempt";
     },
     retry() {},
+    cast: { state: store({ kind: "local" }), volume: store(null) },
   };
 
   const subtitles = subtitleModel({

@@ -1,3 +1,4 @@
+import { playerOutput, type CastOutput } from "./output.ts";
 import type { SubtitleModel } from "../subtitles/model.ts";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import { withoutAddresses } from "@mrstreamer/core/provider";
@@ -15,6 +16,9 @@ import type {
 } from "./native.ts";
 import { mediaModel, type MediaModel, type MediaPersistence } from "./media.ts";
 import type { Resolve } from "./resolve.ts";
+
+/** No new attempt was created; callers must keep the current playback and route. */
+export class PlaybackRefused extends Error {}
 
 // The app's one player, for Watch, the mini player and whatever plays next: it turns an intent
 // into one attempt at a time on the native player (modules/player). play() replaces what plays;
@@ -74,6 +78,7 @@ export interface Settled {
 }
 
 export interface PlayerOwner {
+  readonly cast: CastOutput;
   /** Subtitle actions share this player; the native app attaches its protected-storage adapter. */
   subtitles?: SubtitleModel;
   readonly state: Store<PlayerState>;
@@ -161,10 +166,11 @@ function continued(intent: PlayIntent, positionMs: number, startMs: number): Pla
 }
 
 export function playerOwner(
-  native: NativePlayer,
+  local: NativePlayer,
   resolve: Resolve,
   persistence?: MediaPersistence,
 ): PlayerOwner {
+  const { native, cast } = playerOutput(local, resolve.canOverlap);
   const state = store<PlayerState>({ kind: "idle" });
   const previewState = store<PreviewState>({ kind: "idle" });
   const settledListeners = new Set<(settled: Settled) => void>();
@@ -278,6 +284,7 @@ export function playerOwner(
   };
 
   const owner: PlayerOwner = {
+    cast,
     state,
     previewState,
     endPreview,
@@ -350,6 +357,19 @@ export function playerOwner(
     },
 
     play(intent) {
+      const output = cast.state.get();
+
+      if (
+        intent.kind === "catch-up" &&
+        (output.kind === "connecting" ||
+          output.kind === "remote" ||
+          (output.kind === "stopped" && output.detached))
+      ) {
+        owner.media.refuseOutput();
+
+        throw new PlaybackRefused();
+      }
+
       void endPreview();
       owner.media.cancelNext();
       const before = playing();

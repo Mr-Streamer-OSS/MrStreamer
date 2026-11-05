@@ -40,6 +40,7 @@ class PlayerModule : Module() {
 
   private val events =
     object : PlayerEvents {
+      override fun outputCommand(attempt: String, command: String, positionMs: Long?) = sendEvent("onOutputCommand", mapOf("attempt" to attempt, "command" to command, "positionMs" to positionMs?.toDouble()))
       override fun observed(observation: Observation) = sendEvent("onState", mapOf(observation))
 
       override fun tracks(attempt: String, tracks: List<Track>) =
@@ -60,7 +61,7 @@ class PlayerModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("Player")
-    Events("onState", "onTracks", "onReleased", "onMedia", "onMediaCommand")
+    Events("onState", "onTracks", "onReleased", "onMedia", "onMediaCommand", "onOutputCommand")
 
     AsyncFunction("admit") { record: AdmissionRecord ->
       val hold =
@@ -70,6 +71,9 @@ class PlayerModule : Module() {
         Admission(record.attempt, record.url, record.headers, record.format, record.mode, record.startMs.toLong(), hold, record.title, record.preview),
       )
     }.runOnQueue(Queues.MAIN)
+    AsyncFunction("remotePosition") { attempt: String, positionMs: Double -> owner().updateRemotePosition(attempt, positionMs.toLong()) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("remoteOutput") { attempt: String -> owner().remoteOutput(attempt) }.runOnQueue(Queues.MAIN)
+    AsyncFunction("localOutput") { attempt: String, positionMs: Double -> owner().localOutput(attempt, positionMs.toLong()) }.runOnQueue(Queues.MAIN)
     AsyncFunction("pause") { attempt: String -> owner().pause(attempt) }.runOnQueue(Queues.MAIN)
     AsyncFunction("resume") { attempt: String -> owner().resume(attempt) }.runOnQueue(Queues.MAIN)
     AsyncFunction("seek") { attempt: String, positionMs: Double -> owner().seek(attempt, positionMs.toLong()) }

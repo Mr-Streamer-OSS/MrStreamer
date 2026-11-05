@@ -4,7 +4,7 @@ import { resumePoint } from "@mrstreamer/core/viewing/continue";
 import type { LibraryModel } from "../library/model.ts";
 import type { MediaIdentity, intentRegistry } from "../library/intents.ts";
 import type { PlayIntent } from "../player/intent.ts";
-import type { PlayerOwner } from "../player/player.ts";
+import { PlaybackRefused, type PlayerOwner } from "../player/player.ts";
 import { nextEpisode as nextEpisodeIn } from "../player/next-episode.ts";
 
 /** App-owned admission for Library actions. Async details cannot outlive another play or cleanup. */
@@ -35,6 +35,19 @@ export function startEntries(options: {
   const stopPlayer = options.player.state.subscribe(observePlayer);
 
   const play = async (intent: PlayIntent, media?: MediaIdentity) => {
+    const output = options.player.cast.state.get();
+
+    if (
+      intent.kind === "catch-up" &&
+      (output.kind === "connecting" ||
+        output.kind === "remote" ||
+        (output.kind === "stopped" && output.detached))
+    ) {
+      options.player.media.refuseOutput();
+
+      return;
+    }
+
     const run = ++request;
     const before = lastAttempt;
     const stands = () => active && request === run && lastAttempt === before;
@@ -163,7 +176,9 @@ export function startEntries(options: {
       playingAttempt = lastAttempt;
       authority = undefined;
       options.open(admitted);
-    } catch {
+    } catch (cause) {
+      if (cause instanceof PlaybackRefused) return;
+
       if (stands())
         options.refused(
           failure,
