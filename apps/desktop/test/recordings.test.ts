@@ -2,8 +2,9 @@ import { type as arkType } from "arktype";
 // Recordings through the real main runtime: the fake provider at the HTTP boundary, its live
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
+import { DatabaseSync } from "node:sqlite";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { createServer, get as httpGet, type IncomingMessage } from "node:http";
 import {
   chmod,
@@ -2169,7 +2170,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(existsSync(join(dataDir, "recordings", "mine"))).toBe(true);
   });
 
-  it("keeps where an ended recording played, written once storage works, and lists one whose file went as missing before it plays", async () => {
+  it("keeps personal progress while inventory writes fail, and lists a missing copy before playback", async () => {
     const { dataDir, channel, recordings, quit } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
 
@@ -2182,19 +2183,15 @@ describe.skipIf(!hasTools)("recordings", () => {
       async () => (await readFile(manifest, "utf8").catch(() => "")).includes('"kind":"complete"'),
       Boolean,
     );
-    await rm(manifest);
+    await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
-    await expect(recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
-      error: { kind: "unexpected", detail: "Recordings could not be saved." },
-    });
+    await recordings.recordProgress(id, 42, 90);
     expect((await recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-    // The next check writes it, or the one the refused save woke, as soon as storage works: no
-    // older copy is put back, which would overwrite what that one wrote.
+    // A background inventory save neither stores nor resets personal progress.
     await rm(manifest, { recursive: true });
+    await rename(`${manifest}.saved`, manifest);
     await recordings.check();
-    expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
-      recordings: [expect.objectContaining({ id, progress: { position: 42, duration: 90 } })],
-    });
+    expect((await recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
     await quit();
 
     const again = await app(dataDir);
@@ -2211,58 +2208,97 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(heard.at(-1)?.[0]?.status).toEqual({ kind: "missing" });
   });
 
-  it.each(["check", "shutdown"] as const)(
-    "writes a played position again at %s while schedules.json can't be read",
-    async (when) => {
-      const { dataDir, channel, recordings, quit } = await connected();
-      const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
+  it("retries a refused personal write without changing the saved position while schedules cannot be read", async () => {
+    const { dataDir, channel, recordings, quit } = await connected();
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
 
-      if (answer.kind !== "started") throw new Error("Not started");
-      const { id } = answer.recording;
-      await until(recordings.list, ([first]) => first?.status.kind === "complete");
-      await quit();
-      await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
+    if (answer.kind !== "started") throw new Error("Not started");
+    const { id } = answer.recording;
+    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+    await recordings.recordProgress(id, 12, 90);
+    await quit();
+    await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
-      const again = runtimeFor(
-        mainLayer({ ...testConfig(dataDir), ffmpeg: "ffmpeg", ffprobe: "ffprobe" }).pipe(
-          Layer.provideMerge(TestClock.layer({ warningDelay: "1 day" })),
-        ),
-      );
-
-      const kept = await promised(again, Recordings);
-      await again.runPromise(TestClock.adjust(0));
-
-      // A suspended app cannot run the ordinary retry before shutdown's final save.
-      if (when === "shutdown") await kept.suspend();
-      const manifest = join(dataDir, "recordings", "recordings.json");
-      await rename(manifest, `${manifest}.saved`);
-      await mkdir(manifest);
-      await expect(kept.recordProgress(id, 42, 90)).rejects.toMatchObject({
+    try {
+      lock.exec("begin immediate");
+      await expect(again.recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
         error: { kind: "unexpected" },
       });
-      // Let the wake settle while storage refuses writes, keeping its timer still.
-      await again.runPromise(TestClock.adjust(0));
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
 
-      if (when === "shutdown") await kept.leave("away");
-      rmSync(manifest, { recursive: true });
-      renameSync(`${manifest}.saved`, manifest);
+    expect((await again.recordings.copy(id))?.progress).toEqual({ position: 12, duration: 90 });
+    await again.recordings.recordProgress(id, 42, 90);
+    await again.recordings.check();
+    await again.quit();
+    const last = await app(dataDir);
+    onTestFinished(last.quit);
+    expect((await last.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
+  });
 
-      if (when === "check") {
-        await kept.check();
-        expect(JSON.parse(await readFile(manifest, "utf8"))).toMatchObject({
-          recordings: expect.arrayContaining([
-            expect.objectContaining({ id, progress: { position: 42, duration: 90 } }),
-          ]),
-        });
-      }
+  it("seeds legacy recording progress once and keeps zero across inventory updates and provider removal", async () => {
+    const { dataDir, channel, recordings, quit, roster, subscriptionId } = await connected();
+    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
 
-      await again.dispose();
+    if (answer.kind !== "started") throw new Error("Not started");
+    const { id } = answer.recording;
+    await until(recordings.list, ([first]) => first?.status.kind === "complete");
+    await roster.remove(subscriptionId, true);
+    await quit();
+    const path = join(dataDir, "recordings", "recordings.json");
 
-      const last = await app(dataDir);
-      onTestFinished(last.quit);
-      expect((await last.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-    },
-  );
+    const legacy = await import("../src/main/recordings/store.ts").then(({ readRecordings }) =>
+      readRecordings(path),
+    );
+
+    if (legacy.kind !== "read") throw new Error("Unreadable fixture");
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        recordings: legacy.items.map((record) => ({
+          ...record,
+          progress: { position: 42, duration: 90 },
+        })),
+      }),
+    );
+    const again = await app(dataDir);
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("begin immediate");
+      await expect(again.recordings.copy(id)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+
+    expect((await again.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
+    await again.recordings.recordProgress(id, 0, 90);
+    await again.recordings.check();
+    await again.quit();
+    // A stale inventory document must never restore its old playback position.
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        recordings: legacy.items.map((record) => ({
+          ...record,
+          progress: { position: 42, duration: 90 },
+        })),
+      }),
+    );
+    const last = await app(dataDir);
+    onTestFinished(last.quit);
+    expect((await last.recordings.copy(id))?.progress).toEqual({ position: 0, duration: 90 });
+  });
 
   it("deletes what was saved for a recording's subtitles with it, and only its own", async () => {
     const { channel, recordings, savedSubtitles } = await connected({ maxConnections: 2 });

@@ -37,6 +37,7 @@
 // queued download listed; which copies go together and what plays next are worked out from those
 // (see @mrstreamer/core/downloads/series). An episode queued before this, or by an earlier build,
 // has no series and stands alone.
+import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { downloadFailure, type OperationObserver } from "../analytics/operations.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -176,6 +177,7 @@ interface Active {
 function make(deps: DownloadsDeps) {
   return Effect.gen(function* () {
     const store = yield* DownloadStore;
+    const personal = yield* copyProgress;
     const playback = yield* Playback;
     const coordination = yield* PlaybackCoordination;
     const onDemand = yield* OnDemand;
@@ -340,53 +342,55 @@ function make(deps: DownloadsDeps) {
       record: StoredDownload,
       owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
       busy: ReadonlySet<string>,
-    ): Download => ({
-      id: record.id,
-      title: record.title,
-      subscription: owners.get(record.account) ?? null,
-      name: record.about.name,
-      episodeName: record.about.episodeName,
-      year: record.about.year,
-      duration: record.about.duration,
-      originalLanguage: record.about.originalLanguage,
-      posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
-      wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
-      size:
-        record.state === "complete"
-          ? record.received
-          : active?.id === record.id
-            ? active.size
-            : record.size,
-      status:
-        record.state === "complete"
-          ? { kind: missing.has(record.id) ? "missing" : "complete" }
-          : record.state === "failed"
-            ? {
-                kind: "failed",
-                failure: record.failure ?? {
-                  kind: "app",
-                  error: { kind: "unexpected", detail: t("This download stopped.") },
-                },
-              }
-            : active?.id === record.id
-              ? {
-                  kind: "transferring",
-                  received: active.received,
-                  size: active.size,
-                  rate: active.rate,
-                  restarted: active.restarted,
-                }
-              : record.pausedAt !== undefined
-                ? { kind: "paused", received: record.received, size: record.size }
-                : busy.has(record.subscriptionId)
-                  ? { kind: "waiting" }
-                  : { kind: "queued" },
-      progress: record.progress && {
-        position: record.progress.position,
-        duration: record.progress.duration,
-      },
-      series: seriesKeyOf(record),
-    });
+    ) =>
+      Effect.gen(function* () {
+        const progress = yield* personal.read("download", record.id, record.progress);
+
+        return {
+          id: record.id,
+          title: record.title,
+          subscription: owners.get(record.account) ?? null,
+          name: record.about.name,
+          episodeName: record.about.episodeName,
+          year: record.about.year,
+          duration: record.about.duration,
+          originalLanguage: record.about.originalLanguage,
+          posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
+          wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
+          size:
+            record.state === "complete"
+              ? record.received
+              : active?.id === record.id
+                ? active.size
+                : record.size,
+          status:
+            record.state === "complete"
+              ? { kind: missing.has(record.id) ? "missing" : "complete" }
+              : record.state === "failed"
+                ? {
+                    kind: "failed",
+                    failure: record.failure ?? {
+                      kind: "app",
+                      error: { kind: "unexpected", detail: t("This download stopped.") },
+                    },
+                  }
+                : active?.id === record.id
+                  ? {
+                      kind: "transferring",
+                      received: active.received,
+                      size: active.size,
+                      rate: active.rate,
+                      restarted: active.restarted,
+                    }
+                  : record.pausedAt !== undefined
+                    ? { kind: "paused", received: record.received, size: record.size }
+                    : busy.has(record.subscriptionId)
+                      ? { kind: "waiting" }
+                      : { kind: "queued" },
+          progress,
+          series: seriesKeyOf(record),
+        } satisfies Download;
+      });
 
     /** What each series of the downloads listed, by its key: as its latest queued one read it. */
     const seriesOf = (all: readonly StoredDownload[]) => {
@@ -430,12 +434,14 @@ function make(deps: DownloadsDeps) {
       });
 
       return {
-        items: [
-          ...queue.filter(leads),
-          ...queue.filter((record) => record.state === "queued" && !leads(record)),
-          ...queue.filter((record) => record.state === "failed"),
-          ...copies,
-        ].map((record) => downloadOf(record, owners, busy)),
+        items: yield* Effect.all(
+          [
+            ...queue.filter(leads),
+            ...queue.filter((record) => record.state === "queued" && !leads(record)),
+            ...queue.filter((record) => record.state === "failed"),
+            ...copies,
+          ].map((record) => downloadOf(record, owners, busy)),
+        ),
         series: seriesOf(all),
         bytes: all.reduce(
           (sum, record) => sum + (active?.id === record.id ? active.received : record.received),
@@ -911,7 +917,11 @@ function make(deps: DownloadsDeps) {
 
               const owners = yield* accounts;
 
-              return downloadOf(records.get(known.id) ?? known, owners, yield* coordination.busy);
+              return yield* downloadOf(
+                records.get(known.id) ?? known,
+                owners,
+                yield* coordination.busy,
+              );
             });
 
           const known = knownOf();
@@ -963,7 +973,7 @@ function make(deps: DownloadsDeps) {
           tell();
           wake();
 
-          return downloadOf(record, yield* accounts, yield* coordination.busy);
+          return yield* downloadOf(record, yield* accounts, yield* coordination.busy);
         }),
 
       remove: (id: string) =>
@@ -1067,10 +1077,7 @@ function make(deps: DownloadsDeps) {
           const record = records.get(id);
 
           if (record?.state !== "complete") throw notFound();
-          write({
-            ...record,
-            progress: { position: Math.min(position, duration), duration, at: Date.now() },
-          });
+          await Effect.runPromise(personal.write("download", id, position, duration));
           tell();
         }),
 
@@ -1091,16 +1098,18 @@ function make(deps: DownloadsDeps) {
             );
           }
 
-          return Effect.succeed({
-            id: record.id,
-            path: mediaOf(record),
-            container: record.container,
-            title: record.title,
-            progress: record.progress && {
-              position: record.progress.position,
-              duration: record.progress.duration,
-            },
-          } satisfies LocalCopy);
+          return personal.read("download", id, record.progress).pipe(
+            Effect.map(
+              (progress) =>
+                ({
+                  id: record.id,
+                  path: mediaOf(record),
+                  container: record.container,
+                  title: record.title,
+                  progress,
+                }) satisfies LocalCopy,
+            ),
+          );
         }),
 
       artwork: (id: string, artwork: DownloadArtwork) =>

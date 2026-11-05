@@ -332,12 +332,16 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
 
+  const personalCopies = Layer.mergeAll(database, profilesLayer.pipe(Layer.provide(database)));
+
   const downloads = Downloads.layer({
     dataDir,
     userAgent: config.userAgent,
     ...config.downloads,
   }).pipe(
-    Layer.provide(Layer.mergeAll(services, downloadStoreLayer.pipe(Layer.provide(database)))),
+    Layer.provide(
+      Layer.mergeAll(services, personalCopies, downloadStoreLayer.pipe(Layer.provide(database))),
+    ),
   );
 
   const output = Output.layer(config.output ?? { adapters: [] }).pipe(Layer.provide(viewing));
@@ -347,7 +351,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   );
 
   const recordings = Recordings.layer({ dataDir, userAgent: config.userAgent }).pipe(
-    Layer.provide(Layer.mergeAll(guide, services)),
+    Layer.provide(Layer.mergeAll(guide, services, personalCopies)),
   );
 
   return Roster.layer.pipe(

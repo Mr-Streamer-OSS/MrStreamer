@@ -1,5 +1,6 @@
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
+import type { StoredDownload } from "../src/main/platform/downloads-store.ts";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -811,6 +812,67 @@ describe.skipIf(!hasTools)("downloads", () => {
     await failsWith({ kind: "folder", detail: expect.any(String) });
     const items = (await downloads.list()).items;
     expect(items.every((item) => item.status.kind !== "complete")).toBe(true);
+  }, 60_000);
+
+  it("migrates personal copy positions once, separates exact copies, and retries refused writes", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await quit();
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    const stored = JSON.parse(
+      String(db.prepare("select record from downloads where id = ?").get(done.id)?.record),
+    ) as StoredDownload;
+
+    const other = randomUUID();
+    const legacy = { ...stored, progress: { position: 4, duration: 8, at: Date.now() } };
+    db.prepare("update downloads set record = ? where id = ?").run(JSON.stringify(legacy), done.id);
+    db.prepare("insert into downloads (id, added_at, record) values (?, ?, ?)").run(
+      other,
+      stored.addedAt,
+      JSON.stringify({ ...legacy, id: other }),
+    );
+    // The upgrade fixture has no personal table, as in the previous release.
+    db.exec("drop table if exists profile_copy_progress");
+    db.close();
+    await cp(join(dataDir, "downloads", done.id), join(dataDir, "downloads", other), {
+      recursive: true,
+    });
+    const again = await app(dataDir);
+    expect((await again.downloads.copy(done.id)).progress).toEqual({ position: 4, duration: 8 });
+    await again.downloads.recordProgress(done.id, 0, 8);
+    expect((await again.downloads.copy(other)).progress).toEqual({ position: 4, duration: 8 });
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("begin immediate");
+      await expect(again.downloads.recordProgress(done.id, 6, 8)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+
+    expect((await again.downloads.copy(done.id)).progress).toEqual({ position: 0, duration: 8 });
+    await again.downloads.recordProgress(other, 7, 8);
+    await again.roster.remove(subscriptionId, true);
+    await again.quit();
+    // A background inventory writer still holding the upgrade's document saves it later.
+    const inventory = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    inventory
+      .prepare("update downloads set record = ? where id = ?")
+      .run(JSON.stringify(legacy), done.id);
+    inventory.close();
+    const last = await app(dataDir);
+    onTestFinished(last.quit);
+    expect((await last.downloads.copy(done.id)).progress).toEqual({ position: 0, duration: 8 });
+    expect((await last.downloads.copy(other)).progress).toEqual({ position: 7, duration: 8 });
+    expect((await last.find(done.id))?.progress).toEqual({ position: 0, duration: 8 });
   }, 60_000);
 
   it("ends unfinished downloads with their subscription and keeps its copies playable after a restart", async () => {

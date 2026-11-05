@@ -39,6 +39,7 @@
 // for its start, and holds while the guide lists another programme or none then: it never records
 // another show by its title or time. Each start reads its subscription's login as it is then, so
 // a replaced login is the one used, and a removed subscription takes its schedules with it.
+import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -347,6 +348,7 @@ function finalOf(
 
 function make(deps: RecordingsDeps) {
   return Effect.gen(function* () {
+    const personal = yield* copyProgress;
     const subscriptions = yield* Subscriptions;
     const library = yield* Library;
     const guide = yield* Guide;
@@ -2457,7 +2459,7 @@ function make(deps: RecordingsDeps) {
             path: fileOf(record),
             container: "ts",
             title: { kind: "movie", id },
-            progress: record.progress ?? null,
+            progress: yield* personal.read("recording", id, record.progress ?? null),
           } satisfies LocalCopy;
         }),
       recordProgress: (id: string, position: number, duration: number) =>
@@ -2469,19 +2471,7 @@ function make(deps: RecordingsDeps) {
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
-          records.set(id, {
-            ...record,
-            progress: { position: Math.min(position, duration), duration },
-          });
-          // Kept meanwhile, and written by the next check when this write fails.
-          const written = yield* Effect.result(save);
-
-          if (written._tag === "Failure") {
-            unsaved.recordings = true;
-            yield* wake;
-
-            return yield* written.failure;
-          }
+          yield* personal.write("recording", id, position, duration);
         }),
       storage: storageNow,
       setLimits: (limits: RecordingLimits) =>

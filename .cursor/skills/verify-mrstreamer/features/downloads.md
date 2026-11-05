@@ -74,3 +74,21 @@ The fake provider holds a file once per request, at its byte: a download resumed
 The folded-page check probes 760 down to 520 CSS px in 20 px steps and records `notice.foldedWidth`, requiring the actual folded Downloads control and current-page marker before exercising its pointer/keyboard paths. Header copy changes the width where folding starts; 760 px alone may still fit all page names. The existing 960/760 layout checks remain required separately.
 
 The Back/notice fold probe checks 960 down to 320 CSS px in 20 px steps, stopping at the first arrow-only notice. System fonts and native window-control insets change that boundary; text that fits at 520 px is valid. Every probed width must still fit Back and all controls, the shorter percentage must regain its words at the same width, and Settings must fold there too. The separate 520 px Settings check still requires an unclipped bar.
+
+## Default local-copy progress
+
+From 0.0.24, `apps/desktop/src/main/platform/profile-copy-progress.ts` keeps resume
+positions in the existing database under the active Default profile, copy kind and local
+copy ID. Copy reads seed a missing position from its legacy document once, including
+absence and zero; only explicit playback writes replace it. Provider removal, another copy
+of the same title/channel, artwork, transfer and recording-inventory writes cannot replace
+that personal position. No additional profile or switching UI is exposed. Failed personal
+writes report failure, retain the last saved position and allow an explicit retry.
+
+Focused public runtime tests cover migration, restart, zero reset, stale inventory writes,
+provider removal and refused SQLite writes followed by retry. They use temporary profiles
+and fake providers; they do not prove keyboard playback, translated resume controls, native
+playback or installed upgrade behavior. For candidate acceptance, run the existing isolated
+UI journey, resume a migrated copy, seek back to zero, leave and reopen it after a restart
+and subscription removal, then verify keyboard focus/readability and a supported translated
+interface. Retain candidate build identity and screenshots; service tests alone are not UI proof.
