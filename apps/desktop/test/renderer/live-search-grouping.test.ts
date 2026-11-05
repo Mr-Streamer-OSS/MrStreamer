@@ -1245,7 +1245,7 @@ describe("real search components with two subscriptions", () => {
     expect(rows[20]!.textContent).toContain("Evening news");
     expect(p.scope().textContent).toContain("20 channels · 20 streams");
 
-    // From the first row: the last row searches every guide day, past the programme.
+    // Twenty Downs from the first row reach the programme, with the guide-search row after it.
     for (let index = 0; index < 20; index++) await p.press("ArrowUp", p.field());
 
     for (let index = 0; index < 20; index++) await p.press("ArrowDown", p.field());

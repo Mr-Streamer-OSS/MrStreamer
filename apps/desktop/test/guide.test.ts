@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { Guide } from "@mrstreamer/core/guide/service";
@@ -360,7 +360,6 @@ describe("programme guide", () => {
     );
     const path = join(guide.dataDir, "guide-source.json");
     const parked = `${path}.saved`;
-    const { rename } = await import("node:fs/promises");
     await rename(path, parked);
     await mkdir(path);
 

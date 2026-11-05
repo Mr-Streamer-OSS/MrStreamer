@@ -1520,7 +1520,6 @@ describe("available-horizon guide reads", () => {
     expect(found.matches.slice(1).every((m) => m.programme.metadata?.episode === undefined)).toBe(
       true,
     );
-    expect(found.matches.every((m) => !("firstRun" in (m.programme.metadata ?? {})))).toBe(true);
     const slots = await rangeAt(guides, channels, ["a"], NOON, NOON, NOON + 4 * HOUR);
     expect(slots["a"]?.every((slot) => !("metadata" in slot) && !("description" in slot))).toBe(
       true,

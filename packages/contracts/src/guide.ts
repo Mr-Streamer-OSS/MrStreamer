@@ -1,5 +1,6 @@
 // The programme guide as the UI sees it. Times are epoch milliseconds.
 import type { AppError } from "./errors.ts";
+import type { GuideSearchPageInput } from "./guide-query.ts";
 import type { LiveChannel } from "./library.ts";
 
 export interface Programme {
@@ -281,8 +282,7 @@ export interface ProgrammeMetadata {
 
 export type { GuideQuery, SavedGuideQuery, GuideSearchPageInput } from "./guide-query.ts";
 
-import type { GuideSearchPageInput } from "./guide-query.ts";
-
+/** A page of `guide.searchPage`; `next` is the `after` of the page that follows, if one does. */
 export interface GuideSearchPage {
   readonly matches: readonly ProgrammeMatch[];
   readonly next: GuideSearchPageInput["after"] | null;

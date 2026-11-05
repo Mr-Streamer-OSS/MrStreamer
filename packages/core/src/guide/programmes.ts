@@ -29,7 +29,6 @@ import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { defined } from "../defined.ts";
 import { normalize, searchWords } from "../text.ts";
 import {
-  type FirstSearch,
   eachMatch,
   type GuideIndex,
   type GuideSearching,
@@ -181,12 +180,10 @@ export function listingsAt(
     const shown = shownChannel(guides, channels, channelId, at);
     const listing = shown && shown.part.index.listing(shown.channel, at);
 
-    if (listing && shown)
+    if (shown && listing)
       result[channelId] = {
-        now: listing.now ? scopedProgramme(listing.now, shown.part.source, shown.channel.id) : null,
-        next: listing.next
-          ? scopedProgramme(listing.next, shown.part.source, shown.channel.id)
-          : null,
+        now: listing.now && scoped(listing.now, shown),
+        next: listing.next && scoped(listing.next, shown),
       };
   }
 
@@ -263,7 +260,7 @@ export function scheduleAt(
   return shown
     ? shown.part.index
         .schedule(shown.channel, at, from, until)
-        .map((p) => scopedProgramme(p, shown.part.source, shown.channel.id))
+        .map((programme) => scoped(programme, shown))
     : [];
 }
 
@@ -325,13 +322,10 @@ export function programmeAt(
 ): Programme | null {
   const shown = shownChannel(guides, channels, channelId, at);
 
-  return shown && guideRef(shown.part.source, shown.channel.id) === ref
-    ? scopedProgrammeOrNull(
-        shown.part.index.programme(shown.channel, start),
-        shown.part.source,
-        shown.channel.id,
-      )
-    : null;
+  if (!shown || guideRef(shown.part.source, shown.channel.id) !== ref) return null;
+  const programme = shown.part.index.programme(shown.channel, start);
+
+  return programme && scoped(programme, shown);
 }
 
 /**
@@ -349,16 +343,11 @@ export function startingAt(
 ): ProgrammeAt {
   if (!channels.channel(channelId)) return { kind: "unknown" };
   const shown = shownChannel(guides, channels, channelId, at);
+  const programme = shown?.part.index.programme(shown.channel, start);
 
-  const programme = shown
-    ? scopedProgrammeOrNull(
-        shown.part.index.programme(shown.channel, start),
-        shown.part.source,
-        shown.channel.id,
-      )
-    : null;
-
-  return programme ? { kind: "found", programme } : { kind: "none" };
+  return shown && programme
+    ? { kind: "found", programme: scoped(programme, shown) }
+    : { kind: "none" };
 }
 
 /** What `startingAt` answers, here and as `Guide.startingAt`. */
@@ -404,7 +393,7 @@ export async function searchAt(
       if (shownOn)
         matches.push({
           channel: shownOn,
-          programme: scopedProgramme(programme, part.source, part.index.channel(channel)!.id),
+          programme: scoped(programme, { part, channel: part.index.channel(channel)! }),
         });
     }
   }
@@ -794,7 +783,11 @@ export function slicer(): Slice {
   };
 }
 
-/** Bounded reads over the selected sources, ordered by start then catalogue channel id. */
+/**
+ * A page of the programmes whose title has every word of `input.query` (any, without words), on
+ * every day the guides keep, ordered by start then catalogue channel id. `next` hands the last of
+ * them back as `after` for the page that follows.
+ */
 export async function searchPageAt(
   guides: Guides,
   channels: MappedChannels,
@@ -803,49 +796,40 @@ export async function searchPageAt(
   search: GuideSearching,
   signal: AbortSignal,
 ): Promise<GuideSearchPage> {
-  const selected = input.channels
-    ? { ...channels, all: channels.all.filter((channel) => input.channels!.includes(channel.id)) }
-    : channels;
-
-  const shown = await searchable(guides, selected, at);
-  const matches: ProgrammeMatch[] = [];
+  const { channels: only, after, limit } = input;
   const from = input.from ?? -8_000_000_000_000_000;
 
   if (input.until !== undefined && input.until <= from) return { matches: [], next: null };
 
+  const selected = only
+    ? { ...channels, all: channels.all.filter((channel) => only.includes(channel.id)) }
+    : channels;
+
+  const shown = await searchable(guides, selected, at);
+  const matches: ProgrammeMatch[] = [];
+
   for (const [place, part] of guides.parts.entries()) {
-    const keys = new Map(
-      [...(shown[place] ?? [])]
-        .filter(([, channel]) => !input.channels || input.channels.includes(channel.id))
-        .sort((a, b) => (a[1].id < b[1].id ? -1 : a[1].id > b[1].id ? 1 : 0)),
-    );
+    const keys = new Map([...(shown[place] ?? [])].sort(([, a], [, b]) => byId(a.id, b.id)));
 
     if (!keys.size) continue;
 
-    const request: FirstSearch = {
-      path: part.path,
-      words: searchWords(input.query),
-      at: Math.max(from, input.after?.start ?? from),
-      from,
-      channels: [...keys.keys()],
-      limit: input.limit + 1,
-    };
-
-    const after = input.after;
-
+    // One more than a page tells whether another follows.
     const found = await search.first(
       {
-        ...request,
+        path: part.path,
+        words: searchWords(input.query),
+        at: Math.max(from, after?.start ?? from),
+        from,
+        channels: [...keys.keys()],
+        limit: limit + 1,
         ...defined({
           until: input.until,
-          after: after
-            ? {
-                start: after.start,
-                channels: [...keys].flatMap(([key, channel]) =>
-                  channel.id > after.channel ? [key] : [],
-                ),
-              }
-            : undefined,
+          after: after && {
+            start: after.start,
+            channels: [...keys].flatMap(([key, channel]) =>
+              channel.id > after.channel ? [key] : [],
+            ),
+          },
         }),
       },
       signal,
@@ -857,38 +841,32 @@ export async function searchPageAt(
       if (shownOn)
         matches.push({
           channel: shownOn,
-          programme: scopedProgramme(programme, part.source, part.index.channel(channel)!.id),
+          programme: scoped(programme, { part, channel: part.index.channel(channel)! }),
         });
     }
   }
 
-  matches.sort(
-    (a, b) =>
-      a.programme.start - b.programme.start ||
-      (a.channel.id < b.channel.id ? -1 : a.channel.id > b.channel.id ? 1 : 0),
-  );
-  const page = matches.slice(0, input.limit);
+  matches.sort((a, b) => a.programme.start - b.programme.start || byId(a.channel.id, b.channel.id));
+  const page = matches.slice(0, limit);
   const last = page.at(-1);
 
   return {
     matches: page,
     next:
-      matches.length > input.limit && last
+      matches.length > limit && last
         ? { start: last.programme.start, channel: last.channel.id }
         : null,
   };
 }
 
-function scopedProgramme(programme: Programme, source: string, channel: string): Programme {
-  return programme.metadata
-    ? { ...programme, metadata: { ...programme.metadata, guide: guideRef(source, channel) } }
-    : programme;
-}
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-function scopedProgrammeOrNull(
-  programme: Programme | null,
-  source: string,
-  channel: string,
-): Programme | null {
-  return programme ? scopedProgramme(programme, source, channel) : null;
+/** The programme with its metadata qualified by the guide channel it was read from. */
+function scoped(programme: Programme, { part, channel }: Shown): Programme {
+  return programme.metadata
+    ? {
+        ...programme,
+        metadata: { ...programme.metadata, guide: guideRef(part.source, channel.id) },
+      }
+    : programme;
 }

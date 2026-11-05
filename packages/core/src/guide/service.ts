@@ -452,7 +452,6 @@ interface Loaded {
 
 /** What is set for a subscription's guide, as read this run. */
 interface Settings {
-  readonly queries?: readonly SavedGuideQuery[];
   readonly key: string;
   /**
    * The channels mapped by hand, by channel id. One made against a legacy address that couldn't
@@ -468,6 +467,8 @@ interface Settings {
   readonly legacy: LegacyExternal | null;
   /** False where what is set couldn't be read: it is read again, and nothing is written over it. */
   readonly readable: boolean;
+  /** The searches saved in guide search, kept with the mappings. */
+  readonly queries: readonly SavedGuideQuery[];
 }
 
 /**
@@ -481,7 +482,7 @@ const legacyKey = (id: string) => `legacy:${id}`;
 
 /** Settings as the store keeps them. */
 const storedConfig = ({ mappings, legacy, queries }: Settings): StoredConfig => ({
-  queries: queries ?? [],
+  queries,
   external: legacy,
   mappings: Object.fromEntries(
     Object.entries(mappings).map(([channelId, mapping]) => [
@@ -869,7 +870,14 @@ function make() {
         if (known?.key === key) return known;
 
         if (forgotten.has(id)) {
-          return { key, mappings: {}, own: null, legacy: null, readable: true } satisfies Settings;
+          return {
+            key,
+            mappings: {},
+            own: null,
+            legacy: null,
+            readable: true,
+            queries: [],
+          } satisfies Settings;
         }
 
         const unreadable = Symbol("unreadable");
@@ -897,6 +905,7 @@ function make() {
             own: own === unreadable ? null : own,
             legacy: null,
             readable: false,
+            queries: [],
           };
 
           keep(subscription, read);
@@ -2765,7 +2774,7 @@ function make() {
           if (!now.readable)
             return yield* Effect.fail(failedWith(new Error("Saved guide queries cannot be read.")));
 
-          return now.queries ?? [];
+          return now.queries;
         }),
       setSavedQueries: (subscriptionId: string, queries: readonly SavedGuideQuery[]) =>
         Effect.gen(function* () {

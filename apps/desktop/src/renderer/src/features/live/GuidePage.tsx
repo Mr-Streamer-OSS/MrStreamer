@@ -22,9 +22,9 @@ import { useSearchUsage } from "../../app/analytics.ts";
 //   Reorder, beside the field of Favourites or of one of the viewer's lists, or R, puts it in
 // another order: see ./reorder.ts for its keys, which replace these until the order is saved or
 // cancelled.
-//   Search the guide, the calendar beside the bell, searches programme titles on every day the guide keeps,
-// with days, channels and saved searches, in place of the channels: see ./GuideSearch.tsx. It
-// has the keys while it shows, and Escape closes it.
+//   Search the guide, the calendar beside the bell, searches programme titles on every day the
+// guide keeps, with days, channels and saved searches, in place of the channels: see
+// ./GuideSearch.tsx. It has the keys while it shows, and Escape closes it.
 //   The bell beside the field lists the programme reminders, set from a future programme's
 // details in the grid, the rest of a day or Search (../reminders/).
 //   The viewer's lists are made with New list at the end of them in the lists, and a channel goes
