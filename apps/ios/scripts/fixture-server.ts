@@ -80,11 +80,13 @@
 //   POST, GET /live-link               the pace live segments are sent at; see
 //                                      scripts/native-fixtures/live-link.ts
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   createServer,
   request as forward,
   type IncomingMessage,
+  type Server,
   type ServerResponse,
 } from "node:http";
 import { join, resolve } from "node:path";
@@ -682,36 +684,22 @@ const controlServer = createServer((request, response) => {
   answer(response, 404, "text/plain", "");
 });
 
-// Let the listener own an ephemeral port from allocation onward. Readiness is published only
-// after both binds complete; a failed bind must also release the already-started services.
-try {
-  for (const [listener, requested] of [
-    [server, port],
-    [controlServer, controlPort],
-  ] as const) {
-    await new Promise<void>((resolve, reject) => {
-      listener.once("error", reject);
-      listener.listen(requested, "127.0.0.1", () => {
-        listener.removeListener("error", reject);
-        resolve();
-      });
-    });
-  }
-  const address = server.address();
-  const controlAddress = controlServer.address();
-  if (
-    !address ||
-    typeof address === "string" ||
-    !controlAddress ||
-    typeof controlAddress === "string"
-  )
-    throw new Error("fixture listeners have no TCP addresses");
-  port = address.port;
-  controlPort = controlAddress.port;
-} catch (error) {
-  console.error(error);
-  process.exit(1);
+/** Listens on 127.0.0.1 and resolves with the port held: `requested`, or the system's pick for 0. */
+async function listen(listener: Server, requested: number) {
+  await once(listener.listen(requested, "127.0.0.1"), "listening");
+  const address = listener.address();
+
+  if (!address || typeof address === "string")
+    throw new Error("fixture listener has no TCP address");
+
+  return address.port;
 }
+
+// Readiness is announced only once both listeners hold their ports. A failed bind rejects here,
+// and the unhandled rejection exits the process, releasing every service it started.
+port = await listen(server, port);
+
+controlPort = await listen(controlServer, controlPort);
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),

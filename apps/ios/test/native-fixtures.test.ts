@@ -76,50 +76,36 @@ describe("the native verification fixture", () => {
       env: { ...env, NODE_ENV: process.env.NODE_ENV, FIXTURE_OUT: out, FIXTURE_TITLES: "30" },
       stdio: ["ignore", "pipe", "inherit"],
     });
+    // Reads the addresses the server holds from its readiness line, and keeps draining its output.
     const lines = createInterface({ input: server.stdout! });
-    let cleanup = () => {};
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const failed = (error: Error) => reject(error);
-        const exited = (code: number | null, signal: NodeJS.Signals | null) =>
-          reject(new Error(`fixture server exited with ${code ?? signal}`));
-        const ready = (line: string) => {
-          const addresses =
-            /^fixture panel (http:\/\/127\.0\.0\.1:\d+) .*; control (http:\/\/127\.0\.0\.1:\d+)$/.exec(
-              line,
-            );
-          if (!addresses) return;
-          panel = addresses[1]!;
-          control = addresses[2]!;
-          resolve();
-        };
-        server.once("error", failed);
-        server.once("exit", exited);
-        lines.on("line", ready);
-        cleanup = () => {
-          server.removeListener("error", failed);
-          server.removeListener("exit", exited);
-          lines.removeListener("line", ready);
-        };
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.once("exit", (code, signal) =>
+        reject(new Error(`fixture server exited with ${code ?? signal}`)),
+      );
+      lines.on("line", (line) => {
+        const addresses =
+          /^fixture panel (http:\/\/127\.0\.0\.1:\d+) .*; control (http:\/\/127\.0\.0\.1:\d+)$/.exec(
+            line,
+          );
+
+        if (!addresses) return;
+        panel = addresses[1]!;
+        control = addresses[2]!;
+        resolve();
       });
-    } catch (error) {
-      await stop();
-      throw error;
-    } finally {
-      cleanup();
-      lines.close();
-      server.stdout?.resume();
-    }
+    });
   }, 300_000);
-  async function stop() {
+  // Vitest runs this after a failed beforeAll too, so a fixture that never got ready is stopped.
+  afterAll(async () => {
     if (server?.pid && server.exitCode === null && server.signalCode === null) {
       const exited = new Promise((resolve) => server.once("exit", resolve));
       server.kill();
       await exited;
     }
+
     if (out) rmSync(out, { recursive: true, force: true });
-  }
-  afterAll(stop);
+  });
 
   it("lists a Live channel whose English and Dutch sound and subtitles a player can choose", async () => {
     const { channels } = await provider().liveCatalogue();
