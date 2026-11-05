@@ -79,7 +79,11 @@ async function lingeringChild(autoExitMs: number) {
   const samples: OwnershipSample[] = [];
   const owner = ownedGroup(app, executable, Date.now(), (sample) => samples.push(sample));
   const [pid] = await once(app, "message");
-  const exit = await closeNative(app, async () => app.send("stop"));
+
+  const exit = await closeNative(app, async () => {
+    app.send("stop");
+  });
+
   expect(exit).toMatchObject({
     code: 0,
     signal: null,

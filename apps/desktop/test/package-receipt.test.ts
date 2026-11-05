@@ -298,14 +298,15 @@ describe("successful package receipts", () => {
       (r: PackageReceipt) => ({ ...r, files: [{ ...r.files[0], bytes: 1 }, ...r.files.slice(1)] }),
       /byte count/,
     ],
-  ] satisfies [string, (r: PackageReceipt) => unknown, RegExp][])(
-    "refuses a receipt with wrong %s",
-    async (_, spoil, message) => {
-      const world = fixture();
-      world.updateReceipt(spoil(world.receipt()));
-      await expect(world.resolve()).rejects.toThrow(message);
-    },
-  );
+  ] satisfies [
+    string,
+    (r: PackageReceipt) => Parameters<ReturnType<typeof fixture>["updateReceipt"]>[0],
+    RegExp,
+  ][])("refuses a receipt with wrong %s", async (_, spoil, message) => {
+    const world = fixture();
+    world.updateReceipt(spoil(world.receipt()));
+    await expect(world.resolve()).rejects.toThrow(message);
+  });
 
   it("requires the current attempt and one exact receipt artifact", async () => {
     const world = fixture();

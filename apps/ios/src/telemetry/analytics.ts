@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import type {
   AnalyticsFailure,
@@ -43,7 +44,7 @@ export interface PlaybackView {
 
 export interface AnalyticsPorts {
   /** `analytics.json`: null when there is none. Throws when it can't be written. */
-  readonly store: { load(): unknown; save(record: AnalyticsRecord): void };
+  readonly store: { load(): Json; save(record: AnalyticsRecord): void };
   readonly transport: CaptureTransport | null;
   readonly build: IosBuild;
   readonly monotonic: () => number;

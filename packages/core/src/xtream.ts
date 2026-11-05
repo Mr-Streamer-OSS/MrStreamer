@@ -195,7 +195,7 @@ export function xtreamProvider(account: XtreamAccount, options: XtreamOptions): 
     }
   }
 
-  const getJson = (params: string, timeoutMs: number, signal?: AbortSignal): Promise<unknown> =>
+  const getJson = (params: string, timeoutMs: number, signal?: AbortSignal): Promise<Json> =>
     request(params, timeoutMs, signal, async (response) => JSON.parse(await response.text()));
 
   /**

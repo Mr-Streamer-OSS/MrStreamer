@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import type { SavedSubtitle } from "@mrstreamer/contracts/online-subtitles";
 import { Window, type Element } from "happy-dom";
 import { act, createElement, type ReactNode } from "react";
@@ -30,7 +31,7 @@ const scenario = vi.hoisted(() => ({
   key: null as string | null,
   writable: true,
   /** The subtitle kept for the version that plays. */
-  retained: null as unknown,
+  retained: null as Json,
   /** Whether the native player takes a sidecar or its timing. */
   accept: true,
   sidecars: [] as { offset: number; speed: number }[],

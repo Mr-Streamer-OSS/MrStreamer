@@ -84,7 +84,11 @@ function fixture() {
     json: async (path: string) => {
       if (path.startsWith("/actions/runs/900/attempts/")) return run;
 
-      return artifacts.find((each) => path === `/actions/artifacts/${each.id}`);
+      const artifact = artifacts.find((each) => path === `/actions/artifacts/${each.id}`);
+
+      if (!artifact) throw new Error(`Unexpected API request ${path}`);
+
+      return artifact;
     },
     bytes: async (path: string) => {
       if (path === "/actions/artifacts/30/zip") return archive;

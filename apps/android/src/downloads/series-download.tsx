@@ -4,6 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import type { SeriesDetails, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
 import { Icon } from "../library/parts.tsx";
+import type { LibrarySource } from "../library/model.ts";
 import { Dialog, FitSheet, SheetRow, TextButton } from "../live/chrome.tsx";
 import { useOpenShared } from "../navigation/open.ts";
 import { store, useStore } from "../platform/store.ts";
@@ -42,7 +43,7 @@ export interface SeriesDownloadProps {
   readonly versionLabel: string;
   readonly sourceLabel: string;
   /** The provider's reader now; another one means it signed in anew or was removed. */
-  readonly reader: () => unknown;
+  readonly reader: () => LibrarySource["reader"];
   /** Beside the details on a tablet, rather than a list row with its hairline. */
   readonly inline?: boolean;
 }
@@ -91,7 +92,7 @@ function seriesSummary(result: SeriesResult): string {
 /** A plan reviewed in the sheet, with what was true as it opened. */
 interface Review {
   readonly plan: SeriesPlan;
-  readonly reader: unknown;
+  readonly reader: LibrarySource["reader"];
   readonly version: string;
 }
 

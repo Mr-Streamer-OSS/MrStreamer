@@ -203,7 +203,13 @@ async function fixture(mode: "stable" | "candidate" = "stable") {
 
       if (path === `/commits/v${version}`) return { sha: SOURCE };
 
-      if (path.startsWith("/compare/")) return histories.get(path.slice(9).split("?")[0]!);
+      if (path.startsWith("/compare/")) {
+        const history = histories.get(path.slice(9).replace(/\?.*$/, ""));
+
+        if (!history) throw new Error(`Unexpected GET ${path}`);
+
+        return history;
+      }
 
       if (mode === "candidate" && path === "/actions/runs/900") return run;
 

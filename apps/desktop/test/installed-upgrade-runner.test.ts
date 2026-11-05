@@ -189,8 +189,12 @@ describe("what an installed upgrade run leaves behind", () => {
 
     const left = await cleanUp(undefined, {
       ...paths,
-      network: () => restored.push("network"),
-      services: () => restored.push("services"),
+      network: () => {
+        restored.push("network");
+      },
+      services: () => {
+        restored.push("services");
+      },
       uninstall: () => Promise.reject(new Error("Uninstalling left the app installed.")),
     });
 
@@ -229,9 +233,15 @@ describe("what an installed upgrade run leaves behind", () => {
 
     const left = await cleanUp(failure, {
       ...paths,
-      network: () => done.push("network"),
-      services: () => done.push("services"),
-      uninstall: () => done.push("uninstall"),
+      network: () => {
+        done.push("network");
+      },
+      services: () => {
+        done.push("services");
+      },
+      uninstall: () => {
+        done.push("uninstall");
+      },
     });
 
     expect(left.failed).toBe(failure);

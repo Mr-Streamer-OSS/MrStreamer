@@ -66,7 +66,7 @@ function within<T>(what: string, ms: number, pending: Promise<T>): Promise<T> {
  * the last, however the script goes, so a start that fails halfway ends what it had started and
  * nothing else.
  */
-const started: (() => unknown)[] = [];
+const started: (() => void | Promise<void>)[] = [];
 
 async function takeDown(): Promise<void> {
   for (const end of started.reverse()) await end();
@@ -173,7 +173,7 @@ const fullScreens = () =>
   })()`);
 
 /** Does `act`, and waits until the window has then arrived in full screen, or is back out of it. */
-async function until(what: "arrived" | "left", act: () => Promise<unknown>): Promise<void> {
+async function until(what: "arrived" | "left", act: () => Promise<void | Box>): Promise<void> {
   const before = (await fullScreens())[what];
   await act();
   await waitFor(async () => (await fullScreens())[what] > before, 10_000);

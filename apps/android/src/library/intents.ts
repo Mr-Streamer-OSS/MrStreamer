@@ -56,7 +56,8 @@ export interface DownloadPresentation {
 export interface DownloadPresentationAdapter {
   readonly read: (media: MediaIdentity) => DownloadPresentation | undefined;
   readonly subscribe: (listener: () => void) => () => void;
-  readonly snapshot: () => unknown;
+  /** A change token for useSyncExternalStore: equal strings mean nothing to redraw. */
+  readonly snapshot: () => string;
 }
 
 export function downloadPresentationRegistry() {
@@ -91,7 +92,7 @@ export interface ViewingNotice {
 /** Viewing owns persistence and failure presentation; Library exposes current title/episode facts. */
 export interface ViewingPresentationAdapter {
   subscribe(listener: () => void): () => void;
-  snapshot(): unknown;
+  snapshot(): number;
   watchlist(title: import("@mrstreamer/contracts/ondemand").Title): {
     label: string;
     activate(): void;

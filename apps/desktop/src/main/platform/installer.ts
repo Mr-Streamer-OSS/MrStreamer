@@ -24,11 +24,11 @@ export interface Updater {
   requestHeaders: OutgoingHttpHeaders | null;
   setFeedURL(options: { provider: "generic"; url: string }): void;
   checkForUpdates(): Promise<{ updateInfo: { version: string } } | null>;
-  downloadUpdate(token: CancellationToken): Promise<unknown>;
+  downloadUpdate(token: CancellationToken): Promise<string[]>;
   quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void;
-  on(event: "download-progress", listener: (info: { percent: number }) => void): unknown;
-  off(event: "download-progress", listener: (info: { percent: number }) => void): unknown;
-  once(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "download-progress", listener: (info: { percent: number }) => void): Updater;
+  off(event: "download-progress", listener: (info: { percent: number }) => void): Updater;
+  once(event: "error", listener: (error: Error) => void): Updater;
 }
 
 export function electronInstaller(updater: Updater = electronUpdater.autoUpdater): Installer {

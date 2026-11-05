@@ -325,7 +325,7 @@ function metadataOf() {
     read: async () => {
       const file = metadataFile();
 
-      return file.exists ? (JSON.parse(await file.text()) as unknown) : null;
+      return file.exists ? JSON.parse(await file.text()) : null;
     },
     write: async (contents) => {
       const file = metadataFile();

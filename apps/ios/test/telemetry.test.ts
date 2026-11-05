@@ -772,7 +772,7 @@ describe("the outbox", () => {
   /** The owner over memory, with a transport that answers as each test says. */
   function owner(answer: () => Promise<"accepted" | "retry" | "discard">) {
     const sent: CaptureEvent[] = [];
-    let record: unknown = null;
+    let record: AnalyticsRecord | null = null;
     let mono = 0;
     let id = 0;
 
@@ -805,7 +805,7 @@ describe("the outbox", () => {
     return {
       analytics,
       sent,
-      record: () => record as AnalyticsRecord | null,
+      record: () => record,
       advance: (ms: number) => (mono += ms),
     };
   }

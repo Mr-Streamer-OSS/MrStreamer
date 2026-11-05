@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { describe, expect, it, vi } from "vitest";
 import { createGuide } from "../src/guide.ts";
 import { createGuides, GUIDE_LIMIT } from "../src/guide-sources.ts";
@@ -13,7 +14,7 @@ vi.mock("expo-secure-store", () => ({ AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 0 }))
 const LINK = "https://guide.test/epg.xml.gz?token=private-guide-token";
 
 /** A launch: the guides file and Keychain as the last one left them, and a native store. */
-function launch(disk: { file: unknown; items: Map<string, string> }) {
+function launch(disk: { file: Json; items: Map<string, string> }) {
   const { native, control } = guideFixture();
   const prepared: string[] = [];
   control.prepare = async () => ({ kind: "failed", error: "network" });
@@ -68,7 +69,11 @@ function launch(disk: { file: unknown; items: Map<string, string> }) {
   return { guides, owner, control, prepared, refused, disk, written };
 }
 
-const fresh = () => ({ file: null as unknown, items: new Map<string, string>() });
+const fresh = (): { file: Json; items: Map<string, string> } => ({
+  file: null,
+  items: new Map<string, string>(),
+});
+
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("external guides", () => {
@@ -214,7 +219,7 @@ describe("external guides", () => {
     expect(guides.load().ids).toEqual([]);
     expect(guides.links()).toEqual([]);
     expect(await guides.add(LINK)).toBe("saving");
-    const locked = { file: null as unknown, items: new Map<string, string>() };
+    const locked = fresh();
     const before = launch(locked);
     before.guides.load();
     await before.guides.add(LINK);

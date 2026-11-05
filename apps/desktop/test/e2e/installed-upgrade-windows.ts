@@ -12,6 +12,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { type } from "arktype";
+import type { Page } from "./app.ts";
 
 /** The disposable runner and the install this run owns on it. */
 export interface Runner {
@@ -249,7 +250,7 @@ export function ownedTree(runner: Runner, app: Started, childGraceMs = 20_000) {
      * from the install folder, is still there: the setup must not replace files in use. What is
      * left runs on, with the profile, until the runner is thrown away.
      */
-    async stop(close: () => Promise<unknown>) {
+    async stop(close: () => Promise<void | Awaited<ReturnType<Page["send"]>>>) {
       alive();
       const forced: string[] = [];
       await close().catch(() => undefined);
@@ -560,7 +561,7 @@ export function outboundBlock(runner: Runner) {
     restore() {
       const errors: string[] = [];
 
-      const attempt = (what: string, action: () => unknown) => {
+      const attempt = (what: string, action: () => void) => {
         try {
           action();
         } catch (error) {

@@ -302,7 +302,7 @@ it("keeps a refused record and never discards unreadable consent", async () => {
 });
 
 it("retries a refused Off before delivery after a new owner starts", async () => {
-  let saved: unknown = null;
+  let saved: ConsentRecord<CaptureEvent> | null = null;
   let pending = false;
   let refused = false;
   const send = vi.fn(async () => "retry" as const);

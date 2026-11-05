@@ -693,14 +693,14 @@ export async function guideGridScrollScenario(d: Driver) {
   await d.capture("scroll-grid-across");
 }
 
-interface CpuProfile {
+type CpuProfile = {
   readonly nodes: readonly {
     readonly id: number;
     readonly callFrame: { functionName: string; url: string; lineNumber: number };
   }[];
   readonly samples: readonly number[];
   readonly timeDeltas: readonly number[];
-}
+};
 
 /** The functions the renderer spent most of its own time in, in milliseconds. */
 function busiest(profile: CpuProfile): { name: string; ms: number }[] {

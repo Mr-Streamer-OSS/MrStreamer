@@ -35,7 +35,8 @@ const scenario = vi.hoisted(() => ({
     progress: null as Promise<readonly TitleProgress[]> | null,
     standing: null as Promise<SeriesViewing> | null,
   },
-  details: (_version: OwnedId): Promise<unknown> => new Promise(() => undefined),
+  details: (_version: OwnedId): ReturnType<typeof import("../src/titles.ts").detailsOf> =>
+    new Promise(() => undefined),
   download: undefined,
 }));
 

@@ -63,7 +63,7 @@ function launch(phone: Phone, fetchImpl: typeof fetch = fetch): SourcesOwner {
     // As storage.ts reads: no file, or one that isn't JSON, is none.
     readJson: (name) => {
       try {
-        return JSON.parse(phone.files.get(name) ?? "null") as unknown;
+        return JSON.parse(phone.files.get(name) ?? "null");
       } catch {
         return null;
       }

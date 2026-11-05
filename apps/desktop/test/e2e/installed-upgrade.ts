@@ -1553,9 +1553,15 @@ export async function installPublished(
 /** What a run leaves on the runner, and how each part is taken down. */
 export interface Leftovers {
   /** Puts back the network, when the run blocked it. */
-  readonly network: (() => unknown) | null;
-  readonly services: () => unknown;
-  readonly uninstall: () => unknown;
+  readonly network: (() => void | ReturnType<ReturnType<typeof outboundBlock>["restore"]>) | null;
+  readonly services: () => void | Promise<
+    PromiseSettledResult<
+      Awaited<
+        ReturnType<Services["stop"] | Awaited<ReturnType<typeof startSubtitleFixture>>["stop"]>
+      >
+    >[]
+  >;
+  readonly uninstall: () => void | ReturnType<typeof uninstall>;
   readonly installRoot: string;
   readonly profile: string;
   readonly lock: string;
@@ -1571,7 +1577,14 @@ export async function cleanUp(cause: unknown, left: Leftovers) {
   let failed = cause;
   const steps: Record<string, unknown> = {};
 
-  const attempt = async (what: string, action: () => unknown) => {
+  const attempt = async (
+    what: string,
+    action: () =>
+      | Promise<void>
+      | ReturnType<
+          Leftovers["services"] | Leftovers["uninstall"] | NonNullable<Leftovers["network"]>
+        >,
+  ) => {
     try {
       steps[what] = (await action()) ?? true;
     } catch (error) {

@@ -69,13 +69,17 @@ async function text(document: AsyncIterable<Uint8Array>): Promise<string> {
 }
 
 /** Why a guide was refused. */
-async function refusal(work: Promise<unknown>): Promise<unknown> {
+async function refusal(work: Promise<unknown>) {
   const cause = await work.then(
     () => null,
     (cause: unknown) => cause,
   );
 
-  return cause instanceof AppFailure && cause.error.kind === "guide" ? cause.error.failure : cause;
+  if (cause instanceof AppFailure && cause.error.kind === "guide") return cause.error.failure;
+
+  if (cause instanceof Error) return cause;
+
+  throw cause ?? new Error("Expected a guide failure.");
 }
 
 const programme = (channel: string, start: string, stop: string | null, title: string) =>

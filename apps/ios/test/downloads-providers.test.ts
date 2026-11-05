@@ -799,7 +799,7 @@ describe("offline Next", { timeout: 30_000 }, () => {
   }
 
   /** What can change under a countdown to the next copy, each of which must end it. */
-  const changes: Record<string, (copies: Awaited<ReturnType<typeof pair>>) => Promise<unknown>> = {
+  const changes: Record<string, (copies: Awaited<ReturnType<typeof pair>>) => Promise<void>> = {
     // A new copy of the same episode is another file than the one the countdown named.
     "the next copy is downloaded again": async ({ app, a, to }) => {
       await app.removeDownload(to.id);

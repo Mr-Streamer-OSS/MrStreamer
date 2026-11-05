@@ -74,7 +74,7 @@ vi.mock("expo-video", () => ({
 }));
 
 const { native, File: DiskFile, Directory: Folder } = await import("./native-files.ts");
-const { background } = await import("./native-downloads.ts");
+const { background, nativeDownloads: port } = await import("./native-downloads.ts");
 const host = globalThis as { expo?: { modules?: Record<string, unknown> } };
 let guide = guideFixture();
 const releases: Array<() => void> = [];
@@ -88,7 +88,7 @@ function held() {
 }
 
 const disk = (name: string) => new DiskFile(native.root, "documents", name);
-const json = (name: string): unknown => JSON.parse(disk(name).textSync());
+const json = (name: string): Json => JSON.parse(disk(name).textSync());
 
 const registry = () =>
   (disk("subscriptions.json").exists
@@ -368,13 +368,6 @@ describe("Demo through the production lifecycle", () => {
   it("refuses a validated download crossing Reset's erase snapshot while its old Source is current", async () => {
     const first = await withDemo();
 
-    const port = host.expo!.modules!["BackgroundDownloads"] as {
-      authorize: (...args: unknown[]) => Promise<unknown>;
-      revokeSource: (...args: unknown[]) => Promise<unknown>;
-      cancelAuthorization: (...args: unknown[]) => Promise<unknown>;
-      finishForegroundReconcile: (...args: unknown[]) => Promise<unknown>;
-    };
-
     let armed = false;
     const authorize = port.authorize;
     vi.spyOn(port, "authorize").mockImplementation(async (...args) => {
@@ -602,10 +595,6 @@ describe("Demo through the production lifecycle", () => {
     const gate = held();
     let fencing = false;
 
-    const port = host.expo!.modules!["BackgroundDownloads"] as {
-      cancelAuthorization: (...args: unknown[]) => Promise<unknown>;
-    };
-
     const cancel = port.cancelAuthorization;
     vi.spyOn(port, "cancelAuthorization").mockImplementation(async (...args) => {
       fencing = true;
@@ -623,10 +612,6 @@ describe("Demo through the production lifecycle", () => {
 
   it("starts once on a clean install without waiting for native readiness or touching secrets", async () => {
     const ready = held();
-
-    const port = host.expo!.modules!["BackgroundDownloads"] as {
-      reconcile: (...args: unknown[]) => Promise<unknown>;
-    };
 
     const actual = port.reconcile;
     vi.spyOn(port, "reconcile").mockImplementation(async (...args) => {
@@ -1041,10 +1026,6 @@ describe("Demo through the production lifecycle", () => {
     );
     // A background wake may not deliver receipt hints to JS before the account command.
     background.listeners.get("receipt")?.clear();
-
-    const port = host.expo!.modules!["BackgroundDownloads"] as {
-      cancelAuthorization: (...args: unknown[]) => Promise<unknown>;
-    };
 
     let fences = 0;
 

@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,34 +69,36 @@ function fixture(rejectedUrl = "about:blank") {
     };
   });
 
-  const evaluate = vi.fn<Page["evaluate"]>().mockResolvedValue({
-    pid: 123,
-    executable: "/owned/app.exe",
-    resources: "/owned/resources",
-    appPath: "/owned/resources/app.asar",
-    version: "0.0.15",
-    excluded: "not retained",
-    webContents: [
-      {
-        id: 1,
-        type: "window",
-        url: "file:///later",
-        loading: true,
-        isLoadingMainFrame: true,
-        crashed: false,
-        destroyed: false,
-      },
-      {
-        id: 2,
-        type: "remote",
-        url: "devtools://later",
-        loading: false,
-        isLoadingMainFrame: false,
-        crashed: false,
-        destroyed: false,
-      },
-    ],
-  });
+  const evaluate = vi
+    .fn<(expression: string, timeoutMs: number) => Promise<Json | undefined>>()
+    .mockResolvedValue({
+      pid: 123,
+      executable: "/owned/app.exe",
+      resources: "/owned/resources",
+      appPath: "/owned/resources/app.asar",
+      version: "0.0.15",
+      excluded: "not retained",
+      webContents: [
+        {
+          id: 1,
+          type: "window",
+          url: "file:///later",
+          loading: true,
+          isLoadingMainFrame: true,
+          crashed: false,
+          destroyed: false,
+        },
+        {
+          id: 2,
+          type: "remote",
+          url: "devtools://later",
+          loading: false,
+          isLoadingMainFrame: false,
+          crashed: false,
+          destroyed: false,
+        },
+      ],
+    });
 
   const listing = [
     {
@@ -329,7 +332,7 @@ describe("failure-only renderer launch evidence", () => {
     const f = fixture();
     const page = Promise.withResolvers<Awaited<ReturnType<Page["send"]>>>();
     const listing = Promise.withResolvers<Response>();
-    const main = Promise.withResolvers<unknown>();
+    const main = Promise.withResolvers<Json | undefined>();
     f.send.mockReturnValue(page.promise);
     f.fetch_.mockReturnValue(listing.promise);
     f.evaluate.mockReturnValue(main.promise);

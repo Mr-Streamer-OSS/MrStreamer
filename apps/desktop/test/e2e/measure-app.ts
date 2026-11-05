@@ -698,7 +698,7 @@ function streamRequests() {
 async function timed(
   name: keyof typeof APP_METRICS,
   page: Page,
-  act: string | (() => Promise<unknown>),
+  act: string | (() => Promise<void | Awaited<ReturnType<Page["send"]>>>),
   condition: string,
 ): Promise<void> {
   if (condition === FRESH_PICTURE)
@@ -738,7 +738,11 @@ async function timed(
 }
 
 /** Exercise the actual encoder and player before measuring, retaining cost and movement. */
-async function movingWarmup(page: Page, name: string, act: string | (() => Promise<unknown>)) {
+async function movingWarmup(
+  page: Page,
+  name: string,
+  act: string | (() => Promise<void | Awaited<ReturnType<Page["send"]>>>),
+) {
   await page.evaluate(
     `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
   );
@@ -807,7 +811,7 @@ function buttonClick(text: string): string {
   })()`;
 }
 
-async function clickText(page: Page, text: string): Promise<unknown> {
+async function clickText(page: Page, text: string): Promise<void> {
   if (text === "All channels" || text === "TEST | Formats and failures") {
     if (await revealFixtureList(page, text))
       observations.push({ name: "Reveal fixture list", list: text });
@@ -824,7 +828,7 @@ function rowClick(channel: string): string {
   })()`;
 }
 
-function clickRow(page: Page, channel: string): Promise<unknown> {
+function clickRow(page: Page, channel: string): Promise<void> {
   return page.evaluate(rowClick(channel));
 }
 

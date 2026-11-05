@@ -38,6 +38,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
+import type { Json } from "@mrstreamer/contracts/json";
 import type { Component, Fact, Licences, Notice } from "../src/licences.ts";
 import {
   app,
@@ -148,7 +149,7 @@ function bundleSources(): string[] {
 }
 
 /** Runs one of expo-modules-autolinking's commands and returns its JSON. */
-const autolinking = (args: readonly string[]): unknown =>
+const autolinking = (args: readonly string[]): Json =>
   JSON.parse(
     execFileSync(join(app, "node_modules/.bin/expo-modules-autolinking"), args, {
       cwd: app,
