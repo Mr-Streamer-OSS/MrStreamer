@@ -365,9 +365,11 @@ export async function guideSearchScenario(d: Driver, otherUrl: string): Promise<
   d.observed.searchWatch = await d.evaluate(
     "(() => { const v = document.querySelector('video'); return { width: v.videoWidth, time: v.currentTime }; })()",
   );
+  await d.wait(() => d.evaluate<boolean>("!document.body.innerText.includes('Tuning')"));
   await d.capture("guide-watch-playback");
+  await d.click("Stop proved playback", "document.querySelector('button[aria-label=Stop]')");
 
-  await d.key("Escape", 27);
+  if (await d.exists("document.querySelector('[data-view=watch]')")) await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
   await addBackup(d, otherUrl);
   await d.click("Live TV with two sources", named("header button", "Live TV"));
