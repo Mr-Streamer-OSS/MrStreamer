@@ -22,6 +22,8 @@ import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, waitFor, type Page } from "./app.ts";
 import { seedCopies, slowProvider } from "./download-performance-fixture.ts";
 
+const TraceBatch = arkType({ value: JsonValue.array() });
+
 const { values } = parseArgs({
   options: {
     "app-dir": { type: "string" },
@@ -418,9 +420,7 @@ try {
   await checked("Profiler.setSamplingInterval", { interval: 1000 });
   await checked("Profiler.start");
   profiling = true;
-  page!.on("Tracing.dataCollected", (params) =>
-    trace.push(...arkType({ value: JsonValue.array() }).assert(params).value),
-  );
+  page!.on("Tracing.dataCollected", (params) => trace.push(...TraceBatch.assert(params).value));
 
   page!.on("Tracing.tracingComplete", () => {
     traceComplete = true;

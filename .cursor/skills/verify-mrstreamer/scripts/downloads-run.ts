@@ -38,7 +38,7 @@ export interface Connection {
   readonly path?: string;
 }
 
-/** Connections observed during one playback interval, retained without dropping failed attempts. */
+/** Non-IPC main connections and nonlocal window requests between two observed moments. */
 export interface NetworkObservation {
   readonly main: Connection[];
   readonly window: { at: number; url: string }[];

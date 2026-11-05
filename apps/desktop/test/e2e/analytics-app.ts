@@ -1,4 +1,3 @@
-import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
@@ -878,7 +877,10 @@ async function verifyAbout() {
 
   if (shown.source !== target.source || !shown.text.includes(target.version))
     throw new Error("About does not match the pinned version/source");
-  await snapshot("about-" + JsonValue.array().assert(observations["instances"]).length);
+  const instances = observations["instances"];
+
+  if (!Array.isArray(instances)) throw new Error("Missing observed instances");
+  await snapshot("about-" + instances.length);
   await keyEscape();
 }
 
