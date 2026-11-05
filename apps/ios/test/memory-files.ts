@@ -4,7 +4,7 @@ import { type as arkType } from "arktype";
  * and survives its app-module relaunches; synchronous full-disk faults leave async writes alone. */
 export function memoryFiles(memory: { files: Map<string, string>; full: Set<string> }) {
   const pathOf = (parent: string | { readonly path: string }, name: string) =>
-    `${arkType("string").allows(parent) ? parent : parent.path}/${name}`;
+    `${arkType.keywords.string.root.allows(parent) ? parent : parent.path}/${name}`;
 
   class Directory {
     readonly path: string;

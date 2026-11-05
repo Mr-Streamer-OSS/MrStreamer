@@ -1,4 +1,3 @@
-import { lazy } from "@mrstreamer/contracts/lazy";
 import { type as arkType } from "arktype";
 // What a playlist's stream sends where once its address is https, through the real playback proxy,
 // its converter, a receiver's address on the local network, catch-up, title playback and downloads.
@@ -20,10 +19,6 @@ import { Subscriptions } from "../src/main/services/subscription.ts";
 import { fixture } from "./fake-provider.ts";
 import { promised, runtimeFor, tempDir, testSecrets, userAgent } from "./support.ts";
 import { defined } from "@mrstreamer/core/defined";
-
-const Redirect = lazy(() =>
-  arkType({ location: "string" }).narrow((value) => !(value instanceof Function)),
-);
 
 // CI points this at the bundled build, with ffprobe beside it; locally the one on PATH does.
 const FFMPEG = process.env["MR_STREAMER_FFMPEG"] ?? "ffmpeg";
@@ -66,11 +61,8 @@ async function connected(entries: (plain: string) => readonly string[], link = L
 
     if (answer === undefined) return response.writeHead(404).end();
 
-    if (arkType.keywords.object.root.allows(answer) && "location" in answer) {
-      if (!Redirect().allows(answer)) throw new Error("Invalid playlist redirect");
-
+    if (arkType.keywords.object.root.allows(answer) && "location" in answer)
       return response.writeHead(302, { location: answer.location }).end();
-    }
 
     const body = Buffer.from(answer);
     // Byte ranges, as files behind a provider's redirect answer them.
@@ -102,12 +94,10 @@ async function connected(entries: (plain: string) => readonly string[], link = L
 
     if (found === undefined) return new Response(null, { status: 404 });
 
-    let response: Response;
-
-    if (arkType.keywords.object.root.allows(found) && "location" in found) {
-      if (!Redirect().allows(found)) throw new Error("Invalid playlist redirect");
-      response = new Response(null, { status: 302, headers: { location: found.location } });
-    } else response = new Response(found);
+    const response =
+      arkType.keywords.object.root.allows(found) && "location" in found
+        ? new Response(null, { status: 302, headers: { location: found.location } })
+        : new Response(found);
 
     // As fetch tells the address it answered for, which a moved playlist's addresses start from.
     return Object.defineProperty(response, "url", { value: url.href });

@@ -1621,8 +1621,7 @@ function bridgeCode(cause: unknown): string | null {
     let depth = 0;
     depth < 4 &&
     arkType.keywords.object.root.allows(cause) &&
-    !arkType("Function").allows(cause) &&
-    cause !== null;
+    !arkType.keywords.Function.allows(cause);
     depth++
   ) {
     if ("code" in cause && cause.code === "ERR_OBSERVED_NOT_DRAINED") return cause.code;

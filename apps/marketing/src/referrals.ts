@@ -160,10 +160,7 @@ function stored(): Entry | undefined {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
 
-    if (
-      !(arkType.keywords.object.root.allows(value) && !arkType("Function").allows(value)) ||
-      value === null
-    )
+    if (!(arkType.keywords.object.root.allows(value) && !arkType.keywords.Function.allows(value)))
       return undefined;
     const codes: Partial<Record<keyof Entry, unknown>> = value;
     const entry_source = pick(Object.keys(SOURCES) as Source[], String(codes.entry_source));

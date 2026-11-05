@@ -106,13 +106,12 @@ export function exposes(
  * holding one. Artwork kept has none.
  */
 export function holds(value: Json | undefined, login: Login): boolean {
-  if (arkType("string").allows(value))
+  if (arkType.keywords.string.root.allows(value))
     return (login.passwords.length > 0 || login.uncertain.length > 0) && textHolds(value, login);
 
   return (
     arkType.keywords.object.root.allows(value) &&
-    !arkType("Function").allows(value) &&
-    value !== null &&
+    !arkType.keywords.Function.allows(value) &&
     Object.values(value).some((each: Json | undefined) => holds(each, login))
   );
 }

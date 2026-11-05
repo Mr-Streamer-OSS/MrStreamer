@@ -500,7 +500,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
       const address = host.address();
 
-      if (!address || arkType("string").allows(address)) throw new Error("No address");
+      if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
       const { subscriptions, library, recordings, playback } = await app(await tempDir());
 
       const { id: subscriptionId } = await subscriptions.add({
@@ -658,7 +658,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     const address = host.address();
 
-    if (!address || arkType("string").allows(address)) throw new Error("No address");
+    if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
 
@@ -2578,7 +2578,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     const address = host.address();
 
-    if (!address || arkType("string").allows(address)) throw new Error("No address");
+    if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
 

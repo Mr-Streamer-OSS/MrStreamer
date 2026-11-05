@@ -201,7 +201,8 @@ export async function startSubtitleFixture() {
   await once(server, "listening");
   const address = server.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No subtitle fixture port");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("No subtitle fixture port");
 
   return {
     origin: `http://127.0.0.1:${address.port}`,

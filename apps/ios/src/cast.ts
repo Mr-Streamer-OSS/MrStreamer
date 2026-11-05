@@ -611,8 +611,7 @@ function fromBase64(text: string): Uint8Array {
 
 const isRecord = (value: Json | undefined): value is JsonObject =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   !Array.isArray(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
@@ -876,8 +875,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
     if (
       launched["type"] !== "RECEIVER_STATUS" ||
-      !arkType("string").allows(app?.["transportId"]) ||
-      !arkType("string").allows(app["sessionId"])
+      !arkType.keywords.string.root.allows(app?.["transportId"]) ||
+      !arkType.keywords.string.root.allows(app["sessionId"])
     ) {
       throw new Error("The TV didn't start its player.");
     }

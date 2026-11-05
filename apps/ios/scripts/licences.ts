@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 // Generates src/licences.json, the notices Settings' Licences shows offline, from what the build
 // really carries:
 //
@@ -265,7 +264,7 @@ function packageComponent(
 
   const id = `${pkg.name}@${pkg.version}`;
 
-  if (!arkType("string").allows(pkg.license))
+  if (!type.keywords.string.root.allows(pkg.license))
     fail(`${id} names no SPDX licence in its package.json`);
   const files = [found.root, ...[...found.within].sort()].flatMap(licenceFiles);
 

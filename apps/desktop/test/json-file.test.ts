@@ -16,7 +16,7 @@ vi.mock("node:fs/promises", async (original) => {
   const actual = await original<typeof import("node:fs/promises")>();
 
   const rename: typeof actual.rename = async (from, to) => {
-    if (!arkType("string").allows(from) || !arkType("string").allows(to))
+    if (!arkType.keywords.string.root.allows(from) || !arkType.keywords.string.root.allows(to))
       throw new Error("This probe requires ordinary file paths");
     disk.attempts.push({
       from,

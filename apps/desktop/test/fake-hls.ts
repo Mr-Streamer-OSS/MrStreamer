@@ -107,7 +107,7 @@ export async function startFakeHls(
     if (override)
       return response
         .writeHead(override.status ?? 200, override.headers)
-        .end(arkType("Function").allows(override.body) ? override.body() : override.body);
+        .end(arkType.keywords.Function.allows(override.body) ? override.body() : override.body);
 
     if (path === "/list.m3u")
       return response.end(
@@ -209,7 +209,7 @@ export async function startFakeHls(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No fixture port");
+  if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No fixture port");
   origin = `http://127.0.0.1:${address.port}`;
 
   return {

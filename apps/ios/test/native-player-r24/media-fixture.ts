@@ -149,7 +149,7 @@ export function serveMedia(directory: string, port = 0) {
   server.listen(port, "127.0.0.1", () => {
     const address = server.address();
 
-    if (address && !arkType("string").allows(address))
+    if (address && !arkType.keywords.string.root.allows(address))
       console.log(JSON.stringify({ port: address.port }));
   });
 

@@ -695,7 +695,7 @@ async function listen(listener: Server, requested: number) {
   await once(listener.listen(requested, "127.0.0.1"), "listening");
   const address = listener.address();
 
-  if (!address || arkType("string").allows(address))
+  if (!address || arkType.keywords.string.root.allows(address))
     throw new Error("fixture listener has no TCP address");
 
   return address.port;

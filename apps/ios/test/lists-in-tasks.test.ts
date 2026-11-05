@@ -145,9 +145,7 @@ describe("movie and series lists read and indexed in tasks", () => {
           | ReturnType<typeof panelRows>["series"][number],
       ) => {
         const fields =
-          arkType.keywords.object.root.allows(row) &&
-          !arkType("Function").allows(row) &&
-          row !== null
+          arkType.keywords.object.root.allows(row) && !arkType.keywords.Function.allows(row)
             ? row
             : {};
 

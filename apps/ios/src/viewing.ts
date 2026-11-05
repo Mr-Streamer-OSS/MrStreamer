@@ -104,7 +104,7 @@ const read: unknown = json;
 function snapshot(): ViewingSnapshot | null {
   return read &&
     arkType.keywords.object.root.allows(read) &&
-    !arkType("Function").allows(read) &&
+    !arkType.keywords.Function.allows(read) &&
     "version" in read &&
     read.version === 1
     ? (read as ViewingSnapshot)
@@ -115,7 +115,7 @@ function snapshot(): ViewingSnapshot | null {
 const kept = readMembership(
   json &&
     arkType.keywords.object.root.allows(json) &&
-    !arkType("Function").allows(json) &&
+    !arkType.keywords.Function.allows(json) &&
     "favouriteMembership" in json
     ? json.favouriteMembership
     : undefined,

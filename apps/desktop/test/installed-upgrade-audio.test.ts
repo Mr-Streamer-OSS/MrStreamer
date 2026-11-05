@@ -108,7 +108,7 @@ function standIn() {
 
         if (app.inputError) throw app.inputError;
 
-        if (params["type"] === "keyDown" && arkType("string").allows(params["text"])) {
+        if (params["type"] === "keyDown" && arkType.keywords.string.root.allows(params["text"])) {
           expect(window.document.activeElement).toBe(select);
           typeahead(params["text"]);
         }

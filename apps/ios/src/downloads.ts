@@ -1,5 +1,4 @@
 import { JsonValue } from "@mrstreamer/contracts/json-value";
-import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -1332,9 +1331,8 @@ function load() {
 
   const entries =
     valid &&
-    read !== null &&
-    arkType.keywords.object.root.allows(read) &&
-    !arkType("Function").allows(read) &&
+    type.keywords.object.root.allows(read) &&
+    !type.keywords.Function.allows(read) &&
     !Array.isArray(read) &&
     "items" in read &&
     Array.isArray(read.items)
@@ -1342,7 +1340,7 @@ function load() {
       : [];
 
   for (const item of entries) {
-    if (item === null || !JsonValue.and("object").allows(item)) continue;
+    if (!JsonValue.and("object").allows(item)) continue;
     const record = Stored()(item);
 
     if (record instanceof type.errors) unreadable.push(item);
@@ -1368,7 +1366,7 @@ function sweep() {
   const named = new Set([
     ...doc.items.map((record) => record.id),
     ...doc.unreadable.flatMap((item) =>
-      "id" in item && arkType("string").allows(item.id) ? [item.id] : [],
+      "id" in item && type.keywords.string.root.allows(item.id) ? [item.id] : [],
     ),
     ...closingFolders,
   ]);
@@ -2156,7 +2154,7 @@ export async function eraseDownloads(
   const unknown = doc.unreadable.some(
     (item) =>
       !("subscriptionId" in item) ||
-      !arkType("string").allows(item.subscriptionId) ||
+      !type.keywords.string.root.allows(item.subscriptionId) ||
       item.subscriptionId === subscriptionId,
   );
 

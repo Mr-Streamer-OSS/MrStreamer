@@ -19,7 +19,7 @@ function systemTags(): readonly string[] {
   const preferred: unknown = Settings.get("AppleLanguages");
 
   const tags = Array.isArray(preferred)
-    ? preferred.filter((tag): tag is string => arkType("string").allows(tag))
+    ? preferred.filter((tag): tag is string => arkType.keywords.string.root.allows(tag))
     : [];
 
   return tags;
@@ -31,13 +31,12 @@ function savedChoice(): string | undefined {
 
   const choice =
     arkType.keywords.object.root.allows(saved) &&
-    !arkType("Function").allows(saved) &&
-    saved !== null &&
+    !arkType.keywords.Function.allows(saved) &&
     "choice" in saved
       ? saved.choice
       : undefined;
 
-  return arkType("string").allows(choice) ? choice : undefined;
+  return arkType.keywords.string.root.allows(choice) ? choice : undefined;
 }
 
 const language = store(resolveLanguage(savedChoice(), systemTags()));

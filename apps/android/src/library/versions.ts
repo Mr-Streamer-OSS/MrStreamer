@@ -38,9 +38,8 @@ export function versionMemory(storage: {
   }
 
   let picks: Record<string, unknown> =
-    raw !== null &&
     type.keywords.object.root.allows(raw) &&
-    !type("Function").allows(raw) &&
+    !type.keywords.Function.allows(raw) &&
     !Array.isArray(raw)
       ? Object.fromEntries(Object.entries(raw))
       : {};
@@ -52,7 +51,7 @@ export function versionMemory(storage: {
       const saved = storage.readJson(file);
 
       const object = (value: Json): value is JsonObject =>
-        value !== null && type.keywords.object.root.allows(value) && !Array.isArray(value);
+        type.keywords.object.root.allows(value) && !Array.isArray(value);
 
       if (saved !== null && !object(saved)) throw new Error("Couldn't save version");
       const next: Record<string, Json | undefined> = saved === null ? {} : { ...saved };

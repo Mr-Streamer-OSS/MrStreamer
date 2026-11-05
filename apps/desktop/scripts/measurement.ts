@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 // Shared result contract for the existing measurement CLIs. Invalid instrumentation throws;
 // exceeded performance budgets remain warnings and never turn a sample into zero.
 import { execFileSync } from "node:child_process";
@@ -267,9 +266,9 @@ export const validateMeasurement = Result.pipe((result) => {
           width = picture["videoWidth"];
 
         if (
-          !arkType("number | number.NaN").allows(previous) ||
-          !arkType("number | number.NaN").allows(current) ||
-          !arkType("number | number.NaN").allows(width) ||
+          !type("number | number.NaN").allows(previous) ||
+          !type("number | number.NaN").allows(current) ||
+          !type("number | number.NaN").allows(width) ||
           !Number.isFinite(previous) ||
           !Number.isFinite(current) ||
           !Number.isFinite(width) ||
@@ -398,7 +397,7 @@ export const validateMeasurement = Result.pipe((result) => {
   for (const values of [result.workload, result.conditions])
     if (
       Object.values(values).some(
-        (value) => arkType("number | number.NaN").allows(value) && !Number.isFinite(value),
+        (value) => type("number | number.NaN").allows(value) && !Number.isFinite(value),
       )
     )
       throw new Error("Non-finite measurement metadata");
@@ -420,7 +419,7 @@ export const validateMeasurement = Result.pipe((result) => {
   for (const observation of result.observations ?? [])
     if (
       Object.values(observation).some(
-        (value) => arkType("number | number.NaN").allows(value) && !Number.isFinite(value),
+        (value) => type("number | number.NaN").allows(value) && !Number.isFinite(value),
       )
     )
       throw new Error("Non-finite observation metadata");

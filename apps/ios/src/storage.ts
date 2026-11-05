@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 
 import { type } from "arktype";
@@ -72,7 +71,7 @@ export function readState(): SavedState {
   const state =
     parsed instanceof type.errors ||
     data === null ||
-    !(arkType.keywords.object.root.allows(data) && !arkType("Function").allows(data)) ||
+    !(type.keywords.object.root.allows(data) && !type.keywords.Function.allows(data)) ||
     Array.isArray(data)
       ? EMPTY
       : { ...data, ...parsed };

@@ -56,14 +56,13 @@ const installed = new WeakSet<MainTransport>();
 
 const object = (value: Json | undefined): value is Record<string, Json | undefined> =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   !Array.isArray(value);
 
 function errorText(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
 
-  if (arkType("string").allows(cause)) return cause;
+  if (arkType.keywords.string.root.allows(cause)) return cause;
 
   try {
     return JSON.stringify(cause) ?? String(cause);
@@ -325,9 +324,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
 
     if (
       !object(frame) ||
-      !arkType("string").allows(frame.callFrameId) ||
+      !arkType.keywords.string.root.allows(frame.callFrameId) ||
       !object(frame.location) ||
-      !arkType("string").allows(frame.location.scriptId)
+      !arkType.keywords.string.root.allows(frame.location.scriptId)
     )
       throw new Error("Invalid startup callframe");
     const scriptId = frame.location.scriptId;
@@ -336,9 +335,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     const frameURL = frame.url;
 
     if (
-      !arkType("string").allows(parsedURL) ||
+      !arkType.keywords.string.root.allows(parsedURL) ||
       !allowedStartupScripts.has(parsedURL) ||
-      (arkType("string").allows(frameURL) && frameURL !== "" && frameURL !== parsedURL)
+      (arkType.keywords.string.root.allows(frameURL) && frameURL !== "" && frameURL !== parsedURL)
     )
       throw new Error(
         "Startup callframe is not the exact catalogue worker script or a caller-listed startup script",
@@ -384,7 +383,8 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   listen("NodeWorker.receivedMessageFromWorker", (params) => {
     if (params.sessionId !== sessionId || !active) return;
 
-    if (!arkType("string").allows(params.message)) throw new Error("Malformed worker message");
+    if (!arkType.keywords.string.root.allows(params.message))
+      throw new Error("Malformed worker message");
     const message: Json = JSON.parse(params.message);
 
     if (!object(message)) throw new Error("Worker message must be an object");
@@ -396,12 +396,15 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
       return;
     }
 
-    if (!arkType("string").allows(message.method) || !object(message.params))
+    if (!arkType.keywords.string.root.allows(message.method) || !object(message.params))
       throw new Error("Malformed worker event");
     const event = message.params;
 
     if (message.method === "Debugger.scriptParsed") {
-      if (arkType("string").allows(event.scriptId) && arkType("string").allows(event.url))
+      if (
+        arkType.keywords.string.root.allows(event.scriptId) &&
+        arkType.keywords.string.root.allows(event.url)
+      )
         scripts.set(event.scriptId, event.url);
     } else if (message.method === "Debugger.paused") {
       pause = event;
@@ -434,13 +437,14 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     ) {
       const other = params.sessionId;
 
-      if (!arkType("string").allows(other) || !other) throw new Error("Invalid worker sessionId");
+      if (!arkType.keywords.string.root.allows(other) || !other)
+        throw new Error("Invalid worker sessionId");
       void task(() => release(other));
 
       return;
     }
 
-    if (!arkType("string").allows(params.sessionId) || !params.sessionId)
+    if (!arkType.keywords.string.root.allows(params.sessionId) || !params.sessionId)
       throw new Error("Invalid catalogue worker sessionId");
 
     if (sessionId !== undefined)

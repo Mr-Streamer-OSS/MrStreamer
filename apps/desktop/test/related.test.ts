@@ -206,7 +206,8 @@ http://127.0.0.1/neighbour.mp4
     try {
       const address = server.address();
 
-      if (!address || arkType("string").allows(address)) throw new Error("No fixture port");
+      if (!address || arkType.keywords.string.root.allows(address))
+        throw new Error("No fixture port");
       const provider = await fakeProvider({ titles: 24 });
 
       const runtime = runtimeFor(

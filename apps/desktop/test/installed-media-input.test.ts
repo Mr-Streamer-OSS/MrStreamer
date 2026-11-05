@@ -119,7 +119,7 @@ function standIn(collapsed = true) {
         if (
           result &&
           arkType.keywords.object.root.allows(result) &&
-          !arkType("Function").allows(result) &&
+          !arkType.keywords.Function.allows(result) &&
           "events" in result
         )
           app.onSnapshot();

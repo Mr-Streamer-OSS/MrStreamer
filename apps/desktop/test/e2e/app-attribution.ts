@@ -106,8 +106,8 @@ export function profileSummary(profile: CpuProfile, top = 25) {
     profile.nodes.some(
       (node) =>
         !Number.isInteger(node.id) ||
-        !arkType("string").allows(node.callFrame?.functionName) ||
-        !arkType("string").allows(node.callFrame.url) ||
+        !arkType.keywords.string.root.allows(node.callFrame?.functionName) ||
+        !arkType.keywords.string.root.allows(node.callFrame.url) ||
         !Number.isFinite(node.callFrame.lineNumber),
     ) ||
     profile.samples.some((id) => !byId.has(id))
@@ -434,7 +434,7 @@ async function traceTo(page: Page, path: string, ms: number) {
       const completion = params as { stream?: unknown; dataLossOccurred?: boolean } | undefined;
       const handle = completion?.stream;
 
-      if (!arkType("string").allows(handle) || !handle) {
+      if (!arkType.keywords.string.root.allows(handle) || !handle) {
         reject(new Error("Trace completion has no IO stream"));
 
         return;

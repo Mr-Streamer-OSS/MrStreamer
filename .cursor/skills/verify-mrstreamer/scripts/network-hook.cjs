@@ -22,15 +22,19 @@ const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (...args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
 
-  if (first && arkType.keywords.object.root.allows(first) && !arkType("Function").allows(first)) {
+  if (
+    first &&
+    arkType.keywords.object.root.allows(first) &&
+    !arkType.keywords.Function.allows(first)
+  ) {
     if (first.path) write({ kind: "ipc", path: String(first.path) });
     else write({ kind: "tcp", host: first.host ?? "localhost", port: Number(first.port) });
-  } else if (arkType("string").allows(first) && Number.isNaN(Number(first))) {
+  } else if (arkType.keywords.string.root.allows(first) && Number.isNaN(Number(first))) {
     write({ kind: "ipc", path: first });
   } else {
     write({
       kind: "tcp",
-      host: arkType("string").allows(args[1]) ? args[1] : "localhost",
+      host: arkType.keywords.string.root.allows(args[1]) ? args[1] : "localhost",
       port: Number(first),
     });
   }
@@ -41,7 +45,7 @@ net.Socket.prototype.connect = function (...args) {
 const send = dgram.Socket.prototype.send;
 
 dgram.Socket.prototype.send = function (...args) {
-  const address = args.find((arg, index) => index > 0 && arkType("string").allows(arg));
+  const address = args.find((arg, index) => index > 0 && arkType.keywords.string.root.allows(arg));
 
   const port = args.find(
     (arg, index) => index > 0 && arkType("number | number.NaN").allows(arg) && arg > 0,
@@ -57,7 +61,7 @@ dgram.Socket.prototype.send = function (...args) {
 let fetchInstalled = globalThis.fetch;
 
 const fetchHooked = (input, init) => {
-  const href = arkType("string").allows(input)
+  const href = arkType.keywords.string.root.allows(input)
     ? input
     : input instanceof URL
       ? input.href

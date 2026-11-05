@@ -25,9 +25,8 @@ type LaunchFailure = {
 
 function record(value: unknown): value is JsonObject {
   return (
-    value !== null &&
     arkType.keywords.object.root.allows(value) &&
-    !arkType("Function").allows(value) &&
+    !arkType.keywords.Function.allows(value) &&
     !Array.isArray(value)
   );
 }
@@ -40,8 +39,11 @@ function fields(value: Json | undefined, names: readonly string[]) {
     for (const name of names) {
       const field = value[name];
 
-      if (arkType("string").allows(field)) result[name] = field.slice(0, 2048);
-      else if (arkType("number | number.NaN").allows(field) || arkType("boolean").allows(field))
+      if (arkType.keywords.string.root.allows(field)) result[name] = field.slice(0, 2048);
+      else if (
+        arkType("number | number.NaN").allows(field) ||
+        arkType.keywords.boolean.allows(field)
+      )
         result[name] = field;
     }
 

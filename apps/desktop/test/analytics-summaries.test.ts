@@ -735,7 +735,8 @@ async function sink(withhold: boolean) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No loopback listener.");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("No loopback listener.");
 
   return { bodies, endpoint: `http://127.0.0.1:${address.port}/i/v0/e/` };
 }

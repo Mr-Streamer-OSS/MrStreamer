@@ -32,8 +32,7 @@ function success<T>(result: Outcome<T>): T {
 function object(value: unknown): value is Record<string, unknown> {
   return (
     arkType.keywords.object.root.allows(value) &&
-    !arkType("Function").allows(value) &&
-    value !== null &&
+    !arkType.keywords.Function.allows(value) &&
     !Array.isArray(value)
   );
 }
@@ -103,7 +102,7 @@ class Transport implements MainTransport {
       assert(
         object(raw) &&
           arkType("number | number.NaN").allows(raw.id) &&
-          arkType("string").allows(raw.method) &&
+          arkType.keywords.string.root.allows(raw.method) &&
           object(raw.params),
       );
       const command = { id: raw.id, method: raw.method, params: raw.params };

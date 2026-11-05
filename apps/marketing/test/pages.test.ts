@@ -293,7 +293,7 @@ describe("one stable download contract across pages and metadata", () => {
       });
       expect(
         Object.values(links()).every(
-          (link) => arkType("string").allows(link) && link.includes("/v0.0.8/"),
+          (link) => arkType.keywords.string.root.allows(link) && link.includes("/v0.0.8/"),
         ),
       ).toBe(true);
       expect(document.title).toBe("Download Mr. Streamer 0.0.8 for Mac, Windows and Linux");

@@ -54,7 +54,7 @@ async function check(
       writeFileSync(join(root, file), "");
     }
 
-    const text = arkType("string").allows(report)
+    const text = arkType.keywords.string.root.allows(report)
       ? report
       : JSON.stringify({
           testResults: report.map(({ file, tests = ["passed"], status, message = "" }) => ({

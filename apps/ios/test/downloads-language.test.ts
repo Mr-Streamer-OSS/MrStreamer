@@ -50,7 +50,7 @@ vi.mock("react-native", async () => {
     ) => {
       if (props.testID) scenario.pressables.set(props.testID, props);
 
-      const children = arkType("Function").allows(props.children)
+      const children = arkType.keywords.Function.allows(props.children)
         ? (props.children as (state: { pressed: boolean }) => React.ReactNode)({ pressed: false })
         : props.children;
 

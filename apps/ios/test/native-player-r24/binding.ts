@@ -143,9 +143,9 @@ assert.equal(writes, 2);
 const exports = module.namespace;
 const useVideoPlayer = "useVideoPlayer" in exports ? exports.useVideoPlayer : undefined;
 
-assert.equal(arkType("Function").allows(useVideoPlayer), true);
+assert.equal(arkType.keywords.Function.allows(useVideoPlayer), true);
 
-if (!arkType("Function").allows(useVideoPlayer)) throw new Error("fixture-hook-missing");
+if (!arkType.keywords.Function.allows(useVideoPlayer)) throw new Error("fixture-hook-missing");
 
 const createHookPlayer = useVideoPlayer;
 const hookPlayer: unknown = useVideoPlayer(null);

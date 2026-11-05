@@ -506,10 +506,10 @@ type Row = readonly [url: string, name: string, bytes: number, fetchedAt: number
 const isRow = (row: unknown): row is Row =>
   Array.isArray(row) &&
   row.length === 5 &&
-  arkType("string").allows(row[0]) &&
+  arkType.keywords.string.root.allows(row[0]) &&
   row[0].length <= URL_LENGTH &&
   /^https?:\/\//.test(row[0]) &&
-  arkType("string").allows(row[1]) &&
+  arkType.keywords.string.root.allows(row[1]) &&
   NAME.test(row[1]) &&
   Number.isInteger(row[2]) &&
   row[2] > 0 &&
@@ -528,8 +528,7 @@ async function readIndex(): Promise<readonly Row[]> {
 
       if (
         arkType.keywords.object.root.allows(value) &&
-        !arkType("Function").allows(value) &&
-        value !== null &&
+        !arkType.keywords.Function.allows(value) &&
         "version" in value &&
         value.version === VERSION &&
         "entries" in value &&

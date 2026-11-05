@@ -195,8 +195,7 @@ try {
   const parsed: Json = JSON.parse(json);
 
   if (
-    !(arkType.keywords.object.root.allows(parsed) && !arkType("Function").allows(parsed)) ||
-    parsed === null ||
+    !(arkType.keywords.object.root.allows(parsed) && !arkType.keywords.Function.allows(parsed)) ||
     Array.isArray(parsed)
   )
     throw new Error("Invalid app metadata");
@@ -210,7 +209,7 @@ try {
     pictures.length === 0 ||
     pictures.some(
       (picture: Json | undefined) =>
-        !arkType("string").allows(picture) ||
+        !arkType.keywords.string.root.allows(picture) ||
         !picture.startsWith(`${SITE}/`) ||
         !existsSync(join(files, picture.slice(SITE.length))),
     )
@@ -234,8 +233,7 @@ const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/scri
   .find(
     (data): data is JsonObject =>
       arkType.keywords.object.root.allows(data) &&
-      !arkType("Function").allows(data) &&
-      data !== null &&
+      !arkType.keywords.Function.allows(data) &&
       "@type" in data &&
       data["@type"] === "FAQPage",
   );
@@ -245,8 +243,7 @@ if (!faq) {
 } else {
   const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map((question: Json) =>
     arkType.keywords.object.root.allows(question) &&
-    !arkType("Function").allows(question) &&
-    question !== null &&
+    !arkType.keywords.Function.allows(question) &&
     "name" in question
       ? question.name
       : undefined,

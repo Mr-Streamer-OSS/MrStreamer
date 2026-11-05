@@ -196,7 +196,7 @@ app.on('window-all-closed', () => app.quit());
       await delay(500, undefined, { signal: abort.signal });
       const screenshot = await send("Page.captureScreenshot", { format: "png" });
 
-      if (!record(screenshot) || !arkType("string").allows(screenshot["data"]))
+      if (!record(screenshot) || !arkType.keywords.string.root.allows(screenshot["data"]))
         throw new Error("No website screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(screenshot["data"], "base64"));
       await writeFile(
@@ -406,7 +406,10 @@ app.on('window-all-closed', () => app.quit());
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
 
-    if (record(screenshot?.result) && arkType("string").allows(screenshot.result["data"]))
+    if (
+      record(screenshot?.result) &&
+      arkType.keywords.string.root.allows(screenshot.result["data"])
+    )
       await writeFile(
         join(evidence, "failure.png"),
         Buffer.from(screenshot.result["data"], "base64"),

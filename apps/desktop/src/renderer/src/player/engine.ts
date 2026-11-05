@@ -69,6 +69,8 @@ const PrivatePacket = lazy(() =>
   ),
 );
 
+const Timestamp = lazy(() => arkType("number | number.NaN"));
+
 export function isEngineError(value: unknown): value is EngineError {
   return EngineFailure().allows(value);
 }
@@ -298,9 +300,9 @@ function mpegtsEngine(
   player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: PESPrivateData) => {
     if (!privateData || !PrivatePacket().allows(packet)) return;
     const { pid, data, pts, nearest_pts } = packet;
-    const at = arkType("number | number.NaN").allows(pts) ? pts : nearest_pts;
+    const at = Timestamp().allows(pts) ? pts : nearest_pts;
 
-    if (arkType("number | number.NaN").allows(at)) {
+    if (Timestamp().allows(at)) {
       privateData(pid, data, at / 1000);
     }
   });

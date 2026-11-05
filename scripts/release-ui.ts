@@ -218,9 +218,9 @@ export async function inspectScenario(
       !proof["actions"].every(
         (action) =>
           record(action) &&
-          arkType("string").allows(action["action"]) &&
+          arkType.keywords.string.root.allows(action["action"]) &&
           action["action"].length > 0 &&
-          arkType("string").allows(action["at"]) &&
+          arkType.keywords.string.root.allows(action["at"]) &&
           Number.isFinite(Date.parse(action["at"])),
       )
     )

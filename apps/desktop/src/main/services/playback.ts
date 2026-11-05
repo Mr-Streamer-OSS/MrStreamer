@@ -197,7 +197,13 @@ import { defined } from "@mrstreamer/core/defined";
 
 /** The ffprobe fields conversion reads; unrelated stream fields remain forward compatible. */
 const ProbeStreams = lazy(() => type({ streams: "unknown[]" }));
-const ProbePicture = lazy(() => type({ width: "number.safe > 0", height: "number.safe > 0" }));
+
+const ProbePicture = lazy(() =>
+  type({
+    width: "0 < number.integer <= 9007199254740991",
+    height: "0 < number.integer <= 9007199254740991",
+  }),
+);
 
 /** How long the provider gets to start answering before the stream counts as failed. */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -4682,7 +4688,11 @@ function listen(
     http.listen(0, host, () => {
       const address = http.address();
 
-      if (address && type.keywords.object.root.allows(address) && !type("Function").allows(address))
+      if (
+        address &&
+        type.keywords.object.root.allows(address) &&
+        !type.keywords.Function.allows(address)
+      )
         resolve({ server: http, port: address.port });
       else reject(new Error("Stream proxy has no TCP address."));
     });

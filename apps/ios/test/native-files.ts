@@ -95,7 +95,7 @@ type Part = string | File | Directory;
 const pathOf = (parts: readonly Part[]) =>
   join(
     ...parts.map((part) =>
-      arkType("string").allows(part) ? part.replace(/^file:\/\//, "") : part.path,
+      arkType.keywords.string.root.allows(part) ? part.replace(/^file:\/\//, "") : part.path,
     ),
   );
 

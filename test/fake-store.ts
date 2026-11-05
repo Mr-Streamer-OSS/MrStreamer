@@ -264,9 +264,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   }
 
   function move(submission: Submission, verdict: Verdict): void {
-    submission.status = arkType("string").allows(verdict) ? verdict : verdict.status;
+    submission.status = arkType.keywords.string.root.allows(verdict) ? verdict : verdict.status;
 
-    if (arkType("string").allows(verdict)) return;
+    if (arkType.keywords.string.root.allows(verdict)) return;
     submission["statusDetails"] = {
       errors: verdict.errors,
       warnings: [],
@@ -405,7 +405,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     } else if (request.headers["Authorization"] !== `Bearer ${TOKEN}`) {
       response = refused(401, "Unauthorized", "The token is missing or wrong.");
     } else {
-      const parsed: Json | undefined = arkType("string").allows(body)
+      const parsed: Json | undefined = arkType.keywords.string.root.allows(body)
         ? JSON.parse(body)
         : undefined;
 

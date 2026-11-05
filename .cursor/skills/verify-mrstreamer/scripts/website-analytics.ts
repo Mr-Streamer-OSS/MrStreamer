@@ -394,7 +394,7 @@ app.on('window-all-closed', () => app.quit());
       await delay(400);
       const image = await send("Page.captureScreenshot", { format: "png" });
 
-      if (!record(image) || !arkType("string").allows(image["data"]))
+      if (!record(image) || !arkType.keywords.string.root.allows(image["data"]))
         throw new Error("No screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(image["data"], "base64"));
     };
@@ -575,8 +575,7 @@ app.on('window-all-closed', () => app.quit());
         const body: unknown = JSON.parse(c.raw);
 
         if (
-          !(arkType.keywords.object.root.allows(body) && !arkType("Function").allows(body)) ||
-          body === null ||
+          !(arkType.keywords.object.root.allows(body) && !arkType.keywords.Function.allows(body)) ||
           !("properties" in body)
         )
           return [undefined];
@@ -584,8 +583,7 @@ app.on('window-all-closed', () => app.quit());
 
         return [
           arkType.keywords.object.root.allows(properties) &&
-          !arkType("Function").allows(properties) &&
-          properties !== null &&
+          !arkType.keywords.Function.allows(properties) &&
           "feature_name" in properties
             ? properties.feature_name
             : undefined,
@@ -1072,9 +1070,8 @@ app.on('window-all-closed', () => app.quit());
       const body: Json = JSON.parse(entry.raw);
 
       const jsonObject = (value: Json | undefined): value is JsonObject =>
-        value !== null &&
         arkType.keywords.object.root.allows(value) &&
-        !arkType("Function").allows(value) &&
+        !arkType.keywords.Function.allows(value) &&
         !Array.isArray(value);
 
       if (!jsonObject(body)) throw new Error("Malformed body.");
@@ -1085,7 +1082,7 @@ app.on('window-all-closed', () => app.quit());
       if (
         Object.keys(rest).length ||
         api_key !== key ||
-        !arkType("string").allows(event) ||
+        !arkType.keywords.string.root.allows(event) ||
         distinct_id !== COOKIELESS
       )
         throw new Error(`Body outside the allowlist: ${Object.keys(body).join(",")}`);
@@ -1117,7 +1114,7 @@ app.on('window-all-closed', () => app.quit());
         throw new Error("$raw_user_agent differs from the browser's User-Agent header.");
 
       if (
-        !arkType("string").allows($pathname) ||
+        !arkType.keywords.string.root.allows($pathname) ||
         !/^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/.test($pathname) ||
         $current_url !== `${SITE}${$pathname}` ||
         $host !== "mrstreamer.app" ||
@@ -1136,7 +1133,8 @@ app.on('window-all-closed', () => app.quit());
         names.includes("entry_source") &&
         ["entry_source", "entry_medium", "entry_campaign"].some(
           (name) =>
-            !arkType("string").allows(fields[name]) || !/^[a-z_]{1,20}$/.test(String(fields[name])),
+            !arkType.keywords.string.root.allows(fields[name]) ||
+            !/^[a-z_]{1,20}$/.test(String(fields[name])),
         )
       )
         throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
@@ -1250,7 +1248,7 @@ app.on('window-all-closed', () => app.quit());
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
 
-    if (record(image?.result) && arkType("string").allows(image.result["data"]))
+    if (record(image?.result) && arkType.keywords.string.root.allows(image.result["data"]))
       await writeFile(join(evidence, "failure.png"), Buffer.from(image.result["data"], "base64"));
   } finally {
     const errors: string[] = [];

@@ -472,8 +472,7 @@ describe("downloads", { timeout: 30_000 }, () => {
     const stored: unknown = JSON.parse(disk.textSync(), (key, value: Json) =>
       key === "about" &&
       arkType.keywords.object.root.allows(value) &&
-      !arkType("Function").allows(value) &&
-      value !== null
+      !arkType.keywords.Function.allows(value)
         ? { ...value, originalLanguage: "fr" }
         : value,
     );

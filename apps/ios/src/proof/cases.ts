@@ -80,17 +80,17 @@ export async function outcome(request: () => Promise<ProofResponse>): Promise<Ob
             ? "undefined"
             : error === null
               ? "object"
-              : type("string").allows(error)
+              : type.keywords.string.root.allows(error)
                 ? "string"
                 : type("number | number.NaN").allows(error)
                   ? "number"
-                  : type("boolean").allows(error)
+                  : type.keywords.boolean.allows(error)
                     ? "boolean"
-                    : type("bigint").allows(error)
+                    : type.keywords.bigint.allows(error)
                       ? "bigint"
-                      : type("symbol").allows(error)
+                      : type.keywords.symbol.allows(error)
                         ? "symbol"
-                        : type("Function").allows(error)
+                        : type.keywords.Function.allows(error)
                           ? "function"
                           : "object",
     };

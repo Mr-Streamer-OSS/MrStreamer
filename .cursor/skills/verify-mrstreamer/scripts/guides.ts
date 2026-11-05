@@ -219,7 +219,7 @@ export async function guidesScenario(
         Object.entries(expected).every(([name, want]) => {
           const text = shown[drawn(name)] ?? "";
 
-          return arkType("string").allows(want) ? text.includes(want) : want.test(text);
+          return arkType.keywords.string.root.allows(want) ? text.includes(want) : want.test(text);
         })
       );
     });

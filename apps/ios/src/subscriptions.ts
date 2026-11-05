@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
@@ -116,9 +115,8 @@ export function readRegistry(): RegistryFile | null {
   const read = readJson(FILE);
 
   const object = (value: Json): value is JsonObject =>
-    value !== null &&
-    arkType.keywords.object.root.allows(value) &&
-    !arkType("Function").allows(value) &&
+    type.keywords.object.root.allows(value) &&
+    !type.keywords.Function.allows(value) &&
     !Array.isArray(value);
 
   if (!object(read)) return null;

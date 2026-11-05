@@ -394,7 +394,9 @@ function ifRangeOf(mark: string): string | null {
 /** What a failed write says of the disk or the folder, or null when it was something else. */
 function writeFailure(cause: unknown): TransferOutcome | null {
   const code =
-    type.keywords.object.root.allows(cause) && !type("Function").allows(cause) && "code" in cause
+    type.keywords.object.root.allows(cause) &&
+    !type.keywords.Function.allows(cause) &&
+    "code" in cause
       ? cause.code
       : null;
 

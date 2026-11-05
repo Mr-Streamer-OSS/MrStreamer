@@ -1,4 +1,3 @@
-import { lazy } from "@mrstreamer/contracts/lazy";
 import { type as arkType } from "arktype";
 // A fake host for XMLTV guides at addresses of their own, apart from any provider, as a guide
 // service publishes them: one file behind an address that carries a key. Tests say what each
@@ -7,10 +6,6 @@ import { type as arkType } from "arktype";
 // headers it came with.
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
-
-const Redirect = lazy(() =>
-  arkType({ redirect: "string" }).narrow((value) => !(value instanceof Function)),
-);
 
 /** The key in every address the host gives out, which must show nowhere outside the request. */
 export const GUIDE_KEY = "k3y-n0b0dy-sh0uld-s33";
@@ -72,11 +67,8 @@ export async function startGuideHost(): Promise<GuideHost> {
       if (arkType("number | number.NaN").allows(answer))
         return void response.writeHead(answer).end();
 
-      if (arkType.keywords.object.root.allows(answer) && "redirect" in answer) {
-        if (!Redirect().allows(answer)) throw new Error("Invalid guide redirect");
-
+      if (arkType.keywords.object.root.allows(answer) && "redirect" in answer)
         return void response.writeHead(302, { Location: answer.redirect }).end();
-      }
 
       const bytes = Buffer.from(answer);
       response.writeHead(200, options.headers);

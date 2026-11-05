@@ -33,21 +33,19 @@ interface FileResult {
 
 const isTest = (value: unknown): value is FileResult["assertionResults"][number] =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   "fullName" in value &&
-  arkType("string").allows(value.fullName) &&
+  arkType.keywords.string.root.allows(value.fullName) &&
   "status" in value &&
-  arkType("string").allows(value.status);
+  arkType.keywords.string.root.allows(value.status);
 
 const isFile = (value: unknown): value is FileResult =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   "name" in value &&
-  arkType("string").allows(value.name) &&
+  arkType.keywords.string.root.allows(value.name) &&
   "status" in value &&
-  arkType("string").allows(value.status) &&
+  arkType.keywords.string.root.allows(value.status) &&
   "assertionResults" in value &&
   Array.isArray(value.assertionResults) &&
   value.assertionResults.every(isTest);
@@ -63,8 +61,7 @@ function readReport(path: string): readonly FileResult[] | string {
   }
 
   if (
-    !(arkType.keywords.object.root.allows(report) && !arkType("Function").allows(report)) ||
-    report === null ||
+    !(arkType.keywords.object.root.allows(report) && !arkType.keywords.Function.allows(report)) ||
     !("testResults" in report) ||
     !Array.isArray(report.testResults) ||
     !report.testResults.every(isFile)
@@ -83,7 +80,9 @@ function problems(file: string, results: readonly FileResult[]): string[] {
   if (others.length) return [`${file}: in the report ${results.length} times.`];
 
   const message =
-    arkType("string").allows(result.message) && result.message ? ` ${result.message}` : "";
+    arkType.keywords.string.root.allows(result.message) && result.message
+      ? ` ${result.message}`
+      : "";
 
   if (result.assertionResults.length === 0) return [`${file}: ran no tests.${message}`];
   const platform = platformOnly[file];
@@ -119,7 +118,7 @@ if (files.length === 0)
 
 const report = readReport(path);
 
-if (arkType("string").allows(report)) fail([report]);
+if (arkType.keywords.string.root.allows(report)) fail([report]);
 
 const byFile = Map.groupBy(report, (result) =>
   relative(process.cwd(), result.name).replaceAll("\\", "/"),

@@ -213,7 +213,7 @@ function tmdbAnswer(url: string) {
 }
 
 const standIn: typeof fetch = async (input) => {
-  const url = arkType("string").allows(input)
+  const url = arkType.keywords.string.root.allows(input)
     ? input
     : input instanceof URL
       ? input.href

@@ -61,7 +61,8 @@ function stableOf(feed: Json | undefined): { version: string; listed: Json | und
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
 
-  if (!arkType("string").allows(version) || !/^\d+\.\d+\.\d+$/.test(version)) return null;
+  if (!arkType.keywords.string.root.allows(version) || !/^\d+\.\d+\.\d+$/.test(version))
+    return null;
 
   return files === `${RELEASES}/download/v${version}` ? { version, listed } : null;
 }
@@ -149,7 +150,7 @@ export function showFeedDownloads(page: ParentNode, feed: Json | undefined): voi
 
   if (minimum !== undefined) {
     const generated =
-      isRecord(feed) && arkType("string").allows(feed["generated"])
+      isRecord(feed) && arkType.keywords.string.root.allows(feed["generated"])
         ? Date.parse(feed["generated"])
         : NaN;
 
@@ -277,8 +278,7 @@ export function writeDownloads(
 function isRecord(value: Json | undefined): value is JsonObject {
   return (
     arkType.keywords.object.root.allows(value) &&
-    !arkType("Function").allows(value) &&
-    value !== null &&
+    !arkType.keywords.Function.allows(value) &&
     !Array.isArray(value)
   );
 }

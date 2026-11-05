@@ -84,7 +84,7 @@ async function remembered(profile: string): Promise<Json> {
 
   if (
     file === null ||
-    !(arkType.keywords.object.root.allows(file) && !arkType("Function").allows(file)) ||
+    !(arkType.keywords.object.root.allows(file) && !arkType.keywords.Function.allows(file)) ||
     Array.isArray(file)
   )
     throw new Error("Expected preferences.json to contain an object");
@@ -123,7 +123,9 @@ async function eraseBackup(d: Driver) {
  */
 async function search(d: Driver, name: string, text: string) {
   await d.click("Open Live TV", named("header button", "Live TV"));
-  await d.wait(async () => arkType("string").allows(await d.evaluate<string | undefined>(HEADING)));
+  await d.wait(async () =>
+    arkType.keywords.string.root.allows(await d.evaluate<string | undefined>(HEADING)),
+  );
 
   if ((await d.evaluate<string | undefined>(HEADING)) !== "All channels")
     await d.click(
@@ -190,7 +192,7 @@ export async function customListRoundTripScenario(
   const executable =
     priorDoctor &&
     arkType.keywords.object.root.allows(priorDoctor) &&
-    !arkType("Function").allows(priorDoctor) &&
+    !arkType.keywords.Function.allows(priorDoctor) &&
     "executable" in priorDoctor
       ? String(priorDoctor.executable)
       : "";
@@ -205,7 +207,9 @@ export async function customListRoundTripScenario(
     appAsar: await sha256(join(dirname(executable), "resources/app.asar")),
   };
   await d.click("Open Live TV in the prior release", named("header button", "Live TV"));
-  await d.wait(async () => arkType("string").allows(await d.evaluate<string | undefined>(HEADING)));
+  await d.wait(async () =>
+    arkType.keywords.string.root.allows(await d.evaluate<string | undefined>(HEADING)),
+  );
   // A list it doesn't know reads as nothing remembered: it shows its own choice.
   d.observed["priorLiveTv"] = await d.evaluate<string | undefined>(HEADING);
   await d.capture("prior-live-tv");

@@ -111,8 +111,7 @@ function record(line: string): string | null {
   }
 
   if (
-    !(type.keywords.object.root.allows(value) && !type("Function").allows(value)) ||
-    value === null ||
+    !(type.keywords.object.root.allows(value) && !type.keywords.Function.allows(value)) ||
     Array.isArray(value)
   )
     return null;
@@ -252,8 +251,7 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
 
           return (
             type.keywords.object.root.allows(value) &&
-            !type("Function").allows(value) &&
-            value !== null &&
+            !type.keywords.Function.allows(value) &&
             "outcome" in value &&
             value.outcome !== "ok" &&
             value.outcome !== "interrupted" &&

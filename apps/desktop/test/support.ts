@@ -69,7 +69,7 @@ export async function promised<I, S extends object>(
   const calls = Object.entries(service).map(([name, member]: [string, unknown]) => {
     if (Effect.isEffect(member)) return [name, () => run(member)];
 
-    if (!arkType("Function").allows(member)) return [name, member];
+    if (!arkType.keywords.Function.allows(member)) return [name, member];
 
     return [
       name,

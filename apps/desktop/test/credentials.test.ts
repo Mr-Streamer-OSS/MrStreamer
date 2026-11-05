@@ -96,7 +96,7 @@ async function failure(promise: Promise<unknown>): Promise<AppError> {
 
 /** The parts of the login `value` holds, as the window or a file would receive it. */
 function loginIn(value: Json): string[] {
-  const text = arkType("string").allows(value) ? value : JSON.stringify(value);
+  const text = arkType.keywords.string.root.allows(value) ? value : JSON.stringify(value);
 
   return [LOGIN.username, LOGIN.password].filter((secret) => text.includes(secret));
 }

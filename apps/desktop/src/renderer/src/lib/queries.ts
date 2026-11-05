@@ -111,7 +111,7 @@ export const queries = {
         }
       },
       structuralSharing: (previous, next) => {
-        if (type.keywords.object.root.allows(next) && !type("Function").allows(next)) {
+        if (type.keywords.object.root.allows(next) && !type.keywords.Function.allows(next)) {
           const read = viewingReads.get(next);
 
           if (read) {

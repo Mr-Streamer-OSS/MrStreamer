@@ -481,8 +481,7 @@ function about(url: URL, body: Json): Json {
 
   if (
     !title ||
-    !(arkType.keywords.object.root.allows(body) && !arkType("Function").allows(body)) ||
-    body === null
+    !(arkType.keywords.object.root.allows(body) && !arkType.keywords.Function.allows(body))
   )
     return body;
   const opened = url.searchParams.get("append_to_response") === "credits";
@@ -679,7 +678,8 @@ async function listen(
 function address(server: Server): string {
   const bound = server.address();
 
-  if (!bound || arkType("string").allows(bound)) throw new Error("The server has no address.");
+  if (!bound || arkType.keywords.string.root.allows(bound))
+    throw new Error("The server has no address.");
 
   return `http://127.0.0.1:${bound.port}`;
 }

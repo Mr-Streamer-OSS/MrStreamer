@@ -78,7 +78,8 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
   );
   const address = server.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No fixture address");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("No fixture address");
   const origin = `http://127.0.0.1:${address.port}`;
 
   const options = {

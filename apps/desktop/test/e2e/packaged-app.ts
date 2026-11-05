@@ -453,9 +453,9 @@ async function capture(page: Page, name: string): Promise<void> {
 
   if (
     !result ||
-    !(arkType.keywords.object.root.allows(result) && !arkType("Function").allows(result)) ||
+    !(arkType.keywords.object.root.allows(result) && !arkType.keywords.Function.allows(result)) ||
     !("data" in result) ||
-    !arkType("string").allows(result.data)
+    !arkType.keywords.string.root.allows(result.data)
   )
     throw new Error("No packaged smoke screenshot");
   writeFileSync(join(evidence, `${name}.png`), Buffer.from(result.data, "base64"));

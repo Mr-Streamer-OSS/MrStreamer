@@ -1136,7 +1136,7 @@ describe("Live on iPad and Duo windows", () => {
     state.did.filter(
       (did) =>
         arkType.keywords.object.root.allows(did) &&
-        !arkType("Function").allows(did) &&
+        !arkType.keywords.Function.allows(did) &&
         did &&
         "type" in did,
     );

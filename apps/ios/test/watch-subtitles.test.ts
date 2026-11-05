@@ -55,8 +55,7 @@ vi.mock("react-native", async () => ({
       .reduce<number | undefined>(
         (found, each) =>
           arkType.keywords.object.root.allows(each) &&
-          !arkType("Function").allows(each) &&
-          each !== null &&
+          !arkType.keywords.Function.allows(each) &&
           "fontSize" in each
             ? (each as { fontSize: number }).fontSize
             : found,

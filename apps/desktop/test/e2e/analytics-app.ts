@@ -1,4 +1,3 @@
-import { type as arkType } from "arktype";
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
@@ -902,7 +901,8 @@ async function snapshot(name: string) {
   await delay(200);
   const shot = await send("Page.captureScreenshot", { format: "png" });
 
-  if (!record(shot) || !arkType("string").allows(shot["data"])) throw new Error("No screenshot.");
+  if (!record(shot) || !type.keywords.string.root.allows(shot["data"]))
+    throw new Error("No screenshot.");
   await writeFile(join(evidence, `${name}.png`), Buffer.from(shot["data"], "base64"));
   await writeFile(
     join(evidence, `${name}-tree.json`),
@@ -1745,12 +1745,13 @@ try {
   await new Promise<void>((resolve) => capture.listen(0, "127.0.0.1", resolve));
   const address = capture.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No owned capture port.");
+  if (!address || type.keywords.string.root.allows(address))
+    throw new Error("No owned capture port.");
   endpoint = `http://127.0.0.1:${address.port}/i/v0/e/`;
   await new Promise<void>((resolve) => updateFeed.listen(0, "127.0.0.1", resolve));
   const updateAddress = updateFeed.address();
 
-  if (!updateAddress || arkType("string").allows(updateAddress))
+  if (!updateAddress || type.keywords.string.root.allows(updateAddress))
     throw new Error("No local update endpoint.");
   updateEndpoint = `http://127.0.0.1:${updateAddress.port}`;
 

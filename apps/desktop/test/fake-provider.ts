@@ -889,7 +889,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   });
   const address = server.address();
 
-  if (!address || arkType("string").allows(address))
+  if (!address || arkType.keywords.string.root.allows(address))
     throw new Error("The fake provider has no address.");
   origin = `http://127.0.0.1:${address.port}`;
 
@@ -903,7 +903,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     replaceMovieFile(movieId, file) {
       const movie = movieFiles.get(String(movieId));
 
-      if (movie) replace(movie, arkType("string").allows(file) ? fixture(file) : file);
+      if (movie) replace(movie, arkType.keywords.string.root.allows(file) ? fixture(file) : file);
     },
     unsettleMovieFile(movieId, on) {
       const movie = movieFiles.get(String(movieId));
@@ -926,7 +926,8 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     replaceEpisodeFile(episodeId, file) {
       const episode = episodeFiles.get(String(episodeId));
 
-      if (episode) replace(episode, arkType("string").allows(file) ? fixture(file) : file);
+      if (episode)
+        replace(episode, arkType.keywords.string.root.allows(file) ? fixture(file) : file);
     },
     slowFileParts(ms) {
       partsWait = ms;

@@ -54,8 +54,7 @@ let cached: Store<MediaPreferences> | undefined;
 
 const record = (value: Json | undefined): value is JsonObject =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   !Array.isArray(value);
 
 const knownLanguage = (value: Json | undefined) =>
@@ -69,7 +68,7 @@ const isChannelPicks = (value: Json | undefined): value is ChannelPicks =>
   Object.values(value).every(
     (channels) =>
       record(channels) &&
-      Object.values(channels).every((stream) => arkType("string").allows(stream)),
+      Object.values(channels).every((stream) => arkType.keywords.string.root.allows(stream)),
   );
 
 function audioOf(value: Json | undefined): Audio {

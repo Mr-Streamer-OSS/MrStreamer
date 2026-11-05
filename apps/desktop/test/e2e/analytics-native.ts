@@ -799,7 +799,8 @@ export async function runNativeTelemetry(c: Context) {
                 !!result &&
                 (!!result.destinationSha256 ||
                   result.attempts >= 4 ||
-                  (arkType("string").allows(result.lastCode) && !denied.has(result.lastCode)))
+                  (arkType.keywords.string.root.allows(result.lastCode) &&
+                    !denied.has(result.lastCode)))
               );
             });
             const results = await probe.readers();
@@ -823,7 +824,7 @@ export async function runNativeTelemetry(c: Context) {
           const recovered = results.filter(
             (result) =>
               !result.openError &&
-              arkType("string").allows(result.firstCode) &&
+              arkType.keywords.string.root.allows(result.firstCode) &&
               denied.has(result.firstCode) &&
               result.lastCode === null &&
               result.attempts > 1,

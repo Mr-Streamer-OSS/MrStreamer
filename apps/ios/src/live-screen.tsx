@@ -156,7 +156,7 @@ const text = (params: RouteParams, name: string) => {
   // Navigation keeps its params as plain serializable objects, so each one is an own value.
   const value: unknown = params && Object.getOwnPropertyDescriptor(params, name)?.value;
 
-  return arkType("string").allows(value) && value !== "" ? value : null;
+  return arkType.keywords.string.root.allows(value) && value !== "" ? value : null;
 };
 
 /**

@@ -56,7 +56,7 @@ function knownKeys(value: JsonObject, keys: readonly string[], label: string) {
 function object(value: Json | undefined, label: string): JsonObject {
   if (
     !value ||
-    !(arkType.keywords.object.root.allows(value) && !arkType("Function").allows(value)) ||
+    !(arkType.keywords.object.root.allows(value) && !arkType.keywords.Function.allows(value)) ||
     Array.isArray(value)
   )
     throw new Error(`${label} must be an object`);
@@ -65,7 +65,8 @@ function object(value: Json | undefined, label: string): JsonObject {
 }
 
 function string(value: Json | undefined, label: string): string {
-  if (!arkType("string").allows(value) || !value.trim()) throw new Error(`${label} is required`);
+  if (!arkType.keywords.string.root.allows(value) || !value.trim())
+    throw new Error(`${label} is required`);
 
   return value;
 }

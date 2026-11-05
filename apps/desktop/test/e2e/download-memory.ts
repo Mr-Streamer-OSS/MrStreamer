@@ -91,7 +91,7 @@ if (process.argv[2] === "serve") {
     const address = server.address();
     process.send?.(
       arkType.keywords.object.root.allows(address) &&
-        !arkType("Function").allows(address) &&
+        !arkType.keywords.Function.allows(address) &&
         address
         ? address.port
         : 0,

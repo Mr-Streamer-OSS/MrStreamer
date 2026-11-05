@@ -16,7 +16,9 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !registry ||
-    !(arkType.keywords.object.root.allows(registry) && !arkType("Function").allows(registry)) ||
+    !(
+      arkType.keywords.object.root.allows(registry) && !arkType.keywords.Function.allows(registry)
+    ) ||
     !("subscriptions" in registry) ||
     !Array.isArray(registry.subscriptions)
   )
@@ -25,11 +27,11 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !owner ||
-    !(arkType.keywords.object.root.allows(owner) && !arkType("Function").allows(owner)) ||
+    !(arkType.keywords.object.root.allows(owner) && !arkType.keywords.Function.allows(owner)) ||
     !("id" in owner) ||
-    !arkType("string").allows(owner.id) ||
+    !arkType.keywords.string.root.allows(owner.id) ||
     !("key" in owner) ||
-    !arkType("string").allows(owner.key)
+    !arkType.keywords.string.root.allows(owner.key)
   )
     throw new Error("Owned UI login has no account key");
 
@@ -145,7 +147,7 @@ export async function slowProvider(origin: string) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || arkType("string").allows(address)) throw new Error("No proxy port");
+  if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No proxy port");
   url = `http://127.0.0.1:${address.port}`;
 
   return {

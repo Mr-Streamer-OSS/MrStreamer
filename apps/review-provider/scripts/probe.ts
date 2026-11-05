@@ -2,7 +2,7 @@ import { type } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 
 function isObject(value: Json | undefined): value is JsonObject {
-  return type.keywords.object.root.allows(value) && value !== null && !Array.isArray(value);
+  return type.keywords.object.root.allows(value) && !Array.isArray(value);
 }
 
 function object(value: Json | undefined): JsonObject {

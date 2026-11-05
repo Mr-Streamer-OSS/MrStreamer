@@ -129,7 +129,10 @@ async function until(ready: () => boolean) {
 }
 
 vi.stubGlobal("fetch", async (input: string | URL | Request) => {
-  const url = new URL(arkType("string").allows(input) || input instanceof URL ? input : input.url);
+  const url = new URL(
+    arkType.keywords.string.root.allows(input) || input instanceof URL ? input : input.url,
+  );
+
   memory.requests++;
 
   if (url.hostname === "personal.example") {

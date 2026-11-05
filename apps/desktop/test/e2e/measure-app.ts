@@ -706,11 +706,11 @@ async function timed(
     await page.evaluate(
       `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
     );
-  const observation = observe(page, condition, arkType("string").allows(act) ? act : "");
+  const observation = observe(page, condition, arkType.keywords.string.root.allows(act) ? act : "");
 
   const [elapsed] = await Promise.all([
     observation,
-    arkType("string").allows(act) ? Promise.resolve() : act(),
+    arkType.keywords.string.root.allows(act) ? Promise.resolve() : act(),
   ]);
 
   record(name, elapsed);
@@ -749,8 +749,8 @@ async function movingWarmup(
   );
 
   const [elapsedMs] = await Promise.all([
-    observe(page, FRESH_PICTURE, arkType("string").allows(act) ? act : ""),
-    arkType("string").allows(act) ? Promise.resolve() : act(),
+    observe(page, FRESH_PICTURE, arkType.keywords.string.root.allows(act) ? act : ""),
+    arkType.keywords.string.root.allows(act) ? Promise.resolve() : act(),
   ]);
 
   observations.push({

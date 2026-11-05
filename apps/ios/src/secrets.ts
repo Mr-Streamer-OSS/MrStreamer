@@ -69,7 +69,9 @@ async function ids(): Promise<string[]> {
   const listed = await SecureStore.getItemAsync(INDEX, OPTIONS);
   const parsed: unknown = listed ? JSON.parse(listed) : [];
 
-  return Array.isArray(parsed) ? parsed.filter((id) => arkType("string").allows(id)) : [];
+  return Array.isArray(parsed)
+    ? parsed.filter((id) => arkType.keywords.string.root.allows(id))
+    : [];
 }
 
 const index = (change: (listed: string[]) => string[]) =>

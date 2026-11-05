@@ -149,7 +149,7 @@ export async function startServices() {
       for (const name of ["range", "if-range", "if-none-match", "if-modified-since"]) {
         const value = request.headers[name];
 
-        if (arkType("string").allows(value)) headers.set(name, value);
+        if (arkType.keywords.string.root.allows(value)) headers.set(name, value);
       }
 
       const upstream = await fetch(

@@ -97,10 +97,10 @@ function tokenize(expression: string): string[] {
 const truthy = (value: Value) => value !== null && value !== false && value !== 0 && value !== "";
 
 const number = (value: Value) =>
-  value === null ? 0 : arkType("boolean").allows(value) ? Number(value) : Number(value || 0);
+  value === null ? 0 : arkType.keywords.boolean.allows(value) ? Number(value) : Number(value || 0);
 
 const equal = (a: Value, b: Value) =>
-  arkType("string").allows(a) && arkType("string").allows(b)
+  arkType.keywords.string.root.allows(a) && arkType.keywords.string.root.allows(b)
     ? a.toLowerCase() === b.toLowerCase()
     : number(a) === number(b);
 
@@ -209,7 +209,11 @@ function runs(expression: string | undefined, scope: Scope): boolean {
 }
 
 const needsOf = (job: Job) =>
-  job.needs === undefined ? [] : arkType("string").allows(job.needs) ? [job.needs] : job.needs;
+  job.needs === undefined
+    ? []
+    : arkType.keywords.string.root.allows(job.needs)
+      ? [job.needs]
+      : job.needs;
 
 /** Every job `name` needs, directly or through the jobs it needs. */
 function ancestorsOf(workflow: Workflow, name: string): Set<string> {
@@ -418,7 +422,7 @@ function publication(
     actual.set(name, result);
     const tolerated = job["continue-on-error"];
 
-    const continuing = arkType("boolean").allows(tolerated)
+    const continuing = arkType.keywords.boolean.allows(tolerated)
       ? tolerated
       : tolerated
         ? truthy(evaluate(tolerated.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), scope))

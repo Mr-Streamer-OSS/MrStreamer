@@ -616,7 +616,7 @@ async function run(scenario: Scenario, prior?: string) {
       await delay(200, undefined, { signal: abort.signal });
       const shot = await send("Page.captureScreenshot", { format: "png" });
 
-      if (!record(shot) || !arkType("string").allows(shot["data"]))
+      if (!record(shot) || !arkType.keywords.string.root.allows(shot["data"]))
         throw new Error("No screenshot returned.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(shot["data"], "base64"));
       const tree = await send("Accessibility.getFullAXTree");
@@ -1482,7 +1482,7 @@ async function run(scenario: Scenario, prior?: string) {
         .send("Page.captureScreenshot", { format: "png" })
         .catch(() => undefined);
 
-      if (record(shot?.result) && arkType("string").allows(shot.result["data"]))
+      if (record(shot?.result) && arkType.keywords.string.root.allows(shot.result["data"]))
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
   } finally {

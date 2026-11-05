@@ -8,8 +8,7 @@ import { parseAst } from "vite";
 
 const isObject = (value: Json | undefined): value is JsonObject =>
   arkType.keywords.object.root.allows(value) &&
-  !arkType("Function").allows(value) &&
-  value !== null &&
+  !arkType.keywords.Function.allows(value) &&
   !Array.isArray(value);
 
 function object(value: Json | undefined): JsonObject {
@@ -48,7 +47,7 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
       if (
         record.unpacked ||
         record.link ||
-        !arkType("string").allows(record.offset) ||
+        !arkType.keywords.string.root.allows(record.offset) ||
         !/^\d+$/.test(record.offset) ||
         !arkType("number | number.NaN").allows(record.size) ||
         !Number.isSafeInteger(record.size) ||
@@ -111,7 +110,7 @@ export async function catalogueWorkerScripts(resources: string, expectedAsarSha2
         continue;
       const literal = statement.source?.value;
 
-      if (!arkType("string").allows(literal)) continue;
+      if (!arkType.keywords.string.root.allows(literal)) continue;
 
       if (!literal.startsWith(".")) continue;
 

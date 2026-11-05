@@ -409,7 +409,7 @@ export async function startFakeCastReceiver(): Promise<FakeCastReceiver> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (address === null || arkType("string").allows(address)) throw new Error("no port");
+  if (address === null || arkType.keywords.string.root.allows(address)) throw new Error("no port");
 
   return new FakeCastReceiver(server, address.port);
 }

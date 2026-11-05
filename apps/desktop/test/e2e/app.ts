@@ -101,7 +101,7 @@ export async function connect(
     const message: JsonObject = JSON.parse(String(event.data));
 
     if (arkType("number | number.NaN").allows(message.id)) pending.get(message.id)?.(message);
-    else if (arkType("string").allows(message.method))
+    else if (arkType.keywords.string.root.allows(message.method))
       listeners.get(message.method)?.(message.params);
   });
   socket.addEventListener("close", () => {

@@ -448,7 +448,9 @@ describe("movies and series", { timeout: 20_000 }, () => {
       inject("catalogueWorker") ??
       new URL("../src/main/ondemand/catalogue-worker.ts", import.meta.url);
 
-    const href = arkType("string").allows(entry) ? pathToFileURL(entry).href : entry.href;
+    const href = arkType.keywords.string.root.allows(entry)
+      ? pathToFileURL(entry).href
+      : entry.href;
 
     // Only the worker's wall clock stands still, as in catalogue-persistence.test.ts: both lists
     // are fetched at the same millisecond.
