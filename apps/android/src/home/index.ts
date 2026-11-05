@@ -37,10 +37,10 @@ export const viewingFailure = store<{
 // Once the viewer dismisses a refused progress save, later refusals stay quiet until one is kept.
 let progressQuiet = false;
 
-function attempt(
+function attempt<Result>(
   kind: "progress" | "watchlist" | "episode",
   message: string,
-  work: () => Promise<unknown>,
+  work: () => Promise<Result>,
   target: string = kind,
 ) {
   const failure = { kind, message, target, retry: () => retry() };
@@ -122,7 +122,7 @@ export function startViewing(): () => void {
     const marks = new Map<string, { sourceId: string; state?: EpisodeState; failed?: boolean }>();
     const bump = () => revision.set((n) => n + 1);
     // The last kept episode mark, which Details offers to undo until it closes or another mark.
-    const kept = store<{ message: string; undo: () => Promise<unknown> } | null>(null);
+    const kept = store<{ message: string; undo: () => Promise<void> } | null>(null);
 
     let previousViewing = viewing.state.get();
 

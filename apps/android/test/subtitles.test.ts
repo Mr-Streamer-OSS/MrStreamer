@@ -26,7 +26,7 @@ function setup() {
   const setSidecar = vi.fn(async () => true);
   const setText = vi.fn(async () => true);
   const native = { setText, setSidecar, unpackSubtitle: async (bytes: Uint8Array) => bytes };
-  const files = { read: vi.fn<() => unknown>(() => saved), write: vi.fn(), remove: vi.fn() };
+  const files = { read: vi.fn<() => SavedSubtitle | null>(() => saved), write: vi.fn(), remove: vi.fn() };
 
   const secrets = {
     read: vi.fn(async (): Promise<string | null> => null),

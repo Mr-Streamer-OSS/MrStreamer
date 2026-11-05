@@ -51,7 +51,7 @@ export type ViewingState = {
 };
 
 interface ViewingPlatform {
-  readJson(name: string): unknown;
+  readJson(name: string): Json;
   writeJson(name: string, value: Json): void;
 }
 
