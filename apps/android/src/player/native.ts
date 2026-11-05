@@ -70,7 +70,7 @@ export interface Observation {
   readonly qualityAutomatic?: boolean;
 }
 
-/** A track the media declares, and whether this phone decodes it. */
+/** A declared track and Media3 renderer support, not proof of decoded picture or sound. */
 export interface Track {
   /** Pass it back to `setQuality` for a video track. */
   readonly id: string;
