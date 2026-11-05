@@ -1,13 +1,14 @@
-type ScreenOptions = {
-  title?: string;
-  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
-};
-
 import { createRoot, document, type Root } from "./dom.ts";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import type { Locale } from "@mrstreamer/contracts/language";
 import * as React from "react";
 import { afterEach, expect, it, vi } from "vitest";
+
+/** The top bar options these screens set. */
+type ScreenOptions = {
+  title?: string;
+  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
+};
 
 // Settings' own pages in the interface language: Diagnostics' title, Share and note follow it while
 // the text it shares stays as written, and a licence's labels follow it while its names, versions

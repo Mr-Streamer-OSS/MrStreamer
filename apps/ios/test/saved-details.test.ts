@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { keychain } from "./keychain.ts";
 import type { SeriesDetails, Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
@@ -16,6 +16,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // Title and season details a launch shows from the phone: titles.ts and the records it saves in
 // Caches/details, over real files (`native-files.ts`). The desktop tests' fake Xtream panel and
@@ -118,15 +121,14 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     }
 
     if (!hold) return response;
-    const body = fixtureType({ "[string]": JsonTransport }).assert(await response.json());
+    const body = JsonRecord.assert(await response.json());
     await new Promise<void>((go) => memory.heldTranslated.push(go));
 
     return Response.json(
       url.pathname.includes("/season/")
         ? {
             ...body,
-            episodes: fixtureType({ "[string]": JsonTransport })
-              .array()
+            episodes: JsonRecord.array()
               .assert(body["episodes"])
               .map((episode) => ({
                 ...episode,
@@ -160,9 +162,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 
   if (!rewrite || !response.ok) return response;
 
-  return Response.json(
-    rewrite(fixtureType({ "[string]": JsonTransport }).assert(await response.json())),
-  );
+  return Response.json(rewrite(JsonRecord.assert(await response.json())));
 });
 
 const { native } = await import("./native-files.ts");
@@ -317,17 +317,15 @@ async function opened(app: App, title: Title) {
 const episodePlots = (body: Record<string, Json | undefined>, plot: string) => ({
   ...body,
   episodes: Object.fromEntries(
-    Object.entries(
-      fixtureType({ "[string]": fixtureType({ "[string]": JsonTransport }).array() }).assert(
-        body["episodes"],
-      ),
-    ).map(([season, episodes]) => [
-      season,
-      episodes.map((episode) => ({
-        ...episode,
-        info: { ...fixtureType({ "[string]": JsonTransport }).assert(episode["info"]), plot },
-      })),
-    ]),
+    Object.entries(arkType({ "[string]": JsonRecord.array() }).assert(body["episodes"])).map(
+      ([season, episodes]) => [
+        season,
+        episodes.map((episode) => ({
+          ...episode,
+          info: { ...JsonRecord.assert(episode["info"]), plot },
+        })),
+      ],
+    ),
   ),
 });
 
@@ -335,7 +333,7 @@ const firstEpisodePlot = (details: TitleDetails) => seriesOf(details).seasons[0]
 
 const plotOf = (body: Record<string, Json | undefined>, plot: string) => ({
   ...body,
-  info: { ...fixtureType({ "[string]": JsonTransport }).assert(body["info"]), plot },
+  info: { ...JsonRecord.assert(body["info"]), plot },
 });
 
 beforeEach(() => {
@@ -762,20 +760,18 @@ describe("details saved on the phone", () => {
     memory.details = (body) => ({
       ...body,
       episodes: Object.fromEntries(
-        Object.entries(
-          fixtureType({ "[string]": fixtureType({ "[string]": JsonTransport }).array() }).assert(
-            body["episodes"],
-          ),
-        ).map(([season, episodes]) => [
-          season,
-          episodes.map((episode) => ({
-            ...episode,
-            info: {
-              ...fixtureType({ "[string]": JsonTransport }).assert(episode["info"]),
-              movie_image: `${panel.url}/still.php?username=${ONE.username}&password=${encodeURIComponent(ONE.password)}`,
-            },
-          })),
-        ]),
+        Object.entries(arkType({ "[string]": JsonRecord.array() }).assert(body["episodes"])).map(
+          ([season, episodes]) => [
+            season,
+            episodes.map((episode) => ({
+              ...episode,
+              info: {
+                ...JsonRecord.assert(episode["info"]),
+                movie_image: `${panel.url}/still.php?username=${ONE.username}&password=${encodeURIComponent(ONE.password)}`,
+              },
+            })),
+          ],
+        ),
       ),
     });
     await opened(app, series);

@@ -1,5 +1,4 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import type { FakeProviderOptions } from "../../desktop/test/fake-provider.ts";
 import { type as arkType } from "arktype";
 import { nativePlayer } from "./native-player.ts";
@@ -203,7 +202,7 @@ vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit)
     }
 
     if (["get_vod_streams", "get_series", "get_live_streams"].includes(action)) {
-      const rows = fixtureType({ "[string]": JsonTransport })
+      const rows = arkType({ "[string]": JsonValue })
         .array()
         .assert(await response.json());
 

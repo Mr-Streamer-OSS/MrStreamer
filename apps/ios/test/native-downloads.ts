@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import type { GuideNative } from "../src/guide-native.ts";
 import type { RemindersNative } from "../src/reminders.ts";
 import { appendFileSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -1425,10 +1426,7 @@ export interface FixtureModules {
     | (Partial<Omit<typeof nativeDownloads, "reconcile">> & {
         reconcile?: (
           ...args: Parameters<typeof nativeDownloads.reconcile>
-        ) => Promise<
-          | Awaited<ReturnType<typeof nativeDownloads.reconcile>>
-          | import("@mrstreamer/contracts/json").Json
-        >;
+        ) => Promise<Awaited<ReturnType<typeof nativeDownloads.reconcile>> | Json>;
       })
     | undefined;
   ProgrammeReminders?: RemindersNative;

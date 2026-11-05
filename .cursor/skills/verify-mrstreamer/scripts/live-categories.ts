@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // TV B through the built window, including the shared Watch picker and retained viewing state.
 import type { FakeProvider } from "../../../../apps/desktop/test/fake-provider.ts";
 import { LANGUAGE_NAMES, type Locale } from "../../../../packages/contracts/src/language.ts";
@@ -539,9 +540,7 @@ export async function liveCategoriesScenario(
   await d.wait(() =>
     d.evaluate<boolean>("document.querySelector('main h1')?.textContent === 'News'"),
   );
-  d.observed["rememberedAfterBothRemovalPaths"] = await d.evaluate<
-    import("../../../../packages/contracts/src/json.ts").Json
-  >(
+  d.observed["rememberedAfterBothRemovalPaths"] = await d.evaluate<Json>(
     "(async()=>{const r=await window.mrStreamer.invoke('liveBrowse.get');return r.ok?r.value:null;})()",
   );
   await d.capture("browse-original-source-removed");

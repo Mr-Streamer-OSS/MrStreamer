@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
 import { spawnSync } from "node:child_process";
@@ -2257,7 +2257,7 @@ describe.skipIf(!hasTools)("an episode's series", () => {
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
     const row = (id: string) =>
-      fixtureType({ "[string]": JsonTransport }).assert(
+      arkType({ "[string]": JsonValue }).assert(
         JSON.parse(
           String(db.prepare("select record from downloads where id = ?").get(id)?.["record"]),
         ),

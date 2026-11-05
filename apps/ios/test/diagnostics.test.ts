@@ -1,8 +1,3 @@
-type ScreenOptions = {
-  title?: string;
-  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
-};
-
 import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
@@ -12,6 +7,12 @@ import { byIds, indexCatalogue, type IndexedCatalogue } from "@mrstreamer/core/o
 import type { OnDemandCatalogue } from "@mrstreamer/core/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AboutStanding, MetadataStanding } from "../src/titles.ts";
+
+/** The top bar options these screens set. */
+type ScreenOptions = {
+  title?: string;
+  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
+};
 
 // What the viewer sees and does to mend TMDB's part and share diagnostics: Settings' TMDB group
 // and Diagnostics row, the Diagnostics preview and its Share, and the reason a title's details

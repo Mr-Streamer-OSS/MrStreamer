@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import type { Observations } from "./language.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Drives the built Electron app through its window. Fixtures replace only provider and TMDB APIs.
@@ -293,7 +294,7 @@ async function run(scenario: Scenario, prior?: string) {
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   const actions: { action: string; at: string }[] = [];
-  const observed: import("./language.ts").Observations = {};
+  const observed: Observations = {};
   const runtimeExceptions: { launch: number; event: Json | undefined }[] = [];
   let catalogueLaunch = 0;
   let profile: string | undefined;

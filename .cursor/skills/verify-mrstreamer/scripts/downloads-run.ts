@@ -1,3 +1,4 @@
+import type { Observations } from "./language.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import type { preflight } from "./control.ts";
 import { type as arkType } from "arktype";
@@ -200,7 +201,7 @@ export interface Run<D> {
   readonly profile: string;
   readonly abort: AbortController;
   readonly actions: { action: string; at: string }[];
-  readonly observed: import("./language.ts").Observations;
+  readonly observed: Observations;
   readonly networkLog: string;
   readonly windowRequests: { at: number; url: string }[];
   readonly provider: FakeProvider;
@@ -224,12 +225,12 @@ export async function ownedRun<D>(
     readonly watchWindow: boolean;
     readonly prefix: string;
     readonly locale?: Locale;
-    readonly observed: import("./language.ts").Observations;
+    readonly observed: Observations;
     readonly pictures: () => Promise<Server>;
     readonly driver: (page: Page, base: BaseDriver) => D;
     readonly describe: (started: Started) => Record<string, Json | undefined>;
     /** Runs first, inside the run, before any fixture starts. */
-    readonly prepare?: (observed: import("./language.ts").Observations) => Promise<void>;
+    readonly prepare?: (observed: Observations) => Promise<void>;
     /** Runs first in cleanup, before the app is stopped. */
     readonly release?: (clean: (operation: () => Promise<void>) => Promise<void>) => Promise<void>;
     readonly proof: Record<string, Json | undefined>;

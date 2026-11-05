@@ -1,3 +1,5 @@
+import type { Download } from "../../../../packages/contracts/src/downloads.ts";
+import type { UpdateStatus } from "../../../../packages/contracts/src/updates.ts";
 import { type } from "arktype";
 // Installed-only media acceptance. Product pins are separate from this verifier's revision.
 import assert from "node:assert/strict";
@@ -65,7 +67,7 @@ type MediaProof = {
   browserArguments?: string[];
   identity?: AppIdentity;
   renderer?: string;
-  updateStatus?: import("../../../../packages/contracts/src/updates.ts").UpdateStatus;
+  updateStatus?: UpdateStatus;
   actions?: { at: string; action: string }[];
   requests?: WindowRequest[];
   videoAtFailure?: MediaObservation;
@@ -183,7 +185,7 @@ type MediaProof = {
     provenNative: boolean;
     decodedWithControls: MediaObservation;
   };
-  completedCopies?: readonly import("../../../../packages/contracts/src/downloads.ts").Download[];
+  completedCopies?: readonly Download[];
   offlineCutoff?: {
     at: number;
     rendererRequestsFrom: number;
@@ -192,7 +194,7 @@ type MediaProof = {
   };
   fixturePortsRefused?: { origin: string; refused: true }[];
   fixturesStoppedAt?: number;
-  standaloneCopies?: readonly import("../../../../packages/contracts/src/downloads.ts").Download[];
+  standaloneCopies?: readonly Download[];
   startupSequence?: {
     copy: Delivery;
     rejected: TypeCheck;

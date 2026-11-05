@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { keychain } from "./keychain.ts";
 import { nativePlayer } from "./native-player.ts";
@@ -15,6 +15,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // The lists a launch shows from the phone: account.ts and the files it saves in Caches, over real
 // files (`native-files.ts`, whose gate holds a read, write or move as a busy disk would, or for
@@ -88,9 +91,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 
   if (action !== "get_live_streams" || !rewrite || !response.ok) return response;
 
-  const rows = fixtureType({ "[string]": JsonTransport })
-    .array()
-    .assert(await response.json());
+  const rows = JsonRecord.array().assert(await response.json());
 
   return Response.json(rewrite(rows));
 });
@@ -974,9 +975,7 @@ describe("a large provider's lists", () => {
     const name = `${id}.titles.json`;
     const envelope = contents(name);
 
-    const movies = fixtureType({ "[string]": JsonTransport })
-      .array()
-      .assert(envelope.catalogue.movies);
+    const movies = JsonRecord.array().assert(envelope.catalogue.movies);
 
     movies[movies.length - 3] = { ...movies[movies.length - 3], streamUrl: "http://x" };
     writeFileSync(pathOf(name), JSON.stringify(envelope));

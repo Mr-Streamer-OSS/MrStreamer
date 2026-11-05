@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 // What a marketing capture run takes and how it records each master, for marketing-capture.ts.
 // See docs/contributing/marketing-artwork.md.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -61,15 +62,15 @@ export type Provenance = Omit<
   readonly electron?: string | undefined;
   readonly status?: string;
   readonly method?: string;
-  readonly nativeSession?: import("../../../packages/contracts/src/json.ts").Json;
+  readonly nativeSession?: Json;
   readonly evidence?: string;
   readonly language?: string;
   readonly caption?: string;
-  readonly sources?: import("../../../packages/contracts/src/json.ts").Json | undefined;
-  readonly media?: import("../../../packages/contracts/src/json.ts").Json | undefined;
-  readonly buildFiles?: import("../../../packages/contracts/src/json.ts").Json | undefined;
-  readonly fixtureFiles?: import("../../../packages/contracts/src/json.ts").Json | undefined;
-  readonly analytics?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly sources?: Json | undefined;
+  readonly media?: Json | undefined;
+  readonly buildFiles?: Json | undefined;
+  readonly fixtureFiles?: Json | undefined;
+  readonly analytics?: Json | undefined;
   readonly credits?: readonly string[];
   readonly limitations?: readonly string[];
   readonly linuxCaptureScriptSha256?: string;

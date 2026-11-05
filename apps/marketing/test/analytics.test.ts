@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -95,11 +95,11 @@ const sent = () =>
   fetchMock.mock.calls.map(([url, init]) => ({
     url,
     init,
-    body: fixtureType({
+    body: arkType({
       api_key: "string",
       event: "string",
       distinct_id: "string",
-      properties: fixtureType({ "[string]": JsonTransport }),
+      properties: arkType({ "[string]": JsonValue }),
     }).assert(JSON.parse(String(init.body))),
   }));
 

@@ -1,3 +1,4 @@
+import type { Observations } from "./language.ts";
 import type { preflight } from "./control.ts";
 // The downloads-series scenario of `pnpm verify:desktop`: downloaded episodes of a series grouped on
 // the Downloads page and played on, copy after copy, in the offline player, driven through the
@@ -75,7 +76,7 @@ export async function runDownloadsSeries(
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
   /** Another connection to the run's profile database, holding its write lock while set. */
   let locked: DatabaseSync | undefined;
-  const observed: import("./language.ts").Observations = { build };
+  const observed: Observations = { build };
 
   const steps = async ({
     start,

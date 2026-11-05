@@ -1,4 +1,4 @@
-import { JsonValue as JsonTransport } from "../../../../packages/contracts/src/json-value.ts";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import { preferenceValues } from "./preference-reply.ts";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
@@ -878,7 +878,7 @@ async function verifyAbout() {
 
   if (shown.source !== target.source || !shown.text.includes(target.version))
     throw new Error("About does not match the pinned version/source");
-  await snapshot("about-" + JsonTransport.array().assert(observations["instances"]).length);
+  await snapshot("about-" + JsonValue.array().assert(observations["instances"]).length);
   await keyEscape();
 }
 
@@ -2088,9 +2088,7 @@ try {
     )
       throw new Error("Re-enable did not observe an unknown current version exactly once.");
 
-    const diagnostics = await live().evaluate<Json>(
-      "window.mrStreamer.invoke('diagnostics.preview')",
-    );
+    const diagnostics = await live().evaluate("window.mrStreamer.invoke('diagnostics.preview')");
 
     if (JSON.stringify(diagnostics).includes(first.distinct_id))
       throw new Error("Installation identity leaked into diagnostics.");

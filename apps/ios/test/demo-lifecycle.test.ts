@@ -1,5 +1,4 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import type { FixtureModules } from "./native-downloads.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
@@ -9,6 +8,9 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // Production account, catalogue, downloads, player and viewing owners. Only native I/O, fetch
 // and telemetry transport are replaced. Media requests receive fixture bytes, never a network.
@@ -95,16 +97,16 @@ const disk = (name: string) => new DiskFile(native.root, "documents", name);
 const json = (name: string): Json => JSON.parse(disk(name).textSync());
 
 const registry = () =>
-  fixtureType({ "[string]": JsonTransport }).assert(
+  JsonRecord.assert(
     disk("subscriptions.json").exists
       ? json("subscriptions.json")
       : json("subscriptions.json.next"),
   );
 
 const downloads = () =>
-  fixtureType({
-    items: fixtureType({ "[string]": JsonTransport }).array(),
-    forgetting: fixtureType("string[]"),
+  arkType({
+    items: JsonRecord.array(),
+    forgetting: arkType("string[]"),
   }).assert(json("downloads.json"));
 
 const save = (name: string, value: Json) => disk(name).writeSync(JSON.stringify(value));
@@ -778,16 +780,10 @@ describe("Demo through the production lifecycle", () => {
       favouriteMembership: carried,
     });
     const app = await withDemo();
-    expect(
-      fixtureType({ "[string]": JsonTransport }).assert(json("viewing.json"))[
-        "favouriteMembership"
-      ],
-    ).toEqual(carried);
+    expect(JsonRecord.assert(json("viewing.json"))["favouriteMembership"]).toEqual(carried);
     await app.recordProgress(movie, 30, 150, Date.now());
     expect(await app.resetDemo()).toEqual({ kind: "started" });
-    expect(
-      fixtureType({ "[string]": JsonTransport }).assert(json("viewing.json"))["accounts"],
-    ).not.toHaveProperty("demo");
+    expect(JsonRecord.assert(json("viewing.json"))["accounts"]).not.toHaveProperty("demo");
     expect(json("viewing.json")).not.toHaveProperty("favouriteMembership");
   });
 
@@ -994,9 +990,7 @@ describe("Demo through the production lifecycle", () => {
     const own: TitleRef = { kind: "movie", subscriptionId: id, id: "own" };
     await app.recordProgress(own, 55, 150, Date.now());
 
-    const before = fixtureType({ accounts: fixtureType({ "[string]": JsonTransport }) }).assert(
-      json("viewing.json"),
-    ).accounts[id];
+    const before = arkType({ accounts: JsonRecord }).assert(json("viewing.json")).accounts[id];
 
     app.playDownload(kept.id);
     await until(() => memory.played.length === 1);
@@ -1026,11 +1020,9 @@ describe("Demo through the production lifecycle", () => {
     expect(await app.endDemo()).toEqual({ kind: "erased", files: "deferred" });
     expect(app.playback.playbackState.get().phase).toBe(phase);
     expect(folder(kept.id).exists).toBe(true);
-    expect(
-      fixtureType({ accounts: fixtureType({ "[string]": JsonTransport }) }).assert(
-        json("viewing.json"),
-      ).accounts[id],
-    ).toEqual(before);
+    expect(arkType({ accounts: JsonRecord }).assert(json("viewing.json")).accounts[id]).toEqual(
+      before,
+    );
     close.resolve();
     await playing;
     await until(() => !folder(kept.id).exists);

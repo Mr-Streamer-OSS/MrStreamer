@@ -1,10 +1,10 @@
+import { type as arkType } from "arktype";
 import type { Appearance, Highlight } from "./controls.ts";
 import type { Bounds, Row } from "./live-names.ts";
 import type { Source } from "./moved-guide.ts";
 import type { SQLOutputValue } from "node:sqlite";
 import type { NetworkObservation } from "./downloads-run.ts";
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../../packages/contracts/src/json-value.ts";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import type { Playing } from "./hls-compatibility.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 // The language scenario: the interface language picked in Settings, through the real window, at
@@ -86,9 +86,7 @@ export async function languageScenario(d: Driver): Promise<void> {
   const prefsPath = join(d.profile, "preferences.json");
 
   const savedPreferences = async () =>
-    fixtureType({ "[string]": JsonTransport }).assert(
-      JSON.parse(await readFile(prefsPath, "utf8")),
-    );
+    arkType({ "[string]": JsonValue }).assert(JSON.parse(await readFile(prefsPath, "utf8")));
 
   await smallestWindow(d);
 

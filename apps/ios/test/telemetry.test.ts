@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Analytics, type AnalyticsPorts } from "../src/telemetry/analytics.ts";
 import type { AnalyticsRecord, CaptureEvent } from "../src/telemetry/model.ts";
 import { analyticsTransport, type CaptureTransport } from "../src/telemetry/transport.ts";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // The iOS app's statistics as PostHog would receive them: the app's own telemetry and player run
 // against a loopback capture server, with the native player, app state and files as stand-ins
@@ -95,7 +98,7 @@ beforeEach(async () => {
       }
 
       raw.push(body);
-      captured.push(fixtureType({ "[string]": JsonTransport }).assert(JSON.parse(body)));
+      captured.push(JsonRecord.assert(JSON.parse(body)));
 
       if (respond === "hang") {
         hung.push(response);
@@ -155,9 +158,7 @@ const names = () => captured.map((body) => body["event"]);
 
 const ofName = (name: string) =>
   captured.flatMap((body) =>
-    body["event"] === name
-      ? [fixtureType({ "[string]": JsonTransport }).assert(body["properties"])]
-      : [],
+    body["event"] === name ? [JsonRecord.assert(body["properties"])] : [],
   );
 
 const stored = () => JSON.parse(files.get("analytics.json") ?? "null") as AnalyticsRecord | null;

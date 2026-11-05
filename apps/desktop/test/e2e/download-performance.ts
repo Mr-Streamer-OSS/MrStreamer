@@ -1,5 +1,5 @@
-import { type as fixtureType } from "arktype";
-import { JsonValue as JsonTransport } from "../../../../packages/contracts/src/json-value.ts";
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Native Electron diagnostic. Run serially for each frozen build, with the same executable:
 // xvfb-run -a node apps/desktop/test/e2e/download-performance.ts --app-dir /build/apps/desktop \
@@ -394,7 +394,7 @@ try {
   results["beforeCatalogue"] = beforeCatalogue;
   assert.equal(beforeIdentity.rows.length, 26);
   assert.equal(beforeIdentity.seasons.length, 20);
-  await page!.evaluate<Json>(
+  await page!.evaluate(
     `document.querySelector('[aria-label="Download S1 E1"]').scrollIntoView({block:'center'})`,
   );
   await capture("details-before");
@@ -419,7 +419,7 @@ try {
   await checked("Profiler.start");
   profiling = true;
   page!.on("Tracing.dataCollected", (params) =>
-    trace.push(...fixtureType({ value: JsonTransport.array() }).assert(params).value),
+    trace.push(...arkType({ value: JsonValue.array() }).assert(params).value),
   );
 
   page!.on("Tracing.tracingComplete", () => {
@@ -504,17 +504,17 @@ try {
     );
   }
 
-  const cpu = fixtureType({ profile: JsonTransport }).assert(await checked("Profiler.stop"));
+  const cpu = arkType({ profile: JsonValue }).assert(await checked("Profiler.stop"));
   profiling = false;
   await writeFile(join(output, "renderer.cpuprofile"), JSON.stringify(cpu.profile));
   await checked("Tracing.end");
   tracing = false;
   await waitFor(async () => traceComplete, 10000);
   await writeFile(join(output, "renderer-trace.json"), JSON.stringify({ traceEvents: trace }));
-  results["nativeObservation"] = await page!.evaluate<Json>(
+  results["nativeObservation"] = await page!.evaluate(
     `({events:window.__events,frames:window.__frames,rootCommits:window.__rootCommits})`,
   );
-  await page!.evaluate<Json>("window.__framing=false;window.__stopDownloadObserver()");
+  await page!.evaluate("window.__framing=false;window.__stopDownloadObserver()");
   assert.deepEqual(
     await identity(),
     beforeIdentity,
@@ -565,7 +565,7 @@ try {
       ),
     10000,
   );
-  await page!.evaluate<Json>(
+  await page!.evaluate(
     `document.querySelector('[aria-label="Cancel download of S1 E1"]').scrollIntoView({block:'center'})`,
   );
   const positive: Json[] = [];
@@ -619,14 +619,12 @@ try {
     }
 
     results["failedNativeObservation"] = await page
-      .evaluate<Json>("({events:window.__events,frames:window.__frames})")
+      .evaluate("({events:window.__events,frames:window.__frames})")
       .catch(String);
     await capture("failure").catch(() => {});
-    results["failureDom"] = await page.evaluate<Json>("document.body.innerText").catch(String);
+    results["failureDom"] = await page.evaluate("document.body.innerText").catch(String);
     results["failureInstrumentation"] = await page
-      .evaluate<Json>(
-        "({commits:window.__rootCommits,hook:!!window.__REACT_DEVTOOLS_GLOBAL_HOOK__})",
-      )
+      .evaluate("({commits:window.__rootCommits,hook:!!window.__REACT_DEVTOOLS_GLOBAL_HOOK__})")
       .catch(String);
   }
 } finally {

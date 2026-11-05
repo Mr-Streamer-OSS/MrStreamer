@@ -586,7 +586,7 @@ try {
 
   if (page)
     observations["actualMseAtFailure"] = await page
-      .evaluate<Json>(
+      .evaluate(
         "({ checks: window.__compatibility?.checks, errors: window.__compatibility?.errors })",
       )
       .catch(() => null);

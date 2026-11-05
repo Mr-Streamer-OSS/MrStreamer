@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import type { preflight } from "./control.ts";
 // The downloads-queue scenario of `pnpm verify:desktop`: Pause, Resume, Up and Down on the
 // Downloads page's rows and Pause all in its heading, driven through the built app's window with
@@ -220,10 +221,7 @@ export async function runDownloadsQueue(
         .observe(document.querySelector('section'), { childList: true });
     })()`);
 
-    const keyboardLog = () =>
-      online.page.evaluate<import("../../../../packages/contracts/src/json.ts").Json[]>(
-        "window.__keyboard ?? []",
-      );
+    const keyboardLog = () => online.page.evaluate<Json[]>("window.__keyboard ?? []");
 
     // 2. Pause the transfer from the keyboard: it stops once its request ended, keeps its bytes,
     // and the keyboard stays on its row's control, now Resume, though the row moved.
