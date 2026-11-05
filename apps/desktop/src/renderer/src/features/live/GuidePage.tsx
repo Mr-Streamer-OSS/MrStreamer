@@ -836,7 +836,9 @@ export function GuidePage({ active }: { active: boolean }) {
           />
           <main className="flex min-w-0 flex-1 flex-col">
             {/* The switch sits beside Watch, or at the end of the title while nothing plays. */}
-            <NowStrip active={active} viewSwitch={viewSwitch} />
+            <div hidden={guideSearch}>
+              <NowStrip active={active} viewSwitch={viewSwitch} />
+            </div>
             {guideSearch ? (
               <GuideSearch
                 list={title}

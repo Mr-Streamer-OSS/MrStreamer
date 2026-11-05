@@ -63,6 +63,11 @@ const LAYOUT = `(() => {
     if (!title || title.box.width === 0 || cut(title.box, title.from)) titles.push(title?.data ?? '?');
     if (!channel || channel.box.width === 0 || cut(channel.box, channel.from)) channels.push(title?.data ?? '?');
   }
+  const visible = rows.filter(row => {
+    const box = row.getBoundingClientRect();
+    return box.height > 0 && box.top >= 0 && box.bottom <= innerHeight;
+  });
+  if (!visible.length) problems.push('No complete programme row is visible');
   if (titles.length) problems.push(titles.length + ' of ' + rows.length + ' titles are cut, such as ' + titles[0]);
   if (channels.length) problems.push(channels.length + ' of ' + rows.length + ' channels are cut, such as on ' + channels[0]);
   return {
@@ -434,7 +439,98 @@ export async function guideSearchScenario(d: Driver, otherUrl: string): Promise<
   );
   await d.wait(() => d.evaluate<boolean>("!document.body.innerText.includes('Tuning')"));
   await d.capture("guide-watch-playback");
-  await d.click("Stop proved playback", "document.querySelector('button[aria-label=Stop]')");
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
+
+  const pickLanguage = async (prefix: string, language: string) => {
+    await d.click(
+      "Settings for selected-preview layout",
+      "document.querySelector('header button[aria-pressed]')",
+    );
+    const select = "document.querySelector('main section select:has(option[value=\"en-US\"])')";
+    await d.wait(() => d.exists(select));
+    await d.evaluate(`${select}.focus()`);
+
+    if (language === "en-US") await d.key("Home", 36);
+    else
+      for (const char of prefix) {
+        await d.send("Input.dispatchKeyEvent", { type: "keyDown", key: char, text: char });
+        await d.send("Input.dispatchKeyEvent", { type: "keyUp", key: char });
+      }
+
+    await d.wait(() =>
+      d.evaluate<boolean>(`document.documentElement.lang === ${JSON.stringify(language)}`),
+    );
+    await d.key("Escape", 27);
+  };
+
+  await pickLanguage("De", "de-DE");
+  await d.send("Emulation.setDeviceMetricsOverride", {
+    width: 960,
+    height: 600,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await d.evaluate("document.documentElement.style.fontSize = '125%'");
+  await d.click(
+    "Live TV with selected playing channel",
+    named("header button", translate("de-DE", "Live TV")),
+  );
+
+  if (!(await d.exists(field)))
+    await d.click(
+      "Search with selected preview",
+      "document.querySelector('[data-guide-search-opener]')",
+    );
+  await search("Weekly");
+  const selectedLayout = await d.evaluate<{ problems: string[] }>(LAYOUT);
+  expect(
+    selectedLayout.problems.length === 0,
+    `Selected playing preview layout: ${selectedLayout.problems.join("; ")}`,
+  );
+  await d.capture("guide-selected-playing-de-960-text125");
+  await d.click(
+    "Close search restores selected preview",
+    `document.querySelector('button[aria-label=${JSON.stringify(translate("de-DE", "Close guide search"))}]')`,
+  );
+  const watch = named("main section button", translate("de-DE", "Watch"));
+  await d.wait(() => d.exists(`${watch}?.checkVisibility()`));
+  await d.capture("guide-selected-preview-restored");
+  await d.click("Return to Watch to stop selected channel", watch);
+  await d.click(
+    "Stop selected preview proof",
+    `document.querySelector('button[aria-label=${JSON.stringify(translate("de-DE", "Stop"))}]')`,
+  );
+
+  if (await d.exists("document.querySelector('[data-view=watch]')")) await d.key("Escape", 27);
+  await d.click(
+    "Live TV with stopped selected channel",
+    named("header button", translate("de-DE", "Live TV")),
+  );
+  await d.click(
+    "Search with stopped selected preview",
+    "document.querySelector('[data-guide-search-opener]')",
+  );
+  await search("Weekly");
+  const stoppedLayout = await d.evaluate<{ problems: string[] }>(LAYOUT);
+  expect(
+    stoppedLayout.problems.length === 0,
+    `Stopped selected preview layout: ${stoppedLayout.problems.join("; ")}`,
+  );
+  await d.capture("guide-selected-stopped-de-960-text125");
+  d.observed.selectedPreviewLayouts = {
+    playing: selectedLayout,
+    stopped: stoppedLayout,
+    restored: true,
+  };
+  await pickLanguage("En", "en-US");
+  await d.send("Emulation.setDeviceMetricsOverride", {
+    width: 1280,
+    height: 800,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await d.evaluate("document.documentElement.style.fontSize = ''");
 
   if (await d.exists("document.querySelector('[data-view=watch]')")) await d.key("Escape", 27);
   await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
