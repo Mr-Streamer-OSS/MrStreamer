@@ -1,3 +1,6 @@
+import { preview } from "../../preview/session.ts";
+import { useStore } from "../../platform/store.ts";
+import { PreviewBack, PreviewFrame } from "../../preview/controls.tsx";
 import { lazy, Suspense, useSyncExternalStore } from "react";
 import * as Native from "react-native";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/core/i18n";
@@ -15,14 +18,17 @@ const Preferences = lazy(() => import("../../settings/consent-prompt.tsx"));
 export const unstable_settings = { anchor: START_DESTINATION };
 
 // Home, Live, Movies and Series, each keeping its own stack while another shows. Back at a
-// destination's root returns to Live, and at Live's root leaves the app.
+// destination's root returns to Live, and at Live's root leaves the app (in preview, returns to
+// Connect). While previewing, each destination's scene sits under the Preview mode strip.
 export default function DestinationsLayout() {
   useSyncExternalStore(onLanguageChange, currentLanguage);
+  const browsing = useStore(preview);
   const layout = layoutFor(useWindowDimensions().width);
 
   return (
     <>
-      {"Platform" in Native && Native.Platform.OS === "android" ? (
+      <PreviewBack />
+      {!browsing && "Platform" in Native && Native.Platform.OS === "android" ? (
         <Suspense fallback={null}>
           <Preferences />
         </Suspense>
@@ -30,6 +36,7 @@ export default function DestinationsLayout() {
       <Tabs
         backBehavior="initialRoute"
         tabBar={(props) => <DestinationBar {...props} layout={layout} />}
+        screenLayout={({ children }) => <PreviewFrame>{children}</PreviewFrame>}
         screenOptions={{
           headerShown: false,
           tabBarPosition: layout === "rail" ? "left" : "bottom",

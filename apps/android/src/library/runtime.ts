@@ -1,3 +1,5 @@
+import { preview } from "../preview/session.ts";
+import { exampleLibrary } from "../preview/library.ts";
 import { useSyncExternalStore } from "react";
 import { store } from "../platform/store.ts";
 import { currentLanguage } from "@mrstreamer/core/i18n";
@@ -98,7 +100,8 @@ export function library() {
 export function useLibraryModel(injected?: ReturnType<typeof libraryModel>) {
   useSyncExternalStore(revision.subscribe, revision.get);
 
-  const active = injected ?? library();
+  const browsing = useSyncExternalStore(preview.subscribe, preview.get);
+  const active = injected ?? (browsing ? exampleLibrary : library());
   useSyncExternalStore(
     active.metadata?.subscribe ?? noSubscription,
     active.metadata?.revision ?? noRevision,

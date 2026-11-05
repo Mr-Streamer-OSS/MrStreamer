@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { useIsFocused, useSegments } from "expo-router";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -231,6 +232,7 @@ function BulkRow({
   ).length;
 
   async function ask(only: readonly SeriesFile[] = files) {
+    if (providerRequired("download", version.subscriptionId)) return;
     const asked = { reader: reader(), version: ownedKey(version) };
 
     try {

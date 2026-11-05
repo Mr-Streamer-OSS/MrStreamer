@@ -16,11 +16,15 @@ const { createRoot } = (await import(REACT_DOM)) as {
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const service = vi.hoisted(() => ({ schedule: vi.fn(), programmeAt: vi.fn() }));
+const service = vi.hoisted(() => ({
+  schedule: vi.fn(),
+  programmeAt: vi.fn(),
+  start: vi.fn(async () => {}),
+}));
 
 vi.mock("../src/bootstrap/sources.ts", () => ({ sources: {} }));
 
-vi.mock("../src/guide/runtime.ts", () => ({ startGuide: async () => {} }));
+vi.mock("../src/guide/runtime.ts", () => ({ startGuide: service.start }));
 
 vi.mock("../src/guide/guide-sources.ts", () => ({ guides: {} }));
 
@@ -159,5 +163,31 @@ it("ignores an older programme response after the selected programme fails", asy
     expect(container.textContent).toBe("New news");
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+it("defers guide startup while its screen previews and resumes on exit", async () => {
+  const { enterPreview, exitPreview } = await import("../src/preview/session.ts");
+  const { useGuideStart } = await import("../src/guide/hooks.ts");
+  const container = document.createElement("div");
+  const root = createRoot(container);
+
+  function Screen() {
+    useGuideStart();
+
+    return null;
+  }
+
+  service.start.mockClear();
+  enterPreview();
+
+  try {
+    await act(async () => root.render(createElement(Screen)));
+    expect(service.start).not.toHaveBeenCalled();
+    await act(async () => exitPreview());
+    expect(service.start).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    exitPreview();
   }
 });

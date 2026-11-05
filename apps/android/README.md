@@ -209,3 +209,22 @@ the android-emulator skill's cleanup procedure.
 Android 0.1.0 is source on `main` only: no build has been distributed, and nothing is on Google
 Play. The [Android programme card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=291935563)
 lists the delivery cards that follow this one.
+
+## Browse without a provider
+
+Connect > Explore app opens the real Live, Home, Movies, Series, Search and detail screens with
+fictional local examples. Preview mode is an in-memory browsing session. It installs no source,
+account, credential or playable media and needs no provider or TMDB requests. Example content
+actions, Cast, reminders, favourites and Watchlist offer Add provider before their owners run.
+A Preview mode strip on every destination offers Add provider and Exit preview.
+Personal list edits and download queue changes also require a provider while previewing.
+Real downloaded files still play through OfflinePlay without a provider. Preview never mounts the
+first-run statistics prompt or records its feature visits, and muted autoplay refuses examples silently.
+Cancelling the provider form leaves the browse tree mounted; connecting normally removes the
+examples. Exit preview and a fresh process restore the normal source gate without deleting data.
+
+Source checks: `pnpm exec vitest run apps/android/test/preview*.test.ts` and
+`pnpm exec tsc --noEmit -p apps/android`. These exercise rendered library browsing, action refusal,
+Live/Guide display reads and the absence of writes and requests. Installed phone/tablet Back,
+TalkBack, large text and real provider connection still require managed Android verification;
+source tests and a JavaScript bundle do not qualify those native paths.

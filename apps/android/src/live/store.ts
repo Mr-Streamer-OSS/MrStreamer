@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
@@ -109,6 +110,7 @@ export function listsOwner(
     state,
     read,
     create(name: string, first?: Entry) {
+      if (providerRequired("save", first?.sourceId)) return "";
       const valid = named(name);
       const entries = first ? [current(first)] : [];
       const id = `list-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -117,14 +119,19 @@ export function listsOwner(
       return id;
     },
     rename(id: string, name: string) {
+      if (providerRequired("save")) return false;
+
       if (id === FAVOURITES) throw new Error("identity");
       change(id, (list) => ({ ...list, name: named(name, id) }));
     },
     delete(id: string) {
+      if (providerRequired("save")) return false;
+
       if (id === FAVOURITES) throw new Error("identity");
       save(lists().filter((list) => list.id !== id));
     },
     member(id: string, entry: Entry, included: boolean) {
+      if (providerRequired("save", entry.sourceId)) return false;
       const now = current(entry);
       change(id, (list) => ({
         ...list,
@@ -136,6 +143,7 @@ export function listsOwner(
       }));
     },
     commit(draft: Draft) {
+      if (providerRequired("save")) return false;
       change(draft.id, (list) => {
         if (
           snapshot(list, sources()) !== draft.snapshot ||

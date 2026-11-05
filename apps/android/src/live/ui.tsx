@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { router, useSegments } from "expo-router";
 import { scheduleHref } from "../guide/routes.ts";
 import { destinationIn } from "../navigation/open.ts";
@@ -206,7 +207,12 @@ export function Channel({
   const now = t("No programme information");
   const favourite = t(starred ? "Remove from Favourites" : "Add to Favourites");
 
+  const openLists = () => {
+    if (!providerRequired("save", entry.sourceId)) onLists(entry);
+  };
+
   const play = () => {
+    if (providerRequired("play", entry.sourceId)) return;
     const intent = playIntent(entry, sources.state.get());
 
     if (!intent) return;
@@ -242,12 +248,12 @@ export function Channel({
 
         if (nativeEvent.actionName === "star" && saved.kind === "ready") star();
 
-        if (nativeEvent.actionName === "lists") onLists(entry);
+        if (nativeEvent.actionName === "lists") openLists();
 
         if (nativeEvent.actionName === "schedule") schedule();
       }}
       onPress={play}
-      onLongPress={() => onLists(entry)}
+      onLongPress={openLists}
       {...focus}
       android_ripple={{ color: colors.ripple }}
       style={{
@@ -454,7 +460,8 @@ export function Empty({
 
 /**
  * New list and Rename's Material dialog: a 56dp outlined field with the name, a 60-character
- * counter and the reason a name was refused, in red, keeping the text to fix. `onSave` throws
+ * counter and the reason a name was refused, in red, keeping the text to fix. `onSave` returns
+ * false for provider admission refusal, keeping the dialog open, and throws
  * what the lists owner refused.
  */
 export function NameDialog({
@@ -473,15 +480,14 @@ export function NameDialog({
   /** What a storage failure says, for the name typed. */
   failed: (name: string) => string;
   onClose: () => void;
-  onSave: (name: string) => void;
+  onSave: (name: string) => void | boolean;
 }) {
   const [name, setName] = useState(initial);
   const [error, setError] = useState("");
 
   const save = () => {
     try {
-      onSave(name);
-      onClose();
+      if (onSave(name) !== false) onClose();
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : "";
       const typed = name.trim();
@@ -670,7 +676,7 @@ export function ListsSheet({ entry, onClose }: { entry: Entry | null; onClose: (
           failed={(name) => t("Couldn't make {name}", { name })}
           onClose={() => setCreating(false)}
           onSave={(name) => {
-            lists.create(name, entry);
+            return Boolean(lists.create(name, entry));
           }}
         />
       ) : null}

@@ -1,4 +1,11 @@
+import { enterPreview, exitPreview, providerPrompt } from "../src/preview/session.ts";
 import { expect, it, vi } from "vitest";
+
+vi.mock("../src/library/intents.ts", async (original) => {
+  const module = await original<typeof import("../src/library/intents.ts")>();
+
+  return { ...module, libraryIntents: module.intentRegistry() };
+});
 
 const mocks = vi.hoisted(() => ({
   playerState: { kind: "playing", intent: { kind: "file", path: "/private/copy", title: "Copy" } },
@@ -172,3 +179,79 @@ it.each([false, true])(
     mocks.playerState.intent.kind = "file";
   },
 );
+
+it("refuses destructive real-download actions in preview before reading or writing native state", async () => {
+  const owner = downloads();
+
+  const row = {
+    id: "copy",
+    key: "copy",
+    sourceId: "real",
+    title: "Copy",
+    sourceLabel: "Real",
+    kind: "movie",
+    mediaId: "1",
+    container: "mp4",
+    state: "complete",
+    bytes: 1,
+    total: 1,
+    reason: "",
+  } as const;
+
+  const native = vi.spyOn(owner.native, "filePath");
+  mocks.command.mockClear();
+  mocks.review.mockClear();
+  mocks.release.mockClear();
+  enterPreview();
+
+  try {
+    await owner.command(row, "remove");
+    expect(providerPrompt.get()).toBe("download");
+    const { replaceNow } = await import("../src/downloads/replace.ts");
+    replaceNow(owner, row);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(owner.prompt.get()).toBeNull();
+    await owner.replace(row);
+    expect(native).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
+    expect(mocks.command).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+  } finally {
+    native.mockRestore();
+    exitPreview();
+  }
+});
+
+it("direct registered download refuses preview before resolving or enqueueing", async () => {
+  const { libraryIntents } = await import("../src/library/intents.ts");
+  const { library } = await import("../src/library/runtime.ts");
+  const owner = downloads();
+  const stop = owner.start();
+  enterPreview();
+  vi.mocked(library).mockClear();
+  mocks.review.mockClear();
+  mocks.admit.mockClear();
+  mocks.notification.mockClear();
+
+  try {
+    libraryIntents.state.get().download?.({
+      action: "download",
+      media: {
+        kind: "movie",
+        sourceId: "example:627",
+        titleKey: "example",
+        titleId: "1",
+        version: { subscriptionId: "example:627", id: "1", tags: [] },
+      },
+    });
+    expect(providerPrompt.get()).toBe("download");
+    expect(library).not.toHaveBeenCalled();
+    expect(mocks.review).not.toHaveBeenCalled();
+    expect(mocks.admit).not.toHaveBeenCalled();
+    expect(mocks.notification).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    exitPreview();
+  }
+});

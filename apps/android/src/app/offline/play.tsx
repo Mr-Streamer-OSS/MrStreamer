@@ -1,3 +1,4 @@
+import { providerRequired } from "../../preview/session.ts";
 import { downloads } from "../../downloads/runtime.ts";
 import { t } from "../../downloads/copy.ts";
 import { router, useIsFocused } from "expo-router";
@@ -43,6 +44,7 @@ export default function OfflinePlay() {
       : null;
 
   async function remove(path: string) {
+    if (providerRequired("download")) return;
     await player.stop();
     const owner = downloads();
 

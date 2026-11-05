@@ -1,3 +1,6 @@
+import { t as homeT } from "../home/copy.ts";
+import { preview, providerRequired, isExample } from "../preview/session.ts";
+import { t as previewCopy } from "../preview/copy.ts";
 import { stopSeriesDownloads } from "../downloads/series.ts";
 import {
   SeriesDialogs,
@@ -41,7 +44,13 @@ import * as storage from "../platform/storage.ts";
 import { browseCollection, type BrowseChoices, type BrowsedCollection } from "./browse.ts";
 import { useLocale } from "./catalogue.ts";
 import { t } from "./i18n.ts";
-import { libraryDownloads, libraryIntents, libraryViewing, type MediaIdentity } from "./intents.ts";
+import {
+  libraryDownloads,
+  libraryIntents,
+  libraryViewing,
+  type MediaIdentity,
+  type ViewingPresentationAdapter,
+} from "./intents.ts";
 import type { DetailState, LibraryModel } from "./model.ts";
 import {
   Artwork,
@@ -725,14 +734,42 @@ function useDownloadPresentation(media: MediaIdentity) {
 }
 
 /** Rereads viewing actions after a committed change; refused writes retain their prior label. */
-function useViewingPresentation() {
+function useViewingPresentation(): ViewingPresentationAdapter | undefined {
   const adapter = useStore(libraryViewing.state);
   useSyncExternalStore(
     adapter?.subscribe ?? noDownloadSubscription,
     adapter?.snapshot ?? noDownloadSnapshot,
   );
 
-  return adapter;
+  const browsing = useStore(preview);
+
+  return browsing
+    ? {
+        subscribe: preview.subscribe,
+        snapshot: () => 0,
+        notice: () => null,
+        play: () => {
+          providerRequired("play");
+        },
+        watchlist: () => ({
+          label: homeT("Add to Watchlist"),
+          activate: () => {
+            providerRequired("save");
+          },
+        }),
+        episode: () => ({
+          label: homeT("Mark watched"),
+          activate: () => {
+            providerRequired("save");
+          },
+        }),
+        series: (_, details) => {
+          const episode = details.seasons[0]?.episodes[0];
+
+          return episode ? { episode, resumeAt: 0, resumed: false } : undefined;
+        },
+      }
+    : adapter;
 }
 
 /** Paper A's primary series action follows this version's history, independent of the open season. */
@@ -798,30 +835,60 @@ function MovieActions({
   const viewing = useViewingPresentation();
   const saved = useDownloadPresentation(media);
 
+  const playButton =
+    play && container ? (
+      <FilledButton
+        label={t("Play")}
+        icon="play-arrow"
+        onPress={() => {
+          viewing?.play(media);
+          play(
+            {
+              kind: "title",
+              sourceId: title.subscriptionId,
+              media: "movie",
+              id: title.id,
+              container,
+              title: title.title,
+            },
+            media,
+          );
+        }}
+      />
+    ) : null;
+
+  // Paper A's Explore details: Play across the width over labelled Download and Cast, each of
+  // which offers Add provider through its owner's admission before any native work.
+  if (isExample(title.subscriptionId))
+    return (
+      <View style={{ gap: 8, paddingTop: 12 }}>
+        {playButton ? <View style={{ flexDirection: "row" }}>{playButton}</View> : null}
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {download ? (
+            <View style={{ flex: 1 }}>
+              <OutlinedButton
+                label={t("Download")}
+                icon="download"
+                onPress={() => download({ action: "download", media })}
+              />
+            </View>
+          ) : null}
+          <View style={{ flex: 1 }}>
+            <OutlinedButton
+              label={previewCopy("Cast")}
+              icon="cast"
+              onPress={() => providerRequired("cast", title.subscriptionId)}
+            />
+          </View>
+        </View>
+      </View>
+    );
+
   if (!play && !download && !saved) return null;
 
   return (
     <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
-      {play && container ? (
-        <FilledButton
-          label={t("Play")}
-          icon="play-arrow"
-          onPress={() => {
-            viewing?.play(media);
-            play(
-              {
-                kind: "title",
-                sourceId: title.subscriptionId,
-                media: "movie",
-                id: title.id,
-                container,
-                title: title.title,
-              },
-              media,
-            );
-          }}
-        />
-      ) : null}
+      {playButton}
       {saved ? (
         <View style={{ gap: 4 }}>
           <OutlinedButton
@@ -1172,7 +1239,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     if (!title) return;
 
     try {
-      savedVersions().set(title.key, next);
+      if (!isExample(title.subscriptionId)) savedVersions().set(title.key, next);
       setSaveFailed(false);
     } catch {
       setSaveFailed(true);
@@ -1245,7 +1312,34 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
   const header = (
     <>
       {backdrop ? <Artwork url={backdrop} height={beside ? 220 : 190} radius={12} /> : null}
-      {facts.length ? (
+      {isExample(title.subscriptionId) ? (
+        // Paper A's Explore details: EXAMPLE leads the facts, and TalkBack reads it first.
+        <View
+          accessible
+          accessibilityLabel={[previewCopy("Example"), ...facts].join(", ")}
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "baseline",
+            columnGap: 12,
+            paddingTop: backdrop ? 16 : 4,
+          }}
+        >
+          <Text
+            style={{
+              color: colors.text,
+              fontSize: 12,
+              lineHeight: 16,
+              fontWeight: "700",
+              letterSpacing: 0.48,
+              textTransform: "uppercase",
+            }}
+          >
+            {previewCopy("Example")}
+          </Text>
+          {facts.length ? <Text style={typeScale.meta}>{facts.join(" · ")}</Text> : null}
+        </View>
+      ) : facts.length ? (
         <Text style={{ ...typeScale.meta, paddingTop: backdrop ? 12 : 4 }}>
           {facts.join(" · ")}
         </Text>

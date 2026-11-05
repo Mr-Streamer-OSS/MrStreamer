@@ -1,3 +1,4 @@
+import { ExploreEntry } from "../preview/controls.tsx";
 import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { router } from "expo-router";
@@ -51,34 +52,37 @@ export default function Connect() {
         owner={sources}
         onConnected={() => {}}
         footer={
-          hasDownloads ? (
-            // As Connect's own action rows: a 24dp icon 16dp before its 16sp label.
-            <Press
-              label={t("Downloads")}
-              onPress={() => router.push("/offline")}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 16,
-                minHeight: 48,
-                marginTop: 8,
-                paddingHorizontal: 16,
-              }}
-            >
-              <Icon name="download" />
-              <Text
+          <>
+            <ExploreEntry />
+            {hasDownloads ? (
+              // As Connect's own action rows: a 24dp icon 16dp before its 16sp label.
+              <Press
+                label={t("Downloads")}
+                onPress={() => router.push("/offline")}
                 style={{
-                  flex: 1,
-                  color: colors.text,
-                  fontSize: 16,
-                  lineHeight: 20,
-                  fontWeight: "500",
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 16,
+                  minHeight: 48,
+                  marginTop: 8,
+                  paddingHorizontal: 16,
                 }}
               >
-                {t("Downloads")}
-              </Text>
-            </Press>
-          ) : null
+                <Icon name="download" />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: colors.text,
+                    fontSize: 16,
+                    lineHeight: 20,
+                    fontWeight: "500",
+                  }}
+                >
+                  {t("Downloads")}
+                </Text>
+              </Press>
+            ) : null}
+          </>
         }
       />
     </SafeAreaView>

@@ -13,7 +13,7 @@ export type ReplacePrompt =
 
 export interface ReplaceOwner {
   readonly prompt: Store<ReplacePrompt | null>;
-  /** Native's answer, or why it didn't ask: the copy is playing or still closing. */
+  /** Native's answer, or a refusal: playing, closing, or provider-required in preview. */
   replace(row: DownloadRow): Promise<string>;
 }
 
@@ -27,6 +27,8 @@ export function replaceNow(owner: ReplaceOwner, row: DownloadRow) {
   owner
     .replace(row)
     .then((reason) => {
+      if (reason === "provider-required") return;
+
       if (reason === "playing" || reason === "closing")
         owner.prompt.set({ kind: "refused", row, reason });
       else if (reason !== "replaced") owner.prompt.set({ kind: "failed", row });

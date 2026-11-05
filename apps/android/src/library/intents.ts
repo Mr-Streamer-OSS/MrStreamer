@@ -1,3 +1,4 @@
+import { playSource, providerRequired } from "../preview/session.ts";
 import type { TitleVersion } from "@mrstreamer/contracts/ondemand";
 import type { PlayIntent } from "../player/intent.ts";
 import { store } from "../platform/store.ts";
@@ -21,12 +22,27 @@ export interface IntentHandlers {
 }
 
 /** Feature owners register here. Unregistering an older owner cannot remove its successor. */
-export function intentRegistry() {
+export function intentRegistry(
+  admit?: (sourceId: string | undefined, action: "play" | "download") => boolean,
+) {
   const state = store<IntentHandlers>({});
 
   return {
     state,
-    register(handlers: IntentHandlers) {
+    register(registered: IntentHandlers) {
+      const { play, download } = registered;
+      const handlers = { ...registered };
+
+      // Forwards the caller's exact arguments, so owners see the same call they were made.
+      if (admit && play)
+        handlers.play = (...args) =>
+          args[0].kind === "file" || admit(playSource(args[0]), "play") ? play(...args) : undefined;
+
+      if (admit && download)
+        handlers.download = (intent) => {
+          if (admit(intent.media.sourceId, "download")) download(intent);
+        };
+
       state.set((current) => ({ ...current, ...handlers }));
 
       return () => {
@@ -42,7 +58,9 @@ export function intentRegistry() {
   };
 }
 
-export const libraryIntents = intentRegistry();
+export const libraryIntents = intentRegistry(
+  (sourceId, action) => !providerRequired(action, sourceId),
+);
 
 /** Downloads owns the words and actions; Library only renders this optional presentation. */
 export interface DownloadPresentation {

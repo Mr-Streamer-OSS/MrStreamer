@@ -1,3 +1,4 @@
+import { playSource, providerRequired } from "../preview/session.ts";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import type { TitleProgress } from "@mrstreamer/contracts/viewing";
 import { resumePoint } from "@mrstreamer/core/viewing/continue";
@@ -35,6 +36,7 @@ export function startEntries(options: {
   const stopPlayer = options.player.state.subscribe(observePlayer);
 
   const play = async (intent: PlayIntent, media?: MediaIdentity) => {
+    if (providerRequired("play", playSource(intent))) return;
     const output = options.player.cast.state.get();
 
     if (

@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { useState } from "react";
 import { Text, View } from "react-native";
 import type { Programme } from "@mrstreamer/contracts/guide";
@@ -90,6 +91,8 @@ export function ReminderAction({
   if (!saved && programme.start <= Date.now() && !error) return null;
 
   const press = async () => {
+    if (providerRequired("remind", identity.sourceId)) return;
+
     if (busy) return;
     setBusy(true);
     setError(null);

@@ -1,3 +1,4 @@
+import { playSource, providerRequired } from "../preview/session.ts";
 import { router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, ScrollView, Text, useWindowDimensions, View } from "react-native";
@@ -60,6 +61,7 @@ function onAir(programme: Programme | null, now = Date.now()) {
 
 /** Plays a channel, as Live's rows do, and opens Watch. */
 function watch(intent: PlayIntent) {
+  if (intent.kind !== "file" && providerRequired("play", playSource(intent))) return;
   player.play(intent);
   router.push(watchHref(intent));
 }
@@ -406,6 +408,11 @@ export function HomeScreen() {
   const [listing, setListing] = useState<Entry | null>(null);
   const [refused, setRefused] = useState<Continuing | null>(null);
 
+  // Holding a row opens its lists, which an example offers Add provider for instead.
+  const hold = (entry: Entry) => {
+    if (!providerRequired("save", entry.sourceId)) setListing(entry);
+  };
+
   const channelsWaiting = home.restoring || (!home.onNow.length && home.loading.length > 0);
 
   const loading =
@@ -471,7 +478,7 @@ export function HomeScreen() {
         onNow
           .slice(0, wide ? 5 : 3)
           .map(({ row, programme }) => (
-            <OnNowRow key={row.key} row={row} programme={programme} onHold={setListing} />
+            <OnNowRow key={row.key} row={row} programme={programme} onHold={hold} />
           ))
       )}
     </View>
@@ -499,7 +506,7 @@ export function HomeScreen() {
         <StillTiles inset={inset} height={68} />
       ) : large ? (
         favourites.map(({ row, programme }) => (
-          <OnNowRow key={row.key} row={row} programme={programme} onHold={setListing} />
+          <OnNowRow key={row.key} row={row} programme={programme} onHold={hold} />
         ))
       ) : (
         <Shelf inset={inset}>
@@ -509,10 +516,10 @@ export function HomeScreen() {
               title={row.title}
               detail={programme?.title}
               onPress={() => watchChannel(row)}
-              onHold={() => setListing(identity(row))}
+              onHold={() => hold(identity(row))}
               actions={[
                 { name: "activate", label: live("Play"), run: () => watchChannel(row) },
-                { name: "lists", label: live("Lists"), run: () => setListing(identity(row)) },
+                { name: "lists", label: live("Lists"), run: () => hold(identity(row)) },
               ]}
             />
           ))}

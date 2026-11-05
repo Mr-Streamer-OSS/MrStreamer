@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
@@ -177,6 +178,8 @@ let browsing = 0;
  * Looks for TVs until the returned stop is called: only while the chooser is open, with no speculative permission prompt.
  */
 export function browseTvs(): () => void {
+  if (providerRequired("cast")) return () => {};
+
   const module = native();
 
   if (!module) return () => {};
@@ -676,6 +679,7 @@ let made = 0;
  * receiver doesn't start.
  */
 export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Promise<TvLink> {
+  if (providerRequired("cast")) throw new TvRefused("network");
   const module = native();
 
   if (!module) throw new Error("This build can't play on a TV.");

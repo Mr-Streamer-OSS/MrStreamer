@@ -1,3 +1,4 @@
+import { preview, isExample, playSource, providerRequired } from "../preview/session.ts";
 import { playerOutput, type CastOutput } from "./output.ts";
 import type { SubtitleModel } from "../subtitles/model.ts";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
@@ -289,6 +290,8 @@ export function playerOwner(
     previewState,
     endPreview,
     preview(intent) {
+      if (preview.get() || (intent.kind !== "file" && isExample(intent.sourceId))) return null;
+
       if (state.get().kind !== "idle" || owner.media.watching) return null;
       void endPreview();
       const controller = new AbortController();
@@ -357,6 +360,7 @@ export function playerOwner(
     },
 
     play(intent) {
+      if (intent.kind !== "file" && providerRequired("play", playSource(intent))) return "";
       const output = cast.state.get();
 
       if (
