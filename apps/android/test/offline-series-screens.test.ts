@@ -199,6 +199,8 @@ const dialog = (container: HTMLElement) =>
     .map((d) => d.textContent)
     .join("\n");
 
+const reader = {};
+
 const seasonLabel = (n: number) => (n === 0 ? "Specials" : `Season ${n}`);
 
 /** The whole series' bulk row on Details for the fixture series `s`. */
@@ -210,7 +212,7 @@ const seriesRow = (s: Awaited<ReturnType<typeof series>>, versionLabel = "Full H
     seasonLabel,
     versionLabel,
     sourceLabel: "Source",
-    reader: () => "reader",
+    reader: () => reader,
   });
 
 it("reviews the whole series with Specials and exact counts, then reports what it queued", async () => {
@@ -388,7 +390,7 @@ it.each(["tab", "downloads", "watch", "offline", "season", "tablet"])(
             seasonLabel,
             versionLabel: "Full HD",
             sourceLabel: "Source",
-            reader: () => "reader",
+            reader: () => reader,
             inline,
             season,
           }),
