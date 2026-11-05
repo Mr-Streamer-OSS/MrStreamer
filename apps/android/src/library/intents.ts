@@ -92,7 +92,7 @@ export interface ViewingNotice {
 /** Viewing owns persistence and failure presentation; Library exposes current title/episode facts. */
 export interface ViewingPresentationAdapter {
   subscribe(listener: () => void): () => void;
-  snapshot(): unknown;
+  snapshot(): number;
   watchlist(title: import("@mrstreamer/contracts/ondemand").Title): {
     label: string;
     activate(): void;

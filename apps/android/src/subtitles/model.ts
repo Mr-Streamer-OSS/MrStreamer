@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import {
   DEFAULT_SUBTITLE_TIMING,
   SavedSubtitle,
@@ -29,7 +30,7 @@ export interface SubtitleTitle {
 }
 
 export interface SubtitleFiles {
-  read(key: string): unknown;
+  read(key: string): Json;
   write(key: string, value: SavedSubtitle): void;
   remove(key: string): void;
 }
