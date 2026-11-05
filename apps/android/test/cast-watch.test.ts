@@ -35,12 +35,27 @@ vi.mock("react-native", async () => {
     children?: ReactNode;
     accessibilityLabel?: string;
     onPress?: () => void;
+    onAccessibilityAction?: (event: { nativeEvent: { actionName: string } }) => void;
   };
 
   const view =
     (tag: string) =>
-    ({ children, accessibilityLabel, onPress }: Props) =>
-      h(tag, { "aria-label": accessibilityLabel, onClick: onPress, tabIndex: -1 }, children);
+    ({ children, accessibilityLabel, onPress, onAccessibilityAction }: Props) =>
+      h(
+        tag,
+        {
+          "aria-label": accessibilityLabel,
+          onClick: onPress,
+          onKeyDown: onAccessibilityAction
+            ? (event: { key: string }) =>
+                onAccessibilityAction({
+                  nativeEvent: { actionName: event.key === "ArrowUp" ? "increment" : "decrement" },
+                })
+            : undefined,
+          tabIndex: -1,
+        },
+        children,
+      );
 
   return {
     View: view("div"),
@@ -516,3 +531,54 @@ it("mini Play explicitly recovers a stopped TV instead of sending resume to a de
   await press(shown, "Play");
   expect(scenario.asked).toEqual(["play here"]);
 });
+
+it("dispatches adjustable volume increment and decrement from the visible TV sheet", async () => {
+  output({ kind: "remote", tv: lounge });
+  const shown = mount(() => createElement(Watch));
+  await press(shown, "On Lounge TV");
+  act(() => player.cast.volume.set({ level: 0.6, muted: true }));
+  const control = shown.querySelector('[aria-label="TV volume"]')!;
+  act(() =>
+    control.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })),
+  );
+  act(() =>
+    control.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })),
+  );
+  expect(scenario.asked).toEqual(["volume 0.7", "volume 0.5"]);
+});
+
+it.each([
+  [
+    "en-US",
+    "Returning playback to this phone.",
+    "Couldn't return playback to this phone. Try Play here again.",
+    "Something else plays on Lounge TV.",
+  ],
+  [
+    "nl-NL",
+    "Afspelen terugzetten naar deze telefoon.",
+    "Kon niet terugkeren naar deze telefoon. Probeer Hier afspelen opnieuw.",
+    "Er speelt iets anders op Lounge TV.",
+  ],
+] as const)(
+  "renders distinct returning, failed restore and takeover in %s",
+  async (locale, returning, failed, taken) => {
+    const { currentLanguage, setLanguage } = await import("@mrstreamer/mobile/language");
+    const previous = currentLanguage();
+
+    try {
+      act(() => setLanguage({ locale, formats: locale }));
+      output({ kind: "stopped", tv: lounge, reason: "returning", detached: true });
+      const shown = mount(() => createElement(Watch));
+      expect(shown.textContent).toContain(returning);
+      expect(shown.textContent).not.toContain(failed);
+      output({ kind: "stopped", tv: lounge, reason: "restore", detached: true });
+      expect(shown.textContent).toContain(failed);
+      expect(shown.textContent).not.toContain(returning);
+      output({ kind: "stopped", tv: lounge, reason: "taken", detached: true });
+      expect(shown.textContent).toContain(taken);
+    } finally {
+      act(() => setLanguage(previous));
+    }
+  },
+);

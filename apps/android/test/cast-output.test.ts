@@ -23,6 +23,13 @@ const tv = { id: "test", name: "Test TV", model: null };
 function setup(source = false, budget = vi.fn(async () => true)) {
   let observe!: (event: Observation) => void;
   let tracks!: (event: never) => void;
+
+  let command!: (event: {
+    attempt: string;
+    command: "pause" | "resume" | "seek";
+    positionMs: number | null;
+  }) => void;
+
   let report!: (status: TvStatus) => void;
   let lose!: (why: "lost" | "stopped") => void;
 
@@ -69,8 +76,10 @@ function setup(source = false, budget = vi.fn(async () => true)) {
     setSpeed: vi.fn(async () => true),
     setQuality: vi.fn(async () => true),
     capabilities: () => ({ containers: [], decoders: {} }),
-    addListener: ((event: string, listener: (value: Observation) => void) => {
-      if (event === "onState") observe = listener;
+    addListener: ((event: string, listener: (value: never) => void) => {
+      if (event === "onState") observe = (value) => listener(value as never);
+
+      if (event === "onOutputCommand") command = (value) => listener(value as never);
 
       if (event === "onTracks") tracks = listener as (event: never) => void;
 
@@ -110,6 +119,8 @@ function setup(source = false, budget = vi.fn(async () => true)) {
   return {
     ...output,
     local,
+    command: (event: Parameters<typeof command>[0]) => command(event),
+    volume: link.setVolume,
     ready,
     tracks: (value: {
       attempt: string;
@@ -450,4 +461,36 @@ it("a failed live rewrite stops remote output without transferring commands loca
   );
   expect(await f.native.resume("one")).toBe(false);
   expect(f.local.resume).not.toHaveBeenCalled();
+});
+
+it("dispatches native output events only to the attached current remote load", async () => {
+  const f = setup();
+  await onTv(f);
+  f.command({ attempt: "one", command: "pause", positionMs: null });
+  f.command({ attempt: "one", command: "resume", positionMs: null });
+  f.command({ attempt: "one", command: "seek", positionMs: 51234 });
+  expect(f.loaded.pause).toHaveBeenCalledOnce();
+  expect(f.loaded.play).toHaveBeenCalledOnce();
+  expect(f.loaded.seek).toHaveBeenCalledExactlyOnceWith(51.234);
+  f.command({ attempt: "stale", command: "seek", positionMs: 1000 });
+  f.report({ state: "stopped", time: null, duration: null });
+
+  for (const command of ["pause", "resume", "seek"] as const)
+    f.command({ attempt: "one", command, positionMs: 2000 });
+  expect(f.loaded.pause).toHaveBeenCalledOnce();
+  expect(f.loaded.play).toHaveBeenCalledOnce();
+  expect(f.loaded.seek).toHaveBeenCalledOnce();
+  expect(f.local.pause).not.toHaveBeenCalled();
+  expect(f.local.resume).not.toHaveBeenCalled();
+  expect(f.local.seek).not.toHaveBeenCalled();
+  await f.cast.cancel();
+});
+
+it("clamps finite output volume and rejects nonfinite input before the sender", async () => {
+  const f = setup();
+  await onTv(f);
+
+  for (const value of [-2, 0.35, 3, NaN, Infinity, -Infinity]) f.cast.setVolume(value);
+  expect(f.volume.mock.calls).toEqual([[0], [0.35], [1]]);
+  await f.cast.cancel();
 });

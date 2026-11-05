@@ -256,3 +256,34 @@ it.each(["CANCELLED", "INTERRUPTED"])(
     }
   },
 );
+
+it("frames receiver volume and explicitly unmutes the last muted receiver report", async () => {
+  const { connectTv } = await import("../src/cast/sender.ts");
+  const link = await connectTv({ id: "tv", name: "TV", model: null });
+
+  try {
+    tvSays(lastChannel, "receiver-0", RECEIVER, {
+      type: "RECEIVER_STATUS",
+      status: {
+        applications: [{ appId: "CC1AD845", sessionId: "s1", transportId: "t1" }],
+        volume: { level: 0.4, muted: true },
+      },
+    });
+    expect(link.volume.get()).toEqual({ level: 0.4, muted: true });
+    sent.length = 0;
+    link.setVolume(0.7);
+    expect(
+      sent.map(({ to, namespace, payload }) => ({
+        to,
+        namespace,
+        type: payload.type,
+        volume: payload["volume"],
+      })),
+    ).toEqual([
+      { to: "receiver-0", namespace: RECEIVER, type: "SET_VOLUME", volume: { level: 0.7 } },
+      { to: "receiver-0", namespace: RECEIVER, type: "SET_VOLUME", volume: { muted: false } },
+    ]);
+  } finally {
+    await link.close(false);
+  }
+});
