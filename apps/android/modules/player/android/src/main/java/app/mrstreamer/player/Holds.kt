@@ -2,10 +2,17 @@ package app.mrstreamer.player
 
 import android.net.Uri
 import android.os.Handler
+import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorInput
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.PositionHolder
+import androidx.media3.extractor.ts.TsExtractor
 import java.io.IOException
 
 /**
@@ -107,4 +114,64 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
       }
     }
   }
+}
+
+/**
+ * A progressive HTTP source probes Range on each open at zero with unset requested length.
+ * A 400/403 probe refusal retries the original GET once, closing the refused connection first.
+ * If the provider answers 200, only TS extraction loses its length: this avoids the duration-tail
+ * probe and publishes an unseekable map. The loader keeps the real length and ordinary retry reads;
+ * other containers, local files, HLS and providers answering 206 keep their normal extraction.
+ */
+@UnstableApi
+internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private val extractors: ExtractorsFactory) {
+  private var ignoredRange = false
+
+  /** Published by TS extraction to the owner on the application thread. */
+  @Volatile var confirmedNoRange = false
+    private set
+
+  val readers = DataSource.Factory {
+    val reader = upstream.createDataSource()
+    object : DataSource by reader {
+      override fun open(dataSpec: DataSpec): Long {
+        val probe = dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong()
+        val length = try {
+          reader.open(if (probe) dataSpec.withAdditionalHeaders(mapOf("Range" to "bytes=0-")) else dataSpec)
+        } catch (cause: HttpDataSource.InvalidResponseCodeException) {
+          if (!probe || cause.responseCode !in listOf(400, 403) || Thread.currentThread().isInterrupted) throw cause
+          try { reader.close() } catch (cleanup: IOException) {
+            cause.addSuppressed(cleanup)
+            throw cause
+          }
+          try { reader.open(dataSpec) } catch (retry: IOException) {
+            retry.addSuppressed(cause)
+            throw retry
+          }
+        }
+        if (probe) ignoredRange = reader.responseCode == 200
+        return length
+      }
+    }
+  }
+
+  val factory = object : ExtractorsFactory by extractors {
+    override fun createExtractors(): Array<Extractor> = wrap(extractors.createExtractors())
+    override fun createExtractors(uri: Uri, headers: Map<String, List<String>>): Array<Extractor> =
+      wrap(extractors.createExtractors(uri, headers))
+  }
+
+  private fun wrap(candidates: Array<Extractor>): Array<Extractor> = candidates.map { extractor ->
+    if (extractor !is TsExtractor) extractor else object : Extractor by extractor {
+      override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
+        if (ignoredRange) confirmedNoRange = true
+        return extractor.read(
+          if (ignoredRange) object : ExtractorInput by input {
+            override fun getLength(): Long = C.LENGTH_UNSET.toLong()
+          } else input,
+          seekPosition,
+        )
+      }
+    }
+  }.toTypedArray()
 }
