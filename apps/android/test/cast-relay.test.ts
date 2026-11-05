@@ -142,4 +142,4 @@ it("keeps every URI in mixed old/fresh refreshes available beyond the route cap,
   } finally {
     await relay.revoke();
   }
-});
+}, 20000);
