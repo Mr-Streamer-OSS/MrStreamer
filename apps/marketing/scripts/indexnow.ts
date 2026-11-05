@@ -1,4 +1,3 @@
-import { isCallable } from "../../../packages/contracts/src/callable.ts";
 // This module is also the dependency-free notification CLI shipped by the secret-free build.
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +18,7 @@ export function readIndexNowBuild(text: string, revision: string, sitemap: strin
   const value: unknown = JSON.parse(text);
   const invalid = new Error("Invalid IndexNow build identity or ownership value.");
 
-  if (value !== Object(value) || isCallable(value)) throw invalid;
+  if (value !== Object(value)) throw invalid;
 
   const fields: {
     site?: unknown;

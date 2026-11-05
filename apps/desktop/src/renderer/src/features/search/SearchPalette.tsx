@@ -45,13 +45,13 @@ import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 
+const CachedStaleTime = lazy(() => type("number | number.NaN"));
+
 /**
  * Searches channel names across every category, then movies and series, then programmes on now
  * and later today. Opens with ⌘K or Ctrl K, on what Movies or Series searched for, if anything.
  * A programme to come opens to its description and Remind me; one with a reminder shows a bell.
  */
-const CachedStaleTime = lazy(() => type("number | number.NaN"));
-
 export function SearchPalette() {
   const open = useUi((state) => state.searchOpen);
   // What had the keyboard as search opened, as a control of the details that stay open under it,

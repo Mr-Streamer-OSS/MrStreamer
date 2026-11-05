@@ -28,12 +28,12 @@ import {
 } from "./messages.ts";
 import { defined } from "@mrstreamer/core/defined";
 
+const ReceiverNumber = lazy(() => type("number | number.NaN"));
+
 /**
  * Google's Default Media Receiver: the app every Cast receiver can start, which plays the address
  * it is given and needs no registration.
  */
-const ReceiverNumber = lazy(() => type("number | number.NaN"));
-
 const MEDIA_RECEIVER = "CC1AD845";
 
 /** How long the adapter waits at each step, in milliseconds. */
