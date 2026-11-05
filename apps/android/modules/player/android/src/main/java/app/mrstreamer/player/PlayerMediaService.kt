@@ -17,6 +17,13 @@ class PlayerMediaService : MediaSessionService() {
     return super.onStartCommand(intent, flags, startId)
   }
   override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = PlayerHost.session
+  override fun onDestroy() {
+    // The session outlives this service. Detach its notification controller before teardown
+    // so later playback cannot issue foreground starts from the destroyed service instance.
+    sessions.forEach { removeSession(it) }
+    super.onDestroy()
+    PlayerHost.serviceDestroyed()
+  }
   override fun onTaskRemoved(rootIntent: Intent?) {
     PlayerHost.existing()?.stopAll()
     stopSelf()
