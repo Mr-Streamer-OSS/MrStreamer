@@ -1316,7 +1316,8 @@ it("does not announce empty while titles or programmes are pending", async () =>
   expect(p.scope().textContent).not.toContain("No matches");
   programmes.resolve([]);
   await settled();
-  expect(p.scope().textContent).toContain("No matches");
+  expect(p.scope().textContent).not.toContain("No matches");
+  expect(p.scope().querySelector("[data-guide-search]")).not.toBeNull();
 });
 
 it("keeps a selected programme when channel results arrive before it", async () => {
@@ -1366,7 +1367,8 @@ it("blocks old palette rows immediately within the input event, and respects IME
   await settled(150);
   await settled();
   expect(p.rows()).toHaveLength(0);
-  expect(p.scope().textContent).toContain("No matches");
+  expect(p.scope().textContent).not.toContain("No matches");
+  expect(p.scope().querySelector("[data-guide-search]")).not.toBeNull();
 });
 
 it("blocks old Live rows in the raw debounce window and keeps names usable on guide failure", async () => {

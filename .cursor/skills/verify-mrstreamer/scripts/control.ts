@@ -324,14 +324,30 @@ async function run(scenario: Scenario, prior?: string) {
     const stage = scenario === "home-stage" || scenario === "home-stage-live-only";
     provider = await startFakeProvider({
       channels:
-        scenario === "live-categories" ? 64000 : scenario === "guide-grid-scroll" ? 20000 : 60,
+        scenario === "live-categories"
+          ? 64000
+          : scenario === "guide-grid-scroll"
+            ? 20000
+            : scenario === "guide-search"
+              ? 2000
+              : 60,
       // Poster grids read 120 titles a page; poster-grid crosses several.
       titles: scenario === "poster-grid" ? 400 : 30,
       live: true,
       ...scenarioProvider(scenario),
     });
 
-    if (scenario === "guide-search") provider.serveGuide(searchGuide());
+    if (scenario === "guide-search") {
+      provider.serveGuide(searchGuide());
+      other = await startFakeProvider({
+        channels: 60,
+        titles: 10,
+        live: true,
+        second: true,
+        channelOf: (channel) => backupChannel(guided(channel)),
+      });
+      other.serveGuide(searchGuide().replaceAll("Weekly", "BackupWeekly"));
+    }
 
     if (scenario === "next-episode") provider.replaceEpisodeFile(81000, "title-h264-aac.mp4");
 
@@ -1185,7 +1201,7 @@ async function run(scenario: Scenario, prior?: string) {
         quit,
       };
 
-      if (scenario === "guide-search") await guideSearchScenario(driver);
+      if (scenario === "guide-search") await guideSearchScenario(driver, other!.url);
       else if (scenario === "guide-grid")
         await guideGridScenario(driver, {
           streams: () => ({

@@ -8,7 +8,7 @@ import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { defined } from "@mrstreamer/core/defined";
 import { queryView } from "./mount.ts";
 import { GuideSearch, useGuideSearch } from "../../src/renderer/src/features/live/GuideSearch.tsx";
-import { queries } from "../../src/renderer/src/lib/queries.ts";
+import { queries, syncGuideUpdates } from "../../src/renderer/src/lib/queries.ts";
 
 const NOW = new Date(2026, 10, 5, 20, 0).getTime();
 const HOUR = 60 * 60 * 1000;
@@ -88,6 +88,8 @@ async function panel(saved: "read" | "unreadable" = "read") {
     )!;
 
   return {
+    client,
+    render: mounted.render,
     container,
     button,
     field: () => container.querySelector<HTMLInputElement>("input")!,
@@ -311,4 +313,203 @@ it("uses seven calendar days across the autumn DST change and resolves saved Tod
     if (previous === undefined) delete process.env["TZ"];
     else process.env["TZ"] = previous;
   }
+});
+
+it("retries a refused first page and retains rows when the next page is refused", async () => {
+  ipc.refuse("guide.searchPage", { kind: "unexpected", detail: "offline" });
+  const view = await panel();
+  await view.type("rally");
+  await settled();
+  expect(view.rows()).toEqual([]);
+  expect(view.container.textContent).toContain("Service unavailable");
+  ipc.always("guide.searchPage", {
+    matches: [match(MERIDIAN, NOW)],
+    next: { start: NOW, channel: "1" },
+  });
+  await view.click(view.button("Retry"));
+  await settled();
+  expect(view.rows()).toHaveLength(1);
+  ipc.refuse("guide.searchPage", { kind: "unexpected", detail: "offline" });
+  await view.click(view.button("Show more"));
+  await settled();
+  expect(view.rows()).toHaveLength(1);
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Service unavailable",
+  );
+  ipc.always("guide.searchPage", { matches: [match(RIVERBEND, NOW + HOUR)], next: null });
+  await view.click(view.button("Show more"));
+  await settled();
+  expect(view.rows()).toHaveLength(2);
+  expect(view.container.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("cannot act on late matches after typing, filtering or unmounting the panel", async () => {
+  const old = ipc.hold("guide.searchPage");
+  const view = await panel();
+  await view.type("old");
+  const current = ipc.hold("guide.searchPage");
+  await view.type("current");
+  old.resolve({ matches: [match(MERIDIAN, NOW)], next: null });
+  await settled();
+  expect(view.rows()).toEqual([]);
+  current.resolve({ matches: [match(RIVERBEND, NOW)], next: null });
+  await settled();
+  expect(view.rows().join()).toContain("Riverbend");
+  const filtered = ipc.hold("guide.searchPage");
+  await view.click(view.button("Tomorrow"));
+  expect(view.rows()).toEqual([]);
+  const latest = ipc.hold("guide.searchPage");
+  await view.click(view.button("Today"));
+  filtered.resolve({ matches: [match(MERIDIAN, NOW + 24 * HOUR)], next: null });
+  await settled();
+  expect(view.rows()).toEqual([]);
+  unmount();
+  latest.resolve({ matches: [match(MERIDIAN, NOW)], next: null });
+  await settled();
+  expect(view.container.querySelector("[data-guide-row]")).toBeNull();
+});
+
+it("disables a new save at twenty while allowing an existing query to update", async () => {
+  const saved = Array.from({ length: 20 }, (_, i) => ({ name: `saved ${i}`, query: `query ${i}` }));
+  const view = await panel();
+  await act(async () => view.client.setQueryData(["guide", "savedQueries", SUBSCRIPTION], saved));
+  await view.type("new query");
+  expect(view.button("Save search").disabled).toBe(true);
+  expect(view.container.textContent).toContain("20 saved at most");
+  await view.type("query 0");
+  expect(view.button("Save search").disabled).toBe(false);
+  ipc.always("guide.setSavedQueries", saved);
+  await view.click(view.button("Tomorrow"));
+  await view.click(view.button("Save search"));
+  await settled();
+  const written = ipc.argsOf("guide.setSavedQueries").at(-1)!.queries;
+  expect(written).toHaveLength(20);
+  expect(written.find((each) => each.query === "query 0")).toMatchObject({ days: "tomorrow" });
+});
+
+it("keeps a delayed save owned by its subscription after switching away and reopening", async () => {
+  const view = await panel();
+  await view.type("rally");
+  const write = ipc.hold("guide.setSavedQueries");
+  await view.click(view.button("Save search"));
+  const other = { ...SAVED, id: "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11", name: "Other" };
+  await act(async () => view.client.setQueryData(queries.subscriptions().queryKey, [SAVED, other]));
+  await settled();
+  await view.click(view.button("Other"));
+  ipc.answer("guide.savedQueries", ({ subscriptionId }) =>
+    subscriptionId === SUBSCRIPTION ? [{ name: "rally", query: "rally" }] : [],
+  );
+  write.resolve([{ name: "rally", query: "rally" }]);
+  await settled();
+  expect(view.button("rally")).toBeUndefined();
+  ipc.hold("guide.savedQueries");
+  await view.click(view.button("line.example.tv"));
+  await settled();
+  expect(view.button("rally")).toBeDefined();
+  ipc.always("guide.savedQueries", [{ name: "rally", query: "rally" }]);
+  // Closing unmounts the panel, as GuidePage does, while preserving the public query client.
+  await view.render(createElement("div"));
+  await view.render(
+    createElement(GuideSearch, {
+      list: "Favourites",
+      channels: [MERIDIAN],
+      everything: false,
+      filtered: [],
+      playing: undefined,
+      onWatch: () => {},
+    }),
+  );
+  await settled();
+  expect(view.button("rally")).toBeDefined();
+  expect(ipc.argsOf("guide.setSavedQueries")).toEqual([
+    { subscriptionId: SUBSCRIPTION, queries: [{ name: "rally", query: "rally", days: "any" }] },
+  ]);
+});
+
+it("replaces mounted matches after a guide or mapping update, rejecting the held older reply", async () => {
+  const old = ipc.hold("guide.searchPage");
+  const view = await panel();
+  const stop = syncGuideUpdates(view.client);
+
+  try {
+    await view.type("rally");
+    ipc.always("guide.searchPage", { matches: [match(RIVERBEND, NOW)], next: null });
+    await act(async () => ipc.emit("guide.updated", null));
+    await settled();
+    expect(view.rows().join()).toContain("Riverbend");
+    old.resolve({ matches: [match(MERIDIAN, NOW)], next: null });
+    await settled();
+    expect(view.rows().join()).not.toContain("Meridian");
+    ipc.always("guide.searchPage", { matches: [], next: null });
+    await act(async () => ipc.emit("guide.updated", null));
+    await settled();
+    expect(view.rows()).toEqual([]);
+    expect(view.container.textContent).toContain("No matches");
+  } finally {
+    stop();
+  }
+});
+
+it("explains empty and oversized lists, and prefers a source filter over playback then falls back after removal", async () => {
+  const view = await panel();
+  const other = { ...SAVED, id: "3f6c1b5e-2a47-4d0e-9c1f-7b8a5d2e4f11", name: "Other" };
+  await act(async () => view.client.setQueryData(queries.subscriptions().queryKey, [SAVED, other]));
+
+  const render = async (channels: LiveChannel[], filtered: string[], playing: string) => {
+    await view.render(createElement("div"));
+    await view.render(
+      createElement(GuideSearch, {
+        list: "Favourites",
+        channels,
+        everything: false,
+        filtered,
+        playing,
+        onWatch: () => {},
+      }),
+    );
+    await settled();
+  };
+
+  await render([], [SUBSCRIPTION], other.id);
+  expect(view.button("line.example.tv").getAttribute("aria-pressed")).toBe("true");
+  expect(view.button("Favourites").disabled).toBe(true);
+  expect(view.container.textContent).toContain("None from this subscription");
+  await render(
+    Array.from({ length: 101 }, (_, i) => channel(String(i), `Channel ${i}`)),
+    [],
+    SUBSCRIPTION,
+  );
+  expect(view.button("Favourites").disabled).toBe(true);
+  expect(view.container.textContent).toContain("Over 100 channels");
+  await render([MERIDIAN], [], other.id);
+  expect(view.button("Other").getAttribute("aria-pressed")).toBe("true");
+  await view.click(view.button("line.example.tv"));
+  expect(view.button("line.example.tv").getAttribute("aria-pressed")).toBe("true");
+  await act(async () => view.client.setQueryData(queries.subscriptions().queryKey, [other]));
+  await settled();
+  await view.type("rally");
+  expect(ipc.argsOf("guide.searchPage").at(-1)?.subscriptionId).toBe(other.id);
+});
+
+it("shows a save completed while closed when the panel reopens", async () => {
+  const view = await panel();
+  await view.type("rally");
+  const write = ipc.hold("guide.setSavedQueries");
+  await view.click(view.button("Save search"));
+  await view.render(createElement("div"));
+  write.resolve([{ name: "rally", query: "rally" }]);
+  await settled();
+  ipc.hold("guide.savedQueries");
+  await view.render(
+    createElement(GuideSearch, {
+      list: "Favourites",
+      channels: [MERIDIAN],
+      everything: false,
+      filtered: [],
+      playing: undefined,
+      onWatch: () => {},
+    }),
+  );
+  await settled();
+  expect(view.button("rally")).toBeDefined();
 });

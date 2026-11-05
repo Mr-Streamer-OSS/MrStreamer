@@ -235,9 +235,6 @@ function Palette() {
     ];
   }, [query, searched, groups, expanded, titles.data, programmes.data, answered, subscriptions]);
 
-  /** What was found, without the row that searches every guide day. */
-  const found = results.filter((result) => result.kind !== "guide").length;
-
   const identity = (result: Result) =>
     result.kind === "title"
       ? `title/${result.title.key}`
@@ -579,7 +576,7 @@ function Palette() {
             .join(" · ")}
         </div>
       )}
-      {current && found === 0 && !pending && !failed && (
+      {current && results.length === 0 && !pending && !failed && (
         <div className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
           {t("No matches")}
         </div>

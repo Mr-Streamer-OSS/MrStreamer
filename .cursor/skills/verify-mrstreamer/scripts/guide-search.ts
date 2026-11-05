@@ -1,5 +1,6 @@
 // Public window proof for the full-horizon guide search. Only the provider boundary is fake.
 import { translate } from "../../../../packages/core/src/i18n.ts";
+import { addBackup, openList } from "./custom-lists.ts";
 import type { Driver } from "./language.ts";
 
 const named = (selector: string, text: string) =>
@@ -91,7 +92,7 @@ export function searchGuide(): string {
           ? '<episode-num system="xmltv_ns">broken</episode-num><new/>'
           : "";
 
-    return `<programme channel="${id}" start="${stamp(start)}" stop="${stamp(start + 3600000)}"><title>Weekly ${i}</title><desc>Fixture programme ${i}</desc>${metadata}</programme>`;
+    return `<programme channel="${id}" start="${stamp(start)}" stop="${stamp(start + 3600000)}"><title>Weekly ${i === 0 ? "ArchiveOnly" : i}</title><desc>Fixture programme ${i}</desc>${metadata}</programme>`;
   });
 
   return `<tv><channel id="${id}"><display-name>Fixture</display-name></channel>${programmes.join("")}</tv>`;
@@ -102,7 +103,7 @@ function expect(value: boolean, message: string): void {
 }
 
 /** Header and palette entry, paging/reset, day filters, save/restart/remove and keyboard exit. */
-export async function guideSearchScenario(d: Driver): Promise<void> {
+export async function guideSearchScenario(d: Driver, otherUrl: string): Promise<void> {
   const button = (text: string) => named("section button", text);
 
   const search = async (text: string) => {
@@ -121,7 +122,7 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
   };
 
   /** Ctrl K, "Weekly", until the row that searches every guide day is listed and settled. */
-  const palette = async () => {
+  const palette = async (text = "Weekly") => {
     for (const type of ["rawKeyDown", "keyUp"])
       await d.send("Input.dispatchKeyEvent", {
         type,
@@ -131,7 +132,7 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
         modifiers: 2,
       });
     await d.wait(() => d.exists("document.querySelector('[role=dialog] input[role=combobox]')"));
-    await d.send("Input.insertText", { text: "Weekly" });
+    await d.send("Input.insertText", { text });
     await d.wait(() => d.exists("document.querySelector('[data-guide-search]')"));
     await d.wait(() =>
       d.evaluate<boolean>(
@@ -141,6 +142,62 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
   };
 
   await d.click("Open Live TV", named("header button", "Live TV"));
+  await openList(d, "News");
+  await d.click("Oversized list search", "document.querySelector('[data-guide-search-opener]')");
+  expect(
+    await d.evaluate<boolean>(`${button("News")}.disabled`),
+    "Oversized list cannot be applied",
+  );
+  expect(
+    await d.evaluate<boolean>(
+      "document.querySelector('section').textContent.includes('Over 100 channels')",
+    ),
+    "Oversized list explains why",
+  );
+  await d.capture("guide-oversized-list");
+  await d.click(
+    "Close oversized list",
+    "document.querySelector('button[aria-label=\"Close guide search\"]')",
+  );
+  await openList(d, "Favourites");
+  await d.click("Empty favourites search", "document.querySelector('[data-guide-search-opener]')");
+  await d.wait(() => d.exists(button("Favourites")));
+  expect(
+    await d.evaluate<boolean>(`${button("Favourites")}.disabled`),
+    "Empty list cannot be applied",
+  );
+  expect(
+    await d.evaluate<boolean>(
+      "document.querySelector('section').textContent.includes('None from this subscription')",
+    ),
+    "Empty list explains why",
+  );
+  await d.capture("guide-empty-favourites");
+  await d.click(
+    "Close empty favourites",
+    "document.querySelector('button[aria-label=\"Close guide search\"]')",
+  );
+  await openList(d, "All channels");
+  await d.click(
+    "Favourite playable channel",
+    "document.querySelector('main [data-index] button[aria-label=\"Add to favourites\"]')",
+  );
+  await openList(d, "Favourites");
+  await d.click("Small list search", "document.querySelector('[data-guide-search-opener]')");
+  await search("Weekly");
+  await d.click("Apply small list", button("Favourites"));
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  await d.click("Leave small list filter", button("All channels"));
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  await d.click("Revisit small list filter", button("Favourites"));
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  await d.capture("guide-small-list-revisited");
+  d.observed.smallListRevisitAndEmpty = true;
+  await d.click(
+    "Close list search",
+    "document.querySelector('button[aria-label=\"Close guide search\"]')",
+  );
+  await openList(d, "All channels");
   await d.click("Header calendar", "document.querySelector('[data-guide-search-opener]')");
   await d.wait(() => d.exists(`${field} === document.activeElement`));
   await search("Weekly");
@@ -219,6 +276,169 @@ export async function guideSearchScenario(d: Driver): Promise<void> {
   expect(await d.exists(`${field}.value === 'Weekly'`), "Palette preserves typed words");
   d.observed.paletteSeed = "Weekly";
   await d.capture("guide-from-palette");
+
+  // ArchiveOnly is past the ordinary palette guide horizon and has no catalogue/channel match.
+  await d.click(
+    "Close search before keyboard palette",
+    "document.querySelector('button[aria-label=\"Close guide search\"]')",
+  );
+  await palette("ArchiveOnly");
+  expect(
+    await d.evaluate<boolean>(
+      "document.querySelectorAll('[role=dialog] [role=treeitem]').length === 1",
+    ),
+    "Only the guide-search action remains",
+  );
+  expect(
+    await d.evaluate<boolean>(
+      "!document.querySelector('[role=dialog]').textContent.includes('No matches')",
+    ),
+    "Guide-only palette is not labelled empty",
+  );
+
+  const guideIndex = await d.evaluate<number>(
+    "Number(document.querySelector('[data-guide-search]').dataset.index)",
+  );
+
+  for (let i = 0; i < guideIndex; i++) await d.key("ArrowDown", 40);
+  await d.key("Enter", 13);
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 1);
+  expect(await d.exists(`${field}.value === 'ArchiveOnly'`), "Keyboard palette transfers query");
+  d.observed.paletteKeyboardGuideOnly = true;
+
+  await search("Weekly 49");
+  await d.wait(async () => (await d.evaluate<number>(rows)) > 0);
+  await d.click(
+    "Open future programme",
+    "[...document.querySelectorAll('[data-guide-row]')].find(e => /, Weekly 49(?:,|$)/.test(e.getAttribute('aria-label')))",
+  );
+  await d.click("Remind from search", button("Remind me"));
+  await d.wait(() =>
+    d.exists("document.querySelector('[data-guide-row] [aria-label=\"Reminder set\"]')"),
+  );
+  await d.click(
+    "Close search to inspect header bell",
+    "document.querySelector('button[aria-label=\"Close guide search\"]')",
+  );
+  await d.wait(() =>
+    d.exists("document.querySelector('button[aria-label=\"Reminders, 1 to come\"]')"),
+  );
+  await d.click(
+    "Open reminder bell",
+    "document.querySelector('button[aria-label=\"Reminders, 1 to come\"]')",
+  );
+  await d.wait(() => d.exists("document.querySelector('[role=dialog][aria-label=Reminders]')"));
+  await d.capture("guide-reminder-bell");
+  await d.key("Escape", 27);
+
+  await d.capture("guide-future-reminder");
+  await d.quit();
+  await d.launch();
+  await d.click("Return Live TV for reminder", named("header button", "Live TV"));
+  await d.click(
+    "Search after reminder restart",
+    "document.querySelector('[data-guide-search-opener]')",
+  );
+  await search("Weekly 49");
+  await d.wait(() =>
+    d.exists("document.querySelector('[data-guide-row] [aria-label=\"Reminder set\"]')"),
+  );
+  await d.click("Open persisted reminder", "document.querySelector('[data-guide-row]')");
+  await d.click("Remove reminder from search", button("Reminder set"));
+  await d.wait(
+    async () =>
+      !(await d.exists("document.querySelector('[data-guide-row] [aria-label=\"Reminder set\"]')")),
+  );
+  d.observed.searchReminderPersistedAndRemoved = true;
+  await search("Weekly 48");
+  await d.wait(async () => (await d.evaluate<number>(rows)) > 0);
+  await d.click(
+    "Open on-now programme",
+    "[...document.querySelectorAll('[data-guide-row]')].find(e => /, Weekly 48(?:,|$)/.test(e.getAttribute('aria-label')))",
+  );
+  await d.click("Watch from search", button("Watch"));
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "!!document.querySelector('[data-view=watch]') && (document.querySelector('video')?.videoWidth ?? 0) > 0 && (document.querySelector('video')?.currentTime ?? 0) > 0",
+    ),
+  );
+  d.observed.searchWatch = await d.evaluate(
+    "(() => { const v = document.querySelector('video'); return { width: v.videoWidth, time: v.currentTime }; })()",
+  );
+  await d.capture("guide-watch-playback");
+
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
+  await addBackup(d, otherUrl);
+  await d.click("Live TV with two sources", named("header button", "Live TV"));
+
+  if (await d.exists("document.querySelector('[data-guide-search-opener]')"))
+    await d.click("Open two-source search", "document.querySelector('[data-guide-search-opener]')");
+
+  const primary = await d.evaluate<string>(
+    "[...document.querySelectorAll('section button[aria-pressed=true]')].map(e=>e.textContent).find(t=>t !== 'Any day' && t !== 'All channels')",
+  );
+
+  await d.click("Choose Backup source", button("Backup"));
+  await search("BackupWeekly");
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  expect(
+    await d.evaluate<boolean>(
+      "[...document.querySelectorAll('[data-guide-row]')].every(e=>e.textContent.includes('Backup') && e.textContent.includes('BackupWeekly'))",
+    ),
+    "Backup results identify their own source",
+  );
+  await d.click("Save Backup search", button("Save search"));
+  await d.wait(() => d.exists(button("BackupWeekly")));
+  await d.capture("guide-backup-save");
+  await d.click("Return first source", button(primary));
+  await d.wait(async () => !(await d.exists(button("BackupWeekly"))));
+  await search("Weekly");
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  expect(
+    await d.evaluate<boolean>(
+      "[...document.querySelectorAll('[data-guide-row]')].every(e=>!e.textContent.includes('Backup'))",
+    ),
+    "First source results stay separate",
+  );
+  await d.click("Return Backup saved search", button("Backup"));
+  await d.wait(() => d.exists(button("BackupWeekly")));
+  await d.click("Apply Backup saved search", button("BackupWeekly"));
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  d.observed.twoSourcesResultsAndSaves = true;
+  await d.click(
+    "Settings to remove chosen Backup",
+    "document.querySelector('header button[aria-pressed]')",
+  );
+  await d.click("Subscriptions to remove chosen source", named("nav button", "Subscriptions"));
+  const backup = "document.querySelectorAll('main section > ul > li')[1]";
+
+  if (!(await d.exists(`${backup}.querySelector('[role=region]')`)))
+    await d.click("Expand Backup subscription", `${backup}.querySelector('button')`);
+  await d.click(
+    "Ask remove Backup",
+    `[...${backup}.querySelectorAll('button')].find(e=>e.textContent.trim() === 'Remove Backup')`,
+  );
+  await d.wait(() => d.exists(`${backup}.querySelector('[role=checkbox]')`));
+  await d.click(
+    "Remove Backup keeping saved data",
+    `[...${backup}.querySelectorAll('button')].find(e=>e.textContent.trim() === 'Remove')`,
+  );
+  await d.wait(() =>
+    d.evaluate<boolean>("document.querySelectorAll('main section > ul > li').length === 1"),
+  );
+  await d.key("Escape", 27);
+  await d.click("Live TV after source removal", named("header button", "Live TV"));
+  await search("Weekly");
+  await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+  expect(
+    await d.evaluate<boolean>(
+      "[...document.querySelectorAll('[data-guide-row]')].every(e=>!e.textContent.includes('Backup'))",
+    ),
+    "Removed chosen source falls back to remaining guide",
+  );
+  d.observed.sourceRemovalFallback = true;
+  await d.capture("guide-source-removal-fallback");
 
   // Every language at the smallest window with text enlarged by a quarter: ⌘K's guide row is
   // pressed by pointer, and the panel keeps its controls, titles and channels inside the window.
