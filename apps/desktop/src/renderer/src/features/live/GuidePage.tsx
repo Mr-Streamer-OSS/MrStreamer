@@ -836,9 +836,7 @@ export function GuidePage({ active }: { active: boolean }) {
           />
           <main className="flex min-w-0 flex-1 flex-col">
             {/* The switch sits beside Watch, or at the end of the title while nothing plays. */}
-            <div hidden={guideSearch}>
-              <NowStrip active={active} viewSwitch={viewSwitch} />
-            </div>
+            <NowStrip active={active} viewSwitch={viewSwitch} hidden={guideSearch} />
             {guideSearch ? (
               <GuideSearch
                 list={title}
@@ -1306,7 +1304,15 @@ function NothingFound({
  * archive says when it aired, as Watch does. While a receiver on the network is connected, the channel stands still and a line
  * says why.
  */
-function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNode }) {
+function NowStrip({
+  active,
+  viewSwitch,
+  hidden,
+}: {
+  active: boolean;
+  viewSwitch: ReactNode;
+  hidden: boolean;
+}) {
   const channel = usePlayer((state) => state.channel);
   const archive = usePlayer((state) => state.archive);
   const audible = usePlayer((state) => state.audible && !state.muted);
@@ -1322,7 +1328,7 @@ function NowStrip({ active, viewSwitch }: { active: boolean; viewSwitch: ReactNo
   const current = archive ? null : (listing?.now ?? null);
 
   return (
-    <section className="flex items-end gap-6 px-9 pt-5 pb-4">
+    <section className={cn("flex items-end gap-6 px-9 pt-5 pb-4", hidden && "hidden")}>
       <div className="relative aspect-video w-[18rem] flex-none overflow-hidden rounded-xl bg-white/5">
         <div className="absolute inset-0 grid place-items-center">
           <ChannelLogo channel={channel} className="h-12 w-20" />
