@@ -142,7 +142,12 @@ Actual background and physical-device acceptance remain separate from source and
   archived from `main` at `a80a34e2`, has been on TestFlight for the internal "Private iPhone
   testing" group since 3 November 2026, with the Downloads header ring and Play on TV. Build 18,
   from `7229b687`, predates both and stays available to the same group. There is no App Store
-  release of 0.2.0. Source now proposes build 20; it has not been archived, uploaded or delivered. Its simulator
+  release of 0.2.0. Build 20, from `99570bc6762add379589f7d999cb075a7a4f725b`, was delivered
+  to the same internal group on 4 November 2026: Apple reports `VALID`, upload `COMPLETE`,
+  `IN_BETA_TESTING` and group membership. This is internal beta availability; physical-device,
+  receiver, playback/audio/GPU and accessibility acceptance remain separate, and the prebuilt
+  React, ReactNativeDependencies and hermesvm dSYMs are still missing. Store images remain blocked
+  by the 0.1.0 review, no editable 0.2.0 Store version and no documented Duo display type. Simulator
   results go on the [native acceptance card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288197148), and the [release card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288153777)
   holds what it still needs.
 - **Play on TV** ([card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288196691))
@@ -1050,15 +1055,18 @@ proof out: `src/app/proof.tsx` loads it only in development.
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
 builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
-`ios.buildNumber` `20`, a proposed candidate that has not been archived, uploaded or delivered.
-The read-only App Store Connect inventory on 4 November 2026 at 12:59 UTC found build 20 absent
-from both builds and uploads. Build 19 was archived from `a80a34e2`, uploaded once and added to the
+`ios.buildNumber` `20`. Build 20 was archived from frozen source
+`99570bc6762add379589f7d999cb075a7a4f725b`, uploaded once and delivered to the existing
+Private iPhone testing internal group on 4 November 2026. Apple readback confirms `VALID`, upload
+`COMPLETE`, `IN_BETA_TESTING` and group membership; the inspected archive and IPA contain device
+families 1 and 2. Previous builds, testers and group settings were preserved. This delivery did
+not submit 0.2.0 to App Review or release it publicly. Build 19 was archived from `a80a34e2`, uploaded once and added to the
 internal TestFlight group on 3 November 2026, where App Store Connect shows it VALID and in beta
 testing; it has Play on TV and the Downloads header ring. Build 18, archived from `7229b687`,
 predates both and stays in that group. Build 17 of 0.1.0 went to App Review on 27 October 2026
 with manual release and remains `WAITING_FOR_REVIEW`; leave that build and its review as they are.
 Before each archive, read the current App Store Connect build and upload inventory again, confirm
-the proposed number is still unused or allocate the next unused number, and record the dated
+the candidate number is unused or allocate the next unused number; build 20 is now used. Record the dated
 readback and allocation on the candidate's project card.
 The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
