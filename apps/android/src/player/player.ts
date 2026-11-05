@@ -354,6 +354,14 @@ export function playerOwner(
     },
 
     play(intent) {
+      const output = cast.state.get();
+
+      if (output.kind === "remote" || (output.kind === "stopped" && output.detached)) {
+        owner.media.refuseOutput();
+
+        return playing()?.attempt ?? "";
+      }
+
       void endPreview();
       owner.media.cancelNext();
       const before = playing();

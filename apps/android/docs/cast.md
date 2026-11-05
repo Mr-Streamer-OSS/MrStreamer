@@ -5,7 +5,7 @@ Android owns its open sender in `apps/android/src/cast/` and its platform networ
 Google sender SDK or new dependency. Cast native sources compile with the existing player
 module and are registered beside Player so they share its one admission and reader hold.
 
-The chooser calls `browseTvs()` and disposes its returned stop function when it closes.
+The chooser and Move to another TV list call `browseTvs()` and disposes its returned stop function when it closes.
 `useTvSearch()` reports searching, actual platform denial or failure. NSD names and models are
 untrusted receiver declarations. The target36 route adds no speculative permission prompt.
 
@@ -47,7 +47,7 @@ trusted-LAN route, not pairing. Normal upstream HTTPS validation is unchanged.
 Watch and the mini player follow `player.cast.state` through `apps/android/src/cast/watch.tsx`,
 after Paper A's Android Cast page. The Cast button opens Play on TV, which stays on Connecting
 until the TV reports PLAYING. On a TV, Watch keeps play, pause, the jumps where it seeks, the
-seek bar and Subtitles, which says downloaded subtitles don't play on the TV. Refusals and failed
+seek bar and Subtitles, which explains sidecar limits when a sidecar is selected and otherwise the unavailable TV subtitle choices. Refusals and failed
 connections are a dialog over a phone that still plays; a TV that stopped after taking over
 offers Play here and, unless it couldn't play it, the same TV again. A build without the Cast
 module shows none of it.
@@ -56,3 +56,5 @@ Source tests use protocol/upstream stand-ins and JVM socket/file contracts on fo
 proves source integration only. No Android device, actual NSD discovery, receiver launch,
 audible/moving playback, live rollover, receiver commands/volume/tracks, installed lifecycle,
 Wi-Fi loss, buffered-stop interval or final APK packaging is qualified by these checks.
+
+Foreground exit retains the admitted source for explicit Play here after readers drain. Remote completion never starts the next episode locally. Next and Play from start visibly refuse while remote; Live favourites keep the listed channel identity. Multiple selected audio choices refuse before transfer; where track identity is unknown the chooser discloses receiver-default audio. Refusals name this route’s limits, not receiver incompatibility. TCP/TLS opens before preflight to select the LAN address, but LAUNCH follows budget and media preflight. Playlist and initialization routes are pinned; only media routes roll over in the bounded 65536-route map. Oversized single playlists refuse before LAUNCH.

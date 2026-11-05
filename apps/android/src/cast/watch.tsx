@@ -1,3 +1,5 @@
+import { Alert } from "react-native";
+import { Star } from "../player/media-controls.tsx";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { t as coreT } from "@mrstreamer/core/i18n";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
@@ -100,6 +102,11 @@ export function tvLine(output: OutputState): string | null {
       return t("Lost {tv}.", { tv });
     case "failed":
       return t("{tv} couldn't play it.", { tv });
+    case "restore":
+      return "Couldn’t return playback to this phone. Try Play here again.";
+    case "taken":
+      return `Something else plays on ${tv}.`;
+    case "stopped":
     case "ended":
       return t("{tv} stopped playing it.", { tv });
     case "foreground":
@@ -161,14 +168,36 @@ function Panel({ title, line, live = false }: { title: string; line: string; liv
 }
 
 /**
- * The row under the seek bar while the TV plays: Subtitles only, which says what the TV shows.
- * Audio, Speed, Quality, Next episode and Picture in picture stay on the phone.
+ * The row under the seek bar while the TV plays: Subtitles and explicit Next/start refusals, with Live favourites.
+ * Track and speed selection remain local.
  */
 export function OnTvRow({ onOpen }: { onOpen: (sheet: TvSheet) => void }) {
   useLocale();
 
+  const now = useStore(player.state);
+  const media = useStore(player.media.state);
+
+  const refuse = () =>
+    Alert.alert(
+      "Can't change playback on the TV",
+      "Play here before choosing another episode or playing from start.",
+    );
+
   return (
     <View style={{ minHeight: 48, flexDirection: "row", flexWrap: "wrap", alignItems: "center" }}>
+      {media.next || (now.kind === "playing" && now.intent.kind === "file") ? (
+        <TextControl
+          icon="skip-next"
+          label={playerT("Next episode")}
+          onPress={() => player.media.playNext()}
+        />
+      ) : null}
+      {now.kind === "playing" && now.intent.kind === "live" ? (
+        <>
+          <TextControl icon="replay" label="Play from start" onPress={refuse} />
+          <Star intent={now.intent} />
+        </>
+      ) : null}
       <TextControl
         icon="subtitles"
         label={playerT("Subtitles")}
@@ -511,6 +540,9 @@ function ForegroundRule({ indented = false }: { indented?: boolean }) {
       <Text style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
         {t("Leaving the app stops playback on the TV.")}
       </Text>
+      <Text style={{ color: colors.secondary, fontSize: 14, lineHeight: 18 }}>
+        The TV uses its default audio when the phone can’t identify the selected track.
+      </Text>
     </View>
   );
 }
@@ -699,6 +731,10 @@ function OnTvSubtitles({ now, onPlayHere }: { now: Playing; onPlayHere: () => vo
 /** A refusal's reason, said before anything reached the TV; null when it couldn't connect. */
 function refusal(reason: Extract<OutputState, { kind: "refused" }>["reason"]): string | null {
   switch (reason) {
+    case "audio":
+      return "Mr. Streamer can’t preserve the selected audio on this TV route. It still plays on this phone.";
+    case "playback":
+      return "The TV connected but didn’t report playback. It still plays on this phone.";
     case "format":
       return t("This file type can't play on a TV.");
     case "protected":

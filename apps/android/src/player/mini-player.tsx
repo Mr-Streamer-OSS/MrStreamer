@@ -40,6 +40,17 @@ const NAVIGATION_BAR = 80;
  * or try a failed attempt again where it was. Watch and the mini player share it.
  */
 export function playPause(now: Playing): { icon: IconName; label: string; run: () => void } {
+  const output = player.cast.state.get();
+
+  if (output.kind === "stopped" && output.detached)
+    return {
+      icon: "play-arrow",
+      label: t("Play"),
+      run: () => {
+        void player.cast.playHere().catch(() => {});
+      },
+    };
+
   switch (now.phase) {
     case "paused":
       return { icon: "play-arrow", label: t("Play"), run: () => void player.resume() };

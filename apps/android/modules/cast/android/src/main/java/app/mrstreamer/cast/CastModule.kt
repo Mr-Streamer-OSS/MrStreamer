@@ -32,6 +32,27 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
   private val relays = ConcurrentHashMap<String, Relay>()
   private val answers = ConcurrentHashMap<String, CompletableFuture<String?>>()
   private var browser: NsdManager.DiscoveryListener? = null
+  private val resolves = java.util.ArrayDeque<Pair<NsdServiceInfo, Int>>()
+  private var resolving = false
+  @Suppress("DEPRECATION")
+  private fun resolveNext() {
+    if (resolving || browser == null || resolves.isEmpty()) return
+    val (info, retry) = resolves.removeFirst()
+    val mine = browser
+    resolving = true
+    nsd.resolveService(info, object : NsdManager.ResolveListener {
+      override fun onResolveFailed(info: NsdServiceInfo, code: Int) { main.post {
+        resolving = false
+        if (browser === mine && code == 3 && retry < 2 && resolves.size < 64) resolves.addLast(info to (retry + 1))
+        main.postDelayed({ resolveNext() }, if (code == 3) 100L else 0L)
+      } }
+      override fun onServiceResolved(info: NsdServiceInfo) { main.post {
+        resolving = false
+        if (browser === mine && privateV4(info.host) && devices.size < 64) { devices[info.serviceName] = info; browseState() }
+        resolveNext()
+      } }
+    })
+  }
   private var application: Application? = null
   private val visible = mutableSetOf<Activity>()
   @Volatile private var foreground = true
@@ -55,13 +76,9 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
       override fun onServiceLost(info: NsdServiceInfo) { devices.remove(info.serviceName); browseState() }
       override fun onServiceFound(info: NsdServiceInfo) {
         if (browser !== this || devices.size >= 64) return
-        val mine = this
-        nsd.resolveService(info, object : NsdManager.ResolveListener {
-          override fun onResolveFailed(info: NsdServiceInfo, code: Int) {}
-          override fun onServiceResolved(info: NsdServiceInfo) {
-            if (browser === mine && privateV4(info.host) && devices.size < 64) { devices[info.serviceName] = info; browseState() }
-          }
-        })
+        main.post {
+          if (browser === this && resolves.size < 64) { resolves.addLast(info to 0); resolveNext() }
+        }
       }
     }
     browser = listener
@@ -72,6 +89,7 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun stopBrowsing() {
     val listener = browser ?: return
     browser = null
+    resolves.clear()
     runCatching { nsd.stopServiceDiscovery(listener) }
   }
   private fun closeChannel(id: String) {
@@ -82,10 +100,10 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
   private fun cleanup(left: Boolean = true) {
     generation++
     if (left) foreground = false
-    stopBrowsing()
+    if (left) stopBrowsing()
     answers.values.forEach { it.complete(null) }
     answers.clear()
-    PlayerHost.existing()?.stopRemoteOutput()
+    if (left) PlayerHost.existing()?.stopRemoteOutput()
     channels.entries.toList().forEach { (id, socket) ->
       val stop = stops.remove(id)
       if (stop != null) writes.execute {
@@ -98,7 +116,7 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
     relays.entries.toList().forEach { (token, relay) ->
       io.execute { runCatching { relay.revoke(); relays.remove(token, relay) } }
     }
-    sendEvent("onBackground", emptyMap<String, String>())
+    if (left) sendEvent("onBackground", emptyMap<String, String>())
   }
   override fun definition() = ModuleDefinition {
     Name("Cast")
@@ -172,7 +190,7 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
             try {
               val peer = channels.values.firstOrNull() ?: error("No selected TV")
               val local = peer.localAddress
-              require(privateV4(local))
+              if (!privateV4(local)) throw UnknownHostException("No private route")
               val source = (admission.hold as? app.mrstreamer.player.HoldRef.LocalFile)?.let { java.io.File(it.path).toURI().toString() } ?: admission.url
               var relayToken: String? = null
               val relay = Relay(local, source, admission.headers, playlist, { url, body ->
@@ -195,10 +213,10 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
                   promise.resolve(mapOf("address" to relay.address, "token" to relay.token))
                 }
               }
-            } catch (_: Exception) {
+            } catch (cause: Exception) {
               if (made == null) main.post { released() }
               else runCatching { made?.revoke() }
-              promise.reject("CAST_RELAY", "Can't serve this media", null)
+              promise.reject(if (cause is UnknownHostException) "CAST_NETWORK" else "CAST_RELAY", "Can't serve this media", null)
             }
           }
         }
@@ -207,17 +225,24 @@ class CastModule : Module(), Application.ActivityLifecycleCallbacks {
     Function("route") { token: String, routes: List<Map<String, Any?>> ->
       require(routes.size <= 4096)
       val relay = relays[token]
-      routes.forEach { route -> relay?.route(route["id"] as String, route["url"] as String, route["playlist"] as Boolean) }
+      routes.forEach { route -> relay?.route(route["id"] as String, route["url"] as String, route["playlist"] as Boolean, route["pinned"] as? Boolean ?: (route["playlist"] as Boolean)) }
     }
-    AsyncFunction("read") { token: String, id: String ->
-      try { relays[token]?.read(id)?.let { (url, body) -> mapOf("url" to url, "body" to body) } }
-      catch (_: Exception) { null }
+    AsyncFunction("read") { token: String, id: String, promise: Promise ->
+      io.execute {
+        try { promise.resolve(relays[token]?.read(id)?.let { (url, body) -> mapOf("url" to url, "body" to body) }) }
+        catch (_: Exception) { promise.reject("CAST_READ", "Media unreadable", null) }
+      }
     }
     Function("answer") { request: String, body: String? ->
       require(body == null || body.length <= 1_048_576)
       answers[request]?.complete(body); Unit
     }
-    AsyncFunction("revoke") { token: String -> relays[token]?.let { relay -> relay.revoke(); relays.remove(token, relay) }; Unit }
+    AsyncFunction("revoke") { token: String, promise: Promise ->
+      io.execute {
+        try { relays[token]?.let { relay -> relay.revoke(); relays.remove(token, relay) }; promise.resolve(null) }
+        catch (_: Exception) { promise.reject("CAST_DRAIN", "Readers did not close", null) }
+      }
+    }
     OnDestroy {
       main.post { cleanup(); application?.unregisterActivityLifecycleCallbacks(this@CastModule); io.shutdown(); writes.shutdown() }
     }

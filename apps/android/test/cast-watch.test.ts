@@ -370,7 +370,7 @@ describe("Play on TV", () => {
 });
 
 describe("the TV sheet", () => {
-  it("shows the TV's volume only once the TV reported one, and sends a change to the TV", async () => {
+  it("shows the TV's volume only once the TV reported one, and reveals its volume control", async () => {
     output({ kind: "remote", tv: lounge });
     const shown = mount(() => createElement(Watch));
     await press(shown, "On Lounge TV");
@@ -438,7 +438,7 @@ describe("when the TV can't or doesn't play it", () => {
     const shown = mount(() => createElement(Watch));
     expect(shown.textContent).toContain("Can't play on Lounge TV");
     expect(shown.textContent).toContain(
-      "Its stream is protected, so it can't play on a TV. It still plays on this phone.",
+      "Mr. Streamer can’t send this protected stream through this TV route. It still plays on this phone.",
     );
     expect(labels(shown)).toContain("Picture in picture");
 
@@ -507,4 +507,12 @@ describe("the mini player on a TV", () => {
     await press(shown, "Close");
     expect(scenario.asked).toEqual(["stop"]);
   });
+});
+
+it("mini Play explicitly recovers a stopped TV instead of sending resume to a dead link", async () => {
+  player.state.set(playing({ phase: "failed" }));
+  output({ kind: "stopped", tv: lounge, reason: "foreground", detached: true });
+  const shown = mount(() => createElement(MiniPlayer));
+  await press(shown, "Play");
+  expect(scenario.asked).toEqual(["play here"]);
 });

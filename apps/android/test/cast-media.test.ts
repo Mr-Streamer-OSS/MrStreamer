@@ -43,7 +43,7 @@ describe("rewritePlaylist", () => {
     expect(result.text).toContain('#EXT-X-MAP:URI="1.ts"');
     expect(result.segments).toBe("fmp4");
     expect(routes).toEqual([
-      { url: "http://provider.example:8080/live/user/secret/init.mp4", kind: "media" },
+      { url: "http://provider.example:8080/live/user/secret/init.mp4", kind: "init" },
       { url: "http://provider.example:8080/live/user/secret/seg1.m4s?token=abc", kind: "media" },
       { url: "http://cdn.example/seg2.m4s", kind: "media" },
       { url: "http://provider.example:8080/live/other/seg3.m4s", kind: "media" },

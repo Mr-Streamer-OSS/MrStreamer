@@ -264,7 +264,14 @@ class PlayerOwner(
     return now.admission
   }
 
-  fun stopRemoteOutput() { current?.takeIf { it.remote }?.let { stop(it.admission.attempt) } }
+  fun stopRemoteOutput() {
+    // Foreground departure retires networking, not the admitted source needed by Play here.
+    current?.takeIf { it.remote }?.let { now ->
+      player.stop()
+      player.clearMediaItems()
+      now.outputEnd?.invoke()
+    }
+  }
 
   /** Only receiver PLAYING may detach the local renderer, retaining admission and hold. */
   fun remoteOutput(attempt: String): Boolean {

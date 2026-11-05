@@ -47,7 +47,7 @@ export function tvPath(container: string, live: boolean): TvPath {
 }
 
 /** Whether the URI points at a playlist, which the relay reads and rewrites, or at media. */
-export type RouteKind = "playlist" | "media";
+export type RouteKind = "playlist" | "media" | "init";
 
 /** One rewritten playlist: its text, and the segment format a LOAD names, once a segment says. */
 export type Rewritten =
@@ -226,7 +226,7 @@ export function rewritePlaylist(
 
         if (uri === null) continue;
         segments = "fmp4";
-        values.set("URI", `"${route(absolute(uri), "media")}"`);
+        values.set("URI", `"${route(absolute(uri), "init")}"`);
         out.push(`${tag}:${written(values)}`);
         continue;
       }

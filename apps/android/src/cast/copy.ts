@@ -42,14 +42,16 @@ export const t = catalogue(
     "Play on {tv}": "Play on {tv}",
     "Can't play on {tv}": "Can't play on {tv}",
     "Couldn't connect to {tv}": "Couldn't connect to {tv}",
-    "This file type can't play on a TV.": "This file type can't play on a TV.",
+    "This file type can't play on a TV.": "Mr. Streamer can’t send this file type to a TV yet.",
     "Its stream is protected, so it can't play on a TV.":
-      "Its stream is protected, so it can't play on a TV.",
-    "Its picture or sound can't play on a TV.": "Its picture or sound can't play on a TV.",
-    "This channel's stream can't play on a TV.": "This channel's stream can't play on a TV.",
+      "Mr. Streamer can’t send this protected stream through this TV route.",
+    "Its picture or sound can't play on a TV.":
+      "Mr. Streamer can’t send this picture or sound through this TV route yet.",
+    "This channel's stream can't play on a TV.":
+      "Mr. Streamer can’t send this channel to a TV yet.",
     "Connect this phone to Wi-Fi to play on a TV.": "Connect this phone to Wi-Fi to play on a TV.",
     "The provider allows no other stream right now.":
-      "The provider allows no other stream right now.",
+      "Mr. Streamer can’t confirm room for another provider stream.",
     "Downloaded subtitles don't play on the TV.": "Downloaded subtitles don't play on the TV.",
     "{track} shows again when it plays here.": "{track} shows again when it plays here.",
     "Subtitle choices aren't available on the TV.": "Subtitle choices aren't available on the TV.",
@@ -92,16 +94,18 @@ export const t = catalogue(
       "Play on {tv}": "Afspelen op {tv}",
       "Can't play on {tv}": "Kan niet afspelen op {tv}",
       "Couldn't connect to {tv}": "Kan geen verbinding maken met {tv}",
-      "This file type can't play on a TV.": "Dit bestandstype kan niet op een tv spelen.",
+      "This file type can't play on a TV.":
+        "Mr. Streamer kan dit bestandstype nog niet naar een tv sturen.",
       "Its stream is protected, so it can't play on a TV.":
-        "De stream is beveiligd en kan daarom niet op een tv spelen.",
-      "Its picture or sound can't play on a TV.": "Het beeld of geluid kan niet op een tv spelen.",
+        "Mr. Streamer kan deze beveiligde stream niet via deze tv-route sturen.",
+      "Its picture or sound can't play on a TV.":
+        "Mr. Streamer kan dit beeld of geluid nog niet via deze tv-route sturen.",
       "This channel's stream can't play on a TV.":
-        "De stream van dit kanaal kan niet op een tv spelen.",
+        "Mr. Streamer kan dit kanaal nog niet naar een tv sturen.",
       "Connect this phone to Wi-Fi to play on a TV.":
         "Verbind deze telefoon met wifi om op een tv af te spelen.",
       "The provider allows no other stream right now.":
-        "De provider staat nu geen andere stream toe.",
+        "Mr. Streamer kan niet bevestigen dat er ruimte is voor nog een providerstream.",
       "Downloaded subtitles don't play on the TV.":
         "Gedownloade ondertiteling speelt niet op de tv.",
       "{track} shows again when it plays here.": "{track} verschijnt weer als het hier speelt.",

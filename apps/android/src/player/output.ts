@@ -32,7 +32,7 @@ export type OutputState =
   | {
       readonly kind: "stopped";
       readonly tv: Tv;
-      readonly reason: "lost" | "foreground" | "ended" | "failed";
+      readonly reason: "lost" | "foreground" | "ended" | "failed" | "stopped" | "taken" | "restore";
       /**
        * Whether the TV had taken over, so the phone shows nothing until `playHere()` returns it.
        * False when it stopped before confirmed PLAYING: the phone still plays, and `cancel()`
@@ -44,7 +44,7 @@ export type OutputState =
       readonly kind: "refused";
       readonly tv: Tv;
       /** Why, before anything reached the TV; "unavailable" when it couldn't be connected. */
-      readonly reason: TvRefused["refusal"] | "unavailable";
+      readonly reason: TvRefused["refusal"] | "unavailable" | "playback";
     };
 
 /** One output of the admitted player. UI state never contains a source or relay address. */
@@ -73,6 +73,7 @@ export function playerOutput(
   let loaded: TvLoaded | null = null;
   let remote = false;
   let selecting = false;
+  let selectedAudio = false;
   // The local render may not resume until all relay readers are confirmed closed.
   let closing: Promise<void> = Promise.resolve();
   const retired = new Set<Relay>();
@@ -94,6 +95,13 @@ export function playerOutput(
     }
 
     for (const listener of listeners) listener(event);
+  });
+
+  local.addListener("onTracks", (event) => {
+    if (event.attempt === admission?.attempt)
+      selectedAudio =
+        event.tracks.filter((track) => track.type === "audio" && track.selected).length > 0 &&
+        event.tracks.filter((track) => track.type === "audio").length > 1;
   });
 
   async function close(stop = true) {
@@ -138,7 +146,7 @@ export function playerOutput(
     last = {
       ...last,
       phase,
-      positionMs: Math.max(0, status.time * 1000),
+      positionMs: status.time === null ? last.positionMs : Math.max(0, status.time * 1000),
       durationMs: status.duration === null ? null : status.duration * 1000,
       bufferedMs: 0,
       speed: 1,
@@ -162,6 +170,7 @@ export function playerOutput(
       state.set({ kind: "connecting", tv });
 
       let detached = false;
+      const progress: { stage: "connect" | "preflight" | "load" } = { stage: "connect" };
 
       const active = () =>
         operation === controller && admission === request && !controller.signal.aborted;
@@ -175,7 +184,29 @@ export function playerOutput(
         const path = tvPath(container, request.mode === "live");
 
         if (path.kind === "refused") throw new TvRefused(path.refusal);
-        const connected = await connectTv(tv);
+
+        if (selectedAudio) throw new TvRefused("audio");
+
+        const budget =
+          request.mode === "file" ||
+          !!(
+            request.sourceId &&
+            (await canOverlap?.(request.sourceId, controller.signal).catch(() => {
+              throw new TvRefused("unreadable");
+            }))
+          );
+
+        if (!budget) throw new TvRefused("budget");
+
+        const connected = await connectTv(tv, async () => {
+          progress.stage = "preflight";
+
+          if (!active()) throw new Error("Output changed");
+          relay = await serveOnRelay(request.attempt, request.url, path, controller.signal);
+
+          if (!active()) throw new Error("Output changed");
+          progress.stage = "connect";
+        });
 
         if (!active()) {
           await connected.close();
@@ -186,21 +217,16 @@ export function playerOutput(
         link = connected;
         volume.set(connected.volume.get());
         stopVolume = connected.volume.subscribe(() => volume.set(connected.volume.get()));
-        void connected.lost.then(() => {
+        void connected.lost.then((reason) => {
           if (link !== connected) return;
-          state.set({ kind: "stopped", tv, reason: "lost", detached: remote });
+          state.set({ kind: "stopped", tv, reason, detached: remote });
           observe({ state: "failed", time: (last?.positionMs ?? 0) / 1000, duration: null });
           void close(false).catch(() => {});
         });
 
-        const budget =
-          request.mode === "file" ||
-          !!(request.sourceId && (await canOverlap?.(request.sourceId, controller.signal)));
-
-        if (!budget) throw new TvRefused("budget");
-
-        if (!active()) throw new Error("Output changed");
-        relay = await serveOnRelay(request.attempt, request.url, path, controller.signal);
+        // A preflighted relay must exist before receiver LOAD.
+        if (!relay) throw new TvRefused("unreadable");
+        progress.stage = "load";
 
         if (!active()) {
           await close();
@@ -236,7 +262,10 @@ export function playerOutput(
               state.set({
                 kind: "stopped",
                 tv,
-                reason: status.state === "ended" ? "ended" : "failed",
+                reason:
+                  status.state === "ended" || status.state === "taken" || status.state === "stopped"
+                    ? status.state
+                    : "failed",
                 detached: remote,
               });
               void close(status.state !== "taken").catch(() => {});
@@ -298,7 +327,14 @@ export function playerOutput(
           state.set({
             kind: "refused",
             tv,
-            reason: cause instanceof TvRefused ? cause.refusal : "unavailable",
+            reason:
+              cause instanceof TvRefused
+                ? cause.refusal
+                : progress.stage === "load"
+                  ? "playback"
+                  : progress.stage === "preflight"
+                    ? "unreadable"
+                    : "unavailable",
           });
 
         return false;
@@ -314,13 +350,19 @@ export function playerOutput(
     async playHere() {
       const request = admission;
       const position = last?.positionMs ?? 0;
+      const previous = state.get();
+
+      if (previous.kind !== "local")
+        state.set({ kind: "stopped", tv: previous.tv, reason: "restore", detached: remote });
       await close();
 
       if (!request || admission !== request) return false;
-      remote = false;
       const accepted = (await local.localOutput?.(request.attempt, position)) ?? false;
 
-      if (accepted) state.set({ kind: "local" });
+      if (accepted) {
+        remote = false;
+        state.set({ kind: "local" });
+      }
 
       return accepted;
     },
@@ -357,6 +399,7 @@ export function playerOutput(
       const admit = () => {
         remote = false;
         admission = request;
+        selectedAudio = false;
         last = null;
         state.set({ kind: "local" });
 

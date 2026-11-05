@@ -14,25 +14,53 @@ internal class Relay(
   private val rewrite: (String, String) -> String?,
   private val drained: () -> Unit,
 ) {
-  data class Route(val url: String, val playlist: Boolean)
+  data class Route(val url: String, val playlist: Boolean, val pinned: Boolean = playlist)
   val token = ByteArray(24).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
   private val server = ServerSocket(0, 8, address)
   val address = "http://${address.hostAddress}:${server.localPort}/$token/"
   private val routes = linkedMapOf("0" to Route(source, playlist))
   private val sockets = ConcurrentHashMap.newKeySet<Socket>()
   private val upstreams = ConcurrentHashMap.newKeySet<HttpURLConnection>()
+  private val requests = ConcurrentHashMap<String, Socket>()
+  @Volatile private var serving: Socket? = null
+  private val incoming = ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, ArrayBlockingQueue(8))
   private val pool = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue(8))
+  private val retirement = Object()
+  private var readers = 0
+  private var acknowledged = false
+  private fun <T> reading(block: () -> T): T {
+    synchronized(retirement) { check(active); readers++ }
+    try { return block() }
+    finally { synchronized(retirement) { readers--; retirement.notifyAll() } }
+  }
   @Volatile private var active = true
   init {
     if (!playlist) {
       try { qualifyFile() }
-      catch (cause: Exception) { server.close(); pool.shutdown(); throw IllegalArgumentException("Range-readable MP4/MOV required") }
+      catch (cause: Exception) { server.close(); incoming.shutdown(); pool.shutdown(); throw IllegalArgumentException("Range-readable MP4/MOV required") }
     }
     Thread({
       while (active) {
         val socket = try { server.accept() } catch (_: IOException) { break }
-        sockets.add(socket)
-        try { pool.execute { try { serve(socket) } catch (_: Exception) {} finally { sockets.remove(socket); socket.close() } } }
+        synchronized(retirement) { if (!active) { socket.close(); break }; sockets.add(socket) }
+        try { incoming.execute {
+          try {
+            val parsed = parse(socket)
+            // Only a valid capability for the same route may replace a deferred response.
+            if (parsed.request[0] == "GET" && parsed.route != null && !parsed.route.playlist) {
+              val old = requests.put(parsed.id, socket)
+              if (old != null) {
+                runCatching { old.close() }
+                if (serving === old) upstreams.forEach { it.disconnect() }
+              }
+            }
+            pool.execute {
+              try { reading { check(!socket.isClosed); serving = socket; serve(socket, parsed) } }
+              catch (_: Exception) {}
+              finally { serving = null; requests.remove(parsed.id, socket); sockets.remove(socket); socket.close() }
+            }
+          } catch (_: Exception) { sockets.remove(socket); socket.close() }
+        } }
         catch (_: RejectedExecutionException) { sockets.remove(socket); socket.close() }
       }
     }, "cast-relay").apply { isDaemon = true; start() }
@@ -50,30 +78,36 @@ internal class Relay(
     }
     require(bytes.copyOfRange(4, 8).toString(Charsets.US_ASCII) in listOf("ftyp", "moov", "mdat", "wide"))
   }
-  @Synchronized fun route(id: String, url: String, playlist: Boolean) {
+  @Synchronized fun route(id: String, url: String, playlist: Boolean, pinned: Boolean = playlist) {
     check(active && id.matches(Regex("[0-9]{1,10}")))
     val uri = URI(url)
     require(uri.scheme in listOf("http", "https"))
     require(!source.startsWith("https:") || uri.scheme == "https")
-    if (id !in routes && routes.size >= 4096) routes.keys.firstOrNull { it != "0" }?.let { routes.remove(it) }
-    routes[id] = Route(url, playlist)
+    if (id !in routes && routes.size >= 65536) {
+      val disposable = routes.entries.firstOrNull { it.key != "0" && !it.value.pinned }?.key ?: error("Route limit")
+      routes.remove(disposable)
+    }
+    routes[id] = Route(url, playlist, pinned)
   }
   private fun open(url: String, range: String?): HttpURLConnection {
     var current = URL(url)
     val origin = URL(source)
     repeat(6) {
-      check(active)
       require(current.protocol in listOf("http", "https"))
       require(origin.protocol != "https" || current.protocol == "https")
-      val connection = current.openConnection() as HttpURLConnection
-      upstreams.add(connection)
+      val connection = synchronized(retirement) {
+        check(active)
+        (current.openConnection() as HttpURLConnection).also { upstreams.add(it) }
+      }
       connection.instanceFollowRedirects = false
       connection.connectTimeout = 6000
       connection.readTimeout = 6000
       connection.useCaches = false
       // Custom credentials never follow a cross-origin redirect or playlist reference.
-      if (current.protocol == origin.protocol && current.host == origin.host && current.port == origin.port)
-        headers.forEach { (key, value) -> connection.setRequestProperty(key, value) }
+      headers.forEach { (key, value) ->
+        if (key.equals("User-Agent", true) || (current.protocol == origin.protocol && current.host == origin.host && current.port == origin.port))
+          connection.setRequestProperty(key, value)
+      }
       if (range != null) connection.setRequestProperty("Range", range)
       try {
       val status = connection.responseCode
@@ -90,7 +124,8 @@ internal class Relay(
     }
     error("redirect limit")
   }
-  fun read(id: String): Pair<String, String>? {
+  fun read(id: String): Pair<String, String>? = reading { readPlaylist(id) }
+  private fun readPlaylist(id: String): Pair<String, String>? {
     val route = synchronized(this) { routes[id] } ?: return null
     if (!active || !route.playlist) return null
     val connection = open(route.url, null)
@@ -109,13 +144,14 @@ internal class Relay(
       return connection.url.toString() to bytes.toString(Charsets.UTF_8)
     } finally { connection.disconnect(); upstreams.remove(connection) }
   }
-  private fun serve(socket: Socket) {
+  private data class Parsed(val id: String, val route: Route?, val request: List<String>, val lines: List<String>)
+  private fun parse(socket: Socket): Parsed {
     socket.soTimeout = 6000
     val input = socket.getInputStream()
     // A hard header bound independent of line lengths and client pacing.
     val header = ByteArrayOutputStream()
     while (header.size() < 16384) {
-      val byte = input.read(); if (byte < 0) return
+      val byte = input.read(); require(byte >= 0)
       header.write(byte)
       if (byte == 10 && header.size() >= 4 && header.toByteArray().takeLast(4) == listOf<Byte>(13, 10, 13, 10)) break
     }
@@ -127,11 +163,15 @@ internal class Relay(
     require(path.startsWith("/$token/") && !path.contains('?'))
     val id = path.removePrefix("/$token/").substringBefore('.')
     require(id.matches(Regex("[0-9]{1,10}")))
-    val route = synchronized(this) { routes[id] } ?: return
+    return Parsed(id, synchronized(this) { routes[id] }, request, lines)
+  }
+  private fun serve(socket: Socket, parsed: Parsed) {
+    val (id, route, request, lines) = parsed
     val output = socket.getOutputStream()
     fun head(status: String, extras: String = "") {
       output.write(("HTTP/1.1 $status\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nAccess-Control-Expose-Headers: Content-Range, Accept-Ranges, Content-Length\r\n$extras\r\n").toByteArray())
     }
+    if (route == null) { head("404 Not Found"); return }
     if (request[0] == "OPTIONS") { head("204 No Content"); return }
     val range = lines.drop(1).firstOrNull { it.startsWith("Range:", true) }?.substringAfter(':')?.trim()
     require(range == null || range.matches(Regex("bytes=[0-9]{1,18}-[0-9]{0,18}")))
@@ -139,7 +179,7 @@ internal class Relay(
       RandomAccessFile(File(URI(route.url)), "r").use { file ->
         val start = range?.removePrefix("bytes=")?.substringBefore('-')?.toLong() ?: 0
         val end = range?.substringAfter('-')?.takeIf { it.isNotEmpty() }?.toLong()?.coerceAtMost(file.length() - 1) ?: (file.length() - 1)
-        require(start in 0..end)
+        if (start !in 0..end) { head("416 Range Not Satisfiable", "Content-Range: bytes */${file.length()}\r\n"); return }
         val length = end - start + 1
         val partial = if (range != null) "Content-Range: bytes $start-$end/${file.length()}\r\n" else ""
         head(if (range != null) "206 Partial Content" else "200 OK", "Content-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Length: $length\r\n$partial")
@@ -168,12 +208,21 @@ internal class Relay(
     }
   }
   fun revoke() {
-    synchronized(this) { active = false; routes.clear() }
+    synchronized(retirement) { active = false }
+    synchronized(this) { routes.clear() }
     server.close()
     sockets.forEach { runCatching { it.close() } }
     upstreams.forEach { it.disconnect() }
+    incoming.shutdown()
     pool.shutdown()
-    check(pool.awaitTermination(8, TimeUnit.SECONDS) && upstreams.isEmpty()) { "Readers did not close" }
-    drained()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8)
+    synchronized(retirement) {
+      while (readers > 0) {
+        val remaining = deadline - System.nanoTime()
+        check(remaining > 0) { "Readers did not close" }
+        TimeUnit.NANOSECONDS.timedWait(retirement, remaining)
+      }
+      if (!acknowledged) { acknowledged = true; drained() }
+    }
   }
 }

@@ -51,4 +51,32 @@ class CastOwnerTest {
       file.delete()
     }
   }
+
+  @Test fun foregroundExitKeepsAdmissionForExplicitRecovery() {
+    val context = RuntimeEnvironment.getApplication()
+    val player = TestExoPlayerBuilder(context).build()
+    val releases = mutableListOf<Release>()
+    val owner = PlayerOwner(player, object : PlayerEvents {
+      override fun observed(observation: Observation) {}
+      override fun tracks(attempt: String, tracks: List<Track>) {}
+      override fun released(release: Release) { releases.add(release) }
+    })
+    val file = File.createTempFile("cast-recovery", ".mp4", context.cacheDir)
+    javaClass.classLoader!!.getResourceAsStream("media/h264-aac.mp4")!!.use { input -> file.outputStream().use { input.copyTo(it) } }
+    var reader: (() -> Unit)? = null
+    try {
+      owner.admit(Admission("cast", file.toURI().toString(), emptyMap(), "progressive", "file", 0, HoldRef.LocalFile(file.path)))
+      assertNotNull(owner.reserveOutput("cast"))
+      reader = owner.outputReader("cast")
+      assertNotNull(reader)
+      assertTrue(owner.remoteOutput("cast"))
+      owner.stopRemoteOutput()
+      reader!!.invoke()
+      assertTrue(releases.isEmpty())
+      assertEquals("cast", owner.attempt)
+      assertTrue(owner.localOutput("cast", 42000))
+      assertEquals("cast", owner.attempt)
+    } finally { reader?.invoke(); owner.stopAll(); player.release(); file.delete() }
+  }
+
 }

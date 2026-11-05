@@ -208,3 +208,14 @@ it("launches the open receiver, loads an opaque route, observes status and arms 
     await link.close();
   }
 });
+
+it("does not LAUNCH when the preflight callback refuses", async () => {
+  const { connectTv, TvRefused } = await import("../src/cast/sender.ts");
+  sent.length = 0;
+  await expect(
+    connectTv({ id: "stand-in", name: "TV", model: null }, async () => {
+      throw new TvRefused("budget");
+    }),
+  ).rejects.toThrow();
+  expect(sent.some((message) => message.payload.type === "LAUNCH")).toBe(false);
+});

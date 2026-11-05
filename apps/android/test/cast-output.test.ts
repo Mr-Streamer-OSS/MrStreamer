@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import type { NativePlayer, Observation } from "../src/player/native.ts";
+import type { NativePlayer, Observation, Track } from "../src/player/native.ts";
 import type { TvLink, TvStatus } from "../src/cast/sender.ts";
 import { playerOutput } from "../src/player/output.ts";
 
@@ -10,14 +10,19 @@ vi.mock("../src/cast/sender.ts", () => ({
   serveOnRelay: sender.serve,
   onLeftApp: sender.leave,
   TvRefused: class extends Error {
-    refusal = "format";
+    readonly refusal: string;
+    constructor(refusal: string) {
+      super(refusal);
+      this.refusal = refusal;
+    }
   },
 }));
 
 const tv = { id: "test", name: "Test TV", model: null };
 
-function setup() {
+function setup(source = false, budget = vi.fn(async () => true)) {
   let observe!: (event: Observation) => void;
+  let tracks!: (event: never) => void;
   let report!: (status: TvStatus) => void;
   let lose!: (why: "lost" | "stopped") => void;
 
@@ -41,7 +46,11 @@ function setup() {
     }),
   } satisfies TvLink;
 
-  sender.connect.mockResolvedValue(link);
+  sender.connect.mockImplementation(async (_tv, preflight) => {
+    await preflight?.();
+
+    return link;
+  });
   sender.serve.mockResolvedValue({
     address: "http://relay.invalid/opaque/0.mp4",
     contentType: "video/mp4",
@@ -60,14 +69,16 @@ function setup() {
     setSpeed: vi.fn(async () => true),
     setQuality: vi.fn(async () => true),
     capabilities: () => ({ containers: [], decoders: {} }),
-    addListener: ((_event: string, listener: (value: Observation) => void) => {
-      observe = listener;
+    addListener: ((event: string, listener: (value: Observation) => void) => {
+      if (event === "onState") observe = listener;
+
+      if (event === "onTracks") tracks = listener as (event: never) => void;
 
       return { remove() {} };
     }) as NativePlayer["addListener"],
   } satisfies NativePlayer;
 
-  const output = playerOutput(local);
+  const output = playerOutput(local, budget);
 
   const ready = async () => {
     await output.native.admit({
@@ -76,7 +87,8 @@ function setup() {
       url: "file:///owned/movie.mp4",
       headers: {},
       format: "progressive",
-      mode: "file",
+      mode: source ? "title" : "file",
+      sourceId: "provider",
       startMs: 0,
     });
     observe({
@@ -99,6 +111,10 @@ function setup() {
     ...output,
     local,
     ready,
+    tracks: (value: {
+      attempt: string;
+      tracks: readonly Pick<Track, "id" | "type" | "selected">[];
+    }) => tracks(value as never),
     report: (status: TvStatus) => report(status),
     lose: (why: "lost" | "stopped") => lose(why),
     loadSent: () => report !== undefined,
@@ -115,6 +131,7 @@ it("keeps the admitted local output until PLAYING, then routes commands and retu
   await f.ready();
   const selected = f.cast.select(tv);
   await vi.waitFor(() => expect(sender.serve).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.loadSent()).toBe(true));
   await vi.waitFor(() => expect(f.cast.state.get().kind).toBe("connecting"));
   expect(f.local.remoteOutput).not.toHaveBeenCalled();
   f.report({ state: "playing", time: 43, duration: 100 });
@@ -136,6 +153,7 @@ it("cancels a pending load and never detaches for a stale PLAYING", async () => 
   await f.ready();
   const selected = f.cast.select(tv);
   await vi.waitFor(() => expect(sender.serve).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.loadSent()).toBe(true));
   await f.cast.cancel();
   f.report({ state: "playing", time: 43, duration: 100 });
   expect(await selected).toBe(false);
@@ -148,6 +166,7 @@ it("keeps uncertain reader cleanup retryable and still retires the player hold o
   await f.ready();
   const selected = f.cast.select(tv);
   await vi.waitFor(() => expect(sender.serve).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(f.loadSent()).toBe(true));
   f.report({ state: "playing", time: 43, duration: 100 });
   await selected;
   f.revoke.mockRejectedValue(new Error("reader still open"));
@@ -246,4 +265,101 @@ it("says a TV that stopped before PLAYING never took the phone's output, and can
     detached: false,
   });
   expect(left.local.remoteOutput).not.toHaveBeenCalled();
+});
+
+it.each(["restore", "drain"])(
+  "keeps failed %s retryable without On TV or local command authority",
+  async (failure) => {
+    const f = setup();
+    await onTv(f);
+
+    if (failure === "restore") f.local.localOutput.mockResolvedValue(false);
+    else f.revoke.mockRejectedValue(new Error("reader open"));
+    await f.cast.playHere().catch(() => false);
+    expect(f.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "restore", detached: true });
+    expect(await f.native.resume("one")).toBe(false);
+    expect(f.local.resume).not.toHaveBeenCalled();
+    f.revoke.mockResolvedValue();
+    f.local.localOutput.mockResolvedValue(true);
+    expect(await f.cast.playHere()).toBe(true);
+  },
+);
+
+it.each(["stopped", "taken"] as const)(
+  "retains confirmed position after external %s with unknown time",
+  async (state) => {
+    const f = setup();
+    await onTv(f);
+    f.report({ state, time: null, duration: null });
+    expect(f.cast.state.get()).toEqual({ kind: "stopped", tv, reason: state, detached: true });
+    await f.cast.playHere();
+    expect(f.local.localOutput).toHaveBeenCalledWith("one", 43000);
+  },
+);
+
+it("refuses a selected non-default Dutch audio choice before opening the receiver", async () => {
+  const f = setup();
+  await f.ready();
+  f.tracks({
+    attempt: "one",
+    tracks: [
+      { id: "en", type: "audio", selected: false },
+      { id: "nl", type: "audio", selected: true },
+    ],
+  });
+  expect(await f.cast.select(tv)).toBe(false);
+  expect(sender.connect).not.toHaveBeenCalled();
+  expect(f.local.remoteOutput).not.toHaveBeenCalled();
+});
+
+it("names LOAD failure as playback failure after successful preflight and connection", async () => {
+  const f = setup();
+  await f.ready();
+  sender.connect.mockImplementation(async (_tv, beforeLaunch) => {
+    await beforeLaunch();
+
+    return {
+      volume: { get: () => null, subscribe: () => () => {} },
+      lost: new Promise(() => {}),
+      close: async () => {},
+      load: async () => {
+        throw new Error("LOAD_FAILED");
+      },
+    };
+  });
+  expect(await f.cast.select(tv)).toBe(false);
+  expect(f.cast.state.get()).toEqual({ kind: "refused", tv, reason: "playback" });
+  expect(f.local.remoteOutput).not.toHaveBeenCalled();
+});
+
+it("refuses unreadable accounting or unknown budget before opening a TV", async () => {
+  for (const budget of [
+    vi.fn(async () => false),
+    vi.fn(async (): Promise<boolean> => {
+      throw new Error("unreadable account");
+    }),
+  ]) {
+    sender.connect.mockClear();
+    const f = setup(true, budget);
+    await f.ready();
+    expect(await f.cast.select(tv)).toBe(false);
+    expect(sender.connect).not.toHaveBeenCalled();
+    expect(f.local.remoteOutput).not.toHaveBeenCalled();
+  }
+});
+
+it("names missing PLAYING after accepted LOAD as playback failure", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const f = setup();
+    await f.ready();
+    const selecting = f.cast.select(tv);
+    await vi.advanceTimersByTimeAsync(8001);
+    expect(await selecting).toBe(false);
+    expect(f.cast.state.get()).toEqual({ kind: "refused", tv, reason: "playback" });
+    expect(f.local.remoteOutput).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });

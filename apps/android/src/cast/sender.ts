@@ -37,8 +37,8 @@ export interface TvStatus {
    * plays there now. Neither says where it got to.
    */
   readonly state: "loading" | "playing" | "paused" | "ended" | "failed" | "stopped" | "taken";
-  /** Seconds into it. */
-  readonly time: number;
+  /** Seconds into it, or null when the receiver did not report a position. */
+  readonly time: number | null;
   /** Its length in seconds; null for a channel or before the TV knows. */
   readonly duration: number | null;
 }
@@ -91,7 +91,7 @@ export interface TvLink {
 /** A refusal said before anything reached the TV, for playback.ts to show. */
 export class TvRefused extends Error {
   /** Beside the media's own: no private Wi-Fi address, or the stream couldn't be read. */
-  readonly refusal: Refusal | "network" | "unreadable" | "budget";
+  readonly refusal: Refusal | "network" | "unreadable" | "budget" | "audio";
   constructor(refusal: TvRefused["refusal"]) {
     super(`Can't play on a TV: ${refusal}`);
     this.refusal = refusal;
@@ -103,6 +103,7 @@ interface RelayRoute {
   readonly id: string;
   readonly url: string;
   readonly playlist: boolean;
+  readonly pinned?: boolean;
 }
 
 type Listener<E> = (event: E) => void;
@@ -238,7 +239,7 @@ export interface Relay {
 }
 
 /** The relay's most segment routes per token (`CastRelay.routesKept`). */
-const ROUTES_KEPT = 4095;
+const ROUTES_KEPT = 65535;
 
 /** The file extension `url`'s path ends in, else `fallback`. */
 const extension = (url: string, fallback: string) =>
@@ -259,7 +260,17 @@ export async function serveOnRelay(
   const module = native();
 
   if (!module) throw new TvRefused("network");
-  const served = await module.serve(attempt, path.kind === "hls");
+
+  const served = await module.serve(attempt, path.kind === "hls").catch((cause: unknown) => {
+    throw new TvRefused(
+      typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        cause.code === "CAST_NETWORK"
+        ? "network"
+        : "unreadable",
+    );
+  });
 
   if (!served) throw new TvRefused("network");
   const { token } = served;
@@ -301,15 +312,17 @@ export async function serveOnRelay(
   const rewrite = (base: string, body: string) => {
     const made: RelayRoute[] = [];
     const fresh = new Map<string, string>();
+    const referenced = new Set<string>();
 
     const route = (target: string, kind: RouteKind) => {
       const key = `${kind} ${target}`;
+      referenced.add(key);
       const found = known.get(key) ?? fresh.get(key);
 
       if (found) return found;
       const id = String(next++);
       const path = `${id}.${kind === "playlist" ? "m3u8" : extension(target, "ts")}`;
-      made.push({ id, url: target, playlist: kind === "playlist" });
+      made.push({ id, url: target, playlist: kind === "playlist", pinned: kind !== "media" });
       fresh.set(key, path);
 
       return path;
@@ -318,13 +331,23 @@ export async function serveOnRelay(
     const rewritten = rewritePlaylist(body, base, route);
 
     if (rewritten.kind === "playlist") {
-      module.route(token, made);
+      const required = new Set(
+        [...known.keys(), ...fresh.keys()].filter((key) => !key.startsWith("media ")),
+      );
+
+      for (const key of referenced) required.add(key);
+
+      if (required.size > ROUTES_KEPT) throw new TvRefused("unreadable");
+
+      for (let index = 0; index < made.length; index += 4096)
+        module.route(token, made.slice(index, index + 4096));
 
       for (const [key, path] of fresh) known.set(key, path);
 
       for (const key of known.keys()) {
         if (known.size <= ROUTES_KEPT) break;
-        known.delete(key);
+
+        if (key.startsWith("media ")) known.delete(key);
       }
     }
 
@@ -607,7 +630,7 @@ let made = 0;
  * Connects to `tv` and starts the media receiver on it. Rejects when it can't be reached or the
  * receiver doesn't start.
  */
-export async function connectTv(tv: Tv): Promise<TvLink> {
+export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Promise<TvLink> {
   const module = native();
 
   if (!module) throw new Error("This build can't play on a TV.");
@@ -752,13 +775,13 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
     if (!media || media.id === null) return;
 
     if (ids.length > 0 && !ids.includes(media.id)) {
-      return media.status({ state: "taken", time: 0, duration: null });
+      return media.status({ state: "taken", time: null, duration: null });
     }
 
     // Asked, the TV no longer names this load's media: it went unannounced, as the TV's remote
     // or another sender stopping it leaves an empty answer.
     if (own && ids.length === 0 && !media.over) {
-      return media.status({ state: "stopped", time: 0, duration: null });
+      return media.status({ state: "stopped", time: null, duration: null });
     }
 
     for (const status of statuses) {
@@ -772,7 +795,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
       if (state === "ended" || state === "failed") media.over = true;
       media.status({
         state,
-        time: Math.max(0, numberOr(status["currentTime"], 0)),
+        time: typeof status["currentTime"] === "number" ? Math.max(0, status["currentTime"]) : null,
         duration: numberOr(info["duration"], null),
       });
     }
@@ -836,6 +859,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
         send(PLATFORM, NAMESPACE.heartbeat, { type: "PING" });
       }, TIMING.ping),
     );
+
+    await beforeLaunch?.();
 
     const launched = await ask(
       PLATFORM,
@@ -977,6 +1002,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
       const poll = setInterval(() => {
         if (media !== mine) return clearInterval(poll);
+
+        if (mine.requests.size >= 64) mine.requests.delete(mine.requests.values().next().value!);
         mine.requests.add(++requests);
         send(to, NAMESPACE.media, { type: "GET_STATUS", requestId: requests });
       }, TIMING.poll);
@@ -985,6 +1012,7 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
       const command = (payload: Payload) => {
         if (media === mine && mine.id !== null) {
+          if (mine.requests.size >= 64) mine.requests.delete(mine.requests.values().next().value!);
           mine.requests.add(++requests);
           send(to, NAMESPACE.media, { ...payload, mediaSessionId: mine.id, requestId: requests });
         }
