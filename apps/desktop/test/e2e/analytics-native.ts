@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
+import type { Json } from "@mrstreamer/contracts/json";
 import type {
   AnalyticsRecord,
   CaptureEvent,
@@ -43,7 +44,10 @@ type Context = {
   events(): CaptureEvent[];
   bodies: { body: string; at: number; closedAt?: number }[];
   capture(mode: "accept" | "reject" | "hold" | "hold-usage" | "offline"): Promise<void>;
-  observations: Record<string, unknown>;
+  observations: Record<string, unknown> & {
+    windowsRetryReaders?: Json;
+    windowsRetryMeasurements?: Json;
+  };
 };
 
 const checkbox = '[role="checkbox"][aria-label="Share basic usage statistics"]';
@@ -69,7 +73,7 @@ export async function runNativeTelemetry(c: Context) {
     status: "running" | "passed" | "failed";
     started: number;
     ended?: number;
-    proof?: unknown;
+    proof?: Json;
   }[] = [];
 
   c.observations.nativeCases = cases;
@@ -259,7 +263,7 @@ export async function runNativeTelemetry(c: Context) {
     return marker;
   };
 
-  const run = async (name: string, work: () => Promise<unknown>) => {
+  const run = async (name: string, work: () => Promise<Json>) => {
     if (selected && selected !== name) return;
     c.abort.throwIfAborted();
     const receipt: (typeof cases)[number] = { name, status: "running", started: Date.now() };
@@ -405,7 +409,7 @@ export async function runNativeTelemetry(c: Context) {
     });
 
     await run("checkpoint", async () => {
-      const proofs: unknown[] = [];
+      const proofs: Json[] = [];
 
       for (const phase of ["before", "after"] as const) {
         await fresh();
@@ -477,7 +481,7 @@ export async function runNativeTelemetry(c: Context) {
     });
 
     await run("seal-send-ack", async () => {
-      const proofs: unknown[] = [];
+      const proofs: Json[] = [];
 
       for (const spec of [
         { kind: "seal", phase: "before" },
@@ -1000,7 +1004,7 @@ export async function runNativeTelemetry(c: Context) {
           startedAt: string;
           endedAt?: string;
           error?: string;
-          proof?: unknown;
+          proof?: Json;
           old: {
             attachedAt?: string;
             profile?: string;
@@ -1016,7 +1020,7 @@ export async function runNativeTelemetry(c: Context) {
               startedAt: string;
               clickedAt?: string;
               completedAt?: string;
-              state?: unknown;
+              state?: Json;
             }[];
             diagnosticErrors: string[];
             limits: string[];

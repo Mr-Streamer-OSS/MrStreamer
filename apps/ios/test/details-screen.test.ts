@@ -62,7 +62,7 @@ const scenario = vi.hoisted(() => ({
   details: (
     _version: string,
     _show: (facts: import("../src/titles.ts").ShownDetails) => void,
-  ): Promise<unknown> => new Promise(() => undefined),
+  ): ReturnType<typeof import("../src/titles.ts").detailsOf> => new Promise(() => undefined),
 }));
 
 vi.mock("react-native", async () => ({
@@ -944,9 +944,18 @@ const listed = (subscriptionId: string, id: string, season: number, number: numb
  * Series 2's details from `subscriptionId`: Season 1, Specials, Season 2, in that order, with the
  * playlist's own order when `order` is given.
  */
-function seriesFacts(subscriptionId: string, order?: readonly string[]) {
+function seriesFacts(
+  subscriptionId: string,
+  order?: readonly string[],
+): import("@mrstreamer/contracts/ondemand").SeriesDetails {
   const at = (id: string, season: number, number: number) =>
     listed(subscriptionId, id, season, number);
+
+  const title = byIds(indexCatalogue([{ subscriptionId, catalogue }], "en"), "series", [
+    { subscriptionId, id: "2" },
+  ])[0];
+
+  if (!title) throw new Error("Series details fixture is missing series 2");
 
   return {
     kind: "series",
@@ -956,7 +965,9 @@ function seriesFacts(subscriptionId: string, order?: readonly string[]) {
     genres: [],
     duration: null,
     backdropUrl: null,
-    title: {},
+    originalTitle: null,
+    releaseDate: null,
+    title,
     seasons: [
       {
         number: 1,

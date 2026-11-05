@@ -221,9 +221,7 @@ export async function ownedRun<D>(
     /** Runs first, inside the run, before any fixture starts. */
     readonly prepare?: (observed: Record<string, unknown>) => Promise<void>;
     /** Runs first in cleanup, before the app is stopped. */
-    readonly release?: (
-      clean: (operation: () => Promise<unknown>) => Promise<void>,
-    ) => Promise<void>;
+    readonly release?: (clean: (operation: () => Promise<void>) => Promise<void>) => Promise<void>;
     readonly proof: Record<string, unknown>;
     readonly limits: readonly string[];
     readonly done: string;
@@ -424,7 +422,7 @@ export async function ownedRun<D>(
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
   } finally {
-    const clean = async (operation: () => Promise<unknown>) => {
+    const clean = async (operation: () => Promise<void>) => {
       try {
         await operation();
       } catch (error) {

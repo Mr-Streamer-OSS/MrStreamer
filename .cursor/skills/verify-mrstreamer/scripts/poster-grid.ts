@@ -4,6 +4,7 @@
 // identity holds across pages, a 960x600 window and larger text. Closing details puts the focus
 // back on the poster that opened them, and a removal on the tile that took its place. Keys and
 // clicks go through CDP; DOM and accessibility-tree reads observe the result.
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import type { Driver } from "./language.ts";
 
 const GRID = `document.querySelector('[role="list"]:has([role="listitem"][data-index])')`;
@@ -87,7 +88,7 @@ interface GridState {
   readonly rem: number;
 }
 
-interface AxNode {
+type AxNode = {
   readonly nodeId: string;
   readonly parentId?: string;
   readonly ignored?: boolean;
@@ -95,9 +96,9 @@ interface AxNode {
   readonly name?: { readonly value?: string };
   readonly properties?: readonly {
     readonly name: string;
-    readonly value: { readonly value?: unknown };
+    readonly value: { readonly value?: Json };
   }[];
-}
+};
 
 const button = (selector: string, text: string) =>
   `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(text)})`;

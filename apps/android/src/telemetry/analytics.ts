@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { defined } from "@mrstreamer/core/defined";
 import { statisticsConsent, type ConsentRecord } from "@mrstreamer/mobile/consent/statistics";
@@ -11,7 +12,7 @@ import type { CaptureTransport } from "./transport.ts";
 
 /** Android's current observations only. Every queued event must hold on disk before delivery. */
 export function androidAnalytics(ports: {
-  readonly load: () => unknown;
+  readonly load: () => Json;
   readonly save: (record: ConsentRecord<CaptureEvent>) => boolean;
   readonly revocation?: { load(): boolean; save(pending: boolean): boolean };
   readonly uuid: () => string;

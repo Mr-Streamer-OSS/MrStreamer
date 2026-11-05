@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { type } from "arktype";
 import { unzipSync } from "fflate";
 import { PLATFORMS, platformFiles } from "@mrstreamer/contracts/release-files";
+import type { Json } from "@mrstreamer/contracts/json";
 import { packageVersion } from "./msix-version.ts";
 
 const Sha = type(/^[0-9a-f]{40}$/);
@@ -61,7 +62,7 @@ export const Artifact = type({
 
 export interface PackageGitHub {
   readonly repository: string;
-  json(path: string): Promise<unknown>;
+  json(path: string): Promise<Json>;
   bytes(path: string): Promise<Uint8Array>;
 }
 

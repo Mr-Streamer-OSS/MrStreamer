@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { Json } from "@mrstreamer/contracts/json";
 import {
   readReceipt,
   resolvePackages,
@@ -94,7 +95,7 @@ function published() {
   const diff = { status: "ahead", ahead_by: 8, behind_by: 0 };
   const onMain = { status: "ahead", ahead_by: 1, behind_by: 0 };
 
-  const json: Record<string, unknown> = {
+  const json: Record<string, Json> = {
     "": { default_branch: "main" },
     [`/releases/tags/${EXPECTED.stableTag}`]: stable.value,
     [`/releases/tags/${EXPECTED.candidateTag}`]: candidate.value,
@@ -112,9 +113,11 @@ function published() {
 
       if (page) return structuredClone(releases.slice((+page - 1) * 100, +page * 100));
 
-      if (!(path in json)) throw new Error(`Unexpected API request ${path}`);
+      const reply = json[path];
 
-      return structuredClone(json[path]);
+      if (reply === undefined) throw new Error(`Unexpected API request ${path}`);
+
+      return structuredClone(reply);
     }),
     bytes: async (path) => {
       const id = Number(path.split("/").at(-1));

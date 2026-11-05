@@ -49,14 +49,14 @@ const ascKey = (() => {
   return path && keyId && issuer ? { path, keyId, issuer } : null;
 })();
 
-interface ApiCertificate {
+type ApiCertificate = {
   readonly attributes: {
     readonly displayName: string;
     readonly serialNumber: string;
     readonly expirationDate: string;
     readonly certificateContent: string;
   };
-}
+};
 
 class ApiError extends Error {
   readonly status: number;
@@ -236,7 +236,7 @@ async function developerIdCertificates(): Promise<readonly ApiCertificate[]> {
   return found.data;
 }
 
-async function api(method: string, path: string, body?: Json): Promise<unknown> {
+async function api(method: string, path: string, body?: Json): Promise<Json> {
   const response = await fetch(`https://api.appstoreconnect.apple.com/v1${path}`, {
     method,
     headers: { authorization: `Bearer ${token()}`, "content-type": "application/json" },

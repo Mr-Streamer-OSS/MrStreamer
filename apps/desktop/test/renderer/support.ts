@@ -57,7 +57,7 @@ const held = new Map<
 >();
 
 const standing = new Map<IpcMethod, Result<unknown>>();
-const replies = new Map<IpcMethod, (args: IpcInput<IpcMethod>) => unknown>();
+const replies = new Map<IpcMethod, (args: IpcInput<IpcMethod>) => IpcOutput<IpcMethod>>();
 const listeners = new Map<string, Set<(payload: IpcEvents[IpcEvent]) => void>>();
 const calls: { readonly method: IpcMethod; readonly args: unknown }[] = [];
 let preferences = defaultPreferences;

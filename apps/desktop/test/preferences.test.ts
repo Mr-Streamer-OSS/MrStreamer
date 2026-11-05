@@ -1,3 +1,4 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type } from "arktype";
@@ -86,7 +87,7 @@ async function savedAs(
   return found;
 }
 
-const stored = async (dataDir: string): Promise<unknown> =>
+const stored = async (dataDir: string): Promise<Json> =>
   JSON.parse(await readFile(join(dataDir, "preferences.json"), "utf8"));
 
 describe("preferences", () => {

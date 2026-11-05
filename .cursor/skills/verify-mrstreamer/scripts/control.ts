@@ -1489,7 +1489,7 @@ async function run(scenario: Scenario, prior?: string) {
     releaseGuide?.();
     const cleanupErrors: string[] = [];
 
-    const clean = async (operation: () => Promise<unknown>) => {
+    const clean = async (operation: () => Promise<void>) => {
       try {
         await operation();
       } catch (error) {
@@ -1528,7 +1528,9 @@ async function run(scenario: Scenario, prior?: string) {
 
     if (guideHosts) {
       const owned = guideHosts;
-      await clean(() => Promise.all([owned.north.close(), owned.south.close()]));
+      await clean(async () => {
+        await Promise.all([owned.north.close(), owned.south.close()]);
+      });
     }
 
     if (movedHost) {

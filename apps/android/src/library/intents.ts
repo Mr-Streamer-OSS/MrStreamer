@@ -56,7 +56,8 @@ export interface DownloadPresentation {
 export interface DownloadPresentationAdapter {
   readonly read: (media: MediaIdentity) => DownloadPresentation | undefined;
   readonly subscribe: (listener: () => void) => () => void;
-  readonly snapshot: () => unknown;
+  /** A change token for useSyncExternalStore: equal strings mean nothing to redraw. */
+  readonly snapshot: () => string;
 }
 
 export function downloadPresentationRegistry() {

@@ -113,7 +113,7 @@ export interface GitHub {
   /** owner/name of the repository the workflow runs in. */
   readonly repository: string;
   /** GET `/repos/{repository}{path}` as JSON. */
-  json(path: string): Promise<unknown>;
+  json(path: string): Promise<Json>;
   /** GET `/repos/{repository}{path}` as bytes, following a redirect without the token. */
   bytes(path: string, accept?: string): Promise<Uint8Array>;
 }
@@ -575,7 +575,7 @@ export function restGitHub(repository: string, token: string): GitHub {
 
   return {
     repository,
-    json: async (path) => (await get(path)).json(),
+    json: async (path) => JSON.parse(await (await get(path)).text()),
     bytes: async (path, accept) => new Uint8Array(await (await get(path, accept)).arrayBuffer()),
   };
 }

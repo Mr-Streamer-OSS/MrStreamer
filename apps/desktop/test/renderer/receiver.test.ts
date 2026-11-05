@@ -237,7 +237,7 @@ const gone = () => ({
 });
 
 /** Tries the lost TV again with `retry`, refused at once with no status said meanwhile. */
-async function refusedAgain(retry: () => Promise<unknown>): Promise<void> {
+async function refusedAgain(retry: () => Promise<void | boolean>): Promise<void> {
   const connect = ipc.hold("output.connect");
   await retry();
   await act(async () => connect.reject({ kind: "output", failure: { kind: "unreachable" } }));

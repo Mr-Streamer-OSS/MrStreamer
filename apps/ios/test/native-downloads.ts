@@ -962,7 +962,7 @@ const gate = () => {
   if (background.corrupt) throw refused("ERR_DOWNLOADS_CORRUPT");
 };
 
-const module = {
+export const nativeDownloads = {
   async sourceState(sourceId: string) {
     recover();
 
@@ -1424,4 +1424,4 @@ host.expo ??= {};
 
 host.expo.modules ??= {};
 
-host.expo.modules["BackgroundDownloads"] = module;
+host.expo.modules["BackgroundDownloads"] = nativeDownloads;

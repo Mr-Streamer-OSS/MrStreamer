@@ -196,7 +196,7 @@ function install(profile: string, delayMs: number) {
 
   const observe = async (
     operation: "read" | "directory" | "replace",
-    run: () => Promise<unknown>,
+    run: () => ReturnType<typeof fs.readFile | typeof fs.readdir | typeof fs.rename>,
   ) => {
     const sample = {
       operation,
@@ -250,7 +250,11 @@ function install(profile: string, delayMs: number) {
     }
   };
 
-  const wrap = <T extends (...args: never[]) => Promise<unknown>>(
+  const wrap = <
+    T extends (
+      ...args: never[]
+    ) => ReturnType<typeof fs.readFile | typeof fs.readdir | typeof fs.rename>,
+  >(
     method: T,
     operation: "read" | "directory" | "replace",
     argument: number,

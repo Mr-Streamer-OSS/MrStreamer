@@ -148,7 +148,7 @@ it("presents only the exact episode file and dispatches its state action", () =>
 
 it("keeps the successor presentation adapter when an older registration cleans up", () => {
   const registry = downloadPresentationRegistry();
-  const adapter = { read: () => undefined, snapshot: () => 0, subscribe: () => () => {} };
+  const adapter = { read: () => undefined, snapshot: () => "", subscribe: () => () => {} };
   const first = registry.register(adapter);
   const successor = { ...adapter };
   const second = registry.register(successor);

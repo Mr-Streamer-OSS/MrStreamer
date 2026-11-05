@@ -24,7 +24,7 @@ afterEach(() => {
  * Does `step`, then waits for what it set off: React Query tells the screen about a mutation's
  * changes in a timer of its own, set once the answer has gone through a few promises.
  */
-async function settled(step: () => unknown): Promise<void> {
+async function settled(step: () => void): Promise<void> {
   await act(async () => {
     step();
     await vi.advanceTimersByTimeAsync(20);

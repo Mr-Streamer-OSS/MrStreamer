@@ -34,7 +34,7 @@ import { playlistReader } from "./playlist.ts";
 
 /** What a source answers for: checking its login and listing its channels. */
 export interface CatalogueReader {
-  authenticate(signal?: AbortSignal): Promise<unknown>;
+  authenticate(signal?: AbortSignal): Promise<void | Awaited<ReturnType<Provider["authenticate"]>>>;
   liveCatalogue(signal?: AbortSignal): Promise<LiveCatalogue>;
 }
 
@@ -88,7 +88,7 @@ export type Connected =
 
 export interface SourcesPlatform {
   readonly credentials: Credentials;
-  readonly readJson: (name: string) => unknown;
+  readonly readJson: (name: string) => Json;
   readonly writeJson: (name: string, value: Json) => void;
   readonly fetch: typeof fetch;
   readonly userAgent: string;

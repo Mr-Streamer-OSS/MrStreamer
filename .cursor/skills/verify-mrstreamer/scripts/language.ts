@@ -18,7 +18,7 @@ export interface Driver {
   readonly profile: string;
   readonly observed: Record<string, unknown>;
   evaluate<T>(expression: string): Promise<T>;
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  send(method: string, params?: Record<string, unknown>): Promise<Json | undefined>;
   /** Waits for `check`, 30 seconds unless `timeout` says otherwise. */
   wait(check: () => Promise<boolean>, timeout?: number): Promise<void>;
   exists(expression: string): Promise<boolean>;

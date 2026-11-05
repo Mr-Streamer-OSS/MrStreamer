@@ -227,7 +227,14 @@ describe("the demo provider as the app makes it", () => {
     const missing = (titleId: string) => ({ kind: "title-not-found", titleId });
 
     // Each is asked only when checked, so no refusal is left without a handler meanwhile.
-    const asked: Array<[() => Promise<unknown>, string]> = [
+    const asked: Array<
+      [
+        () => ReturnType<
+          ReturnType<typeof demoProvider>["movieDetails" | "seriesDetails" | "titleFile"]
+        >,
+        string,
+      ]
+    > = [
       [() => provider.movieDetails("series"), "series"],
       [() => provider.seriesDetails("movie"), "movie"],
       [() => provider.titleFile("movie", "episode-1", "mp4"), "episode-1"],

@@ -33,7 +33,7 @@ const empty: ChannelList = { id: FAVOURITES, name: "Favourites", entries: [] };
 
 /** Whole-file writes publish only after storage succeeds; a refused edit leaves its draft untouched. */
 export function listsOwner(
-  platform: { readJson(name: string): unknown; writeJson(name: string, value: Json): void },
+  platform: { readJson(name: string): Json; writeJson(name: string, value: Json): void },
   sources: () => Sources,
 ) {
   const state = store<State>({ kind: "failed", lists: [] });

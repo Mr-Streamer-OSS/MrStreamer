@@ -1,7 +1,8 @@
+import type { Json } from "@mrstreamer/contracts/json";
 import { readJsonStrict, writeJson } from "./storage.ts";
 
 export interface PreferenceFiles {
-  read(name: string): unknown;
+  read(name: string): Json;
   write(name: string, value: Parameters<typeof writeJson>[1]): void;
 }
 

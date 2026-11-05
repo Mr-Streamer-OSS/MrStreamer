@@ -188,7 +188,7 @@ export function demoProvider(
     const entries = await playlistEntries(get, signal);
     const parsed = playlistCatalogue(entries.filter(isHttpsHls).slice(0, PLAYLIST_CHANNELS));
 
-    if (signal?.aborted) throw stopped(signal);
+    if (signal?.aborted) throw signal.reason ?? new Error("The read stopped.");
 
     // An older read that ends after a newer one, or an aborted one, keeps the newer streams.
     if (mine > installed) {
@@ -262,8 +262,6 @@ function httpsOnly(fetchImpl: typeof fetch): typeof fetch {
 
 const isHttpsHls = (entry: PlaylistEntry) =>
   URL.parse(entry.url)?.protocol === "https:" && streamFormat(entry.url) === "hls";
-
-const stopped = (signal: AbortSignal): unknown => signal.reason ?? new Error("The read stopped.");
 
 const tooLarge = () =>
   new AppFailure({

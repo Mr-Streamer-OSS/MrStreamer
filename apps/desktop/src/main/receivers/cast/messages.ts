@@ -4,6 +4,7 @@
 // null for a field it has nothing to say in, so every optional field takes it.
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
+import type { Json } from "@mrstreamer/contracts/json";
 
 /** Who the app is on a channel, and the receiver itself, as opposed to an app running on it. */
 export const SENDER = "sender-0";
@@ -76,7 +77,7 @@ export type MediaMessage = Messages["Media"]["infer"];
 export type MediaStatus = NonNullable<MediaMessage["status"]>[number];
 
 /** A payload's JSON, or undefined when it isn't JSON, which no schema takes. */
-function json(payload: string): unknown {
+function json(payload: string): Json | undefined {
   try {
     return JSON.parse(payload);
   } catch {
