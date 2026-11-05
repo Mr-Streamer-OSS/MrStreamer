@@ -411,6 +411,8 @@ class PlayerOwner(
       if (ok) completed?.invoke(true)
       return ok
     }
+    // Rebuilding an unseekable progressive network source would restart it instead of restoring this place.
+    if (now.admission.hold !is HoldRef.LocalFile && now.admission.format != "hls" && !player.isCurrentMediaItemSeekable) return false
     val old = now.sidecar
     val oldLanguage = now.sidecarLanguage
     val oldParameters = player.trackSelectionParameters

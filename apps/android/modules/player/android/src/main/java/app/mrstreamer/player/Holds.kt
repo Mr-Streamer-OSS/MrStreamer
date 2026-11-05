@@ -117,7 +117,8 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
 }
 
 /**
- * A progressive HTTP source asks for Range on its first open, without opening another connection.
+ * A progressive HTTP source probes Range on each open at zero with unset requested length.
+ * A 400/403 probe refusal retries the original GET once, closing the refused connection first.
  * If the provider answers 200, only TS extraction loses its length: this avoids the duration-tail
  * probe and publishes an unseekable map. The loader keeps the real length and ordinary retry reads;
  * other containers, local files, HLS and providers answering 206 keep their normal extraction.
@@ -131,7 +132,19 @@ internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private v
     object : DataSource by reader {
       override fun open(dataSpec: DataSpec): Long {
         val probe = dataSpec.position == 0L && dataSpec.length == C.LENGTH_UNSET.toLong()
-        val length = reader.open(if (probe) dataSpec.withAdditionalHeaders(mapOf("Range" to "bytes=0-")) else dataSpec)
+        val length = try {
+          reader.open(if (probe) dataSpec.withAdditionalHeaders(mapOf("Range" to "bytes=0-")) else dataSpec)
+        } catch (cause: HttpDataSource.InvalidResponseCodeException) {
+          if (!probe || cause.responseCode !in listOf(400, 403) || Thread.currentThread().isInterrupted) throw cause
+          try { reader.close() } catch (cleanup: IOException) {
+            cause.addSuppressed(cleanup)
+            throw cause
+          }
+          try { reader.open(dataSpec) } catch (retry: IOException) {
+            cause.addSuppressed(retry)
+            throw cause
+          }
+        }
         if (probe) ignoredRange = reader.responseCode == 200
         return length
       }

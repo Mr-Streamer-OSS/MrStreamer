@@ -37,7 +37,7 @@ class NoRangeTsTest {
   private val packetStream = javaClass.classLoader!!.getResourceAsStream("media/hls/segment0.m2ts")!!.use { it.readBytes() }
   private val body = ByteArray(packetStream.size * 2000) { packetStream[it % packetStream.size] }
 
-  @Test fun ignoredRangeStartsWithoutDiscardingTheFileRetriesAtItsPositionAndClosesItsHold() =
+  @Test fun ignoredRangeStartsWithoutDiscardingTheFileReopensAtItsPositionAndClosesItsHold() =
     withSource(false) { source, url, requests, hold, settled ->
       val output = extract(source, url, 512 * 1024)
       assertTrue("Startup consumed nearly the whole response", transferred.get() < 512 * 1024)
@@ -75,6 +75,72 @@ class NoRangeTsTest {
     assertArrayEquals(body.copyOfRange(position.toInt(), position.toInt() + bytes.size), bytes)
     assertEquals("bytes=$position-", requests.last())
   }
+
+  @Test fun interruptedRetryPropagatesAndSettlesWithoutCallerClose() =
+    withSource(false, interruptRetry = true) { source, url, requests, hold, settled ->
+      source.open(DataSpec(url))
+      source.close()
+      val failure = try {
+        assertThrows(androidx.media3.datasource.HttpDataSource.HttpDataSourceException::class.java) {
+          source.open(DataSpec.Builder().setUri(url).setPosition(1880).build())
+        }
+      } finally { Thread.interrupted() }
+      assertTrue(failure.cause is java.io.InterruptedIOException)
+      assertEquals(listOf("bytes=0-", "bytes=1880-"), requests.toList())
+      assertEquals(2L, starts.get())
+      hold.retire()
+      ShadowLooper.idleMainLooper()
+      assertEquals(true, settled())
+      assertEquals(starts.get(), ends.get())
+      source.close()
+      source.close()
+      assertEquals(starts.get(), ends.get())
+    }
+
+  @Test fun rangeRejectingProviderStillServesLinearMedia() =
+    withSource(false, rejectRange = 403) { source, url, requests, _, _ ->
+      assertEquals(body.size.toLong(), source.open(DataSpec(url)))
+      val bytes = ByteArray(188)
+      assertEquals(bytes.size, source.read(bytes, 0, bytes.size))
+      assertArrayEquals(body.copyOfRange(0, bytes.size), bytes)
+      assertEquals(listOf("bytes=0-", "none"), requests.toList())
+      source.close()
+      assertEquals(1L, starts.get())
+      assertEquals(starts.get(), ends.get())
+    }
+
+  @Test fun badRequestRangeProbeFallsBackOnce() =
+    withSource(false, rejectRange = 400) { source, url, requests, _, _ ->
+      assertEquals(body.size.toLong(), source.open(DataSpec(url)))
+      assertEquals(listOf("bytes=0-", "none"), requests.toList())
+    }
+
+  @Test fun failedPlainGetPreservesTheProbeErrorAndSettlesWithoutCallerClose() =
+    withSource(false, rejectRange = 403, plainStatus = 401) { source, url, requests, hold, settled ->
+      val failure = assertThrows(androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException::class.java) {
+        source.open(DataSpec(url))
+      }
+      assertEquals(403, failure.responseCode)
+      assertEquals(401, (failure.suppressed.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException).responseCode)
+      assertEquals(listOf("bytes=0-", "none"), requests.toList())
+      hold.retire()
+      ShadowLooper.idleMainLooper()
+      assertEquals(true, settled())
+      assertEquals(starts.get(), ends.get())
+      source.close()
+    }
+
+  @Test fun missingResourceDoesNotTriggerFallback() =
+    withSource(false, rejectRange = 404) { source, url, requests, hold, settled ->
+      val failure = assertThrows(androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException::class.java) {
+        source.open(DataSpec(url))
+      }
+      assertEquals(404, failure.responseCode)
+      assertEquals(listOf("bytes=0-"), requests.toList())
+      hold.retire()
+      ShadowLooper.idleMainLooper()
+      assertEquals(true, settled())
+    }
 
   private val transferred = AtomicLong()
   private val starts = AtomicLong()
@@ -114,13 +180,15 @@ class NoRangeTsTest {
     } finally { extractor.release() }
   }
 
-  private fun withSource(ranges: Boolean, test: (DataSource, Uri, MutableList<String>, Hold, () -> Boolean?) -> Unit) {
+  private fun withSource(ranges: Boolean, interruptRetry: Boolean = false, rejectRange: Int? = null, plainStatus: Int? = null, test: (DataSource, Uri, MutableList<String>, Hold, () -> Boolean?) -> Unit) {
     val requests = Collections.synchronizedList(mutableListOf<String>())
     val server = MockWebServer()
     server.dispatcher = object : Dispatcher() {
       override fun dispatch(request: RecordedRequest): MockResponse {
         val range = request.getHeader("Range")
         requests += range ?: "none"
+        if (range != null && rejectRange != null) return MockResponse().setResponseCode(rejectRange)
+        if (range == null && plainStatus != null) return MockResponse().setResponseCode(plainStatus)
         val start = if (ranges && range != null) range.substringAfter("bytes=").substringBefore('-').toInt() else 0
         val response = MockResponse().setBody(Buffer().write(body, start, body.size - start))
         if (ranges && range != null) {
@@ -132,7 +200,7 @@ class NoRangeTsTest {
     server.start()
     val http = DefaultHttpDataSource.Factory().setTransferListener(object : TransferListener {
       override fun onTransferInitializing(source: DataSource, spec: DataSpec, network: Boolean) {}
-      override fun onTransferStart(source: DataSource, spec: DataSpec, network: Boolean) { starts.incrementAndGet() }
+      override fun onTransferStart(source: DataSource, spec: DataSpec, network: Boolean) { starts.incrementAndGet(); if (interruptRetry && spec.position > 0) Thread.currentThread().interrupt() }
       override fun onBytesTransferred(source: DataSource, spec: DataSpec, network: Boolean, bytes: Int) { transferred.addAndGet(bytes.toLong()) }
       override fun onTransferEnd(source: DataSource, spec: DataSpec, network: Boolean) { ends.incrementAndGet() }
     })
