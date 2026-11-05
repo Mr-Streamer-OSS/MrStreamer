@@ -1,3 +1,5 @@
+import { preview, exampleId } from "../preview/session.ts";
+import { channels } from "../preview/catalogue.ts";
 import type { PlayIntent } from "../player/intent.ts";
 import type { ChannelRow, Sources } from "../connect/sources.ts";
 
@@ -85,6 +87,12 @@ function resolutions(sources: Extract<Sources, { kind: "ready" }>) {
 
 /** Never resolves by title, row position, or an arbitrary first duplicate. */
 export function resolve(entry: Identity, sources: Sources): Resolution {
+  if (preview.get() && entry.sourceId === exampleId) {
+    const row = channels.find((r) => r.key === `${entry.sourceId}:${entry.channelId}`);
+
+    return row ? { kind: "listed", row } : { kind: "missing" };
+  }
+
   if (sources.kind === "restoring") return { kind: "loading" };
   const owner = resolutions(sources).get(entry.sourceId);
 

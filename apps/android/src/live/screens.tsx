@@ -1,3 +1,4 @@
+import { preview } from "../preview/session.ts";
 import { reminderCount } from "../reminders/rules.ts";
 import { reminders } from "../reminders/state.ts";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -368,7 +369,8 @@ export function LiveScreen() {
   const chosen = country ? view.countries.find((group) => group.name === country) : undefined;
   const rows = useMemo(() => (country ? (chosen?.rows ?? []) : view.rows), [country, chosen, view]);
   const inCountry = useMemo(() => new Set(rows), [rows]);
-  const all = saved.lists;
+  const browsing = useStore(preview);
+  const all = browsing ? [] : saved.lists;
   const favourites = all.find((list) => list.id === FAVOURITES);
 
   const shortcuts = [

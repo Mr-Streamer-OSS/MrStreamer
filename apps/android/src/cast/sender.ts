@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind, type TvPath } from "./media.ts";
 import { store, useStore, type Store } from "../platform/store.ts";
@@ -175,6 +176,8 @@ let browsing = 0;
  * Looks for TVs until the returned stop is called: only while the chooser is open, with no speculative permission prompt.
  */
 export function browseTvs(): () => void {
+  if (providerRequired()) return () => {};
+
   const module = native();
 
   if (!module) return () => {};
@@ -673,6 +676,7 @@ let made = 0;
  * receiver doesn't start.
  */
 export async function connectTv(tv: Tv, beforeLaunch?: () => Promise<void>): Promise<TvLink> {
+  if (providerRequired()) throw new TvRefused("network");
   const module = native();
 
   if (!module) throw new Error("This build can't play on a TV.");

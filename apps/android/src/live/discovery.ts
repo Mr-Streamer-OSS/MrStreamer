@@ -1,3 +1,5 @@
+import { preview } from "../preview/session.ts";
+import { channels } from "../preview/catalogue.ts";
 import {
   leadingFlag,
   regionForCode,
@@ -16,6 +18,18 @@ const cache = new WeakMap<Sources, ReturnType<typeof collect>>();
 
 /** Only loaded rows contribute counts. Loading and failed providers remain separate, even with results. */
 export function discover(sources: Sources) {
+  if (preview.get())
+    return {
+      rows: channels,
+      loading: [],
+      failed: [],
+      restoring: false,
+      countries: [],
+      categories: ["Culture", "Science"].map((name) => ({
+        name,
+        rows: channels.filter((r) => r.category === name),
+      })),
+    };
   const cached = cache.get(sources);
 
   if (cached) return cached;

@@ -111,3 +111,13 @@ For receiver Live HLS, `openReceiver` inspects a bounded selected prefix before 
 External audio renditions, encryption, fMP4 maps, byte ranges and low-latency parts retain their direct paths. Excluded receiver inputs are passed through regardless of declared codecs. A local observed decode failure outside the conversion subset gets one typed unsupported refusal with `inspect / hls_subset_unsupported`; converter failure is `convert / conversion_failed`. Preserve existing request-specific HTTP causes, download admission and receiver load generations. Native installed/bundled tools, private providers, audible output, GPU and physical receivers require separate authorized acceptance.
 
 The installed-package smoke `apps/desktop/test/e2e/packaged-app.ts` connects the same fake HLS host through Settings and reuses the maintained epoch/sound/caption scenario. Native package jobs execute this smoke against installed apps. MSIX fixture generation runs verified byte-identical copies outside WindowsApps in the owned temporary profile; the installed app still uses its own packaged tools. Bundled-tool verification requires actual `pad` and `setsar` filters and decodes all five codec fixtures through the same image-argument builder as converted HLS, including fitted dimensions and square pixels. Linux source-build proof remains distinct from the later native package runs.
+
+Android Connect > Explore app admits an ephemeral browse session through the real destinations.
+`apps/android/src/preview/` supplies fictional local presentation facts without creating a source
+or provider. Home, Live, Guide schedules/programmes, Movies, Series and Search use those facts;
+content actions use a common provider-required boundary. Add provider opens over the mounted
+browse tree, so Cancel retains its context. Normal connection removes examples, and Exit preview
+or process restart restores the source gate without clearing personal data. Source contracts and
+rendered library/reminder actions are covered by `apps/android/test/preview.test.ts` and
+`apps/android/test/preview-screens.test.ts`. Installed phone/tablet navigation, Back, TalkBack,
+large text, provider transition and native effect absence remain separate Android acceptance.

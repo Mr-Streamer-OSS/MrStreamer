@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { router, useSegments } from "expo-router";
 import { scheduleHref } from "../guide/routes.ts";
 import { destinationIn } from "../navigation/open.ts";
@@ -207,6 +208,7 @@ export function Channel({
   const favourite = t(starred ? "Remove from Favourites" : "Add to Favourites");
 
   const play = () => {
+    if (providerRequired(entry.sourceId)) return;
     const intent = playIntent(entry, sources.state.get());
 
     if (!intent) return;
@@ -242,12 +244,12 @@ export function Channel({
 
         if (nativeEvent.actionName === "star" && saved.kind === "ready") star();
 
-        if (nativeEvent.actionName === "lists") onLists(entry);
+        if (nativeEvent.actionName === "lists" && !providerRequired(entry.sourceId)) onLists(entry);
 
         if (nativeEvent.actionName === "schedule") schedule();
       }}
       onPress={play}
-      onLongPress={() => onLists(entry)}
+      onLongPress={() => (providerRequired(entry.sourceId) ? undefined : onLists(entry))}
       {...focus}
       android_ripple={{ color: colors.ripple }}
       style={{

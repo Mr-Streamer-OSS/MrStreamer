@@ -1,3 +1,5 @@
+import { preview, exitPreview } from "../preview/session.ts";
+import { ProviderRequiredSheet } from "../preview/controls.tsx";
 import { startPlayEntries } from "../play-entry/runtime.ts";
 import { startReminders } from "../reminders/runtime.ts";
 import { useReminderRouting } from "../reminders/routing.ts";
@@ -31,6 +33,10 @@ const theme = {
 
 export default function RootLayout() {
   const state = useStore(sources.state);
+  const browsing = useStore(preview);
+  useEffect(() => {
+    if (state.kind === "ready" && state.sources.length > 0) exitPreview();
+  }, [state]);
   useReminderRouting(
     state.kind === "ready" && state.sources.length > 0,
     state.kind === "ready" && state.sources.length === 0,
@@ -69,7 +75,7 @@ export default function RootLayout() {
         screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}
       >
         <Stack.Screen name="offline" />
-        <Stack.Protected guard={signedIn} redirectTo="/connect">
+        <Stack.Protected guard={signedIn || browsing} redirectTo="/connect">
           <Stack.Screen name="(tabs)" />
         </Stack.Protected>
         <Stack.Protected guard={signedIn || localFile} redirectTo="/connect">
@@ -80,6 +86,7 @@ export default function RootLayout() {
         </Stack.Protected>
       </Stack>
       {signedIn || localFile ? <MiniPlayer /> : null}
+      <ProviderRequiredSheet />
     </ThemeProvider>
   );
 }

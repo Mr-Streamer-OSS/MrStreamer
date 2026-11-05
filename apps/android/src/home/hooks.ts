@@ -1,3 +1,5 @@
+import { preview } from "../preview/session.ts";
+import { channels, titles } from "../preview/catalogue.ts";
 import { useRootNavigationState } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { sources } from "../bootstrap/sources.ts";
@@ -41,6 +43,7 @@ function liveCountry(state: NavigationTree | undefined, inLive = false): string 
 
 /** React screens follow the same pure Home model, including source removal and metadata updates. */
 export function useHome(country?: string) {
+  const browsing = useStore(preview);
   const locale = useLocale();
   const navigation = useRootNavigationState();
   const library = useLibraryModel();
@@ -65,7 +68,23 @@ export function useHome(country?: string) {
     [state, accounts, library, catalogue, saved, chosenCountry, locale, metadataRevision],
   );
 
-  return model;
+  return browsing
+    ? {
+        ...model,
+        stage: null,
+        onNow: channels,
+        favourites: [],
+        favouriteCount: 0,
+        continuing: [],
+        watchlist: [],
+        watchlistCount: 0,
+        movies: titles.filter((t) => t.kind === "movie"),
+        moviesTab: "all",
+        loading: [],
+        failures: [],
+        restoring: false,
+      }
+    : model;
 }
 
 /** Missing guide facts leave the channel's own name; they never invent a programme or rating. */

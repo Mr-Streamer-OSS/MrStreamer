@@ -1,3 +1,4 @@
+import { PreviewStrip } from "../../preview/controls.tsx";
 import { lazy, Suspense, useSyncExternalStore } from "react";
 import * as Native from "react-native";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/core/i18n";
@@ -22,6 +23,7 @@ export default function DestinationsLayout() {
 
   return (
     <>
+      <PreviewStrip />
       {"Platform" in Native && Native.Platform.OS === "android" ? (
         <Suspense fallback={null}>
           <Preferences />

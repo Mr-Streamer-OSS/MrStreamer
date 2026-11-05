@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { type } from "arktype";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
@@ -125,6 +126,7 @@ export function listsOwner(
       save(lists().filter((list) => list.id !== id));
     },
     member(id: string, entry: Entry, included: boolean) {
+      if (providerRequired(entry.sourceId)) return;
       const now = current(entry);
       change(id, (list) => ({
         ...list,

@@ -1,3 +1,4 @@
+import { preview, providerRequired, isExample } from "../preview/session.ts";
 import { Fragment, createElement as h, useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import type { Programme } from "@mrstreamer/contracts/guide";
@@ -159,7 +160,7 @@ export function ProgrammeActions({
     answer?.key === key && answer?.channelId === identity.channelId ? answer : undefined;
 
   const entry =
-    listed.length === 1
+    listed.length === 1 || (preview.get() && isExample(identity.sourceId))
       ? programmeEntry(
           identity,
           ready?.channel ?? { id: identity.channelId, catchupDays: null },
@@ -170,6 +171,7 @@ export function ProgrammeActions({
       : null;
 
   const run = (archive: boolean) => {
+    if (providerRequired(identity.sourceId)) return;
     const current = sources.state.get();
 
     const matches =

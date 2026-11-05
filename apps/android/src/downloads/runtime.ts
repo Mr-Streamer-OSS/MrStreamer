@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { type } from "arktype";
 import { episodesIn } from "@mrstreamer/mobile/series-download";
 import { router } from "expo-router";
@@ -52,6 +53,7 @@ function createRuntime() {
   }
 
   function tapAction(media: DownloadIntent["media"], operation: () => Promise<void>) {
+    if (providerRequired(media.sourceId)) return;
     void model.change(async () => {
       try {
         await operation();

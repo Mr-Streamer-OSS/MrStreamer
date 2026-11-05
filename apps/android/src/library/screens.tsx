@@ -1,3 +1,4 @@
+import { preview, providerRequired, isExample } from "../preview/session.ts";
 import { stopSeriesDownloads } from "../downloads/series.ts";
 import {
   SeriesDialogs,
@@ -725,14 +726,45 @@ function useDownloadPresentation(media: MediaIdentity) {
 }
 
 /** Rereads viewing actions after a committed change; refused writes retain their prior label. */
-function useViewingPresentation() {
+function useViewingPresentation(): import("./intents.ts").ViewingPresentationAdapter | undefined {
   const adapter = useStore(libraryViewing.state);
   useSyncExternalStore(
     adapter?.subscribe ?? noDownloadSubscription,
     adapter?.snapshot ?? noDownloadSnapshot,
   );
 
-  return adapter;
+  const browsing = useStore(preview);
+
+  return browsing
+    ? {
+        subscribe: preview.subscribe,
+        snapshot: () => 0,
+        notice: () => null,
+        play: () => {
+          providerRequired();
+        },
+        watchlist: () => ({
+          label: "Add to Watchlist",
+          activate: () => {
+            providerRequired();
+          },
+        }),
+        episode: () => ({
+          label: "Mark watched",
+          activate: () => {
+            providerRequired();
+          },
+        }),
+        series: (
+          _title: Title,
+          details: import("@mrstreamer/contracts/ondemand").SeriesDetails,
+        ) => {
+          const episode = details.seasons[0]?.episodes[0];
+
+          return episode ? { episode, resumeAt: 0, resumed: false } : undefined;
+        },
+      }
+    : adapter;
 }
 
 /** Paper A's primary series action follows this version's history, independent of the open season. */
@@ -1172,7 +1204,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     if (!title) return;
 
     try {
-      savedVersions().set(title.key, next);
+      if (!isExample(title.subscriptionId)) savedVersions().set(title.key, next);
       setSaveFailed(false);
     } catch {
       setSaveFailed(true);
@@ -1244,6 +1276,14 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
 
   const header = (
     <>
+      {isExample(title.subscriptionId) ? (
+        <TextButton
+          label="Cast"
+          onPress={() => {
+            providerRequired(title.subscriptionId);
+          }}
+        />
+      ) : null}
       {backdrop ? <Artwork url={backdrop} height={beside ? 220 : 190} radius={12} /> : null}
       {facts.length ? (
         <Text style={{ ...typeScale.meta, paddingTop: backdrop ? 12 : 4 }}>

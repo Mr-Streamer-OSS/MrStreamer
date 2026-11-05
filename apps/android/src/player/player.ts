@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { playerOutput, type CastOutput } from "./output.ts";
 import type { SubtitleModel } from "../subtitles/model.ts";
 import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
@@ -357,6 +358,7 @@ export function playerOwner(
     },
 
     play(intent) {
+      if (providerRequired(intent.kind === "file" ? undefined : intent.sourceId)) return "";
       const output = cast.state.get();
 
       if (

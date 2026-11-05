@@ -1,3 +1,4 @@
+import { preview } from "../preview/session.ts";
 import { defined } from "@mrstreamer/core/defined";
 import type { Programme } from "@mrstreamer/contracts/guide";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -13,11 +14,14 @@ import { startGuide } from "./runtime.ts";
 
 /** Starts the guide's runtime once, from whichever guide screen opens first. */
 export function useGuideStart() {
+  const browsing = useStore(preview);
+
   useEffect(() => {
+    if (browsing) return;
     void startGuide().catch(() => {
       // Statuses stay unknown, which the screens show as loading; the next launch tries again.
     });
-  }, []);
+  }, [browsing]);
 }
 
 /** Changes as guide contents, catalogues or mappings change what a read answers. */

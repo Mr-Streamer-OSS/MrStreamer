@@ -1,3 +1,4 @@
+import { presentationGuide } from "../preview/guide.ts";
 import type { Listing, Programme } from "@mrstreamer/contracts/guide";
 import {
   GuideFault,
@@ -1165,4 +1166,4 @@ export function createGuide(
   return service;
 }
 
-export const guide = createGuide();
+export const guide = presentationGuide(createGuide());

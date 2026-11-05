@@ -1,3 +1,4 @@
+import { providerRequired } from "../preview/session.ts";
 import { router, useIsFocused } from "expo-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, ScrollView, Text, useWindowDimensions, View } from "react-native";
@@ -60,6 +61,7 @@ function onAir(programme: Programme | null, now = Date.now()) {
 
 /** Plays a channel, as Live's rows do, and opens Watch. */
 function watch(intent: PlayIntent) {
+  if (providerRequired(intent.kind === "file" ? undefined : intent.sourceId)) return;
   player.play(intent);
   router.push(watchHref(intent));
 }
@@ -468,11 +470,16 @@ export function HomeScreen() {
       {channelsWaiting && !home.onNow.length ? (
         <StillChannels />
       ) : (
-        onNow
-          .slice(0, wide ? 5 : 3)
-          .map(({ row, programme }) => (
-            <OnNowRow key={row.key} row={row} programme={programme} onHold={setListing} />
-          ))
+        onNow.slice(0, wide ? 5 : 3).map(({ row, programme }) => (
+          <OnNowRow
+            key={row.key}
+            row={row}
+            programme={programme}
+            onHold={(entry) => {
+              if (!providerRequired(entry.sourceId)) setListing(entry);
+            }}
+          />
+        ))
       )}
     </View>
   );
@@ -499,7 +506,14 @@ export function HomeScreen() {
         <StillTiles inset={inset} height={68} />
       ) : large ? (
         favourites.map(({ row, programme }) => (
-          <OnNowRow key={row.key} row={row} programme={programme} onHold={setListing} />
+          <OnNowRow
+            key={row.key}
+            row={row}
+            programme={programme}
+            onHold={(entry) => {
+              if (!providerRequired(entry.sourceId)) setListing(entry);
+            }}
+          />
         ))
       ) : (
         <Shelf inset={inset}>
@@ -509,7 +523,9 @@ export function HomeScreen() {
               title={row.title}
               detail={programme?.title}
               onPress={() => watchChannel(row)}
-              onHold={() => setListing(identity(row))}
+              onHold={() => {
+                if (!providerRequired(row.sourceId)) setListing(identity(row));
+              }}
               actions={[
                 { name: "activate", label: live("Play"), run: () => watchChannel(row) },
                 { name: "lists", label: live("Lists"), run: () => setListing(identity(row)) },
