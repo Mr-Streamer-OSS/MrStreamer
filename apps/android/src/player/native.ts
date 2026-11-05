@@ -111,6 +111,9 @@ type Listener<T> = (event: T) => void;
 export interface NativePlayer {
   /** False refuses a preview; older native clients return no admission result. */
   admit(admission: Admission): Promise<boolean | void>;
+  remotePosition?(attempt: string, positionMs: number): Promise<void>;
+  remoteOutput?(attempt: string): Promise<boolean>;
+  localOutput?(attempt: string, positionMs: number): Promise<boolean>;
   pause(attempt: string): Promise<boolean>;
   resume(attempt: string): Promise<boolean>;
   seek(attempt: string, positionMs: number): Promise<boolean>;
@@ -136,6 +139,14 @@ export interface NativePlayer {
   reconcile?(): Promise<void>;
   stop(attempt: string): Promise<boolean>;
   capabilities(): Capabilities;
+  addListener(
+    event: "onOutputCommand",
+    listener: Listener<{
+      attempt: string;
+      command: "pause" | "resume" | "seek";
+      positionMs: number | null;
+    }>,
+  ): { remove(): void };
   addListener(event: "onState", listener: Listener<Observation>): { remove(): void };
   addListener(
     event: "onTracks",

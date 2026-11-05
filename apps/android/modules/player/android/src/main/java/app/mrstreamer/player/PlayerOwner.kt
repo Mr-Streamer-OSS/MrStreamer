@@ -96,6 +96,7 @@ data class Track(
 data class Release(val attempt: String, val hold: HoldRef, val outcome: String)
 
 interface PlayerEvents {
+  fun outputCommand(attempt: String, command: String, positionMs: Long?) {}
   fun observed(observation: Observation)
   fun tracks(attempt: String, tracks: List<Track>)
   fun media(attempt: String, pip: Boolean) {}
@@ -121,6 +122,10 @@ class PlayerOwner(
     var sidecarDone: ((Boolean) -> Unit)? = null
     var rollbackSidecar: (() -> Unit)? = null
     var audioFormat: androidx.media3.common.Format? = null
+    var remote = false
+    var remotePosition = 0L
+    var outputLease = false
+    var outputEnd: (() -> Unit)? = null
     var stopped = false
     /** Why it failed, until it plays again. */
     var failure: Failure? = null
@@ -141,7 +146,7 @@ class PlayerOwner(
   fun reconcile() { observe(); reportTracks() }
   fun mediaCommand(command: String) { attempt?.let { events?.mediaCommand(it, command) } }
   fun pauseCurrent() { attempt?.let { pause(it) } }
-  fun jump(by: Long) { attempt?.let { seek(it, player.currentPosition + by) } }
+  fun jump(by: Long) { attempt?.let { seek(it, (current?.takeIf { it.remote }?.remotePosition ?: player.currentPosition) + by) } }
 
   private val main = Handler(player.applicationLooper)
   private var current: Current? = null
@@ -245,6 +250,61 @@ class PlayerOwner(
     )
   }
 
+  /** Reserves the same hold for a bounded relay. Unknown provider overlap budgets are refused. */
+  fun reserveOutput(attempt: String, budget: Boolean = false, onRetire: () -> Unit = {}): Admission? = synchronized(LocalFiles) {
+    val now = current ?: return null
+    if (now.admission.attempt != attempt || now.stopped || now.outputLease || now.admission.preview) return null
+    // JS checks fresh provider accounting before granting one serial relay reader.
+    if (now.admission.hold !is HoldRef.LocalFile && !budget) return null
+    if (!now.hold.opened()) return null
+    now.outputLease = true
+    now.outputEnd = onRetire
+    (now.admission.hold as? HoldRef.LocalFile)?.let { LocalFiles.opened(it.path) }
+    return now.admission
+  }
+
+  fun stopRemoteOutput() { current?.takeIf { it.remote }?.let { stop(it.admission.attempt) } }
+
+  /** Only receiver PLAYING may detach the local renderer, retaining admission and hold. */
+  fun remoteOutput(attempt: String): Boolean {
+    val now = current ?: return false
+    if (now.admission.attempt != attempt || !now.outputLease || now.stopped) return false
+    now.remote = true
+    player.stop()
+    player.clearMediaItems()
+    views.forEach { it.player = null; it.keepScreenOn = true }
+    return true
+  }
+
+  /** Returns this admitted attempt locally, without resolving or admitting another source. */
+  fun localOutput(attempt: String, positionMs: Long): Boolean {
+    val now = current ?: return false
+    if (now.admission.attempt != attempt || now.stopped) return false
+    if (!now.remote) return true
+    now.remote = false
+    prepare(now.admission.copy(startMs = positionMs), now.hold, now.admission.hold as? HoldRef.LocalFile)
+    views.lastOrNull()?.player = player
+    player.prepare()
+    player.play()
+    return true
+  }
+
+  /** The relay lease closes only after all native relay readers have demonstrably drained. */
+  fun outputReader(attempt: String): (() -> Unit)? {
+    val now = current ?: return null
+    if (now.admission.attempt != attempt || !now.outputLease) return null
+    var closed = false
+    return {
+      if (!closed) {
+        closed = true
+        now.outputLease = false
+        now.outputEnd = null
+        (now.admission.hold as? HoldRef.LocalFile)?.let { LocalFiles.closed(it.path) }
+        now.hold.closed()
+      }
+    }
+  }
+
   /** Plays [admission], replacing what played before; false means a preview was not admitted. */
   fun admit(admission: Admission): Boolean {
     if (admission.preview && !PlayerPip.canPreview()) return false
@@ -334,7 +394,7 @@ class PlayerOwner(
   /** Rebuilds only this owner's media, preserving position and pause; bytes outlive saved-data removal. */
   fun setSidecar(attempt: String, text: String, language: String, offset: Double, speed: Double, completed: ((Boolean) -> Unit)? = null): Boolean {
     val now = current ?: return false
-    if (now.admission.attempt != attempt || now.stopped || now.admission.mode !in listOf("title", "file")) return false
+    if (now.admission.attempt != attempt || now.stopped || now.remote || now.admission.mode !in listOf("title", "file")) return false
     val bytes = try { Subtitles.timed(text, offset, speed) } catch (_: Exception) { return false }
     if (now.sidecarDone != null) return false
     if (now.sidecar?.contentEquals(bytes) == true && now.sidecarLanguage == language) {
@@ -378,11 +438,21 @@ class PlayerOwner(
     return true
   }
 
-  fun pause(attempt: String) = command(attempt, ::ownsCurrentItem) { mediaCommand("cancel-next"); player.pause() }
+  fun updateRemotePosition(attempt: String, positionMs: Long) {
+    current?.takeIf { it.admission.attempt == attempt && it.remote }?.remotePosition = positionMs.coerceAtLeast(0)
+  }
+  private fun remoteCommand(attempt: String, command: String, positionMs: Long? = null): Boolean {
+    val now = current ?: return false
+    if (!now.remote || now.stopped || now.admission.attempt != attempt) return false
+    if (command == "seek" && live) return false
+    events?.outputCommand(attempt, command, positionMs)
+    return true
+  }
+  fun pause(attempt: String) = remoteCommand(attempt, "pause") || command(attempt, ::ownsCurrentItem) { mediaCommand("cancel-next"); player.pause() }
 
   /** Plays on; Live rejoins its live edge, an ended title starts again, a failed one tries again. */
   fun resume(attempt: String) =
-    command(attempt, ::ownsCurrentItem) {
+    remoteCommand(attempt, "resume") || command(attempt, ::ownsCurrentItem) {
       if (current?.admission?.mode == "live") player.seekToDefaultPosition()
       else if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
       if (player.playbackState == Player.STATE_IDLE) player.prepare()
@@ -390,7 +460,7 @@ class PlayerOwner(
     }
 
   fun seek(attempt: String, positionMs: Long) =
-    command(attempt, { ownsCurrentItem() && seekable() }) { mediaCommand("cancel-next"); player.seekTo(positionMs.coerceAtLeast(0)) }
+    remoteCommand(attempt, "seek", positionMs) || command(attempt, { ownsCurrentItem() && seekable() }) { mediaCommand("cancel-next"); player.seekTo(positionMs.coerceAtLeast(0)) }
 
   fun setSpeed(attempt: String, speed: Float) =
     command(attempt, { current?.admission?.mode != "live" && speed in 0.25f..4f }) {
@@ -444,7 +514,7 @@ class PlayerOwner(
 
   /** Ends [attempt], reporting where it stopped, and releases what it held. */
   fun stop(attempt: String) =
-    command(attempt) {
+    command(attempt, remoteStop = true) {
       observe()
       val ending = end()
       player.stop()
@@ -487,8 +557,8 @@ class PlayerOwner(
     val previous = views.lastOrNull()
     views.remove(view)
     views.addLast(view)
-    PlayerView.switchTargetView(player, previous, view)
-    view.keepScreenOn = player.isPlaying
+    if (current?.remote != true) PlayerView.switchTargetView(player, previous, view)
+    view.keepScreenOn = player.isPlaying || current?.remote == true
   }
 
   /** Stops showing the picture in [view]; the newest still attached shows it instead. */
@@ -498,12 +568,12 @@ class PlayerOwner(
     view.keepScreenOn = false
     if (wasShowing) PlayerView.switchTargetView(player, view, views.lastOrNull())
     else if (view.player === player) view.player = null
-    views.lastOrNull()?.keepScreenOn = player.isPlaying
+    views.lastOrNull()?.keepScreenOn = player.isPlaying || current?.remote == true
   }
 
-  private fun command(attempt: String, allowed: () -> Boolean = { true }, action: () -> Unit): Boolean {
+  private fun command(attempt: String, allowed: () -> Boolean = { true }, remoteStop: Boolean = false, action: () -> Unit): Boolean {
     val now = current ?: return false
-    if (now.admission.attempt != attempt || now.stopped || !allowed()) return false
+    if (now.admission.attempt != attempt || now.stopped || (now.remote && !remoteStop) || !allowed()) return false
     action()
     return true
   }
@@ -514,8 +584,11 @@ class PlayerOwner(
     if (!ending.stopped) {
       ending.stopped = true
       main.removeCallbacks(tick)
+      views.forEach { it.keepScreenOn = false }
       events?.observed(observationOf(ending.admission, Phase.STOPPED, null))
     }
+    ending.outputEnd?.invoke()
+    ending.outputEnd = null
     ending.sidecarDone?.invoke(false)
     ending.sidecarDone = null
     ending.rollbackSidecar = null
@@ -543,7 +616,7 @@ class PlayerOwner(
 
   private fun observe(failure: Failure? = null) {
     val now = current ?: return
-    if (now.stopped) return
+    if (now.stopped || now.remote) return
     if (failure != null) now.failure = failure
     else if (player.playbackState != Player.STATE_IDLE) now.failure = null
     // A live stream has no end: one that ends lost its connection to the provider.
@@ -568,7 +641,7 @@ class PlayerOwner(
     Observation(
       attempt = admission.attempt,
       phase = phase,
-      positionMs = player.currentPosition.coerceAtLeast(0),
+      positionMs = current?.takeIf { it.remote }?.remotePosition ?: player.currentPosition.coerceAtLeast(0),
       durationMs = player.duration.takeIf { it != C.TIME_UNSET && admission.mode != "live" },
       bufferedMs = player.totalBufferedDuration,
       // A recording is never live, whatever its playlist says: Live and catch-up stay apart.

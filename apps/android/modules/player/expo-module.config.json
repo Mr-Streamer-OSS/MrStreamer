@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["app.mrstreamer.player.PlayerModule"]
+    "modules": ["app.mrstreamer.player.PlayerModule", "app.mrstreamer.cast.CastModule"]
   }
 }
