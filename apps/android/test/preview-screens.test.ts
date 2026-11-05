@@ -14,6 +14,7 @@ const route = vi.hoisted(() => ({
   segments: ["(tabs)", "movies"] as string[],
   stacks: {} as Record<string, Href[]>,
   destination: "movies",
+  replaced: [] as string[],
 }));
 
 vi.mock("expo-router", () => ({
@@ -31,6 +32,7 @@ vi.mock("expo-router", () => ({
       route.segments = ["(tabs)", route.destination, "library", "details"];
     },
     navigate: vi.fn(),
+    replace: (href: string) => route.replaced.push(href),
     back: () => {
       const stack = route.stacks[route.destination]!;
 
@@ -162,6 +164,7 @@ afterEach(() => {
   window.document.body.innerHTML = "";
   route.params = {};
   route.opened = [];
+  route.replaced = [];
   route.segments = ["(tabs)", "movies"];
   route.stacks = {};
   route.destination = "movies";
@@ -191,10 +194,10 @@ it("browses offline examples in real Movies, Search and series Details without r
     expect(shown.textContent).toContain("A new horizon 1 · Example");
     expect(shown.textContent).toContain("Season 2");
     press(shown, "Play S1 E1");
-    expect(providerPrompt.get()).toBe(true);
-    providerPrompt.set(false);
+    expect(providerPrompt.get()).toBe("play");
+    providerPrompt.set(null);
     press(shown, "Add to Watchlist");
-    expect(providerPrompt.get()).toBe(true);
+    expect(providerPrompt.get()).toBe("save");
     expect(route.params).toEqual({ kind: "series", title: series.key, season: "2" });
     expect(play).not.toHaveBeenCalled();
     expect(download).not.toHaveBeenCalled();
@@ -217,10 +220,14 @@ it("offers Play, Download and Cast for a fictional movie without invoking their 
     const shown = show(createElement(DetailsScreen, { model: exampleLibrary }));
     await act(async () => {});
 
-    for (const action of ["Play", "Download", "Cast"]) {
-      providerPrompt.set(false);
-      press(shown, action);
-      expect(providerPrompt.get()).toBe(true);
+    for (const [label, action] of [
+      ["Play", "play"],
+      ["Download", "download"],
+      ["Cast", "cast"],
+    ] as const) {
+      providerPrompt.set(null);
+      press(shown, label);
+      expect(providerPrompt.get()).toBe(action);
     }
 
     expect(play).not.toHaveBeenCalled();
@@ -270,7 +277,7 @@ it("offers Add provider for a future programme reminder before permissions or al
 
   expect(button).toBeDefined();
   await act(async () => button?.click());
-  expect(providerPrompt.get()).toBe(true);
+  expect(providerPrompt.get()).toBe("remind");
   expect(reminderEffects.save).not.toHaveBeenCalled();
   expect(reminderEffects.access).not.toHaveBeenCalled();
   expect(reminderEffects.native).not.toHaveBeenCalled();
@@ -298,7 +305,12 @@ it("cancels the real Add provider form back to the mounted series and selected s
     (e) => e.textContent === series.title,
   );
 
-  act(() => providerPrompt.set(true));
+  act(() => providerPrompt.set("save"));
+  expect(shown.querySelector("dialog")?.textContent).toContain("Add a provider to save");
+  press(shown, "Keep exploring");
+  expect(shown.querySelector("dialog")).toBeNull();
+  act(() => providerPrompt.set("play"));
+  expect(shown.querySelector("dialog")?.textContent).toContain("Add a provider to play");
   press(shown, "Add provider");
   expect(shown.querySelector('[aria-label="Server or M3U link"]')).not.toBeNull();
   press(shown, "Cancel");
@@ -306,4 +318,31 @@ it("cancels the real Add provider form back to the mounted series and selected s
   expect(route.params).toEqual(params);
   expect(title?.isConnected).toBe(true);
   expect(shown.textContent).toContain("Season 2");
+});
+
+it("heads preview scenes with the strip, whose actions open the form and leave for Connect", async () => {
+  const { PreviewFrame, ProviderRequiredSheet } = await import("../src/preview/controls.tsx");
+  const { preview } = await import("../src/preview/session.ts");
+
+  const shown = show(
+    createElement(
+      "div",
+      null,
+      createElement(PreviewFrame, null, createElement("p", null, "Live")),
+      createElement(ProviderRequiredSheet),
+    ),
+  );
+
+  expect(shown.querySelector('[aria-label="Preview mode, Fictional examples"]')).toBeNull();
+  act(enterPreview);
+  expect(shown.querySelector('[aria-label="Preview mode, Fictional examples"]')).not.toBeNull();
+  press(shown, "Add provider");
+  expect(shown.querySelector('[aria-label="Server or M3U link"]')).not.toBeNull();
+  press(shown, "Cancel");
+  expect(shown.querySelector("dialog")).toBeNull();
+  expect(shown.textContent).toContain("Live");
+  press(shown, "Exit preview");
+  expect(preview.get()).toBe(false);
+  expect(route.replaced).toEqual(["/connect"]);
+  expect(shown.querySelector('[aria-label="Preview mode, Fictional examples"]')).toBeNull();
 });

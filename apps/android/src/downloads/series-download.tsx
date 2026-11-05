@@ -232,7 +232,7 @@ function BulkRow({
   ).length;
 
   async function ask(only: readonly SeriesFile[] = files) {
-    if (providerRequired(version.subscriptionId)) return;
+    if (providerRequired("download", version.subscriptionId)) return;
     const asked = { reader: reader(), version: ownedKey(version) };
 
     try {

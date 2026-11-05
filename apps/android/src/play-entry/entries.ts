@@ -36,7 +36,7 @@ export function startEntries(options: {
   const stopPlayer = options.player.state.subscribe(observePlayer);
 
   const play = async (intent: PlayIntent, media?: MediaIdentity) => {
-    if (providerRequired(intent.kind === "file" ? undefined : intent.sourceId)) return;
+    if (providerRequired("play", intent.kind === "file" ? undefined : intent.sourceId)) return;
     const output = options.player.cast.state.get();
 
     if (

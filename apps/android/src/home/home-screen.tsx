@@ -61,7 +61,7 @@ function onAir(programme: Programme | null, now = Date.now()) {
 
 /** Plays a channel, as Live's rows do, and opens Watch. */
 function watch(intent: PlayIntent) {
-  if (providerRequired(intent.kind === "file" ? undefined : intent.sourceId)) return;
+  if (providerRequired("play", intent.kind === "file" ? undefined : intent.sourceId)) return;
   player.play(intent);
   router.push(watchHref(intent));
 }
@@ -476,7 +476,7 @@ export function HomeScreen() {
             row={row}
             programme={programme}
             onHold={(entry) => {
-              if (!providerRequired(entry.sourceId)) setListing(entry);
+              if (!providerRequired("save", entry.sourceId)) setListing(entry);
             }}
           />
         ))
@@ -511,7 +511,7 @@ export function HomeScreen() {
             row={row}
             programme={programme}
             onHold={(entry) => {
-              if (!providerRequired(entry.sourceId)) setListing(entry);
+              if (!providerRequired("save", entry.sourceId)) setListing(entry);
             }}
           />
         ))
@@ -524,7 +524,7 @@ export function HomeScreen() {
               detail={programme?.title}
               onPress={() => watchChannel(row)}
               onHold={() => {
-                if (!providerRequired(row.sourceId)) setListing(identity(row));
+                if (!providerRequired("save", row.sourceId)) setListing(identity(row));
               }}
               actions={[
                 { name: "activate", label: live("Play"), run: () => watchChannel(row) },

@@ -171,7 +171,7 @@ export function ProgrammeActions({
       : null;
 
   const run = (archive: boolean) => {
-    if (providerRequired(identity.sourceId)) return;
+    if (providerRequired("play", identity.sourceId)) return;
     const current = sources.state.get();
 
     const matches =

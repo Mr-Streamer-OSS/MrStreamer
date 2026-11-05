@@ -91,7 +91,7 @@ export function ReminderAction({
   if (!saved && programme.start <= Date.now() && !error) return null;
 
   const press = async () => {
-    if (providerRequired(identity.sourceId)) return;
+    if (providerRequired("remind", identity.sourceId)) return;
 
     if (busy) return;
     setBusy(true);

@@ -1,5 +1,4 @@
-import { enterPreview } from "../preview/session.ts";
-import { TextButton } from "../library/parts.tsx";
+import { ExploreEntry } from "../preview/controls.tsx";
 import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { router } from "expo-router";
@@ -54,13 +53,7 @@ export default function Connect() {
         onConnected={() => {}}
         footer={
           <>
-            <TextButton
-              label="Explore app"
-              onPress={() => {
-                enterPreview();
-                router.replace("/(tabs)/(live)");
-              }}
-            />
+            <ExploreEntry />
             {hasDownloads ? (
               // As Connect's own action rows: a 24dp icon 16dp before its 16sp label.
               <Press

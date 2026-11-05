@@ -216,6 +216,7 @@ Connect > Explore app opens the real Live, Home, Movies, Series, Search and deta
 fictional local examples. Preview mode is an in-memory browsing session. It installs no source,
 account, credential or playable media and needs no provider or TMDB requests. Example content
 actions, Cast, reminders, favourites and Watchlist offer Add provider before their owners run.
+A Preview mode strip on every destination offers Add provider and Exit preview.
 Cancelling the provider form leaves the browse tree mounted; connecting normally removes the
 examples. Exit preview and a fresh process restore the normal source gate without deleting data.
 

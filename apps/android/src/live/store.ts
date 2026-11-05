@@ -126,7 +126,7 @@ export function listsOwner(
       save(lists().filter((list) => list.id !== id));
     },
     member(id: string, entry: Entry, included: boolean) {
-      if (providerRequired(entry.sourceId)) return;
+      if (providerRequired("save", entry.sourceId)) return;
       const now = current(entry);
       change(id, (list) => ({
         ...list,

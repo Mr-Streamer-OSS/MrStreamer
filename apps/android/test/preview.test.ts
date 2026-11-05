@@ -33,7 +33,7 @@ it("explores fictional Live, schedules and programmes offline without writing pe
     expect((await guide.programme(next.detail))?.title).toContain("Example");
     expect(next.start).toBeGreaterThan(Date.now());
     lists.member("favourites", identity(row), true);
-    expect(providerPrompt.get()).toBe(true);
+    expect(providerPrompt.get()).toBe("save");
     expect(lists.state.get()).toBe(before);
     expect(writeJson).not.toHaveBeenCalled();
     expect(sources).toEqual({ kind: "ready", sources: [] });
@@ -49,7 +49,7 @@ it("explores fictional Live, schedules and programmes offline without writing pe
 it("stops receiver discovery and stale example playback links at the same provider boundary", async () => {
   enterPreview();
   const stop = browseTvs();
-  expect(providerPrompt.get()).toBe(true);
+  expect(providerPrompt.get()).toBe("cast");
   await expect(connectTv({ id: "tv", name: "TV", model: null })).rejects.toThrow();
   stop();
   exitPreview();
@@ -60,14 +60,14 @@ it("stops receiver discovery and stale example playback links at the same provid
     await libraryIntents.state
       .get()
       .play?.({ kind: "live", sourceId: exampleId, channelId: "1", title: "Example" });
-    expect(providerPrompt.get()).toBe(true);
+    expect(providerPrompt.get()).toBe("play");
     expect(play).not.toHaveBeenCalled();
-    providerPrompt.set(false);
+    providerPrompt.set(null);
     await libraryIntents.state
       .get()
       .play?.({ kind: "live", sourceId: "real", channelId: "1", title: "Real" });
     expect(play).toHaveBeenCalledOnce();
-    expect(providerPrompt.get()).toBe(false);
+    expect(providerPrompt.get()).toBeNull();
   } finally {
     unregister();
   }
@@ -101,12 +101,12 @@ it("refuses example play and deep links before stream resolution or native sessi
   const action = { kind: "live", sourceId: exampleId, channelId: "1", title: "Example" } as const;
   enterPreview();
   owner.play(action);
-  expect(providerPrompt.get()).toBe(true);
+  expect(providerPrompt.get()).toBe("play");
   expect(owner.state.get().kind).toBe("idle");
   exitPreview();
   owner.play(action);
   await Promise.resolve();
-  expect(providerPrompt.get()).toBe(true);
+  expect(providerPrompt.get()).toBe("play");
   expect(resolve).not.toHaveBeenCalled();
   expect(admit).not.toHaveBeenCalled();
   expect(command).not.toHaveBeenCalled();

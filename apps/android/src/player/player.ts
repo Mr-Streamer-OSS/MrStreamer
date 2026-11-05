@@ -358,7 +358,7 @@ export function playerOwner(
     },
 
     play(intent) {
-      if (providerRequired(intent.kind === "file" ? undefined : intent.sourceId)) return "";
+      if (providerRequired("play", intent.kind === "file" ? undefined : intent.sourceId)) return "";
       const output = cast.state.get();
 
       if (

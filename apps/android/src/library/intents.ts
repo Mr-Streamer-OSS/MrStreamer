@@ -22,7 +22,9 @@ export interface IntentHandlers {
 }
 
 /** Feature owners register here. Unregistering an older owner cannot remove its successor. */
-export function intentRegistry(admit?: (sourceId: string | undefined) => boolean) {
+export function intentRegistry(
+  admit?: (sourceId: string | undefined, action: "play" | "download") => boolean,
+) {
   const state = store<IntentHandlers>({});
 
   return {
@@ -34,13 +36,13 @@ export function intentRegistry(admit?: (sourceId: string | undefined) => boolean
         handlers.play = (...args) => {
           const [intent] = args;
 
-          if (admit(intent.kind === "file" ? undefined : intent.sourceId))
+          if (admit(intent.kind === "file" ? undefined : intent.sourceId, "play"))
             return registered.play?.(...args);
         };
 
       if (admit && registered.download)
         handlers.download = (intent) => {
-          if (admit(intent.media.sourceId)) registered.download?.(intent);
+          if (admit(intent.media.sourceId, "download")) registered.download?.(intent);
         };
 
       state.set((current) => ({ ...current, ...handlers }));
@@ -58,7 +60,9 @@ export function intentRegistry(admit?: (sourceId: string | undefined) => boolean
   };
 }
 
-export const libraryIntents = intentRegistry((sourceId) => !providerRequired(sourceId));
+export const libraryIntents = intentRegistry(
+  (sourceId, action) => !providerRequired(action, sourceId),
+);
 
 /** Downloads owns the words and actions; Library only renders this optional presentation. */
 export interface DownloadPresentation {
