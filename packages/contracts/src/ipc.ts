@@ -208,7 +208,8 @@ export const ipcInputs = {
     }).narrow(({ from, to }) => to > from && to - from <= GUIDE_RANGE.hours * 60 * 60 * 1000),
   /** One programme of a channel, by a slot's `guide` and `start`: what the slot leaves out. */
   "guide.programme": () => type({ channel: owned(), guide: "string", start: "number" }),
-  "guide.searchPage": GuideSearchPageInput,
+  /** Like `guide.search`, a named `request` can be cancelled with `guide.cancelSearch`. */
+  "guide.searchPage": () => GuideSearchPageInput().merge({ "request?": searchRequest() }),
   "guide.savedQueries": () => type({ subscriptionId: "string > 0" }),
   "guide.setSavedQueries": () =>
     type({ subscriptionId: "string > 0", queries: SavedGuideQuery().array().atMostLength(20) }),

@@ -339,7 +339,7 @@ async function page(
 
 /** The palette's programme results: its rows that aren't a channel's. */
 const programmeResults = () =>
-  [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')].filter(
+  [...document.querySelectorAll<HTMLElement>('[role="treeitem"]:not([data-guide-search])')].filter(
     (row) => !row.querySelector("[data-group-row]"),
   );
 
@@ -1236,10 +1236,17 @@ describe("real search components with two subscriptions", () => {
 
     await act(async () => p.client.setQueryData(queries.search("news").queryKey, responses(names)));
     await expect.poll(() => p.rows().length).toBe(20);
-    const rows = [...document.querySelectorAll<HTMLElement>('[role="treeitem"]')];
+
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>('[role="treeitem"]:not([data-guide-search])'),
+    ];
+
     expect(rows).toHaveLength(21);
     expect(rows[20]!.textContent).toContain("Evening news");
     expect(p.scope().textContent).toContain("20 channels · 20 streams");
+
+    // From the first row: the last row searches every guide day, past the programme.
+    for (let index = 0; index < 20; index++) await p.press("ArrowUp", p.field());
 
     for (let index = 0; index < 20; index++) await p.press("ArrowDown", p.field());
     expect(p.field().getAttribute("aria-activedescendant")).toBe(rows[20]!.id);

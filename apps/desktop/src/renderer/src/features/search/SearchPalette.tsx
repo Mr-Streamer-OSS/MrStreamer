@@ -43,6 +43,7 @@ import { searchQualities } from "../live/search-rows.ts";
 import { cn } from "../../lib/utils.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
+import { episodeLine, openGuideSearch } from "../live/GuideSearch.tsx";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
 
 const CachedStaleTime = lazy(() => type("number | number.NaN"));
@@ -51,6 +52,8 @@ const CachedStaleTime = lazy(() => type("number | number.NaN"));
  * Searches channel names across every category, then movies and series, then programmes on now
  * and later today. Opens with ⌘K or Ctrl K, on what Movies or Series searched for, if anything.
  * A programme to come opens to its description and Remind me; one with a reminder shows a bell.
+ * A programme shows what the guide says of its episode. The last row searches every guide day for
+ * the same words, in Live TV (../live/GuideSearch.tsx).
  */
 export function SearchPalette() {
   const open = useUi((state) => state.searchOpen);
@@ -106,7 +109,8 @@ type Result =
       readonly key: string;
     }
   | { readonly kind: "title"; readonly title: Title }
-  | { readonly kind: "programme"; readonly match: ProgrammeMatch; readonly key: string };
+  | { readonly kind: "programme"; readonly match: ProgrammeMatch; readonly key: string }
+  | { readonly kind: "guide" };
 
 /** Channel results listed before the rest. */
 const CHANNEL_RESULTS = 20;
@@ -194,6 +198,10 @@ function Palette() {
   const [open, setOpen] = useState<string | null>(null);
   const [selected, select] = useState<string | null>(null);
 
+  // The row that searches every guide day comes last, once each source first answered, so it
+  // never holds the selection that a result arriving later would have.
+  const answered = current && !channels.isPending && !programmes.isPending && !titles.isPending;
+
   const results = useMemo((): Result[] => {
     if (!query.trim() || !searched.trim()) return [];
 
@@ -223,11 +231,19 @@ function Palette() {
         match,
         key: `${ownedKey(match.channel)}:${match.programme.start}`,
       })),
+      ...(answered && subscriptions.length > 0 ? [{ kind: "guide" } as const] : []),
     ];
-  }, [query, searched, groups, expanded, titles.data, programmes.data]);
+  }, [query, searched, groups, expanded, titles.data, programmes.data, answered, subscriptions]);
+
+  /** What was found, without the row that searches every guide day. */
+  const found = results.filter((result) => result.kind !== "guide").length;
 
   const identity = (result: Result) =>
-    result.kind === "title" ? `title/${result.title.key}` : `${result.kind}/${result.key}`;
+    result.kind === "title"
+      ? `title/${result.title.key}`
+      : result.kind === "guide"
+        ? "guide"
+        : `${result.kind}/${result.key}`;
 
   const kept = results.findIndex((result) => identity(result) === selected);
   const active = Math.max(kept, 0);
@@ -261,6 +277,9 @@ function Palette() {
       }
 
       openDetails({ kind: result.title.kind, ...ownedId(result.title) });
+    } else if (result.kind === "guide") {
+      useUi.setState({ searchOpen: false });
+      openGuideSearch(searched.trim());
     } else if (result.match.programme.start <= Date.now()) watchChannel(result.match.channel);
     else setOpen((current) => (current === result.key ? null : result.key));
   };
@@ -399,6 +418,30 @@ function Palette() {
               );
             }
 
+            if (result.kind === "guide")
+              return (
+                <button
+                  key="guide"
+                  data-guide-search
+                  id={`${resultsId}-${index}`}
+                  role="treeitem"
+                  aria-level={1}
+                  aria-selected={index === active}
+                  data-index={index}
+                  onFocus={() => setActive(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                  className={cn(
+                    "flex w-full items-center rounded-2xl px-3 py-2.5 text-left text-[0.8125rem] text-muted-foreground hover:bg-white/6 hover:text-foreground",
+                    index === active && "bg-white/10 text-foreground hover:bg-white/10",
+                  )}
+                >
+                  <span className="truncate">
+                    {t("Search every guide day for {query}", { query: searched.trim() })}
+                  </span>
+                </button>
+              );
+
             if (result.kind === "programme") {
               const { channel, programme } = result.match;
               const source = sourceOf(channel);
@@ -410,6 +453,7 @@ function Palette() {
                 : `${t("On now")} · ${shows} · ${timeLeft(programme, now)}`;
 
               const reminded = reminderAt(reminders, channel, programme.start) !== undefined;
+              const episode = episodeLine(programme.metadata);
 
               return (
                 <div
@@ -435,6 +479,9 @@ function Palette() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[0.9375rem] text-white">
                         {programme.title}
+                        {episode && (
+                          <span className="ml-2 text-xs text-muted-foreground">{episode}</span>
+                        )}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">{detail}</span>
                       {open === result.key && programme.description && (
@@ -531,7 +578,7 @@ function Palette() {
             .join(" · ")}
         </div>
       )}
-      {current && results.length === 0 && !pending && !failed && (
+      {current && found === 0 && !pending && !failed && (
         <div className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
           {t("No matches")}
         </div>
