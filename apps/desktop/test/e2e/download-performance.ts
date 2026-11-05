@@ -1,3 +1,6 @@
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../../packages/contracts/src/json-value.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Native Electron diagnostic. Run serially for each frozen build, with the same executable:
 // xvfb-run -a node apps/desktop/test/e2e/download-performance.ts --app-dir /build/apps/desktop \
 //   --executable /path/to/electron --revision SHA --output .local/native-download/before
@@ -11,7 +14,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import type { DownloadList } from "@mrstreamer/contracts/downloads";
+import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { freePort, stop } from "../../../../.cursor/skills/verify-mrstreamer/scripts/session.ts";
 import { startFakeProvider, fixture } from "../fake-provider.ts";
@@ -44,7 +47,10 @@ const clip = join(profile, "seed.mp4");
 
 await writeFile(clip, fixture("title-h264-aac.mp4"));
 
-const results: Record<string, unknown> = {
+const results: Record<
+  string,
+  Json | Download | Awaited<ReturnType<typeof catalogueIdentity>> | undefined
+> = {
   revision: values.revision,
   appDir,
   executable,
@@ -75,7 +81,7 @@ let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
 let proxy: Awaited<ReturnType<typeof slowProvider>> | undefined;
 let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
 const logs: string[] = [];
-const trace: unknown[] = [];
+const trace: Json[] = [];
 let profiling = false;
 let tracing = false;
 let traceComplete = false;
@@ -112,7 +118,7 @@ async function manifest(directory: string): Promise<Record<string, string>> {
   return hashes;
 }
 
-async function checked(method: string, params: Record<string, unknown> = {}) {
+async function checked(method: string, params: Record<string, Json | undefined> = {}) {
   assert(page);
   const reply = await page.send(method, params);
 
@@ -388,7 +394,7 @@ try {
   results["beforeCatalogue"] = beforeCatalogue;
   assert.equal(beforeIdentity.rows.length, 26);
   assert.equal(beforeIdentity.seasons.length, 20);
-  await page!.evaluate(
+  await page!.evaluate<Json>(
     `document.querySelector('[aria-label="Download S1 E1"]').scrollIntoView({block:'center'})`,
   );
   await capture("details-before");
@@ -413,7 +419,7 @@ try {
   await checked("Profiler.start");
   profiling = true;
   page!.on("Tracing.dataCollected", (params) =>
-    trace.push(...(params as { value: unknown[] }).value),
+    trace.push(...fixtureType({ value: JsonTransport.array() }).assert(params).value),
   );
 
   page!.on("Tracing.tracingComplete", () => {
@@ -424,7 +430,7 @@ try {
     options: "record-as-much-as-possible",
   });
   tracing = true;
-  const samples: Record<string, unknown>[] = [];
+  const samples: Record<string, Json | undefined>[] = [];
   results["scroll"] = samples;
 
   for (let index = 0; index < 35; index++) {
@@ -462,7 +468,7 @@ try {
 
     const observed = await page!.evaluate<{
       input: { top: number; observedTop?: number; scroll: number | null; raf: number | null };
-      events: unknown[];
+      events: Json[];
       commits: number;
       epochOffset: number;
     }>(
@@ -498,17 +504,17 @@ try {
     );
   }
 
-  const cpu = (await checked("Profiler.stop")) as { profile: unknown };
+  const cpu = fixtureType({ profile: JsonTransport }).assert(await checked("Profiler.stop"));
   profiling = false;
   await writeFile(join(output, "renderer.cpuprofile"), JSON.stringify(cpu.profile));
   await checked("Tracing.end");
   tracing = false;
   await waitFor(async () => traceComplete, 10000);
   await writeFile(join(output, "renderer-trace.json"), JSON.stringify({ traceEvents: trace }));
-  results["nativeObservation"] = await page!.evaluate(
+  results["nativeObservation"] = await page!.evaluate<Json>(
     `({events:window.__events,frames:window.__frames,rootCommits:window.__rootCommits})`,
   );
-  await page!.evaluate("window.__framing=false;window.__stopDownloadObserver()");
+  await page!.evaluate<Json>("window.__framing=false;window.__stopDownloadObserver()");
   assert.deepEqual(
     await identity(),
     beforeIdentity,
@@ -559,10 +565,10 @@ try {
       ),
     10000,
   );
-  await page!.evaluate(
+  await page!.evaluate<Json>(
     `document.querySelector('[aria-label="Cancel download of S1 E1"]').scrollIntoView({block:'center'})`,
   );
-  const positive: unknown[] = [];
+  const positive: Json[] = [];
   results["positiveControl"] = positive;
 
   for (let i = 0; i < 2; i++) {
@@ -613,12 +619,14 @@ try {
     }
 
     results["failedNativeObservation"] = await page
-      .evaluate("({events:window.__events,frames:window.__frames})")
+      .evaluate<Json>("({events:window.__events,frames:window.__frames})")
       .catch(String);
     await capture("failure").catch(() => {});
-    results["failureDom"] = await page.evaluate("document.body.innerText").catch(String);
+    results["failureDom"] = await page.evaluate<Json>("document.body.innerText").catch(String);
     results["failureInstrumentation"] = await page
-      .evaluate("({commits:window.__rootCommits,hook:!!window.__REACT_DEVTOOLS_GLOBAL_HOOK__})")
+      .evaluate<Json>(
+        "({commits:window.__rootCommits,hook:!!window.__REACT_DEVTOOLS_GLOBAL_HOOK__})",
+      )
       .catch(String);
   }
 } finally {

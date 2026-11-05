@@ -1,3 +1,4 @@
+import type { Json, JsonObject } from "../../../../../packages/contracts/src/json.ts";
 import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 // Build an export from known fields, never by copying or trying to scrub a raw log. Older or
@@ -103,7 +104,7 @@ const FIELDS = {
 } as const satisfies Record<Diagnostic["op"], Record<string, Rule>>;
 
 function record(line: string): string | null {
-  let value: unknown;
+  let value: Json;
 
   try {
     value = JSON.parse(line);
@@ -111,9 +112,11 @@ function record(line: string): string | null {
     return null;
   }
 
-  if (!(type.keywords.object.root.allows(value) && !isCallable(value)) || Array.isArray(value))
-    return null;
-  const raw = value as Record<string, unknown>;
+  const object = (input: Json): input is JsonObject =>
+    type.keywords.object.root.allows(input) && !isCallable(input) && !Array.isArray(input);
+
+  if (!object(value)) return null;
+  const raw = value;
   const known = Object.entries(FIELDS).find(([key]) => key === raw["op"]);
 
   if (

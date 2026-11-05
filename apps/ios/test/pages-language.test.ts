@@ -1,3 +1,8 @@
+type ScreenOptions = {
+  title?: string;
+  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
+};
+
 import { createRoot, document, type Root } from "./dom.ts";
 import { setLanguage } from "@mrstreamer/core/i18n";
 import type { Locale } from "@mrstreamer/contracts/language";
@@ -11,7 +16,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const scenario = vi.hoisted(() => ({
   /** The options a screen set on its top bar, newest last. */
-  options: [] as Record<string, unknown>[],
+  options: [] as ScreenOptions[],
 }));
 
 vi.mock("expo-file-system", () => import("./native-files.ts"));
@@ -23,7 +28,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("expo-router", () => ({
   useLocalSearchParams: () => ({ id: "fflate@0.8.2" }),
   useNavigation: () => ({
-    setOptions: (options: Record<string, unknown>) => scenario.options.push(options),
+    setOptions: (options: ScreenOptions) => scenario.options.push(options),
   }),
 }));
 

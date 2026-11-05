@@ -1,3 +1,5 @@
+import { type } from "arktype";
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { useEffect, useState } from "react";
 import { Platform, ScrollView, Text } from "react-native";
 import { fetch as expoFetch } from "expo/fetch";
@@ -10,10 +12,6 @@ import { keychainSecrets } from "../secrets.ts";
 // report to scripts/proof-server.ts. Its guide group fails on purpose while core's XMLTV reader
 // needs Buffer, so the app never runs it at launch.
 const PROOF_URL = process.env.EXPO_PUBLIC_PROOF_URL;
-
-interface HermesRuntime {
-  getRuntimeProperties?(): Record<string, unknown>;
-}
 
 /** What the app threw outside the cases, such as a shared module failing while it loads. */
 const uncaught: string[] = [];
@@ -43,11 +41,20 @@ async function prove() {
   );
 
   results.push({ name: "keychain", compare: "record", ms: Date.now() - started, ...keychain });
-  const hermes = (globalThis as { HermesInternal?: HermesRuntime }).HermesInternal;
+  const scope = globalThis;
+  const hermes = "HermesInternal" in scope ? scope.HermesInternal : undefined;
+
+  // Hermes declares arbitrary property values. Keep the result opaque and serialize it intact.
+  const properties =
+    type.keywords.object.root.allows(hermes) &&
+    "getRuntimeProperties" in hermes &&
+    isCallable(hermes.getRuntimeProperties)
+      ? hermes.getRuntimeProperties()
+      : null;
 
   const report = {
     runtime: {
-      hermes: hermes?.getRuntimeProperties?.() ?? null,
+      hermes: properties ?? null,
       platform: Platform.OS,
       constants: Platform.constants,
     },

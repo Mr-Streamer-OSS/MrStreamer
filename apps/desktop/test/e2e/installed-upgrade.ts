@@ -834,7 +834,7 @@ async function playCopies(d: Driver, titles: Fixtures, kept?: number) {
     );
   };
 
-  const seen: Record<string, unknown> = {};
+  const seen: Record<string, Json | undefined> = {};
   await watch(sound.id, "the two-sound-track movie");
   const before = (await d.video()).time;
   await d.key("ArrowRight", 39);
@@ -1047,7 +1047,22 @@ export type AfterCandidate = Awaited<ReturnType<typeof upgradeToCandidate>>;
 /** What the offline part needs of the machine: the block, and what it refused. */
 export interface Offline {
   /** Stops the fake services, blocks the app and its tools, and proves the block refuses them. */
-  cutOff(d: Driver): Promise<Record<string, unknown>>;
+  cutOff(d: Driver): Promise<
+    Partial<{
+      endpoints: { window: string; tools: string };
+      servicesStopped: Awaited<ReturnType<Services["stop"]>>;
+      subtitlesStopped: Awaited<
+        ReturnType<Awaited<ReturnType<typeof startSubtitleFixture>>["stop"]>
+      >;
+      appReachedOutsideBeforeBlock: string;
+      toolsBeforeBlock: ({ tool: string } & Awaited<ReturnType<typeof toolProbe>>)[];
+      applied: ReturnType<ReturnType<typeof outboundBlock>["apply"]>;
+      appAfterBlock: string;
+      toolsAfterBlock: ({ tool: string } & Awaited<ReturnType<typeof toolProbe>>)[];
+      checkStillReaches: Awaited<ReturnType<typeof reaches>>[];
+      refused: ReturnType<ReturnType<typeof outboundBlock>["blocked"]>;
+    }>
+  >;
   /** Connections of the blocked programs refused since `since`. */
   refused(since: Date): unknown[];
 }
@@ -1576,7 +1591,19 @@ export interface Leftovers {
  */
 export async function cleanUp(cause: unknown, left: Leftovers) {
   let failed = cause;
-  const steps: Record<string, unknown> = {};
+
+  const steps: Record<
+    string,
+    | true
+    | string
+    | null
+    | string[]
+    | Awaited<
+        ReturnType<
+          Leftovers["services"] | Leftovers["uninstall"] | NonNullable<Leftovers["network"]>
+        >
+      >
+  > = {};
 
   const attempt = async (
     what: string,
@@ -1777,7 +1804,18 @@ export async function runCommand(args: string[]) {
   process.env["MR_STREAMER_TMDB_KEY"] = "synthetic-installed-upgrade";
 
   /** What each stage did, by stage, for proof.json. */
-  type ByStage = Partial<Record<Stage, unknown>>;
+  type ByStage = Partial<
+    Record<
+      Stage,
+      | Json
+      | Awaited<ReturnType<typeof installPublished>>
+      | Awaited<ReturnType<typeof start>>["identity"]
+      | Awaited<ReturnType<typeof seedStable>>
+      | Awaited<ReturnType<typeof restartCandidate>>
+      | Pick<AfterCandidate, "kept" | "inherited" | "savedSubtitle" | "played" | "copies" | "after">
+      | undefined
+    >
+  >;
 
   const proof = {
     runner: runner.id,
@@ -1818,7 +1856,10 @@ export async function runCommand(args: string[]) {
     ends: {} as ByStage,
     status: "running" as "running" | "passed" | "failed",
     error: null as string | null,
-    cleanup: {} as Record<string, unknown>,
+    cleanup: {} as Awaited<ReturnType<typeof cleanUp>>["steps"] & {
+      kept?: string[];
+      error?: string | null;
+    },
     limits: [] as string[],
   };
 

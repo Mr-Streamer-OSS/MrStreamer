@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 import { type } from "arktype";
 // Captures the five windows the marketing site is made from, as docs/assets/marketing-*.png: a
 // series' details, an episode playing with its subtitle menu open, Live TV, its guide grid with an
@@ -118,7 +119,22 @@ const session = `marketing-${Date.now()}`;
 const actions: { action: string; at: string }[] = [];
 const captures: CaptureEntry[] = [];
 
-const proof: Record<string, unknown> = {
+const proof: Record<string, Json | CaptureEntry[] | undefined> & {
+  source: string;
+  appVersion: string;
+  platform: string;
+  architecture: string;
+  system: string;
+  electron?: string;
+  mainSha256: string;
+  manifestSha256: string;
+  sources?: Json;
+  media?: Json;
+  buildFiles?: Json;
+  fixtureFiles?: Json;
+  analytics?: Json;
+  limitations: string[];
+} = {
   status: "running",
   source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   sourceDiff: execFileSync("git", ["diff", "--", "apps/desktop/scripts/marketing-capture.ts"], {
@@ -764,7 +780,7 @@ async function capture(
 }
 
 /** The build, system and inputs of this run, as the manifest records them. */
-function provenance() {
+export function provenance() {
   return {
     capturedAt: new Date().toISOString(),
     appSource: proof["source"],
@@ -803,8 +819,8 @@ async function clickExpression(page: Page, target: string, label: string): Promi
     await page.send("Input.dispatchMouseEvent", { type, ...point, button: "left", clickCount: 1 });
 }
 
-function cua(tool: string, arguments_: Record<string, unknown>) {
-  const result: unknown = JSON.parse(
+function cua(tool: string, arguments_: Record<string, Json | undefined>) {
+  const result: Json = JSON.parse(
     execFileSync(
       join(homedir(), ".local/bin/cua-driver"),
       ["call", tool, JSON.stringify({ session, ...arguments_ })],

@@ -35,6 +35,199 @@ import {
   subtitleRequests,
 } from "./installed-subtitles.ts";
 
+type WindowRequest = Driver["requests"][number];
+
+type SubtitleRequest = Awaited<ReturnType<typeof subtitleRequests>>[number];
+
+type MediaInputEvidence = Parameters<Parameters<typeof removeMediaSubscription>[1]>[0];
+
+type BrowserFacts = Awaited<ReturnType<typeof browserFacts>>;
+
+type Delivery = BrowserFacts["deliveries"][number];
+
+type TypeCheck = BrowserFacts["checks"][number];
+
+type BrowserError = BrowserFacts["errors"][number];
+
+type MediaProof = {
+  ownershipSamples?: OwnershipSample[];
+  pid?: number | undefined;
+  args?: string[];
+  profile?: string;
+  scratch?: string;
+  startedAt?: number;
+  processOwner?:
+    ReturnType<typeof ownedTree>["root"] | ReturnType<typeof ownedGroup>["root"] | undefined;
+  pausedIdentity?: MainIdentity;
+  pausedPins?: { at: number; pins: Pins };
+  subtitleBootstrap?: { pid: number; origin: string; boundary: string };
+  workerProvenance?: Awaited<ReturnType<typeof catalogueWorkerScripts>>;
+  browserArguments?: string[];
+  identity?: AppIdentity;
+  renderer?: string;
+  updateStatus?: import("../../../../packages/contracts/src/updates.ts").UpdateStatus;
+  actions?: { at: string; action: string }[];
+  requests?: WindowRequest[];
+  videoAtFailure?: MediaObservation;
+  probeAtFailure?: BrowserFacts;
+  subtitleRequests?: SubtitleRequest[] | undefined;
+  groupBeforeClose?:
+    { pid: number; parent: number; group: number; started: number; raw: string }[] | undefined;
+  exit?:
+    | Awaited<ReturnType<typeof closeNative>>
+    | (Awaited<ReturnType<ReturnType<typeof ownedTree>["stop"]>> & {
+        code: number | null;
+        signal: NodeJS.Signals | null;
+        alreadyExited: boolean;
+      })
+    | undefined;
+  groupDrain?: { startedAt: number; wallMs: number; waited: boolean };
+  groupAfterClose?:
+    { pid: number; parent: number; group: number; started: number; raw: string }[] | undefined;
+  exitPins?: { at: number; pins: Pins } | undefined;
+  cleanupErrors?: string[];
+  removalInput?: MediaInputEvidence;
+  before?: MediaObservation | BrowserFacts;
+  latest?:
+    | {
+        decoded: MediaObservation;
+        buffer: BrowserFacts["buffers"][number] | undefined;
+        delivery: Delivery | undefined;
+      }
+    | MediaObservation;
+  after?: MediaObservation;
+  pause?: { before: MediaObservation; held: MediaObservation; still: MediaObservation };
+  pausedSeek?: MediaObservation;
+  soundChoices?: string[];
+  soundTransition?: MediaProof;
+  pausedOtherSound?: MediaObservation;
+  selectedOtherSound?: { picked: string; selected: string };
+  resumed?: MediaObservation;
+  actualLaterRejections?: MediaProof[];
+  phase?: "video" | "audio";
+  window?: number;
+  generation?: number;
+  injection?: { sequence: number };
+  error?: BrowserError | string;
+  followingDelivery?: Delivery;
+  recoveryBuffer?: BrowserFacts["buffers"][number] | undefined;
+  recoveredPaused?: MediaObservation;
+  embeddedFrenchTransition?: MediaProof;
+  embeddedFrenchSeeks?: MediaProof[];
+  afterSelection?: MediaObservation;
+  browser?: BrowserFacts;
+  key?: { name: string; code: number; nodeRequestedAt: number };
+  fixture?: { originalSha256: string; bytes: number };
+  av1Fixtures?: {
+    short: { file: string; bytes: number; sha256: string };
+    long: { file: string; bytes: number; sha256: string };
+  };
+  invalidAvcConfiguration?: {
+    offset: number;
+    originalSha256: string;
+    mutatedSha256: string;
+    original: number;
+    mutated: number;
+  };
+  servedFixtureSha256?: string;
+  media?: {
+    events: { nodeReceivedAt: number; kind: string; data: unknown }[];
+    network: { nodeReceivedAt: number; data: unknown }[];
+    beginWindow(name: string): Promise<WindowStart>;
+    windowFacts(window: WindowStart): Promise<{
+      deliveries: Delivery[];
+      checks: TypeCheck[];
+      errors: BrowserError[];
+      name: string;
+      at: number;
+      sequence: number;
+      window: number;
+    }>;
+  };
+  about?: { text: string; source: string };
+  windows?: {
+    decoded: MediaObservation;
+    progress: { before: MediaObservation; after: MediaObservation };
+    deliveries: Delivery[];
+    checks: TypeCheck[];
+    errors: BrowserError[];
+    name: string;
+    at: number;
+    sequence: number;
+    window: number;
+  }[];
+  savedProviderSubtitle?: {
+    release: string;
+    timing: { offset: number; speed: number };
+    cue: { start: number; end: number; text: string };
+    interval: { start: number; end: number };
+    before: { time: number; caption: string };
+    shown: { time: number; caption: string };
+  };
+  onlineDecoded?: MediaObservation;
+  initialDelivery?: {
+    decoded: MediaObservation;
+    progress: { before: MediaObservation; after: MediaObservation };
+    deliveries: Delivery[];
+    checks: TypeCheck[];
+    errors: BrowserError[];
+    name: string;
+    at: number;
+    sequence: number;
+    window: number;
+  };
+  providerControls?: MediaProof;
+  depthBehavior?: {
+    initialVideo: string;
+    copiedRejection: string;
+    provenNative: boolean;
+    decodedWithControls: MediaObservation;
+  };
+  completedCopies?: readonly import("../../../../packages/contracts/src/downloads.ts").Download[];
+  offlineCutoff?: {
+    at: number;
+    rendererRequestsFrom: number;
+    providerServedReads: number;
+    subtitleAttempts: number;
+  };
+  fixturePortsRefused?: { origin: string; refused: true }[];
+  fixturesStoppedAt?: number;
+  standaloneCopies?: readonly import("../../../../packages/contracts/src/downloads.ts").Download[];
+  startupSequence?: {
+    copy: Delivery;
+    rejected: TypeCheck;
+    converted: Delivery;
+    decodedAt: number;
+    decoded: MediaObservation;
+  };
+  offlineLongControls?: MediaProof;
+  embeddedFrench?: MediaObservation;
+  savedOfflineSubtitle?: Awaited<ReturnType<typeof observeSavedSubtitle>>;
+  offlineSavedResume?: {
+    left: number;
+    kept: { readonly position: number; readonly duration: number };
+    percentage: string;
+    resumed: number;
+  };
+  providerServedReadsAfterCutoff?: number;
+  rendererRequestAttemptsAfterCutoff?: WindowRequest[];
+  subtitleAttemptsAfterCutoff?: SubtitleRequest[];
+  finalBrowserFacts?: BrowserFacts;
+  failureCaptureError?: string;
+  capabilityAtFailure?: { initiallyConverted: boolean; acceptedInvalidAvc: boolean | undefined };
+  subtitleFixture?: {
+    requests: { at: string; host: string; path: string; method: string }[];
+    zipSha256: string;
+  };
+  beforeSpawnPins?: { at: number; pins: Pins };
+  target?: Target;
+  preflightPins?: { at: number; pins: Pins };
+  localBoundaries?: { endpoint: string; update: string };
+  finalPins?: { at: number; pins: Pins };
+  captureErrors?: string[];
+  endedAt?: number;
+};
+
 const repository = fileURLToPath(new URL("../../../../", import.meta.url));
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 const hash = async (path: string) => digest(await readFile(path));
@@ -229,7 +422,7 @@ function launch(
   update: string,
   port: number,
   inspect: number,
-  record: Record<string, unknown>,
+  record: MediaProof,
   spawned: () => void,
 ) {
   const environment = Object.fromEntries(
@@ -635,7 +828,7 @@ async function download(d: Driver, name: string) {
   await d.key("Escape", 27);
 }
 
-async function remove(d: Driver, record: Record<string, unknown>, save: () => Promise<void>) {
+async function remove(d: Driver, record: MediaProof, save: () => Promise<void>) {
   await d.click("Settings", labelled("Settings"));
   await d.click("Subscriptions", button("nav button", "Subscriptions"));
   await removeMediaSubscription(d, async (trace) => {
@@ -682,7 +875,7 @@ class Unresolved extends Error {}
 async function settledAfter(
   d: Driver,
   before: MediaObservation,
-  record: Record<string, unknown>,
+  record: MediaProof,
   timeout: number,
   label: string,
 ) {
@@ -737,7 +930,7 @@ async function settledAfter(
 async function pauseSeekResume(
   d: Driver,
   otherSound: boolean,
-  record: Record<string, unknown>,
+  record: MediaProof,
   whilePaused?: () => Promise<void>,
 ) {
   const before = await media(d);
@@ -785,7 +978,7 @@ async function pauseSeekResume(
 
     const picked = await d.page.evaluate<string>(`(${other}).textContent.trim()`);
     const soundBefore = await media(d);
-    const transition: Record<string, unknown> = {};
+    const transition: MediaProof = {};
     record["soundTransition"] = transition;
     await d.click("Other sound while paused", other);
     await d.wait(
@@ -839,9 +1032,9 @@ async function pauseSeekResume(
   record["resumed"] = await media(d);
 }
 
-async function laterRejections(d: Driver, record: Record<string, unknown>) {
+async function laterRejections(d: Driver, record: MediaProof) {
   const position = (await media(d)).time;
-  const steps: Record<string, unknown>[] = [];
+  const steps: MediaProof[] = [];
   record["actualLaterRejections"] = steps;
   let priorGeneration = 0;
   let recoverySequence = 0;
@@ -860,7 +1053,7 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
     priorGeneration = before.generation;
     const window = before.window;
 
-    const step: Record<string, unknown> = {
+    const step: MediaProof = {
       phase,
       before,
       window,
@@ -964,13 +1157,9 @@ async function laterRejections(d: Driver, record: Record<string, unknown>) {
   }
 }
 
-async function embeddedFrench(
-  d: Driver,
-  record: Record<string, unknown>,
-  save: () => Promise<void>,
-) {
-  const transition: Record<string, unknown> = {};
-  const attempts: Record<string, unknown>[] = [];
+async function embeddedFrench(d: Driver, record: MediaProof, save: () => Promise<void>) {
+  const transition: MediaProof = {};
+  const attempts: MediaProof[] = [];
   record["embeddedFrenchTransition"] = transition;
   record["embeddedFrenchSeeks"] = attempts;
   await d.click("Open Subtitles", labelled("Subtitles"));
@@ -996,7 +1185,7 @@ async function embeddedFrench(
   for (let attempt = 0; (await media(d)).time < 48 && attempt < 7; attempt++) {
     const before = await media(d);
 
-    const observation: Record<string, unknown> = {
+    const observation: MediaProof = {
       before,
       key: { name: "ArrowRight", code: 39, nodeRequestedAt: Date.now() },
     };
@@ -1050,8 +1239,8 @@ interface CaseProof {
   outcome: Outcome | "running";
   profile: string;
   startedAt: number;
-  facts: Record<string, unknown>;
-  session: Record<string, unknown>;
+  facts: MediaProof;
+  session: MediaProof;
   cleanupErrors: string[];
   error?: string;
   endedAt?: number;
@@ -1247,7 +1436,7 @@ async function runCase(
       laterCopyDecoded = true;
     }
 
-    const controls: Record<string, unknown> = {};
+    const controls: MediaProof = {};
     proof.facts["providerControls"] = controls;
     await pauseSeekResume(
       d,
@@ -1400,7 +1589,7 @@ async function runCase(
       );
       await anchor(d);
       await moving(d);
-      const longControls: Record<string, unknown> = {};
+      const longControls: MediaProof = {};
       proof.facts["offlineLongControls"] = longControls;
       await pauseSeekResume(d, false, longControls);
       proof.facts["embeddedFrench"] = await embeddedFrench(d, proof.facts, save);
@@ -1554,7 +1743,7 @@ export async function installedMedia(args: string[]) {
     spawns: number;
     cases: CaseProof[];
     limits: string[];
-    details: Record<string, unknown>;
+    details: MediaProof;
   } = {
     outcome: "running",
     startedAt: Date.now(),

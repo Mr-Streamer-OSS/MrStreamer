@@ -45,7 +45,7 @@ type Context = {
   events(): CaptureEvent[];
   bodies: { body: string; at: number; closedAt?: number }[];
   capture(mode: "accept" | "reject" | "hold" | "hold-usage" | "offline"): Promise<void>;
-  observations: Record<string, unknown> & {
+  observations: Record<string, Json | undefined> & {
     windowsRetryReaders?: Json;
     windowsRetryMeasurements?: Json;
   };

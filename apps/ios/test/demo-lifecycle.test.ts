@@ -1,3 +1,6 @@
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import type { FixtureModules } from "./native-downloads.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
@@ -76,7 +79,7 @@ vi.mock("expo-video", () => ({
 
 const { native, File: DiskFile, Directory: Folder } = await import("./native-files.ts");
 const { background, nativeDownloads: port } = await import("./native-downloads.ts");
-const host = globalThis as { expo?: { modules?: Record<string, unknown> } };
+const host: { expo?: { modules?: FixtureModules } } = globalThis;
 let guide = guideFixture();
 const releases: Array<() => void> = [];
 
@@ -92,12 +95,17 @@ const disk = (name: string) => new DiskFile(native.root, "documents", name);
 const json = (name: string): Json => JSON.parse(disk(name).textSync());
 
 const registry = () =>
-  (disk("subscriptions.json").exists
-    ? json("subscriptions.json")
-    : json("subscriptions.json.next")) as Record<string, unknown>;
+  fixtureType({ "[string]": JsonTransport }).assert(
+    disk("subscriptions.json").exists
+      ? json("subscriptions.json")
+      : json("subscriptions.json.next"),
+  );
 
 const downloads = () =>
-  json("downloads.json") as { items: Array<Record<string, unknown>>; forgetting: string[] };
+  fixtureType({
+    items: fixtureType({ "[string]": JsonTransport }).array(),
+    forgetting: fixtureType("string[]"),
+  }).assert(json("downloads.json"));
 
 const save = (name: string, value: Json) => disk(name).writeSync(JSON.stringify(value));
 
@@ -109,7 +117,7 @@ const personal = (id = "personal") => ({
   name: "Personal",
 });
 
-const envelope = (extra: Record<string, unknown> = {}) => ({
+const envelope = (extra: Record<string, Json | undefined> = {}) => ({
   version: 1,
   subscriptions: [],
   retired: [],
@@ -770,14 +778,16 @@ describe("Demo through the production lifecycle", () => {
       favouriteMembership: carried,
     });
     const app = await withDemo();
-    expect((json("viewing.json") as Record<string, unknown>)["favouriteMembership"]).toEqual(
-      carried,
-    );
+    expect(
+      fixtureType({ "[string]": JsonTransport }).assert(json("viewing.json"))[
+        "favouriteMembership"
+      ],
+    ).toEqual(carried);
     await app.recordProgress(movie, 30, 150, Date.now());
     expect(await app.resetDemo()).toEqual({ kind: "started" });
-    expect((json("viewing.json") as Record<string, unknown>)["accounts"]).not.toHaveProperty(
-      "demo",
-    );
+    expect(
+      fixtureType({ "[string]": JsonTransport }).assert(json("viewing.json"))["accounts"],
+    ).not.toHaveProperty("demo");
     expect(json("viewing.json")).not.toHaveProperty("favouriteMembership");
   });
 
@@ -983,7 +993,11 @@ describe("Demo through the production lifecycle", () => {
     if (!id) throw new Error("No personal provider");
     const own: TitleRef = { kind: "movie", subscriptionId: id, id: "own" };
     await app.recordProgress(own, 55, 150, Date.now());
-    const before = (json("viewing.json") as { accounts: Record<string, unknown> }).accounts[id];
+
+    const before = fixtureType({ accounts: fixtureType({ "[string]": JsonTransport }) }).assert(
+      json("viewing.json"),
+    ).accounts[id];
+
     app.playDownload(kept.id);
     await until(() => memory.played.length === 1);
     const close = holdReader();
@@ -1012,9 +1026,11 @@ describe("Demo through the production lifecycle", () => {
     expect(await app.endDemo()).toEqual({ kind: "erased", files: "deferred" });
     expect(app.playback.playbackState.get().phase).toBe(phase);
     expect(folder(kept.id).exists).toBe(true);
-    expect((json("viewing.json") as { accounts: Record<string, unknown> }).accounts[id]).toEqual(
-      before,
-    );
+    expect(
+      fixtureType({ accounts: fixtureType({ "[string]": JsonTransport }) }).assert(
+        json("viewing.json"),
+      ).accounts[id],
+    ).toEqual(before);
     close.resolve();
     await playing;
     await until(() => !folder(kept.id).exists);

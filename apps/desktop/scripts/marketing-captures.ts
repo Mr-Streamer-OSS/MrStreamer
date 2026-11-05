@@ -54,7 +54,26 @@ export interface CaptureEntry {
 }
 
 /** The build, system and inputs a master was captured from. */
-export type Provenance = Readonly<Record<string, unknown>>;
+export type Provenance = Omit<
+  Partial<ReturnType<typeof import("./marketing-capture.ts").provenance>>,
+  "electron"
+> & {
+  readonly electron?: string | undefined;
+  readonly status?: string;
+  readonly method?: string;
+  readonly nativeSession?: import("../../../packages/contracts/src/json.ts").Json;
+  readonly evidence?: string;
+  readonly language?: string;
+  readonly caption?: string;
+  readonly sources?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly media?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly buildFiles?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly fixtureFiles?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly analytics?: import("../../../packages/contracts/src/json.ts").Json | undefined;
+  readonly credits?: readonly string[];
+  readonly limitations?: readonly string[];
+  readonly linuxCaptureScriptSha256?: string;
+};
 
 interface CaptureManifest {
   readonly captures: readonly { readonly name: string }[];

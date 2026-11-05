@@ -1,3 +1,5 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
+import type { preflight } from "./control.ts";
 import { type as arkType } from "arktype";
 // The owned run the downloads scenarios of `pnpm verify:desktop` share: one profile, the fake
 // provider, TMDB and a picture server, starts of the built app checked to be this run's, window
@@ -33,6 +35,13 @@ export interface Connection {
   readonly host?: string;
   readonly port?: number;
   readonly path?: string;
+}
+
+/** Connections observed during one playback interval, retained without dropping failed attempts. */
+export interface NetworkObservation {
+  readonly main: Connection[];
+  readonly window: { at: number; url: string }[];
+  readonly windowRequests: number;
 }
 
 /** Which build a start runs: this checkout's, or an earlier one's packaged executable. */
@@ -191,7 +200,7 @@ export interface Run<D> {
   readonly profile: string;
   readonly abort: AbortController;
   readonly actions: { action: string; at: string }[];
-  readonly observed: Record<string, unknown>;
+  readonly observed: import("./language.ts").Observations;
   readonly networkLog: string;
   readonly windowRequests: { at: number; url: string }[];
   readonly provider: FakeProvider;
@@ -209,21 +218,21 @@ export interface Run<D> {
  */
 export async function ownedRun<D>(
   options: {
-    readonly build: Record<string, unknown> & { executable: string };
+    readonly build: Awaited<ReturnType<typeof preflight>>;
     readonly style: Style;
     /** Records the window's requests over CDP into `windowRequests`. */
     readonly watchWindow: boolean;
     readonly prefix: string;
     readonly locale?: Locale;
-    readonly observed: Record<string, unknown>;
+    readonly observed: import("./language.ts").Observations;
     readonly pictures: () => Promise<Server>;
     readonly driver: (page: Page, base: BaseDriver) => D;
-    readonly describe: (started: Started) => Record<string, unknown>;
+    readonly describe: (started: Started) => Record<string, Json | undefined>;
     /** Runs first, inside the run, before any fixture starts. */
-    readonly prepare?: (observed: Record<string, unknown>) => Promise<void>;
+    readonly prepare?: (observed: import("./language.ts").Observations) => Promise<void>;
     /** Runs first in cleanup, before the app is stopped. */
     readonly release?: (clean: (operation: () => Promise<void>) => Promise<void>) => Promise<void>;
-    readonly proof: Record<string, unknown>;
+    readonly proof: Record<string, Json | undefined>;
     readonly limits: readonly string[];
     readonly done: string;
   },
@@ -263,7 +272,7 @@ export async function ownedRun<D>(
 
     observed["fixturePorts"] = fixturePorts;
     /** Each start's own process, debugging port, profile and renderer, as checked. */
-    const starts: Record<string, unknown>[] = [];
+    const starts: Record<string, Json | undefined>[] = [];
     observed["starts"] = starts;
     const owned = { profile, tmdb };
 

@@ -1,3 +1,4 @@
+import type { preflight } from "./control.ts";
 // The downloads-series scenario of `pnpm verify:desktop`: downloaded episodes of a series grouped on
 // the Downloads page and played on, copy after copy, in the offline player, driven through the
 // built app's window with pointer and key input on one profile started several times. Episodes of
@@ -68,13 +69,13 @@ const driver = (page: Page, base: BaseDriver) => {
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsSeries(
-  build: Record<string, unknown> & { executable: string },
+  build: Awaited<ReturnType<typeof preflight>>,
   previous?: string,
 ) {
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
   /** Another connection to the run's profile database, holding its write lock while set. */
   let locked: DatabaseSync | undefined;
-  const observed: Record<string, unknown> = { build };
+  const observed: import("./language.ts").Observations = { build };
 
   const steps = async ({
     start,

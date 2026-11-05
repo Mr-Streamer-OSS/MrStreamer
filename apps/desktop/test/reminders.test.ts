@@ -1,3 +1,5 @@
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
 // Programme reminders through the app's services, against the fake provider and a guide served
 // for the test, with a test clock the test moves and a stand-in for the system's notifications.
 import { existsSync, readFileSync } from "node:fs";
@@ -59,9 +61,11 @@ function fakeNotifier(file: string, supported = true) {
     show(notice, on) {
       if (refuse === "throw") throw new Error("The system broke.");
 
-      const kept = JSON.parse(readFileSync(file, "utf8")) as {
-        subscriptions: Record<string, { id: string; state: unknown }[]>;
-      };
+      const kept = fixtureType({
+        subscriptions: fixtureType({
+          "[string]": fixtureType({ id: "string", state: JsonTransport }).array(),
+        }),
+      }).assert(JSON.parse(readFileSync(file, "utf8")));
 
       storedAtShow.push(
         Object.values(kept.subscriptions)
@@ -573,9 +577,9 @@ describe("programme reminders", () => {
     expect((await again.reminders.list()).reminders).toEqual([]);
     expect(notices.shown).toHaveLength(1);
 
-    const read = JSON.parse(await readFile(join(dataDir, "reminders.json"), "utf8")) as {
-      subscriptions: Record<string, unknown>;
-    };
+    const read = fixtureType({ subscriptions: fixtureType({ "[string]": JsonTransport }) }).assert(
+      JSON.parse(await readFile(join(dataDir, "reminders.json"), "utf8")),
+    );
 
     expect(read.subscriptions["gone-subscription"]).toBeUndefined();
   });
@@ -641,9 +645,11 @@ describe("programme reminders", () => {
     await app.close();
     const path = join(dataDir, "reminders.json");
 
-    const file = JSON.parse(await readFile(path, "utf8")) as {
-      subscriptions: Record<string, Record<string, unknown>[]>;
-    };
+    const file = fixtureType({
+      subscriptions: fixtureType({
+        "[string]": fixtureType({ "[string]": JsonTransport }).array(),
+      }),
+    }).assert(JSON.parse(await readFile(path, "utf8")));
 
     const [entry] = file.subscriptions[app.subscriptionId] ?? [];
     const later = { kind: "later", when: "never" };

@@ -1,3 +1,11 @@
+import type { Appearance, Highlight } from "./controls.ts";
+import type { Bounds, Row } from "./live-names.ts";
+import type { Source } from "./moved-guide.ts";
+import type { SQLOutputValue } from "node:sqlite";
+import type { NetworkObservation } from "./downloads-run.ts";
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../../packages/contracts/src/json-value.ts";
+import type { Playing } from "./hls-compatibility.ts";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 // The language scenario: the interface language picked in Settings, through the real window, at
 // the smallest window the app allows. It changes the app's own text at once, keeps the title,
@@ -13,12 +21,50 @@ import {
 } from "../../../../packages/contracts/src/language.ts";
 import { translate } from "../../../../packages/core/src/i18n.ts";
 
+type LanguageView = {
+  lang: string;
+  heading: string;
+  tabs: string[];
+  select: { value: string; options: string[]; label: string | null };
+  sections: string[];
+};
+
+type LanguageVisit = { settings: LanguageView; bar: { nav: string[]; labels: string[] } };
+
+/** JSON proof facts and the concrete domain observations these scenarios collect. */
+export type Observations = Record<
+  string,
+  | Json
+  | InterfaceLanguage
+  | Record<string, Appearance | null>
+  | Record<string, { before: Highlight; after: Highlight }>
+  | Row
+  | readonly Row[]
+  | Source
+  | readonly Source[]
+  | readonly {
+      name: Bounds;
+      cell: Bounds;
+      row: Bounds;
+      line: (Bounds & { visible: boolean; clipped: boolean; contained: boolean }) | null;
+    }[]
+  | { name: Bounds; dot: Bounds; cell: Bounds; gap: number }
+  | NetworkObservation
+  | readonly { account: string; backup: boolean; n: SQLOutputValue | undefined }[]
+  | Playing
+  | readonly Playing[]
+  | LanguageVisit
+  | (LanguageView & { language: InterfaceLanguage })
+  | Record<string, LanguageVisit>
+  | undefined
+>;
+
 /** What the scenario drives the owned app with; `control.ts` provides it. */
 export interface Driver {
   readonly profile: string;
-  readonly observed: Record<string, unknown>;
-  evaluate<T>(expression: string): Promise<T>;
-  send(method: string, params?: Record<string, unknown>): Promise<Json | undefined>;
+  readonly observed: Observations;
+  evaluate<T = Json | undefined>(expression: string): Promise<T>;
+  send(method: string, params?: Record<string, Json | undefined>): Promise<Json | undefined>;
   /** Waits for `check`, 30 seconds unless `timeout` says otherwise. */
   wait(check: () => Promise<boolean>, timeout?: number): Promise<void>;
   exists(expression: string): Promise<boolean>;
@@ -40,7 +86,9 @@ export async function languageScenario(d: Driver): Promise<void> {
   const prefsPath = join(d.profile, "preferences.json");
 
   const savedPreferences = async () =>
-    JSON.parse(await readFile(prefsPath, "utf8")) as Record<string, unknown>;
+    fixtureType({ "[string]": JsonTransport }).assert(
+      JSON.parse(await readFile(prefsPath, "utf8")),
+    );
 
   await smallestWindow(d);
 
@@ -127,7 +175,7 @@ export async function languageScenario(d: Driver): Promise<void> {
     }
   };
 
-  const visits: Record<string, unknown> = {};
+  const visits: Record<string, LanguageVisit> = {};
 
   for (const locale of ["fr-FR", "nl-NL", "es-ES", "de-DE"] as const) {
     await pick(locale);
@@ -465,7 +513,7 @@ async function liveTv(d: Driver, locale: Locale) {
  * and every page's name shows whole.
  */
 async function pages(d: Driver, locale: Locale) {
-  const fits: Record<string, unknown> = {};
+  const fits: Record<string, Json | undefined> = {};
 
   for (const page of ["Live TV", "Movies", "Series", "Watchlist", "Home"] as const) {
     if (page === "Watchlist") {
@@ -684,7 +732,9 @@ async function smallestWindow(d: Driver) {
     mobile: false,
   });
   await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
-  d.observed["viewport"] = await d.evaluate<object>("({ width: innerWidth, height: innerHeight })");
+  d.observed["viewport"] = await d.evaluate<{ width: number; height: number }>(
+    "({ width: innerWidth, height: innerHeight })",
+  );
 }
 
 function expect(condition: boolean, what: string, seen?: Json): asserts condition {

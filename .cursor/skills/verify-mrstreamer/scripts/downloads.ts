@@ -1,3 +1,5 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
+import type { preflight } from "./control.ts";
 // The downloads scenario of `pnpm verify:desktop`: the built app, started three times on one
 // profile, driven through its window. It downloads a movie and an episode from their details,
 // gives a running download's connection to playback of the same subscription, cancels, retries
@@ -62,7 +64,7 @@ const driver = (page: Page, base: BaseDriver) => {
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloads(
-  build: Record<string, unknown> & { executable: string },
+  build: Awaited<ReturnType<typeof preflight>>,
   locale: Locale = SOURCE_LOCALE,
 ) {
   // The text expected below, in the language the app shows.
@@ -136,7 +138,7 @@ export async function runDownloads(
     const onDownloadsPage = (d: Driver) =>
       d.exists(`document.querySelector('h1')?.textContent === ${JSON.stringify(t("Downloads"))}`);
 
-    const notices: Record<string, unknown> = {};
+    const notices: Record<string, Json | undefined> = {};
     observed["notice"] = notices;
 
     type Bar = Awaited<ReturnType<typeof barOf>>;
@@ -683,7 +685,7 @@ export async function runDownloads(
       return { ...bar, focus: focus.active };
     };
 
-    const focused: Record<string, unknown> = { width: narrowest };
+    const focused: Record<string, Json | undefined> = { width: narrowest };
     notices["focusAcrossFolds"] = focused;
     await online.click(
       "Cancel the held download",

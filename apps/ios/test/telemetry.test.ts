@@ -1,3 +1,5 @@
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -67,7 +69,7 @@ const SEARCH = "cnry search words";
 
 /** The loopback PostHog: every capture body, in order. */
 let server: Server;
-const captured: Array<Record<string, unknown>> = [];
+const captured: Array<Record<string, Json | undefined>> = [];
 const raw: string[] = [];
 let respond: "ok" | "hang" = "ok";
 const hung: ServerResponse[] = [];
@@ -93,7 +95,7 @@ beforeEach(async () => {
       }
 
       raw.push(body);
-      captured.push(JSON.parse(body) as Record<string, unknown>);
+      captured.push(fixtureType({ "[string]": JsonTransport }).assert(JSON.parse(body)));
 
       if (respond === "hang") {
         hung.push(response);
@@ -153,7 +155,9 @@ const names = () => captured.map((body) => body["event"]);
 
 const ofName = (name: string) =>
   captured.flatMap((body) =>
-    body["event"] === name ? [body["properties"] as Record<string, unknown>] : [],
+    body["event"] === name
+      ? [fixtureType({ "[string]": JsonTransport }).assert(body["properties"])]
+      : [],
   );
 
 const stored = () => JSON.parse(files.get("analytics.json") ?? "null") as AnalyticsRecord | null;

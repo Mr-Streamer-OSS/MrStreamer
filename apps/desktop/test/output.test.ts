@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import type { RemotePlaybackObservers } from "../src/main/analytics/observers.ts";
 import type { AnalyticsRecord, CaptureEvent } from "../src/main/analytics/model.ts";
 import { Analytics } from "../src/main/analytics/service.ts";
@@ -179,8 +180,7 @@ async function casting(
   };
 
   /** The LOAD the TV was sent last. */
-  const loaded = () =>
-    tv.requests("LOAD").at(-1) as { media: { contentId: string } } & Record<string, unknown>;
+  const loaded = () => type({ media: { contentId: "string" } }).assert(tv.requests("LOAD").at(-1));
 
   /**
    * Asks for a stream as a receiver does, its playlists and its first segment: the one the TV was

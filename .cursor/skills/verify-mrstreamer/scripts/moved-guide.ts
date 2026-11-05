@@ -22,7 +22,7 @@ const ASKED_WITHIN_MS = 20_000;
 /** The guide channel the address lists, mapped by hand to a channel of the provider. */
 const MAPPED = "ext.mapped";
 
-interface Source {
+export interface Source {
   readonly id: string;
   readonly origin: string;
   readonly processing: { readonly state: string; readonly fetchedAt?: number };

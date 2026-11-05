@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Built-checkout proof through the actual Movies and Downloads UI. System tools on Linux are
 // source-build evidence; run installed/bundled acceptance separately on each native platform.
 // xvfb-run -a node apps/desktop/test/e2e/title-compatibility.ts [h264-10bit | hevc-12bit | h264-rejected-copy | h264-later-rejection]
@@ -96,8 +97,8 @@ const logs: string[] = [];
 for (const output of [app.stdout, app.stderr])
   output?.on("data", (data: Buffer) => logs.push(data.toString()));
 
-const observations: Record<string, unknown> = {};
-const deliveries: unknown[] = [];
+const observations: Record<string, Json | (Json | undefined)[] | undefined> = {};
+const deliveries: Json[] = [];
 const actions: string[] = [];
 let page: Page | undefined;
 let failure: string | undefined;
@@ -137,7 +138,7 @@ try {
   await doctor();
   await live.send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await live.send("Media.enable");
-  const media: unknown[] = [];
+  const media: (Json | undefined)[] = [];
   live.on("Media.playerPropertiesChanged", (event) => media.push(event));
   live.on("Media.playerEventsAdded", (event) => media.push(event));
   observations["chromiumMedia"] = media;
@@ -359,7 +360,7 @@ try {
       active: provider.activeStreams(),
     });
 
-    const attempts: unknown[] = [];
+    const attempts: Json[] = [];
     observations["pausedBufferAttempts"] = attempts;
 
     const { before, after, picture } = await (async () => {
@@ -562,7 +563,7 @@ try {
 
   const checks = await live.evaluate<{
     checks: { type: string; supported: boolean }[];
-    errors: unknown[];
+    errors: Json[];
   }>("({ checks: window.__compatibility.checks, errors: window.__compatibility.errors })");
 
   observations["actualMse"] = checks;
@@ -585,7 +586,7 @@ try {
 
   if (page)
     observations["actualMseAtFailure"] = await page
-      .evaluate(
+      .evaluate<Json>(
         "({ checks: window.__compatibility?.checks, errors: window.__compatibility?.errors })",
       )
       .catch(() => null);

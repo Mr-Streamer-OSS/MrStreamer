@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Saved delays through Settings and actual media-ended events in an isolated built app.
 import type { Preferences } from "../../../../packages/contracts/src/preferences.ts";
 import {
@@ -292,7 +293,7 @@ export async function nextEpisodeScenario(
   expect(maximumInitial <= 60 && maximumInitial >= 58, "The next countdown did not use 60 seconds");
   await d.capture("maximum-60-countdown");
   await openSettings();
-  const languages: Record<string, unknown> = {};
+  const languages: Record<string, Json | undefined> = {};
 
   for (const next of LOCALES) {
     await pickLocale(next);

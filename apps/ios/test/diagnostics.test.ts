@@ -1,3 +1,8 @@
+type ScreenOptions = {
+  title?: string;
+  unstable_headerRightItems?: () => { label: string; onPress?: () => void }[];
+};
+
 import "./native-assets.ts";
 import { createRoot, document, Event } from "./dom.ts";
 import * as React from "react";
@@ -26,7 +31,7 @@ const scenario = vi.hoisted(() => ({
   /** The system's share sheet: each payload it was handed. */
   shared: [] as unknown[],
   /** The options a screen set on its top bar, newest last. */
-  options: [] as Record<string, unknown>[],
+  options: [] as ScreenOptions[],
   pushed: [] as string[],
   tab: "(home)" as string,
   sheet: null as { options: readonly string[]; pick: (index: number) => void } | null,
@@ -74,7 +79,7 @@ vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.2.0" } }
 vi.mock("expo-router", () => ({
   router: { push: (href: string) => scenario.pushed.push(href) },
   useNavigation: () => ({
-    setOptions: (options: Record<string, unknown>) => scenario.options.push(options),
+    setOptions: (options: ScreenOptions) => scenario.options.push(options),
   }),
 }));
 

@@ -1,3 +1,6 @@
+import { type as fixtureType } from "arktype";
+import { JsonValue as JsonTransport } from "../../../packages/contracts/src/json-value.ts";
+import type { FakeProviderOptions } from "../../desktop/test/fake-provider.ts";
 import { type as arkType } from "arktype";
 import { nativePlayer } from "./native-player.ts";
 import type { DownloadStatus } from "@mrstreamer/contracts/downloads";
@@ -200,7 +203,9 @@ vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit)
     }
 
     if (["get_vod_streams", "get_series", "get_live_streams"].includes(action)) {
-      const rows = (await response.json()) as Record<string, unknown>[];
+      const rows = fixtureType({ "[string]": JsonTransport })
+        .array()
+        .assert(await response.json());
 
       return Response.json(
         rows.map((row) => {
@@ -275,7 +280,7 @@ interface FakeProvider {
 const FAKE_PROVIDER = "../../desktop/test/fake-provider.ts";
 
 const { startFakeProvider, fixture } = (await import(FAKE_PROVIDER)) as {
-  startFakeProvider(options: Record<string, unknown>): Promise<FakeProvider>;
+  startFakeProvider(options: FakeProviderOptions): Promise<FakeProvider>;
   fixture(name: string): Buffer;
 };
 

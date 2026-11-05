@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Drives the built Electron app through its window. Fixtures replace only provider and TMDB APIs.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
@@ -232,7 +233,7 @@ Each scenario owns a fresh app/profile/ports and retains proof in .local/verific
 }
 
 /** Read-only build/tool checks. Importing Electron itself can download a binary, so resolve its path. */
-async function preflight() {
+export async function preflight() {
   const executable = await electronExecutable();
   const main = await readFile(join(desktop, "out/main/index.js"));
   await access(join(desktop, "out/renderer/index.html"));
@@ -292,8 +293,8 @@ async function run(scenario: Scenario, prior?: string) {
   process.once("SIGINT", interrupt);
   process.once("SIGTERM", interrupt);
   const actions: { action: string; at: string }[] = [];
-  const observed: Record<string, unknown> = {};
-  const runtimeExceptions: { launch: number; event: unknown }[] = [];
+  const observed: import("./language.ts").Observations = {};
+  const runtimeExceptions: { launch: number; event: Json | undefined }[] = [];
   let catalogueLaunch = 0;
   let profile: string | undefined;
   let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
@@ -540,7 +541,7 @@ async function run(scenario: Scenario, prior?: string) {
       return page;
     };
 
-    const send = async (method: string, params: Record<string, unknown> = {}) => {
+    const send = async (method: string, params: Record<string, Json | undefined> = {}) => {
       abort.signal.throwIfAborted();
       const reply = await live().send(method, params);
 
@@ -599,7 +600,7 @@ async function run(scenario: Scenario, prior?: string) {
     await launch();
 
     const livePage = {
-      evaluate: <T>(expression: string) => live().evaluate<T>(expression),
+      evaluate: <T = Json | undefined>(expression: string) => live().evaluate<T>(expression),
     };
 
     const wait = (check: () => Promise<boolean>, timeout?: number) =>

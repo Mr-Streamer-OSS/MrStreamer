@@ -1,3 +1,5 @@
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
+import type { JsonObject } from "../../../../packages/contracts/src/json.ts";
 import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 // Shared ownership and process cleanup for the desktop and website verification helpers.
@@ -59,8 +61,10 @@ export async function freePort() {
   return address.port;
 }
 
-export function record(value: unknown): value is Record<string, unknown> {
-  return arkType.keywords.object.root.allows(value) && !isCallable(value);
+export function record(value: unknown): value is JsonObject {
+  return (
+    JsonValue.allows(value) && arkType.keywords.object.root.allows(value) && !isCallable(value)
+  );
 }
 
 /** Graceful quit first; escalation targets only the app or process group this run created. */

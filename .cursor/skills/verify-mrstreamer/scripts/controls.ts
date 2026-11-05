@@ -20,7 +20,7 @@ const expect = (value: boolean, message: string) => {
   if (!value) throw new Error(message);
 };
 
-interface Appearance {
+export interface Appearance {
   /** Computed `border-radius`, one value per corner where they differ. */
   readonly radius: string;
   readonly height: number;
@@ -28,7 +28,7 @@ interface Appearance {
 }
 
 /** A menu's highlighted row by its place among the rows, -1 for none, and how many are enabled. */
-interface Highlight {
+export interface Highlight {
   readonly row: number;
   readonly label: string | null;
   readonly enabled: number;

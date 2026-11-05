@@ -81,7 +81,17 @@ const module = new SourceTextModule(
   sourceBinding ? stripTypeScriptTypes(bindingCode) : bindingCode,
 );
 
-const boundary = (exports: Record<string, unknown>) =>
+type Boundary =
+  | { default: { VideoPlayer: typeof NativePlayer } }
+  | { default: () => { uri: string } }
+  | {
+      useReleasingSharedObjectWithLifecycle: (
+        definition: NonNullable<typeof hookDefinition>,
+      ) => NativePlayer;
+    }
+  | { useState: () => [number, () => void] };
+
+const boundary = (exports: Boundary) =>
   new SyntheticModule(Object.keys(exports), function () {
     for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
   });

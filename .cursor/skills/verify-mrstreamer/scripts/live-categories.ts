@@ -539,7 +539,9 @@ export async function liveCategoriesScenario(
   await d.wait(() =>
     d.evaluate<boolean>("document.querySelector('main h1')?.textContent === 'News'"),
   );
-  d.observed["rememberedAfterBothRemovalPaths"] = await d.evaluate<unknown>(
+  d.observed["rememberedAfterBothRemovalPaths"] = await d.evaluate<
+    import("../../../../packages/contracts/src/json.ts").Json
+  >(
     "(async()=>{const r=await window.mrStreamer.invoke('liveBrowse.get');return r.ok?r.value:null;})()",
   );
   await d.capture("browse-original-source-removed");
