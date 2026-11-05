@@ -38,9 +38,9 @@ class PlayerMediaServiceTest {
       RobolectricUtil.runMainLooperUntil {
         player.playbackState == Player.STATE_READY && session.connectedControllers.isNotEmpty()
       }
-      service.destroy()
       val app = shadowOf(context)
       app.clearStartedServices() // Starts issued while the service was alive are expected.
+      service.destroy()
       player.play()
       RobolectricUtil.runMainLooperUntil { player.isPlaying }
       // Flush the actual Media3 notification controller's asynchronous state updates.
