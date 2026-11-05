@@ -5,6 +5,8 @@
 // plays where it can't play the panel's MPEG-TS.
 //
 //   node scripts/fixture-server.ts [port] [control port]
+// Use 0 for a system-assigned port; readiness reports both bound addresses. A second
+// provider needs an explicit panel port to name its request log and provenance.
 //
 // The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass", or as the
 // FIXTURE_USERNAME / FIXTURE_PASSWORD given, such as the canaries scripts/log-scan.ts looks for.
@@ -80,11 +82,13 @@
 //   POST, GET /live-link               the pace live segments are sent at; see
 //                                      scripts/native-fixtures/live-link.ts
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   createServer,
   request as forward,
   type IncomingMessage,
+  type Server,
   type ServerResponse,
 } from "node:http";
 import { join, resolve } from "node:path";
@@ -121,8 +125,8 @@ const CHANNELS = 6000;
 /** A channel counts as playing while it was asked for this recently. */
 const PLAYING_MS = 6_000;
 
-const port = Number(process.argv[2] ?? 8791);
-const controlPort = Number(process.argv[3] ?? 8792);
+let port = Number(process.argv[2] ?? 8791);
+let controlPort = Number(process.argv[3] ?? 8792);
 const root = join(import.meta.dirname, "../../..");
 const out = resolve(process.env.FIXTURE_OUT ?? join(root, ".local/ios-fixture"));
 const fixtures = join(root, "apps/desktop/test/fixtures");
@@ -130,6 +134,9 @@ const fixtures = join(root, "apps/desktop/test/fixtures");
 mkdirSync(out, { recursive: true });
 
 const second = process.env.FIXTURE_SECOND === "1";
+
+if (second && port === 0) throw new Error("FIXTURE_SECOND requires an explicit panel port");
+
 const pngLogos = process.env.FIXTURE_LOGOS === "png";
 const cacheableArt = pngLogos && process.env.FIXTURE_ART_CACHEABLE === "1";
 
@@ -431,7 +438,7 @@ function playlistStatus(
 const listed = (id: string) => (lists.unlisted(id) ? undefined : channels.get(id));
 const playlistType = "application/vnd.apple.mpegurl";
 
-createServer((request, response) => {
+const server = createServer((request, response) => {
   const path = request.url ?? "/";
   const url = new URL(path, "http://fixture.test");
   const live = /^\/live\/([^/]+)\/([^/]+)\/(\d+)\.m3u8$/.exec(url.pathname);
@@ -584,9 +591,9 @@ createServer((request, response) => {
     upstream.on("error", () => answer(response, 502, "text/plain", ""));
     request.pipe(upstream);
   }, wait);
-}).listen(port, "127.0.0.1");
+});
 
-createServer((request, response) => {
+const controlServer = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://control.test");
 
   const json = (
@@ -680,7 +687,24 @@ createServer((request, response) => {
   }
 
   answer(response, 404, "text/plain", "");
-}).listen(controlPort, "127.0.0.1");
+});
+
+/** Listens on 127.0.0.1 and resolves with the port held: `requested`, or the system's pick for 0. */
+async function listen(listener: Server, requested: number) {
+  await once(listener.listen(requested, "127.0.0.1"), "listening");
+  const address = listener.address();
+
+  if (!address || typeof address === "string")
+    throw new Error("fixture listener has no TCP address");
+
+  return address.port;
+}
+
+// Readiness is announced only once both listeners hold their ports. A failed bind rejects here,
+// and the unhandled rejection exits the process, releasing every service it started.
+port = await listen(server, port);
+
+controlPort = await listen(controlServer, controlPort);
 
 writeFileSync(
   join(out, second ? `server-${port}.json` : "server.json"),
