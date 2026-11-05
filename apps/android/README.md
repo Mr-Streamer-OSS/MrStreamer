@@ -26,10 +26,12 @@ keep those two at the versions the root lockfile holds. The workspace installs n
 own, so only the native modules named in `package.json`, and those they depend on (Expo's
 `expo-asset`, `expo-font` and `expo-keep-awake` among them), are linked into the build.
 
+From the repository root, install both frozen lockfiles before checking the Android source:
+
 ```sh
-cd apps/android
 pnpm install --frozen-lockfile
-../../node_modules/.bin/tsc --noEmit -p .
+pnpm --dir apps/android install --frozen-lockfile
+pnpm exec tsc --noEmit -p apps/android
 ```
 
 Its tests run from the repository's root with the rest (`pnpm exec vitest run apps/android/test`),
@@ -46,7 +48,7 @@ React Native: Expo 58.0.9, React Native 0.88.0-rc.4, React 19.3.0, and the nativ
 versions `expo@58.0.9` bundles (`node_modules/expo/bundledNativeModules.json`). The build uses
 the Android Gradle Plugin 9.2.1 and NDK 27.1.12297006 from React Native's Gradle catalogue
 (`node_modules/react-native/gradle/libs.versions.toml`), Kotlin 2.2.10 as Gradle resolves it,
-and Gradle 9.4.1 from the committed wrapper. Nothing pins the JDK: the Mac mini builds with its
+and Gradle 9.4.1 from the committed wrapper. Nothing pins the JDK in the project: `fleet-android` uses forge's
 JDK 17. Every native library in the Release
 APK is aligned for 16 KB pages.
 
@@ -73,11 +75,34 @@ dependency, regenerate it and commit the result:
 CI=1 pnpm exec expo prebuild --platform android --clean --no-install
 ```
 
-Build on the Mac mini, where the Android SDK is:
+Build on forge after the two frozen installs above. From the repository root:
 
 ```sh
-onmac run -- onmac-job zsh -c 'cd apps/android && pnpm install --frozen-lockfile && cd android && ./gradlew assembleRelease'
+cd apps/android/android
+fleet-android gradle assembleRelease
 ```
+
+For the native player's JVM tests, run `fleet-android gradle :player:testDebugUnitTest` in
+that same directory. These tests do not qualify installed decoding.
+
+For installed checks, forge hosts the shared `Pixel_9_API_37` emulator (Android 17,
+x86_64) on device host `local`. Call `device_list`, then `device_open` with that host
+and device id. If another agent owns it, wait until its session closes. Follow the returned
+`quickStart` and use its exact AgentDevice command for app launch and every UI action.
+With the managed device open, install from the same Gradle directory:
+
+```sh
+fleet-android install app/build/outputs/apk/release/app-release.apk
+```
+
+The install prints `Success`. The release APK bundles JavaScript and needs no Metro.
+The emulator requires x86_64 native code; the configured ABIs remain `arm64-v8a,x86_64`.
+Keep emulator results separate from physical-device, receiver and store qualification.
+Use `device_screenshot` to confirm the expected app state. For loopback fixtures, use
+[the format qualification recipe](docs/formats.md), with direct adb reverse on forge.
+Stop owned servers, remove their reverses and any app installed only for the check, then
+close the AgentDevice session and call `device_close` with `shutdown: true`, following
+the android-emulator skill's cleanup procedure.
 
 ## Handoff for later Android cards
 
