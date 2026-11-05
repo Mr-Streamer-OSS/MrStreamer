@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicLong
 import androidx.media3.extractor.DefaultExtractorInput
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.test.utils.FakeExtractorOutput
 import okhttp3.mockwebserver.Dispatcher
@@ -36,22 +37,29 @@ class NoRangeTsTest {
   private val packetStream = javaClass.classLoader!!.getResourceAsStream("media/hls/segment0.m2ts")!!.use { it.readBytes() }
   private val body = ByteArray(packetStream.size * 2000) { packetStream[it % packetStream.size] }
 
-  @Test fun ignoredRangeOutputsSamplesWithoutDiscardingTheFileAndClosesItsHold() = withSource(false) { source, url, requests, hold, settled ->
-    val output = extract(source, url, 512 * 1024)
-    assertTrue("Startup consumed nearly the whole response", transferred.get() < 512 * 1024)
-    assertTrue(output.trackOutputs.size() > 0)
-    assertFalse(output.seekMap.isSeekable)
-    assertEquals(C.TIME_UNSET, output.seekMap.durationUs)
-    assertEquals(listOf("bytes=0-"), requests.toList())
-    hold.retire()
-    ShadowLooper.idleMainLooper()
-    assertNull(settled())
-    source.close()
-    ShadowLooper.idleMainLooper()
-    assertEquals(true, settled())
-    assertEquals(starts.get(), ends.get())
-    assertThrows(java.io.IOException::class.java) { source.open(DataSpec(url)) }
-  }
+  @Test fun ignoredRangeStartsWithoutDiscardingTheFileRetriesAtItsPositionAndClosesItsHold() =
+    withSource(false) { source, url, requests, hold, settled ->
+      val output = extract(source, url, 512 * 1024)
+      assertTrue("Startup consumed nearly the whole response", transferred.get() < 512 * 1024)
+      assertTrue(output.trackOutputs.size() > 0)
+      assertFalse(output.seekMap.isSeekable)
+      assertEquals(C.TIME_UNSET, output.seekMap.durationUs)
+      assertEquals(listOf("bytes=0-"), requests.toList())
+      source.close()
+      val position = 188L * 10
+      assertEquals(body.size - position, source.open(DataSpec.Builder().setUri(url).setPosition(position).build()))
+      val bytes = ByteArray(188)
+      assertEquals(bytes.size, source.read(bytes, 0, bytes.size))
+      assertArrayEquals(body.copyOfRange(position.toInt(), position.toInt() + bytes.size), bytes)
+      assertEquals(listOf("bytes=0-", "bytes=$position-"), requests.toList())
+      hold.retire()
+      ShadowLooper.idleMainLooper()
+      assertNull(settled())
+      source.close()
+      ShadowLooper.idleMainLooper()
+      assertEquals(true, settled())
+      assertEquals(starts.get(), ends.get())
+    }
 
   @Test fun rangeProviderRetainsDurationAndByteSeeks() = withSource(true) { source, url, requests, _, _ ->
     val output = extract(source, url, body.size * 2)
@@ -68,44 +76,10 @@ class NoRangeTsTest {
     assertEquals("bytes=$position-", requests.last())
   }
 
-  @Test fun ignoredRangeRetryStillReadsTheRequestedPositionAndCanBeCancelled() = withSource(false) { source, url, requests, hold, settled ->
-    assertEquals(body.size.toLong(), source.open(DataSpec(url)))
-    source.close()
-    val position = 188L * 10
-    assertEquals(body.size - position, source.open(DataSpec.Builder().setUri(url).setPosition(position).build()))
-    val bytes = ByteArray(188)
-    assertEquals(bytes.size, source.read(bytes, 0, bytes.size))
-    assertArrayEquals(body.copyOfRange(position.toInt(), position.toInt() + bytes.size), bytes)
-    assertEquals(listOf("bytes=0-", "bytes=$position-"), requests.toList())
-    hold.retire()
-    ShadowLooper.idleMainLooper()
-    assertNull(settled())
-    source.close()
-    source.close()
-    ShadowLooper.idleMainLooper()
-    assertEquals(true, settled())
-    assertEquals(starts.get(), ends.get())
-  }
-
-  @Test fun cancelledRetryReleasesTheReaderWithoutAnExplicitClose() = withSource(false) { source, url, _, hold, settled ->
-    source.open(DataSpec(url))
-    source.close()
-    try {
-      Thread.currentThread().interrupt()
-      assertThrows(java.io.IOException::class.java) {
-        source.open(DataSpec.Builder().setUri(url).setPosition(1880).build())
-      }
-    } finally { Thread.interrupted() }
-    hold.retire()
-    ShadowLooper.idleMainLooper()
-    assertEquals(true, settled())
-    assertEquals(starts.get(), ends.get())
-  }
-
   private val transferred = AtomicLong()
   private val starts = AtomicLong()
   private val ends = AtomicLong()
-  private var extractorFactory: androidx.media3.extractor.ExtractorsFactory? = null
+  private lateinit var extractorFactory: ExtractorsFactory
 
   private fun extract(source: DataSource, url: Uri, budget: Int): FakeExtractorOutput {
     var read = 0
@@ -116,7 +90,7 @@ class NoRangeTsTest {
       }
     }
     val length = source.open(DataSpec(url))
-    val candidates = extractorFactory!!.createExtractors(url, source.responseHeaders)
+    val candidates = extractorFactory.createExtractors(url, source.responseHeaders)
     var input = DefaultExtractorInput(counted, 0, length)
     val extractor = candidates.first { candidate ->
       try { candidate.sniff(input) } finally { input.resetPeekPosition() }

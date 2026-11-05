@@ -384,9 +384,7 @@ class PlayerOwner(
         )
         .build()
     // A file reads only files and a source only its provider's addresses (see [allows]).
-    val noRangeTs = if (local == null && admission.format != "hls" && admission.mode != "live") {
-      NoRangeTs(http, extractors)
-    } else null
+    val noRangeTs = if (local == null && admission.format != "hls" && admission.mode != "live") NoRangeTs(http, extractors) else null
     val upstream = if (local != null) FileDataSource.Factory() else noRangeTs?.readers ?: http
     val source =
       DefaultMediaSourceFactory(hold.factory(upstream) { allows(admission, it) }, noRangeTs?.factory ?: extractors).createMediaSource(item)
