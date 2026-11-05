@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node
+import { type as arkType } from "arktype";
 // Real local-site navigation in an isolated browser, for environments without T3 preview.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -195,7 +196,7 @@ app.on('window-all-closed', () => app.quit());
       await delay(500, undefined, { signal: abort.signal });
       const screenshot = await send("Page.captureScreenshot", { format: "png" });
 
-      if (!record(screenshot) || typeof screenshot["data"] !== "string")
+      if (!record(screenshot) || !arkType("string").allows(screenshot["data"]))
         throw new Error("No website screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(screenshot["data"], "base64"));
       await writeFile(
@@ -405,7 +406,7 @@ app.on('window-all-closed', () => app.quit());
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
 
-    if (record(screenshot?.result) && typeof screenshot.result["data"] === "string")
+    if (record(screenshot?.result) && arkType("string").allows(screenshot.result["data"]))
       await writeFile(
         join(evidence, "failure.png"),
         Buffer.from(screenshot.result["data"], "base64"),

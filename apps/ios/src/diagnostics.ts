@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import { formatDate, formatNumber } from "@mrstreamer/core/i18n";
 import Constants from "expo-constants";
@@ -17,7 +18,7 @@ const OMITTED =
 
 /** `value` when it reads as `pattern` whole, else "unknown". */
 const checked = (value: string | null | undefined, pattern: RegExp) =>
-  typeof value === "string" && pattern.test(value) ? value : "unknown";
+  arkType("string").allows(value) && pattern.test(value) ? value : "unknown";
 
 /** An error's kind, which is a word of the app's own; never its detail. */
 const kindOf = (error: AppError) => checked(error.kind, /^[a-z][a-z-]{0,39}$/);

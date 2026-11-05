@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import type { Page } from "./app.ts";
 
 /** Observe owned startup I/O before the entrypoint runs. No record bytes or paths leave main. */
@@ -44,7 +45,7 @@ export async function startupProbe(
 
   const pid = result?.result?.value?.pid;
 
-  if (reply.error || result?.exceptionDetails || typeof pid !== "number")
+  if (reply.error || result?.exceptionDetails || !type("number | number.NaN").allows(pid))
     throw new Error("Could not install owned startup probe.");
 
   if (pid !== expectedPid) throw new Error("Wrong main inspector process.");
@@ -80,9 +81,8 @@ function install(profile: string, delayMs: number) {
   const normalize = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value);
   const owned = normalize(native.realpathSync(profile));
 
-  const matches = (value: string | URL, directory: boolean): boolean => {
-    if (typeof value !== "string" || (!directory && path.basename(value) !== "analytics.json"))
-      return false;
+  const matches = (value: string, directory: boolean): boolean => {
+    if (!directory && path.basename(value) !== "analytics.json") return false;
 
     try {
       return normalize(native.realpathSync(directory ? value : path.dirname(value))) === owned;
@@ -130,16 +130,16 @@ function install(profile: string, delayMs: number) {
             };
 
             const patch: unknown = args[1];
+            const patchFields: { analyticsEnabled?: unknown } = Object(patch);
 
             const update = {
               startedMs: sample.startedMs,
               endedMs: null as number | null,
               requested:
-                patch &&
-                typeof patch === "object" &&
-                "analyticsEnabled" in patch &&
-                typeof patch.analyticsEnabled === "boolean"
-                  ? patch.analyticsEnabled
+                patch === Object(patch) &&
+                !(patch instanceof Function) &&
+                (patchFields.analyticsEnabled === true || patchFields.analyticsEnabled === false)
+                  ? patchFields.analyticsEnabled
                   : null,
               ok: null as boolean | null,
               error: null as string | null,
@@ -153,38 +153,30 @@ function install(profile: string, delayMs: number) {
             const reply: unknown = await handler.apply(context, args);
             update.endedMs = performance.now() - started;
 
-            if (
-              reply &&
-              typeof reply === "object" &&
-              "ok" in reply &&
-              typeof reply.ok === "boolean"
-            )
-              update.ok = reply.ok;
+            const fields: { ok?: unknown; error?: unknown; value?: unknown } = Object(reply);
 
-            if (
-              reply &&
-              typeof reply === "object" &&
-              "error" in reply &&
-              reply.error &&
-              typeof reply.error === "object" &&
-              "detail" in reply.error &&
-              reply.error.detail === "Analytics preference could not be saved."
-            )
-              update.error = reply.error.detail;
+            if (reply === Object(reply) && !(reply instanceof Function)) {
+              if (fields.ok === true || fields.ok === false) update.ok = fields.ok;
+              const failure: { detail?: unknown } = Object(fields.error);
 
-            if (
-              reply &&
-              typeof reply === "object" &&
-              "value" in reply &&
-              reply.value &&
-              typeof reply.value === "object" &&
-              "preferences" in reply.value &&
-              reply.value.preferences &&
-              typeof reply.value.preferences === "object" &&
-              "analyticsEnabled" in reply.value.preferences &&
-              typeof reply.value.preferences.analyticsEnabled === "boolean"
-            )
-              sample.enabled = reply.value.preferences.analyticsEnabled;
+              if (
+                fields.error === Object(fields.error) &&
+                !(fields.error instanceof Function) &&
+                failure.detail === "Analytics preference could not be saved."
+              )
+                update.error = failure.detail;
+              const result: { preferences?: unknown } = Object(fields.value);
+              const preferences: { analyticsEnabled?: unknown } = Object(result.preferences);
+
+              if (
+                fields.value === Object(fields.value) &&
+                !(fields.value instanceof Function) &&
+                result.preferences === Object(result.preferences) &&
+                !(result.preferences instanceof Function) &&
+                (preferences.analyticsEnabled === true || preferences.analyticsEnabled === false)
+              )
+                sample.enabled = preferences.analyticsEnabled;
+            }
 
             return reply;
           },
@@ -216,21 +208,29 @@ function install(profile: string, delayMs: number) {
 
       const value = await run();
 
-      if (
-        operation === "read" &&
-        (typeof value === "string" || Buffer.isBuffer(value)) &&
-        Buffer.byteLength(value) <= 128 * 1024
-      ) {
+      let bytes: string | Buffer | null = Buffer.isBuffer(value) ? value : null;
+
+      if (operation === "read" && bytes === null) {
         try {
-          const parsed: unknown = JSON.parse(value.toString());
+          const text = String.prototype.valueOf.call(value);
+
+          if (text === value) bytes = text;
+        } catch {
+          // Other filesystem results are not record bytes.
+        }
+      }
+
+      if (operation === "read" && bytes !== null && Buffer.byteLength(bytes) <= 128 * 1024) {
+        try {
+          const parsed: unknown = JSON.parse(bytes.toString());
+          const fields: { format?: unknown } = Object(parsed);
 
           if (
-            parsed &&
-            typeof parsed === "object" &&
-            "format" in parsed &&
-            (parsed.format === 1 || parsed.format === 2)
+            parsed === Object(parsed) &&
+            !(parsed instanceof Function) &&
+            (fields.format === 1 || fields.format === 2)
           )
-            sample.format = parsed.format;
+            sample.format = fields.format;
         } catch {
           /* Invalid records stay unknown; never retain parse errors or values. */
         }
@@ -240,10 +240,8 @@ function install(profile: string, delayMs: number) {
     } catch (error) {
       const code = error instanceof Error && "code" in error ? error.code : null;
       sample.code =
-        typeof code === "string" &&
-        ["ENOENT", "EPERM", "EACCES", "EBUSY", "EIO", "ENOSPC"].includes(code)
-          ? code
-          : "other";
+        ["ENOENT", "EPERM", "EACCES", "EBUSY", "EIO", "ENOSPC"].find((known) => known === code) ??
+        "other";
       throw error;
     } finally {
       sample.endedMs = performance.now() - started;
@@ -265,9 +263,16 @@ function install(profile: string, delayMs: number) {
 
         const value = args[argument];
 
-        return typeof value === "string" && matches(value, operation === "directory")
-          ? observe(operation, run)
-          : run();
+        try {
+          const file = String.prototype.valueOf.call(value);
+
+          if (file === value && matches(file, operation === "directory"))
+            return observe(operation, run);
+        } catch {
+          // Buffer/URL paths and other arguments remain native calls, outside this probe.
+        }
+
+        return run();
       },
     });
 

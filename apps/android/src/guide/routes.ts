@@ -21,7 +21,7 @@ export const BESIDE = 840;
 
 /** A route param as one string, "" when missing or repeated. */
 export const param = (value: string | string[] | undefined) =>
-  typeof value === "string" ? value : "";
+  Array.isArray(value) ? "" : (value ?? "");
 
 /** The `Channel.key` the guide reads a channel by. */
 export const channelKey = ({ sourceId, channelId }: ChannelIdentity) => `${sourceId}:${channelId}`;

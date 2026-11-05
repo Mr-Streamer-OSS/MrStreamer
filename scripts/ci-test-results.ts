@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Checks CI's Vitest JSON report against the test files of the checkout it runs in: every file
 // test/suites.ts finds has to be in the report once, with tests, each of them passed. A group that
 // skipped for want of ffmpeg, a file that failed to load and a file the run left out all fail CI,
@@ -31,20 +32,22 @@ interface FileResult {
 }
 
 const isTest = (value: unknown): value is FileResult["assertionResults"][number] =>
-  typeof value === "object" &&
+  arkType.keywords.object.root.allows(value) &&
+  !arkType("Function").allows(value) &&
   value !== null &&
   "fullName" in value &&
-  typeof value.fullName === "string" &&
+  arkType("string").allows(value.fullName) &&
   "status" in value &&
-  typeof value.status === "string";
+  arkType("string").allows(value.status);
 
 const isFile = (value: unknown): value is FileResult =>
-  typeof value === "object" &&
+  arkType.keywords.object.root.allows(value) &&
+  !arkType("Function").allows(value) &&
   value !== null &&
   "name" in value &&
-  typeof value.name === "string" &&
+  arkType("string").allows(value.name) &&
   "status" in value &&
-  typeof value.status === "string" &&
+  arkType("string").allows(value.status) &&
   "assertionResults" in value &&
   Array.isArray(value.assertionResults) &&
   value.assertionResults.every(isTest);
@@ -60,7 +63,7 @@ function readReport(path: string): readonly FileResult[] | string {
   }
 
   if (
-    typeof report !== "object" ||
+    !(arkType.keywords.object.root.allows(report) && !arkType("Function").allows(report)) ||
     report === null ||
     !("testResults" in report) ||
     !Array.isArray(report.testResults) ||
@@ -78,7 +81,9 @@ function problems(file: string, results: readonly FileResult[]): string[] {
   if (!result) return [`${file}: not in the report. Did it fail to load, or the run stop early?`];
 
   if (others.length) return [`${file}: in the report ${results.length} times.`];
-  const message = typeof result.message === "string" && result.message ? ` ${result.message}` : "";
+
+  const message =
+    arkType("string").allows(result.message) && result.message ? ` ${result.message}` : "";
 
   if (result.assertionResults.length === 0) return [`${file}: ran no tests.${message}`];
   const platform = platformOnly[file];
@@ -114,7 +119,7 @@ if (files.length === 0)
 
 const report = readReport(path);
 
-if (typeof report === "string") fail([report]);
+if (arkType("string").allows(report)) fail([report]);
 
 const byFile = Map.groupBy(report, (result) =>
   relative(process.cwd(), result.name).replaceAll("\\", "/"),

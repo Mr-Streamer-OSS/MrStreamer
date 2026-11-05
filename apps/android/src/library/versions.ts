@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -37,18 +38,21 @@ export function versionMemory(storage: {
   }
 
   let picks: Record<string, unknown> =
-    raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    raw !== null &&
+    type.keywords.object.root.allows(raw) &&
+    !type("Function").allows(raw) &&
+    !Array.isArray(raw)
       ? Object.fromEntries(Object.entries(raw))
       : {};
 
   return {
-    get: (key: string) => (typeof picks[key] === "string" ? picks[key] : undefined),
+    get: (key: string) => (type.keywords.string.root.allows(picks[key]) ? picks[key] : undefined),
     set(key: string, version: string | null) {
       // Reread before saving: null starts again; an unreadable file remains retryable.
       const saved = storage.readJson(file);
 
       const object = (value: Json): value is JsonObject =>
-        value !== null && typeof value === "object" && !Array.isArray(value);
+        value !== null && type.keywords.object.root.allows(value) && !Array.isArray(value);
 
       if (saved !== null && !object(saved)) throw new Error("Couldn't save version");
       const next: Record<string, Json | undefined> = saved === null ? {} : { ...saved };

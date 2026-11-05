@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -62,7 +63,7 @@ async function playlistHost() {
 
     if (body === "hold") return;
 
-    if (typeof body === "number") return response.writeHead(body).end();
+    if (arkType("number | number.NaN").allows(body)) return response.writeHead(body).end();
 
     if (pathname.endsWith("segment-1.ts")) {
       const packed = gzipSync(body);

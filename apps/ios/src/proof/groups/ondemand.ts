@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Title } from "@mrstreamer/contracts/ondemand";
 import { metadataStore, type MetadataFile } from "@mrstreamer/core/metadata/store";
 import { tmdb } from "@mrstreamer/core/metadata/tmdb";
@@ -212,7 +213,12 @@ function tmdbAnswer(url: string) {
 }
 
 const standIn: typeof fetch = async (input) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const url = arkType("string").allows(input)
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+
   const body = tmdbAnswer(url);
 
   return new Response(JSON.stringify(body), {

@@ -618,7 +618,7 @@ export function metadataStore(deps: MetadataDeps) {
       if (!entry || entry.missing) return [];
 
       return [...Object.values(entry.names ?? {}), entry.original].filter(
-        (name): name is string => typeof name === "string" && name !== "",
+        (name): name is string => name != null && name !== "",
       );
     },
 
@@ -715,7 +715,7 @@ function delay(ms: number, signal: AbortSignal): Promise<boolean> {
 function sameValue(a: Json | undefined, b: Json | undefined): boolean {
   if (a === b) return true;
 
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (!type.keywords.object.root.allows(a) || !type.keywords.object.root.allows(b)) return false;
 
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const left = Object.entries(a).filter(([, value]) => value !== undefined);

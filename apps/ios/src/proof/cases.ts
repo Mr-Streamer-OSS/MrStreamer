@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // What the iOS app needs from the shared packages, run as plain functions so the same files run on
 // Hermes in the app and in Node on the workbench. scripts/proof-server.ts runs them in Node, takes
 // the app's report and compares the two: a shared rule proved on iOS gives Node's answer.
@@ -71,7 +72,28 @@ export async function outcome(request: () => Promise<ProofResponse>): Promise<Ob
       body: await response.text(),
     };
   } catch (error) {
-    return { error: error instanceof Error ? error.name : typeof error };
+    return {
+      error:
+        error instanceof Error
+          ? error.name
+          : error === undefined
+            ? "undefined"
+            : error === null
+              ? "object"
+              : type("string").allows(error)
+                ? "string"
+                : type("number | number.NaN").allows(error)
+                  ? "number"
+                  : type("boolean").allows(error)
+                    ? "boolean"
+                    : type("bigint").allows(error)
+                      ? "bigint"
+                      : type("symbol").allows(error)
+                        ? "symbol"
+                        : type("Function").allows(error)
+                          ? "function"
+                          : "object",
+    };
   }
 }
 

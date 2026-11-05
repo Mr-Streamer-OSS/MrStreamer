@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Performance-only persisted copies and slow HTTP boundary. Neither replaces app IPC or state.
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readFile, stat } from "node:fs/promises";
@@ -15,7 +16,7 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !registry ||
-    typeof registry !== "object" ||
+    !(arkType.keywords.object.root.allows(registry) && !arkType("Function").allows(registry)) ||
     !("subscriptions" in registry) ||
     !Array.isArray(registry.subscriptions)
   )
@@ -24,11 +25,11 @@ export async function seedCopies(profile: string, clip: string) {
 
   if (
     !owner ||
-    typeof owner !== "object" ||
+    !(arkType.keywords.object.root.allows(owner) && !arkType("Function").allows(owner)) ||
     !("id" in owner) ||
-    typeof owner.id !== "string" ||
+    !arkType("string").allows(owner.id) ||
     !("key" in owner) ||
-    typeof owner.key !== "string"
+    !arkType("string").allows(owner.key)
   )
     throw new Error("Owned UI login has no account key");
 
@@ -144,7 +145,7 @@ export async function slowProvider(origin: string) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No proxy port");
+  if (!address || arkType("string").allows(address)) throw new Error("No proxy port");
   url = `http://127.0.0.1:${address.port}`;
 
   return {

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { rewritePlaylist, type Refusal, type RouteKind } from "./cast-media.ts";
 import { store, useStore, type Store } from "./store.ts";
@@ -609,7 +610,10 @@ function fromBase64(text: string): Uint8Array {
 }
 
 const isRecord = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) &&
+  !arkType("Function").allows(value) &&
+  value !== null &&
+  !Array.isArray(value);
 
 /** A JSON payload's fields, or an empty object when it isn't one. */
 function payloadOf(message: CastMessage): JsonObject {
@@ -623,7 +627,7 @@ function payloadOf(message: CastMessage): JsonObject {
 }
 
 const numberOr = <T>(value: Json | undefined, fallback: T) =>
-  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  arkType("number | number.NaN").allows(value) && Number.isFinite(value) ? value : fallback;
 
 /** A media status's `playerState`, and `idleReason` when idle, as a `TvStatus` state. */
 function stateOf(player: Json | undefined, idle: Json | undefined): TvStatus["state"] {
@@ -872,8 +876,8 @@ export async function connectTv(tv: Tv): Promise<TvLink> {
 
     if (
       launched["type"] !== "RECEIVER_STATUS" ||
-      typeof app?.["transportId"] !== "string" ||
-      typeof app["sessionId"] !== "string"
+      !arkType("string").allows(app?.["transportId"]) ||
+      !arkType("string").allows(app["sessionId"])
     ) {
       throw new Error("The TV didn't start its player.");
     }

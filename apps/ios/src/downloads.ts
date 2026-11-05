@@ -1,3 +1,5 @@
+import { JsonValue } from "@mrstreamer/contracts/json-value";
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { type, type Type } from "arktype";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -268,7 +270,7 @@ const removalOf = (record: Stored): Field<Infer<typeof Removal>> =>
 const boundOf = (record: Stored): Transfer | null => {
   const transfer = transferOf(record);
 
-  return typeof transfer === "object" ? transfer : null;
+  return transfer !== undefined && transfer !== "bad" ? transfer : null;
 };
 
 /** A transfer the native side reports under way, as the screens show it. */
@@ -811,7 +813,7 @@ async function reduce(receipt: ReceiptV2, heardLive: boolean) {
 
   if (
     receipt.outcome.kind === "cancelled" &&
-    typeof removal !== "object" &&
+    (removal === undefined || removal === "bad") &&
     (restricting.has(record.id) || excludedDownload(record))
   ) {
     update(record.id, () => fenced(record));
@@ -819,8 +821,12 @@ async function reduce(receipt: ReceiptV2, heardLive: boolean) {
     return;
   }
 
-  if (receipt.outcome.kind === "cancelled" || typeof removal === "object") {
-    await removeRecord(record.id, typeof removal === "object" ? removal.reason : "user", receipt);
+  if (receipt.outcome.kind === "cancelled" || (removal !== undefined && removal !== "bad")) {
+    await removeRecord(
+      record.id,
+      removal !== undefined && removal !== "bad" ? removal.reason : "user",
+      receipt,
+    );
 
     return;
   }
@@ -973,7 +979,8 @@ async function takeLegacy(receipt: LegacyReceipt) {
 
     // A completion wins an automatic removal still waiting for it; an explicit one wins it.
     const automatic =
-      typeof removal === "object" &&
+      removal !== undefined &&
+      removal !== "bad" &&
       removal.reason === "source-removed" &&
       outcome.kind === "complete";
 
@@ -1083,16 +1090,18 @@ async function removeNow(id: string, asked: Reason, fact?: ReceiptV2): Promise<R
   const now = removalOf(record);
 
   const reason =
-    typeof now === "object" && !explicit(asked) && explicit(now.reason) ? now.reason : asked;
+    now !== undefined && now !== "bad" && !explicit(asked) && explicit(now.reason)
+      ? now.reason
+      : asked;
 
-  if (typeof now !== "object" || now.reason !== reason) {
+  if (now === undefined || now === "bad" || now.reason !== reason) {
     update(id, (latest) => ({ ...latest, removal: { version: 1, reason } }));
     tell();
   }
 
   let complete = record.state === "complete";
 
-  if (typeof transfer === "object") {
+  if (transfer !== undefined && transfer !== "bad") {
     const fence = await transfers.cancelAuthorization(transfer.authorization, "remove");
 
     // A completion committed before the fence wins an automatic removal.
@@ -1305,7 +1314,7 @@ async function finishRemovals() {
   for (const record of doc.items) {
     const removal = removalOf(record);
 
-    if (typeof removal === "object") {
+    if (removal !== undefined && removal !== "bad") {
       await removeRecord(record.id, removal.reason).catch(() => undefined);
     }
   }
@@ -1324,7 +1333,8 @@ function load() {
   const entries =
     valid &&
     read !== null &&
-    typeof read === "object" &&
+    arkType.keywords.object.root.allows(read) &&
+    !arkType("Function").allows(read) &&
     !Array.isArray(read) &&
     "items" in read &&
     Array.isArray(read.items)
@@ -1332,7 +1342,7 @@ function load() {
       : [];
 
   for (const item of entries) {
-    if (item === null || typeof item !== "object") continue;
+    if (item === null || !JsonValue.and("object").allows(item)) continue;
     const record = Stored()(item);
 
     if (record instanceof type.errors) unreadable.push(item);
@@ -1358,7 +1368,7 @@ function sweep() {
   const named = new Set([
     ...doc.items.map((record) => record.id),
     ...doc.unreadable.flatMap((item) =>
-      "id" in item && typeof item.id === "string" ? [item.id] : [],
+      "id" in item && arkType("string").allows(item.id) ? [item.id] : [],
     ),
     ...closingFolders,
   ]);
@@ -2146,7 +2156,7 @@ export async function eraseDownloads(
   const unknown = doc.unreadable.some(
     (item) =>
       !("subscriptionId" in item) ||
-      typeof item.subscriptionId !== "string" ||
+      !arkType("string").allows(item.subscriptionId) ||
       item.subscriptionId === subscriptionId,
   );
 

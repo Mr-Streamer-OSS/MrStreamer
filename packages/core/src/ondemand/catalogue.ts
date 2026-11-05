@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // The movie and series catalogue as plain data and functions: indexing what the providers sent,
 // finding titles by id and searching them; collections.ts builds the lists the UI shows. Display
 // names are worked out here, on load, so naming rules improve without fetching again. The
@@ -392,9 +393,9 @@ const preparedAliases = new WeakMap<Title, PreparedAliases>();
  * so a caller changing its array in place cannot keep obsolete spellings alive.
  */
 function aliasNames(title: Title, alias: string | TitleSearchAliases): SearchNames | undefined {
-  const displayed = typeof alias === "string" ? "" : (alias.title ?? "");
-  const original = typeof alias === "string" ? null : (alias.original ?? null);
-  const names = typeof alias === "string" ? (alias ? [alias] : []) : alias.names;
+  const displayed = type.keywords.string.root.allows(alias) ? "" : (alias.title ?? "");
+  const original = type.keywords.string.root.allows(alias) ? null : (alias.original ?? null);
+  const names = type.keywords.string.root.allows(alias) ? (alias ? [alias] : []) : alias.names;
 
   if (!displayed && !original && names.length === 0) {
     preparedAliases.delete(title);

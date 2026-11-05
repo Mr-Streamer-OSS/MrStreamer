@@ -1,3 +1,5 @@
+import { type } from "arktype";
+import { lazy } from "@mrstreamer/contracts/lazy";
 import type { Json } from "@mrstreamer/contracts/json";
 // Stream sessions and the loopback proxy that serves them to the UI.
 //
@@ -192,6 +194,10 @@ import {
   type ReceiverTools,
 } from "../playback/receiver-delivery.ts";
 import { defined } from "@mrstreamer/core/defined";
+
+/** The ffprobe fields conversion reads; unrelated stream fields remain forward compatible. */
+const ProbeStreams = lazy(() => type({ streams: "unknown[]" }));
+const ProbePicture = lazy(() => type({ width: "number.safe > 0", height: "number.safe > 0" }));
 
 /** How long the provider gets to start answering before the stream counts as failed. */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -1376,25 +1382,13 @@ function make(deps: PlaybackDeps) {
         parsed = null;
       }
 
-      const streams: readonly unknown[] =
-        parsed && typeof parsed === "object" && "streams" in parsed && Array.isArray(parsed.streams)
-          ? parsed.streams
-          : [];
+      const streams = ProbeStreams()(parsed);
 
-      const picture: unknown = streams[0];
+      const picture = ProbePicture()(
+        streams instanceof type.errors ? undefined : streams.streams[0],
+      );
 
-      if (
-        !picture ||
-        typeof picture !== "object" ||
-        !("width" in picture) ||
-        !("height" in picture) ||
-        typeof picture.width !== "number" ||
-        typeof picture.height !== "number" ||
-        !Number.isSafeInteger(picture.width) ||
-        !Number.isSafeInteger(picture.height) ||
-        picture.width <= 0 ||
-        picture.height <= 0
-      )
+      if (picture instanceof type.errors)
         throw new HlsInputFailure({
           kind: "unsupported",
           detail: t("The stream could not be converted."),
@@ -1406,7 +1400,8 @@ function make(deps: PlaybackDeps) {
         });
 
       const aspect =
-        "sample_aspect_ratio" in picture && typeof picture.sample_aspect_ratio === "string"
+        "sample_aspect_ratio" in picture &&
+        type.keywords.string.root.allows(picture.sample_aspect_ratio)
           ? /^(\d+):(\d+)$/.exec(picture.sample_aspect_ratio)
           : null;
 
@@ -4687,7 +4682,8 @@ function listen(
     http.listen(0, host, () => {
       const address = http.address();
 
-      if (address && typeof address === "object") resolve({ server: http, port: address.port });
+      if (address && type.keywords.object.root.allows(address) && !type("Function").allows(address))
+        resolve({ server: http, port: address.port });
       else reject(new Error("Stream proxy has no TCP address."));
     });
   });

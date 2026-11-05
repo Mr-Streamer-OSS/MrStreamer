@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { buildFeed } from "../../../packages/contracts/src/update-feed.ts";
 
 const REPOSITORY = "https://github.com/Mr-Streamer-OSS/MrStreamer";
@@ -55,7 +56,11 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
       if (!Array.isArray(rows)) return null;
 
       for (const row of rows) {
-        if (typeof row !== "object" || row === null) return null;
+        if (
+          !(arkType.keywords.object.root.allows(row) && !arkType("Function").allows(row)) ||
+          row === null
+        )
+          return null;
 
         if (!("draft" in row) || !("prerelease" in row)) return null;
 
@@ -63,16 +68,16 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
 
         if (row.draft !== false || row.prerelease !== false) return null;
 
-        if (!("tag_name" in row) || typeof row.tag_name !== "string") return null;
+        if (!("tag_name" in row) || !arkType("string").allows(row.tag_name)) return null;
 
         if (!/^v\d+\.\d+\.\d+$/.test(row.tag_name)) continue;
 
         if (
           !("published_at" in row) ||
-          typeof row.published_at !== "string" ||
+          !arkType("string").allows(row.published_at) ||
           !Number.isFinite(Date.parse(row.published_at)) ||
           !("body" in row) ||
-          (row.body !== null && typeof row.body !== "string") ||
+          (row.body !== null && !arkType("string").allows(row.body)) ||
           !("assets" in row) ||
           !Array.isArray(row.assets)
         )
@@ -81,10 +86,10 @@ export async function stableReleases(request: typeof fetch = fetch): Promise<Rel
 
         for (const asset of row.assets) {
           if (
-            typeof asset !== "object" ||
+            !(arkType.keywords.object.root.allows(asset) && !arkType("Function").allows(asset)) ||
             asset === null ||
             !("name" in asset) ||
-            typeof asset.name !== "string"
+            !arkType("string").allows(asset.name)
           )
             return null;
           assets.push(asset.name);

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Shared ownership and process cleanup for the desktop and website verification helpers.
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
@@ -48,7 +49,7 @@ export async function freePort() {
   await once(server, "listening");
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No loopback port allocated.");
+  if (!address || arkType("string").allows(address)) throw new Error("No loopback port allocated.");
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error ? reject(error) : resolve())),
   );
@@ -57,7 +58,11 @@ export async function freePort() {
 }
 
 export function record(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return (
+    arkType.keywords.object.root.allows(value) &&
+    !arkType("Function").allows(value) &&
+    value !== null
+  );
 }
 
 /** Graceful quit first; escalation targets only the app or process group this run created. */

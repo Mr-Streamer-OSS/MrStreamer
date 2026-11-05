@@ -14,7 +14,7 @@ export function store<S>(initial: S): Store<S> {
   return {
     get: () => state,
     set(next) {
-      const value = typeof next === "function" ? (next as (current: S) => S)(state) : next;
+      const value = next instanceof Function ? (next as (current: S) => S)(state) : next;
 
       if (Object.is(value, state)) return;
       state = value;

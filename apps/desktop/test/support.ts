@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Shared test helpers: a fake provider per test and throwaway data folders.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -68,7 +69,7 @@ export async function promised<I, S extends object>(
   const calls = Object.entries(service).map(([name, member]: [string, unknown]) => {
     if (Effect.isEffect(member)) return [name, () => run(member)];
 
-    if (typeof member !== "function") return [name, member];
+    if (!arkType("Function").allows(member)) return [name, member];
 
     return [
       name,

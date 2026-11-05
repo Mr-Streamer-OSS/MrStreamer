@@ -1,48 +1,41 @@
-interface ReviewLogin {
-  readonly username: string;
-  readonly passwordSha256: string;
-  readonly retiring?: { readonly passwordSha256: string; readonly retireAfterUtc: string | null };
-}
+import { type } from "arktype";
 
-function object(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+// Workerd permits schema compilation during startup, before requests arrive.
+const Login = (() => {
+  const Verifier = type("string").matching(/^[a-f0-9]{64}$/);
 
-const verifier = (value: unknown): value is string =>
-  typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+  return type({
+    username: type("string").matching(/^[A-Za-z0-9_-]{1,128}$/),
+    passwordSha256: Verifier,
+    "retiring?": {
+      passwordSha256: Verifier,
+      retireAfterUtc: type("string")
+        .narrow((value) => Number.isFinite(Date.parse(value)))
+        .or("null"),
+    },
+  });
+})();
+
+type ReviewLogin = typeof Login.infer;
 
 /** Configuration is a secret binding, never an API response or shipped client login. */
 export function readLogin(secret: string | undefined): ReviewLogin | null {
   if (!secret || secret.length > 2048) return null;
 
   try {
-    const value: unknown = JSON.parse(secret);
+    const value = Login(JSON.parse(secret));
 
-    if (
-      !object(value) ||
-      typeof value.username !== "string" ||
-      !/^[A-Za-z0-9_-]{1,128}$/.test(value.username) ||
-      !verifier(value.passwordSha256)
-    )
-      return null;
-
-    if (value.retiring === undefined)
-      return { username: value.username, passwordSha256: value.passwordSha256 };
-    const old = value.retiring;
-
-    if (
-      !object(old) ||
-      !verifier(old.passwordSha256) ||
-      (old.retireAfterUtc !== null &&
-        (typeof old.retireAfterUtc !== "string" ||
-          !Number.isFinite(Date.parse(old.retireAfterUtc))))
-    )
-      return null;
+    if (value instanceof type.errors) return null;
 
     return {
       username: value.username,
       passwordSha256: value.passwordSha256,
-      retiring: { passwordSha256: old.passwordSha256, retireAfterUtc: old.retireAfterUtc },
+      ...(value.retiring && {
+        retiring: {
+          passwordSha256: value.retiring.passwordSha256,
+          retireAfterUtc: value.retiring.retireAfterUtc,
+        },
+      }),
     };
   } catch {
     return null;

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { Directory, File, Paths } from "expo-file-system";
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { exposes, loginFrom, URL_LENGTH } from "./login-safety.ts";
@@ -505,10 +506,10 @@ type Row = readonly [url: string, name: string, bytes: number, fetchedAt: number
 const isRow = (row: unknown): row is Row =>
   Array.isArray(row) &&
   row.length === 5 &&
-  typeof row[0] === "string" &&
+  arkType("string").allows(row[0]) &&
   row[0].length <= URL_LENGTH &&
   /^https?:\/\//.test(row[0]) &&
-  typeof row[1] === "string" &&
+  arkType("string").allows(row[1]) &&
   NAME.test(row[1]) &&
   Number.isInteger(row[2]) &&
   row[2] > 0 &&
@@ -526,7 +527,8 @@ async function readIndex(): Promise<readonly Row[]> {
       const value: unknown = JSON.parse(await file.text());
 
       if (
-        typeof value === "object" &&
+        arkType.keywords.object.root.allows(value) &&
+        !arkType("Function").allows(value) &&
         value !== null &&
         "version" in value &&
         value.version === VERSION &&

@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { DEFAULT_NEXT_EPISODE_DELAY } from "@mrstreamer/contracts/preferences";
 import type { OfflineNext } from "../downloads/offline-next.ts";
 import { store, type Store } from "../platform/store.ts";
@@ -304,7 +305,8 @@ export function mediaModel(
 
       const selected =
         request.key === "speed"
-          ? typeof request.value === "number" && Math.abs(now.speed - request.value) < 0.001
+          ? type.keywords.number.root.allows(request.value) &&
+            Math.abs(now.speed - request.value) < 0.001
           : request.value === "automatic"
             ? state.get().automatic
             : request.id === null

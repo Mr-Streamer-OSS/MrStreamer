@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Controlled Windows error semantics on real temporary files/timers, not native Windows proof.
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -15,7 +16,7 @@ vi.mock("node:fs/promises", async (original) => {
   const actual = await original<typeof import("node:fs/promises")>();
 
   const rename: typeof actual.rename = async (from, to) => {
-    if (typeof from !== "string" || typeof to !== "string")
+    if (!arkType("string").allows(from) || !arkType("string").allows(to))
       throw new Error("This probe requires ordinary file paths");
     disk.attempts.push({
       from,

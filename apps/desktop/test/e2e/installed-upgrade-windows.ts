@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 // What the installed upgrade check does to the Windows machine it runs on: the per-user NSIS
 // install, the process tree of each app instance it starts, and the outbound block on the
@@ -631,7 +632,7 @@ export function toolProbe(tool: string, url: string): Promise<ToolProbe> {
         );
 
         resolve({
-          code: error ? (typeof error.code === "number" ? error.code : null) : 0,
+          code: error ? (arkType("number | number.NaN").allows(error.code) ? error.code : null) : 0,
           attempted: connection.some((line) => line.includes("Starting connection attempt")),
           connected: connection.some((line) => line.includes("Successfully connected")),
           said: [...connection, lines.at(-1) ?? ""],

@@ -76,7 +76,7 @@ async function readStored(path: string): Promise<Stored | null> {
   if (
     parsed instanceof type.errors ||
     data === null ||
-    typeof data !== "object" ||
+    !type.keywords.object.root.allows(data) ||
     Array.isArray(data)
   )
     return null;
@@ -438,7 +438,7 @@ function effective(file: Stored): Preferences {
   return {
     ...preferences,
     nextEpisodeDelaySeconds:
-      typeof nextEpisodeDelaySeconds === "number" &&
+      type("number | number.NaN").allows(nextEpisodeDelaySeconds) &&
       Number.isInteger(nextEpisodeDelaySeconds) &&
       nextEpisodeDelaySeconds >= 0 &&
       nextEpisodeDelaySeconds <= 60

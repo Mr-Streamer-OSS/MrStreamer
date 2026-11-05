@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
@@ -74,13 +75,14 @@ async function captureServer(status: number | (() => number) = 200) {
     const payload: unknown = JSON.parse(Buffer.concat(bytes).toString());
 
     if (!(
-      typeof payload === "object" &&
+      arkType.keywords.object.root.allows(payload) &&
+      !arkType("Function").allows(payload) &&
       payload !== null &&
       "event" in payload &&
       payload.event === "app_version_observed"
     ))
       payloads.push(payload);
-    res.writeHead(typeof status === "number" ? status : status(), {
+    res.writeHead(arkType("number | number.NaN").allows(status) ? status : status(), {
       Location: "https://us.i.posthog.com/i/v0/e/",
     });
     res.end("ok");
@@ -90,7 +92,7 @@ async function captureServer(status: number | (() => number) = 200) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No local capture address.");
+  if (!address || arkType("string").allows(address)) throw new Error("No local capture address.");
 
   return { payloads, endpoint: `http://127.0.0.1:${address.port}/i/v0/e/` };
 }

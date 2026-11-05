@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { Window } from "happy-dom";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -107,7 +108,7 @@ function standIn() {
 
         if (app.inputError) throw app.inputError;
 
-        if (params["type"] === "keyDown" && typeof params["text"] === "string") {
+        if (params["type"] === "keyDown" && arkType("string").allows(params["text"])) {
           expect(window.document.activeElement).toBe(select);
           typeahead(params["text"]);
         }

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
@@ -96,10 +97,10 @@ function tokenize(expression: string): string[] {
 const truthy = (value: Value) => value !== null && value !== false && value !== 0 && value !== "";
 
 const number = (value: Value) =>
-  value === null ? 0 : typeof value === "boolean" ? Number(value) : Number(value || 0);
+  value === null ? 0 : arkType("boolean").allows(value) ? Number(value) : Number(value || 0);
 
 const equal = (a: Value, b: Value) =>
-  typeof a === "string" && typeof b === "string"
+  arkType("string").allows(a) && arkType("string").allows(b)
     ? a.toLowerCase() === b.toLowerCase()
     : number(a) === number(b);
 
@@ -208,7 +209,7 @@ function runs(expression: string | undefined, scope: Scope): boolean {
 }
 
 const needsOf = (job: Job) =>
-  job.needs === undefined ? [] : typeof job.needs === "string" ? [job.needs] : job.needs;
+  job.needs === undefined ? [] : arkType("string").allows(job.needs) ? [job.needs] : job.needs;
 
 /** Every job `name` needs, directly or through the jobs it needs. */
 function ancestorsOf(workflow: Workflow, name: string): Set<string> {
@@ -417,12 +418,11 @@ function publication(
     actual.set(name, result);
     const tolerated = job["continue-on-error"];
 
-    const continuing =
-      typeof tolerated === "boolean"
-        ? tolerated
-        : tolerated
-          ? truthy(evaluate(tolerated.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), scope))
-          : false;
+    const continuing = arkType("boolean").allows(tolerated)
+      ? tolerated
+      : tolerated
+        ? truthy(evaluate(tolerated.replace(/^\$\{\{(.*)\}\}$/s, "$1").trim(), scope))
+        : false;
 
     results.set(name, result === "failure" && continuing ? "success" : result);
   }

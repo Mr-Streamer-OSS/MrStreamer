@@ -80,7 +80,7 @@ import { t } from "@mrstreamer/core/i18n";
 import { flash, flashNote } from "../features/watch/flash-state.ts";
 import { call, listen } from "../lib/ipc.ts";
 import { titleDecoders } from "./decoders.ts";
-import type { EngineError } from "./engine.ts";
+import { isEngineError, type EngineError } from "./engine.ts";
 import { mediaClaim, video } from "./shared-media.ts";
 import { RECONNECT_DELAYS_MS, STABLE_PLAYBACK_MS } from "./recovery-policy.ts";
 import { rememberSubtitles } from "./subtitle-preferences.ts";
@@ -1013,9 +1013,7 @@ function problemOf(upstream: StreamFailure | null, error: EngineError): TitlePro
 }
 
 function asEngineError(cause: unknown): EngineError {
-  return typeof cause === "object" && cause !== null && "kind" in cause && "detail" in cause
-    ? (cause as EngineError)
-    : { kind: "media", detail: String(cause) };
+  return isEngineError(cause) ? cause : { kind: "media", detail: String(cause) };
 }
 
 /** Stops moving the position on between two words of the receiver. */

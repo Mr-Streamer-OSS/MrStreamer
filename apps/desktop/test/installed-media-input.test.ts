@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { Window } from "happy-dom";
 import { createContext, runInContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,7 +116,13 @@ function standIn(collapsed = true) {
         app.commands.push({ method: "evaluate", timeout });
         const result: unknown = await runInContext(expression, context);
 
-        if (result && typeof result === "object" && "events" in result) app.onSnapshot();
+        if (
+          result &&
+          arkType.keywords.object.root.allows(result) &&
+          !arkType("Function").allows(result) &&
+          "events" in result
+        )
+          app.onSnapshot();
 
         return structuredClone(result) as T;
       },

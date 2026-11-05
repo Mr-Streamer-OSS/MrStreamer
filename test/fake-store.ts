@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../packages/contracts/src/json.ts";
 // A stand-in for Microsoft that the Store scripts' tests talk to in place of the network: Entra's
 // token endpoint, the Store submission API for one app, and the Azure storage a package is
@@ -263,9 +264,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
   }
 
   function move(submission: Submission, verdict: Verdict): void {
-    submission.status = typeof verdict === "string" ? verdict : verdict.status;
+    submission.status = arkType("string").allows(verdict) ? verdict : verdict.status;
 
-    if (typeof verdict === "string") return;
+    if (arkType("string").allows(verdict)) return;
     submission["statusDetails"] = {
       errors: verdict.errors,
       warnings: [],
@@ -379,7 +380,7 @@ export function fakeStore({ title = STORE_NAME } = {}) {
 
     if (kind === "unanswered") throw new TypeError(`fetch failed: ${address}`);
 
-    if (typeof kind === "number") return new Response(answer, { status: kind });
+    if (arkType("number | number.NaN").allows(kind)) return new Response(answer, { status: kind });
 
     let response: Response;
 
@@ -404,7 +405,9 @@ export function fakeStore({ title = STORE_NAME } = {}) {
     } else if (request.headers["Authorization"] !== `Bearer ${TOKEN}`) {
       response = refused(401, "Unauthorized", "The token is missing or wrong.");
     } else {
-      const parsed: Json | undefined = typeof body === "string" ? JSON.parse(body) : undefined;
+      const parsed: Json | undefined = arkType("string").allows(body)
+        ? JSON.parse(body)
+        : undefined;
 
       if (parsed !== undefined) sent.set(name, structuredClone(parsed));
       response = api(method, address.slice(API.length), parsed);

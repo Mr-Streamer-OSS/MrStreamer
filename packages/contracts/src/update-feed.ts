@@ -160,13 +160,22 @@ export function mergeFeeds(
 
 /** Reads a feed from parsed JSON, such as the deployed one. Throws when it is not a schema 1 feed. */
 export function readFeed(json: Json | undefined): UpdateFeed {
-  if (!isRecord(json) || json["schema"] !== 1 || typeof json["generated"] !== "string") {
-    throw new Error("This is not an update feed with schema 1.");
+  const malformed = new Error("This is not an update feed with schema 1.");
+
+  if (!isRecord(json) || json["schema"] !== 1) throw malformed;
+  let generated: string;
+
+  try {
+    generated = String.prototype.valueOf.call(json["generated"]);
+
+    if (generated !== json["generated"]) throw malformed;
+  } catch {
+    throw malformed;
   }
 
   return {
     schema: 1,
-    generated: json["generated"],
+    generated,
     stable: readRelease(json["stable"], "stable"),
     nightly: readRelease(json["nightly"], "nightly"),
   };
@@ -194,9 +203,15 @@ function readRelease(json: Json | undefined, channel: Channel): FeedRelease | nu
   const text = (key: keyof FeedRelease): string => {
     const value = json[key];
 
-    if (typeof value !== "string") throw malformed;
+    try {
+      const text = String.prototype.valueOf.call(value);
 
-    return value;
+      if (text !== value) throw malformed;
+
+      return text;
+    } catch {
+      throw malformed;
+    }
   };
 
   const platforms = json["platforms"];
@@ -210,8 +225,13 @@ function readRelease(json: Json | undefined, channel: Channel): FeedRelease | nu
     throw new Error(`The feed's ${channel} release has version "${text("version")}".`);
   }
 
-  const previous =
-    typeof json["previousStable"] === "string" ? parseVersion(json["previousStable"]) : null;
+  const previous = (() => {
+    try {
+      return parseVersion(text("previousStable"));
+    } catch {
+      return null;
+    }
+  })();
 
   return {
     version: formatVersion(version),
@@ -229,9 +249,20 @@ function readRelease(json: Json | undefined, channel: Channel): FeedRelease | nu
 }
 
 function isNames(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((name) => typeof name === "string");
+  try {
+    return (
+      Array.isArray(value) && value.every((name) => name === String.prototype.valueOf.call(name))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isRecord(value: Json | undefined): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    value !== null &&
+    value === Object(value) &&
+    !(value instanceof Function) &&
+    !Array.isArray(value)
+  );
 }

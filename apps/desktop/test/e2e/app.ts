@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // Drives a built app over the DevTools protocol, against the fake provider or the fake playlist
 // host. Shared by the tests of a built app and the measuring script.
@@ -99,8 +100,9 @@ export async function connect(
   socket.addEventListener("message", (event) => {
     const message: JsonObject = JSON.parse(String(event.data));
 
-    if (typeof message.id === "number") pending.get(message.id)?.(message);
-    else if (typeof message.method === "string") listeners.get(message.method)?.(message.params);
+    if (arkType("number | number.NaN").allows(message.id)) pending.get(message.id)?.(message);
+    else if (arkType("string").allows(message.method))
+      listeners.get(message.method)?.(message.params);
   });
   socket.addEventListener("close", () => {
     closed = true;

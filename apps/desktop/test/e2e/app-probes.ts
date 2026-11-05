@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Optional diagnostics for measure-app.ts. These samples are deliberately separate from the
 // comparator's latency metrics: CPU, scheduler wakeups and V8 samples have different limits.
 import { execFileSync, type ChildProcess } from "node:child_process";
@@ -120,7 +121,9 @@ function descendants(pid: number): Sample["descendants"] {
         };
 
         if (
-          Object.values(item).some((value) => typeof value === "number" && !Number.isFinite(value))
+          Object.values(item).some(
+            (value) => arkType("number | number.NaN").allows(value) && !Number.isFinite(value),
+          )
         )
           throw new Error("Invalid /proc stat");
         all.push(item);

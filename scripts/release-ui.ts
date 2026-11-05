@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Release dry-run owner: shared bundle bytes, bounded helper CLIs, required proof and exit journal.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -217,9 +218,9 @@ export async function inspectScenario(
       !proof["actions"].every(
         (action) =>
           record(action) &&
-          typeof action["action"] === "string" &&
+          arkType("string").allows(action["action"]) &&
           action["action"].length > 0 &&
-          typeof action["at"] === "string" &&
+          arkType("string").allows(action["at"]) &&
           Number.isFinite(Date.parse(action["at"])),
       )
     )

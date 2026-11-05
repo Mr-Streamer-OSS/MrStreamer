@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // The app's own text in the interface language, and how numbers, dates and lists are written in
 // it. Every message is keyed by its English text (`i18n/en.ts`), so `t("Settings")` reads as the
 // English it shows and a key that isn't in the catalogue fails to compile. Each process (the
@@ -117,7 +118,7 @@ export function translate<K extends MessageKey>(
   const text =
     message === undefined
       ? key
-      : typeof message === "string"
+      : type.keywords.string.root.allows(message)
         ? message
         : pluralForm(locale, message, Number(values["count"] ?? 0));
 
@@ -126,7 +127,9 @@ export function translate<K extends MessageKey>(
 
     if (value === undefined) return whole;
 
-    return typeof value === "number" ? numbers("count", {}, tag).format(value) : value;
+    return type.keywords.string.root.allows(value)
+      ? value
+      : numbers("count", {}, tag).format(value);
   });
 }
 
@@ -140,7 +143,7 @@ export type MessagePart<K extends MessageKey> = string | { readonly placeholder:
  */
 export function messageParts<K extends TextKey>(key: K): readonly MessagePart<K>[] {
   const message: string | Plural = catalogues[active.locale][key] ?? en[key];
-  const text = typeof message === "string" ? message : message.other;
+  const text = type.keywords.string.root.allows(message) ? message : message.other;
 
   return text.split(/\{(\w+)\}/).flatMap((part, at): MessagePart<K>[] => {
     if (at % 2 === 0) return part ? [part] : [];

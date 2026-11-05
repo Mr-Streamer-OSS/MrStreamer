@@ -1,8 +1,10 @@
+import { type as arkType } from "arktype";
+
 /** In-memory Documents stand-in shared by the multi-provider tests. State belongs to each file
  * and survives its app-module relaunches; synchronous full-disk faults leave async writes alone. */
 export function memoryFiles(memory: { files: Map<string, string>; full: Set<string> }) {
   const pathOf = (parent: string | { readonly path: string }, name: string) =>
-    `${typeof parent === "string" ? parent : parent.path}/${name}`;
+    `${arkType("string").allows(parent) ? parent : parent.path}/${name}`;
 
   class Directory {
     readonly path: string;

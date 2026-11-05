@@ -594,7 +594,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         seen.set(heading, () => ({ event: "changelog_viewed", properties: { version } }));
     }
 
-  if (seen.size && typeof IntersectionObserver === "function") {
+  if (seen.size && globalThis.IntersectionObserver instanceof Function) {
     // A part in a collapsed section counts once it is open and in view, not as its heading passes.
     const shown = (part: Element) => part.closest("details")?.open !== false;
 

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Where a visit entered the site, for website analytics (analytics.ts): three fixed codes, never
 // an address. The page reads its own query and document.referrer only to pick codes from the
 // lists below. A referrer is reduced to its host, and a host that isn't listed is "other". UTM
@@ -159,7 +160,11 @@ function stored(): Entry | undefined {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
 
-    if (typeof value !== "object" || value === null) return undefined;
+    if (
+      !(arkType.keywords.object.root.allows(value) && !arkType("Function").allows(value)) ||
+      value === null
+    )
+      return undefined;
     const codes: Partial<Record<keyof Entry, unknown>> = value;
     const entry_source = pick(Object.keys(SOURCES) as Source[], String(codes.entry_source));
     const entry_medium = pick(MEDIUMS, String(codes.entry_medium));

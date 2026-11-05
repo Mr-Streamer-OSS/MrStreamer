@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Programme as Aired } from "@mrstreamer/contracts/guide";
 import { archiveHolds } from "@mrstreamer/core/catchup";
 import { router, useLocalSearchParams } from "expo-router";
@@ -36,11 +37,11 @@ import { cancelReminder, setReminder, useReminder } from "./reminders.ts";
 import { colors, Message, ReminderBell, TextButton, useListWidth } from "./ui.tsx";
 
 const parameter = (value: string | string[] | undefined) =>
-  typeof value === "string" ? value : "";
+  arkType("string").allows(value) ? value : "";
 
 /** A chosen day as a route's `day` carries it: its first instant, or null for Today. */
 export const dayOf = (value: string | readonly string[] | undefined) => {
-  const day = typeof value === "string" ? Number(value) : NaN;
+  const day = arkType("string").allows(value) ? Number(value) : NaN;
 
   return Number.isFinite(day) && day > 0 ? day : null;
 };

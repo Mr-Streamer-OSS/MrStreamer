@@ -72,7 +72,7 @@ function stopOf(
     case "at": {
       const stop = atTime(now, at);
 
-      return typeof stop === "number" ? stop : null;
+      return stop === "skipped" ? null : (stop ?? null);
     }
   }
 }

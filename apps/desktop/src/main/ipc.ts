@@ -151,7 +151,7 @@ export function registerIpc(
 
       if (
         (method === "guide.search" || method === "guide.searchList") &&
-        typeof input === "object" &&
+        type.keywords.object.root.allows(input) &&
         input !== null &&
         "request" in input &&
         input.request !== undefined

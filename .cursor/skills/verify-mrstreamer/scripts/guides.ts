@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Settings > Guides: XMLTV guides of the viewer's own, which every subscription reads after its
 // own guide, in their order.
@@ -218,7 +219,7 @@ export async function guidesScenario(
         Object.entries(expected).every(([name, want]) => {
           const text = shown[drawn(name)] ?? "";
 
-          return typeof want === "string" ? text.includes(want) : want.test(text);
+          return arkType("string").allows(want) ? text.includes(want) : want.test(text);
         })
       );
     });

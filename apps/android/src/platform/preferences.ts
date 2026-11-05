@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import { readJsonStrict, writeJson } from "./storage.ts";
 
@@ -28,7 +29,7 @@ export function preferences(files: PreferenceFiles = { read: readJsonStrict, wri
 
       if (value === null) return undefined;
 
-      if (typeof value !== "object" || !("choice" in value) || typeof value.choice !== "string")
+      if (!type({ choice: "string" }).allows(value))
         throw new Error("Language preference unavailable.");
 
       return value.choice;

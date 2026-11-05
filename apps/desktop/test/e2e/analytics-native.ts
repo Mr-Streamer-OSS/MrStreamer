@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Explicit native acceptance. The ordinary release-UI scenario never calls this workload.
 import assert from "node:assert/strict";
 import { readFile, readdir, writeFile } from "node:fs/promises";
@@ -798,7 +799,7 @@ export async function runNativeTelemetry(c: Context) {
                 !!result &&
                 (!!result.destinationSha256 ||
                   result.attempts >= 4 ||
-                  (typeof result.lastCode === "string" && !denied.has(result.lastCode)))
+                  (arkType("string").allows(result.lastCode) && !denied.has(result.lastCode)))
               );
             });
             const results = await probe.readers();
@@ -822,7 +823,7 @@ export async function runNativeTelemetry(c: Context) {
           const recovered = results.filter(
             (result) =>
               !result.openError &&
-              typeof result.firstCode === "string" &&
+              arkType("string").allows(result.firstCode) &&
               denied.has(result.firstCode) &&
               result.lastCode === null &&
               result.attempts > 1,

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { appFailure, type AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { AppError } from "@mrstreamer/contracts/errors";
 import type { Quality } from "@mrstreamer/contracts/library";
@@ -1616,7 +1617,14 @@ function observe(event: PlaybackObservation) {
 
 /** Read fixed bridge codes only. Native descriptions and wrapped causes never become UI text. */
 function bridgeCode(cause: unknown): string | null {
-  for (let depth = 0; depth < 4 && typeof cause === "object" && cause !== null; depth++) {
+  for (
+    let depth = 0;
+    depth < 4 &&
+    arkType.keywords.object.root.allows(cause) &&
+    !arkType("Function").allows(cause) &&
+    cause !== null;
+    depth++
+  ) {
     if ("code" in cause && cause.code === "ERR_OBSERVED_NOT_DRAINED") return cause.code;
     cause = "cause" in cause ? cause.cause : null;
   }

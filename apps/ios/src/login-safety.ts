@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 // Whether text the app keeps on disk could give a subscription's login away. The saved copies of
 // lists use it to keep artwork addresses that may carry the login out of their files, and to leave
@@ -105,11 +106,12 @@ export function exposes(
  * holding one. Artwork kept has none.
  */
 export function holds(value: Json | undefined, login: Login): boolean {
-  if (typeof value === "string")
+  if (arkType("string").allows(value))
     return (login.passwords.length > 0 || login.uncertain.length > 0) && textHolds(value, login);
 
   return (
-    typeof value === "object" &&
+    arkType.keywords.object.root.allows(value) &&
+    !arkType("Function").allows(value) &&
     value !== null &&
     Object.values(value).some((each: Json | undefined) => holds(each, login))
   );

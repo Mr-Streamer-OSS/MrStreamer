@@ -115,7 +115,7 @@ export const watchHref = (intent: PlayIntent) =>
  * Files are played by the app's own screens only: a link never names a path.
  */
 export function linkedIntent(param: string | string[] | undefined): PlayIntent | null {
-  if (typeof param !== "string") return null;
+  if (param === undefined || Array.isArray(param)) return null;
   let value: unknown;
 
   try {

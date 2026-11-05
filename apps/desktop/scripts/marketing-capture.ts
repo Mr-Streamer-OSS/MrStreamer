@@ -310,7 +310,7 @@ try {
 
     const owned = listed.find((entry) => entry.pid === app?.pid && entry.title === "Mr. Streamer");
 
-    if (record(owned) && typeof owned["window_id"] === "number") windowId = owned["window_id"];
+    if (owned) windowId = owned.window_id;
 
     if (!windowId) throw new Error("No owned native window.");
   }

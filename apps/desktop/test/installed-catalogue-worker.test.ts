@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../../../packages/contracts/src/json.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -29,7 +30,12 @@ function success<T>(result: Outcome<T>): T {
 }
 
 function object(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    arkType.keywords.object.root.allows(value) &&
+    !arkType("Function").allows(value) &&
+    value !== null &&
+    !Array.isArray(value)
+  );
 }
 
 /** Speaks the private NodeWorker protocol at its main transport boundary. */
@@ -96,8 +102,8 @@ class Transport implements MainTransport {
       const raw: unknown = JSON.parse(String(params.message));
       assert(
         object(raw) &&
-          typeof raw.id === "number" &&
-          typeof raw.method === "string" &&
+          arkType("number | number.NaN").allows(raw.id) &&
+          arkType("string").allows(raw.method) &&
           object(raw.params),
       );
       const command = { id: raw.id, method: raw.method, params: raw.params };

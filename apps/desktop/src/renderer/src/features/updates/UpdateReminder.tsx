@@ -81,7 +81,13 @@ export function UpdateReminder() {
 
   // Permission belongs to one version. Changed or withdrawn offers must be validated again.
   useEffect(() => {
-    if (typeof reminder !== "object" || reminder === null || !("allowed" in reminder)) return;
+    if (
+      reminder === null ||
+      reminder === "done" ||
+      reminder === "asking" ||
+      !("allowed" in reminder)
+    )
+      return;
 
     if (due !== reminder.allowed) useUi.setState({ updateReminder: null });
     else if (free) useUi.setState({ updateReminder: { kept: due }, updateDialog: "reminder" });

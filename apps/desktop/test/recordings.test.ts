@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Recordings through the real main runtime: the fake provider at the HTTP boundary, its live
 // fixtures captured to a temporary data folder, and ffprobe and the app's own copy playback for
 // what was written.
@@ -499,7 +500,7 @@ describe.skipIf(!hasTools)("recordings", () => {
       });
       const address = host.address();
 
-      if (!address || typeof address === "string") throw new Error("No address");
+      if (!address || arkType("string").allows(address)) throw new Error("No address");
       const { subscriptions, library, recordings, playback } = await app(await tempDir());
 
       const { id: subscriptionId } = await subscriptions.add({
@@ -657,7 +658,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     const address = host.address();
 
-    if (!address || typeof address === "string") throw new Error("No address");
+    if (!address || arkType("string").allows(address)) throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
 
@@ -2577,7 +2578,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     });
     const address = host.address();
 
-    if (!address || typeof address === "string") throw new Error("No address");
+    if (!address || arkType("string").allows(address)) throw new Error("No address");
     const dataDir = await tempDir();
     const before = await app(dataDir);
 

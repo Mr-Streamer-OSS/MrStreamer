@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import * as SecureStore from "expo-secure-store";
 
@@ -68,7 +69,7 @@ async function ids(): Promise<string[]> {
   const listed = await SecureStore.getItemAsync(INDEX, OPTIONS);
   const parsed: unknown = listed ? JSON.parse(listed) : [];
 
-  return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  return Array.isArray(parsed) ? parsed.filter((id) => arkType("string").allows(id)) : [];
 }
 
 const index = (change: (listed: string[]) => string[]) =>

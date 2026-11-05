@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { createRoot, document } from "./dom.ts";
 import * as React from "react";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
@@ -41,13 +42,17 @@ vi.mock("react-native", async () => {
   return {
     View: box,
     Text: ({ children }: Props) => createElement("p", null, children),
-    Pressable: (props: Props & Touchable & { children?: unknown }) => {
+    Pressable: (
+      props: Omit<Props, "children"> &
+        Touchable & {
+          children?: React.ReactNode | ((state: { pressed: boolean }) => React.ReactNode);
+        },
+    ) => {
       if (props.testID) scenario.pressables.set(props.testID, props);
 
-      const children =
-        typeof props.children === "function"
-          ? (props.children as (state: { pressed: boolean }) => React.ReactNode)({ pressed: false })
-          : props.children;
+      const children = arkType("Function").allows(props.children)
+        ? (props.children as (state: { pressed: boolean }) => React.ReactNode)({ pressed: false })
+        : props.children;
 
       return createElement(
         "div",

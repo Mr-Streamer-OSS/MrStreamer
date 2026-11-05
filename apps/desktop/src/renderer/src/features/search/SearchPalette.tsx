@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { useSearchUsage } from "../../app/analytics.ts";
 import { Dialog } from "@base-ui/react/dialog";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -127,7 +128,7 @@ function Palette() {
         return (
           cached?.state.status === "success" &&
           cached.state.fetchStatus === "idle" &&
-          typeof options.staleTime === "number" &&
+          type("number | number.NaN").allows(options.staleTime) &&
           !cached.isStaleByTime(options.staleTime)
         );
       },

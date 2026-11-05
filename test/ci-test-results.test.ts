@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -53,20 +54,19 @@ async function check(
       writeFileSync(join(root, file), "");
     }
 
-    const text =
-      typeof report === "string"
-        ? report
-        : JSON.stringify({
-            testResults: report.map(({ file, tests = ["passed"], status, message = "" }) => ({
-              name: join(root, file),
-              status: status ?? (tests.includes("failed") ? "failed" : "passed"),
-              message,
-              assertionResults: tests.map((each, index) => ({
-                fullName: `case ${index + 1}`,
-                status: each,
-              })),
+    const text = arkType("string").allows(report)
+      ? report
+      : JSON.stringify({
+          testResults: report.map(({ file, tests = ["passed"], status, message = "" }) => ({
+            name: join(root, file),
+            status: status ?? (tests.includes("failed") ? "failed" : "passed"),
+            message,
+            assertionResults: tests.map((each, index) => ({
+              fullName: `case ${index + 1}`,
+              status: each,
             })),
-          });
+          })),
+        });
 
     writeFileSync(join(root, "report.json"), text);
     const run = spawn(process.execPath, [cli, "report.json"], { cwd: root, timeout: 10_000 });

@@ -44,7 +44,7 @@ export function useKeptUpdate(): string | null {
 }
 
 function shownReminder(reminder: UpdateReminder | null): reminder is { readonly kept: string } {
-  return typeof reminder === "object" && reminder !== null && "kept" in reminder;
+  return reminder !== null && reminder !== "done" && reminder !== "asking" && "kept" in reminder;
 }
 
 /**

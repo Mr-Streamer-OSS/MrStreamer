@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // Packs the built site as Vercel's Build Output API, version 3, in .vercel/output/, and checks
 // the package before anything deploys it: `vercel deploy --prebuilt` uploads exactly this folder.
@@ -193,7 +194,11 @@ try {
   const [, json = ""] = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(home) ?? [];
   const parsed: Json = JSON.parse(json);
 
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+  if (
+    !(arkType.keywords.object.root.allows(parsed) && !arkType("Function").allows(parsed)) ||
+    parsed === null ||
+    Array.isArray(parsed)
+  )
     throw new Error("Invalid app metadata");
   const { "@type": type, screenshot } = Object.fromEntries(Object.entries(parsed));
   const pictures = Array.isArray(screenshot) ? screenshot : [screenshot];
@@ -205,7 +210,7 @@ try {
     pictures.length === 0 ||
     pictures.some(
       (picture: Json | undefined) =>
-        typeof picture !== "string" ||
+        !arkType("string").allows(picture) ||
         !picture.startsWith(`${SITE}/`) ||
         !existsSync(join(files, picture.slice(SITE.length))),
     )
@@ -228,14 +233,21 @@ const faq = [...home.matchAll(/<script type="application\/ld\+json">(.*?)<\/scri
   })
   .find(
     (data): data is JsonObject =>
-      typeof data === "object" && data !== null && "@type" in data && data["@type"] === "FAQPage",
+      arkType.keywords.object.root.allows(data) &&
+      !arkType("Function").allows(data) &&
+      data !== null &&
+      "@type" in data &&
+      data["@type"] === "FAQPage",
   );
 
 if (!faq) {
   problems.push(`${LISTED["/"]} holds no FAQPage data that reads.`);
 } else {
   const asked = (Array.isArray(faq["mainEntity"]) ? faq["mainEntity"] : []).map((question: Json) =>
-    typeof question === "object" && question !== null && "name" in question
+    arkType.keywords.object.root.allows(question) &&
+    !arkType("Function").allows(question) &&
+    question !== null &&
+    "name" in question
       ? question.name
       : undefined,
   );

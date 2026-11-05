@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Synthetic AVFoundation media inputs. Run generation under the canonical Linux runtime lock.
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -148,7 +149,8 @@ export function serveMedia(directory: string, port = 0) {
   server.listen(port, "127.0.0.1", () => {
     const address = server.address();
 
-    if (address && typeof address !== "string") console.log(JSON.stringify({ port: address.port }));
+    if (address && !arkType("string").allows(address))
+      console.log(JSON.stringify({ port: address.port }));
   });
 
   return server;

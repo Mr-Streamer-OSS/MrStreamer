@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
 import { formatBytes, formatNumber, formatPercent } from "@mrstreamer/core/i18n";
 import { SymbolView } from "expo-symbols";
@@ -73,7 +74,7 @@ function downloadStatus({
  */
 function HeaderGlyph({ status }: { status: ReturnType<typeof downloadStatus> }) {
   const mark = status?.mark;
-  const ring = typeof mark === "number";
+  const ring = arkType("number | number.NaN").allows(mark);
 
   return (
     <>

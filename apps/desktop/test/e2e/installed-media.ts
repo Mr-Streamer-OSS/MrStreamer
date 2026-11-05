@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { type } from "arktype";
 // Installed-only media acceptance. Product pins are separate from this verifier's revision.
 import assert from "node:assert/strict";
@@ -161,7 +162,7 @@ async function listen(server: Server) {
     });
   });
   const address = server.address();
-  assert(address && typeof address !== "string");
+  assert(address && !arkType("string").allows(address));
 
   return `http://127.0.0.1:${address.port}`;
 }

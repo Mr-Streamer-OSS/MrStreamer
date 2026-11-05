@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
@@ -101,14 +102,21 @@ const json = readJson(FILE);
 const read: unknown = json;
 
 function snapshot(): ViewingSnapshot | null {
-  return read && typeof read === "object" && "version" in read && read.version === 1
+  return read &&
+    arkType.keywords.object.root.allows(read) &&
+    !arkType("Function").allows(read) &&
+    "version" in read &&
+    read.version === 1
     ? (read as ViewingSnapshot)
     : null;
 }
 
 /** The favourites' memory as read: another build's, or one not to trust, is only carried. */
 const kept = readMembership(
-  json && typeof json === "object" && "favouriteMembership" in json
+  json &&
+    arkType.keywords.object.root.allows(json) &&
+    !arkType("Function").allows(json) &&
+    "favouriteMembership" in json
     ? json.favouriteMembership
     : undefined,
 );

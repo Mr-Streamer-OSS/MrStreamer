@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Smoke test for a built app: connects it to the fake provider through the login form and checks
 // who updates the build: the Microsoft Store for an installed MSIX package, which runs from
 // WindowsApps, snapd for a Snap, run as /snap/bin/mr-streamer, and the app itself for everything
@@ -452,9 +453,9 @@ async function capture(page: Page, name: string): Promise<void> {
 
   if (
     !result ||
-    typeof result !== "object" ||
+    !(arkType.keywords.object.root.allows(result) && !arkType("Function").allows(result)) ||
     !("data" in result) ||
-    typeof result.data !== "string"
+    !arkType("string").allows(result.data)
   )
     throw new Error("No packaged smoke screenshot");
   writeFileSync(join(evidence, `${name}.png`), Buffer.from(result.data, "base64"));

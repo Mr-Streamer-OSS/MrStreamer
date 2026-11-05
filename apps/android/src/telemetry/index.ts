@@ -13,7 +13,8 @@ export const statistics = androidAnalytics({
     load: () => {
       const value = files.read("statistics-revocation.json");
 
-      if (value !== null && typeof value !== "boolean") throw new Error("Revocation unavailable");
+      if (value !== null && value !== true && value !== false)
+        throw new Error("Revocation unavailable");
 
       return value === true;
     },

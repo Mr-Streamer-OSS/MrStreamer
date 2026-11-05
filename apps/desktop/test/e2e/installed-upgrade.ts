@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { preferenceValues } from "./preference-reply.ts";
 // The Windows installed upgrade check, which a stable release run makes before publishing and
@@ -148,7 +149,7 @@ export async function startServices() {
       for (const name of ["range", "if-range", "if-none-match", "if-modified-since"]) {
         const value = request.headers[name];
 
-        if (typeof value === "string") headers.set(name, value);
+        if (arkType("string").allows(value)) headers.set(name, value);
       }
 
       const upstream = await fetch(

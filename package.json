@@ -35,6 +35,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.90.0",
     "@types/node": "^26.6.6",
+    "arktype": "2.2.9",
     "happy-dom": "21.0.4",
     "knip": "6.38.0",
     "oxlint": "1.90.0",

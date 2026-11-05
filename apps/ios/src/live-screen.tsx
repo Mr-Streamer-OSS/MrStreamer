@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { formatNumber } from "@mrstreamer/core/i18n";
 import { router, useNavigation, useRootNavigationState } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -155,7 +156,7 @@ const text = (params: RouteParams, name: string) => {
   // Navigation keeps its params as plain serializable objects, so each one is an own value.
   const value: unknown = params && Object.getOwnPropertyDescriptor(params, name)?.value;
 
-  return typeof value === "string" && value !== "" ? value : null;
+  return arkType("string").allows(value) && value !== "" ? value : null;
 };
 
 /**

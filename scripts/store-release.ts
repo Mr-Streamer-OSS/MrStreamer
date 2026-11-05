@@ -205,9 +205,10 @@ export async function storeGate(
     );
   }
 
-  if (typeof branches === "string" || branches.join() !== github.defaultBranch) {
-    const allowed =
-      typeof branches === "string" ? `${branches} branches` : branches.join(", ") || "nothing";
+  if (!Array.isArray(branches) || branches.join() !== github.defaultBranch) {
+    const allowed = !Array.isArray(branches)
+      ? `${branches} branches`
+      : branches.join(", ") || "nothing";
 
     throw new Error(
       `The ${STORE_ENVIRONMENT} environment allows ${allowed}. It must allow ${github.defaultBranch} alone, or another branch's workflow could read the Store credential.`,
@@ -458,7 +459,12 @@ export function verifyPackage(
 
 /** Whether `value` is a JSON object, whose fields are still to be checked. */
 export function isRecord(value: Json | undefined): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    value !== null &&
+    value === Object(value) &&
+    !(value instanceof Function) &&
+    !Array.isArray(value)
+  );
 }
 
 /** The release file `release` wrote, with the package once `verify` added it. */
@@ -468,9 +474,15 @@ export function readStoreRelease(path: string): StoreRelease {
   const text = (from: Json | undefined, key: string) => {
     const value = isRecord(from) ? from[key] : undefined;
 
-    if (typeof value !== "string") throw new Error(`${path} names no ${key}.`);
+    try {
+      const text = String.prototype.valueOf.call(value);
 
-    return value;
+      if (text === value) return text;
+    } catch {
+      // Keep the release file's field-specific failure below.
+    }
+
+    throw new Error(`${path} names no ${key}.`);
   };
 
   const checked = isRecord(file) ? file["package"] : undefined;
@@ -482,7 +494,10 @@ export function readStoreRelease(path: string): StoreRelease {
     commit: text(file, "commit"),
     packageVersion: text(file, "packageVersion"),
     notes: text(file, "notes"),
-    run: typeof run === "number" ? run : null,
+    run:
+      Number.isFinite(run) || Number.isNaN(run) || run === Infinity || run === -Infinity
+        ? Number(run)
+        : null,
     ...(checked !== undefined && {
       package: {
         path: text(checked, "path"),

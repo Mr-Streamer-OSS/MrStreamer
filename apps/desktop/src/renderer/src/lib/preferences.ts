@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { queryOptions, type QueryClient, type QueryOptions } from "@tanstack/react-query";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
@@ -92,14 +93,8 @@ const newest: Exclude<
   boolean | undefined
 > = (previous, incoming) => {
   if (
-    previous &&
-    incoming &&
-    typeof previous === "object" &&
-    typeof incoming === "object" &&
-    "revision" in previous &&
-    "revision" in incoming &&
-    typeof previous.revision === "number" &&
-    typeof incoming.revision === "number" &&
+    type({ revision: "number | number.NaN" }).allows(previous) &&
+    type({ revision: "number | number.NaN" }).allows(incoming) &&
     previous.revision >= incoming.revision
   )
     return previous;

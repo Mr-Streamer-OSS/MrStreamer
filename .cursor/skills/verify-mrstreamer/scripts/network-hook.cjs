@@ -1,3 +1,5 @@
+const { type: arkType } = require("arktype");
+
 // Loaded into the verified app's main process with NODE_OPTIONS=--require, for the downloads
 // scenarios only. It records every outbound TCP connection and UDP send main makes, so the proof
 // can say what main asked of the network and when, and it answers artwork hosts from the run's
@@ -20,15 +22,15 @@ const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function (...args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
 
-  if (first && typeof first === "object") {
+  if (first && arkType.keywords.object.root.allows(first) && !arkType("Function").allows(first)) {
     if (first.path) write({ kind: "ipc", path: String(first.path) });
     else write({ kind: "tcp", host: first.host ?? "localhost", port: Number(first.port) });
-  } else if (typeof first === "string" && Number.isNaN(Number(first))) {
+  } else if (arkType("string").allows(first) && Number.isNaN(Number(first))) {
     write({ kind: "ipc", path: first });
   } else {
     write({
       kind: "tcp",
-      host: typeof args[1] === "string" ? args[1] : "localhost",
+      host: arkType("string").allows(args[1]) ? args[1] : "localhost",
       port: Number(first),
     });
   }
@@ -39,8 +41,12 @@ net.Socket.prototype.connect = function (...args) {
 const send = dgram.Socket.prototype.send;
 
 dgram.Socket.prototype.send = function (...args) {
-  const address = args.find((arg, index) => index > 0 && typeof arg === "string");
-  const port = args.find((arg, index) => index > 0 && typeof arg === "number" && arg > 0);
+  const address = args.find((arg, index) => index > 0 && arkType("string").allows(arg));
+
+  const port = args.find(
+    (arg, index) => index > 0 && arkType("number | number.NaN").allows(arg) && arg > 0,
+  );
+
   write({ kind: "udp", host: address ?? "unknown", port: port ?? null });
 
   return send.apply(this, args);
@@ -51,7 +57,12 @@ dgram.Socket.prototype.send = function (...args) {
 let fetchInstalled = globalThis.fetch;
 
 const fetchHooked = (input, init) => {
-  const href = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const href = arkType("string").allows(input)
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+
   const url = URL.parse(href);
 
   if (images && url && IMAGE_HOSTS.has(url.hostname)) {

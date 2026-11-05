@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 // The site's download links: where each installer of the current stable release is, and how
 // the page shows it. README.md, Downloads, has the whole account.
@@ -60,7 +61,7 @@ function stableOf(feed: Json | undefined): { version: string; listed: Json | und
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
 
-  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) return null;
+  if (!arkType("string").allows(version) || !/^\d+\.\d+\.\d+$/.test(version)) return null;
 
   return files === `${RELEASES}/download/v${version}` ? { version, listed } : null;
 }
@@ -112,7 +113,7 @@ export async function verifiedDownloads(
   const stable =
     released &&
     /^\d+\.\d+\.\d+$/.test(released.version) &&
-    typeof published === "number" &&
+    arkType("number | number.NaN").allows(published) &&
     Number.isFinite(published)
       ? { version: released.version }
       : stableOf(feed);
@@ -148,7 +149,9 @@ export function showFeedDownloads(page: ParentNode, feed: Json | undefined): voi
 
   if (minimum !== undefined) {
     const generated =
-      isRecord(feed) && typeof feed["generated"] === "string" ? Date.parse(feed["generated"]) : NaN;
+      isRecord(feed) && arkType("string").allows(feed["generated"])
+        ? Date.parse(feed["generated"])
+        : NaN;
 
     if (
       !Number.isFinite(generated) ||
@@ -272,5 +275,10 @@ export function writeDownloads(
 }
 
 function isRecord(value: Json | undefined): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    arkType.keywords.object.root.allows(value) &&
+    !arkType("Function").allows(value) &&
+    value !== null &&
+    !Array.isArray(value)
+  );
 }
