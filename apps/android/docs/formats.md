@@ -50,7 +50,7 @@ The parity rows come from `docs/contributing/testing.md` and the repository fixt
 | native/not-media.bin                   | invalid bytes (expect format failure)                      |
 | native/vp9-opus.webm                   | vp9 Profile 0, opus                                        |
 
-The native HLS movies are `native/hls/index.m3u8`, `native/hls/event.m3u8`, `native/hls-ladder/index.m3u8` and its `v0/index.m3u8` and `v1/index.m3u8` renditions. They carry silent H.264/AAC and stay on the same fixture origin.
+The native HLS movies are `native/hls/index.m3u8`, `native/hls/event.m3u8`, `native/hls-ladder/index.m3u8` and its `native/hls-ladder/v0/index.m3u8` and `native/hls-ladder/v1/index.m3u8` renditions. They carry silent H.264/AAC and stay on the same fixture origin.
 
 ## Installed qualification procedure
 
@@ -63,7 +63,7 @@ cd apps/android/android
 fleet-android gradle :player:testDebugUnitTest assembleRelease
 ```
 
-Only Evidence opens the managed device session and installs that exact release APK. Record its source SHA, APK hash, package/version, device/API/ABI and codec declarations. Keep installed, physical device, receiver and store results separate. Source and JVM checks do not qualify decoding.
+Only Evidence opens the managed device session and installs that exact release APK. Record its source SHA, APK hash, package/version and device/API/ABI. If available through the approved device workflow, record the platform media codec inventory; the release UI does not expose `capabilities()`. Keep installed, physical device, receiver and store results separate. Source and JVM checks do not qualify decoding.
 
 Start the named-file panel from the repository root, with Node 24+, ffmpeg and ffprobe:
 
@@ -71,7 +71,7 @@ Start the named-file panel from the repository root, with Node 24+, ffmpeg and f
 FIXTURE_OUT="$PWD/.local/699/formats-ranges" node apps/android/test/formats-server.ts 8891 8892
 ```
 
-Both ports bind loopback. Evidence forwards only the provider port to its owned emulator, never the control port, using its approved device workflow. Connect the installed app to the forwarded provider as `fixture` / `fixture-pass`. Movies lists each named row; Live's TEST category supplies original TS channel variants. Use normal UI input through Connect, Movies, Live and Watch. This exercises the production source resolver, admission, headers, holds, one native owner and track controls. Do not invoke a second player or treat the HTTP test as installed proof.
+Both ports bind loopback. Evidence forwards only the provider port to its owned emulator, never the control port, using its approved device workflow. Connect the installed app to the forwarded provider as `fixture` / `fixture-pass`. Movies lists each named row; Live's TEST category supplies silent copies of the TS channel clips. Use normal UI input through Connect, Movies, Live and Watch. This exercises the production source resolver, admission, app-side header construction, holds, one native owner and track controls. The fixture proxy forwards Range only, so it does not qualify upstream receipt of private headers. Do not invoke a second player or treat the HTTP test as installed proof.
 
 Stop this server with SIGINT, then repeat on a fresh isolated app profile:
 
@@ -79,9 +79,9 @@ Stop this server with SIGINT, then repeat on a fresh isolated app profile:
 FIXTURE_OUT="$PWD/.local/699/formats-whole" node apps/android/test/formats-server.ts 8891 8892 --no-ranges
 ```
 
-Every title file must be qualified with ranges and without them, including seek before/after subtitles and the MP4 index at the end. A backend redirect remains on the forwarded provider origin. The panel connection slot is released immediately on close; delayed provider accounting is outside this harness.
+Every title file must be qualified with ranges and without them, including seek before/after subtitles and the MP4 index at the end. A backend redirect remains on the forwarded provider origin. The panel allows 64 simultaneous responses so seek/reconnect overlap does not become a synthetic single-slot refusal. Active proxy responses remain observable; this is not a provider-capacity test.
 
-The server defaults to silent sound in the same codecs/tracks and preserves subtitle dispositions. ffmpeg remuxing can shift timestamps and rewrite indexes: `provenance.json` identifies exact served copies. Use `FIXTURE_SOUND=1` only for a bounded sound test under the host's sound rules. That serves originals byte for byte, so qualify original long/uncued/doubled indexes in that pass as well. No host volume/settings changes. Generated damaged and joined TS may print ffmpeg warnings; those are fixture conditions, not Android results.
+The server defaults to silent sound in the same codecs/tracks and preserves subtitle dispositions. ffmpeg remuxing can shift timestamps and rewrite indexes: `provenance.json` identifies exact served copies. Use `FIXTURE_SOUND=1` only for a bounded sound test under the host's sound rules. That serves repository originals byte for byte. The long/uncued/doubled subtitle fixtures are already silent and remain byte-identical in the default pass. Rows recorded as `silent-*`, including the index-at-end MP4 and EAC3/picture-subtitle MKVs, need the original pass to qualify their original mux/index behavior. The generated network source stays silent in both passes. No host volume/settings changes. Generated damaged and joined TS may print ffmpeg warnings; those are fixture conditions, not Android results.
 
 ### HLS and catch-up rows
 
@@ -105,6 +105,24 @@ Its fake Xtream panel uses the same fixture login. Android normally resolves Xtr
 | Xtream HLS catch-up                       | explicit `.m3u8` request, finite recording despite no ENDLIST, end/seek/release; Android's normal TS route does not qualify this                                             |
 | Flussonic playlist catch-up               | use `apps/desktop/test/fake-playlist.ts` with catchup enabled, four parts without ENDLIST, Guide → programme → archive; requires a separate fixture launch, unqualified here |
 
+Two additional desktop HLS journeys remain explicitly **unqualified** and are not served by this panel: alternate-language audio (including `spa`), English/German WebVTT and empty French WebVTT in `apps/desktop/test/fixtures/hls`, and the MPEG-2/H.264 discontinuity, token redirect and 720p MP3 rendition in `apps/desktop/test/fake-hls.ts`. Standalone epoch TS titles do not exercise an HLS codec switch. Repeatable preparation from the repository root:
+
+```sh
+cat > .local/699/desktop-hls.ts <<'SCRIPT'
+import {startFakePlaylist} from '../../apps/desktop/test/fake-playlist.ts';
+import {startFakeHls} from '../../apps/desktop/test/fake-hls.ts';
+const playlist = await startFakePlaylist({catchup: true});
+const hls = await startFakeHls({tokens: true, qualities: ['hd', 'sd', 'uhd']});
+console.log({playlist, hls});
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => {
+  await playlist.close(); await hls.close();
+});
+SCRIPT
+node .local/699/desktop-hls.ts
+```
+
+Keep the printed synthetic addresses local. These helpers bind ephemeral loopback ports: forward their owned ports and connect an M3U source through normal UI, retaining playlist/segment requests and track/codec-switch results. Before a host run, prepare silent copies with provenance or obtain the bounded sound pass. No Android reachability, silence or installed qualification is asserted for these two helpers.
+
 No silent default is asserted for the separate desktop fake-playlist fixture. Evidence must mute its own test playback or prepare silent copies with provenance before using it. Fixtures and app routes that are not reachable remain explicit qualification gaps; do not replace them with direct extractor reads.
 
 ### Per-row record
@@ -115,7 +133,9 @@ For representative movie/episode rows, download and replay the exact saved copy 
 
 ### Network measurements
 
-The named-file server controls **current and future media response bodies**, while metadata stays unpaced. `startupMs` is sampled per request before response headers; `kbps` and `stalled` are read during each body. Pacing is per response in 100 ms chunks, not an aggregate bandwidth guarantee or latency/jitter simulator. A stall cannot retract bytes already buffered by Media3 or the HTTP stack. Use a long title and wait for an observed buffering transition.
+The named-file server controls **current and future media response bodies**, while metadata stays unpaced. `startupMs` is sampled per request before response headers; `kbps` and `stalled` are read during each body. Pacing is per response in chunks of at most 100 ms of configured bandwidth, not an aggregate bandwidth guarantee or latency/jitter simulator. A stall cannot retract bytes already buffered by Media3 or the HTTP stack. Use `network/continuing.mpegts` for the title measurement and Live channel 7998, TEST | Network continuing silent TS, for Live. Both use a freshly generated five-minute continuous H.264/AAC timeline, about 1200 kbps including TS padding, not a loop of reset timestamps. `session.json` records probed duration, media bitrate and bytes; `provenance.json` records the lavfi sources, encoder command and hashes. All original named codec files and channels remain present. Other Live clips are short finite parity inputs, not network recovery sources.
+
+Baseline title bodies are paced at 1500 kbps even when `kbps=0`, preventing the entire title from arriving before the control action; Live is produced at real-time rate. This ceiling permits filling/recovery above the 1200 kbps media rate. At 256 kbps delivery is below consumption. Begin each run with a fresh playback attempt, allow initial buffering, then stall while the request remains active, wait for observed starvation, clear, and observe recovery before the five-minute source end. Bound each installed trial to four minutes from opening. If the source exhausts, discard that recovery trial and repeat; never attribute EOF to injected starvation. Events distinguish response completion from source exhaustion (a completed partial range is not source exhaustion) and client cancellation. A stall cannot retract socket/player buffers, so record how much arrived and any timeout rather than assuming an immediate transition.
 
 ```sh
 curl -fsS -X POST 'http://127.0.0.1:8892/link?startupMs=1500&kbps=256&stalled=false'
@@ -124,7 +144,7 @@ curl -fsS -X POST 'http://127.0.0.1:8892/link?startupMs=0&kbps=256&stalled=true'
 curl -fsS -X POST 'http://127.0.0.1:8892/link?startupMs=0&kbps=0&stalled=false'
 ```
 
-Record the control event timestamps, candidate identity and screen recording together. Measure play intent to first observed picture, first observed buffering after the stall, buffer duration and recovery after clearing it; record timeouts/refusals, never omit them. Run baseline `(0,0,false)`, delayed `(1500,0,false)`, constrained `(1500,256,false)`, then stall/recover. Repeat for TS Live, range title and no-range title. Report these as observations of the exact candidate/conditions, not a performance comparison measured on busy forge.
+Record each event’s epoch milliseconds and monotonic timestamp with candidate identity and the screen recording clock. Request/response/closed events share an id and contain only logical fixture identity, normalized numeric byte range, HTTP status and emitted byte count, never URLs, credentials or private headers. Response status distinguishes HTTP refusal from format refusal. Cleanup waits for handlers before writing final active/held counts. Measure play intent to first observed picture, first observed buffering after the stall, buffer duration and recovery after clearing it; record timeouts/refusals, never omit them. Run baseline `(0,0,false)`, delayed `(1500,0,false)`, constrained `(1500,256,false)`, then stall/recover. Repeat for TS Live, range title and no-range title. Report these as observations of the exact candidate/conditions, not a performance comparison measured on busy forge.
 
 For the existing HLS server, `POST /live-link?kbps=256` paces new single-rendition live segments only; restore with `kbps=0`. `POST /fail-live?id=<id>&count=1` refuses a playlist. It does not control multitrack, title or archive bodies, nor resume an in-flight segment. Those network routes remain unmeasured unless Evidence adds an isolated transport boundary and records it. Native event/ladder HLS movies use the formats panel controls above; outcomes still need installed observation.
 
