@@ -94,6 +94,12 @@ object PlayerHost {
     return made
   }
 
+  /** Reconcile only after the old service has detached and completed its teardown. */
+  fun serviceDestroyed() {
+    serviceStarted = false
+    owner?.changed?.invoke()
+  }
+
   fun sessionCommands(live: Boolean, next: Boolean): SessionCommands = SessionCommands.Builder().apply {
     add(SessionCommand("close", Bundle.EMPTY))
     if (!live) {

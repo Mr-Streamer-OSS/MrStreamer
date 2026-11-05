@@ -22,6 +22,7 @@ class PlayerMediaService : MediaSessionService() {
     // so later playback cannot issue foreground starts from the destroyed service instance.
     sessions.forEach { removeSession(it) }
     super.onDestroy()
+    PlayerHost.serviceDestroyed()
   }
   override fun onTaskRemoved(rootIntent: Intent?) {
     PlayerHost.existing()?.stopAll()
