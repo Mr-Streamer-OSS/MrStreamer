@@ -127,6 +127,10 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
 internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private val extractors: ExtractorsFactory) {
   private var ignoredRange = false
 
+  /** Published by TS extraction to the owner on the application thread. */
+  @Volatile var confirmedNoRange = false
+    private set
+
   val readers = DataSource.Factory {
     val reader = upstream.createDataSource()
     object : DataSource by reader {
@@ -141,8 +145,8 @@ internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private v
             throw cause
           }
           try { reader.open(dataSpec) } catch (retry: IOException) {
-            cause.addSuppressed(retry)
-            throw cause
+            retry.addSuppressed(cause)
+            throw retry
           }
         }
         if (probe) ignoredRange = reader.responseCode == 200
@@ -159,12 +163,15 @@ internal class NoRangeTs(private val upstream: HttpDataSource.Factory, private v
 
   private fun wrap(candidates: Array<Extractor>): Array<Extractor> = candidates.map { extractor ->
     if (extractor !is TsExtractor) extractor else object : Extractor by extractor {
-      override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int = extractor.read(
-        if (ignoredRange) object : ExtractorInput by input {
-          override fun getLength(): Long = C.LENGTH_UNSET.toLong()
-        } else input,
-        seekPosition,
-      )
+      override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
+        if (ignoredRange) confirmedNoRange = true
+        return extractor.read(
+          if (ignoredRange) object : ExtractorInput by input {
+            override fun getLength(): Long = C.LENGTH_UNSET.toLong()
+          } else input,
+          seekPosition,
+        )
+      }
     }
   }.toTypedArray()
 }

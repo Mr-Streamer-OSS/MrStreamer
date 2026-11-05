@@ -116,6 +116,7 @@ class PlayerOwner(
   var events: PlayerEvents? = null,
 ) {
   private class Current(val admission: Admission, val hold: Hold) {
+    var noRangeTs: NoRangeTs? = null
     var sidecar: ByteArray? = null
     var sidecarLanguage: String = ""
     var pickSidecar = false
@@ -385,6 +386,7 @@ class PlayerOwner(
         .build()
     // A file reads only files and a source only its provider's addresses (see [allows]).
     val noRangeTs = if (local == null && admission.format != "hls" && admission.mode != "live") NoRangeTs(http, extractors) else null
+    current?.noRangeTs = noRangeTs
     val upstream = if (local != null) FileDataSource.Factory() else noRangeTs?.readers ?: http
     val source =
       DefaultMediaSourceFactory(hold.factory(upstream) { allows(admission, it) }, noRangeTs?.factory ?: extractors).createMediaSource(item)
@@ -411,8 +413,8 @@ class PlayerOwner(
       if (ok) completed?.invoke(true)
       return ok
     }
-    // Rebuilding an unseekable progressive network source would restart it instead of restoring this place.
-    if (now.admission.hold !is HoldRef.LocalFile && now.admission.format != "hls" && !player.isCurrentMediaItemSeekable) return false
+    // Only confirmed ignored-Range TS cannot restore a nonzero timestamp after rebuilding.
+    if (now.noRangeTs?.confirmedNoRange == true && player.currentPosition != 0L) return false
     val old = now.sidecar
     val oldLanguage = now.sidecarLanguage
     val oldParameters = player.trackSelectionParameters

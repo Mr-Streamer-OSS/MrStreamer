@@ -115,13 +115,29 @@ class NoRangeTsTest {
       assertEquals(listOf("bytes=0-", "none"), requests.toList())
     }
 
-  @Test fun failedPlainGetPreservesTheProbeErrorAndSettlesWithoutCallerClose() =
+  @Test fun failedPlainGetSurfacesActualErrorAndSettlesWithoutCallerClose() =
     withSource(false, rejectRange = 403, plainStatus = 401) { source, url, requests, hold, settled ->
       val failure = assertThrows(androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException::class.java) {
         source.open(DataSpec(url))
       }
-      assertEquals(403, failure.responseCode)
-      assertEquals(401, (failure.suppressed.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException).responseCode)
+      assertEquals(401, failure.responseCode)
+      assertEquals(403, (failure.suppressed.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException).responseCode)
+      assertEquals(listOf("bytes=0-", "none"), requests.toList())
+      hold.retire()
+      ShadowLooper.idleMainLooper()
+      assertEquals(true, settled())
+      assertEquals(starts.get(), ends.get())
+      source.close()
+    }
+
+  @Test fun cancellationDuringPlainGetRemainsTheActualCauseAndSettles() =
+    withSource(false, rejectRange = 403, cancelPlain = true) { source, url, requests, hold, settled ->
+      val failure = try {
+        assertThrows(java.io.InterruptedIOException::class.java) { source.open(DataSpec(url)) }.also {
+          assertTrue(Thread.currentThread().isInterrupted)
+        }
+      } finally { Thread.interrupted() }
+      assertEquals(403, (failure.suppressed.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException).responseCode)
       assertEquals(listOf("bytes=0-", "none"), requests.toList())
       hold.retire()
       ShadowLooper.idleMainLooper()
@@ -180,7 +196,7 @@ class NoRangeTsTest {
     } finally { extractor.release() }
   }
 
-  private fun withSource(ranges: Boolean, interruptRetry: Boolean = false, rejectRange: Int? = null, plainStatus: Int? = null, test: (DataSource, Uri, MutableList<String>, Hold, () -> Boolean?) -> Unit) {
+  private fun withSource(ranges: Boolean, interruptRetry: Boolean = false, rejectRange: Int? = null, plainStatus: Int? = null, cancelPlain: Boolean = false, test: (DataSource, Uri, MutableList<String>, Hold, () -> Boolean?) -> Unit) {
     val requests = Collections.synchronizedList(mutableListOf<String>())
     val server = MockWebServer()
     server.dispatcher = object : Dispatcher() {
@@ -200,7 +216,7 @@ class NoRangeTsTest {
     server.start()
     val http = DefaultHttpDataSource.Factory().setTransferListener(object : TransferListener {
       override fun onTransferInitializing(source: DataSource, spec: DataSpec, network: Boolean) {}
-      override fun onTransferStart(source: DataSource, spec: DataSpec, network: Boolean) { starts.incrementAndGet(); if (interruptRetry && spec.position > 0) Thread.currentThread().interrupt() }
+      override fun onTransferStart(source: DataSource, spec: DataSpec, network: Boolean) { starts.incrementAndGet(); if (cancelPlain && !spec.httpRequestHeaders.containsKey("Range")) { Thread.currentThread().interrupt(); throw java.io.InterruptedIOException("cancelled plain GET") }; if (interruptRetry && spec.position > 0) Thread.currentThread().interrupt() }
       override fun onBytesTransferred(source: DataSource, spec: DataSpec, network: Boolean, bytes: Int) { transferred.addAndGet(bytes.toLong()) }
       override fun onTransferEnd(source: DataSource, spec: DataSpec, network: Boolean) { ends.incrementAndGet() }
     })

@@ -2,7 +2,6 @@ package app.mrstreamer.player
 
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.test.utils.FakeRenderer
 import androidx.media3.test.utils.TestExoPlayerBuilder
 import androidx.media3.test.utils.robolectric.RobolectricUtil
@@ -52,6 +51,7 @@ class NoRangeTsOwnerTest {
         assertEquals(1, server.requestCount)
         if (mode == "title") {
           assertTrue("Unsupported resume must clamp to the beginning", observation.positionMs < 20_000)
+          until { player.currentPosition > 0 }
           owner.pause(mode)
           val position = player.currentPosition
           val item = player.currentMediaItem
@@ -65,35 +65,60 @@ class NoRangeTsOwnerTest {
     }
   }
 
-  // Change seekability after installing text at the public player boundary. Reading and
-  // subtitle selection still use real ExoPlayer; no private owner state is inspected.
-  @Test fun refusedRebuildKeepsPositionPauseAndPreviouslySelectedSubtitle() {
-    val real = player()
-    var unseekable = false
-    val boundary = java.lang.reflect.Proxy.newProxyInstance(
-      ExoPlayer::class.java.classLoader, arrayOf(ExoPlayer::class.java),
-    ) { _, method, args ->
-      if (method.name == "isCurrentMediaItemSeekable" && unseekable) false
-      else try { method.invoke(real, *(args ?: emptyArray())) }
-      catch (cause: java.lang.reflect.InvocationTargetException) { throw cause.targetException }
-    } as ExoPlayer
-    val owner = PlayerOwner(boundary, events)
+  @Test fun resumedRangeTitleRestoresSavedSubtitleBeforeSeekMapPublication() {
+    val player = player()
+    val owner = PlayerOwner(player, events)
     val server = MockWebServer()
     val media = javaClass.classLoader!!.getResourceAsStream("media/h264-aac.mp4")!!.use { it.readBytes() }
+    server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+      override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+        val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toInt() ?: 0
+        return MockResponse().setResponseCode(206)
+          .addHeader("Content-Range", "bytes $start-${media.lastIndex}/${media.size}")
+          .setBody(Buffer().write(media, start, media.size - start))
+      }
+    }
+    try {
+      owner.admit(Admission("a", server.url("/title.mp4").toString(), emptyMap(), "progressive", "title", 1000, HoldRef.Source("fixture")))
+      owner.pause("a")
+      assertEquals(1000L, player.currentPosition)
+      assertFalse(player.isCurrentMediaItemSeekable)
+      var installed: Boolean? = null
+      assertTrue(owner.setSidecar("a", text, "en", 0.0, 1.0) { installed = it })
+      assertEquals(1000L, player.currentPosition)
+      until { installed != null }
+      assertEquals(true, installed)
+      until { tracks.any { it.id == Subtitles.TRACK && it.selected } }
+      assertTrue(player.isCurrentMediaItemSeekable)
+      assertEquals(1000L, player.currentPosition)
+      assertFalse(player.playWhenReady)
+    } finally { owner.stopAll(); player.release(); server.shutdown() }
+  }
+
+  @Test fun confirmedNoRangeAtZeroAllowsRebuildThenKeepsSubtitleAndPlaybackOnRefusal() {
+    val real = player()
+    val owner = PlayerOwner(real, events)
+    val server = MockWebServer()
+    val packet = javaClass.classLoader!!.getResourceAsStream("media/hls/segment0.m2ts")!!.use { it.readBytes() }
+    val media = ByteArray(packet.size * 2000) { packet[it % packet.size] }
     server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
       override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest) = MockResponse().setBody(Buffer().write(media))
     }
     try {
-      owner.admit(Admission("a", server.url("/title.mp4").toString(), emptyMap(), "progressive", "title", 0, HoldRef.Source("fixture")))
-      until { observations.lastOrNull()?.phase == Phase.PLAYING }
-      assertTrue(owner.pause("a"))
-      assertTrue(owner.seek("a", 1000))
+      owner.admit(Admission("a", server.url("/title.ts").toString(), emptyMap(), "mpegts", "title", 0, HoldRef.Source("fixture")))
+      owner.pause("a")
+      until { real.playbackState == androidx.media3.common.Player.STATE_READY }
+      assertFalse(real.isCurrentMediaItemSeekable)
+      assertEquals(0L, real.currentPosition)
       var installed: Boolean? = null
       assertTrue(owner.setSidecar("a", text, "en", 0.0, 1.0) { installed = it })
       until { installed != null }
       assertEquals(true, installed)
       until { tracks.any { it.id == Subtitles.TRACK && it.selected } }
-      unseekable = true
+      assertEquals(0L, real.currentPosition)
+      owner.resume("a")
+      until { real.currentPosition > 0 }
+      owner.pause("a")
       val position = real.currentPosition
       val item = real.currentMediaItem
       val selection = real.trackSelectionParameters
@@ -107,6 +132,37 @@ class NoRangeTsOwnerTest {
       assertTrue(tracks.any { it.id == Subtitles.TRACK && it.selected })
       assertTrue(owner.setSidecar("a", text, "en", 0.0, 1.0) { completions += it })
       assertEquals(listOf(true), completions)
+    } finally { owner.stopAll(); real.release(); server.shutdown() }
+  }
+
+  @Test fun loaderRetriesTransientPlainGetFailureAndReportsActualCause() {
+    val real = player()
+    val owner = PlayerOwner(real, events)
+    val server = MockWebServer()
+    val packet = javaClass.classLoader!!.getResourceAsStream("media/hls/segment0.m2ts")!!.use { it.readBytes() }
+    server.enqueue(MockResponse().setResponseCode(403))
+    server.enqueue(MockResponse().setResponseCode(503))
+    server.enqueue(MockResponse().setBody(Buffer().write(ByteArray(packet.size * 2000) { packet[it % packet.size] })))
+    val failures = mutableListOf<java.io.IOException>()
+    real.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+      override fun onLoadError(
+        eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+        loadEventInfo: androidx.media3.exoplayer.source.LoadEventInfo,
+        mediaLoadData: androidx.media3.exoplayer.source.MediaLoadData,
+        error: java.io.IOException,
+        wasCanceled: Boolean,
+      ) { failures += error }
+    })
+    try {
+      owner.admit(Admission("a", server.url("/title.ts").toString(), emptyMap(), "mpegts", "title", 0, HoldRef.Source("fixture")))
+      until { observations.lastOrNull()?.phase == Phase.PLAYING }
+      val error = failures.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
+      assertEquals(503, error.responseCode)
+      assertEquals(403, (error.suppressed.single() as androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException).responseCode)
+      assertEquals(3, server.requestCount)
+      assertEquals("bytes=0-", server.takeRequest().getHeader("Range"))
+      assertNull(server.takeRequest().getHeader("Range"))
+      assertEquals("bytes=0-", server.takeRequest().getHeader("Range"))
     } finally { owner.stopAll(); real.release(); server.shutdown() }
   }
 
