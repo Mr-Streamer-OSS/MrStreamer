@@ -17,7 +17,6 @@
 //
 // A file is never changed once written: it is replaced by another. So it is read without locks,
 // by as many connections as like, the main process's and a search worker's.
-import { type } from "arktype";
 import { rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -30,6 +29,7 @@ import {
   type GuideSlot,
   type Listing,
   type Programme,
+  type ProgrammeMetadata,
 } from "@mrstreamer/contracts/guide";
 import { normalize } from "../text.ts";
 import { xmltvDocument } from "./document.ts";
@@ -1002,27 +1002,85 @@ function metadataColumn(db: DatabaseSync): string {
     : "programme.metadata";
 }
 
-const Metadata = type({
-  "guide?": "string <= 1024",
-  "subtitle?": "string <= 512",
-  "premiere?": "string <= 512",
-  "episodes?": type({ system: "string <= 64", value: "string <= 256" }).array().atMostLength(8),
-  "episode?": {
-    season: "number.safe >= 0",
-    episode: "number.safe >= 0",
-    "part?": "number.safe >= 0",
-  },
-  "repeat?": { "start?": "string <= 64", "channel?": "string <= 256" },
-});
+// Decode the on-disk JSON here without loading a schema runtime into the small-heap search
+// worker. Keep these bounds aligned with the optional facts retained by the XMLTV reader.
+/* oxlint-disable anti-slop/no-runtime-typeof -- This is the untrusted stored-metadata boundary. */
+function metadataText(value: unknown, most: number): value is string {
+  return typeof value === "string" && value.length <= most;
+}
+
+function metadataOrdinal(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function validMetadata(value: unknown): value is ProgrammeMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+
+  if ("guide" in value && !metadataText(value.guide, 1024)) return false;
+
+  if ("subtitle" in value && !metadataText(value.subtitle, 512)) return false;
+
+  if ("premiere" in value && !metadataText(value.premiere, 512)) return false;
+
+  if ("episodes" in value) {
+    if (!Array.isArray(value.episodes) || value.episodes.length > 8) return false;
+
+    if (
+      !value.episodes.every(
+        (episode: unknown): episode is NonNullable<ProgrammeMetadata["episodes"]>[number] =>
+          typeof episode === "object" &&
+          episode !== null &&
+          !Array.isArray(episode) &&
+          "system" in episode &&
+          metadataText(episode.system, 64) &&
+          "value" in episode &&
+          metadataText(episode.value, 256),
+      )
+    )
+      return false;
+  }
+
+  if ("episode" in value) {
+    const episode = value.episode;
+
+    if (
+      typeof episode !== "object" ||
+      episode === null ||
+      Array.isArray(episode) ||
+      !("season" in episode) ||
+      !metadataOrdinal(episode.season) ||
+      !("episode" in episode) ||
+      !metadataOrdinal(episode.episode) ||
+      ("part" in episode && !metadataOrdinal(episode.part))
+    )
+      return false;
+  }
+
+  if ("repeat" in value) {
+    const repeat = value.repeat;
+
+    if (
+      typeof repeat !== "object" ||
+      repeat === null ||
+      Array.isArray(repeat) ||
+      ("start" in repeat && !metadataText(repeat.start, 64)) ||
+      ("channel" in repeat && !metadataText(repeat.channel, 256))
+    )
+      return false;
+  }
+
+  return true;
+}
 
 function metadataOf(value: SQLOutputValue | undefined): Pick<Programme, "metadata"> {
-  if (!type.keywords.string.root.allows(value)) return {};
+  if (typeof value !== "string") return {};
 
   try {
     const metadata: unknown = JSON.parse(value);
 
-    return Metadata.allows(metadata) ? { metadata } : {};
+    return validMetadata(metadata) ? { metadata } : {};
   } catch {
     return {};
   }
 }
+/* oxlint-enable anti-slop/no-runtime-typeof */

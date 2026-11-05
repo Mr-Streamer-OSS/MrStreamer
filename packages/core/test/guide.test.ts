@@ -1671,21 +1671,40 @@ it("reads offline version-2 guides and carries their retained past into the next
   expect(carried.matches.map((m) => m.programme.title)).toEqual(["Kept news", "New news"]);
 });
 
-it("keeps programmes readable when stored optional metadata has an invalid shape", async () => {
-  const own = await index(tv(later("one.test", "Readable")));
-  const db = new DatabaseSync(own.target);
-  db.prepare("update programme set metadata = ?").run(JSON.stringify({ episodes: {} }));
-  db.close();
+it.each([
+  null,
+  [],
+  { episodes: {} },
+  { episodes: Array.from({ length: 9 }, () => ({ system: "xmltv_ns", value: "0.1." })) },
+  { episodes: [{ system: "x".repeat(65), value: "0.1." }] },
+  { episodes: [{ system: "xmltv_ns", value: "x".repeat(257) }] },
+  { episode: { season: 0, episode: -1 } },
+  { episode: { season: 0, episode: 0, part: 0.5 } },
+  { episode: { season: Number.MAX_SAFE_INTEGER + 1, episode: 0 } },
+  { repeat: null },
+  { repeat: { start: "x".repeat(65) } },
+  { repeat: { channel: "x".repeat(257) } },
+  { guide: "x".repeat(1025) },
+  { subtitle: "x".repeat(513) },
+  { premiere: "x".repeat(513) },
+])(
+  "keeps programmes readable when stored optional metadata has an invalid shape: %j",
+  async (metadata) => {
+    const own = await index(tv(later("one.test", "Readable")));
+    const db = new DatabaseSync(own.target);
+    db.prepare("update programme set metadata = ?").run(JSON.stringify(metadata));
+    db.close();
 
-  const read = await searchPageAt(
-    ownGuide(own.guide, own.target),
-    catalogueOf({ a: ["one.test"] }),
-    { subscriptionId: "s", query: "Readable", limit: 10 },
-    NOON,
-    inProcess,
-    stopNever,
-  );
+    const read = await searchPageAt(
+      ownGuide(own.guide, own.target),
+      catalogueOf({ a: ["one.test"] }),
+      { subscriptionId: "s", query: "Readable", limit: 10 },
+      NOON,
+      inProcess,
+      stopNever,
+    );
 
-  expect(read.matches[0]?.programme.title).toBe("Readable");
-  expect(read.matches[0]?.programme.metadata).toBeUndefined();
-});
+    expect(read.matches[0]?.programme.title).toBe("Readable");
+    expect(read.matches[0]?.programme.metadata).toBeUndefined();
+  },
+);
