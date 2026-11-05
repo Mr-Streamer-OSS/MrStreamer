@@ -1,3 +1,10 @@
+import { languageName } from "@mrstreamer/core/ondemand/tracks";
+import { offlineNextNotice, type OfflineNext } from "../downloads/offline-next.ts";
+import { t as downloadT } from "../downloads/copy.ts";
+import { askReplace } from "../downloads/replace.ts";
+import { ReplaceDialog } from "../downloads/replace-dialog.tsx";
+import { useOpenShared } from "../navigation/open.ts";
+import { TextButton, RED } from "../live/chrome.tsx";
 import { fileSourceLabel } from "../downloads/file-source-label.ts";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
@@ -267,6 +274,9 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
                 {state.live || state.seekable ? (
                   <Progress now={state} onTouch={touch} onHold={setHeld} />
                 ) : null}
+                {state.intent.kind === "file" && state.phase === "ended" ? (
+                  <OfflineEnd next={media.offline ?? null} remaining={media.remaining} />
+                ) : null}
                 <MediaRow now={state} media={media} onOpen={open} />
               </View>
             ) : null}
@@ -289,6 +299,122 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
         ) : null}
       </View>
     </FocusWithin>
+  );
+}
+
+/** The file end never offers a provider fallback or skips an unavailable next copy. */
+function OfflineEnd({ next, remaining }: { next: OfflineNext | null; remaining: number | null }) {
+  const open = useOpenShared();
+
+  const [owner, setOwner] = useState<ReturnType<
+    typeof import("../downloads/runtime.ts").downloads
+  > | null>(null);
+
+  const [kept, setKept] = useState<{ next: OfflineNext; language: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+
+    if (next?.kind === "ready")
+      void import("../subtitles/runtime.ts")
+        .then(({ retainedFileSubtitle }) => retainedFileSubtitle(next.row, next.path))
+        .then((saved) => {
+          if (active && saved?.subtitle && saved.shown !== false)
+            setKept({
+              next,
+              language: languageName(saved.subtitle.language) ?? saved.subtitle.language,
+            });
+        })
+        .catch(() => {
+          /* An unreadable sidecar is never advertised as kept. */
+        });
+
+    return () => {
+      active = false;
+    };
+  }, [next]);
+  useEffect(() => {
+    if (!owner || next?.kind === "ready") return;
+    const refresh = () => player.media.refreshOfflineNext();
+    refresh();
+
+    return owner.state.subscribe(refresh);
+  }, [owner, next?.kind]);
+  const notice = next ? offlineNextNotice(next) : null;
+  const ready = next?.kind === "ready";
+
+  const code = ready
+    ? next.row.season !== undefined && next.row.episode !== undefined
+      ? `S${next.row.season} E${next.row.episode}`
+      : next.row.episodeName || next.row.title
+    : null;
+
+  const replace = async () => {
+    if (notice?.action.kind !== "replace") return;
+    const { downloads } = await import("../downloads/runtime.ts");
+    const current = downloads();
+    setOwner(current);
+    askReplace(current, notice.action.row);
+  };
+
+  return (
+    <View
+      style={{
+        minHeight: 48,
+        flexDirection: "row",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <View style={{ flexGrow: 1, flexShrink: 1, gap: 4 }}>
+        {notice || ready ? (
+          <Text style={{ color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "500" }}>
+            {notice?.lead ?? code}
+            {notice?.status ? <Text style={{ color: RED }}>{` · ${notice.status}`}</Text> : null}
+          </Text>
+        ) : null}
+        {notice?.detail ? (
+          <Text style={{ color: DIM, fontSize: 14, lineHeight: 18 }}>{notice.detail}</Text>
+        ) : null}
+        {ready ? (
+          <Text style={{ color: DIM, fontSize: 14, lineHeight: 18 }}>
+            {[
+              downloadT("Downloaded"),
+              kept?.next === next ? kept.language : null,
+              remaining !== null ? mediaT("Plays in {seconds}", { seconds: remaining }) : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </Text>
+        ) : null}
+      </View>
+      <TextButton
+        label={mediaT("Play again")}
+        onPress={() => {
+          player.media.cancelNext();
+          void player.resume();
+        }}
+      />
+      {ready ? (
+        <>
+          {remaining !== null ? (
+            <TextButton label={mediaT("Cancel")} onPress={() => player.media.cancelNext()} />
+          ) : null}
+          <TextButton label={mediaT("Play next")} onPress={() => player.media.playNext()} />
+        </>
+      ) : notice ? (
+        <TextButton
+          label={downloadT(notice.action.kind === "replace" ? "Replace" : "Downloads")}
+          onPress={() => {
+            player.media.cancelNext();
+
+            if (notice.action.kind === "replace") void replace();
+            else open("downloads");
+          }}
+        />
+      ) : null}
+      {owner ? <ReplaceDialog owner={owner} /> : null}
+    </View>
   );
 }
 

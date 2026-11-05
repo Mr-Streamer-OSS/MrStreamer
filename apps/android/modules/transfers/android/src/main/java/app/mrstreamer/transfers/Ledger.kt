@@ -40,7 +40,7 @@ class Ledger(context: Context) {
   fun artwork(id: String) = File(root, "$id.art")
 
   /** Unlinks a row's partial, finished and artwork files. Save the ledger first to fence its writer. */
-  fun discard(id: String) {
+  fun discard(id: String) = app.mrstreamer.player.LocalFiles.unused(media(id).absolutePath) {
     for (file in listOf(media(id, true), media(id), artwork(id))) check(!file.exists() || file.delete())
   }
 
@@ -91,7 +91,7 @@ class Ledger(context: Context) {
       row.remove("blocked") // Holds belong to the process, never to durable work.
       if (row.getString("state") == "complete" &&
         (!readable || length <= 0 || length != row.optLong("total"))) {
-        row.put("state", "failed").put("reason", "missing")
+        row.put("state", "failed").put("reason", if (readable) "file-changed" else "missing")
       } else if (row.getString("state") in listOf("running", "queued")) {
         row.put("state", "queued")
         if (row.optString("reason") != "changed") row.put("reason", "continued")

@@ -1,13 +1,14 @@
 import type { DownloadPresentation, MediaIdentity } from "../library/intents.ts";
 import type { DownloadRow } from "./state.ts";
-import { rowStatus } from "./presentation.ts";
+import { replaceable, rowStatus } from "./presentation.ts";
 import { t } from "./copy.ts";
 
 type Message = Parameters<typeof t>[0];
 
-type LibraryAction = "pause" | "resume" | "retry" | "open" | "remove";
+type LibraryAction = "replace" | "pause" | "resume" | "retry" | "open" | "remove";
 
 const labels = {
+  replace: "Replace",
   open: "Play offline",
   remove: "Retry",
   retry: "Retry",
@@ -23,7 +24,7 @@ function presented(row: DownloadRow): [string, LibraryAction, DownloadPresentati
     case "failed":
       return [
         rowStatus(row, false).text ?? t("File missing"),
-        row.reason === "remove" ? "remove" : "retry",
+        replaceable(row) ? "replace" : row.reason === "remove" ? "remove" : "retry",
         "retry",
       ];
     case "paused":

@@ -640,3 +640,172 @@ it("does not restore a late embedded preference over the version's downloaded su
   f.tracks([text]);
   expect(f.native.setText).not.toHaveBeenCalled();
 });
+
+it("ignores an offline EOF lookup after replay and guards late failures", async () => {
+  const f = setup();
+  let resolve!: (value: import("../src/downloads/offline-next.ts").OfflineNext) => void;
+  f.owner.media.registerOfflineNext(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  f.owner.media.watch(true);
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("playing");
+  f.observe("ended");
+  f.observe("playing");
+  resolve({
+    kind: "ready",
+    path: "/two",
+    row: {
+      id: "two",
+      key: "two",
+      sourceId: "source",
+      sourceLabel: "Source",
+      title: "Two",
+      kind: "episode",
+      mediaId: "two",
+      container: "mp4",
+      state: "complete",
+      bytes: 1,
+      total: 1,
+      reason: "",
+    },
+  });
+  await flush();
+  expect(f.owner.media.state.get().remaining).toBeNull();
+  expect(f.owner.media.state.get().offline).toBeNull();
+  await f.owner.stop();
+});
+
+it("runs offline countdown, Cancel and manual Next through the real media model", async () => {
+  vi.useFakeTimers();
+  const f = setup();
+
+  const row = {
+    id: "two",
+    key: "two",
+    sourceId: "source",
+    sourceLabel: "Source",
+    title: "Two",
+    kind: "episode" as const,
+    mediaId: "two",
+    container: "mp4",
+    state: "complete" as const,
+    bytes: 1,
+    total: 1,
+    reason: "",
+  };
+
+  const resolve = vi.fn(async () => ({ kind: "ready" as const, row, path: "/two" }));
+  f.owner.media.registerOfflineNext(resolve);
+  f.owner.media.watch(true);
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("ended");
+  await flush();
+  expect(f.owner.media.state.get().remaining).toBe(10);
+  f.owner.media.cancelNext();
+  await vi.advanceTimersByTimeAsync(11000);
+  expect(f.owner.state.get()).toMatchObject({ intent: { path: "/one" } });
+  f.owner.media.playNext();
+  await flush();
+  expect(resolve).toHaveBeenCalledTimes(2);
+  expect(f.owner.state.get()).toMatchObject({ intent: { path: "/two" } });
+  await f.owner.stop();
+});
+
+it("discards rejected offline lookups after a new attempt", async () => {
+  const f = setup();
+  let reject!: (error: Error) => void;
+  f.owner.media.registerOfflineNext(
+    () =>
+      new Promise((_done, fail) => {
+        reject = fail;
+      }),
+  );
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("ended");
+  f.owner.play({ kind: "file", path: "/other", title: "Other" });
+  await flush();
+  reject(new Error("late"));
+  await flush();
+  expect(f.owner.media.state.get().offline).toBeNull();
+  await f.owner.stop();
+});
+
+it("refreshes an unavailable offline notice and automatically advances only after checked countdown", async () => {
+  vi.useFakeTimers();
+  const f = setup();
+
+  const row = {
+    id: "two",
+    key: "two",
+    sourceId: "source",
+    sourceLabel: "Source",
+    title: "Two",
+    kind: "episode" as const,
+    mediaId: "two",
+    container: "mp4",
+    state: "complete" as const,
+    bytes: 1,
+    total: 1,
+    reason: "",
+  };
+
+  let ready = false;
+  f.owner.media.registerOfflineNext(async () =>
+    ready ? { kind: "ready", row, path: "/two" } : { kind: "missing", row },
+  );
+  f.owner.media.watch(true);
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("ended");
+  await flush();
+  expect(f.owner.media.state.get().offline?.kind).toBe("missing");
+  ready = true;
+  f.owner.media.refreshOfflineNext();
+  await flush();
+  expect(f.owner.media.state.get().offline?.kind).toBe("ready");
+  expect(f.owner.media.state.get().remaining).toBeNull();
+  f.observe("playing");
+  f.observe("ended");
+  await flush();
+  expect(f.owner.media.state.get().remaining).toBe(10);
+  await vi.advanceTimersByTimeAsync(10000);
+  await flush();
+  expect(f.owner.state.get()).toMatchObject({ intent: { path: "/two" } });
+  await f.owner.stop();
+});
+
+it("rechecks an unfinished offline lookup when Watch returns", async () => {
+  const f = setup();
+  let finish!: (value: import("../src/downloads/offline-next.ts").OfflineNext) => void;
+
+  const resolve = vi.fn(
+    () =>
+      new Promise<import("../src/downloads/offline-next.ts").OfflineNext>((done) => {
+        finish = done;
+      }),
+  );
+
+  f.owner.media.registerOfflineNext(resolve);
+  f.owner.media.watch(true);
+  f.owner.play({ kind: "file", path: "/one", title: "One" });
+  await flush();
+  f.observe("ended");
+  f.owner.media.watch(false);
+  finish({ kind: "not-saved" });
+  await flush();
+  expect(f.owner.media.state.get().offline).toBeNull();
+  f.owner.media.watch(true);
+  expect(resolve).toHaveBeenCalledTimes(2);
+  finish({ kind: "not-saved" });
+  await flush();
+  expect(f.owner.media.state.get().offline?.kind).toBe("not-saved");
+  expect(f.owner.media.state.get().remaining).toBeNull();
+  await f.owner.stop();
+});

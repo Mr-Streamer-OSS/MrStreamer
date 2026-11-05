@@ -37,7 +37,7 @@ class LedgerTest {
       val row = JSONObject().put("state", "complete").put("total", 8)
       Ledger.reconcile(row, length, readable)
       assertEquals("failed", row.getString("state"))
-      assertEquals("missing", row.getString("reason"))
+      assertEquals(if (readable) "file-changed" else "missing", row.getString("reason"))
     }
     val complete = JSONObject().put("state", "complete").put("total", 8)
     Ledger.reconcile(complete, 8, true)

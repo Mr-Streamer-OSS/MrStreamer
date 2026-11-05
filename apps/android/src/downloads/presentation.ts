@@ -4,12 +4,21 @@ import type { DownloadRow } from "./state.ts";
 import { t } from "./copy.ts";
 
 // What a Downloads row says and offers, from the native snapshot alone. Paper A's downloads page:
-// one state line, red only for a failure or a missing file, one trailing action, and the rest in
-// the long-press sheet.
+// one state line, red only for a failure or a missing or changed file, one trailing action, and the
+// rest in the long-press sheet.
 
 /** What a row offers. `delete` and `cancel` ask first; the rest happen at once. */
 export type RowChoice =
-  "pause" | "resume" | "retry" | "play" | "delete" | "up" | "down" | "cancel" | "remove";
+  | "replace"
+  | "pause"
+  | "resume"
+  | "retry"
+  | "play"
+  | "delete"
+  | "up"
+  | "down"
+  | "cancel"
+  | "remove";
 
 export interface RowStatus {
   /** The one state line, or null for a copy with nothing more to say. */
@@ -24,8 +33,12 @@ export interface RowStatus {
 export function isCopy(row: DownloadRow) {
   if (row.state === "removing") return row.total > 0 && row.bytes === row.total;
 
-  return row.state === "complete" || (row.state === "failed" && row.reason === "missing");
+  return row.state === "complete" || (row.state === "failed" && replaceable(row));
 }
+
+/** A failed copy whose file went missing or changed size, which Replace downloads anew. */
+export const replaceable = (row: DownloadRow) =>
+  row.reason === "missing" || row.reason === "file-changed";
 
 /** "1.2 GB of 2.8 GB", or null before anything arrived. */
 function received(row: DownloadRow) {
@@ -53,21 +66,23 @@ export function rowStatus(row: DownloadRow, providerRemoved: boolean): RowStatus
     case "failed":
       return {
         text: t(
-          row.reason === "missing"
-            ? "File missing"
-            : row.reason === "playlist"
-              ? "This provider returned a playlist, not a downloadable file."
-              : row.reason === "document"
-                ? "This provider returned a document, not a video file."
-                : row.reason === "length"
-                  ? "The provider did not report the file size. This file cannot be checked for completion."
-                  : row.reason === "remove"
-                    ? "The file could not be removed. Try removing it again."
-                    : row.reason === "disk"
-                      ? "Disk full. Free some space, then retry."
-                      : row.reason === "credentials"
-                        ? "The provider login changed or is unavailable."
-                        : "The download couldn't go on from where it stopped.",
+          row.reason === "file-changed"
+            ? "File changed. Replace it to play."
+            : row.reason === "missing"
+              ? "File missing"
+              : row.reason === "playlist"
+                ? "This provider returned a playlist, not a downloadable file."
+                : row.reason === "document"
+                  ? "This provider returned a document, not a video file."
+                  : row.reason === "length"
+                    ? "The provider did not report the file size. This file cannot be checked for completion."
+                    : row.reason === "remove"
+                      ? "The file could not be removed. Try removing it again."
+                      : row.reason === "disk"
+                        ? "Disk full. Free some space, then retry."
+                        : row.reason === "credentials"
+                          ? "The provider login changed or is unavailable."
+                          : "The download couldn't go on from where it stopped.",
         ),
         failed: true,
         progress: null,
@@ -96,7 +111,7 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
     case "complete":
       return "play";
     case "failed":
-      return row.reason === "missing" ? "delete" : row.reason === "remove" ? "remove" : "retry";
+      return replaceable(row) ? "replace" : row.reason === "remove" ? "remove" : "retry";
     case "paused":
       return "resume";
     case "queued":
@@ -110,14 +125,14 @@ export function trailingChoice(row: DownloadRow): RowChoice | null {
 /**
  * What the long-press sheet offers. Queue rows: Pause or Resume, Move up and down among those
  * waiting (queued or paused, in queue order), Cancel download. Failed rows: Retry and Remove.
- * Copies: Play offline and Delete download.
+ * Copies: Play offline and Delete download; a missing or changed one Replace and Delete download.
  */
 export function sheetChoices(row: DownloadRow, rows: readonly DownloadRow[]): RowChoice[] {
   switch (row.state) {
     case "complete":
       return ["play", "delete"];
     case "failed":
-      return row.reason === "missing" ? ["delete"] : ["retry", "remove"];
+      return replaceable(row) ? ["replace", "delete"] : ["retry", "remove"];
     case "removing":
       return [];
     case "running":

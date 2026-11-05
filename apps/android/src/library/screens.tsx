@@ -1,3 +1,10 @@
+import { stopSeriesDownloads } from "../downloads/series.ts";
+import {
+  SeriesDialogs,
+  SeriesDownloadRow,
+  SeriesDownloadScope,
+  type SeriesDownloadProps,
+} from "../downloads/series-download.tsx";
 import { router, useLocalSearchParams, useSegments } from "expo-router";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
@@ -1159,6 +1166,9 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
     : [];
 
   const pick = (next: string | null) => {
+    // Accepting a version, even the one shown, ends what a bulk download's sheet reviewed.
+    stopSeriesDownloads("version");
+
     if (!title) return;
 
     try {
@@ -1199,6 +1209,27 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
       t("Version"));
 
   const multiSource = new Set(title.versions.map((v) => v.subscriptionId)).size > 1;
+
+  const group =
+    version && groups.find((g) => g.versions.some((v) => ownedKey(v) === ownedKey(version)));
+
+  const seasonLabel = (number: number) =>
+    number === 0 ? t("Specials") : t("Season {number}", { number });
+
+  // Downloads' bulk rows for the shown version, once its details name every episode's file.
+  const bulkProps: SeriesDownloadProps | null =
+    value?.kind === "series" && version && details
+      ? {
+          details: value,
+          version,
+          containers: details.containers,
+          seasonLabel,
+          versionLabel: group ? [group.quality, group.label].filter(Boolean).join(" · ") : "",
+          sourceLabel: model.sourceLabel(version.subscriptionId) ?? "",
+          reader: () => model.reader(version.subscriptionId),
+        }
+      : null;
+
   const numberedSeasons = seasons.filter((s) => s.number > 0).length;
 
   const facts = [
@@ -1287,6 +1318,7 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
           {t("With {names}", { names: formatList(value.cast.map((p) => p.name)) })}
         </Text>
       ) : null}
+      {beside && bulkProps ? <SeriesDownloadRow key={key} {...bulkProps} inline /> : null}
     </>
   );
 
@@ -1295,12 +1327,15 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
       <TextTabs
         tabs={seasons.map((s) => ({
           value: String(s.number),
-          label: s.number === 0 ? t("Specials") : t("Season {number}", { number: s.number }),
+          label: seasonLabel(s.number),
         }))}
         selected={selectedSeason ? String(selectedSeason.number) : undefined}
         onSelect={(season) => router.setParams({ season })}
         inset={beside ? 12 : 4}
       />
+      {bulkProps && selectedSeason ? (
+        <SeriesDownloadRow key={key} {...bulkProps} season={selectedSeason.number} />
+      ) : null}
       {shown
         ? selectedSeason?.episodes.map((episode) => (
             <EpisodeRow
@@ -1313,78 +1348,82 @@ export function DetailsScreen({ model: injected }: { model?: LibraryModel }) {
             />
           ))
         : null}
+      {!beside && bulkProps ? <SeriesDownloadRow key={key} {...bulkProps} /> : null}
     </>
   ) : null;
 
   return (
-    <Screen title={title.title} pushed>
-      {beside ? (
-        <View style={{ flex: 1, flexDirection: "row" }}>
-          <ScrollView
-            style={{ width: 440, flexGrow: 0 }}
-            contentContainerStyle={{
-              paddingHorizontal: 24,
-              paddingTop: 4,
-              paddingBottom: insets.bottom + 16,
-            }}
-          >
-            {header}
-          </ScrollView>
-          <ScrollView
-            style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.hairline }}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-          >
-            {episodes}
-          </ScrollView>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
-          <View
-            style={{
-              width: "100%",
-              maxWidth: 640,
-              paddingHorizontal: width >= 600 ? 24 : 16,
-              paddingTop: 4,
-            }}
-          >
-            {header}
+    <SeriesDownloadScope key={key}>
+      <Screen title={title.title} pushed>
+        {beside ? (
+          <View style={{ flex: 1, flexDirection: "row" }}>
+            <ScrollView
+              style={{ width: 440, flexGrow: 0 }}
+              contentContainerStyle={{
+                paddingHorizontal: 24,
+                paddingTop: 4,
+                paddingBottom: insets.bottom + 16,
+              }}
+            >
+              {header}
+            </ScrollView>
+            <ScrollView
+              style={{ flex: 1, borderLeftWidth: 1, borderColor: colors.hairline }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+            >
+              {episodes}
+            </ScrollView>
           </View>
-          {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
-        </ScrollView>
-      )}
-      <ViewingLine />
-      <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
-        <SheetTitle title={t("Version")} />
-        <SheetScroll>
-          <View accessibilityRole="radiogroup">
-            <RadioRow
-              label={t("Automatic")}
-              height={56}
-              selected={automatic}
-              onPress={() => pick(null)}
-            />
-            {groups.flatMap((group) =>
-              group.versions.map((v, at) => (
-                <RadioRow
-                  key={ownedKey(v)}
-                  label={[
-                    group.quality,
-                    group.label,
-                    group.versions.length > 1 ? formatNumber(at + 1) : "",
-                    multiSource ? model.sourceLabel(v.subscriptionId) : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  height={56}
-                  selected={!automatic && ownedKey(v) === ownedKey(version!)}
-                  onPress={() => pick(ownedKey(v))}
-                />
-              )),
-            )}
-          </View>
-        </SheetScroll>
-      </Sheet>
-    </Screen>
+        ) : (
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+            <View
+              style={{
+                width: "100%",
+                maxWidth: 640,
+                paddingHorizontal: width >= 600 ? 24 : 16,
+                paddingTop: 4,
+              }}
+            >
+              {header}
+            </View>
+            {episodes ? <View style={{ paddingTop: 12 }}>{episodes}</View> : null}
+          </ScrollView>
+        )}
+        <ViewingLine />
+        <SeriesDialogs />
+        <Sheet visible={menu} label={t("Version")} onClose={() => setMenu(false)}>
+          <SheetTitle title={t("Version")} />
+          <SheetScroll>
+            <View accessibilityRole="radiogroup">
+              <RadioRow
+                label={t("Automatic")}
+                height={56}
+                selected={automatic}
+                onPress={() => pick(null)}
+              />
+              {groups.flatMap((group) =>
+                group.versions.map((v, at) => (
+                  <RadioRow
+                    key={ownedKey(v)}
+                    label={[
+                      group.quality,
+                      group.label,
+                      group.versions.length > 1 ? formatNumber(at + 1) : "",
+                      multiSource ? model.sourceLabel(v.subscriptionId) : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    height={56}
+                    selected={!automatic && ownedKey(v) === ownedKey(version!)}
+                    onPress={() => pick(ownedKey(v))}
+                  />
+                )),
+              )}
+            </View>
+          </SheetScroll>
+        </Sheet>
+      </Screen>
+    </SeriesDownloadScope>
   );
 }
 

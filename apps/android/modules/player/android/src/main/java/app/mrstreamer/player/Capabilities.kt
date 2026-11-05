@@ -8,7 +8,8 @@ import androidx.media3.common.MimeTypes
 /**
  * What this phone can decode, as its codec list declares it: for each format, whether a decoder
  * exists and whether one is hardware. A declared decoder is not proof a stream plays (profiles,
- * levels and the file decide); the tracks the player reports for a playing attempt say that.
+ * levels and the file decide). Track support is a renderer declaration too; only installed
+ * picture and sound observations qualify playback.
  */
 object Capabilities {
   /** The formats IPTV providers send, by the MIME type Media3 names them with. */
@@ -17,6 +18,8 @@ object Capabilities {
       MimeTypes.VIDEO_H264,
       MimeTypes.VIDEO_H265,
       MimeTypes.VIDEO_MPEG2,
+      MimeTypes.VIDEO_MP4V,
+      MimeTypes.VIDEO_VP8,
       MimeTypes.VIDEO_VP9,
       MimeTypes.VIDEO_AV1,
       MimeTypes.AUDIO_AAC,

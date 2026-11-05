@@ -22,6 +22,8 @@ import {
   type RowChoice,
   type RowStatus,
 } from "./presentation.ts";
+import { askReplace } from "./replace.ts";
+import { ReplaceDialog } from "./replace-dialog.tsx";
 import { downloads } from "./runtime.ts";
 import type { DownloadRow } from "./state.ts";
 
@@ -34,6 +36,7 @@ const TRACK = "#3A3A3A";
 const small = { fontSize: 13, lineHeight: 18 } as const;
 
 const choices = {
+  replace: { label: "Replace", icon: "autorenew" },
   pause: { label: "Pause", icon: "pause" },
   resume: { label: "Resume", icon: "file-download" },
   retry: { label: "Retry", icon: "refresh" },
@@ -91,6 +94,8 @@ export default function DownloadsScreen() {
     close();
 
     switch (choice) {
+      case "replace":
+        return askReplace(owner, row);
       case "play":
         return void play(row);
       case "cancel":
@@ -226,6 +231,7 @@ export default function DownloadsScreen() {
           }}
         />
       ) : null}
+      <ReplaceDialog owner={owner} />
     </Screen>
   );
 }

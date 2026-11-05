@@ -11,6 +11,12 @@ const english = {
     "The provider did not report the file size. This file cannot be checked for completion.",
   "The file could not be removed. Try removing it again.":
     "The file could not be removed. Try removing it again.",
+  "File changed. Replace it to play.": "File changed. Replace it to play.",
+  "File changed": "File changed",
+  Replace: "Replace",
+  "Replace the copy of {name}?": "Replace the copy of {name}?",
+  "Its file changed on this device. Replacing deletes it and downloads {episode} again in the same version.":
+    "Its file changed on this device. Replacing deletes it and downloads {episode} again in the same version.",
   Downloads: "Downloads",
   Downloaded: "Downloaded",
   Downloading: "Downloading",
@@ -66,6 +72,79 @@ const english = {
   "Couldn't play {name}": "Couldn't play {name}",
   "The copy on this device can't be read. Delete it and download it again.":
     "The copy on this device can't be read. Delete it and download it again.",
+  // A series' bulk downloads, in iOS's words (apps/ios/src/i18n/downloads.ts).
+  "{count} episodes": { one: "{count} episode", other: "{count} episodes" },
+  "Whole series": "Whole series",
+  "{held} of {total} saved or queued": "{held} of {total} saved or queued",
+  "Adding {done} of {total}": "Adding {done} of {total}",
+  "Stops if you leave this series": "Stops if you leave this series",
+  "Download remaining": "Download remaining",
+  "Review series download": "Review series download",
+  "Cancel remaining": "Cancel remaining",
+  "Download {name}?": "Download {name}?",
+  "Download all of {name}?": "Download all of {name}?",
+  "Download {episodes}": "Download {episodes}",
+  "Download {remaining} and replace {count} missing": {
+    one: "Download {remaining} and replace {count} missing",
+    other: "Download {remaining} and replace {count} missing",
+  },
+  "Replace {count} missing files": {
+    one: "Replace {count} missing file",
+    other: "Replace {count} missing files",
+  },
+  "{episodes} in {seasons} seasons.": "{episodes} in {seasons} seasons.",
+  "{count} already saved or queued.": {
+    one: "{count} already saved or queued.",
+    other: "{count} already saved or queued.",
+  },
+  "{count} failed and will be retried.": {
+    one: "{count} failed and will be retried.",
+    other: "{count} failed and will be retried.",
+  },
+  "{count} saved files are missing.": {
+    one: "{count} saved file is missing.",
+    other: "{count} saved files are missing.",
+  },
+  // Android only: a changed file is replaced from its own row, which asks first.
+  "{count} saved files changed. Replace them in Downloads.": {
+    one: "{count} saved file changed. Replace it in Downloads.",
+    other: "{count} saved files changed. Replace them in Downloads.",
+  },
+  "Size unavailable.": "Size unavailable.",
+  "Uses the selected version.": "Uses the selected version.",
+  "All {count} episodes are saved or queued.": {
+    one: "{count} episode is saved or queued.",
+    other: "All {count} episodes are saved or queued.",
+  },
+  "{count} queued.": { one: "{count} queued.", other: "{count} queued." },
+  "{count} retried.": { one: "{count} retried.", other: "{count} retried." },
+  "{count} replaced.": { one: "{count} replaced.", other: "{count} replaced." },
+  "{count} changed meanwhile and stayed as they were.": {
+    one: "{count} changed meanwhile and stayed as they were.",
+    other: "{count} changed meanwhile and stayed as they were.",
+  },
+  // Android's admission reports no reason for a failed episode.
+  "{count} failed.": { one: "{count} failed.", other: "{count} failed." },
+  "Cancelled before {episodes}.": "Cancelled before {episodes}.",
+  "Stopped before {episodes}: the provider signed in anew or was removed.":
+    "Stopped before {episodes}: the provider signed in anew or was removed.",
+  "Stopped before {episodes}: a version was chosen meanwhile.":
+    "Stopped before {episodes}: a version was chosen meanwhile.",
+  "Nothing was added.": "Nothing was added.",
+  "Couldn't download {name}": "Couldn't download {name}",
+  "Episodes of another download are still being added.":
+    "Episodes of another download are still being added.",
+  "The version or its provider changed. Try again.":
+    "The version or its provider changed. Try again.",
+  "Retry failed": "Retry failed",
+  "Open Downloads": "Open Downloads",
+  // Offline Next at the end of a downloaded episode.
+  "{episode} isn't on this device": "{episode} isn't on this device",
+  "{episode} download is paused": "{episode} download is paused",
+  "{episode} is still downloading": "{episode} is still downloading",
+  "The next episode": "The next episode",
+  "Download it to go on.": "Download it to go on.",
+  "Replace it to go on.": "Replace it to go on.",
 } as const;
 
 const dutch = {
@@ -77,6 +156,12 @@ const dutch = {
     "De provider gaf geen bestandsgrootte door. Deze download kan niet op volledigheid worden gecontroleerd.",
   "The file could not be removed. Try removing it again.":
     "Het bestand kon niet worden verwijderd. Probeer het opnieuw.",
+  "File changed. Replace it to play.": "Bestand veranderd. Vervang het om af te spelen.",
+  "File changed": "Bestand veranderd",
+  Replace: "Vervangen",
+  "Replace the copy of {name}?": "De kopie van {name} vervangen?",
+  "Its file changed on this device. Replacing deletes it and downloads {episode} again in the same version.":
+    "Het bestand is op dit apparaat veranderd. Vervangen verwijdert het en downloadt {episode} opnieuw in dezelfde versie.",
   Downloads: "Downloads",
   Downloaded: "Gedownload",
   Downloading: "Downloaden",
@@ -132,6 +217,81 @@ const dutch = {
   "Couldn't play {name}": "{name} kon niet worden afgespeeld",
   "The copy on this device can't be read. Delete it and download it again.":
     "De kopie op dit apparaat kan niet worden gelezen. Verwijder hem en download hem opnieuw.",
+  "{count} episodes": { one: "{count} aflevering", other: "{count} afleveringen" },
+  "Whole series": "Hele serie",
+  "{held} of {total} saved or queued": "{held} van {total} bewaard of in de wachtrij",
+  "Adding {done} of {total}": "{done} van {total} toevoegen",
+  "Stops if you leave this series": "Stopt als je deze serie verlaat",
+  "Download remaining": "Rest downloaden",
+  "Review series download": "Serie downloaden bekijken",
+  "Cancel remaining": "De rest annuleren",
+  "Download {name}?": "{name} downloaden?",
+  "Download all of {name}?": "Alles van {name} downloaden?",
+  "Download {episodes}": "{episodes} downloaden",
+  "Download {remaining} and replace {count} missing": {
+    one: "{remaining} downloaden en {count} ontbrekende vervangen",
+    other: "{remaining} downloaden en {count} ontbrekende vervangen",
+  },
+  "Replace {count} missing files": {
+    one: "{count} ontbrekend bestand vervangen",
+    other: "{count} ontbrekende bestanden vervangen",
+  },
+  "{episodes} in {seasons} seasons.": "{episodes} in {seasons} seizoenen.",
+  "{count} already saved or queued.": {
+    one: "{count} al bewaard of in de wachtrij.",
+    other: "{count} al bewaard of in de wachtrij.",
+  },
+  "{count} failed and will be retried.": {
+    one: "{count} mislukt en wordt opnieuw geprobeerd.",
+    other: "{count} mislukt en worden opnieuw geprobeerd.",
+  },
+  "{count} saved files are missing.": {
+    one: "{count} bewaard bestand ontbreekt.",
+    other: "{count} bewaarde bestanden ontbreken.",
+  },
+  "{count} saved files changed. Replace them in Downloads.": {
+    one: "{count} bewaard bestand is veranderd. Vervang het in Downloads.",
+    other: "{count} bewaarde bestanden zijn veranderd. Vervang ze in Downloads.",
+  },
+  "Size unavailable.": "Grootte onbekend.",
+  "Uses the selected version.": "Gebruikt de gekozen versie.",
+  "All {count} episodes are saved or queued.": {
+    one: "{count} aflevering is bewaard of in de wachtrij.",
+    other: "Alle {count} afleveringen zijn bewaard of in de wachtrij.",
+  },
+  "{count} queued.": {
+    one: "{count} in de wachtrij gezet.",
+    other: "{count} in de wachtrij gezet.",
+  },
+  "{count} retried.": {
+    one: "{count} opnieuw geprobeerd.",
+    other: "{count} opnieuw geprobeerd.",
+  },
+  "{count} replaced.": { one: "{count} vervangen.", other: "{count} vervangen." },
+  "{count} changed meanwhile and stayed as they were.": {
+    one: "{count} is intussen veranderd en bleef zoals hij was.",
+    other: "{count} zijn intussen veranderd en bleven zoals ze waren.",
+  },
+  "{count} failed.": { one: "{count} mislukt.", other: "{count} mislukt." },
+  "Cancelled before {episodes}.": "Geannuleerd vóór {episodes}.",
+  "Stopped before {episodes}: the provider signed in anew or was removed.":
+    "Gestopt vóór {episodes}: de provider is opnieuw ingelogd of verwijderd.",
+  "Stopped before {episodes}: a version was chosen meanwhile.":
+    "Gestopt vóór {episodes}: intussen is een versie gekozen.",
+  "Nothing was added.": "Er is niets toegevoegd.",
+  "Couldn't download {name}": "{name} kon niet worden gedownload",
+  "Episodes of another download are still being added.":
+    "Afleveringen van een andere download worden nog toegevoegd.",
+  "The version or its provider changed. Try again.":
+    "De versie of de provider is veranderd. Probeer het opnieuw.",
+  "Retry failed": "Mislukte opnieuw proberen",
+  "Open Downloads": "Downloads openen",
+  "{episode} isn't on this device": "{episode} staat niet op dit apparaat",
+  "{episode} download is paused": "Download van {episode} is gepauzeerd",
+  "{episode} is still downloading": "{episode} wordt nog gedownload",
+  "The next episode": "De volgende aflevering",
+  "Download it to go on.": "Download hem om verder te kijken.",
+  "Replace it to go on.": "Vervang hem om verder te kijken.",
 } as const;
 
 export const t = catalogue(english, { "nl-NL": dutch });
