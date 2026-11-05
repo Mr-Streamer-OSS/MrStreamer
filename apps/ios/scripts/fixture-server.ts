@@ -5,6 +5,8 @@
 // plays where it can't play the panel's MPEG-TS.
 //
 //   node scripts/fixture-server.ts [port] [control port]
+// Use 0 for a system-assigned port; readiness reports both bound addresses. A second
+// provider needs an explicit panel port to name its request log and provenance.
 //
 // The app connects to http://127.0.0.1:<port> as "fixture" / "fixture-pass", or as the
 // FIXTURE_USERNAME / FIXTURE_PASSWORD given, such as the canaries scripts/log-scan.ts looks for.
@@ -132,6 +134,9 @@ const fixtures = join(root, "apps/desktop/test/fixtures");
 mkdirSync(out, { recursive: true });
 
 const second = process.env.FIXTURE_SECOND === "1";
+
+if (second && port === 0) throw new Error("FIXTURE_SECOND requires an explicit panel port");
+
 const pngLogos = process.env.FIXTURE_LOGOS === "png";
 const cacheableArt = pngLogos && process.env.FIXTURE_ART_CACHEABLE === "1";
 
