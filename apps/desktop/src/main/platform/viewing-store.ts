@@ -94,6 +94,8 @@ import { WATCHLIST_TABLES } from "./watchlist-store.ts";
 import { CUSTOM_LIST_MEMBERS_TABLE, prepareCustomLists } from "./custom-lists-store.ts";
 import { lazy } from "@mrstreamer/contracts/lazy";
 
+const RemovedAt = lazy(() => type("number | number.NaN"));
+
 const SCHEMA = `
   create table if not exists events (
     sequence integer primary key autoincrement,
@@ -344,7 +346,7 @@ function prepare(db: DatabaseSync): void {
     .all();
 
   for (const { account } of erased) {
-    if (typeof account === "string")
+    if (type.keywords.string.root.allows(account))
       deleteForGood(db, [...MARK_TABLES, DETAIL_CACHE_TABLE], account);
   }
 
@@ -627,7 +629,7 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
       const seriesId = title.kind === "episode" ? title.seriesId : null;
       const removed = statements.removedAt.get(account, titleKey(title), seriesId);
 
-      return typeof removed?.["removed_at"] === "number" ? removed["removed_at"] : null;
+      return RemovedAt().allows(removed?.["removed_at"]) ? removed["removed_at"] : null;
     },
     saveRow: (row) => saveTitle(db, account, row),
     remove: (_title, keys, at) => {
@@ -662,10 +664,10 @@ function storeOn(db: DatabaseSync, usage?: UsageObservers): ViewingStore["Servic
   const markedOf = (account: string): AccountRecord["marked"] =>
     statements.shown.all(account, CONTINUE_OFFERED).flatMap((row) => {
       const key = row["series"];
-      const state = typeof key === "string" ? seriesOf(account, key) : null;
+      const state = type.keywords.string.root.allows(key) ? seriesOf(account, key) : null;
       const mark = state && leading(state);
 
-      return typeof key === "string" && state && mark
+      return type.keywords.string.root.allows(key) && state && mark
         ? [{ mark, next: nextOf(account, key, state) }]
         : [];
     });

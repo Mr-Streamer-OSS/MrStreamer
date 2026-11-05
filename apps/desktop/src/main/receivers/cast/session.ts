@@ -1,3 +1,5 @@
+import { lazy } from "@mrstreamer/contracts/lazy";
+import { type } from "arktype";
 // One connected Cast receiver: the channel to it, the media app started on it, and the load that
 // app plays. It asks the receiver for what the output service wants, each request with an id and
 // a deadline, and turns what the receiver says into the adapter's events.
@@ -25,6 +27,8 @@ import {
   type ReceiverStatus,
 } from "./messages.ts";
 import { defined } from "@mrstreamer/core/defined";
+
+const ReceiverNumber = lazy(() => type("number | number.NaN"));
 
 /**
  * Google's Default Media Receiver: the app every Cast receiver can start, which plays the address
@@ -319,12 +323,13 @@ export async function openSession(
     if (status.activeTrackIds) current.activeTracks = status.activeTrackIds;
     const duration = status.media?.duration;
 
-    if (!current.live && typeof duration === "number" && duration > 0) current.duration = duration;
+    if (!current.live && ReceiverNumber().allows(duration) && duration > 0)
+      current.duration = duration;
 
     const state = stateOf(status, current.shown);
 
     // An idle receiver says 0 or nothing for the position: where the media got to stands.
-    if (typeof status.currentTime === "number" && status.playerState !== "IDLE") {
+    if (ReceiverNumber().allows(status.currentTime) && status.playerState !== "IDLE") {
       current.position = Math.max(0, status.currentTime);
     }
 
@@ -397,7 +402,7 @@ export async function openSession(
 
     if (!established) return;
 
-    if (typeof status.volume?.level === "number") {
+    if (ReceiverNumber().allows(status.volume?.level)) {
       const level = Math.min(1, Math.max(0, status.volume.level));
       const muted = status.volume.muted ?? false;
 

@@ -280,7 +280,7 @@ export function linkProblems(
   const problems = new Set<string>();
 
   for (const notice of notices) {
-    const text = typeof notice.text === "string" ? notice.text : "";
+    const text = type.keywords.string.root.allows(notice.text) ? notice.text : "";
     const places = [notice.source, notice.homepage ?? "", text].join("\n");
 
     for (const [, tag = "", file = ""] of places.matchAll(RELEASE_LINK)) {
@@ -445,7 +445,7 @@ export async function collectNotices({
 
     const line = FULL_TEXT[notice.licence];
 
-    if (line && typeof notice.text === "string" && !notice.text.includes(line)) {
+    if (line && type.keywords.string.root.allows(notice.text) && !notice.text.includes(line)) {
       problems.push(
         `${notice.id}'s notice refers to ${notice.licence} without its text: give it an override with "standardText".`,
       );
@@ -706,7 +706,7 @@ async function standardText(
   const template = join(app, "licences", "standard", `${licence}.txt`);
 
   if (!existsSync(template)) throw new Error(`${id}: licences/standard has no ${licence}.txt.`);
-  const author = typeof json.author === "string" ? json.author : json.author?.name;
+  const author = type.keywords.string.root.allows(json.author) ? json.author : json.author?.name;
   const holder = author?.replace(/\s*[<(].*$/, "").trim();
   const text = normalized(await readFile(template, "utf8"));
 
@@ -747,12 +747,16 @@ function filled(text: string, variables: Readonly<Record<string, string>>, where
 }
 
 function licenceOf(json: PackageJson): string | null {
-  return (typeof json.license === "string" ? json.license : json.license?.type) ?? null;
+  return (
+    (type.keywords.string.root.allows(json.license) ? json.license : json.license?.type) ?? null
+  );
 }
 
 /** The repository as a web address: `git+https://github.com/a/b.git` and `a/b` become https://github.com/a/b. */
 function repositoryOf(json: PackageJson): string | null {
-  const raw = typeof json.repository === "string" ? json.repository : json.repository?.url;
+  const raw = type.keywords.string.root.allows(json.repository)
+    ? json.repository
+    : json.repository?.url;
 
   if (!raw) return null;
 

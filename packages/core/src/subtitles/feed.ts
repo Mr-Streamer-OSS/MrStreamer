@@ -1,3 +1,5 @@
+import { type } from "arktype";
+import { lazy } from "@mrstreamer/contracts/lazy";
 // A movie's or episode's subtitles as the proxy sends them to the player: a JSON line each, with
 // times in seconds into the title. The feed recovers what precedes the position and says `ready`
 // when it has that past. Independent text can arrive and show meanwhile; packet changes wait
@@ -29,6 +31,17 @@ export type SubtitleFeedLine =
   /** A line of text, shown from `at` until `until`. */
   | { readonly at: number; readonly until: number; readonly text: string };
 
+// Branch order is part of the feed: ready/unavailable take precedence over packet fields.
+const Ready = lazy(() => type({ ready: "true" }));
+const TimedReady = lazy(() => Ready().and({ at: "number" }));
+
+const Unavailable = lazy(() =>
+  type({ unavailable: "'limit' | 'changed' | 'unreadable' | 'network'" }),
+);
+
+const Packet = lazy(() => type({ at: "number", data: "string" }));
+const Text = lazy(() => type({ at: "number", text: "string", until: "number" }));
+
 /** What a line of the feed says, or null when it isn't one. */
 export function readFeedLine(line: string): SubtitleFeedLine | null {
   let value: unknown;
@@ -39,36 +52,21 @@ export function readFeedLine(line: string): SubtitleFeedLine | null {
     return null;
   }
 
-  if (typeof value !== "object" || value === null) return null;
+  if (!type.keywords.object.root.allows(value)) return null;
 
   if ("ready" in value) {
-    if (value.ready !== true) return null;
+    if (!Ready().allows(value)) return null;
 
-    return "at" in value && typeof value.at === "number"
-      ? { ready: true, at: value.at }
-      : { ready: true };
+    return TimedReady().allows(value) ? { ready: true, at: value.at } : { ready: true };
   }
 
   if ("unavailable" in value) {
-    const why = value.unavailable;
-
-    return why === "limit" || why === "changed" || why === "unreadable" || why === "network"
-      ? { unavailable: why }
-      : null;
+    return Unavailable().allows(value) ? { unavailable: value.unavailable } : null;
   }
 
-  if (!("at" in value) || typeof value.at !== "number") return null;
+  if (Packet().allows(value)) return { at: value.at, data: value.data };
 
-  if ("data" in value && typeof value.data === "string") return { at: value.at, data: value.data };
-
-  if (
-    "text" in value &&
-    typeof value.text === "string" &&
-    "until" in value &&
-    typeof value.until === "number"
-  ) {
-    return { at: value.at, until: value.until, text: value.text };
-  }
+  if (Text().allows(value)) return { at: value.at, until: value.until, text: value.text };
 
   return null;
 }

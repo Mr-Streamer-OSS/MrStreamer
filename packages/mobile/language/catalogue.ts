@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Locale } from "@mrstreamer/contracts/language";
 import {
   currentLanguage,
@@ -47,7 +48,7 @@ export function catalogue<const E extends English>(
     let text: string | Plural = (locale === "nl-NL" ? others[locale] : english)[key] ?? key;
     const values: Readonly<Record<string, string | number>> = params ?? {};
 
-    if (typeof text !== "string") {
+    if (!arkType.keywords.string.root.allows(text)) {
       let plural = rules.get(locale);
 
       if (!plural) rules.set(locale, (plural = new Intl.PluralRules(locale)));
@@ -59,7 +60,7 @@ export function catalogue<const E extends English>(
 
       if (value === undefined) return whole;
 
-      return typeof value === "number" ? formatNumber(value) : value;
+      return arkType.keywords.string.root.allows(value) ? value : formatNumber(value);
     });
   };
 }

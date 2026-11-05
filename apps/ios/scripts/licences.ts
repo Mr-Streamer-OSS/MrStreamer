@@ -264,7 +264,8 @@ function packageComponent(
 
   const id = `${pkg.name}@${pkg.version}`;
 
-  if (typeof pkg.license !== "string") fail(`${id} names no SPDX licence in its package.json`);
+  if (!type.keywords.string.root.allows(pkg.license))
+    fail(`${id} names no SPDX licence in its package.json`);
   const files = [found.root, ...[...found.within].sort()].flatMap(licenceFiles);
 
   const notices = files.map((file) =>

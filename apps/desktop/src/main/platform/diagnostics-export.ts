@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
+import { type } from "arktype";
 // Build an export from known fields, never by copying or trying to scrub a raw log. Older or
 // damaged records can contain anything, so even string fields have an explicit set of values.
 import { randomUUID } from "node:crypto";
@@ -109,13 +111,14 @@ function record(line: string): string | null {
     return null;
   }
 
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  if (!(type.keywords.object.root.allows(value) && !isCallable(value)) || Array.isArray(value))
+    return null;
   const raw = value as Record<string, unknown>;
   const known = Object.entries(FIELDS).find(([key]) => key === raw["op"]);
 
   if (
     !known ||
-    typeof raw["at"] !== "string" ||
+    !type.keywords.string.root.allows(raw["at"]) ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(raw["at"]) ||
     !Number.isFinite(Date.parse(raw["at"]))
   )
@@ -130,7 +133,7 @@ function record(line: string): string | null {
     if (rule === "nullable-number" && field === null) safe[key] = null;
     else if (rule === "number" || rule === "nullable-number") {
       if (
-        typeof field !== "number" ||
+        !type.keywords.number.root.allows(field) ||
         !Number.isFinite(field) ||
         field < 0 ||
         field > Number.MAX_SAFE_INTEGER
@@ -138,7 +141,7 @@ function record(line: string): string | null {
         return null;
       safe[key] = field;
     } else if (rule === "method") {
-      if (typeof field !== "string" || !Object.hasOwn(ipcInputs, field)) return null;
+      if (!type.keywords.string.root.allows(field) || !Object.hasOwn(ipcInputs, field)) return null;
       safe[key] = field;
     } else {
       const allowed = rule.find((candidate) => candidate === field);
@@ -245,8 +248,8 @@ export function diagnosticsExporter(dataDir: string, context: () => Promise<Diag
           const value: unknown = JSON.parse(line);
 
           return (
-            typeof value === "object" &&
-            value !== null &&
+            type.keywords.object.root.allows(value) &&
+            !isCallable(value) &&
             "outcome" in value &&
             value.outcome !== "ok" &&
             value.outcome !== "interrupted" &&

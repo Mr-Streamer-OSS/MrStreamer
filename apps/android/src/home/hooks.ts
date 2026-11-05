@@ -1,5 +1,6 @@
 import { preview } from "../preview/session.ts";
 import { channels, titles } from "../preview/catalogue.ts";
+import { type } from "arktype";
 import { useRootNavigationState } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { sources } from "../bootstrap/sources.ts";
@@ -30,7 +31,7 @@ function liveCountry(state: NavigationTree | undefined, inLive = false): string 
       live &&
       route.params &&
       "country" in route.params &&
-      typeof route.params.country === "string"
+      type.keywords.string.root.allows(route.params.country)
     )
       return route.params.country;
     const found = liveCountry(route.state, live);

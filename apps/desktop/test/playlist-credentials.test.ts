@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // What a playlist's stream sends where once its address is https, through the real playback proxy,
 // its converter, a receiver's address on the local network, catch-up, title playback and downloads.
 // The link's token never reaches http: not in an address the stream's playlists name, nor in a
@@ -60,8 +61,9 @@ async function connected(entries: (plain: string) => readonly string[], link = L
 
     if (answer === undefined) return response.writeHead(404).end();
 
-    if (typeof answer === "object" && "location" in answer)
+    if (arkType.keywords.object.root.allows(answer) && "location" in answer)
       return response.writeHead(302, { location: answer.location }).end();
+
     const body = Buffer.from(answer);
     // Byte ranges, as files behind a provider's redirect answer them.
     const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? "");
@@ -93,7 +95,7 @@ async function connected(entries: (plain: string) => readonly string[], link = L
     if (found === undefined) return new Response(null, { status: 404 });
 
     const response =
-      typeof found === "object" && "location" in found
+      arkType.keywords.object.root.allows(found) && "location" in found
         ? new Response(null, { status: 302, headers: { location: found.location } })
         : new Response(found);
 

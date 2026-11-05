@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "../../../packages/contracts/src/json.ts";
 import { describe, expect, it } from "vitest";
 import { FEED, listedDownloads, verifiedDownloads } from "../src/downloads.ts";
@@ -96,7 +97,7 @@ describe("the installers the build writes", () => {
       if (address.split("?")[0] === FEED) {
         if (updates instanceof Error) throw updates;
 
-        return typeof updates === "number"
+        return arkType("number | number.NaN").allows(updates)
           ? new Response(null, { status: updates })
           : Response.json(updates);
       }

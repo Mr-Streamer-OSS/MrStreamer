@@ -1,3 +1,5 @@
+import { lazy } from "@mrstreamer/contracts/lazy";
+import { type } from "arktype";
 import { useSearchUsage } from "../../app/analytics.ts";
 import { Dialog } from "@base-ui/react/dialog";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -42,6 +44,8 @@ import { cn } from "../../lib/utils.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { watchChannel } from "../live/GuidePage.tsx";
 import { ReminderButton } from "../reminders/ReminderButton.tsx";
+
+const CachedStaleTime = lazy(() => type("number | number.NaN"));
 
 /**
  * Searches channel names across every category, then movies and series, then programmes on now
@@ -127,7 +131,7 @@ function Palette() {
         return (
           cached?.state.status === "success" &&
           cached.state.fetchStatus === "idle" &&
-          typeof options.staleTime === "number" &&
+          CachedStaleTime().allows(options.staleTime) &&
           !cached.isStaleByTime(options.staleTime)
         );
       },

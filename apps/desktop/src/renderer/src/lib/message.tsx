@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { Fragment, type ReactNode } from "react";
 import { messageParts, type Placeholder, type TextKey } from "@mrstreamer/core/i18n";
 
@@ -13,6 +14,8 @@ export function Message<K extends TextKey>({
   values: { readonly [P in Placeholder<K>]: ReactNode };
 }) {
   return messageParts(text).map((part, at) => (
-    <Fragment key={at}>{typeof part === "string" ? part : values[part.placeholder]}</Fragment>
+    <Fragment key={at}>
+      {type.keywords.string.root.allows(part) ? part : values[part.placeholder]}
+    </Fragment>
   ));
 }

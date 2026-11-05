@@ -1,3 +1,5 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import type { InterfaceLanguage, LanguageChoice } from "@mrstreamer/contracts/language";
 import { resolveLanguage, setLanguage } from "@mrstreamer/core/i18n";
 import { Settings } from "react-native";
@@ -18,7 +20,7 @@ function systemTags(): readonly string[] {
   const preferred: unknown = Settings.get("AppleLanguages");
 
   const tags = Array.isArray(preferred)
-    ? preferred.filter((tag): tag is string => typeof tag === "string")
+    ? preferred.filter((tag): tag is string => arkType.keywords.string.root.allows(tag))
     : [];
 
   return tags;
@@ -29,9 +31,11 @@ function savedChoice(): string | undefined {
   const saved = readJson(FILE);
 
   const choice =
-    typeof saved === "object" && saved !== null && "choice" in saved ? saved.choice : undefined;
+    arkType.keywords.object.root.allows(saved) && !isCallable(saved) && "choice" in saved
+      ? saved.choice
+      : undefined;
 
-  return typeof choice === "string" ? choice : undefined;
+  return arkType.keywords.string.root.allows(choice) ? choice : undefined;
 }
 
 const language = store(resolveLanguage(savedChoice(), systemTags()));

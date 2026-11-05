@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { Type } from "arktype";
 import { type } from "arktype";
@@ -253,7 +254,9 @@ const REFUSALS: Readonly<Record<string, Refusal>> = {
 /** What a rejection of the native side says, or null when it isn't one of its refusals. */
 export function refusalOf(cause: unknown): Refusal | null {
   const code =
-    typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : "";
+    type.keywords.object.root.allows(cause) && !isCallable(cause) && "code" in cause
+      ? String(cause.code)
+      : "";
 
   return REFUSALS[code] ?? null;
 }
@@ -311,7 +314,8 @@ function parsed<T>(parse: Type<T>, value: Json | undefined): Type<T>["infer"] {
 }
 
 function fenceOf(value: Json | undefined): Fence {
-  const body = typeof value === "object" && value !== null ? value : {};
+  const body = type.keywords.object.root.allows(value) && !isCallable(value) ? value : {};
+
   const durable = "durable" in body ? body.durable : null;
 
   if (durable !== "ledger" && durable !== "secrets" && durable !== "already-terminal") {
@@ -335,7 +339,7 @@ export const transfers = {
   enableSource: async (sourceId: string, observed: Observation): Promise<string> => {
     const { generation } = await bounded(native().enableSource({ sourceId, ...observed.expected }));
 
-    if (typeof generation !== "string") throw refused("corrupt");
+    if (!type.keywords.string.root.allows(generation)) throw refused("corrupt");
 
     return generation;
   },
@@ -351,7 +355,7 @@ export const transfers = {
   }): Promise<string> => {
     const { authorization } = await native().reserve({ ...request });
 
-    if (typeof authorization !== "string") throw refused("corrupt");
+    if (!type.keywords.string.root.allows(authorization)) throw refused("corrupt");
 
     return authorization;
   },
@@ -437,10 +441,15 @@ export const transfers = {
       20_000,
     );
 
-    const answer = typeof body === "object" && body !== null ? body : {};
+    const answer = type.keywords.object.root.allows(body) && !isCallable(body) ? body : {};
+
     const epoch = "queueEpoch" in answer ? answer.queueEpoch : null;
 
-    if (!("kind" in answer) || answer.kind !== "reset" || typeof epoch !== "string") {
+    if (
+      !("kind" in answer) ||
+      answer.kind !== "reset" ||
+      !type.keywords.string.root.allows(epoch)
+    ) {
       throw refused("corrupt");
     }
 

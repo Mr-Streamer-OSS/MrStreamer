@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // A fake host for XMLTV guides at addresses of their own, apart from any provider, as a guide
 // service publishes them: one file behind an address that carries a key. Tests say what each
 // path answers: a document, plain or packed, whole or in pieces of a few bytes; an HTTP status
@@ -63,11 +64,11 @@ export async function startGuideHost(): Promise<GuideHost> {
       if (!route) return void response.writeHead(404).end();
       const { answer, options = {} } = route;
 
-      if (typeof answer === "number") return void response.writeHead(answer).end();
+      if (arkType("number | number.NaN").allows(answer))
+        return void response.writeHead(answer).end();
 
-      if (typeof answer === "object" && "redirect" in answer) {
+      if (arkType.keywords.object.root.allows(answer) && "redirect" in answer)
         return void response.writeHead(302, { Location: answer.redirect }).end();
-      }
 
       const bytes = Buffer.from(answer);
       response.writeHead(200, options.headers);

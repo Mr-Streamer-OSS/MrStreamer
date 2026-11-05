@@ -106,7 +106,7 @@ function make(files: NoticeFiles) {
 
         if (!notice) return Effect.fail(unexpected(`No third-party notice is called ${id}.`));
 
-        return typeof notice.text === "string"
+        return type.keywords.string.root.allows(notice.text)
           ? Effect.succeed(notice.text)
           : credits(notice.text.credits);
       }),

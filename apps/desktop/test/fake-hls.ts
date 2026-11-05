@@ -1,3 +1,5 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 // Loopback HLS compatibility fixture, shared by public-service and built-app verification.
 import { createServer } from "node:http";
 import { fixture } from "./fake-provider.ts";
@@ -106,7 +108,7 @@ export async function startFakeHls(
     if (override)
       return response
         .writeHead(override.status ?? 200, override.headers)
-        .end(typeof override.body === "function" ? override.body() : override.body);
+        .end(isCallable(override.body) ? override.body() : override.body);
 
     if (path === "/list.m3u")
       return response.end(
@@ -208,7 +210,7 @@ export async function startFakeHls(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No fixture port");
+  if (!address || arkType.keywords.string.root.allows(address)) throw new Error("No fixture port");
   origin = `http://127.0.0.1:${address.port}`;
 
   return {

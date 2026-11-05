@@ -192,11 +192,20 @@ async function install(profile: string, directory: string) {
   };
 
   async function wrapped(
-    from: Parameters<typeof fs.rename>[0],
+    input: Parameters<typeof fs.rename>[0],
     to: Parameters<typeof fs.rename>[1],
   ) {
+    let from: string;
+
+    try {
+      from = String.prototype.valueOf.call(input);
+
+      if (from !== input) return original(input, to);
+    } catch {
+      return original(input, to);
+    }
+
     if (
-      typeof from !== "string" ||
       to !== destination ||
       path.dirname(from) !== directory ||
       !/^analytics\.json\.[0-9a-f-]{36}\.tmp$/.test(path.basename(from))
@@ -230,13 +239,19 @@ async function install(profile: string, directory: string) {
         // The actual Windows rejection/recovery below validates support in this Electron runtime.
         const constants = nativeFS.constants;
         const exported = "O_EXLOCK" in constants ? constants.O_EXLOCK : undefined;
+        let exclusive = 0x10000000;
+
+        try {
+          const flag = Number.prototype.valueOf.call(exported);
+
+          if (Object.is(flag, exported)) exclusive = flag;
+        } catch {
+          // The fallback is libuv's documented Windows exclusive-open flag.
+        }
+
         recovering = {
           ...reader,
-          flags:
-            reader.mode === "default"
-              ? "r"
-              : nativeFS.constants.O_RDONLY |
-                (typeof exported === "number" ? exported : 0x10000000),
+          flags: reader.mode === "default" ? "r" : nativeFS.constants.O_RDONLY | exclusive,
           node: process.versions.node,
           uv: process.versions.uv,
           electron: process.versions.electron,
@@ -271,10 +286,25 @@ async function install(profile: string, directory: string) {
         failure.errorName = error.name;
         failure.errorMessage = error.message;
 
-        if ("errno" in error && typeof error.errno === "number") failure.errno = error.errno;
+        if ("errno" in error) {
+          try {
+            const errno = Number.prototype.valueOf.call(error.errno);
 
-        if ("syscall" in error && typeof error.syscall === "string")
-          failure.syscall = error.syscall;
+            if (Object.is(errno, error.errno)) failure.errno = errno;
+          } catch {
+            // A nonnumeric errno is absent from the diagnostic.
+          }
+        }
+
+        if ("syscall" in error) {
+          try {
+            const syscall = String.prototype.valueOf.call(error.syscall);
+
+            if (syscall === error.syscall) failure.syscall = syscall;
+          } catch {
+            // A nontext syscall is absent from the diagnostic.
+          }
+        }
 
         if ("path" in error && (error.path === from || error.path === destination))
           failure.path = error.path;

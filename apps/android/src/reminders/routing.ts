@@ -1,36 +1,24 @@
+import { type } from "arktype";
 import { router, useRootNavigationState } from "expo-router";
 import { useEffect, useState } from "react";
 import { programmeHref } from "../guide/routes.ts";
 import { nativeReminders } from "./native.ts";
 
+const ReminderTap = type({
+  sourceId: "string > 0",
+  channelId: "string > 0",
+  start: "number > 0",
+  stop: "number",
+});
+
 function parseReminderTap(json: string) {
   try {
-    const value: unknown = JSON.parse(json);
+    const value = ReminderTap(JSON.parse(json));
 
-    if (
-      typeof value !== "object" ||
-      !value ||
-      !("sourceId" in value) ||
-      !("channelId" in value) ||
-      !("start" in value) ||
-      !("stop" in value)
-    )
-      return null;
+    if (value instanceof type.errors) return null;
     const { sourceId, channelId, start, stop } = value;
 
-    if (
-      typeof sourceId !== "string" ||
-      !sourceId ||
-      typeof channelId !== "string" ||
-      !channelId ||
-      typeof start !== "number" ||
-      !Number.isFinite(start) ||
-      start <= 0 ||
-      typeof stop !== "number" ||
-      !Number.isFinite(stop) ||
-      stop <= start
-    )
-      return null;
+    if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) return null;
 
     return { sourceId, channelId, start, stop };
   } catch {

@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -6,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { parseAst } from "vite";
 
 const isObject = (value: Json | undefined): value is JsonObject =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 function object(value: Json | undefined): JsonObject {
   if (!isObject(value)) throw new Error("Invalid ASAR manifest object");
@@ -44,9 +46,9 @@ async function packedMainScripts(resources: string, expectedAsarSha256: string) 
       if (
         record.unpacked ||
         record.link ||
-        typeof record.offset !== "string" ||
+        !arkType.keywords.string.root.allows(record.offset) ||
         !/^\d+$/.test(record.offset) ||
-        typeof record.size !== "number" ||
+        !arkType("number | number.NaN").allows(record.size) ||
         !Number.isSafeInteger(record.size) ||
         record.size < 0
       )
@@ -107,7 +109,7 @@ export async function catalogueWorkerScripts(resources: string, expectedAsarSha2
         continue;
       const literal = statement.source?.value;
 
-      if (typeof literal !== "string") continue;
+      if (!arkType.keywords.string.root.allows(literal)) continue;
 
       if (!literal.startsWith(".")) continue;
 

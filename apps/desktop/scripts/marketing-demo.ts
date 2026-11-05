@@ -1,3 +1,5 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import type { Json } from "../../../packages/contracts/src/json.ts";
 // The made-up subscription the marketing captures show, and the public-domain footage it plays.
 // docs/assets/marketing-demo-sources.json names the sources and everything shown: channels,
@@ -478,7 +480,7 @@ function about(url: URL, body: Json): Json {
   const id = Number(/^\/3\/tv\/(\d+)$/.exec(url.pathname)?.[1]);
   const title = titles.find((each) => each.tmdbId === id);
 
-  if (!title || typeof body !== "object" || body === null) return body;
+  if (!title || !(arkType.keywords.object.root.allows(body) && !isCallable(body))) return body;
   const opened = url.searchParams.get("append_to_response") === "credits";
 
   const listed = {
@@ -673,7 +675,8 @@ async function listen(
 function address(server: Server): string {
   const bound = server.address();
 
-  if (!bound || typeof bound === "string") throw new Error("The server has no address.");
+  if (!bound || arkType.keywords.string.root.allows(bound))
+    throw new Error("The server has no address.");
 
   return `http://127.0.0.1:${bound.port}`;
 }

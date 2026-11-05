@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import Constants from "expo-constants";
@@ -173,7 +174,7 @@ function build(): IosBuild {
 function randomUuid(): string {
   const bytes = new Uint8Array(16);
 
-  if (typeof globalThis.crypto?.getRandomValues === "function") {
+  if (isCallable(globalThis.crypto?.getRandomValues)) {
     globalThis.crypto.getRandomValues(bytes);
   } else {
     for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);

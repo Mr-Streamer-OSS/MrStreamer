@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -80,7 +81,8 @@ describe("installed subtitle network boundary", () => {
     await once(server, "listening");
     const address = server.address();
 
-    if (!address || typeof address === "string") throw new Error("No echo address");
+    if (!address || arkType.keywords.string.root.allows(address))
+      throw new Error("No echo address");
     const origin = `http://127.0.0.1:${address.port}`;
     const observations: { host: string; path: string }[] = [];
 

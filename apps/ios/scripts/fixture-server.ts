@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // A synthetic subscription for the iOS app on the simulator. The desktop tests' fake Xtream panel
 // (apps/desktop/test/fake-provider.ts) answers the API, with its messy catalogue of thousands of
 // channels, its logins and its failures. In front of it this server adds what the panel lacks and
@@ -649,7 +650,7 @@ const controlServer = createServer((request, response) => {
       status === "login" ? "login" : status && status !== "none" ? Number(status) : null;
 
     if (
-      typeof failure === "number" &&
+      arkType("number | number.NaN").allows(failure) &&
       !(Number.isInteger(failure) && failure >= 400 && failure < 600)
     )
       return answer(response, 400, "text/plain", "");
@@ -694,7 +695,7 @@ async function listen(listener: Server, requested: number) {
   await once(listener.listen(requested, "127.0.0.1"), "listening");
   const address = listener.address();
 
-  if (!address || typeof address === "string")
+  if (!address || arkType.keywords.string.root.allows(address))
     throw new Error("fixture listener has no TCP address");
 
   return address.port;

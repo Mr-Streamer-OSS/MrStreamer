@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@mrstreamer/contracts": "workspace:*",
-    "@mrstreamer/core": "workspace:*"
+    "@mrstreamer/core": "workspace:*",
+    "arktype": "2.2.9"
   }
 }

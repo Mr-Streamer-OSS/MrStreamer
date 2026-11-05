@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { posix, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -54,12 +56,12 @@ export interface ProbeOptions {
 const installed = new WeakSet<MainTransport>();
 
 const object = (value: Json | undefined): value is Record<string, Json | undefined> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+  arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
 function errorText(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
 
-  if (typeof cause === "string") return cause;
+  if (arkType.keywords.string.root.allows(cause)) return cause;
 
   try {
     return JSON.stringify(cause) ?? String(cause);
@@ -321,9 +323,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
 
     if (
       !object(frame) ||
-      typeof frame.callFrameId !== "string" ||
+      !arkType.keywords.string.root.allows(frame.callFrameId) ||
       !object(frame.location) ||
-      typeof frame.location.scriptId !== "string"
+      !arkType.keywords.string.root.allows(frame.location.scriptId)
     )
       throw new Error("Invalid startup callframe");
     const scriptId = frame.location.scriptId;
@@ -332,9 +334,9 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     const frameURL = frame.url;
 
     if (
-      typeof parsedURL !== "string" ||
+      !arkType.keywords.string.root.allows(parsedURL) ||
       !allowedStartupScripts.has(parsedURL) ||
-      (typeof frameURL === "string" && frameURL !== "" && frameURL !== parsedURL)
+      (arkType.keywords.string.root.allows(frameURL) && frameURL !== "" && frameURL !== parsedURL)
     )
       throw new Error(
         "Startup callframe is not the exact catalogue worker script or a caller-listed startup script",
@@ -380,24 +382,28 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
   listen("NodeWorker.receivedMessageFromWorker", (params) => {
     if (params.sessionId !== sessionId || !active) return;
 
-    if (typeof params.message !== "string") throw new Error("Malformed worker message");
+    if (!arkType.keywords.string.root.allows(params.message))
+      throw new Error("Malformed worker message");
     const message: Json = JSON.parse(params.message);
 
     if (!object(message)) throw new Error("Worker message must be an object");
     record("worker-message", message);
 
-    if (typeof message.id === "number") {
+    if (arkType("number | number.NaN").allows(message.id)) {
       pending.get(message.id)?.finish(message);
 
       return;
     }
 
-    if (typeof message.method !== "string" || !object(message.params))
+    if (!arkType.keywords.string.root.allows(message.method) || !object(message.params))
       throw new Error("Malformed worker event");
     const event = message.params;
 
     if (message.method === "Debugger.scriptParsed") {
-      if (typeof event.scriptId === "string" && typeof event.url === "string")
+      if (
+        arkType.keywords.string.root.allows(event.scriptId) &&
+        arkType.keywords.string.root.allows(event.url)
+      )
         scripts.set(event.scriptId, event.url);
     } else if (message.method === "Debugger.paused") {
       pause = event;
@@ -430,13 +436,14 @@ export function installCatalogueWorkerProbe(options: ProbeOptions) {
     ) {
       const other = params.sessionId;
 
-      if (typeof other !== "string" || !other) throw new Error("Invalid worker sessionId");
+      if (!arkType.keywords.string.root.allows(other) || !other)
+        throw new Error("Invalid worker sessionId");
       void task(() => release(other));
 
       return;
     }
 
-    if (typeof params.sessionId !== "string" || !params.sessionId)
+    if (!arkType.keywords.string.root.allows(params.sessionId) || !params.sessionId)
       throw new Error("Invalid catalogue worker sessionId");
 
     if (sessionId !== undefined)

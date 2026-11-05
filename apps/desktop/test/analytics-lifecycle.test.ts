@@ -335,7 +335,8 @@ describe("loopback lifecycle delivery", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
 
-    if (!address || typeof address === "string") throw new Error("Missing loopback port.");
+    if (!address || type.keywords.string.root.allows(address))
+      throw new Error("Missing loopback port.");
     const transport = localCapture(`http://127.0.0.1:${address.port}/i/v0/e/`)!;
     await new Promise<void>((resolve) => server.close(() => resolve()));
     const directory = await tempDir();
@@ -407,7 +408,7 @@ describe("loopback lifecycle delivery", () => {
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
 
-    if (!address || typeof address === "string") throw new Error("No port.");
+    if (!address || type.keywords.string.root.allows(address)) throw new Error("No port.");
     const transport = localCapture(`http://127.0.0.1:${address.port}/i/v0/e/`)!;
     vi.useFakeTimers({ toFake: ["Date"] });
     const store = memoryStore();

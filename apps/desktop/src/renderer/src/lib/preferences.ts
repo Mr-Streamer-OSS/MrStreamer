@@ -1,3 +1,5 @@
+import { type } from "arktype";
+import { lazy } from "@mrstreamer/contracts/lazy";
 import { queryOptions, type QueryClient, type QueryOptions } from "@tanstack/react-query";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
@@ -86,20 +88,16 @@ function applyChanges(
   }
 }
 
+const Revisioned = lazy(() => type({ revision: "number | number.NaN" }));
+
 /** React Query's own queryFn completion must also preserve a newer event already in its cache. */
 const newest: Exclude<
   QueryOptions<PreferenceSnapshot>["structuralSharing"],
   boolean | undefined
 > = (previous, incoming) => {
   if (
-    previous &&
-    incoming &&
-    typeof previous === "object" &&
-    typeof incoming === "object" &&
-    "revision" in previous &&
-    "revision" in incoming &&
-    typeof previous.revision === "number" &&
-    typeof incoming.revision === "number" &&
+    Revisioned().allows(previous) &&
+    Revisioned().allows(incoming) &&
     previous.revision >= incoming.revision
   )
     return previous;

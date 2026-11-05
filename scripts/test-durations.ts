@@ -19,7 +19,9 @@ export default class TestDurations implements Reporter {
 
   onTestRunEnd(modules: readonly TestModule[]) {
     const config = this.#vitest?.config;
-    const output = typeof config?.outputFile === "object" ? config.outputFile["durations"] : "";
+
+    const files: { durations?: string } = Object(config?.outputFile);
+    const output = config?.outputFile === files ? files.durations : "";
 
     if (!config || !output) throw new Error("Pass --outputFile.durations=<file>");
 

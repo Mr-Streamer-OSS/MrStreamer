@@ -1,3 +1,5 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import {
   byIds,
   indexCatalogue,
@@ -143,7 +145,7 @@ describe("movie and series lists read and indexed in tasks", () => {
           | ReturnType<typeof panelRows>["movies"][number]
           | ReturnType<typeof panelRows>["series"][number],
       ) => {
-        const fields = typeof row === "object" && row !== null ? row : {};
+        const fields = arkType.keywords.object.root.allows(row) && !isCallable(row) ? row : {};
 
         return { ...fields, tmdb: "42", is_adult: 0, category_id: "films" };
       };

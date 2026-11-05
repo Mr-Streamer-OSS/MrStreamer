@@ -57,7 +57,15 @@ export function collectShards(
 
     // Other candidates' shards in the same run can match the download pattern.
     if (shard.report !== reportName) continue;
-    const spec = typeof shard.shard === "string" ? /^(\d+)\/(\d+)$/.exec(shard.shard) : null;
+    let spec: RegExpExecArray | null = null;
+
+    try {
+      const name = String.prototype.valueOf.call(shard.shard);
+
+      if (name === shard.shard) spec = /^(\d+)\/(\d+)$/.exec(name);
+    } catch {
+      // A shard identity must be a primitive string, never a coerced JSON value.
+    }
 
     if (!spec) {
       problems.push(`${dir}: shard.json names no shard <index>/<count>.`);

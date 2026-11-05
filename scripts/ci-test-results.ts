@@ -30,42 +30,47 @@ interface FileResult {
   readonly assertionResults: readonly { readonly fullName: string; readonly status: string }[];
 }
 
-const isTest = (value: unknown): value is FileResult["assertionResults"][number] =>
-  typeof value === "object" &&
-  value !== null &&
-  "fullName" in value &&
-  typeof value.fullName === "string" &&
-  "status" in value &&
-  typeof value.status === "string";
+const isTest = (value: unknown): value is FileResult["assertionResults"][number] => {
+  const fields: { fullName?: unknown; status?: unknown } = Object(value);
 
-const isFile = (value: unknown): value is FileResult =>
-  typeof value === "object" &&
-  value !== null &&
-  "name" in value &&
-  typeof value.name === "string" &&
-  "status" in value &&
-  typeof value.status === "string" &&
-  "assertionResults" in value &&
-  Array.isArray(value.assertionResults) &&
-  value.assertionResults.every(isTest);
+  try {
+    return (
+      value === fields &&
+      fields.fullName === String.prototype.valueOf.call(fields.fullName) &&
+      fields.status === String.prototype.valueOf.call(fields.status)
+    );
+  } catch {
+    return false;
+  }
+};
+
+const isFile = (value: unknown): value is FileResult => {
+  const fields: { name?: unknown; status?: unknown; assertionResults?: unknown } = Object(value);
+
+  try {
+    return (
+      value === fields &&
+      fields.name === String.prototype.valueOf.call(fields.name) &&
+      fields.status === String.prototype.valueOf.call(fields.status) &&
+      Array.isArray(fields.assertionResults) &&
+      fields.assertionResults.every(isTest)
+    );
+  } catch {
+    return false;
+  }
+};
 
 /** The report's file entries, or why the file at `path` is no Vitest JSON report. */
 function readReport(path: string): readonly FileResult[] | string {
-  let report: unknown;
+  let report: { testResults?: unknown };
 
   try {
-    report = JSON.parse(readFileSync(path, "utf8"));
+    report = Object(JSON.parse(readFileSync(path, "utf8")));
   } catch (error) {
     return `Couldn't read ${path} as JSON: ${error instanceof Error ? error.message : error}`;
   }
 
-  if (
-    typeof report !== "object" ||
-    report === null ||
-    !("testResults" in report) ||
-    !Array.isArray(report.testResults) ||
-    !report.testResults.every(isFile)
-  )
+  if (!Array.isArray(report.testResults) || !report.testResults.every(isFile))
     return `${path} is no Vitest JSON report: each of its testResults needs a name, a status and assertionResults.`;
 
   return report.testResults;
@@ -78,7 +83,16 @@ function problems(file: string, results: readonly FileResult[]): string[] {
   if (!result) return [`${file}: not in the report. Did it fail to load, or the run stop early?`];
 
   if (others.length) return [`${file}: in the report ${results.length} times.`];
-  const message = typeof result.message === "string" && result.message ? ` ${result.message}` : "";
+
+  let message = "";
+
+  try {
+    const text = String.prototype.valueOf.call(result.message);
+
+    if (text === result.message && text) message = ` ${text}`;
+  } catch {
+    // A non-string diagnostic adds no advice.
+  }
 
   if (result.assertionResults.length === 0) return [`${file}: ran no tests.${message}`];
   const platform = platformOnly[file];
@@ -114,9 +128,9 @@ if (files.length === 0)
 
 const report = readReport(path);
 
-if (typeof report === "string") fail([report]);
+const results: readonly FileResult[] = Array.isArray(report) ? report : fail([String(report)]);
 
-const byFile = Map.groupBy(report, (result) =>
+const byFile = Map.groupBy(results, (result) =>
   relative(process.cwd(), result.name).replaceAll("\\", "/"),
 );
 
@@ -130,7 +144,7 @@ for (const file of byFile.keys())
 
 if (found.length) fail(found);
 
-const passed = report.flatMap((result) =>
+const passed = results.flatMap((result) =>
   result.assertionResults.filter((test) => test.status === "passed"),
 );
 

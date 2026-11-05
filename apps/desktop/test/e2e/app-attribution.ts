@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Attribution diagnostics for measure-app.ts's probes, run in the same disposable instance:
 // steady-state V8 profiles and Chromium traces of playing Live TV, Home and Watch, and the
 // renderer's React Query retention across a browse churn. They read Electron's IPC registry and
@@ -105,8 +106,8 @@ export function profileSummary(profile: CpuProfile, top = 25) {
     profile.nodes.some(
       (node) =>
         !Number.isInteger(node.id) ||
-        typeof node.callFrame?.functionName !== "string" ||
-        typeof node.callFrame.url !== "string" ||
+        !arkType.keywords.string.root.allows(node.callFrame?.functionName) ||
+        !arkType.keywords.string.root.allows(node.callFrame.url) ||
         !Number.isFinite(node.callFrame.lineNumber),
     ) ||
     profile.samples.some((id) => !byId.has(id))
@@ -433,7 +434,7 @@ async function traceTo(page: Page, path: string, ms: number) {
       const completion = params as { stream?: unknown; dataLossOccurred?: boolean } | undefined;
       const handle = completion?.stream;
 
-      if (typeof handle !== "string" || !handle) {
+      if (!arkType.keywords.string.root.allows(handle) || !handle) {
         reject(new Error("Trace completion has no IO stream"));
 
         return;

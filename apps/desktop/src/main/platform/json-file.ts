@@ -5,7 +5,7 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promise
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { gunzip as gunzipCallback, gzip as gzipCallback } from "node:zlib";
-import { ArkErrors } from "arktype";
+import { type, ArkErrors } from "arktype";
 
 const gzip = promisify(gzipCallback);
 const gunzip = promisify(gunzipCallback);
@@ -88,7 +88,7 @@ export async function writeJsonFile(path: string, value: Json | { toJSON(): Json
         wait === undefined ||
         !(cause instanceof Error) ||
         !("code" in cause) ||
-        typeof cause.code !== "string" ||
+        !type.keywords.string.root.allows(cause.code) ||
         !["EPERM", "EACCES", "EBUSY"].includes(cause.code)
       )
         throw cause;

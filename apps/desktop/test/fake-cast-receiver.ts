@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // A fake Cast receiver for tests: a TLS server on 127.0.0.1 that answers a sender as a TV with
 // Google's Default Media Receiver does. It frames and reads with protobufjs from Chromium's
 // current cast_channel.proto (fixtures/cast), so it shares no code with the adapter's own codec,
@@ -356,7 +357,9 @@ export class FakeCastReceiver {
       this.media = {
         mediaSessionId: ++this.mediaSessions,
         playerState: payload.autoplay === false ? "PAUSED" : "BUFFERING",
-        currentTime: typeof payload.currentTime === "number" ? payload.currentTime : 0,
+        currentTime: arkType("number | number.NaN").allows(payload.currentTime)
+          ? payload.currentTime
+          : 0,
         activeTrackIds: [],
         media: { ...(payload.media as JsonObject), duration: this.duration, tracks: this.tracks },
       };
@@ -406,7 +409,7 @@ export async function startFakeCastReceiver(): Promise<FakeCastReceiver> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (address === null || typeof address === "string") throw new Error("no port");
+  if (address === null || arkType.keywords.string.root.allows(address)) throw new Error("no port");
 
   return new FakeCastReceiver(server, address.port);
 }

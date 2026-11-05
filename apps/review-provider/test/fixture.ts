@@ -14,7 +14,9 @@ export const FIXTURE_NOW = Date.UTC(2026, 9, 25, 12);
 export const FIXTURE_ORIGIN = "https://review.fixture.invalid";
 
 export async function digest(value: string | Uint8Array): Promise<string> {
-  const bytes = typeof value === "string" ? new TextEncoder().encode(value) : new Uint8Array(value);
+  const bytes =
+    value instanceof Uint8Array ? new Uint8Array(value) : new TextEncoder().encode(value);
+
   const hash = await crypto.subtle.digest("SHA-256", bytes);
 
   return [...new Uint8Array(hash)].map((n) => n.toString(16).padStart(2, "0")).join("");

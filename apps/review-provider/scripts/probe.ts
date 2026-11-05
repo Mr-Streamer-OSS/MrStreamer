@@ -1,7 +1,8 @@
+import { type } from "arktype";
 import type { Json, JsonObject } from "../../../packages/contracts/src/json.ts";
 
 function isObject(value: Json | undefined): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return type.keywords.object.root.allows(value) && !Array.isArray(value);
 }
 
 function object(value: Json | undefined): JsonObject {
@@ -17,14 +18,13 @@ function list(value: Json | undefined): readonly Json[] {
 }
 
 function text(value: Json | undefined): string {
-  if (typeof value !== "string") throw new Error("Missing probe text");
+  if (!type.keywords.string.root.allows(value)) throw new Error("Missing probe text");
 
   return value;
 }
 
 function numeric(value: Json | undefined): number {
-  const n =
-    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  const n = type("string | number").allows(value) ? Number(value) : Number.NaN;
 
   if (!Number.isFinite(n)) throw new Error("Missing probe number");
 

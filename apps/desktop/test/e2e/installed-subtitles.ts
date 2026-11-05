@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Only the two public SubDL hosts are forwarded. Packaged apps install this boundary while
 // inspect-brk still holds main, before OnlineSubtitles captures fetch. No product hook is needed.
 import { once } from "node:events";
@@ -85,7 +86,7 @@ export async function inspectorOwner(port: number, ownedPids: readonly number[])
     if (
       Array.isArray(owners) &&
       owners.length === 1 &&
-      typeof owners[0] === "number" &&
+      arkType("number | number.NaN").allows(owners[0]) &&
       ownedPids.includes(owners[0])
     )
       return owners[0];
@@ -200,7 +201,8 @@ export async function startSubtitleFixture() {
   await once(server, "listening");
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No subtitle fixture port");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("No subtitle fixture port");
 
   return {
     origin: `http://127.0.0.1:${address.port}`,

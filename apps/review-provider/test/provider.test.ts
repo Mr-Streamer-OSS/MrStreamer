@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath, URL as NodeURL } from "node:url";
 import { gunzipSync } from "node:zlib";
@@ -609,7 +610,7 @@ describe("local workerd binary and gzip transmission", () => {
       expect((await raw(movie(), "GET", { Range: range })).status).toBe(200);
     const etag = (await raw(movie())).headers.etag;
 
-    if (typeof etag !== "string") throw new Error("Missing ETag");
+    if (!type.keywords.string.root.allows(etag)) throw new Error("Missing ETag");
     expect((await raw(movie(), "GET", { Range: "bytes=0-3", "If-Range": etag })).status).toBe(206);
     expect(
       (await raw(movie(), "GET", { Range: "bytes=0-3", "If-Range": '"old-fixture"' })).status,

@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import * as Layer from "effect/Layer";
@@ -198,7 +199,9 @@ describe("live library", () => {
     const channels = await library.channels({ category: own("2") });
 
     // The mock sends every third channel number as a string and some logos as "".
-    expect(channels.every((channel) => typeof channel.number === "number")).toBe(true);
+    expect(channels.every((channel) => arkType("number | number.NaN").allows(channel.number))).toBe(
+      true,
+    );
     expect(channels.some((channel) => channel.logoUrl === null)).toBe(true);
     expect(
       channels

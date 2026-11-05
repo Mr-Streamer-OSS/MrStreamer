@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { ownedKey } from "@mrstreamer/contracts/subscription";
@@ -381,7 +382,8 @@ function same(
 ): boolean {
   if (a === b) return true;
 
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (!arkType.keywords.object.root.allows(a) || !arkType.keywords.object.root.allows(b))
+    return false;
 
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   const left = Object.entries(a).filter(([, value]) => value !== undefined);

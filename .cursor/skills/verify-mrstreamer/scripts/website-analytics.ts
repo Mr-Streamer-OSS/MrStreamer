@@ -1,4 +1,6 @@
 #!/usr/bin/env -S node
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 // Website analytics in a production-configured build, against an isolated loopback capture.
 // The browser reaches the site's own route, mrstreamer.app/ingest, only through a loopback proxy
@@ -393,7 +395,8 @@ app.on('window-all-closed', () => app.quit());
       await delay(400);
       const image = await send("Page.captureScreenshot", { format: "png" });
 
-      if (!record(image) || typeof image["data"] !== "string") throw new Error("No screenshot.");
+      if (!record(image) || !arkType.keywords.string.root.allows(image["data"]))
+        throw new Error("No screenshot.");
       await writeFile(join(evidence, `${name}.png`), Buffer.from(image["data"], "base64"));
     };
 
@@ -572,12 +575,17 @@ app.on('window-all-closed', () => app.quit());
         if (!c.raw.includes('"feature_section_viewed"')) return [];
         const body: unknown = JSON.parse(c.raw);
 
-        if (typeof body !== "object" || body === null || !("properties" in body))
+        if (
+          !(arkType.keywords.object.root.allows(body) && !isCallable(body)) ||
+          !("properties" in body)
+        )
           return [undefined];
         const properties = body.properties;
 
         return [
-          typeof properties === "object" && properties !== null && "feature_name" in properties
+          arkType.keywords.object.root.allows(properties) &&
+          !isCallable(properties) &&
+          "feature_name" in properties
             ? properties.feature_name
             : undefined,
         ];
@@ -1063,7 +1071,7 @@ app.on('window-all-closed', () => app.quit());
       const body: Json = JSON.parse(entry.raw);
 
       const jsonObject = (value: Json | undefined): value is JsonObject =>
-        value !== null && typeof value === "object" && !Array.isArray(value);
+        arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 
       if (!jsonObject(body)) throw new Error("Malformed body.");
       const { api_key, event, distinct_id, properties, ...rest } = body;
@@ -1073,7 +1081,7 @@ app.on('window-all-closed', () => app.quit());
       if (
         Object.keys(rest).length ||
         api_key !== key ||
-        typeof event !== "string" ||
+        !arkType.keywords.string.root.allows(event) ||
         distinct_id !== COOKIELESS
       )
         throw new Error(`Body outside the allowlist: ${Object.keys(body).join(",")}`);
@@ -1105,7 +1113,7 @@ app.on('window-all-closed', () => app.quit());
         throw new Error("$raw_user_agent differs from the browser's User-Agent header.");
 
       if (
-        typeof $pathname !== "string" ||
+        !arkType.keywords.string.root.allows($pathname) ||
         !/^\/(?:[a-z0-9-]+(?:\/[a-z0-9-]+)*)?$/.test($pathname) ||
         $current_url !== `${SITE}${$pathname}` ||
         $host !== "mrstreamer.app" ||
@@ -1124,14 +1132,15 @@ app.on('window-all-closed', () => app.quit());
         names.includes("entry_source") &&
         ["entry_source", "entry_medium", "entry_campaign"].some(
           (name) =>
-            typeof fields[name] !== "string" || !/^[a-z_]{1,20}$/.test(String(fields[name])),
+            !arkType.keywords.string.root.allows(fields[name]) ||
+            !/^[a-z_]{1,20}$/.test(String(fields[name])),
         )
       )
         throw new Error(`Entry codes malformed on ${event}: ${JSON.stringify(fields)}`);
 
       // Measurements are bounded numbers in their units, and each leave carries all three.
       const share = (value: Json | undefined): boolean =>
-        typeof value === "number" &&
+        arkType("number | number.NaN").allows(value) &&
         value >= 0 &&
         value <= 1 &&
         Math.round(value * 100) / 100 === value;
@@ -1151,7 +1160,7 @@ app.on('window-all-closed', () => app.quit());
 
         if (
           vitals.length !== 1 ||
-          typeof value !== "number" ||
+          !arkType("number | number.NaN").allows(value) ||
           !Number.isFinite(value) ||
           value < 0 ||
           value >= 15 * 60_000 ||
@@ -1184,7 +1193,7 @@ app.on('window-all-closed', () => app.quit());
             ? [e.properties[`$web_vitals_${name}_value`]]
             : [],
         )
-        .filter((value) => typeof value === "number");
+        .filter((value) => arkType("number | number.NaN").allows(value));
 
     const expected = observed["measuredDepthExpected"] as { scroll: number; content: number };
     observed["measurements"] = {
@@ -1238,7 +1247,7 @@ app.on('window-all-closed', () => app.quit());
       ?.send("Page.captureScreenshot", { format: "png" })
       .catch(() => undefined);
 
-    if (record(image?.result) && typeof image.result["data"] === "string")
+    if (record(image?.result) && arkType.keywords.string.root.allows(image.result["data"]))
       await writeFile(join(evidence, "failure.png"), Buffer.from(image.result["data"], "base64"));
   } finally {
     const errors: string[] = [];

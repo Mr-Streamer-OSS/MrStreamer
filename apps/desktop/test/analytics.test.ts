@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
@@ -74,13 +75,13 @@ async function captureServer(status: number | (() => number) = 200) {
     const payload: unknown = JSON.parse(Buffer.concat(bytes).toString());
 
     if (!(
-      typeof payload === "object" &&
-      payload !== null &&
+      type.keywords.object.root.allows(payload) &&
+      !isCallable(payload) &&
       "event" in payload &&
       payload.event === "app_version_observed"
     ))
       payloads.push(payload);
-    res.writeHead(typeof status === "number" ? status : status(), {
+    res.writeHead(type("number | number.NaN").allows(status) ? status : status(), {
       Location: "https://us.i.posthog.com/i/v0/e/",
     });
     res.end("ok");
@@ -90,7 +91,8 @@ async function captureServer(status: number | (() => number) = 200) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No local capture address.");
+  if (!address || type.keywords.string.root.allows(address))
+    throw new Error("No local capture address.");
 
   return { payloads, endpoint: `http://127.0.0.1:${address.port}/i/v0/e/` };
 }

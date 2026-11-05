@@ -266,9 +266,9 @@ export const validateMeasurement = Result.pipe((result) => {
           width = picture["videoWidth"];
 
         if (
-          typeof previous !== "number" ||
-          typeof current !== "number" ||
-          typeof width !== "number" ||
+          !type("number | number.NaN").allows(previous) ||
+          !type("number | number.NaN").allows(current) ||
+          !type("number | number.NaN").allows(width) ||
           !Number.isFinite(previous) ||
           !Number.isFinite(current) ||
           !Number.isFinite(width) ||
@@ -395,7 +395,11 @@ export const validateMeasurement = Result.pipe((result) => {
     if (result.checks[check] !== true) throw new Error(`Invalid instrumentation: ${check}`);
 
   for (const values of [result.workload, result.conditions])
-    if (Object.values(values).some((value) => typeof value === "number" && !Number.isFinite(value)))
+    if (
+      Object.values(values).some(
+        (value) => type("number | number.NaN").allows(value) && !Number.isFinite(value),
+      )
+    )
       throw new Error("Non-finite measurement metadata");
 
   if (
@@ -415,7 +419,7 @@ export const validateMeasurement = Result.pipe((result) => {
   for (const observation of result.observations ?? [])
     if (
       Object.values(observation).some(
-        (value) => typeof value === "number" && !Number.isFinite(value),
+        (value) => type("number | number.NaN").allows(value) && !Number.isFinite(value),
       )
     )
       throw new Error("Non-finite observation metadata");

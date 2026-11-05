@@ -293,7 +293,7 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
     };
     const kept = anchors.kept.get(account)?.["anchor"];
 
-    if (typeof kept === "number") return kept;
+    if (type("number | number.NaN").allows(kept)) return kept;
 
     return Number(
       anchors.write.run(account, ANCHOR, EVENT_VERSION, at, randomUUID()).lastInsertRowid,

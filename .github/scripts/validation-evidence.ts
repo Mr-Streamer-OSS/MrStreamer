@@ -98,7 +98,7 @@ export function acceptsEvidence(
   producer: Producer,
 ): boolean {
   const object = (value: Json | undefined): value is JsonObject =>
-    typeof value === "object" && value !== null && !Array.isArray(value);
+    value !== null && value === Object(value) && !Array.isArray(value);
 
   if (!object(value) || !object(value["identities"]) || !object(value["results"])) return false;
   const evidence = value;

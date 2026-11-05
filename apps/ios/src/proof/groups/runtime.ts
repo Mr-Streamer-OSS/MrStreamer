@@ -1,3 +1,4 @@
+import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type Observed, type ProofCase } from "../cases.ts";
 
 export const cases: readonly ProofCase[] = [
@@ -21,24 +22,24 @@ export const cases: readonly ProofCase[] = [
       const crypto = scope["crypto"] as { randomUUID?: unknown; subtle?: unknown } | undefined;
 
       return {
-        Buffer: typeof scope["Buffer"] !== "undefined",
-        TextEncoder: typeof scope["TextEncoder"] !== "undefined",
-        TextDecoder: typeof scope["TextDecoder"] !== "undefined",
-        ReadableStream: typeof scope["ReadableStream"] !== "undefined",
-        structuredClone: typeof scope["structuredClone"] !== "undefined",
-        setImmediate: typeof scope["setImmediate"] !== "undefined",
-        cryptoRandomUUID: typeof crypto?.randomUUID !== "undefined",
-        cryptoSubtle: typeof crypto?.subtle !== "undefined",
+        Buffer: scope["Buffer"] !== undefined,
+        TextEncoder: scope["TextEncoder"] !== undefined,
+        TextDecoder: scope["TextDecoder"] !== undefined,
+        ReadableStream: scope["ReadableStream"] !== undefined,
+        structuredClone: scope["structuredClone"] !== undefined,
+        setImmediate: scope["setImmediate"] !== undefined,
+        cryptoRandomUUID: crypto?.randomUUID !== undefined,
+        cryptoSubtle: crypto?.subtle !== undefined,
         AbortSignalTimeout: "timeout" in AbortSignal,
         AbortSignalAny: "any" in AbortSignal,
-        PromiseWithResolvers: typeof Promise.withResolvers === "function",
-        MapGroupBy: typeof Map.groupBy === "function",
-        ArrayToSorted: typeof Array.prototype.toSorted === "function",
-        IntlDisplayNames: typeof Intl.DisplayNames !== "undefined",
-        IntlListFormat: typeof Intl.ListFormat !== "undefined",
-        IntlPluralRules: typeof Intl.PluralRules !== "undefined",
-        IntlLocale: typeof Intl.Locale !== "undefined",
-        IntlCollator: typeof Intl.Collator !== "undefined",
+        PromiseWithResolvers: isCallable(Promise.withResolvers),
+        MapGroupBy: isCallable(Map.groupBy),
+        ArrayToSorted: isCallable(Array.prototype.toSorted),
+        IntlDisplayNames: Intl.DisplayNames !== undefined,
+        IntlListFormat: Intl.ListFormat !== undefined,
+        IntlPluralRules: Intl.PluralRules !== undefined,
+        IntlLocale: Intl.Locale !== undefined,
+        IntlCollator: Intl.Collator !== undefined,
         timeZoneKolkataMidnightUtc: zone,
         normalizeNfd: "é".normalize("NFD").length,
       };
@@ -59,8 +60,8 @@ export const cases: readonly ProofCase[] = [
       };
 
       return {
-        canParse: typeof URL.canParse === "function",
-        parse: typeof URL.parse === "function",
+        canParse: isCallable(URL.canParse),
+        parse: isCallable(URL.parse),
         relative: attempt(() => new URL("../ok?a=1", "http://line.test:8080/live/user/pass/1.ts")),
         absolutePath: attempt(() => new URL("/ok", "https://line.test/player_api.php?x=1")),
         otherHost: attempt(() => new URL("http://cdn.test/a b", "https://line.test/")),
