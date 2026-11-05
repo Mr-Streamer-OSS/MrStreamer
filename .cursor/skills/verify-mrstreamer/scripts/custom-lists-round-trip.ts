@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 // The prior stable release and this build on one profile, each driven through its own window.
 // This build makes a list holding channels of two subscriptions and chooses it in Live TV. The
 // prior release, which knows nothing of lists, starts on the same profile: it shows its own
@@ -81,7 +83,11 @@ function onDisk(profile: string, account: string) {
 async function remembered(profile: string): Promise<Json> {
   const file: Json = JSON.parse(await readFile(join(profile, "preferences.json"), "utf8"));
 
-  if (file === null || typeof file !== "object" || Array.isArray(file))
+  if (
+    file === null ||
+    !(arkType.keywords.object.root.allows(file) && !isCallable(file)) ||
+    Array.isArray(file)
+  )
     throw new Error("Expected preferences.json to contain an object");
 
   return "rememberedLiveBrowse" in file ? (file.rememberedLiveBrowse ?? null) : null;
@@ -118,7 +124,9 @@ async function eraseBackup(d: Driver) {
  */
 async function search(d: Driver, name: string, text: string) {
   await d.click("Open Live TV", named("header button", "Live TV"));
-  await d.wait(async () => typeof (await d.evaluate<string | undefined>(HEADING)) === "string");
+  await d.wait(async () =>
+    arkType.keywords.string.root.allows(await d.evaluate<string | undefined>(HEADING)),
+  );
 
   if ((await d.evaluate<string | undefined>(HEADING)) !== "All channels")
     await d.click(
@@ -183,7 +191,10 @@ export async function customListRoundTripScenario(
   const priorDoctor = d.observed["priorDoctor"];
 
   const executable =
-    priorDoctor && typeof priorDoctor === "object" && "executable" in priorDoctor
+    priorDoctor &&
+    arkType.keywords.object.root.allows(priorDoctor) &&
+    !isCallable(priorDoctor) &&
+    "executable" in priorDoctor
       ? String(priorDoctor.executable)
       : "";
 
@@ -197,7 +208,9 @@ export async function customListRoundTripScenario(
     appAsar: await sha256(join(dirname(executable), "resources/app.asar")),
   };
   await d.click("Open Live TV in the prior release", named("header button", "Live TV"));
-  await d.wait(async () => typeof (await d.evaluate<string | undefined>(HEADING)) === "string");
+  await d.wait(async () =>
+    arkType.keywords.string.root.allows(await d.evaluate<string | undefined>(HEADING)),
+  );
   // A list it doesn't know reads as nothing remembered: it shows its own choice.
   d.observed["priorLiveTv"] = await d.evaluate<string | undefined>(HEADING);
   await d.capture("prior-live-tv");

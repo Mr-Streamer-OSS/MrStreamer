@@ -631,7 +631,7 @@ export function toolProbe(tool: string, url: string): Promise<ToolProbe> {
         );
 
         resolve({
-          code: error ? (typeof error.code === "number" ? error.code : null) : 0,
+          code: error ? (type("number | number.NaN").allows(error.code) ? error.code : null) : 0,
           attempted: connection.some((line) => line.includes("Starting connection attempt")),
           connected: connection.some((line) => line.includes("Successfully connected")),
           said: [...connection, lines.at(-1) ?? ""],

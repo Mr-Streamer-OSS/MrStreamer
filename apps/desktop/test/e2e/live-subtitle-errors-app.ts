@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // A built app, throwaway profile and public fixture host. Broken subtitle playlists and segments
 // must leave pictures moving, both during discovery and after a manual pick. Healthy languages
 // remain reachable. A subsequent video stall must still reconnect, not inherit a subtitle 404.
@@ -545,7 +546,9 @@ try {
         const failedAt =
           requests.findLast(
             (entry) =>
-              entry.mode === mode && typeof entry.status === "number" && entry.status >= 400,
+              entry.mode === mode &&
+              arkType("number | number.NaN").allows(entry.status) &&
+              entry.status >= 400,
           )?.at ?? 0;
 
         for (let second = 0; second < 20; second++) {

@@ -1,3 +1,5 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import { createRoot, document } from "./dom.ts";
 import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1130,7 +1132,12 @@ describe("a programme's catch-up", () => {
 
 describe("Live on iPad and Duo windows", () => {
   const detail = () => container.querySelector('[data-testid="live-detail"]');
-  const pushes = () => state.did.filter((did) => typeof did === "object" && did && "type" in did);
+
+  const pushes = () =>
+    state.did.filter(
+      (did) => arkType.keywords.object.root.allows(did) && !isCallable(did) && did && "type" in did,
+    );
+
   afterEach(async () => {
     const { closeDetail } = await import("../src/live-screen.tsx");
 

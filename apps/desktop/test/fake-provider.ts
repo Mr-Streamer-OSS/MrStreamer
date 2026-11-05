@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import type { Json } from "@mrstreamer/contracts/json";
 // A fake Xtream Codes provider for tests. Its catalogue has the messiness of real panels:
 // prefixed names, separator entries, numbers sent as strings and missing logos. It allows one
@@ -503,7 +504,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     }
 
     if (
-      typeof titleFailure === "number" &&
+      arkType("number | number.NaN").allows(titleFailure) &&
       (action?.startsWith("get_vod") || action?.startsWith("get_series"))
     ) {
       return void response.writeHead(titleFailure).end();
@@ -692,7 +693,8 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
 
     if (guideAnswer === "hold") return;
 
-    if (typeof guideAnswer === "number") return void response.writeHead(guideAnswer).end();
+    if (arkType("number | number.NaN").allows(guideAnswer))
+      return void response.writeHead(guideAnswer).end();
 
     const document =
       guideAnswer ??
@@ -887,7 +889,8 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
   });
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("The fake provider has no address.");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("The fake provider has no address.");
   origin = `http://127.0.0.1:${address.port}`;
 
   return {
@@ -900,7 +903,7 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     replaceMovieFile(movieId, file) {
       const movie = movieFiles.get(String(movieId));
 
-      if (movie) replace(movie, typeof file === "string" ? fixture(file) : file);
+      if (movie) replace(movie, arkType.keywords.string.root.allows(file) ? fixture(file) : file);
     },
     unsettleMovieFile(movieId, on) {
       const movie = movieFiles.get(String(movieId));
@@ -923,7 +926,8 @@ export async function startFakeProvider(options: FakeProviderOptions = {}): Prom
     replaceEpisodeFile(episodeId, file) {
       const episode = episodeFiles.get(String(episodeId));
 
-      if (episode) replace(episode, typeof file === "string" ? fixture(file) : file);
+      if (episode)
+        replace(episode, arkType.keywords.string.root.allows(file) ? fixture(file) : file);
     },
     slowFileParts(ms) {
       partsWait = ms;

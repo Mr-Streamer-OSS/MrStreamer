@@ -1,3 +1,4 @@
+import { type } from "arktype";
 // Qualification fixture, never imported by the application. Normal Connect/Movies/Watch uses
 // the production admission and player owner; this server replaces only the provider boundary.
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -455,7 +456,8 @@ export async function startFormats(options: {
   function address(serving: typeof server) {
     const value = serving.address();
 
-    if (!value || typeof value === "string") throw new Error("Fixture has no TCP address");
+    if (!value || type.keywords.string.root.allows(value))
+      throw new Error("Fixture has no TCP address");
 
     return `http://127.0.0.1:${value.port}`;
   }

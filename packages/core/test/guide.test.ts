@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +49,7 @@ const DAY = 24 * HOUR;
 
 /** `bytes` as a sender splits them: in pieces of `size`. */
 async function* pieces(bytes: Uint8Array | string, size = 64 * 1024): AsyncGenerator<Uint8Array> {
-  const all = typeof bytes === "string" ? Buffer.from(bytes) : bytes;
+  const all = type.keywords.string.root.allows(bytes) ? Buffer.from(bytes) : bytes;
 
   for (let at = 0; at < all.length; at += size) yield all.subarray(at, at + size);
 }

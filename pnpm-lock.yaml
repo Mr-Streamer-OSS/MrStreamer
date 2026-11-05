@@ -21,6 +21,9 @@ importers:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
+      arktype:
+        specifier: 2.2.9
+        version: 2.2.9
       happy-dom:
         specifier: 21.0.4
         version: 21.0.4
@@ -206,6 +209,9 @@ importers:
       '@mrstreamer/core':
         specifier: workspace:*
         version: link:../core
+      arktype:
+        specifier: 2.2.9
+        version: 2.2.9
 
 packages:
 

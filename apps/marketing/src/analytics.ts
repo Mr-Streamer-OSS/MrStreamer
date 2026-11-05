@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 // Website analytics: a few fixed events per page, sent to the app statistics' PostHog project
 // without an SDK, in PostHog's cookieless mode, through the site's own /ingest route
 // (scripts/site-analytics.ts). docs/privacy.md#website-analytics is the promise this keeps:
@@ -594,7 +595,7 @@ export function startSiteAnalytics(capture: SiteCapture | null): () => void {
         seen.set(heading, () => ({ event: "changelog_viewed", properties: { version } }));
     }
 
-  if (seen.size && typeof IntersectionObserver === "function") {
+  if (seen.size && isCallable(globalThis.IntersectionObserver)) {
     // A part in a collapsed section counts once it is open and in view, not as its heading passes.
     const shown = (part: Element) => part.closest("details")?.open !== false;
 

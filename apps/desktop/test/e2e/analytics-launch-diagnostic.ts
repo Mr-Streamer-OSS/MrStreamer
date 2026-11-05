@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
 import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
 import type { Json, JsonObject } from "../../../../packages/contracts/src/json.ts";
 import type { ChildProcess } from "node:child_process";
@@ -23,7 +25,7 @@ type LaunchFailure = {
 };
 
 function record(value: unknown): value is JsonObject {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  return arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
 }
 
 // Later samples are allowlisted and bounded. The primary rejected URL stays exact.
@@ -34,8 +36,12 @@ function fields(value: Json | undefined, names: readonly string[]) {
     for (const name of names) {
       const field = value[name];
 
-      if (typeof field === "string") result[name] = field.slice(0, 2048);
-      else if (typeof field === "number" || typeof field === "boolean") result[name] = field;
+      if (arkType.keywords.string.root.allows(field)) result[name] = field.slice(0, 2048);
+      else if (
+        arkType("number | number.NaN").allows(field) ||
+        arkType.keywords.boolean.allows(field)
+      )
+        result[name] = field;
     }
 
   return result;

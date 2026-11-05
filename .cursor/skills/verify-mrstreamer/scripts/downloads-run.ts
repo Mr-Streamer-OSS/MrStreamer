@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // The owned run the downloads scenarios of `pnpm verify:desktop` share: one profile, the fake
 // provider, TMDB and a picture server, starts of the built app checked to be this run's, window
 // driving, the failure screenshot, cleanup in order and `proof.json`. Each scenario keeps its own
@@ -83,7 +84,7 @@ function baseDriver(
       );
     const shot = await page.send("Page.captureScreenshot", { format: "png" });
 
-    if (!record(shot.result) || typeof shot.result["data"] !== "string")
+    if (!record(shot.result) || !arkType.keywords.string.root.allows(shot.result["data"]))
       throw new Error("No screenshot returned.");
     await writeFile(join(evidence, `${name}.png`), Buffer.from(shot.result["data"], "base64"));
     const tree = await page.send("Accessibility.getFullAXTree");
@@ -418,7 +419,7 @@ export async function ownedRun<D>(
         .send("Page.captureScreenshot", { format: "png" })
         .catch(() => undefined);
 
-      if (record(shot?.result) && typeof shot.result["data"] === "string")
+      if (record(shot?.result) && arkType.keywords.string.root.allows(shot.result["data"]))
         await writeFile(join(evidence, "failure.png"), Buffer.from(shot.result["data"], "base64"));
     }
   } finally {

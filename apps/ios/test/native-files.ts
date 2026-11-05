@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import "./native-guide.ts";
 import {
   existsSync,
@@ -93,7 +94,9 @@ type Part = string | File | Directory;
 
 const pathOf = (parts: readonly Part[]) =>
   join(
-    ...parts.map((part) => (typeof part === "string" ? part.replace(/^file:\/\//, "") : part.path)),
+    ...parts.map((part) =>
+      arkType.keywords.string.root.allows(part) ? part.replace(/^file:\/\//, "") : part.path,
+    ),
   );
 
 /** Waits for `native.gate` to let the operation through. */

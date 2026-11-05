@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LOCALES } from "@mrstreamer/contracts/language";
 import { en } from "../src/i18n/en.ts";
@@ -149,7 +150,7 @@ describe("every message in every language", () => {
         if (count === 1) continue;
 
         for (const [name, value] of Object.entries(values)) {
-          const shown = typeof value === "number" ? formatNumber(value) : value;
+          const shown = type.keywords.string.root.allows(value) ? value : formatNumber(value);
           expect(said, `${locale} ${key} {${name}}`).toContain(shown);
         }
       }

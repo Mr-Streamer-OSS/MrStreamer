@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { nativePlayer } from "./native-player.ts";
 import type { DownloadStatus } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -183,7 +184,10 @@ const passThrough = globalThis.fetch;
 vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
   const response = await passThrough(input, init);
   const restricted = memory.restricted;
-  const action = typeof input === "string" ? new URL(input).searchParams.get("action") : null;
+
+  const action = arkType.keywords.string.root.allows(input)
+    ? new URL(input).searchParams.get("action")
+    : null;
 
   if (restricted && response.ok && action?.startsWith("get_")) {
     if (action === "get_vod_categories") {
@@ -221,7 +225,11 @@ vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit)
 
   const held = memory.details;
 
-  if (!held || typeof input !== "string" || !input.includes("action=get_series_info")) {
+  if (
+    !held ||
+    !arkType.keywords.string.root.allows(input) ||
+    !input.includes("action=get_series_info")
+  ) {
     return response;
   }
 

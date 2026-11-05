@@ -228,7 +228,9 @@ function readRecord(
 
 /** A stored failure as this build knows them; one it doesn't is an unexpected one. */
 function failureOf(stored: NonNullable<Stored["failure"]>): DownloadFailure {
-  return "kind" in stored && typeof stored.kind === "string" && FAILURES.has(stored.kind)
+  return "kind" in stored &&
+    type.keywords.string.root.allows(stored.kind) &&
+    FAILURES.has(stored.kind)
     ? (stored as DownloadFailure)
     : { kind: "app", error: { kind: "unexpected", detail: t("This download stopped.") } };
 }

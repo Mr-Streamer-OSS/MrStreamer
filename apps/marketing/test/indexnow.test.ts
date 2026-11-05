@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -77,7 +78,8 @@ async function fixture(override?: (req: IncomingMessage, res: ServerResponse) =>
   );
   const address = server.address();
 
-  if (!address || typeof address === "string") throw new Error("No fixture address");
+  if (!address || arkType.keywords.string.root.allows(address))
+    throw new Error("No fixture address");
   const origin = `http://127.0.0.1:${address.port}`;
 
   const options = {

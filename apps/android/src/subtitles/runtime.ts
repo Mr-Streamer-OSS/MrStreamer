@@ -115,7 +115,9 @@ export function startSubtitles(
 
       return [
         ...new Set([
-          ...(typeof text === "object" && text.language ? [text.language.split("-")[0]!] : []),
+          ...(text !== undefined && text !== "off" && text.language
+            ? [text.language.split("-")[0]!]
+            : []),
           title,
           "en",
         ]),
@@ -374,7 +376,7 @@ sources.state.subscribe(() => {
           const key = decodeURIComponent(file.name.slice(0, -5));
           const identity: unknown = JSON.parse(key);
 
-          if (!Array.isArray(identity) || typeof identity[0] !== "string") continue;
+          if (!Array.isArray(identity) || !type.keywords.string.root.allows(identity[0])) continue;
           source = identity[0];
 
           if (removed.includes(source) && !owned.has(key)) file.delete();

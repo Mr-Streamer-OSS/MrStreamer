@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 // Measures a built app against the fake provider at the size of a large subscription: 13,000
 // channels, about 2,000 of them with a guide, a continuous 720p stream from ffmpeg on every test
 // channel, and a series of 520 episodes. Prints medians to compare builds, and how many streams
@@ -705,11 +706,11 @@ async function timed(
     await page.evaluate(
       `window.__source = document.querySelector("video")?.currentSrc ?? ""; window.__movingTime = null`,
     );
-  const observation = observe(page, condition, typeof act === "string" ? act : "");
+  const observation = observe(page, condition, arkType.keywords.string.root.allows(act) ? act : "");
 
   const [elapsed] = await Promise.all([
     observation,
-    typeof act === "string" ? Promise.resolve() : act(),
+    arkType.keywords.string.root.allows(act) ? Promise.resolve() : act(),
   ]);
 
   record(name, elapsed);
@@ -748,8 +749,8 @@ async function movingWarmup(
   );
 
   const [elapsedMs] = await Promise.all([
-    observe(page, FRESH_PICTURE, typeof act === "string" ? act : ""),
-    typeof act === "string" ? Promise.resolve() : act(),
+    observe(page, FRESH_PICTURE, arkType.keywords.string.root.allows(act) ? act : ""),
+    arkType.keywords.string.root.allows(act) ? Promise.resolve() : act(),
   ]);
 
   observations.push({

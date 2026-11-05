@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { describe, expect, it } from "vitest";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 import { defined } from "@mrstreamer/core/defined";
@@ -9,7 +10,8 @@ import { fixture } from "./library-fixture.ts";
 
 /** Reaches into a saved JSON object so a test can damage one field; anything else fails the test. */
 function object(value: Json | undefined): { [field: string]: Json | undefined } {
-  if (!value || typeof value !== "object" || !isObject(value)) throw new Error("Not an object");
+  if (!value || !type.keywords.object.root.allows(value) || !isObject(value))
+    throw new Error("Not an object");
 
   return value;
 }

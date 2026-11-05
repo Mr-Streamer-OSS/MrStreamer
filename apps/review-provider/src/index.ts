@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { readLogin, validLogin } from "./auth.ts";
 import { binaryResponse, privateError, type Bucket } from "./binary.ts";
 import {
@@ -132,7 +133,9 @@ function originOf(value: string | undefined): string | null {
 function clientEncoding(request: Request): string | null {
   const original = request.cf?.clientAcceptEncoding;
 
-  return typeof original === "string" ? original : request.headers.get("Accept-Encoding");
+  return type.keywords.string.root.allows(original)
+    ? original
+    : request.headers.get("Accept-Encoding");
 }
 
 function gzipAccepted(header: string | null): boolean {

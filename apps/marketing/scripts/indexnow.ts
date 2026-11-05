@@ -16,27 +16,39 @@ const READINESS_DELAY = 10_000;
 /** Validate the checked artifact before making any network request. */
 export function readIndexNowBuild(text: string, revision: string, sitemap: string) {
   const value: unknown = JSON.parse(text);
+  const invalid = new Error("Invalid IndexNow build identity or ownership value.");
+
+  if (value !== Object(value)) throw invalid;
+
+  const fields: {
+    site?: unknown;
+    revision?: unknown;
+    buildId?: unknown;
+    key?: unknown;
+    urlList?: unknown;
+  } = Object(value);
+
+  const urls = fields.urlList;
+  let buildId: string;
+
+  try {
+    buildId = String.prototype.valueOf.call(fields.buildId);
+
+    if (buildId !== fields.buildId) throw invalid;
+  } catch {
+    throw invalid;
+  }
 
   if (
-    !value ||
-    typeof value !== "object" ||
-    !("site" in value) ||
-    value.site !== SITE ||
-    !("revision" in value) ||
-    value.revision !== revision ||
+    fields.site !== SITE ||
+    fields.revision !== revision ||
     !/^[a-f0-9]{40}$/.test(revision) ||
-    !("buildId" in value) ||
-    typeof value.buildId !== "string" ||
-    !/^[a-f0-9-]{36}$/.test(value.buildId) ||
-    !("key" in value) ||
-    typeof value.key !== "string" ||
-    !/^[a-zA-Z0-9-]{8,128}$/.test(value.key) ||
-    value.key !== INDEXNOW_KEY ||
-    !("urlList" in value) ||
-    !isStrings(value.urlList)
+    !/^[a-f0-9-]{36}$/.test(buildId) ||
+    fields.key !== INDEXNOW_KEY ||
+    !isStrings(urls)
   )
-    throw new Error("Invalid IndexNow build identity or ownership value.");
-  const urlList = [...new Set(value.urlList)];
+    throw invalid;
+  const urlList = [...new Set(urls)];
 
   if (
     urlList.length === 0 ||
@@ -63,19 +75,22 @@ export function readIndexNowBuild(text: string, revision: string, sitemap: strin
     throw new Error("IndexNow URLs do not match the checked sitemap.");
 
   return {
-    site: value.site,
-    revision: value.revision,
-    buildId: value.buildId,
-    key: value.key,
+    site: SITE,
+    revision,
+    buildId,
+    key: INDEXNOW_KEY,
     urlList,
   };
 }
 
 function isStrings(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) &&
-    value.every((entry: unknown): entry is string => typeof entry === "string")
-  );
+  try {
+    return (
+      Array.isArray(value) && value.every((entry) => entry === String.prototype.valueOf.call(entry))
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface NotificationOptions {

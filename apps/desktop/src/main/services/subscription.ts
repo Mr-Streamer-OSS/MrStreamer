@@ -1,3 +1,4 @@
+import { JsonValue } from "@mrstreamer/contracts/json-value";
 import type { Json, JsonObject } from "@mrstreamer/contracts/json";
 
 import type { UsageObservers } from "../analytics/observers.ts";
@@ -63,6 +64,8 @@ import {
 } from "../providers/xtream.ts";
 import { lazy, type Infer } from "@mrstreamer/contracts/lazy";
 import { defined } from "@mrstreamer/core/defined";
+
+const RegistryEntryValue = lazy(() => JsonValue.and("object"));
 
 const AccountRecord = lazy(() =>
   type({
@@ -447,7 +450,7 @@ function make(deps: SubscriptionDeps) {
           continue;
         }
 
-        if ("id" in raw && typeof raw.id === "string") named.add(raw.id);
+        if ("id" in raw && type.keywords.string.root.allows(raw.id)) named.add(raw.id);
         const entry = "original" in raw ? null : AddedEntry()(raw);
 
         if (!entry || entry instanceof type.errors) {
@@ -1043,13 +1046,13 @@ async function readRegistry(path: string): Promise<{
   if (
     !(head instanceof type.errors) &&
     data &&
-    typeof data === "object" &&
+    type.keywords.object.root.allows(data) &&
     !Array.isArray(data) &&
     "subscriptions" in data &&
     Array.isArray(data.subscriptions)
   ) {
     for (const entry of data.subscriptions) {
-      if (entry !== null && typeof entry === "object") entries.push(entry);
+      if (RegistryEntryValue().allows(entry)) entries.push(entry);
     }
   }
 

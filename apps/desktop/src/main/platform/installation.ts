@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { t } from "@mrstreamer/core/i18n";
@@ -74,12 +75,10 @@ export async function installedDistribution(options: {
     const value: unknown = JSON.parse(text);
 
     if (
-      typeof value === "object" &&
-      value !== null &&
-      "schema" in value &&
-      value.schema === PACMAN_INSTALLATION.schema &&
-      "updates" in value &&
-      value.updates === PACMAN_INSTALLATION.updates
+      type({
+        schema: type.unit(PACMAN_INSTALLATION.schema),
+        updates: type.unit(PACMAN_INSTALLATION.updates),
+      }).allows(value)
     )
       return "pacman";
   } catch {

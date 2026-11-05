@@ -81,12 +81,17 @@ export async function readReminders(path: string): Promise<ReadReminders> {
   const unread = new Map<string, Json[]>();
 
   const subscriptions =
-    data && typeof data === "object" && !Array.isArray(data) && "subscriptions" in data
+    data &&
+    type.keywords.object.root.allows(data) &&
+    !Array.isArray(data) &&
+    "subscriptions" in data
       ? data.subscriptions
       : null;
 
   for (const [subscriptionId, entries] of Object.entries(
-    subscriptions && typeof subscriptions === "object" && !Array.isArray(subscriptions)
+    subscriptions &&
+      type.keywords.object.root.allows(subscriptions) &&
+      !Array.isArray(subscriptions)
       ? subscriptions
       : {},
   )) {

@@ -1,3 +1,4 @@
+import type { Json } from "../../../packages/contracts/src/json.ts";
 // Where a visit entered the site, for website analytics (analytics.ts): three fixed codes, never
 // an address. The page reads its own query and document.referrer only to pick codes from the
 // lists below. A referrer is reduced to its host, and a host that isn't listed is "other". UTM
@@ -157,10 +158,10 @@ const MEDIUMS: readonly Medium[] = [...Object.values(SOURCES), ...TAGGED_MEDIUMS
 /** The tab's stored entry, if it holds only listed codes. */
 function stored(): Entry | undefined {
   try {
-    const value: unknown = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
+    const value: Json = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
 
-    if (typeof value !== "object" || value === null) return undefined;
-    const codes: Partial<Record<keyof Entry, unknown>> = value;
+    if (!(value !== null && value === Object(value))) return undefined;
+    const codes: Partial<Record<keyof Entry, unknown>> = Object(value);
     const entry_source = pick(Object.keys(SOURCES) as Source[], String(codes.entry_source));
     const entry_medium = pick(MEDIUMS, String(codes.entry_medium));
     const entry_campaign = pick(CAMPAIGNS, String(codes.entry_campaign));

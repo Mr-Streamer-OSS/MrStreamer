@@ -726,7 +726,9 @@ function url(value: string | null | undefined): string | null {
 }
 
 function firstOf(value: readonly (string | null)[] | string | null | undefined): string | null {
-  return (typeof value === "string" ? value : value?.find((each) => each !== null)) ?? null;
+  return (
+    (type.keywords.string.root.allows(value) ? value : value?.find((each) => each !== null)) ?? null
+  );
 }
 
 function list(value: string | null | undefined, separator: RegExp): string[] {
@@ -738,7 +740,7 @@ function list(value: string | null | undefined, separator: RegExp): string[] {
 
 /** A rating out of 10; panels send "0" or "" when they have none. */
 function rating(value: string | number | null | undefined): number | null {
-  const number = typeof value === "number" ? value : Number(value);
+  const number = Number(value);
 
   return Number.isFinite(number) && number > 0 && number <= 10 ? number : null;
 }
@@ -750,7 +752,7 @@ function epochSeconds(value: string | number | null | undefined): number | null 
 }
 
 function seconds(value: string | number | null | undefined): number | null {
-  const number = typeof value === "number" ? value : Number(value);
+  const number = Number(value);
 
   return Number.isFinite(number) && number > 0 ? Math.round(number) : null;
 }
@@ -763,7 +765,7 @@ function minutes(value: string | number | null | undefined): number | null {
 
 /** "01:39:11" or "39:11" in seconds. A bare number says nothing of its unit, so it counts as none. */
 function clockSeconds(value: string | number | null | undefined): number | null {
-  if (typeof value !== "string") return null;
+  if (!type.keywords.string.root.allows(value)) return null;
   const parts = value.trim().split(":").map(Number);
 
   if (parts.length < 2 || parts.some((part) => !Number.isFinite(part))) return null;
@@ -865,7 +867,8 @@ function rows(body: Json): readonly (Json | undefined)[] {
   if (Array.isArray(body)) return body;
 
   // A few panels return an object keyed by index instead of an array.
-  if (body && typeof body === "object" && !("user_info" in body)) return Object.values(body);
+  if (body && type.keywords.object.root.allows(body) && !("user_info" in body))
+    return Object.values(body);
 
   return [];
 }
@@ -876,7 +879,7 @@ function isTruthy(value: string | number | boolean | null | undefined): boolean 
 
 function toInteger(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === "") return null;
-  const number = typeof value === "number" ? value : Number(value);
+  const number = Number(value);
 
   return Number.isInteger(number) ? number : null;
 }

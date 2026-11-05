@@ -181,8 +181,8 @@ export async function buildGuideIndex(
       const found = whole ? undefined : findTitle.get(text)?.["key"];
 
       const key =
-        typeof found === "number"
-          ? found
+        found === Number(found)
+          ? Number(found)
           : Number(insertTitle.run(text, normalize(text)).lastInsertRowid);
 
       if (titles.size === TITLE_CACHE.titles || cachedBytes >= TITLE_CACHE.bytes) {
@@ -264,7 +264,7 @@ export async function buildGuideIndex(
     if (strict) {
       const last = db.prepare("select max(stop) as until from programme").get()?.["until"];
 
-      if (typeof last !== "number" || last <= since) throw failure({ kind: "ended" });
+      if (last !== Number(last) || Number(last) <= since) throw failure({ kind: "ended" });
     }
 
     const insertChannel = db.prepare(
@@ -287,7 +287,7 @@ export async function buildGuideIndex(
     const result: GuideIndexSummary = {
       channels: Number(db.prepare("select count(*) as n from channel").get()?.["n"] ?? 0),
       programmes: Number(summary?.["programmes"] ?? 0),
-      until: typeof summary?.["until"] === "number" ? summary["until"] : null,
+      until: summary?.["until"] === Number(summary?.["until"]) ? Number(summary["until"]) : null,
     };
 
     db.close();
@@ -509,7 +509,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
         id: String(row["id"]),
         name: String(row["name"]),
         folded: String(row["folded"]),
-        until: typeof row["until"] === "number" ? row["until"] : null,
+        until: row["until"] === Number(row["until"]) ? Number(row["until"]) : null,
       };
 
       channels.set(channel.id, channel);
@@ -529,7 +529,7 @@ export async function openGuideIndex(path: string): Promise<GuideIndex | null> {
       ends: Float64Array.from(ends).sort(),
       byKey,
       programmes: Number(meta?.["programmes"] ?? 0),
-      until: typeof meta?.["until"] === "number" ? meta["until"] : null,
+      until: meta?.["until"] === Number(meta?.["until"]) ? Number(meta["until"]) : null,
     });
   } catch {
     db.close();
@@ -775,7 +775,7 @@ export function searchFirst(search: FirstSearch): FirstFound {
           start,
           stop,
           title,
-          description: typeof description === "string" ? description : null,
+          description: description === String(description) ? String(description) : null,
         },
       };
     });
@@ -948,6 +948,7 @@ function slotOf(row: Record<string, unknown>): Omit<GuideSlot, "guide"> {
 function programmeOf(row: Record<string, unknown>): Programme {
   return {
     ...slotOf(row),
-    description: typeof row["description"] === "string" ? row["description"] : null,
+    description:
+      row["description"] === String(row["description"]) ? String(row["description"]) : null,
   };
 }

@@ -727,9 +727,15 @@ function unfilled(submission: Submission, release: CheckedRelease): string[] {
       const notes = storeNotes(release, language);
       const kept = listing["baseListing"]["releaseNotes"];
 
-      return typeof kept === "string" && kept.replaceAll("\r\n", "\n") === notes
-        ? []
-        : [`listings.${language}.baseListing.releaseNotes`];
+      try {
+        const text = String.prototype.valueOf.call(kept);
+
+        if (text === kept && text.replaceAll("\r\n", "\n") === notes) return [];
+      } catch {
+        // An unreadable release note is a difference, not a successful comparison.
+      }
+
+      return [`listings.${language}.baseListing.releaseNotes`];
     }),
   ];
 }
@@ -1102,11 +1108,18 @@ async function statusOf(
   if (!answer || answer.status !== 200) throw refusal(what, answer, session.clean);
   const body = answer.body;
 
-  if (!isRecord(body) || typeof body["status"] !== "string") {
-    throw new StoreError(`Microsoft answered ${what} with nothing readable.`);
+  if (isRecord(body)) {
+    try {
+      const status = String.prototype.valueOf.call(body["status"]);
+
+      if (status === body["status"])
+        return { status, remarks: remarksOf(body["statusDetails"], session.clean) };
+    } catch {
+      // The response must carry a primitive status, never a coerced value.
+    }
   }
 
-  return { status: body["status"], remarks: remarksOf(body["statusDetails"], session.clean) };
+  throw new StoreError(`Microsoft answered ${what} with nothing readable.`);
 }
 
 /** The app's published submission and the one in progress, once the app is shown to be ours. */
@@ -1163,30 +1176,45 @@ async function storeApp(
 
 /** Whether `value` is a submission's ID, which goes into the address of later requests. */
 function isId(value: unknown): value is string {
-  return typeof value === "string" && /^[\w-]{1,64}$/.test(value);
+  try {
+    const id = String.prototype.valueOf.call(value);
+
+    return id === value && /^[\w-]{1,64}$/.test(id);
+  } catch {
+    return false;
+  }
 }
 
 /** The submission in one of Microsoft's answers, or null when this script can't read one there. */
 function submissionOf(body: Json | undefined, clean: Session["clean"]): Submission | null {
-  if (!isRecord(body) || !isId(body["id"]) || typeof body["status"] !== "string") return null;
+  if (!isRecord(body) || !isId(body["id"])) return null;
 
   const text = (from: Record<string, Json | undefined>, key: string) => {
     const value = from[key];
 
-    return typeof value === "string" ? value : "";
+    try {
+      const text = String.prototype.valueOf.call(value);
+
+      return text === value ? text : null;
+    } catch {
+      return null;
+    }
   };
 
+  const status = text(body, "status");
+
+  if (status === null) return null;
   const packages = Array.isArray(body["applicationPackages"]) ? body["applicationPackages"] : [];
 
   return {
     id: body["id"],
-    status: body["status"],
-    visibility: text(body, "visibility"),
-    publishMode: text(body, "targetPublishMode"),
+    status,
+    visibility: text(body, "visibility") ?? "",
+    publishMode: text(body, "targetPublishMode") ?? "",
     packages: packages.filter(isRecord).map((file) => ({
-      fileName: text(file, "fileName"),
-      fileStatus: text(file, "fileStatus"),
-      version: text(file, "version"),
+      fileName: text(file, "fileName") ?? "",
+      fileStatus: text(file, "fileStatus") ?? "",
+      version: text(file, "version") ?? "",
     })),
     uploadUrl: text(body, "fileUploadUrl") || null,
     remarks: remarksOf(body["statusDetails"], clean),
@@ -1200,7 +1228,15 @@ function remarksOf(details: Json | undefined, clean: Session["clean"]): string[]
 
   const listed = (key: string, label: string) =>
     (Array.isArray(details[key]) ? details[key] : []).filter(isRecord).map((each) => {
-      const parts = [each["code"], each["details"]].filter((part) => typeof part === "string");
+      const parts = [each["code"], each["details"]].flatMap((part) => {
+        try {
+          const text = String.prototype.valueOf.call(part);
+
+          return text === part ? [text] : [];
+        } catch {
+          return [];
+        }
+      });
 
       return `${label}: ${clean(parts.join(": "))}`;
     });
@@ -1231,8 +1267,17 @@ function listingFacts(submission: Submission, clean: Session["clean"]): string[]
     },
   );
 
-  const price =
-    isRecord(pricing) && typeof pricing["priceId"] === "string" ? pricing["priceId"] : "";
+  const price = (() => {
+    if (!isRecord(pricing)) return "";
+
+    try {
+      const price = String.prototype.valueOf.call(pricing["priceId"]);
+
+      return price === pricing["priceId"] ? price : "";
+    } catch {
+      return "";
+    }
+  })();
 
   return [
     `Listings: ${languages.join(", ") || "none"}. Trailers: ${Array.isArray(trailers) ? trailers.length : 0}.`,
@@ -1266,14 +1311,26 @@ async function signIn(access: StoreAccess): Promise<Session> {
   );
 
   const body = answer && isRecord(answer.body) ? answer.body : {};
-  const token = body["access_token"];
+  const fields = new Map<string, string>();
 
-  if (answer?.status === 200 && typeof token === "string" && token) {
+  for (const name of ["access_token", "error"]) {
+    try {
+      const text = String.prototype.valueOf.call(body[name]);
+
+      if (text === body[name]) fields.set(name, text);
+    } catch {
+      // An unreadable OAuth field remains absent, never a fabricated successful sign-in.
+    }
+  }
+
+  const token = fields.get("access_token");
+
+  if (answer?.status === 200 && token) {
     return { access, token, clean: cleaner([access.clientSecret, token]) };
   }
 
   if (!answer) throw new StoreError("Microsoft Entra didn't answer the sign-in.");
-  const error = typeof body["error"] === "string" ? body["error"] : "";
+  const error = fields.get("error") ?? "";
   const code = /AADSTS\d+/.exec(String(body["error_description"]))?.[0];
   const named = [/^\w{1,40}$/.test(error) ? error : `HTTP ${answer.status}`, code].filter(Boolean);
   throw new StoreError(
@@ -1373,10 +1430,20 @@ function refusal(what: string, answer: Answer | null, clean: Session["clean"]): 
   // Microsoft's own errors name a code and a message. Any other body stays unprinted.
   const { body } = answer;
 
-  const said =
-    isRecord(body) && typeof body["code"] === "string" && typeof body["message"] === "string"
-      ? `Microsoft says: ${clean(`${body["code"]}: ${body["message"]}`)}`
-      : "";
+  const said = (() => {
+    if (!isRecord(body)) return "";
+
+    try {
+      const code = String.prototype.valueOf.call(body["code"]);
+      const message = String.prototype.valueOf.call(body["message"]);
+
+      return code === body["code"] && message === body["message"]
+        ? `Microsoft says: ${clean(`${code}: ${message}`)}`
+        : "";
+    } catch {
+      return "";
+    }
+  })();
 
   const asked = answer.correlation ? `Request ${answer.correlation}.` : "";
 

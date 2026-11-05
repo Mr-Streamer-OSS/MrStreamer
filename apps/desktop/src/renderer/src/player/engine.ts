@@ -1,3 +1,6 @@
+import { isCallable } from "../../../../../../packages/contracts/src/callable.ts";
+import { type as arkType } from "arktype";
+import { lazy } from "@mrstreamer/contracts/lazy";
 import type { PESPrivateData } from "mpegts.js/d.ts/src/demux/pes-private-data";
 import type { AnalyticsPlaybackState, PlaybackDiagnostic } from "@mrstreamer/contracts/analytics";
 import { observeMediaPlayback } from "./analytics.ts";
@@ -54,8 +57,23 @@ export interface EngineError {
   readonly failure?: PlaybackFailureSelector;
 }
 
+const EngineFailure = lazy(() =>
+  arkType({
+    kind: "'network' | 'media' | 'unsupported' | 'wrong-container'",
+    detail: "string",
+  }).narrow((value) => !isCallable(value)),
+);
+
+const PrivatePacket = lazy(() =>
+  arkType({ pid: "number | number.NaN", data: arkType.instanceOf(Uint8Array) }).narrow(
+    (value) => !isCallable(value),
+  ),
+);
+
+const Timestamp = lazy(() => arkType("number | number.NaN"));
+
 export function isEngineError(value: unknown): value is EngineError {
-  return typeof value === "object" && value !== null && "kind" in value && "detail" in value;
+  return EngineFailure().allows(value);
 }
 
 /** What is known about the playing stream. Fields are null when the engine cannot tell. */
@@ -281,11 +299,11 @@ function mpegtsEngine(
   let privateData: ((pid: number, data: Uint8Array, at: number) => void) | null = null;
   // mpegts.js times private data in milliseconds on the timeline it gives the element.
   player.on(mpegts.Events.PES_PRIVATE_DATA_ARRIVED, (packet: PESPrivateData) => {
-    if (!privateData || typeof packet !== "object" || packet === null) return;
+    if (!privateData || !PrivatePacket().allows(packet)) return;
     const { pid, data, pts, nearest_pts } = packet;
-    const at = typeof pts === "number" ? pts : nearest_pts;
+    const at = Timestamp().allows(pts) ? pts : nearest_pts;
 
-    if (typeof pid === "number" && data instanceof Uint8Array && typeof at === "number") {
+    if (Timestamp().allows(at)) {
       privateData(pid, data, at / 1000);
     }
   });
@@ -321,10 +339,7 @@ function mpegtsError(
   detail: MpegtsJs["ErrorDetails"][keyof MpegtsJs["ErrorDetails"]],
   info?: mpegts.LoaderErrorMessage,
 ): EngineError {
-  const message =
-    info && typeof info === "object" && "msg" in info && typeof info.msg === "string"
-      ? info.msg
-      : String(detail);
+  const message = arkType({ msg: "string" }).allows(info) ? info.msg : String(detail);
 
   if (type === mpegts.ErrorTypes.NETWORK_ERROR) return { kind: "network", detail: message };
 
@@ -924,9 +939,9 @@ function elementInfo(video: HTMLVideoElement): StreamInfo {
 }
 
 function numberOr(value: number | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function stringOr(value: string | undefined): string | null {
-  return typeof value === "string" && value ? value : null;
+  return value || null;
 }

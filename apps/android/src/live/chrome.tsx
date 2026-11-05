@@ -1,3 +1,4 @@
+import { type } from "arktype";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import type { ReactNode } from "react";
 import {
@@ -132,7 +133,7 @@ export function Bar({
       }}
     >
       <IconButton {...leading} />
-      {typeof title === "string" ? (
+      {type.keywords.string.root.allows(title) ? (
         <Text
           accessibilityRole="header"
           numberOfLines={1}

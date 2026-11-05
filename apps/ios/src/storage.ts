@@ -1,3 +1,4 @@
+import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 
 import { type } from "arktype";
@@ -71,7 +72,7 @@ export function readState(): SavedState {
   const state =
     parsed instanceof type.errors ||
     data === null ||
-    typeof data !== "object" ||
+    !(type.keywords.object.root.allows(data) && !isCallable(data)) ||
     Array.isArray(data)
       ? EMPTY
       : { ...data, ...parsed };

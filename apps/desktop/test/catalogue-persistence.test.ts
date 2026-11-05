@@ -1,3 +1,4 @@
+import { type as arkType } from "arktype";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -36,7 +37,7 @@ function start(dir: string, clock?: BigInt64Array) {
         `const {workerData} = require("node:worker_threads");
         const clock = new BigInt64Array(workerData.clock);
         Date.now = () => Number(Atomics.load(clock, 0));
-        import(${JSON.stringify(typeof entry === "string" ? pathToFileURL(entry).href : entry.href)});`,
+        import(${JSON.stringify(arkType.keywords.string.root.allows(entry) ? pathToFileURL(entry).href : entry.href)});`,
         { eval: true, workerData: { ...setup, clock: clock.buffer } },
       )
     : new Worker(entry, { workerData: setup });

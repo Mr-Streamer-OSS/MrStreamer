@@ -237,7 +237,7 @@ function make(db: DatabaseSync): DetailCache["Service"] {
 
         if (
           !row ||
-          typeof row.payload !== "string" ||
+          !type.keywords.string.root.allows(row.payload) ||
           Buffer.byteLength(row.payload) > RECORD_BYTES
         )
           return row ? discard() : null;

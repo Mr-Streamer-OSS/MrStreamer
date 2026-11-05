@@ -86,7 +86,7 @@ function PreferenceRow<K extends keyof Preferences>({
   // mutation's boolean intent makes its save error obsolete.
   const consentSaved =
     field === "analyticsEnabled" &&
-    typeof update.variables === "boolean" &&
+    (update.variables === true || update.variables === false) &&
     read.data?.analyticsEnabled === update.variables;
 
   const change = (value: Preferences[K]) => {

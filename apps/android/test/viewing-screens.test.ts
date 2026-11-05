@@ -243,7 +243,7 @@ function find(container: HTMLElement, label: string | RegExp) {
     // A button without its own name is read by its text, as a snackbar's action.
     const name = b.getAttribute("aria-label") ?? b.textContent ?? "";
 
-    return typeof label === "string" ? name === label : label.test(name);
+    return label instanceof RegExp ? label.test(name) : name === label;
   });
 
   if (!button) throw new Error(`Missing ${String(label)}`);

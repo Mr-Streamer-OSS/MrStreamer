@@ -1,3 +1,5 @@
+import { isCallable } from "../../../../../../packages/contracts/src/callable.ts";
+import { type } from "arktype";
 // React Query bindings for the IPC contract. Components read data through these hooks only.
 // Whatever a provider lists is asked for with the subscription it belongs to, and cached under
 // both: a provider's ids mean nothing without their subscription.
@@ -110,7 +112,7 @@ export const queries = {
         }
       },
       structuralSharing: (previous, next) => {
-        if (typeof next === "object" && next !== null) {
+        if (type.keywords.object.root.allows(next) && !isCallable(next)) {
           const read = viewingReads.get(next);
 
           if (read) {
@@ -866,7 +868,7 @@ export function syncOnDemand(client: QueryClient): () => void {
 
       return part === "related"
         ? newLists || marked
-        : marked && typeof part === "string" && TITLE_LISTS.has(part);
+        : marked && type.keywords.string.root.allows(part) && TITLE_LISTS.has(part);
     };
 
     // Lists change with a refresh and as TMDB's metadata arrives. A season shown is read again

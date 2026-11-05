@@ -60,9 +60,15 @@ function stableOf(feed: Json | undefined): { version: string; listed: Json | und
   if (!isRecord(feed) || feed["schema"] !== 1 || !isRecord(feed["stable"])) return null;
   const { version, files, installers: listed } = feed["stable"];
 
-  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) return null;
+  try {
+    const text = String.prototype.valueOf.call(version);
 
-  return files === `${RELEASES}/download/v${version}` ? { version, listed } : null;
+    if (text !== version || !/^\d+\.\d+\.\d+$/.test(text)) return null;
+
+    return files === `${RELEASES}/download/v${text}` ? { version: text, listed } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -112,7 +118,8 @@ export async function verifiedDownloads(
   const stable =
     released &&
     /^\d+\.\d+\.\d+$/.test(released.version) &&
-    typeof published === "number" &&
+    published !== null &&
+    published !== undefined &&
     Number.isFinite(published)
       ? { version: released.version }
       : stableOf(feed);
@@ -147,8 +154,17 @@ export function showFeedDownloads(page: ParentNode, feed: Json | undefined): voi
   const downloads = listedDownloads(feed);
 
   if (minimum !== undefined) {
-    const generated =
-      isRecord(feed) && typeof feed["generated"] === "string" ? Date.parse(feed["generated"]) : NaN;
+    let generated = NaN;
+
+    if (isRecord(feed)) {
+      try {
+        const text = String.prototype.valueOf.call(feed["generated"]);
+
+        if (text === feed["generated"]) generated = Date.parse(text);
+      } catch {
+        // An unreadable timestamp cannot supersede the build's verified release.
+      }
+    }
 
     if (
       !Number.isFinite(generated) ||
@@ -272,5 +288,5 @@ export function writeDownloads(
 }
 
 function isRecord(value: Json | undefined): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return value !== null && value === Object(value) && !Array.isArray(value);
 }
