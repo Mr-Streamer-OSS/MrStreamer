@@ -158,16 +158,15 @@ export async function startFakeAirplayHelper(
     const lines = createInterface({ input: socket }).on("error", () => {});
     // Only our relay may name a process and pass on the adapter's commands.
     lines.once("line", (hello) => {
-      const [key, value] = hello.split(":");
-      const pid = Number(value);
+      const [key, pid] = hello.split(":");
 
-      if (key !== token || !Number.isSafeInteger(pid) || pid <= 0) {
+      if (key !== token) {
         socket.destroy();
 
         return;
       }
 
-      pids.push(pid);
+      pids.push(Number(pid));
       current = socket;
       detecting = false;
       list = null;
