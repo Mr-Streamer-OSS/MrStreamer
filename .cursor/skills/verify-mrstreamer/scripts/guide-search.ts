@@ -306,6 +306,73 @@ export async function guideSearchScenario(d: Driver, otherUrl: string): Promise<
   expect(await d.exists(`${field}.value === 'ArchiveOnly'`), "Keyboard palette transfers query");
   d.observed.paletteKeyboardGuideOnly = true;
 
+  // Every language at the smallest window with text enlarged by a quarter: ⌘K's guide row is
+  // pressed by pointer, and the panel keeps its controls, titles and channels inside the window.
+  const problems: string[] = [];
+
+  for (const locale of ["en_US", "nl_NL", "fr_FR", "de_DE", "es_ES"]) {
+    await d.quit();
+    await d.launch(locale);
+    await d.send("Emulation.setDeviceMetricsOverride", {
+      width: 960,
+      height: 600,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
+    // Text enlargement is a rendering probe; application state still changes through controls.
+    await d.evaluate("document.documentElement.style.fontSize = '125%'");
+
+    const language = await d.evaluate<"en-US" | "nl-NL" | "fr-FR" | "de-DE" | "es-ES">(
+      "document.documentElement.lang",
+    );
+
+    await d.click("Open localized Live TV", named("header button", translate(language, "Live TV")));
+    await palette();
+    const pressable = await d.evaluate<boolean>(PRESSABLE);
+
+    await d.capture(`palette-${locale}-960-text125`);
+
+    if (pressable) {
+      await d.click(
+        "Localized palette guide search",
+        "document.querySelector('[data-guide-search]')",
+      );
+      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+      expect(await d.exists(`${field}.value === 'Weekly'`), "Palette preserves typed words");
+    } else {
+      problems.push(`${locale}: ⌘K's guide row can't be pressed inside the window`);
+      await d.key("Escape", 27);
+      await d.wait(async () => !(await d.exists("document.querySelector('[role=dialog]')")));
+      await d.click(
+        "Localized header calendar",
+        "document.querySelector('[data-guide-search-opener]')",
+      );
+      await search("Weekly");
+      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
+    }
+
+    const layout = await d.evaluate<{ problems: string[] }>(LAYOUT);
+
+    problems.push(...layout.problems.map((problem) => `${locale}: ${problem}`));
+    d.observed[`layout-${locale}`] = {
+      lang: language,
+      font: await d.evaluate<string>("getComputedStyle(document.documentElement).fontSize"),
+      ...layout,
+    };
+    await d.capture(`guide-${locale}-960-text125`);
+  }
+
+  d.observed.layoutProblems = problems;
+  expect(problems.length === 0, `Readable at 960 × 600 with 125% text:\n${problems.join("\n")}`);
+  await d.quit();
+  await d.launch();
+  await d.click("Return English Live TV after locale checks", named("header button", "Live TV"));
+  await d.click(
+    "Reopen search for row actions",
+    "document.querySelector('[data-guide-search-opener]')",
+  );
+
   await search("Weekly 49");
   await d.wait(async () => (await d.evaluate<number>(rows)) > 0);
   await d.click(
@@ -441,64 +508,4 @@ export async function guideSearchScenario(d: Driver, otherUrl: string): Promise<
   );
   d.observed.sourceRemovalFallback = true;
   await d.capture("guide-source-removal-fallback");
-
-  // Every language at the smallest window with text enlarged by a quarter: ⌘K's guide row is
-  // pressed by pointer, and the panel keeps its controls, titles and channels inside the window.
-  const problems: string[] = [];
-
-  for (const locale of ["en_US", "nl_NL", "fr_FR", "de_DE", "es_ES"]) {
-    await d.quit();
-    await d.launch(locale);
-    await d.send("Emulation.setDeviceMetricsOverride", {
-      width: 960,
-      height: 600,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-    await d.wait(() => d.evaluate<boolean>("innerWidth === 960 && innerHeight === 600"));
-    // Text enlargement is a rendering probe; application state still changes through controls.
-    await d.evaluate("document.documentElement.style.fontSize = '125%'");
-
-    const language = await d.evaluate<"en-US" | "nl-NL" | "fr-FR" | "de-DE" | "es-ES">(
-      "document.documentElement.lang",
-    );
-
-    await d.click("Open localized Live TV", named("header button", translate(language, "Live TV")));
-    await palette();
-    const pressable = await d.evaluate<boolean>(PRESSABLE);
-
-    await d.capture(`palette-${locale}-960-text125`);
-
-    if (pressable) {
-      await d.click(
-        "Localized palette guide search",
-        "document.querySelector('[data-guide-search]')",
-      );
-      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
-      expect(await d.exists(`${field}.value === 'Weekly'`), "Palette preserves typed words");
-    } else {
-      problems.push(`${locale}: ⌘K's guide row can't be pressed inside the window`);
-      await d.key("Escape", 27);
-      await d.wait(async () => !(await d.exists("document.querySelector('[role=dialog]')")));
-      await d.click(
-        "Localized header calendar",
-        "document.querySelector('[data-guide-search-opener]')",
-      );
-      await search("Weekly");
-      await d.wait(async () => (await d.evaluate<number>(rows)) === 50);
-    }
-
-    const layout = await d.evaluate<{ problems: string[] }>(LAYOUT);
-
-    problems.push(...layout.problems.map((problem) => `${locale}: ${problem}`));
-    d.observed[`layout-${locale}`] = {
-      lang: language,
-      font: await d.evaluate<string>("getComputedStyle(document.documentElement).fontSize"),
-      ...layout,
-    };
-    await d.capture(`guide-${locale}-960-text125`);
-  }
-
-  d.observed.layoutProblems = problems;
-  expect(problems.length === 0, `Readable at 960 × 600 with 125% text:\n${problems.join("\n")}`);
 }
