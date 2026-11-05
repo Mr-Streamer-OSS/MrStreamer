@@ -63,7 +63,13 @@ cd apps/android/android
 fleet-android gradle :player:testDebugUnitTest assembleRelease
 ```
 
-Only Evidence opens the managed device session and installs that exact release APK. Record its source SHA, APK hash, package/version and device/API/ABI. If available through the approved device workflow, record the platform media codec inventory; the release UI does not expose `capabilities()`. Keep installed, physical device, receiver and store results separate. Source and JVM checks do not qualify decoding.
+Only Evidence opens the shared `Pixel_9_API_37` x86_64 emulator on forge's device host `local`. Call `device_list`, then `device_open` with that host and device id; wait if another agent owns the session. Follow the returned `quickStart` and use its exact AgentDevice command for app launch and all UI input, screenshots and recordings. From the same Gradle directory, install that exact release APK:
+
+```sh
+fleet-android install app/build/outputs/apk/release/app-release.apk
+```
+
+The install prints `Success`. The release carries its JavaScript bundle and needs no Metro. Its native code must include x86_64; the project configures `arm64-v8a,x86_64`. Confirm the expected app state with `device_screenshot`. Record its source SHA, APK hash, package/version and device/API/ABI. If available through the approved device workflow, record the platform media codec inventory; the release UI does not expose `capabilities()`. Keep installed, physical device, receiver and store results separate. Source and JVM checks do not qualify decoding.
 
 Start the named-file panel from the repository root, with Node 24+, ffmpeg and ffprobe:
 
@@ -71,7 +77,13 @@ Start the named-file panel from the repository root, with Node 24+, ffmpeg and f
 FIXTURE_OUT="$PWD/.local/699/formats-ranges" node apps/android/test/formats-server.ts 8891 8892
 ```
 
-Both ports bind loopback. Evidence forwards only the provider port to its owned emulator, never the control port, using its approved device workflow. Connect the installed app to the forwarded provider as `fixture` / `fixture-pass`. Movies lists each named row; Live's TEST category supplies silent copies of the TS channel clips. Use normal UI input through Connect, Movies, Live and Watch. This exercises the production source resolver, admission, app-side header construction, holds, one native owner and track controls. The fixture proxy forwards Range only, so it does not qualify upstream receipt of private headers. Do not invoke a second player or treat the HTTP test as installed proof.
+Both ports bind loopback on forge. In another shell on forge, Evidence forwards only the provider port directly to its owned emulator:
+
+```sh
+$ANDROID_HOME/platform-tools/adb -s emulator-5554 reverse tcp:8891 tcp:8891
+```
+
+Use the serial of the managed device if it differs from `emulator-5554`. Keep control port 8892 on forge. Connect the installed app to `http://127.0.0.1:8891` as `fixture` / `fixture-pass`. Movies lists each named row; Live's TEST category supplies silent copies of the TS channel clips. Use normal UI input through Connect, Movies, Live and Watch. This exercises the production source resolver, admission, app-side header construction, holds, one native owner and track controls. The fixture proxy forwards Range only, so it does not qualify upstream receipt of private headers. Do not invoke a second player or treat the HTTP test as installed proof.
 
 Stop this server with SIGINT, then repeat on a fresh isolated app profile:
 
@@ -91,7 +103,13 @@ Reuse the existing mobile fixture for HLS, not its iOS player. Run from the root
 FIXTURE_OUT="$PWD/.local/699/hls" node apps/ios/scripts/fixture-server.ts 8791 8792
 ```
 
-Its fake Xtream panel uses the same fixture login. Android normally resolves Xtream Live to TS. To exercise actual HLS, connect a separate M3U source pointing to a file on an owned fixture HTTP host. Each entry must name the forwarded fixture's `/live/fixture/fixture-pass/<id>.m3u8`, including stream 7999. Record the exact generated M3U under `.local/699/`. The fixture control `/live` and request log must show playlist/segment reads; a `.ts` request does not qualify HLS. Remove that source after testing. The native HLS playlists are also named movies on the formats panel; their variants and segments stay on its provider origin, so normal Movies → Watch can qualify title/seek behavior.
+Forward this server's provider port directly on forge as well:
+
+```sh
+$ANDROID_HOME/platform-tools/adb -s emulator-5554 reverse tcp:8791 tcp:8791
+```
+
+Keep control port 8792 on forge. Its fake Xtream panel is reached at `http://127.0.0.1:8791` with the same fixture login. Android normally resolves Xtream Live to TS. To exercise actual HLS, connect a separate M3U source pointing to a file on an owned fixture HTTP host. Each entry must name the forwarded fixture's `/live/fixture/fixture-pass/<id>.m3u8`, including stream 7999. Record the exact generated M3U under `.local/699/`. The fixture control `/live` and request log must show playlist/segment reads; a `.ts` request does not qualify HLS. Remove that source after testing. The native HLS playlists are also named movies on the formats panel; their variants and segments stay on its provider origin, so normal Movies → Watch can qualify title/seek behavior.
 
 | Named route                               | Required observations                                                                                                                                                        |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -151,7 +169,14 @@ Record each event’s epoch milliseconds and monotonic timestamp with candidate 
 
 For the existing HLS server, `POST /live-link?kbps=256` paces new single-rendition live segments only; restore with `kbps=0`. `POST /fail-live?id=<id>&count=1` refuses a playlist. It does not control multitrack, title or archive bodies, nor resume an in-flight segment. Those network routes remain unmeasured unless Evidence adds an isolated transport boundary and records it. Native event/ladder HLS movies use the formats panel controls above; outcomes still need installed observation.
 
-After each row stop playback and observe closed requests before moving on. `/state` reports active proxy responses, response bodies currently held by the stall, and condition events, not native hold settlement or decode counters. `session.json`, `provenance.json` and `network.json` are retained under the chosen ignored output directory. SIGINT/SIGTERM closes the panel, active HTTP connections and control port. Evidence must also remove its app/profile, fixture hosts, forwarding rules, M3U file and managed device session, recording cleanup failures explicitly.
+After each row stop playback and observe closed requests before moving on. `/state` reports active proxy responses, response bodies currently held by the stall, and condition events, not native hold settlement or decode counters. `session.json`, `provenance.json` and `network.json` are retained under the chosen ignored output directory. SIGINT/SIGTERM closes the panel, active HTTP connections and control port. Evidence must also remove its app/profile, fixture hosts, M3U file and owned forwarding rules:
+
+```sh
+$ANDROID_HOME/platform-tools/adb -s emulator-5554 reverse --remove tcp:8891
+$ANDROID_HOME/platform-tools/adb -s emulator-5554 reverse --remove tcp:8791
+```
+
+Remove only reverses created for the check, including any ephemeral fixture ports. Close the AgentDevice session and call `device_close` with `shutdown: true`, following the android-emulator skill's cleanup procedure. Record cleanup failures explicitly.
 
 ## Remaining gaps and UI handoff
 
