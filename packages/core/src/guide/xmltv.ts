@@ -13,6 +13,8 @@
 // It reads the text and nothing else. A DOCTYPE is passed over and the only references it knows
 // are the five XML defines and numbered characters, so a document can't make it fetch or read
 // anything.
+import { defined } from "../defined.ts";
+import type { ProgrammeMetadata } from "@mrstreamer/contracts/guide";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 
 /** A programme as the document lists it. */
@@ -25,6 +27,7 @@ export interface XmltvProgramme {
   readonly stop: number | null;
   readonly title: string;
   readonly description: string | null;
+  readonly metadata?: ProgrammeMetadata;
 }
 
 /** A channel as the document lists it. */
@@ -341,7 +344,16 @@ function programmeOf(attributes: string, body: string): XmltvProgramme | null {
 
   if (!channel || start === null || !title || (stop !== null && stop <= start)) return null;
 
-  return { channel, start, stop, title, description: text(DESCRIPTION.exec(body)?.[1]) };
+  const metadata = metadataOf(body);
+
+  return {
+    channel,
+    start,
+    stop,
+    title,
+    description: text(DESCRIPTION.exec(body)?.[1]),
+    ...defined({ metadata }),
+  };
 }
 
 function channelOf(attributes: string, body: string | null): XmltvChannel | null {
@@ -414,4 +426,83 @@ function time(value: string | undefined): number | null {
     : 0;
 
   return Date.UTC(y, mo - 1, d, h, mi, s) - offset * 60_000;
+}
+
+/** Optional fields never make an otherwise readable programme fail. */
+function metadataOf(body: string): ProgrammeMetadata | undefined {
+  const bounded = (tag: string, max: number) => {
+    const value = text(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(body)?.[1]);
+
+    return value && value.length <= max ? value : undefined;
+  };
+
+  const subtitle = bounded("sub-title", 512);
+  const premiere = bounded("premiere", 512);
+  const episodes: { system: string; value: string }[] = [];
+  let episode: ProgrammeMetadata["episode"];
+  let invalid = false;
+
+  for (const match of body.matchAll(/<episode-num(?:\s([^>]*))?>([\s\S]*?)<\/episode-num>/g)) {
+    const system = [...(match[1] ?? "").matchAll(ATTRIBUTE)].find((m) => m[1] === "system");
+    const scheme = decode(system?.[2] ?? system?.[3] ?? "").trim();
+    const value = text(match[2]);
+
+    if (!scheme || scheme.length > 64 || !value || value.length > 256 || episodes.length >= 8) {
+      invalid = true;
+      continue;
+    }
+
+    episodes.push({ system: scheme, value });
+
+    if (scheme !== "xmltv_ns") continue;
+
+    const tuple = /^(\d+)(?:\/(\d+))?\.(\d+)(?:\/(\d+))?\.(\d+)(?:\/(\d+))?$/.exec(
+      value.replace(/\s/g, ""),
+    );
+
+    if (!tuple) {
+      invalid = true;
+      continue;
+    }
+
+    const parts = [1, 3, 5].map((i) => Number(tuple[i]));
+
+    if (
+      parts.some(
+        (n, i) =>
+          !Number.isSafeInteger(n) ||
+          (tuple[2 * i + 2] !== undefined && n >= Number(tuple[2 * i + 2])),
+      )
+    ) {
+      invalid = true;
+      continue;
+    }
+
+    const parsed = { season: parts[0]!, episode: parts[1]!, part: parts[2]! };
+
+    if (episode && JSON.stringify(episode) !== JSON.stringify(parsed)) invalid = true;
+    episode = parsed;
+  }
+
+  const repeatTag = /<previously-shown(?:\s([^>]*))?\s*\/?>/.exec(body);
+  const repeat: { start?: string; channel?: string } = {};
+
+  if (repeatTag)
+    for (const m of (repeatTag[1] ?? "").matchAll(ATTRIBUTE)) {
+      const value = decode(m[2] ?? m[3] ?? "");
+
+      if (m[1] === "start" && value.length <= 64) repeat.start = value;
+
+      if (m[1] === "channel" && value.length <= 256) repeat.channel = value;
+    }
+
+  const result = defined({
+    subtitle,
+    premiere,
+    episodes: episodes.length ? episodes : undefined,
+    episode: invalid ? undefined : episode,
+    repeat: repeatTag ? repeat : undefined,
+  });
+
+  return Object.keys(result).length ? result : undefined;
 }

@@ -89,6 +89,9 @@ import {
   type MapChannelPage,
   type MapFilter,
   type Programme,
+  type GuideSearchPageInput,
+  type GuideSearchPage,
+  type SavedGuideQuery,
   type ProgrammeMatch,
 } from "@mrstreamer/contracts/guide";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
@@ -128,6 +131,7 @@ import {
   rangeAt,
   scheduleAt,
   searchAt,
+  searchPageAt,
   searchChannelsAt,
   SEARCH_LIMIT,
   slicer,
@@ -295,6 +299,7 @@ export interface LegacyExternal {
  * else the subscription's own guide.
  */
 export interface StoredConfig {
+  readonly queries?: readonly SavedGuideQuery[];
   readonly external: LegacyExternal | null;
   readonly mappings: Readonly<
     Record<string, Omit<GuideMapping, "source"> & { readonly source: string | null }>
@@ -447,6 +452,7 @@ interface Loaded {
 
 /** What is set for a subscription's guide, as read this run. */
 interface Settings {
+  readonly queries?: readonly SavedGuideQuery[];
   readonly key: string;
   /**
    * The channels mapped by hand, by channel id. One made against a legacy address that couldn't
@@ -474,7 +480,8 @@ const LEGACY = "legacy";
 const legacyKey = (id: string) => `legacy:${id}`;
 
 /** Settings as the store keeps them. */
-const storedConfig = ({ mappings, legacy }: Settings): StoredConfig => ({
+const storedConfig = ({ mappings, legacy, queries }: Settings): StoredConfig => ({
+  queries: queries ?? [],
   external: legacy,
   mappings: Object.fromEntries(
     Object.entries(mappings).map(([channelId, mapping]) => [
@@ -557,6 +564,12 @@ export class Guide extends Context.Service<
     startingAt(channel: OwnedId, start: number): Effect.Effect<ProgrammeAt>;
     /** Programmes on now or later whose title matches, in any guide, on now first. */
     search(query: string): Effect.Effect<readonly ProgrammeMatch[], Failed>;
+    searchPage(input: GuideSearchPageInput): Effect.Effect<GuideSearchPage, Failed>;
+    savedQueries(subscriptionId: string): Effect.Effect<readonly SavedGuideQuery[], Failed>;
+    setSavedQueries(
+      subscriptionId: string,
+      queries: readonly SavedGuideQuery[],
+    ): Effect.Effect<readonly SavedGuideQuery[], Failed>;
     /**
      * What a search finds in the programmes of the given channels, by each channel's `ownedKey`:
      * on now, and the first later one that starts before `until`. Every channel given is searched.
@@ -909,7 +922,15 @@ function make() {
           ]),
         );
 
-        const read: Settings = { key, mappings, own, legacy, readable: true };
+        const read: Settings = {
+          key,
+          mappings,
+          own,
+          legacy,
+          readable: true,
+          queries: stored?.queries ?? [],
+        };
+
         // Noted where it moved to, and what the mappings made before name: added to what is
         // kept, never taken from it.
         const older = Object.values(stored?.mappings ?? {}).some((each) => !each.source);
@@ -1011,7 +1032,7 @@ function make() {
 
           if (!then) return null;
 
-          if (then.mappings !== now.mappings && !now.readable) {
+          if ((then.mappings !== now.mappings || then.queries !== now.queries) && !now.readable) {
             // What is set couldn't be read: a write would lose it.
             return yield* Effect.fail(
               failedWith(new Error("What is set for the guide can't be read.")),
@@ -1020,7 +1041,7 @@ function make() {
 
           if (then.own !== now.own) yield* store.setOwn(subscription, then.own);
 
-          if (then.mappings !== now.mappings)
+          if (then.mappings !== now.mappings || then.queries !== now.queries)
             yield* store.setConfig(subscription, storedConfig(then));
 
           // What couldn't be read is read again next time, not kept as it was taken.
@@ -2735,6 +2756,43 @@ function make() {
             ));
 
           return found ?? ({ kind: "unknown" } as const);
+        }),
+      savedQueries: (subscriptionId: string) =>
+        Effect.gen(function* () {
+          const subscription = yield* savedOr(subscriptionId);
+          const now = yield* readSettings(subscription);
+
+          if (!now.readable)
+            return yield* Effect.fail(failedWith(new Error("Saved guide queries cannot be read.")));
+
+          return now.queries ?? [];
+        }),
+      setSavedQueries: (subscriptionId: string, queries: readonly SavedGuideQuery[]) =>
+        Effect.gen(function* () {
+          const subscription = yield* savedOr(subscriptionId);
+
+          const before = yield* change(subscription, generationOf(subscriptionId), (now) =>
+            Effect.succeed({ ...now, queries }),
+          );
+
+          if (!before) return yield* changed;
+
+          return queries;
+        }),
+      searchPage: (input: GuideSearchPageInput) =>
+        Effect.gen(function* () {
+          const subscription = yield* savedOr(input.subscriptionId);
+
+          const found = yield* withContext(subscription, (context) =>
+            searching(
+              subscription.id,
+              (signal) =>
+                searchPageAt(context.guides, context.channels, input, context.at, searcher, signal),
+              { matches: [], next: null },
+            ),
+          );
+
+          return found ?? { matches: [], next: null };
         }),
       search: (query: string) =>
         Effect.gen(function* () {

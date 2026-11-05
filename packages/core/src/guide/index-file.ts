@@ -20,9 +20,10 @@
 import { rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import {
+  type ProgrammeMetadata,
   GUIDE_RANGE,
   GUIDE_SCHEDULE,
   type GuideFailure,
@@ -37,9 +38,9 @@ import { xmltvReader } from "./xmltv.ts";
 
 /**
  * The layout of the files this release writes. A file of another is read as no guide. 2: rows
- * within `GUIDE_KEPT`.
+ * within `GUIDE_KEPT`. 3: bounded optional XMLTV metadata.
  */
-const VERSION = 2;
+const VERSION = 3;
 
 /** Programmes written per transaction while a document is read, or text of this many bytes. */
 const BATCH = { programmes: 5_000, bytes: 8 * 1024 * 1024 };
@@ -137,6 +138,7 @@ export async function buildGuideIndex(
         stop integer,
         title integer not null,
         description text,
+        metadata text,
         primary key (channel, start)
       ) without rowid;
       create table meta (programmes integer not null, until integer);
@@ -200,7 +202,7 @@ export async function buildGuideIndex(
     // Duplicates of a start time count once: the first the document lists, also when it has no
     // end and a later one does, so it runs until the next start. Releases before 0.0.13 kept the
     // later one then, as they dropped an entry whose end the next start would make empty.
-    const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?)");
+    const insertProgramme = db.prepare("insert or ignore into programme values (?, ?, ?, ?, ?, ?)");
     // Each programme is written as it is read, so nothing of it stays in memory; a transaction
     // ends every so many programmes or bytes.
     let pending = { programmes: 0, bytes: 0 };
@@ -237,9 +239,19 @@ export async function buildGuideIndex(
 
           // Counted as it comes, so a guide past the limit stops here rather than at its end.
           const channel = listed(entry.channel, null);
-          insertProgramme.run(channel, entry.start, entry.stop, titleKey(title), description);
+          const metadata = entry.metadata ? JSON.stringify(entry.metadata) : null;
+
+          insertProgramme.run(
+            channel,
+            entry.start,
+            entry.stop,
+            titleKey(title),
+            description,
+            metadata,
+          );
           pending.programmes++;
-          pending.bytes += 2 * (title.length + (description?.length ?? 0));
+          pending.bytes +=
+            2 * (title.length + (description?.length ?? 0) + (metadata?.length ?? 0));
 
           if (pending.programmes >= BATCH.programmes || pending.bytes >= BATCH.bytes) commit();
         },
@@ -356,9 +368,9 @@ function carry(db: DatabaseSync, previous: string, cutoff: number) {
     ).run(cutoff);
     db.prepare(
       `
-      insert or ignore into programme (channel, start, stop, title, description)
+      insert or ignore into programme (channel, start, stop, title, description, metadata)
       select opening.key, programme.start, min(programme.stop, opening.start), title.key,
-        programme.description
+        programme.description, programme.metadata
       from temp.opening as opening
       join old.channel as was on was.id = opening.id
       join old.programme as programme on programme.channel = was.key
@@ -559,7 +571,7 @@ function reader(
         -9007199254740991
       )`;
 
-  const described = `select ${columns}, programme.description ${from}`;
+  const described = `select ${columns}, programme.description, programme.metadata ${from}`;
   // Every read is bounded in SQL, before a row is made: the one that may have ended comes first.
   // A row is a few kilobytes at most and a minute of time at least (`GUIDE_KEPT`).
   const listing = db.prepare(`${described} order by programme.start limit 3`);
@@ -569,7 +581,7 @@ function reader(
   );
 
   const selected = `
-    select ${columns}, programme.description
+    select ${columns}, programme.description, programme.metadata
     from programme join title on title.key = programme.title
     where programme.channel = :channel`;
 
@@ -589,11 +601,11 @@ function reader(
   );
 
   const detail = db.prepare(`
-    select ${columns}, programme.description
+    select ${columns}, programme.description, programme.metadata
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
 
-  const unended = (rows: Record<string, unknown>[], at: number) =>
+  const unended = (rows: Record<string, SQLOutputValue>[], at: number) =>
     rows.flatMap((row) => {
       const programme = programmeOf(row);
 
@@ -670,6 +682,9 @@ interface Search {
 
 /** A search for the first `limit` programmes it finds: on now first, then by start. */
 export interface FirstSearch extends Search {
+  readonly from?: number;
+  readonly until?: number;
+  readonly after?: { readonly start: number; readonly channels: readonly number[] };
   readonly limit: number;
 }
 
@@ -738,10 +753,14 @@ export interface GuideSearching {
 export function searchFirst(search: FirstSearch): FirstFound {
   const { at, limit } = search;
   const best: FoundProgramme[] = [];
-  const rank = (found: FoundProgramme) => (found.start <= at ? 0 : 1);
+  const paged = search.from !== undefined;
+  const rank = (found: FoundProgramme) => (paged ? 0 : found.start <= at ? 0 : 1);
+  const order = new Map(search.channels.map((key, i) => [key, i]));
 
   const before = (a: FoundProgramme, b: FoundProgramme) =>
-    rank(a) - rank(b) || a.start - b.start || a.channel - b.channel;
+    rank(a) - rank(b) ||
+    a.start - b.start ||
+    (paged ? (order.get(a.channel) ?? 0) - (order.get(b.channel) ?? 0) : a.channel - b.channel);
 
   return reading(search.path, (db) => {
     matching(
@@ -749,8 +768,20 @@ export function searchFirst(search: FirstSearch): FirstFound {
       search,
       // Once `limit` are in, only one that starts by the last of them can take its place: earlier,
       // or as early on a channel the file keys first. Starts are whole milliseconds.
-      () => (best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY) + 1,
+      () =>
+        Math.min(
+          search.until ?? Number.POSITIVE_INFINITY,
+          (best.at(limit - 1)?.start ?? Number.POSITIVE_INFINITY) + 1,
+        ),
       (found) => {
+        if (search.from !== undefined && found.stop <= search.from) return;
+
+        if (
+          search.after &&
+          (found.start < search.after.start ||
+            (found.start === search.after.start && !search.after.channels.includes(found.channel)))
+        )
+          return;
         let place = best.length;
 
         while (place > 0 && before(found, best[place - 1]!) < 0) place--;
@@ -763,11 +794,12 @@ export function searchFirst(search: FirstSearch): FirstFound {
     );
 
     const described = db.prepare(
-      "select description from programme where channel = ? and start = ?",
+      "select description, metadata from programme where channel = ? and start = ?",
     );
 
     return best.map(({ channel, start, stop, title }) => {
-      const description = described.get(channel, start)?.["description"];
+      const row = described.get(channel, start);
+      const description = row?.["description"];
 
       return {
         channel,
@@ -776,6 +808,7 @@ export function searchFirst(search: FirstSearch): FirstFound {
           stop,
           title,
           description: description === String(description) ? String(description) : null,
+          ...metadataOf(row?.["metadata"]),
         },
       };
     });
@@ -863,7 +896,7 @@ function matching(
   before: () => number,
   visit: (found: FoundProgramme) => void,
 ) {
-  if (words.length === 0 || keys.length === 0) return;
+  if (keys.length === 0) return;
   const channels = new Set(keys);
 
   const listing = Number(
@@ -874,7 +907,7 @@ function matching(
   const only = channels.size * 2 < listing ? JSON.stringify(keys) : null;
   const within = only === null ? "" : "and programme.channel in (select value from json_each(?))";
 
-  const found = (row: Record<string, unknown>): FoundProgramme => ({
+  const found = (row: Record<string, SQLOutputValue>): FoundProgramme => ({
     channel: Number(row["channel"]),
     start: Number(row["start"]),
     stop: Number(row["stop"]),
@@ -885,7 +918,7 @@ function matching(
 
   // The titles that match, a page of title keys at a time.
   const titles = db.prepare(
-    `select key from title where key > ? and key <= ? and ${words.map(() => "instr(folded, ?) > 0").join(" and ")}`,
+    `select key from title where key > ? and key <= ? and ${words.length ? words.map(() => "instr(folded, ?) > 0").join(" and ") : "1"}`,
   );
 
   // The programmes of a page of titles in a stretch of time.
@@ -932,7 +965,7 @@ function matching(
     select programme.channel, programme.start, programme.stop, title.text
     from programme indexed by programme_long join title on title.key = programme.title
     where programme.stop - programme.start > ${LONG_MS} and programme.stop > ? and programme.start < ?
-      and ${words.map(() => "instr(title.folded, ?) > 0").join(" and ")}`);
+      and ${words.length ? words.map(() => "instr(title.folded, ?) > 0").join(" and ") : "1"}`);
 
   for (const row of long.iterate(at, Math.min(before(), Number.MAX_SAFE_INTEGER), ...words)) {
     const programme = found(row);
@@ -941,14 +974,26 @@ function matching(
   }
 }
 
-function slotOf(row: Record<string, unknown>): Omit<GuideSlot, "guide"> {
+function slotOf(row: Record<string, SQLOutputValue>): Omit<GuideSlot, "guide"> {
   return { start: Number(row["start"]), stop: Number(row["stop"]), title: String(row["title"]) };
 }
 
-function programmeOf(row: Record<string, unknown>): Programme {
+function programmeOf(row: Record<string, SQLOutputValue>): Programme {
   return {
     ...slotOf(row),
+    ...metadataOf(row["metadata"]),
     description:
       row["description"] === String(row["description"]) ? String(row["description"]) : null,
   };
+}
+
+function metadataOf(value: SQLOutputValue | undefined): Pick<Programme, "metadata"> {
+  if (value !== String(value)) return {};
+
+  try {
+    // This immutable versioned index is written only by buildGuideIndex, from bounded XMLTV facts.
+    return { metadata: JSON.parse(String(value)) as ProgrammeMetadata };
+  } catch {
+    return {};
+  }
 }

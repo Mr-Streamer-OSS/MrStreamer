@@ -1,3 +1,4 @@
+import { SavedGuideQuery } from "@mrstreamer/contracts/guide-query";
 import type { Type } from "arktype";
 // Keeps the programme guides on disk: each subscription's own in its folder, and the global
 // XMLTV sources the viewer adds in Settings > Guides in a folder of their own.
@@ -97,6 +98,7 @@ const KeptDocument = lazy(() =>
 const GuideSourceFile = lazy(() =>
   type({
     version: "1",
+    "queries?": SavedGuideQuery().array().atMostLength(20),
     /** Which account this was set for. */
     key: "string",
     external: type({
@@ -263,18 +265,21 @@ export const guideStoreLayer: Layer.Layer<GuideStore> = Layer.succeed(GuideStore
             since: external.since ?? null,
           },
           mappings,
+          queries: file.queries ?? [],
         };
       },
       catch: failedWith,
     }),
-  setConfig: ({ store, key }, { external, mappings }) =>
+  setConfig: ({ store, key }, { external, mappings, queries }) =>
     Effect.tryPromise({
       try: async () => {
-        if (!external && Object.keys(mappings).length === 0) return removeFile(sourcePath(store));
+        if (!external && Object.keys(mappings).length === 0 && !queries?.length)
+          return removeFile(sourcePath(store));
 
         const file: Infer<typeof GuideSourceFile> = {
           version: 1,
           key,
+          queries: [...(queries ?? [])],
           external: external && {
             origin: external.origin,
             identity: external.identity,

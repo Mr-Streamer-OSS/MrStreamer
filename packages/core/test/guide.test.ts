@@ -34,6 +34,7 @@ import {
   rangeAt,
   scheduleAt,
   searchAt,
+  searchPageAt,
   searchChannelsAt,
   unresolvedMappings,
   type GuideMapping,
@@ -1339,5 +1340,191 @@ describe("a guide's address", () => {
     ]) {
       expect(guideAddress(typed), typed).toBeNull();
     }
+  });
+});
+
+describe("available-horizon guide reads", () => {
+  it("pages every available day with date/channel filters and selected sources", async () => {
+    const document = tv(
+      ...Array.from({ length: 125 }, (_, i) =>
+        programme("one.test", stamp(NOON + i * DAY), stamp(NOON + i * DAY + HOUR), "Horizon news"),
+      ),
+      programme("two.test", stamp(NOON), stamp(NOON + HOUR), "Other news"),
+    );
+
+    const own = await index(document);
+    const external = await index(tv(later("one.test", "Wrong source news")));
+
+    const guides = guidesOf(
+      [
+        { source: OWN_GUIDE, origin: null, index: own.guide, path: own.target },
+        {
+          source: "external",
+          origin: "https://example.test",
+          index: external.guide,
+          path: external.target,
+        },
+      ],
+      new Map([["external", "https://example.test"]]),
+    );
+
+    const channels = catalogueOf({ a: ["one.test"], b: ["two.test"] });
+    const input = { subscriptionId: "subscription", query: "news", channels: ["a"], limit: 50 };
+    const first = await searchPageAt(guides, channels, input, NOON, inProcess, stopNever);
+
+    const second = await searchPageAt(
+      guides,
+      channels,
+      { ...input, after: first.next! },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    const third = await searchPageAt(
+      guides,
+      channels,
+      { ...input, after: second.next! },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    expect([first.matches.length, second.matches.length, third.matches.length, third.next]).toEqual(
+      [50, 50, 25, null],
+    );
+    expect(
+      new Set([...first.matches, ...second.matches, ...third.matches].map((m) => m.programme.start))
+        .size,
+    ).toBe(125);
+    expect(third.matches.at(-1)?.programme.start).toBe(NOON + 124 * DAY);
+    expect(
+      first.matches.every((m) => m.channel.id === "a" && m.programme.title === "Horizon news"),
+    ).toBe(true);
+
+    const filtered = await searchPageAt(
+      guides,
+      channels,
+      { ...input, query: "", from: NOON + DAY, until: NOON + 2 * DAY },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    expect(filtered.matches.map((m) => m.programme.start)).toEqual([NOON + DAY]);
+
+    const mapped = catalogueOf(
+      { a: ["one.test"] },
+      { a: { source: "external", guideId: "one.test", name: "Mapped" } },
+    );
+
+    expect(
+      (await searchPageAt(guides, mapped, input, NOON, inProcess, stopNever)).matches.map(
+        (m) => m.programme.title,
+      ),
+    ).toEqual(["Wrong source news"]);
+  });
+
+  it("does not lose same-time channels or exclude a selected alias", async () => {
+    const own = await index(tv(later("one.test", "News"), later("two.test", "News")));
+    const guides = ownGuide(own.guide, own.target);
+    const channels = catalogueOf({ a: ["one.test"], b: ["two.test"], c: ["one.test"] });
+    const input = { subscriptionId: "s", query: "news", limit: 1 };
+    const first = await searchPageAt(guides, channels, input, NOON, inProcess, stopNever);
+
+    const second = await searchPageAt(
+      guides,
+      channels,
+      { ...input, after: first.next! },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    expect([first.matches[0]?.channel.id, second.matches[0]?.channel.id, second.next]).toEqual([
+      "a",
+      "b",
+      null,
+    ]);
+    expect(
+      (
+        await searchPageAt(
+          guides,
+          channels,
+          { ...input, channels: ["c"] },
+          NOON,
+          inProcess,
+          stopNever,
+        )
+      ).matches[0]?.channel.id,
+    ).toBe("c");
+
+    const adults: MappedChannels = {
+      ...channels,
+      all: channels.all.map((c) => ({ ...c, adult: true })),
+    };
+
+    expect((await searchPageAt(guides, adults, input, NOON, inProcess, stopNever)).matches).toEqual(
+      [],
+    );
+  });
+
+  it("retains optional episode facts through indexing without enlarging grid slots or guessing first-run", async () => {
+    const entry = (extra: string, i: number) =>
+      programme(
+        "one.test",
+        stamp(NOON + i * HOUR),
+        stamp(NOON + (i + 1) * HOUR),
+        "Readable",
+      ).replace("</programme>", `${extra}</programme>`);
+
+    const { guide, target } = await index(
+      tv(
+        entry(
+          '<sub-title>Episode title</sub-title><episode-num system="xmltv_ns">0.1.0</episode-num><previously-shown start="20250101"/><premiere>Season premiere</premiere><new/>',
+          0,
+        ),
+        entry('<episode-num system="xmltv_ns">0..</episode-num><new/>', 1),
+        entry(
+          '<episode-num system="xmltv_ns">0.1.0</episode-num><episode-num system="xmltv_ns">0.2.0</episode-num>',
+          2,
+        ),
+        entry("<new/><premiere>First ever</premiere>", 3),
+      ),
+    );
+
+    const reopened = await openGuideIndex(target);
+
+    if (!reopened) throw new Error("Expected readable index");
+    opened.push(reopened);
+    const guides = ownGuide(reopened, target);
+    const channels = catalogueOf({ a: ["one.test"] });
+
+    const found = await searchPageAt(
+      guides,
+      channels,
+      { subscriptionId: "s", query: "Readable", limit: 10 },
+      NOON,
+      inProcess,
+      stopNever,
+    );
+
+    expect(found.matches).toHaveLength(4);
+    expect(found.matches[0]?.programme.metadata).toMatchObject({
+      guide: "own:one.test",
+      subtitle: "Episode title",
+      episode: { season: 0, episode: 1, part: 0 },
+      repeat: { start: "20250101" },
+      premiere: "Season premiere",
+    });
+    expect(found.matches.slice(1).every((m) => m.programme.metadata?.episode === undefined)).toBe(
+      true,
+    );
+    expect(found.matches.every((m) => !("firstRun" in (m.programme.metadata ?? {})))).toBe(true);
+    const slots = await rangeAt(guides, channels, ["a"], NOON, NOON, NOON + 4 * HOUR);
+    expect(slots["a"]?.every((slot) => !("metadata" in slot) && !("description" in slot))).toBe(
+      true,
+    );
+    expect(guide.programmes).toBe(4);
   });
 });

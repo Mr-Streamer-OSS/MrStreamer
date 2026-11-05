@@ -12,6 +12,8 @@
 // A guide id means something only within its guide, so a guide channel is named by both, its
 // `guideRef`, wherever it leaves the main process to be handed back: a grid's slot, a mapping.
 import type {
+  GuideSearchPageInput,
+  GuideSearchPage,
   GuideChannel,
   GuideChannelPage,
   GuideChannelRef,
@@ -24,8 +26,10 @@ import type {
   ProgrammeMatch,
 } from "@mrstreamer/contracts/guide";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { defined } from "../defined.ts";
 import { normalize, searchWords } from "../text.ts";
 import {
+  type FirstSearch,
   eachMatch,
   type GuideIndex,
   type GuideSearching,
@@ -177,7 +181,13 @@ export function listingsAt(
     const shown = shownChannel(guides, channels, channelId, at);
     const listing = shown && shown.part.index.listing(shown.channel, at);
 
-    if (listing) result[channelId] = listing;
+    if (listing && shown)
+      result[channelId] = {
+        now: listing.now ? scopedProgramme(listing.now, shown.part.source, shown.channel.id) : null,
+        next: listing.next
+          ? scopedProgramme(listing.next, shown.part.source, shown.channel.id)
+          : null,
+      };
   }
 
   return result;
@@ -250,7 +260,11 @@ export function scheduleAt(
 ): readonly Programme[] {
   const shown = shownChannel(guides, channels, channelId, at);
 
-  return shown ? shown.part.index.schedule(shown.channel, at, from, until) : [];
+  return shown
+    ? shown.part.index
+        .schedule(shown.channel, at, from, until)
+        .map((p) => scopedProgramme(p, shown.part.source, shown.channel.id))
+    : [];
 }
 
 /**
@@ -312,7 +326,11 @@ export function programmeAt(
   const shown = shownChannel(guides, channels, channelId, at);
 
   return shown && guideRef(shown.part.source, shown.channel.id) === ref
-    ? shown.part.index.programme(shown.channel, start)
+    ? scopedProgrammeOrNull(
+        shown.part.index.programme(shown.channel, start),
+        shown.part.source,
+        shown.channel.id,
+      )
     : null;
 }
 
@@ -331,7 +349,14 @@ export function startingAt(
 ): ProgrammeAt {
   if (!channels.channel(channelId)) return { kind: "unknown" };
   const shown = shownChannel(guides, channels, channelId, at);
-  const programme = shown?.part.index.programme(shown.channel, start) ?? null;
+
+  const programme = shown
+    ? scopedProgrammeOrNull(
+        shown.part.index.programme(shown.channel, start),
+        shown.part.source,
+        shown.channel.id,
+      )
+    : null;
 
   return programme ? { kind: "found", programme } : { kind: "none" };
 }
@@ -376,7 +401,11 @@ export async function searchAt(
     for (const { channel, programme } of found) {
       const shownOn = keys.get(channel);
 
-      if (shownOn) matches.push({ channel: shownOn, programme });
+      if (shownOn)
+        matches.push({
+          channel: shownOn,
+          programme: scopedProgramme(programme, part.source, part.index.channel(channel)!.id),
+        });
     }
   }
 
@@ -763,4 +792,103 @@ export function slicer(): Slice {
       }),
     );
   };
+}
+
+/** Bounded reads over the selected sources, ordered by start then catalogue channel id. */
+export async function searchPageAt(
+  guides: Guides,
+  channels: MappedChannels,
+  input: GuideSearchPageInput,
+  at: number,
+  search: GuideSearching,
+  signal: AbortSignal,
+): Promise<GuideSearchPage> {
+  const selected = input.channels
+    ? { ...channels, all: channels.all.filter((channel) => input.channels!.includes(channel.id)) }
+    : channels;
+
+  const shown = await searchable(guides, selected, at);
+  const matches: ProgrammeMatch[] = [];
+  const from = input.from ?? -8_000_000_000_000_000;
+
+  if (input.until !== undefined && input.until <= from) return { matches: [], next: null };
+
+  for (const [place, part] of guides.parts.entries()) {
+    const keys = new Map(
+      [...(shown[place] ?? [])]
+        .filter(([, channel]) => !input.channels || input.channels.includes(channel.id))
+        .sort((a, b) => (a[1].id < b[1].id ? -1 : a[1].id > b[1].id ? 1 : 0)),
+    );
+
+    if (!keys.size) continue;
+
+    const request: FirstSearch = {
+      path: part.path,
+      words: searchWords(input.query),
+      at: Math.max(from, input.after?.start ?? from),
+      from,
+      channels: [...keys.keys()],
+      limit: input.limit + 1,
+    };
+
+    const after = input.after;
+
+    const found = await search.first(
+      {
+        ...request,
+        ...defined({
+          until: input.until,
+          after: after
+            ? {
+                start: after.start,
+                channels: [...keys].flatMap(([key, channel]) =>
+                  channel.id > after.channel ? [key] : [],
+                ),
+              }
+            : undefined,
+        }),
+      },
+      signal,
+    );
+
+    for (const { channel, programme } of found) {
+      const shownOn = keys.get(channel);
+
+      if (shownOn)
+        matches.push({
+          channel: shownOn,
+          programme: scopedProgramme(programme, part.source, part.index.channel(channel)!.id),
+        });
+    }
+  }
+
+  matches.sort(
+    (a, b) =>
+      a.programme.start - b.programme.start ||
+      (a.channel.id < b.channel.id ? -1 : a.channel.id > b.channel.id ? 1 : 0),
+  );
+  const page = matches.slice(0, input.limit);
+  const last = page.at(-1);
+
+  return {
+    matches: page,
+    next:
+      matches.length > input.limit && last
+        ? { start: last.programme.start, channel: last.channel.id }
+        : null,
+  };
+}
+
+function scopedProgramme(programme: Programme, source: string, channel: string): Programme {
+  return programme.metadata
+    ? { ...programme, metadata: { ...programme.metadata, guide: guideRef(source, channel) } }
+    : programme;
+}
+
+function scopedProgrammeOrNull(
+  programme: Programme | null,
+  source: string,
+  channel: string,
+): Programme | null {
+  return programme ? scopedProgramme(programme, source, channel) : null;
 }
