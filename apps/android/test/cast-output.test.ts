@@ -19,6 +19,7 @@ const tv = { id: "test", name: "Test TV", model: null };
 function setup() {
   let observe!: (event: Observation) => void;
   let report!: (status: TvStatus) => void;
+  let lose!: (why: "lost" | "stopped") => void;
 
   const stop = vi.fn(async () => {}),
     revoke = vi.fn(async () => {});
@@ -30,7 +31,9 @@ function setup() {
     volume: { get: () => null, subscribe: () => () => {} },
     setVolume: vi.fn(),
     close: vi.fn(async () => {}),
-    lost: new Promise<"lost">(() => {}),
+    lost: new Promise<"lost" | "stopped">((resolve) => {
+      lose = resolve;
+    }),
     load: vi.fn(async (_media, status) => {
       report = status;
 
@@ -89,7 +92,20 @@ function setup() {
     });
   };
 
-  return { ...output, local, ready, report: (status: TvStatus) => report(status), loaded, revoke };
+  // What native foreground cleanup calls, as the output owner registered it.
+  const leave = sender.leave.mock.lastCall?.[0] as (done: () => void) => void;
+
+  return {
+    ...output,
+    local,
+    ready,
+    report: (status: TvStatus) => report(status),
+    lose: (why: "lost" | "stopped") => lose(why),
+    loadSent: () => report !== undefined,
+    leave,
+    loaded,
+    revoke,
+  };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -139,4 +155,95 @@ it("keeps uncertain reader cleanup retryable and still retires the player hold o
   expect(f.local.stop).toHaveBeenCalledWith("one");
   await expect(f.cast.playHere()).rejects.toThrow("reader still open");
   expect(f.local.localOutput).not.toHaveBeenCalled();
+});
+
+/** Selects `tv` and waits until its load reached the TV; `selected` settles with the select. */
+async function connecting(f: ReturnType<typeof setup>) {
+  await f.ready();
+  const selected = f.cast.select(tv);
+  await vi.waitFor(() => expect(f.cast.state.get().kind).toBe("connecting"));
+  await vi.waitFor(() => expect(f.loadSent()).toBe(true));
+
+  return { selected };
+}
+
+/** Selects `tv` until the TV confirmed PLAYING and the phone gave it the output. */
+async function onTv(f: ReturnType<typeof setup>) {
+  const { selected } = await connecting(f);
+  f.report({ state: "playing", time: 43, duration: 100 });
+  expect(await selected).toBe(true);
+  expect(f.cast.state.get().kind).toBe("remote");
+}
+
+it("says a TV that stopped after taking over left the phone detached until Play here", async () => {
+  const lost = setup();
+  await onTv(lost);
+  lost.lose("lost");
+  await vi.waitFor(() =>
+    expect(lost.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "lost", detached: true }),
+  );
+  expect(lost.local.localOutput).not.toHaveBeenCalled();
+
+  const ended = setup();
+  await onTv(ended);
+  ended.report({ state: "ended", time: 100, duration: 100 });
+  expect(ended.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "ended", detached: true });
+
+  const failed = setup();
+  await onTv(failed);
+  failed.report({ state: "failed", time: 50, duration: 100 });
+  expect(failed.cast.state.get()).toEqual({
+    kind: "stopped",
+    tv,
+    reason: "failed",
+    detached: true,
+  });
+
+  const left = setup();
+  await onTv(left);
+  const done = vi.fn();
+  left.leave(done);
+  expect(left.cast.state.get()).toEqual({
+    kind: "stopped",
+    tv,
+    reason: "foreground",
+    detached: true,
+  });
+  await vi.waitFor(() => expect(done).toHaveBeenCalledOnce());
+  expect(await left.cast.playHere()).toBe(true);
+  expect(left.cast.state.get()).toEqual({ kind: "local" });
+});
+
+it("says a TV that stopped before PLAYING never took the phone's output, and cancel clears it", async () => {
+  const failed = setup();
+  const { selected } = await connecting(failed);
+  failed.report({ state: "failed", time: 0, duration: null });
+  expect(await selected).toBe(false);
+  expect(failed.cast.state.get()).toEqual({
+    kind: "stopped",
+    tv,
+    reason: "failed",
+    detached: false,
+  });
+  expect(failed.local.remoteOutput).not.toHaveBeenCalled();
+  await failed.cast.cancel();
+  expect(failed.cast.state.get()).toEqual({ kind: "local" });
+
+  const lost = setup();
+  const { selected: pending } = await connecting(lost);
+  lost.lose("lost");
+  expect(await pending).toBe(false);
+  expect(lost.cast.state.get()).toEqual({ kind: "stopped", tv, reason: "lost", detached: false });
+
+  const left = setup();
+  const { selected: leaving } = await connecting(left);
+  left.leave(() => {});
+  expect(await leaving).toBe(false);
+  expect(left.cast.state.get()).toEqual({
+    kind: "stopped",
+    tv,
+    reason: "foreground",
+    detached: false,
+  });
+  expect(left.local.remoteOutput).not.toHaveBeenCalled();
 });

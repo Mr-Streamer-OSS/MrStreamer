@@ -42,6 +42,20 @@ import type { NativeFailure } from "../player/native.ts";
 import type { PlaybackFailure, Playing } from "../player/player.ts";
 import { PlayerSurface } from "../player/surface.ts";
 import { SubtitleDialog } from "../subtitles/sheets.tsx";
+import {
+  CastButton,
+  onTv,
+  OnTvPanel,
+  OnTvRow,
+  TvDialog,
+  tvLine,
+  TvSheets,
+  TvStoppedPanel,
+  TvStoppedRow,
+  useOutput,
+  type TvSheet,
+} from "../cast/watch.tsx";
+import { tvAvailable } from "../cast/sender.ts";
 import { FocusWithin, useKeyboardFocus } from "../ui/focus.ts";
 import { IconButton, type IconName } from "../ui/icon-button.tsx";
 import { colors } from "../ui/theme.ts";
@@ -51,7 +65,9 @@ import { colors } from "../ui/theme.ts";
 // again from the mini player, a link or a rotation carries on. Back, Android's or its own, leaves it with playback going on in the mini
 // player. Controls show on a tap and hide after a few seconds of playing; they stay while
 // something else is shown, a media sheet is open or one of them has keyboard focus, and always
-// while TalkBack runs. Picture in picture shows the picture alone.
+// while TalkBack runs. Picture in picture shows the picture alone. On a TV (src/cast/watch.tsx)
+// the picture's place names the TV, and only what the TV takes stays: play, pause, the jumps
+// where it seeks, the seek bar and Subtitles; once it stopped there, Play here or again on it.
 
 /** Paper A's secondary text over the picture, a step brighter than over black. */
 const DIM = "#D0D0D0";
@@ -146,10 +162,23 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
   );
 
   const [sheet, setSheet] = useState<MediaSheet | null>(null);
+  const [tvSheet, setTvSheet] = useState<TvSheet | null>(null);
+  const closeTv = useCallback(() => setTvSheet(null), []);
+  const output = useOutput();
+  const tv = onTv(output);
+  const stopped = output.kind === "stopped" && output.detached ? output : null;
 
   useEffect(() => {
-    if (media.pip) setSheet(null);
+    if (media.pip) {
+      setSheet(null);
+      setTvSheet(null);
+    }
   }, [media.pip]);
+
+  // The phone's own sheets close as a TV takes over.
+  useEffect(() => {
+    if (tv) setSheet(null);
+  }, [tv]);
 
   const open = (next: MediaSheet) => {
     // A save or read that failed earlier is tried again as the viewer comes back to choose.
@@ -157,7 +186,7 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
     setSheet(next);
   };
 
-  const kept = held || focusedControls > 0 || sheet !== null;
+  const kept = held || focusedControls > 0 || sheet !== null || tvSheet !== null;
   // Kept controls count as shown, so letting go of them starts the full wait whatever hid or
   // showed them meanwhile (a pause elsewhere, then playing on).
   useEffect(() => {
@@ -186,7 +215,11 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
           onPress={() => setShown((now) => !now)}
           style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
         />
-        {!media.pip && state.kind === "playing" && state.failure ? (
+        {!media.pip && stopped ? (
+          <Centre>
+            <TvStoppedPanel output={stopped} />
+          </Centre>
+        ) : !media.pip && state.kind === "playing" && state.failure ? (
           <Failed
             failure={state.failure}
             playlist={state.intent.kind !== "file" && state.intent.sourceId.startsWith("m3u:")}
@@ -221,29 +254,17 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
               }}
             >
               <IconButton icon="arrow-back" label={t("Back")} onPress={() => leave(offline)} />
-              <Text
-                accessibilityRole="header"
-                pointerEvents="none"
-                numberOfLines={1}
-                style={{
-                  flex: 1,
-                  minHeight: 48,
-                  paddingLeft: 8,
-                  paddingVertical: 13,
-                  color: colors.text,
-                  fontSize: 18,
-                  lineHeight: 22,
-                  fontWeight: "700",
-                }}
-              >
-                {state.kind === "playing" ? state.intent.title : ""}
-              </Text>
+              <Title
+                title={state.kind === "playing" ? state.intent.title : ""}
+                line={tvLine(output)}
+              />
               {state.kind === "playing" && fileSourceLabel(state.intent) ? (
                 <Text style={{ color: DIM, fontSize: 14, paddingVertical: 13 }}>
                   {fileSourceLabel(state.intent)}
                 </Text>
               ) : null}
-              {state.kind === "playing" && media.pipSupported ? (
+              {state.kind === "playing" ? <CastButton onOpen={setTvSheet} /> : null}
+              {state.kind === "playing" && media.pipSupported && !tv ? (
                 <IconButton
                   icon="picture-in-picture"
                   label={mediaT("Picture in picture")}
@@ -251,34 +272,33 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
                 />
               ) : null}
             </View>
-            {state.kind === "playing" && !loading && !state.failure ? (
+            {state.kind === "playing" && !loading && !state.failure && !stopped ? (
               <Centre>
-                <Transport now={state} onTouch={touch} />
+                <View style={{ alignItems: "center", gap: 20 }}>
+                  {output.kind === "remote" ? <OnTvPanel tv={output.tv} /> : null}
+                  <Transport now={state} onTouch={touch} />
+                </View>
               </Centre>
             ) : null}
-            {state.kind === "playing" && !loading && !state.failure ? (
-              <View
-                pointerEvents="box-none"
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  paddingTop: 24,
-                  paddingBottom: 12 + insets.bottom,
-                  paddingLeft: 24 + insets.left,
-                  paddingRight: 24 + insets.right,
-                  backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
-                }}
-              >
+            {state.kind === "playing" && stopped ? (
+              <Foot>
+                <TvStoppedRow output={stopped} />
+              </Foot>
+            ) : null}
+            {state.kind === "playing" && !loading && !state.failure && !stopped ? (
+              <Foot>
                 {state.live || state.seekable ? (
                   <Progress now={state} onTouch={touch} onHold={setHeld} />
                 ) : null}
                 {state.intent.kind === "file" && state.phase === "ended" ? (
                   <OfflineEnd next={media.offline ?? null} remaining={media.remaining} />
                 ) : null}
-                <MediaRow now={state} media={media} onOpen={open} />
-              </View>
+                {tv ? (
+                  <OnTvRow onOpen={setTvSheet} />
+                ) : (
+                  <MediaRow now={state} media={media} onOpen={open} />
+                )}
+              </Foot>
             ) : null}
           </>
         ) : null}
@@ -291,6 +311,17 @@ export default function Watch({ offline = false }: { offline?: boolean }) {
               onOpen={open}
               onClose={() => setSheet(null)}
             />
+            {/* A build without the Cast module has no TV to show anything for. */}
+            {tvAvailable() ? (
+              <>
+                <TvSheets
+                  open={tvSheet}
+                  now={state.kind === "playing" ? state : null}
+                  onClose={closeTv}
+                />
+                <TvDialog />
+              </>
+            ) : null}
             <MediaDialog error={media.error} />
             {player.subtitles ? (
               <SubtitleDialog model={player.subtitles} sheet={sheet} onOpen={open} />
@@ -441,6 +472,62 @@ function useScreenReader() {
   }, []);
 
   return enabled;
+}
+
+/** The title, bold, and under it where it plays or why the TV stopped, when on a TV. */
+function Title({ title, line }: { title: string; line: string | null }) {
+  const style = { color: colors.text, fontSize: 18, lineHeight: 22, fontWeight: "700" } as const;
+
+  if (!line)
+    return (
+      <Text
+        accessibilityRole="header"
+        pointerEvents="none"
+        numberOfLines={1}
+        style={{ ...style, flex: 1, minHeight: 48, paddingLeft: 8, paddingVertical: 13 }}
+      >
+        {title}
+      </Text>
+    );
+
+  return (
+    <View pointerEvents="none" style={{ flex: 1, gap: 2, paddingLeft: 8, paddingTop: 4 }}>
+      <Text accessibilityRole="header" numberOfLines={1} style={style}>
+        {title}
+      </Text>
+      <Text
+        accessibilityLiveRegion="polite"
+        numberOfLines={1}
+        style={{ color: DIM, fontSize: 14, lineHeight: 18 }}
+      >
+        {line}
+      </Text>
+    </View>
+  );
+}
+
+/** The controls' band along the bottom, over a gradient from the picture's black. */
+function Foot({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingTop: 24,
+        paddingBottom: 12 + insets.bottom,
+        paddingLeft: 24 + insets.left,
+        paddingRight: 24 + insets.right,
+        backgroundImage: "linear-gradient(0deg, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0))",
+      }}
+    >
+      {children}
+    </View>
+  );
 }
 
 /** Centres its children over the picture, leaving touches outside them to the picture. */

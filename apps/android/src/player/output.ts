@@ -22,6 +22,12 @@ export type OutputState =
       readonly kind: "stopped";
       readonly tv: Tv;
       readonly reason: "lost" | "foreground" | "ended" | "failed";
+      /**
+       * Whether the TV had taken over, so the phone shows nothing until `playHere()` returns it.
+       * False when it stopped before confirmed PLAYING: the phone still plays, and `cancel()`
+       * clears this state.
+       */
+      readonly detached: boolean;
     }
   | { readonly kind: "refused"; readonly tv: Tv; readonly reason: string };
 
@@ -177,7 +183,7 @@ export function playerOutput(
         stopVolume = connected.volume.subscribe(() => volume.set(connected.volume.get()));
         void connected.lost.then(() => {
           if (link !== connected) return;
-          state.set({ kind: "stopped", tv, reason: "lost" });
+          state.set({ kind: "stopped", tv, reason: "lost", detached: remote });
           observe({ state: "failed", time: (last?.positionMs ?? 0) / 1000, duration: null });
           void close(false).catch(() => {});
         });
@@ -237,6 +243,7 @@ export function playerOutput(
                 kind: "stopped",
                 tv,
                 reason: status.state === "ended" ? "ended" : "failed",
+                detached: remote,
               });
               void close(status.state !== "taken").catch(() => {});
             }
@@ -332,7 +339,7 @@ export function playerOutput(
     const now = state.get();
 
     if (now.kind === "remote" || now.kind === "connecting")
-      state.set({ kind: "stopped", tv: now.tv, reason: "foreground" });
+      state.set({ kind: "stopped", tv: now.tv, reason: "foreground", detached: remote });
     observe({ state: "failed", time: (last?.positionMs ?? 0) / 1000, duration: null });
     void close()
       .finally(done)

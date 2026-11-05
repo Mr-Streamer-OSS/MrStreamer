@@ -228,6 +228,7 @@ vi.mock("../src/player/instance.ts", async () => {
             ]
           : [];
       },
+      cast: { state: store({ kind: "local" }), volume: store(null) },
     },
   };
 });

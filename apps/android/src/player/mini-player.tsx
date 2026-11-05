@@ -1,3 +1,5 @@
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import { t as tvT } from "../cast/copy.ts";
 import { fileSourceLabel } from "../downloads/file-source-label.ts";
 import { currentLanguage, onLanguageChange } from "@mrstreamer/mobile/language";
 import { useSyncExternalStore } from "react";
@@ -55,10 +57,15 @@ export function playPause(now: Playing): { icon: IconName; label: string; run: (
  * pause and Close, which stops it. Tapping it opens Watch again. Paper A: over the navigation bar
  * on phones, and at the foot of the content beside the rail from 600dp. The root layout mounts it
  * over destinations, Connect and Offline; it sets `footOverlay` to its height while it shows, so the screens under
- * it scroll behind it and their last row still clears it.
+ * it scroll behind it and their last row still clears it. While a TV holds what plays, a cast mark
+ * takes the picture's place and it says "On {tv}"; play, pause and Close drive the same owner, so
+ * Close stops the TV and disconnects.
  */
 export function MiniPlayer() {
   const state = useStore(player.state);
+  const output = useStore(player.cast.state);
+  const stoppedOnTv = output.kind === "stopped" && output.detached;
+  const remote = output.kind === "remote" || stoppedOnTv;
   useSyncExternalStore(onLanguageChange, currentLanguage);
   const pathname = usePathname();
   const onWatch = pathname === "/watch" || pathname === "/offline/play";
@@ -77,13 +84,17 @@ export function MiniPlayer() {
   const control = playPause(state);
 
   const status =
-    state.phase === "failed"
-      ? t("Didn't start")
-      : state.phase === "resolving" || state.phase === "preparing"
-        ? t("Loading")
-        : state.live
-          ? "Live"
-          : fileSourceLabel(state.intent);
+    output.kind === "remote"
+      ? tvT("On {tv}", { tv: output.tv.name })
+      : stoppedOnTv
+        ? tvT("TV stopped")
+        : state.phase === "failed"
+          ? t("Didn't start")
+          : state.phase === "resolving" || state.phase === "preparing"
+            ? t("Loading")
+            : state.live
+              ? "Live"
+              : fileSourceLabel(state.intent);
 
   return (
     <View
@@ -128,9 +139,19 @@ export function MiniPlayer() {
             borderRadius: 4,
             overflow: "hidden",
             backgroundColor: colors.background,
+            ...(remote && {
+              borderWidth: 1,
+              borderColor: colors.hairline,
+              alignItems: "center",
+              justifyContent: "center",
+            }),
           }}
         >
-          <PlayerSurface style={{ flex: 1 }} />
+          {remote ? (
+            <MaterialIcons name="cast-connected" size={20} color={colors.text} />
+          ) : (
+            <PlayerSurface style={{ flex: 1 }} />
+          )}
         </View>
         <View importantForAccessibility="no-hide-descendants" style={{ flex: 1, gap: 2 }}>
           <Text
