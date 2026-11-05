@@ -60,7 +60,17 @@ it("lists only a checked completion as a copy, and a missing file with its copie
   const missing = row("missing", { state: "failed", bytes: 2.8 * GB, reason: "missing" });
   expect(isCopy(missing)).toBe(true);
   expect(rowStatus(missing, false)).toMatchObject({ text: "File missing", failed: true });
-  expect(trailingChoice(missing)).toBe("delete");
+  // Replace is its one action; Delete download stays in its sheet.
+  expect(trailingChoice(missing)).toBe("replace");
+  expect(sheetChoices(missing, [missing])).toEqual(["replace", "delete"]);
+
+  const changed = row("changed", { state: "failed", bytes: 2.8 * GB, reason: "file-changed" });
+  expect(isCopy(changed)).toBe(true);
+  expect(rowStatus(changed, false)).toMatchObject({
+    text: "File changed. Replace it to play.",
+    failed: true,
+  });
+  expect(trailingChoice(changed)).toBe("replace");
 
   const kept = row("kept", { state: "complete", bytes: 2.8 * GB });
   expect(isCopy(kept)).toBe(true);

@@ -61,18 +61,31 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
   private inner class Counted(private val upstream: DataSource, private val allowed: (Uri) -> Boolean) :
     DataSource {
     private var counted = false
+    private var localPath: String? = null
 
     override fun addTransferListener(transferListener: TransferListener) =
       upstream.addTransferListener(transferListener)
 
-    // DataSource's contract calls close() even when open() throws, so a failed open is counted too.
-    override fun open(dataSpec: DataSpec): Long {
+    // Register before opening upstream; failed opens release their hold even without a later close.
+    override fun open(dataSpec: DataSpec): Long =
+      if (dataSpec.uri.scheme == "file") synchronized(LocalFiles) { openCounted(dataSpec) }
+      else openCounted(dataSpec)
+
+    private fun openCounted(dataSpec: DataSpec): Long {
       if (!allowed(dataSpec.uri)) throw Refused()
       if (!counted) {
         if (!opened()) throw IOException("The attempt was released")
         counted = true
+        if (dataSpec.uri.scheme == "file") {
+          localPath = dataSpec.uri.path
+          localPath?.let { LocalFiles.opened(it) }
+        }
       }
-      return upstream.open(dataSpec)
+      try { return upstream.open(dataSpec) }
+      catch (cause: Throwable) {
+        try { close() } catch (cleanup: Throwable) { cause.addSuppressed(cleanup) }
+        throw cause
+      }
     }
 
     override fun read(buffer: ByteArray, offset: Int, length: Int) = upstream.read(buffer, offset, length)
@@ -86,6 +99,8 @@ internal class Hold(private val main: Handler, private val onSettled: (closed: B
         upstream.close()
       } finally {
         if (counted) {
+          localPath?.let { LocalFiles.closed(it) }
+          localPath = null
           counted = false
           closed()
         }

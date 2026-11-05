@@ -18,6 +18,9 @@ class TransfersModule : Module() {
       }
     }
     AsyncFunction("snapshot") { Transfers.snapshot(context, false) }
+    AsyncFunction("review") { json: String -> Transfers.review(context, json) }
+    AsyncFunction("endReview") { token: String -> Transfers.endReview(token) }
+    AsyncFunction("admit") { token: String, key: String, expected: String -> Transfers.admit(context, token, key, expected) }
     AsyncFunction("enqueue") { json: String -> Transfers.add(context, json) }
     AsyncFunction("command") { id: String, action: String -> Transfers.command(context, id, action) }
     AsyncFunction("cacheArtwork") Coroutine { id: String, address: String ->

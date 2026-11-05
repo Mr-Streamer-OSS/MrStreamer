@@ -32,6 +32,7 @@ const scenario = vi.hoisted(() => ({
   played: [] as unknown[],
   retries: 0,
   media: [] as string[],
+  replacements: [] as string[],
 }));
 
 vi.mock("react-native", async () => {
@@ -134,11 +135,14 @@ vi.mock("expo-router", () => ({
   useLocalSearchParams: () => scenario.params,
   useIsFocused: () => true,
   usePathname: () => scenario.pathname,
+  useSegments: () => [],
+  navigate: () => {},
   router: {
     canGoBack: () => true,
     back: () => scenario.asked.push("back"),
     replace: (href: string) => scenario.asked.push(`replace ${href}`),
     push: () => scenario.asked.push("push"),
+    navigate: () => scenario.asked.push("downloads"),
   },
 }));
 
@@ -170,6 +174,7 @@ vi.mock("../src/player/instance.ts", async () => {
         speed: asked("speed"),
         quality: asked("quality"),
         enterPip: asked("pip"),
+        refreshOfflineNext: asked("refresh offline next"),
         playNext: asked("play next"),
         cancelNext() {
           scenario.media.push("cancel next");
@@ -185,11 +190,32 @@ vi.mock("../src/player/instance.ts", async () => {
 
         return "attempt";
       },
+      resume: asked("resume"),
       retry() {
         scenario.retries++;
       },
     },
   };
+});
+
+vi.mock("../src/subtitles/runtime.ts", () => ({
+  retainedFileSubtitle: async () => ({ subtitle: { language: "nl" } }),
+}));
+
+vi.mock("../src/downloads/runtime.ts", async () => {
+  const { store } = await import("../src/platform/store.ts");
+
+  const owner = {
+    state: store({ rows: [] }),
+    prompt: store<import("../src/downloads/replace.ts").ReplacePrompt | null>(null),
+    replace: async (row: { id: string }) => {
+      scenario.replacements.push(row.id);
+
+      return "replaced";
+    },
+  };
+
+  return { downloads: () => owner };
 });
 
 const window = new Window();
@@ -576,5 +602,126 @@ describe("the mini player", () => {
     expect(footOverlay.get()).toBe(72);
     act(() => root?.unmount());
     expect(footOverlay.get()).toBe(0);
+  });
+});
+
+describe("downloaded Watch end", () => {
+  const row = {
+    id: "next-copy",
+    key: "key",
+    sourceId: "source",
+    title: "Series",
+    sourceLabel: "Provider",
+    kind: "episode",
+    mediaId: "second",
+    container: "mp4",
+    state: "complete",
+    bytes: 100,
+    total: 100,
+    reason: "",
+    season: 1,
+    episode: 2,
+  } as const;
+
+  function end(
+    next: import("../src/downloads/offline-next.ts").OfflineNext,
+    remaining: number | null = null,
+  ) {
+    player.state.set(
+      playing({ kind: "file", path: "/current", title: "Series" }, { phase: "ended" }),
+    );
+    player.media.state.set({ ...still, offline: next, remaining });
+
+    return open(null);
+  }
+
+  function click(shown: Element, text: string) {
+    const button = [...shown.querySelectorAll("button")].findLast(
+      (button) => button.textContent === text,
+    );
+
+    if (!(button instanceof window.HTMLButtonElement)) throw new Error(`No ${text}`);
+    act(() => button.click());
+  }
+
+  it.each(["downloading", "not-saved", "read"] as const)(
+    "offers Downloads without advancing for %s",
+    (kind) => {
+      const shown = end({
+        kind,
+        row: { ...row, state: kind === "downloading" ? "running" : "complete" },
+      });
+
+      expect(shown.textContent).toContain(
+        kind === "downloading"
+          ? "still downloading"
+          : kind === "read"
+            ? "Couldn't read downloads."
+            : "isn't on this device",
+      );
+      expect(shown.textContent).not.toContain("Replace");
+      expect(shown.textContent).not.toContain("Play next");
+
+      for (const control of ["Audio", "Subtitles", "Speed"])
+        expect(shown.textContent).toContain(control);
+      click(shown, "Downloads");
+      expect(scenario.asked).toContain("downloads");
+      expect(scenario.media).not.toContain("play next");
+      click(shown, "Play again");
+      expect(scenario.media).toContain("resume");
+      expect(scenario.played).toEqual([]);
+    },
+  );
+  it.each(["missing", "changed"] as const)(
+    "replaces %s with the existing confirmation rules",
+    async (kind) => {
+      scenario.replacements = [];
+      const { downloads } = await import("../src/downloads/runtime.ts");
+      downloads().prompt.set(null);
+
+      const shown = end({
+        kind,
+        row: { ...row, reason: kind === "missing" ? "missing" : "file-changed" },
+      });
+
+      expect(shown.textContent).toContain(kind === "missing" ? "File missing" : "File changed");
+      click(shown, "Replace");
+      await act(async () => {
+        await vi.waitFor(() =>
+          expect(
+            kind === "changed" ? downloads().prompt.get()?.kind : scenario.replacements[0],
+          ).toBe(kind === "changed" ? "confirm" : row.id),
+        );
+      });
+
+      if (kind === "changed") {
+        expect(scenario.replacements).toEqual([]);
+        expect(shown.textContent).toContain("Replace the copy of");
+        click(shown, "Replace");
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(scenario.replacements).toEqual([row.id]);
+      }
+
+      expect(scenario.played).toEqual([]);
+      expect(scenario.media).not.toContain("play next");
+    },
+  );
+  it("shows the checked countdown and retained language; cancellation leaves manual Next", async () => {
+    const next = { kind: "ready", row, path: "/next" } as const;
+    const shown = end(next, 8);
+    await act(async () => {
+      await import("../src/subtitles/runtime.ts");
+      await Promise.resolve();
+    });
+    expect(shown.textContent).toContain("Downloaded · Nederlands · Plays in 8");
+    expect(scenario.played).toEqual([]);
+    click(shown, "Cancel");
+    expect(shown.textContent).not.toContain("Plays in");
+    click(shown, "Play next");
+    expect(scenario.media).toContain("play next");
+    act(() => player.media.state.set({ ...still, offline: next }));
+    expect(shown.textContent).not.toContain("Plays in");
   });
 });
