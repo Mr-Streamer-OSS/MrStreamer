@@ -29,13 +29,19 @@ vi.mock("../src/live/runtime.ts", () => ({ lists: {} }));
 
 const bootstrap = vi.hoisted(() => ({ sources: {} }));
 
+vi.mock("../src/platform/credentials.ts", () => ({
+  nativeCredentials: () => {
+    throw new Error("Unexpected credentials");
+  },
+}));
+
 vi.mock("../src/bootstrap/sources.ts", () => bootstrap);
 
 vi.mock("../src/platform/storage.ts", () => ({
   readJson: () => ({}),
-  writeJson: () => {
+  writeJson: vi.fn(() => {
     throw new Error("Read only");
-  },
+  }),
 }));
 
 vi.mock("@expo/vector-icons/MaterialIcons", () => ({ default: () => null }));
@@ -388,4 +394,100 @@ it("successful provider connection leaves examples and dismisses the preview for
   expect(providerPrompt.get()).toBeNull();
   expect(shown.querySelector("dialog")).toBeNull();
   expect(route.replaced).toEqual(["/"]);
+});
+
+it("programme Play offers a provider without dispatching playback", async () => {
+  const { store } = await import("../src/platform/store.ts");
+  Object.assign(bootstrap.sources, { state: store({ kind: "ready", sources: [] }) });
+  const { ProgrammeActions } = await import("../src/guide/actions-play.ts");
+  const play = vi.fn();
+  const stop = libraryIntents.register({ play });
+  enterPreview();
+
+  try {
+    const now = Date.now();
+
+    const shown = show(
+      createElement(ProgrammeActions, {
+        identity: { sourceId: "example:627", channelId: "1" },
+        channelName: "Harbour · Example",
+        inset: 16,
+        programme: { title: "Example", start: now - 1000, stop: now + 60000, description: null },
+      }),
+    );
+
+    press(shown, "Watch live");
+    expect(providerPrompt.get()).toBe("play");
+    expect(play).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
+});
+
+it("example version selection changes Details without persisting a preference", async () => {
+  enterPreview();
+  const movie = exampleLibrary.search("movie", "harbour").titles[0]!;
+  route.params = { kind: "movie", title: movie.key };
+  const shown = show(createElement(DetailsScreen, { model: exampleLibrary }));
+  await act(async () => {});
+
+  const versionButton = Array.from(shown.querySelectorAll("button")).find((b) =>
+    b.getAttribute("aria-label")?.startsWith("Version:"),
+  );
+
+  expect(versionButton).toBeDefined();
+  act(() => versionButton!.click());
+  const choices = Array.from(shown.querySelectorAll('[role="radio"]'));
+  expect(choices.length).toBeGreaterThan(1);
+  act(() => choices[1]!.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
+  expect(route.params.version).toBeDefined();
+  const { writeJson } = await import("../src/platform/storage.ts");
+  expect(writeJson).not.toHaveBeenCalled();
+  expect(shown.textContent).not.toContain("Couldn't save version.");
+});
+
+it("bulk-series review refuses preview before planning downloads", async () => {
+  const { store } = await import("../src/platform/store.ts");
+  const { seriesDownloads, seriesOwner } = await import("../src/downloads/series.ts");
+
+  const review = vi.fn(async () => {
+    throw new Error("Unexpected review");
+  });
+
+  const admit = vi.fn(async () => "added");
+
+  const controller = () =>
+    seriesDownloads(
+      { review, admit, endReview: async () => {} },
+      async () => true,
+      async () => {},
+    );
+
+  seriesOwner.set({
+    state: store<import("../src/downloads/state.ts").DownloadState>({
+      rows: [],
+      free: 1,
+      loading: false,
+      notifications: false,
+      error: null,
+    }),
+    prompt: store<import("../src/downloads/replace.ts").ReplacePrompt | null>(null),
+    replace: vi.fn(),
+    series: controller,
+  });
+  enterPreview();
+
+  try {
+    const series = exampleLibrary.search("series", "orbit").titles[0]!;
+    route.params = { kind: "series", title: series.key };
+    const shown = show(createElement(DetailsScreen, { model: exampleLibrary }));
+    await act(async () => {});
+    press(shown, "Review series download");
+    expect(providerPrompt.get()).toBe("download");
+    expect(review).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(shown.textContent).not.toContain("Couldn't download");
+  } finally {
+    seriesOwner.set(undefined);
+  }
 });

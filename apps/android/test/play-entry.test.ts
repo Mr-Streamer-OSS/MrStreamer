@@ -404,3 +404,31 @@ it.each(["source", "cleanup", "newer"] as const)(
     }
   },
 );
+
+it("registered Play refuses example and stale identities before Cast or player dispatch", async () => {
+  const { enterPreview, exitPreview, providerPrompt } = await import("../src/preview/session.ts");
+  const f = await setup();
+  const cast = vi.spyOn(f.player.cast.state, "get");
+  const play = vi.spyOn(f.player, "play");
+  const read = vi.spyOn(f.model, "reader");
+
+  try {
+    for (const browsing of [true, false]) {
+      if (browsing) enterPreview();
+      else exitPreview();
+      providerPrompt.set(null);
+      await f.intents.state.get().play?.({ ...f.intent, sourceId: "example:627" });
+      expect(providerPrompt.get()).toBe("play");
+      expect(cast).not.toHaveBeenCalled();
+      expect(play).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(f.open).not.toHaveBeenCalled();
+    }
+  } finally {
+    cast.mockRestore();
+    play.mockRestore();
+    read.mockRestore();
+    f.stop();
+    exitPreview();
+  }
+});
