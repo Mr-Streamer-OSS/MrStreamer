@@ -268,7 +268,7 @@ export const rulesQuery = () =>
   queryOptions({
     queryKey: ["rules"],
     queryFn: () => call("recordings.rules"),
-    staleTime: Infinity,
+    refetchInterval: 5_000,
   });
 
 export function useRules() {

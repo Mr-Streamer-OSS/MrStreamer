@@ -20,6 +20,7 @@ const schema = () =>
         channelName: "string",
         plan: RecordingPlanSchema().extract({ kind: "'programme'" }),
         settled: "boolean",
+        "observed?": { start: "number", stop: "number" },
       })
         .array()
         .atMostLength(RECORDING_RULE_LIMITS.history),

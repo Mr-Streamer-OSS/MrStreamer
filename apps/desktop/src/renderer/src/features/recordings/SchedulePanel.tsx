@@ -518,10 +518,7 @@ function Holders({ holders }: { holders: readonly ConnectionHolder[] }) {
 export function RulePanel({ rule, onDone }: { rule: RecordingRule; onDone: () => void }) {
   const { plan } = rule;
   const [padding, setPadding] = useState(plan.padding);
-  const names = useQuery(queries.channelsOf(plan.channels)).data;
-
-  // Its channels are offered by name once the lists answer.
-  if (!names) return null;
+  const names = useQuery(queries.channelsOf(plan.channels));
 
   return (
     <div
@@ -530,10 +527,22 @@ export function RulePanel({ rule, onDone }: { rule: RecordingRule; onDone: () =>
       onKeyDown={(event) => guardKeys(event)}
       className="flex flex-col gap-2.5 text-[0.8125rem]"
     >
+      {names.error && (
+        <div role="alert">
+          <p className="text-destructive">{describeError(appError(names.error))}</p>
+          <Button size="sm" onClick={() => void names.refetch()}>
+            {t("Retry")}
+          </Button>
+        </div>
+      )}
       <PaddingSteppers padding={padding} room={2 * PADDING_MAX} onChange={setPadding} />
       <RuleFields
         title={plan.title}
-        named={names.map((channel) => ({ owned: channel, name: channel.title }))}
+        named={plan.channels.map((owned) => ({
+          owned,
+          name:
+            names.data?.find((channel) => ownedKey(channel) === ownedKey(owned))?.title ?? owned.id,
+        }))}
         chosen={plan.channels}
         mode={plan.mode ?? "every"}
         padding={padding}
@@ -611,7 +620,11 @@ function RuleFields({
     onSuccess: (saved) => {
       client.setQueryData(
         rulesQuery().queryKey,
-        (list) => list && [...list.filter((each) => each.id !== saved.id), saved],
+        (list) =>
+          list &&
+          (list.some((each) => each.id === saved.id)
+            ? list.map((each) => (each.id === saved.id ? saved : each))
+            : [...list, saved]),
       );
       onDone();
     },
@@ -636,7 +649,7 @@ function RuleFields({
       <div className="flex flex-wrap gap-x-10 gap-y-3">
         <div className="flex min-w-0 flex-[1_1_28rem] flex-col">
           <Field label={t("Channels")}>
-            <div className="flex flex-wrap gap-1.5 py-1">
+            <div role="group" aria-label={t("Channels")} className="flex flex-wrap gap-1.5 py-1">
               {offered.map(({ owned, name }) => {
                 const key = ownedKey(owned);
                 const on = selected.has(key);
@@ -676,10 +689,11 @@ function RuleFields({
                 onKeyDown={(event) => {
                   const by = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
 
-                  if (by === undefined || unmarked) return;
+                  if (by === undefined) return;
+                  event.preventDefault();
                   const next = modes[(modes.indexOf(mode) + by + modes.length) % modes.length];
 
-                  if (!next) return;
+                  if (!next || (next === "new-only" && unmarked)) return;
                   setMode(next);
                   event.currentTarget
                     .querySelector<HTMLElement>(`[data-mode="${next}"]`)
@@ -729,9 +743,18 @@ function RuleFields({
       </div>
       <div aria-live="polite" className="flex min-h-[2.125rem] max-w-[40rem] flex-col gap-1">
         {failure ? (
-          <p role="alert" className="text-destructive">
-            {describeError(appError(failure))}
-          </p>
+          <div role="alert">
+            <p className="text-destructive">{describeError(appError(failure))}</p>
+            <Button
+              size="sm"
+              onClick={() => {
+                void preview.refetch();
+                void found.refetch();
+              }}
+            >
+              {t("Retry")}
+            </Button>
+          </div>
         ) : channels.length === 0 ? (
           <p className="text-muted-foreground">{t("Choose at least one channel.")}</p>
         ) : (

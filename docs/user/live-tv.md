@@ -170,13 +170,13 @@ From 0.0.24, **Follow programme** records each airing of the programme's title o
 - **Start** and **End** pad each airing as a schedule's do.
 - **Matches in the guide** lists the first 8 airings it would record now, counting the rest, and **On now** for one under way. **Turn on rule** saves it.
 
-Each airing it finds is scheduled, with a ring in the grid. Its details read **Scheduled**, say the rule sets its padding and offer **Cancel schedule**, which lets that airing go while the rule follows the rest. An airing cancelled, stopped or deleted is never recorded again, also after a restart. When the guide moves an airing, the schedule follows it only while the guide gives the same episode number from the same source and the new time overlaps the old; otherwise the old time is dropped and the new one is a new airing.
+Each airing it finds is scheduled, with a ring in the grid. Its details read **Scheduled**, say the rule sets its padding and offer **Cancel schedule**, which lets that airing go while the rule follows the rest. Cancelled, stopped or deleted airings stay suppressed at their saved time and through overlapping guide shifts, also after a restart or a guide-source change. Unambiguous overlapping shifts follow the same airing; conflicting episode identities are treated separately unless the old airing is already settled or recording. A nonoverlapping replacement can be a new airing.
 
-There can be 20 rules, with 100 airings scheduled between them. A check reads up to 100 guide matches per subscription, and a rule remembers up to 1,000 airings; once full, it schedules no more. A rule that can't be saved or stopped says so and can be tried again. Recording still needs Mr. Streamer to be open.
+There can be 20 rules, with 100 airings scheduled between them. A check reads up to 100 current or future guide matches per subscription per rule, and a rule remembers up to 1,000 airings; once full, it schedules no more and shows that its limit was reached. A rule that can't be saved or stopped says so and can be tried again. Recording still needs Mr. Streamer to be open.
 
 ### The Recordings page
 
-**Recordings**, in the top bar while anything is recorded or scheduled, lists **Now**, **Scheduled**, **Rules** and **Recorded**. Each row has the programme, the channel and its times, a bar of what was recorded against what was planned, and how it stands:
+**Recordings**, in the top bar while anything is recorded or scheduled, lists **Now**, **Scheduled** and **Recorded**, plus **Rules** from 0.0.24. Each row has the programme, the channel and its times, a bar of what was recorded against what was planned, and how it stands:
 
 - **Recording**, or **Paused** with why, while its time goes on. **Stop** ends it.
 - **Complete**: all of its time is there.

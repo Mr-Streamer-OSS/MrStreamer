@@ -782,14 +782,15 @@ export interface IpcOutputs {
   "recordings.remove": null;
   /** Every schedule, by when it records next. Fails while they can't be read. */
   "recordings.schedules": readonly ScheduledRecording[];
-  /**
-   * Fails when the channel isn't listed, or the plan has no time to come: a programme whose padded
-   * end passed.
-   */
+  /** Saved rules with retryable background check failures. Fails if their ledger is unreadable. */
   "recordings.rules": readonly RecordingRule[];
+  /** Bounded current/future matches, without saving. */
   "recordings.previewRule": RecordingRulePreview;
+  /** Durably saves a rule before execution. */
   "recordings.saveRule": RecordingRule;
+  /** Durably stops following future airings. */
   "recordings.cancelRule": null;
+  /** Fails when the channel isn't listed or a programme's padded end passed. */
   "recordings.plan": ScheduledRecording;
   /** As saved. Fails as `recordings.plan` does, or when it can't be written. */
   "recordings.schedule": ScheduledRecording;

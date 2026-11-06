@@ -19,7 +19,9 @@ export function planRule(
   const found: RecordingRulePreview["matches"][number][] = [];
   let unproven = 0;
 
-  for (const { channel, programme } of matches) {
+  for (const { channel, programme } of [...matches].sort(
+    (a, b) => a.programme.start - b.programme.start,
+  )) {
     if (
       !channels.has(ownedKey(channel)) ||
       !sameProgrammeTitle(programme.title, plan.title) ||
@@ -32,7 +34,10 @@ export function planRule(
     // documented system before they can promise identity. Premiere is positive evidence.
     const reliable = metadata?.guide && episode;
 
-    if (plan.mode === "new-only" && (!reliable || metadata.repeat || !metadata.premiere?.trim())) {
+    if (
+      plan.mode === "new-only" &&
+      (!reliable || metadata.repeat || metadata.premiere === undefined)
+    ) {
       unproven++;
       continue;
     }

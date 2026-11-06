@@ -618,7 +618,7 @@ function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly L
       ),
   });
 
-  const failure = stop.error ? describeError(appError(stop.error)) : null;
+  const failure = stop.error ? describeError(appError(stop.error)) : rule.error;
 
   const padding = [
     t("{minutes} min early", { minutes: plan.padding.before }),

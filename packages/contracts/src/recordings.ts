@@ -327,6 +327,8 @@ export interface RecordingRulePreview {
 }
 
 export interface RecordingRule {
+  /** Retryable check failure, or exhausted durable identity history. */
+  readonly error?: string;
   readonly id: string;
   readonly plan: RecordingRulePlan;
 }
