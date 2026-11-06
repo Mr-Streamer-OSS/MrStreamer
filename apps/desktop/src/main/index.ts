@@ -891,9 +891,21 @@ async function start(): Promise<void> {
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
   forward(playback.fixed, "playback.fixed", (change) => change);
   let downloadList: DownloadList | null = null;
+  let downloadsKnown = false;
   let downloadsChanged = () => {};
+  let downloadMutations = 0;
+  let downloadRevision = 0;
+  let downloadMutationRevision = 0;
+  const downloadWaiters = new Set<() => void>();
+
+  const waitForDownloads = () =>
+    downloadMutations === 0
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => downloadWaiters.add(resolve));
 
   const acceptDownloads = (list: DownloadList) => {
+    downloadRevision++;
+    downloadsKnown = true;
     downloadList = list;
     downloadsChanged();
   };
@@ -901,29 +913,73 @@ async function start(): Promise<void> {
   void runtime.runFork(
     Stream.runForEach(downloads.changes, (list) => Effect.sync(() => acceptDownloads(list))),
   );
+  const initialRevision = downloadRevision;
   const initialDownloads = runtime.runPromise(Effect.result(downloads.list));
 
   // A later published list takes precedence over the startup read.
   void initialDownloads.then(
     (result) => {
-      if (result._tag === "Success" && downloadList === null) acceptDownloads(result.success);
+      if (result._tag === "Success" && downloadRevision === initialRevision)
+        acceptDownloads(result.success);
     },
     () => {},
   );
 
-  const readDownloads = async () => {
-    try {
-      const result = await runtime.runPromise(Effect.result(downloads.list));
+  const readDownloads = async (): Promise<boolean> => {
+    for (;;) {
+      await waitForDownloads();
+      const revision = downloadRevision;
+      const mutation = downloadMutationRevision;
 
-      if (result._tag === "Failure") return false;
-      acceptDownloads(result.success);
+      try {
+        const result = await runtime.runPromise(Effect.result(downloads.list));
 
-      return true;
-    } catch {
-      // Defects and interrupted reads must leave lifecycle commands available to retry too.
-      return false;
+        // A mutation or publication during this read owns the newer state. Read again after
+        // mutations settle; a publication alone already supplies the latest public list.
+        if (downloadMutations > 0 || mutation !== downloadMutationRevision) continue;
+
+        if (result._tag === "Failure") {
+          downloadsKnown = false;
+
+          return false;
+        }
+
+        if (revision === downloadRevision) acceptDownloads(result.success);
+
+        return true;
+      } catch {
+        // Defects and interrupted reads must leave lifecycle commands available to retry too.
+        downloadsKnown = false;
+
+        return false;
+      }
     }
   };
+
+  // Track only commands that can create runnable work, at this app's composition boundary.
+  // Their public values and errors, including recordProgress, remain the factory's contract.
+  const trackDownload = <A, E>(operation: Effect.Effect<A, E>) =>
+    Effect.suspend(() => {
+      downloadMutations++;
+      downloadMutationRevision++;
+      downloadRevision++;
+      downloadsKnown = false;
+
+      return Effect.ensuring(
+        operation,
+        Effect.promise(async () => {
+          downloadMutations--;
+
+          if (downloadMutations === 0) {
+            for (const resolve of downloadWaiters) resolve();
+            downloadWaiters.clear();
+          }
+
+          await readDownloads();
+          downloadsChanged();
+        }),
+      );
+    });
 
   const downloadCounts = () => {
     const items = downloadList?.items ?? [];
@@ -1034,7 +1090,15 @@ async function start(): Promise<void> {
       ...outputHandlers({ output, coordination, library, onDemand, settings, analytics, pickList }),
       ...viewingHandlers({ viewing, settings }),
       ...customListHandlers({ customLists }),
-      ...downloadHandlers({ downloads }),
+      ...downloadHandlers({
+        downloads: {
+          ...downloads,
+          add: (title) => trackDownload(downloads.add(title)),
+          retry: (id) => trackDownload(downloads.retry(id)),
+          resume: (id) => trackDownload(downloads.resume(id)),
+          resumeAll: trackDownload(downloads.resumeAll),
+        },
+      }),
       ...reminderHandlers({ reminders }),
       ...profileHandlers({ profiles }),
       ...recordingHandlers({
@@ -1093,7 +1157,8 @@ async function start(): Promise<void> {
           return null;
         }),
       "window.quit": () =>
-        Effect.sync(() => {
+        Effect.promise(async () => {
+          await waitForDownloads();
           quitConfirmed = true;
           app.quit();
 
@@ -1311,7 +1376,7 @@ async function start(): Promise<void> {
             refreshTray();
             void runtime
               .runPromise(
-                Effect.match(pause ? downloads.pauseAll : downloads.resumeAll, {
+                Effect.match(pause ? downloads.pauseAll : trackDownload(downloads.resumeAll), {
                   onFailure: () => {
                     // A failed write leaves the app running and the command available to retry.
                     showWindow();
@@ -1340,8 +1405,9 @@ async function start(): Promise<void> {
     if (
       closing ||
       leaving ||
-      (!live() &&
-        downloadList !== null &&
+      (downloadMutations === 0 &&
+        !live() &&
+        downloadsKnown &&
         !downloadsLive() &&
         !(isMac && downloadCounts().paused > 0))
     )
@@ -1382,7 +1448,7 @@ async function start(): Promise<void> {
       isMac &&
       tray &&
       !recordingNow() &&
-      downloadList !== null &&
+      downloadsKnown &&
       !downloadsLive() &&
       downloadCounts().paused === 0
     ) {
@@ -1401,6 +1467,7 @@ async function start(): Promise<void> {
       !closing &&
       !restarting &&
       !changingDownloads &&
+      downloadMutations === 0 &&
       !live() &&
       !downloadsLive()
     ) {
@@ -1470,6 +1537,7 @@ async function start(): Promise<void> {
       if (checkingQuit) return;
       checkingQuit = true;
       const idle = idleQuit;
+      const mutation = downloadMutationRevision;
       idleQuit = false;
       void readDownloads().then((read) => {
         checkingQuit = false;
@@ -1477,9 +1545,16 @@ async function start(): Promise<void> {
         if (!read) {
           quitChosen = false;
 
-          if (!mainWindow) mainWindow = open(true);
-          else showWindow();
-          dialog.showErrorBox(t("Downloads"), t("Couldn't read background work. Try again."));
+          // Keep the failed read visible in the confirmation, with Retry and a deliberate
+          // Quit that still waits for normal runtime disposal and partial-file settlement.
+          askToQuit();
+
+          return;
+        }
+
+        if (mutation !== downloadMutationRevision || downloadMutations > 0) {
+          idleQuit = idle;
+          app.quit();
 
           return;
         }

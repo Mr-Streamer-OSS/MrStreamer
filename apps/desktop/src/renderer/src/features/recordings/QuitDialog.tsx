@@ -78,8 +78,8 @@ export function QuitDialog() {
   const words = unknown
     ? ({
         title: "Quit?",
-        keep: "Keep going",
-        closing: "Closing the window instead keeps both going.",
+        keep: "Cancel",
+        closing: null,
       } as const)
     : running.count === 0
       ? asking.recording
@@ -119,15 +119,14 @@ export function QuitDialog() {
               >
                 {t("Try again")}
               </Button>
-            ) : (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void confirmQuit().catch(() => {})}
-              >
-                {t("Quit")}
-              </Button>
-            )}
+            ) : null}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => void confirmQuit().catch(() => {})}
+            >
+              {t("Quit")}
+            </Button>
             <Button ref={keep} variant="primary" size="sm" className="shadow-none" onClick={close}>
               {t(words.keep)}
             </Button>
@@ -148,7 +147,7 @@ function QuitDetails({
   closing,
 }: {
   running: Running;
-  closing: (typeof asking)[keyof typeof asking]["closing"];
+  closing: (typeof asking)[keyof typeof asking]["closing"] | null;
 }) {
   const now = useNow();
   const live = useLiveRecordings();
@@ -206,7 +205,7 @@ function QuitDetails({
             title: next.title,
             time: comingTime(next.start, now),
           })} `}
-        {t(closing)}
+        {closing && t(closing)}
       </p>
     </>
   );

@@ -188,7 +188,8 @@ it.each(["downloads.list", "recordings.list"] as const)(
       expect(dialog()?.textContent).toContain("Couldn't read background work. Try again."),
     );
     expect(dialog()?.textContent).not.toContain("Quit while recording?");
-    expect(button("Quit")).toBeUndefined();
+    expect(button("Quit")).toBeDefined();
+    await focusesKeep("Cancel");
     expect(ipc.argsOf("window.quit")).toHaveLength(0);
     ipc.always(method, method === "downloads.list" ? downloads() : [recording]);
     await act(async () => button("Try again")?.click());
@@ -196,3 +197,28 @@ it.each(["downloads.list", "recordings.list"] as const)(
     await focusesKeep("Keep recording");
   },
 );
+
+it("keeps persistent read failures visible through retry and deliberate Quit", async () => {
+  ipc.refuse("downloads.list", { kind: "unexpected", detail: "Read refused" });
+  await mount();
+  await act(async () => ipc.emit("window.leaveAsked", null));
+  await vi.waitFor(() => expect(button("Try again")).toBeDefined());
+  await act(async () => button("Try again")?.click());
+  await vi.waitFor(() => expect(ipc.argsOf("downloads.list").length).toBeGreaterThan(1));
+  expect(dialog()?.textContent).toContain("Couldn't read background work. Try again.");
+  expect(dialog()?.textContent).not.toContain("keeps both going");
+  await act(async () => button("Quit")?.click());
+  expect(ipc.argsOf("window.quit")).toHaveLength(1);
+});
+
+it("uses neutral cancellation when all work finished before confirmation", async () => {
+  ipc.always("recordings.list", []);
+  await mount();
+  const shown = await asked();
+  expect(shown.textContent).toContain("Quit?");
+  expect(shown.textContent).not.toContain("keeps both going");
+  await focusesKeep("Cancel");
+  await act(async () => button("Cancel")?.click());
+  await vi.waitFor(() => expect(dialog()).toBeNull());
+  expect(ipc.argsOf("window.quit")).toHaveLength(0);
+});
