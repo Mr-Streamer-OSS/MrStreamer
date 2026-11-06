@@ -174,7 +174,7 @@ interface FakeTitle {
  */
 type FakeEpisode = FakeTitle & {
   readonly number?: number;
-  readonly info?: Readonly<Record<string, unknown>>;
+  readonly info?: Readonly<Record<string, Json | undefined>>;
 };
 
 interface FakeSeries {

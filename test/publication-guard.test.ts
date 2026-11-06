@@ -16,28 +16,35 @@ interface Job {
   readonly if?: string;
   readonly needs?: string | readonly string[];
   readonly uses?: string;
-  readonly with?: Record<string, unknown>;
+  readonly with?: Record<string, string | number | boolean>;
   readonly steps?: readonly {
     readonly id?: string;
     readonly run?: string;
     readonly env?: Record<string, string>;
   }[];
-  readonly outputs?: Record<string, unknown>;
+  readonly outputs?: Record<string, string | { description?: string; value: string }>;
 }
 
 interface Input {
   readonly type: string;
-  readonly default?: unknown;
+  readonly default?: Value;
 }
 
 interface Workflow {
   readonly on: {
     readonly workflow_call?: {
       readonly inputs?: Record<string, Input>;
-      readonly outputs?: Record<string, unknown>;
+      readonly outputs?: Record<string, string | { description?: string; value: string }>;
     };
     readonly workflow_dispatch?: { readonly inputs?: Record<string, Input> };
-  } & Record<string, unknown>;
+    readonly push?: { tags?: readonly string[]; branches?: readonly string[] };
+    readonly pull_request?: {
+      branches?: readonly string[];
+      paths?: readonly string[];
+      types?: readonly string[];
+    } | null;
+    readonly release?: { types?: readonly string[] };
+  };
   readonly jobs: Record<string, Job>;
 }
 

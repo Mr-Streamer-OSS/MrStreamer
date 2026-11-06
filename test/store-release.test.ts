@@ -378,7 +378,7 @@ describe("the package a run kept", () => {
   });
 
   it("carries the identity and the name electron-builder builds the package with", () => {
-    const builder: { appx: Record<string, unknown> } = parse(
+    const builder: { appx: typeof STORE_APP & { displayName: string } } = parse(
       readFileSync("apps/desktop/electron-builder.yml", "utf8"),
     );
 

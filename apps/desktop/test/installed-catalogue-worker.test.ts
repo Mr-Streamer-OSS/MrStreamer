@@ -1,3 +1,4 @@
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import { isCallable } from "../../../packages/contracts/src/callable.ts";
 import { type as arkType } from "arktype";
 import type { Json } from "../../../packages/contracts/src/json.ts";
@@ -22,7 +23,7 @@ const expected = "file:///tmp/owned/resources/app.asar/out/main/catalogue-worker
 const dependency = expected.replace("catalogue-worker-test", "dependency-test");
 const pid = 240024;
 
-type Command = { id: number; method: string; params: Record<string, unknown> };
+type Command = { id: number; method: string; params: Record<string, Json | undefined> };
 
 function success<T>(result: Outcome<T>): T {
   if (!result.ok) throw new Error(result.error);
@@ -30,8 +31,13 @@ function success<T>(result: Outcome<T>): T {
   return result.value;
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return arkType.keywords.object.root.allows(value) && !isCallable(value) && !Array.isArray(value);
+function object(value: unknown): value is Record<string, Json | undefined> {
+  return (
+    JsonValue.allows(value) &&
+    arkType.keywords.object.root.allows(value) &&
+    !isCallable(value) &&
+    !Array.isArray(value)
+  );
 }
 
 /** Speaks the private NodeWorker protocol at its main transport boundary. */
@@ -84,7 +90,7 @@ class Transport implements MainTransport {
       },
     });
   }
-  async send(method: string, params: Record<string, unknown> = {}) {
+  async send(method: string, params: Record<string, Json | undefined> = {}) {
     this.outer.push(method);
 
     if (method === "NodeWorker.disable" && this.disableError) return { error: this.disableError };

@@ -20,7 +20,7 @@
 import { rename, rm } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import {
   GUIDE_RANGE,
@@ -593,7 +593,7 @@ function reader(
     from programme join title on title.key = programme.title
     where programme.channel = ? and programme.start = ?`);
 
-  const unended = (rows: Record<string, unknown>[], at: number) =>
+  const unended = (rows: Record<string, SQLOutputValue>[], at: number) =>
     rows.flatMap((row) => {
       const programme = programmeOf(row);
 
@@ -874,7 +874,7 @@ function matching(
   const only = channels.size * 2 < listing ? JSON.stringify(keys) : null;
   const within = only === null ? "" : "and programme.channel in (select value from json_each(?))";
 
-  const found = (row: Record<string, unknown>): FoundProgramme => ({
+  const found = (row: Record<string, SQLOutputValue>): FoundProgramme => ({
     channel: Number(row["channel"]),
     start: Number(row["start"]),
     stop: Number(row["stop"]),
@@ -941,11 +941,11 @@ function matching(
   }
 }
 
-function slotOf(row: Record<string, unknown>): Omit<GuideSlot, "guide"> {
+function slotOf(row: Record<string, SQLOutputValue>): Omit<GuideSlot, "guide"> {
   return { start: Number(row["start"]), stop: Number(row["stop"]), title: String(row["title"]) };
 }
 
-function programmeOf(row: Record<string, unknown>): Programme {
+function programmeOf(row: Record<string, SQLOutputValue>): Programme {
   return {
     ...slotOf(row),
     description:

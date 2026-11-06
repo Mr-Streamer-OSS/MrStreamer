@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { Agent, request } from "node:http";
+import { Agent, request, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { xtreamProvider } from "@mrstreamer/core/xtream";
@@ -23,7 +23,7 @@ const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).di
 function download(url: string, headers: Record<string, string> = {}, agent?: Agent) {
   return new Promise<{
     status: number;
-    headers: Record<string, unknown>;
+    headers: IncomingHttpHeaders;
     body: Buffer;
     broke: boolean;
   }>((resolve, reject) => {

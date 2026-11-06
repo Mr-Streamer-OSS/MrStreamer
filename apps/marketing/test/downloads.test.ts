@@ -16,7 +16,7 @@ const names = (version: string) =>
   Object.values(NAMES).map((ending) => `Mr-Streamer-${version}-${ending}`);
 
 /** A feed as the release workflow publishes it, naming `version` as the stable release. */
-const feed = (version: string, stable: Record<string, unknown> = {}) => ({
+const feed = (version: string, stable: Record<string, Json | undefined> = {}) => ({
   schema: 1,
   generated: "2026-10-06T06:57:32.055Z",
   stable: {

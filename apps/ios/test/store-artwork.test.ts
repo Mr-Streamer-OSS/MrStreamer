@@ -22,7 +22,14 @@ type Capture = {
   file: string;
   sha256: string;
   provenance?: Record<string, string>;
-  frame?: Record<string, unknown>;
+  frame?: {
+    file: string;
+    source: string;
+    termsSource: string;
+    licenceFile: string;
+    cutout: { left: number; top: number; width: number; height: number };
+    cornerRadius: number;
+  };
 };
 
 const exec = promisify(execFile);
@@ -305,7 +312,7 @@ test.each(["capture", "provenance", "frame", "cutout"])(
           ? capture.provenance!
           : target === "frame"
             ? capture.frame!
-            : (capture.frame!.cutout as Record<string, unknown>);
+            : capture.frame!.cutout;
 
     Object.assign(record, { note: "https://private.invalid/stream?login=secret" });
     await expect(run(dir, slots)).rejects.toThrow(/unknown key.*note/);

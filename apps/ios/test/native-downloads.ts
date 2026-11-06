@@ -1,3 +1,6 @@
+import type { Json } from "@mrstreamer/contracts/json";
+import type { GuideNative } from "../src/guide-native.ts";
+import type { RemindersNative } from "../src/reminders.ts";
 import { appendFileSync, existsSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AuthorizationView, OutcomeV2, Progress, ReceiptV2 } from "../src/download-task.ts";
@@ -1418,7 +1421,28 @@ export const nativeDownloads = {
   },
 };
 
-const host: { expo?: { modules?: Record<string, unknown> } } = globalThis;
+export interface FixtureModules {
+  BackgroundDownloads?:
+    | (Partial<Omit<typeof nativeDownloads, "reconcile">> & {
+        reconcile?: (
+          ...args: Parameters<typeof nativeDownloads.reconcile>
+        ) => Promise<Awaited<ReturnType<typeof nativeDownloads.reconcile>> | Json>;
+      })
+    | undefined;
+  ProgrammeReminders?: RemindersNative;
+  Guide?: GuideNative;
+  TitleFormats?: {
+    create(): void;
+    open(): Promise<{ kind: string; playlist: string }>;
+    close(): void;
+    closed(): Promise<void>;
+    failure(): null;
+    trace(): never[];
+    addListener(): { remove(): void };
+  };
+}
+
+const host: { expo?: { modules?: FixtureModules } } = globalThis;
 
 host.expo ??= {};
 

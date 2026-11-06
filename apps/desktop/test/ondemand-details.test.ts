@@ -1,3 +1,5 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -165,10 +167,9 @@ function relistFirstEpisode(provider: Awaited<ReturnType<typeof app>>["provider"
 async function dropCatalogueStamp(dir: string) {
   const path = join(dir, "ondemand.json.gz");
 
-  const snapshot = JSON.parse(gunzipSync(await readFile(path)).toString()) as Record<
-    string,
-    unknown
-  >;
+  const snapshot = arkType({ "[string]": JsonValue }).assert(
+    JSON.parse(gunzipSync(await readFile(path)).toString()),
+  );
 
   expect(snapshot["catalogueStamp"]).toEqual(expect.any(String));
   delete snapshot["catalogueStamp"];

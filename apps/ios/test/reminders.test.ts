@@ -1,3 +1,4 @@
+import type { FixtureModules } from "./native-downloads.ts";
 import { createRoot, document, type Root } from "./dom.ts";
 import * as React from "react";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -197,7 +198,7 @@ const module: RemindersNative = {
   },
 };
 
-const host: { expo?: { modules?: Record<string, unknown> } } = globalThis;
+const host: { expo?: { modules?: FixtureModules } } = globalThis;
 
 host.expo ??= {};
 

@@ -1,3 +1,6 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
+import type { Json } from "@mrstreamer/contracts/json";
 import { keychain } from "./keychain.ts";
 import type { SeriesDetails, Title, TitleDetails } from "@mrstreamer/contracts/ondemand";
 import { kindOf } from "@mrstreamer/core/ondemand/catalogue";
@@ -13,6 +16,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** A parsed JSON object whose fields stay as stored. */
+const JsonRecord = arkType({ "[string]": JsonValue });
 
 // Title and season details a launch shows from the phone: titles.ts and the records it saves in
 // Caches/details, over real files (`native-files.ts`). The desktop tests' fake Xtream panel and
@@ -39,7 +45,8 @@ const memory = vi.hoisted(() => ({
   heldDetails: [] as Array<() => void>,
   holdDetails: false,
   /** Changes a details answer on its way to the app. */
-  details: null as null | ((body: Record<string, unknown>) => Record<string, unknown>),
+  details: null as
+    null | ((body: Record<string, Json | undefined>) => Record<string, Json | undefined>),
   /** Passwords a panel takes for its own, as one whose password was changed. */
   aliases: [] as Array<readonly [alias: string, password: string]>,
   /** Details requests whose address holds this answer 503, as for a login the panel refuses. */
@@ -114,17 +121,19 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     }
 
     if (!hold) return response;
-    const body = (await response.json()) as Record<string, unknown>;
+    const body = JsonRecord.assert(await response.json());
     await new Promise<void>((go) => memory.heldTranslated.push(go));
 
     return Response.json(
       url.pathname.includes("/season/")
         ? {
             ...body,
-            episodes: (body["episodes"] as Record<string, unknown>[]).map((episode) => ({
-              ...episode,
-              name: "OBSOLETE-NL",
-            })),
+            episodes: JsonRecord.array()
+              .assert(body["episodes"])
+              .map((episode) => ({
+                ...episode,
+                name: "OBSOLETE-NL",
+              })),
           }
         : { ...body, overview: "OBSOLETE-NL" },
     );
@@ -153,7 +162,7 @@ vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
 
   if (!rewrite || !response.ok) return response;
 
-  return Response.json(rewrite((await response.json()) as Record<string, unknown>));
+  return Response.json(rewrite(JsonRecord.assert(await response.json())));
 });
 
 const { native } = await import("./native-files.ts");
@@ -305,15 +314,15 @@ async function opened(app: App, title: Title) {
 }
 
 /** A series' details answer with every episode's plot as `plot`. */
-const episodePlots = (body: Record<string, unknown>, plot: string) => ({
+const episodePlots = (body: Record<string, Json | undefined>, plot: string) => ({
   ...body,
   episodes: Object.fromEntries(
-    Object.entries(body["episodes"] as Record<string, Record<string, unknown>[]>).map(
+    Object.entries(arkType({ "[string]": JsonRecord.array() }).assert(body["episodes"])).map(
       ([season, episodes]) => [
         season,
         episodes.map((episode) => ({
           ...episode,
-          info: { ...(episode["info"] as Record<string, unknown>), plot },
+          info: { ...JsonRecord.assert(episode["info"]), plot },
         })),
       ],
     ),
@@ -322,9 +331,9 @@ const episodePlots = (body: Record<string, unknown>, plot: string) => ({
 
 const firstEpisodePlot = (details: TitleDetails) => seriesOf(details).seasons[0]?.episodes[0]?.plot;
 
-const plotOf = (body: Record<string, unknown>, plot: string) => ({
+const plotOf = (body: Record<string, Json | undefined>, plot: string) => ({
   ...body,
-  info: { ...(body["info"] as Record<string, unknown>), plot },
+  info: { ...JsonRecord.assert(body["info"]), plot },
 });
 
 beforeEach(() => {
@@ -751,13 +760,13 @@ describe("details saved on the phone", () => {
     memory.details = (body) => ({
       ...body,
       episodes: Object.fromEntries(
-        Object.entries(body["episodes"] as Record<string, Record<string, unknown>[]>).map(
+        Object.entries(arkType({ "[string]": JsonRecord.array() }).assert(body["episodes"])).map(
           ([season, episodes]) => [
             season,
             episodes.map((episode) => ({
               ...episode,
               info: {
-                ...(episode["info"] as Record<string, unknown>),
+                ...JsonRecord.assert(episode["info"]),
                 movie_image: `${panel.url}/still.php?username=${ONE.username}&password=${encodeURIComponent(ONE.password)}`,
               },
             })),

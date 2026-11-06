@@ -1,3 +1,4 @@
+import type { FixtureModules } from "./native-downloads.ts";
 import {
   memory,
   native,
@@ -228,7 +229,8 @@ describe("downloads", { timeout: 30_000 }, () => {
     for (const next of [b!, null]) {
       let end!: () => void;
       const ended = new Promise<void>((done) => (end = done));
-      const { modules } = (globalThis as { expo: { modules: Record<string, unknown> } }).expo;
+      const host: { expo?: { modules?: FixtureModules } } = globalThis;
+      const modules = host.expo!.modules!;
       Object.assign(modules, {
         Guide: guideFixture().native,
         TitleFormats: {

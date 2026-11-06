@@ -10,7 +10,7 @@ import type { Page } from "./app.ts";
 
 type LaunchFailure = {
   evidence: string;
-  observations: Record<string, unknown>;
+  observations: Record<string, Json | undefined>;
   page: Pick<Page, "send">;
   mainPage: { evaluate(expression: string, timeoutMs: number): Promise<Json | undefined> };
   app: Pick<ChildProcess, "pid" | "exitCode" | "signalCode">;

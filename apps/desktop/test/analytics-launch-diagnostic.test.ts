@@ -120,7 +120,7 @@ function fixture(rejectedUrl = "about:blank") {
   });
 
   vi.stubGlobal("fetch", fetch_);
-  const observations: Record<string, unknown> = { instance: { pid: 999 } };
+  const observations: Record<string, Json | undefined> = { instance: { pid: 999 } };
 
   const context = {
     evidence,

@@ -376,6 +376,11 @@ let checkpoint: ReturnType<typeof setInterval> | null = null;
 
 /** Settles once the main process answered the last save of how far a title got. */
 let saving: Promise<void> = Promise.resolve();
+
+// A refused final save stays retryable even after the player closes. A newer save for
+// the same copy cancels the older retry, including a late answer from that save.
+const copySaves = new Map<string, { timer: ReturnType<typeof setTimeout> | null }>();
+let sought = false;
 let releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Where a run stopped for a long pause resumes from. */
@@ -583,7 +588,7 @@ function save(): void {
   if (receiver) return;
   const { now, position, duration, next } = store.getState();
 
-  if (!now || !duration || position <= 0) return;
+  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought))) return;
 
   // A copy keeps its own, whatever its subscription's record says.
   if (now.kind === "copy") {
@@ -616,19 +621,63 @@ function save(): void {
  * recording, Recordings, and answers whether main kept it: a save it refused, as while another
  * copy of the app holds the database, answers false. The next copy goes on only from one it kept.
  */
-function saveCopy(now: CopyNow, position: number, duration: number): Promise<boolean> {
+function saveCopy(
+  now: CopyNow,
+  position: number,
+  duration: number,
+  background = false,
+): Promise<boolean> {
   const progress = { id: now.copy, position: Math.min(position, duration), duration };
+  const key = `${now.recording ? "recording" : "download"}:${now.copy}`;
+  const previous = copySaves.get(key);
+
+  if (previous?.timer) clearTimeout(previous.timer);
+  const pending = { timer: null as ReturnType<typeof setTimeout> | null };
+  copySaves.set(key, pending);
 
   const kept = (
     now.recording
       ? call("recordings.recordProgress", progress)
       : call("downloads.recordProgress", progress)
   ).then(
-    () => true,
-    () => false,
+    () => {
+      if (copySaves.get(key) === pending) copySaves.delete(key);
+
+      return true;
+    },
+    () => {
+      // Main owns recording retries, including after this renderer closes.
+      if (now.recording) {
+        if (copySaves.get(key) === pending) copySaves.delete(key);
+      } else {
+        const retry = () => {
+          if (copySaves.get(key) !== pending) return;
+          pending.timer = setTimeout(() => {
+            if (copySaves.get(key) !== pending) return;
+            void call("downloads.list").then((list) => {
+              if (copySaves.get(key) !== pending) return;
+
+              if (
+                !list.items.some((copy) => copy.id === now.copy && copy.status.kind === "complete")
+              ) {
+                copySaves.delete(key);
+
+                return;
+              }
+
+              void saveCopy(now, position, duration, true);
+            }, retry);
+          }, 10_000);
+        };
+
+        retry();
+      }
+
+      return false;
+    },
   );
 
-  saving = kept.then(() => {});
+  if (!background) saving = kept.then(() => {});
 
   return kept;
 }
@@ -1537,6 +1586,7 @@ function closeTitle(keepObservation = false): void {
   }
 
   save();
+  sought = false;
   generation++;
   stopCountdown();
 
@@ -1719,6 +1769,7 @@ export const titlePlayer = {
     }
 
     save();
+    sought = true;
 
     if (engine?.seekWithin(target)) {
       store.setState({ position: target });

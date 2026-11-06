@@ -1,3 +1,5 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
+import type { preflight } from "./control.ts";
 // The downloads-queue scenario of `pnpm verify:desktop`: Pause, Resume, Up and Down on the
 // Downloads page's rows and Pause all in its heading, driven through the built app's window with
 // pointer and key input, on one profile started twice. Four movies are queued from their details,
@@ -65,7 +67,7 @@ const driver = (page: Page, base: BaseDriver) => {
 type Driver = ReturnType<typeof driver>;
 
 export async function runDownloadsQueue(
-  build: Record<string, unknown> & { executable: string },
+  build: Awaited<ReturnType<typeof preflight>>,
   previous?: string,
 ) {
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
@@ -218,7 +220,8 @@ export async function runDownloadsQueue(
         [...document.querySelectorAll('[data-download]')].map((row) => row.dataset.download.slice(0, 8))]))
         .observe(document.querySelector('section'), { childList: true });
     })()`);
-    const keyboardLog = () => online.page.evaluate<unknown[]>("window.__keyboard ?? []");
+
+    const keyboardLog = () => online.page.evaluate<Json[]>("window.__keyboard ?? []");
 
     // 2. Pause the transfer from the keyboard: it stops once its request ended, keeps its bytes,
     // and the keyboard stays on its row's control, now Resume, though the row moved.

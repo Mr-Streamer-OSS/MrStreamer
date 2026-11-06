@@ -7,6 +7,43 @@ import {
 } from "../../../../apps/desktop/test/fake-provider.ts";
 import type { Driver } from "./language.ts";
 
+export type HomeFrame = {
+  width: number;
+  height: number;
+  overflow: number;
+  preview: { width: number; height: number };
+  promoted: string | null;
+  rows: string[];
+  arts: {
+    row: string;
+    width: number;
+    height: number;
+    labelY: number;
+    logo: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      naturalWidth: number;
+      naturalHeight: number;
+      fit: string;
+    } | null;
+  }[];
+  controls: {
+    name: string;
+    radius: number;
+    width: number;
+    height: number;
+    x: number;
+    right: number;
+    bottom: number;
+  }[];
+  titleArt: { row: string; width: number; height: number }[];
+  headings: { text: string; x: number; right: number }[];
+  sparseTitles: number;
+  video: { time: number; muted: boolean; width: number; paused: boolean };
+};
+
 const CHANNELS = ["Meridian", "Newsroom", "Orbit", "Harbour", "Fernlight", "Atlas"];
 
 /** Six playable synthetic channels, with both current programmes and a deliberate guide gap. */
@@ -167,7 +204,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
   ] as const;
 
   const measure = async (state: string) => {
-    const frames: object[] = [];
+    const frames: HomeFrame[] = [];
 
     for (const [width, height] of sizes) {
       d.action(`Measure ${state} at ${width} by ${height}`);
@@ -188,42 +225,7 @@ export async function homeStageScenario(d: Driver, fixture: Fixture): Promise<vo
       );
       await d.capture(`${state}-${width}`);
 
-      const geometry = await d.evaluate<{
-        width: number;
-        height: number;
-        overflow: number;
-        preview: { width: number; height: number };
-        promoted: string | null;
-        rows: string[];
-        arts: {
-          row: string;
-          width: number;
-          height: number;
-          labelY: number;
-          logo: {
-            x: number;
-            y: number;
-            width: number;
-            height: number;
-            naturalWidth: number;
-            naturalHeight: number;
-            fit: string;
-          } | null;
-        }[];
-        controls: {
-          name: string;
-          radius: number;
-          width: number;
-          height: number;
-          x: number;
-          right: number;
-          bottom: number;
-        }[];
-        titleArt: { row: string; width: number; height: number }[];
-        headings: { text: string; x: number; right: number }[];
-        sparseTitles: number;
-        video: { time: number; muted: boolean; width: number; paused: boolean };
-      }>(`(() => {
+      const geometry = await d.evaluate<HomeFrame>(`(() => {
         const box = e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
         const preview = document.querySelector('[data-home-preview]');
         const v = preview.querySelector('video');

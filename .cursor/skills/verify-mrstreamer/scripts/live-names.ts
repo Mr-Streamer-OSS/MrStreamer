@@ -40,14 +40,14 @@ const label = (text: string) =>
 const nameOf = (title: string) =>
   `[...document.querySelectorAll('main [data-name]')].find(e => e.textContent === ${JSON.stringify(title)})`;
 
-interface Bounds {
+export interface Bounds {
   left: number;
   right: number;
   top: number;
   bottom: number;
 }
 
-interface Row {
+export interface Row {
   name: string;
   title: string;
   line: string;
