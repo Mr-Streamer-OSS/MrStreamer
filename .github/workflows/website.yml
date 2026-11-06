@@ -41,6 +41,7 @@ on:
       - docs/maintainers/**
       - docs/contributing/testing.md
       - .cursor/skills/verify-mrstreamer/features/website.md
+      - .cursor/skills/verify-mrstreamer/features/website/**
   workflow_dispatch:
     inputs:
       deploy:

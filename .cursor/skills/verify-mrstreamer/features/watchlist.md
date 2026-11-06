@@ -2,7 +2,7 @@
 
 ## Sub-features
 
-Save/remove movies or whole series from details, browse Watchlist and Home, sort and keyboard-open entries, preserve saves across restart and subscription changes, handle unavailable titles. The page's grid is the poster grid of [Movies and series](titles.md#poster-grid-focus).
+Save/remove movies or whole series from details, browse Watchlist and Home, sort and keyboard-open entries, preserve saves across restart and subscription changes, handle unavailable titles. The page's grid is the poster grid of [Movies and series](titles/poster-grid.md#poster-grid-focus).
 
 ## How to get to it (user POV)
 

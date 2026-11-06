@@ -1,0 +1,3 @@
+## Background download coexistence
+
+The lifecycle in `apps/desktop/src/main/index.ts` keeps recording, schedule and unsaved-recording obligations alongside runnable downloads. Pausing downloads cannot exit Windows/Linux while those recording obligations remain. Once both kinds settle, the windowless app exits; macOS stays open until Quit. Only actual captures, transfers and receiver playback request app wakefulness, with display sleep allowed. Closing a downloads-only window destroys its renderer, preventing a hidden Home preview. Native power, tray and mixed recording/download acceptance require matching platform journeys.
