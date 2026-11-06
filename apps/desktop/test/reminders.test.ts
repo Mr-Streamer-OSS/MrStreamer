@@ -776,7 +776,9 @@ describe("programme reminders", () => {
     // The clock runs on past its start a quarter of a minute at a time, and nothing else asks.
     for (let time = at("20:28") + 15_000; time <= at("20:31"); time += MINUTE / 4) {
       await again.clockTo(time);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      if (time >= at("20:30"))
+        await vi.waitFor(() => expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]));
     }
 
     expect(notices.shown.map((each) => each.id)).toEqual([reminder.id]);
