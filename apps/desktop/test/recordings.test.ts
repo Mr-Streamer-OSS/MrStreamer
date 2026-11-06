@@ -3433,11 +3433,17 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
     vi.setSystemTime(next.stop + 1000);
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
 
-    // Nobody presses Stop for it: a check writes it.
+    const [ended] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "complete" && first.unsaved === true,
+    );
+
+    expect(ended).toMatchObject({ status: { kind: "complete" }, unsaved: true });
+
+    // Nobody presses Stop for it: a check writes it. Do not restore the stale manifest,
+    // which could overwrite a successful background retry once the directory is removed.
     await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
     await recordings.check();
     await quit();
     const again = await app(dataDir);
