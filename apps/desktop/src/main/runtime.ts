@@ -34,10 +34,9 @@ import { guideStoreLayer } from "./platform/guide-store.ts";
 import type { Secrets } from "./platform/secrets.ts";
 import { VerifiedFiles, verifiedFilesLayer } from "./platform/verified-files.ts";
 import { SavedSubtitles, savedSubtitlesLayer } from "./platform/saved-subtitles.ts";
-import { viewingStoreLayer, observedViewingStoreLayer } from "./platform/viewing-store.ts";
+import { personalStoresLayer } from "./services/profiles.ts";
+import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { xmltvFetch } from "./providers/xmltv.ts";
-import { watchlistStoreLayer } from "./platform/watchlist-store.ts";
-import { customListStoreLayer } from "./platform/custom-lists-store.ts";
 import { CustomLists } from "./services/custom-lists.ts";
 import { Downloads, type DownloadsDeps } from "./services/downloads.ts";
 import { Library } from "./services/library.ts";
@@ -288,11 +287,12 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
 
   // One connection for viewing, saved titles, channel lists, verified tracks and downloaded
   // subtitle cues.
-  const stores = Layer.mergeAll(
-    config.usage ? observedViewingStoreLayer(config.usage) : viewingStoreLayer,
-    watchlistStoreLayer,
-    customListStoreLayer,
-  ).pipe(Layer.provide(database));
+  const stores = personalStoresLayer({
+    dataDir,
+    profileId: DEFAULT_PROFILE_ID,
+    database,
+    ...defined({ usage: config.usage }),
+  });
 
   const viewing = ViewingRecord.layer.pipe(
     Layer.provide(

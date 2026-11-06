@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { ViewingRecord } from "@mrstreamer/core/viewing/service";
-import { describe, expect, it } from "vitest";
-import { Profiles } from "../src/main/platform/profile-store.ts";
+import { describe, expect, it, onTestFinished } from "vitest";
+import * as Layer from "effect/Layer";
+import * as Effect from "effect/Effect";
+import { ViewingStore } from "@mrstreamer/core/viewing/service";
+import { personalStoresLayer, ProfileSessions } from "../src/main/services/profiles.ts";
+import { WatchlistStore } from "../src/main/platform/watchlist-store.ts";
+import { CustomListStore } from "../src/main/platform/custom-lists-store.ts";
+import { copyProgress } from "../src/main/platform/profile-copy-progress.ts";
+import { Database } from "../src/main/platform/database.ts";
+import { databaseLayer } from "../src/main/platform/database.ts";
+import { Profiles, profileDirectory } from "../src/main/platform/profile-store.ts";
 import { mainLayer } from "../src/main/runtime.ts";
+import { analyticsFixture } from "./e2e/analytics-fixture.ts";
 import { CustomLists } from "../src/main/services/custom-lists.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
@@ -187,5 +197,320 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
       });
       await app.dispose();
     }
+  });
+});
+
+describe("admitted personal stores", () => {
+  it("keeps identical source, content, list and command ids private through delayed writes and restart", async () => {
+    const dataDir = await tempDir();
+
+    const open = async (id: string) => {
+      const runtime = runtimeFor(personalStoresLayer({ dataDir, profileId: id }));
+
+      return {
+        close: () => runtime.dispose(),
+        viewing: await promised(runtime, ViewingStore),
+        watchlist: await promised(runtime, WatchlistStore),
+        lists: await promised(runtime, CustomListStore),
+      };
+    };
+
+    const a = await open("default");
+    const b = await open("viewer-b");
+
+    const commit = (viewer: typeof a, channelId: string) =>
+      viewer.viewing.commit({
+        accounts: ["source"],
+        commandId: "same-command",
+        at: 1,
+        decide: () => [{ account: "source", event: { type: "favourite-added", channelId } }],
+      });
+
+    await commit(b, "b-channel");
+    // The retained handle is A's admitted owner, even after the caller starts using B.
+    await commit(a, "same-content");
+    expect((await a.viewing.read(["source"])).favourites.map(({ id }) => id)).toEqual([
+      "same-content",
+    ]);
+    expect((await b.viewing.read(["source"])).favourites.map(({ id }) => id)).toEqual([
+      "b-channel",
+    ]);
+
+    for (const viewer of [a, b]) {
+      expect((await viewer.viewing.read(["source"])).favourites).toHaveLength(1);
+      await viewer.lists.create({ id: "same-list", name: "Private", first: null, at: 1 });
+      await viewer.watchlist.save({
+        listed: [
+          {
+            account: "source",
+            facts: {
+              kind: "movie",
+              tmdbId: "123",
+              versionIds: ["same-content"],
+              name: "Film",
+              year: null,
+              adult: false,
+            },
+          },
+        ],
+        at: 1,
+        stands: () => true,
+      });
+      await viewer.viewing.commit({
+        accounts: ["source"],
+        commandId: "same-progress-command",
+        at: Date.now(),
+        decide: () => [
+          {
+            account: "source",
+            event: {
+              type: "title-progress",
+              title: { kind: "movie", id: "same-content" },
+              position: viewer === a ? 120 : 240,
+              duration: 1000,
+              since: Date.now(),
+            },
+          },
+        ],
+      });
+    }
+
+    expect(
+      (await a.viewing.read(["source"])).continueWatching.map(({ progress }) => progress.position),
+    ).toEqual([120]);
+    expect(
+      (await b.viewing.read(["source"])).continueWatching.map(({ progress }) => progress.position),
+    ).toEqual([240]);
+    await a.lists.rename("same-list", "A only");
+    expect((await b.lists.lists()).map(({ name }) => name)).toEqual(["Private"]);
+    await a.viewing.erase("source");
+    expect((await a.viewing.read(["source"])).favourites).toEqual([]);
+    expect(await a.watchlist.entries(["source"])).toEqual([]);
+    expect(await b.watchlist.entries(["source"])).toHaveLength(1);
+    expect((await b.viewing.read(["source"])).favourites).toHaveLength(1);
+    await a.close();
+    await b.close();
+    const restored = await open("viewer-b");
+    expect((await restored.viewing.read(["source"])).favourites).toHaveLength(1);
+    expect((await restored.lists.lists()).map(({ name }) => name)).toEqual(["Private"]);
+  });
+
+  it("keeps added-subscription preferences with their admitted viewer", async () => {
+    const dataDir = await tempDir();
+    const provider = await fakeProvider();
+    const addedProvider = await fakeProvider({ second: true });
+
+    const household = runtimeFor(
+      Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+    );
+
+    const subscriptions = await promised(household, Subscriptions);
+    await subscriptions.add(demoLogin(provider));
+    const second = await subscriptions.add(demoLogin(addedProvider));
+    const shared = Layer.succeed(Subscriptions, await household.runPromise(Subscriptions));
+
+    const installation = await promised(
+      runtimeFor(Settings.layer(dataDir).pipe(Layer.provide(shared))),
+      Settings,
+    );
+
+    const consent = {
+      read: Effect.promise(async () => (await installation.get()).analyticsEnabled ?? true),
+      write: (enabled: boolean) =>
+        Effect.asVoid(Effect.promise(() => installation.update({ analyticsEnabled: enabled }))),
+    };
+
+    const open = async (id: string) => {
+      const runtime = runtimeFor(
+        Settings.profileLayer(dataDir, id, consent).pipe(Layer.provide(shared)),
+      );
+
+      return { close: () => runtime.dispose(), settings: await promised(runtime, Settings) };
+    };
+
+    const a = await open("default");
+    const b = await open("viewer-b");
+    await a.settings.updateSubscription(second.id, { lastChannelId: "A" });
+    expect((await b.settings.ofSubscription(second.id)).lastChannelId).toBeNull();
+    await b.settings.updateSubscription(second.id, { lastChannelId: "B" });
+    await a.settings.update({ volume: 0.3 });
+    expect((await b.settings.get()).volume).not.toBe(0.3);
+    expect((await a.settings.ofSubscription(second.id)).lastChannelId).toBe("A");
+    await b.close();
+    const restarted = await open("viewer-b");
+    expect((await restarted.settings.ofSubscription(second.id)).lastChannelId).toBe("B");
+  });
+});
+
+describe("profile lifecycle before UI enablement", () => {
+  it("retains admitted owners across switch, erases all owners retryably, and deletes only inactive personal data", async () => {
+    const dataDir = await tempDir();
+    let stops = 0;
+    const database = databaseLayer(dataDir);
+
+    const runtime = runtimeFor(
+      ProfileSessions.layer({
+        dataDir,
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () =>
+          Effect.sync(() => {
+            stops++;
+          }),
+      }).pipe(
+        Layer.provide(
+          Layer.merge(
+            database,
+            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+          ),
+        ),
+        Layer.orDie,
+      ),
+    );
+
+    const profiles = await promised(runtime, ProfileSessions);
+    const a = await profiles.admit();
+    const b = await profiles.create("Viewer B");
+    await profiles.switch(b.id);
+    expect(stops).toBe(1);
+    const admittedB = await profiles.admit();
+
+    const save = (channelId: string) =>
+      Effect.flatMap(ViewingStore, (store) =>
+        store.commit({
+          accounts: ["source"],
+          commandId: "same-id",
+          at: Date.now(),
+          decide: () => [{ account: "source", event: { type: "favourite-added", channelId } }],
+        }),
+      );
+
+    await runtime.runPromise(admittedB.run(save("B")));
+    await runtime.runPromise(a.run(save("A")));
+
+    const favourites = Effect.flatMap(ViewingStore, (store) =>
+      Effect.map(store.read(["source"]), (state) => state.favourites.map(({ id }) => id)),
+    );
+
+    expect(await runtime.runPromise(a.run(favourites))).toEqual(["A"]);
+    expect(await runtime.runPromise(admittedB.run(favourites))).toEqual(["B"]);
+    // A held second database demonstrates the cross-file failure boundary: Default's erase
+    // commits, B's fails, the caller sees failure, and the same operation can be retried.
+    const lock = new DatabaseSync(join(profileDirectory(dataDir, b.id), "mrstreamer.db"));
+
+    try {
+      lock.exec("begin immediate");
+      await expect(profiles.eraseSource("source")).rejects.toBeDefined();
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+
+    await expect(runtime.runPromise(a.run(favourites))).rejects.toBeDefined();
+    expect(await runtime.runPromise((await profiles.admit()).run(favourites))).toEqual(["B"]);
+    await profiles.eraseSource("source");
+    expect(await runtime.runPromise((await profiles.admit()).run(favourites))).toEqual([]);
+    await expect(profiles.remove(b.id)).rejects.toBeDefined();
+    await profiles.switch("default");
+    // Household files sit outside every removable personal directory.
+    await writeFile(join(dataDir, "recordings.json"), "household recordings");
+    await profiles.remove(b.id);
+    await expect(
+      runtime.runPromise(
+        admittedB.run(Effect.flatMap(Settings, (settings) => settings.update({ volume: 0.7 }))),
+      ),
+    ).rejects.toBeDefined();
+    expect((await profiles.list()).map(({ id }) => id)).toEqual(["default"]);
+    expect(await readFile(join(dataDir, "recordings.json"), "utf8")).toBe("household recordings");
+    await expect(profiles.remove("default")).rejects.toBeDefined();
+    await expect(profiles.switch(b.id)).rejects.toBeDefined();
+  });
+});
+
+const { start: startAnalytics } = analyticsFixture({
+  app_version: "0.0.24",
+  build_channel: "nightly",
+  update_channel: "stable",
+  os: "linux",
+  arch: "x64",
+  distribution: "direct",
+});
+
+it("profile consent edits use the installation Analytics owner across switch and restart", async () => {
+  const dataDir = await tempDir();
+  let analytics = await startAnalytics({ dataDir, transport: null });
+
+  const consent = {
+    read: Effect.promise(async () => (await analytics.owner.settings()).enabled),
+    write: (enabled: boolean) =>
+      Effect.asVoid(Effect.promise(() => analytics.owner.configure(enabled))),
+  };
+
+  const open = async () => {
+    const runtime = runtimeFor(
+      ProfileSessions.layer({ dataDir, consent, stopInteractive: () => Effect.void }).pipe(
+        Layer.provide(
+          Layer.merge(
+            databaseLayer(dataDir),
+            Subscriptions.layer({ dataDir, secrets: testSecrets, providerOptions: { userAgent } }),
+          ),
+        ),
+        Layer.orDie,
+      ),
+    );
+
+    return { runtime, profiles: await promised(runtime, ProfileSessions) };
+  };
+
+  const app = await open();
+  const b = await app.profiles.create("B");
+  await app.profiles.switch(b.id);
+
+  const read = Effect.flatMap(Settings, (settings) =>
+    Effect.map(settings.get, (preferences) => preferences.analyticsEnabled),
+  );
+
+  await app.runtime.runPromise(
+    (await app.profiles.admit()).run(
+      Effect.flatMap(Settings, (settings) => settings.update({ analyticsEnabled: false })),
+    ),
+  );
+  expect((await analytics.owner.settings()).enabled).toBe(false);
+  await app.profiles.switch("default");
+  expect(await app.runtime.runPromise((await app.profiles.admit()).run(read))).toBe(false);
+  await app.runtime.dispose();
+  await analytics.owner.close();
+  analytics = await startAnalytics({ dataDir, transport: null });
+  const restarted = await open();
+  await restarted.profiles.switch(b.id);
+  expect(await restarted.runtime.runPromise((await restarted.profiles.admit()).run(read))).toBe(
+    false,
+  );
+  expect((await analytics.owner.settings()).enabled).toBe(false);
+});
+
+it("copy progress callbacks keep the owner admitted before file reads and later switches", async () => {
+  const db = new DatabaseSync(":memory:");
+  onTestFinished(() => db.close());
+  let active = "default";
+
+  const progress = await Effect.runPromise(
+    copyProgress.pipe(
+      Effect.provideService(Database, { db }),
+      Effect.provideService(Profiles, { active: Effect.sync(() => ({ id: active, revision: 1 })) }),
+    ),
+  );
+
+  const a = await Effect.runPromise(progress.admit);
+  active = "B";
+  const b = await Effect.runPromise(progress.admit);
+  await Effect.runPromise(b.write("recording", "same-copy", 240, 1000));
+  await Effect.runPromise(a.write("recording", "same-copy", 120, 1000));
+  expect(await Effect.runPromise(b.read("recording", "same-copy", null))).toEqual({
+    position: 240,
+    duration: 1000,
+  });
+  expect(await Effect.runPromise(a.read("recording", "same-copy", null))).toEqual({
+    position: 120,
+    duration: 1000,
   });
 });

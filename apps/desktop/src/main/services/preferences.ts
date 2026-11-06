@@ -23,6 +23,9 @@ import {
 // may have gone while it waited. The interface language is kept beside them, and changed only
 // through `setInterfaceLanguage`.
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
+import { profileDirectory } from "../platform/profile-store.ts";
 import type { LanguageChoice } from "@mrstreamer/contracts/language";
 import {
   defaultPreferences,
@@ -84,6 +87,12 @@ async function readStored(path: string): Promise<Stored | null> {
   return { ...data, ...parsed };
 }
 
+/** Installation consent remains owned by Analytics, including while another viewer is active. */
+export interface InstallationConsent {
+  readonly read: Effect.Effect<boolean>;
+  readonly write: (enabled: boolean) => Effect.Effect<void>;
+}
+
 export class Settings extends Context.Service<
   Settings,
   {
@@ -133,15 +142,29 @@ export class Settings extends Context.Service<
     return saved?.interfaceLanguage;
   }
 
-  /** Settings in `dataDir`. */
+  /** Default's settings keep their original paths. */
   static readonly layer = (dataDir: string, usage?: UsageObservers) =>
-    Layer.effect(Settings, make(dataDir, usage));
+    Layer.effect(Settings, make(dataDir, usage, DEFAULT_PROFILE_ID));
+
+  /** Private viewing settings with a live overlay from the installation's consent owner. */
+  static readonly profileLayer = (
+    dataDir: string,
+    profileId: string,
+    consent: InstallationConsent,
+    usage?: UsageObservers,
+  ) => Layer.effect(Settings, make(dataDir, usage, profileId, consent));
 }
 
-function make(dataDir: string, usage?: UsageObservers) {
+function make(
+  dataDir: string,
+  usage: UsageObservers | undefined,
+  profileId: string,
+  consent?: InstallationConsent,
+) {
   return Effect.gen(function* () {
     const subscriptions = yield* Subscriptions;
-    const path = join(dataDir, "preferences.json");
+    const personalDir = profileDirectory(dataDir, profileId);
+    const path = join(personalDir, "preferences.json");
     const one = yield* Semaphore.make(1);
     let current: Stored | null = null;
     /** What the viewer left each added subscription at, by its id, as last read or written. */
@@ -197,7 +220,14 @@ function make(dataDir: string, usage?: UsageObservers) {
     ) => one.withPermits(1)(Effect.flatMap(saved(subscriptionId), run));
 
     const addedPath = (subscription: SavedSubscription) =>
-      join(subscription.dir, "preferences.json");
+      profileId === DEFAULT_PROFILE_ID
+        ? join(subscription.dir, "preferences.json")
+        : join(
+            personalDir,
+            "subscriptions",
+            createHash("sha256").update(subscription.id).digest("hex"),
+            "preferences.json",
+          );
 
     /** Commits the added source's file and cached value together while holding `one`. */
     const saveAdded = (subscription: SavedSubscription, next: SubscriptionPreferences) =>
@@ -273,7 +303,13 @@ function make(dataDir: string, usage?: UsageObservers) {
       });
 
     return {
-      get: one.withPermits(1)(Effect.map(stored, effective)),
+      get: one.withPermits(1)(
+        Effect.gen(function* () {
+          const personal = effective(yield* stored);
+
+          return consent ? { ...personal, analyticsEnabled: yield* consent.read } : personal;
+        }),
+      ),
       liveBrowse: one.withPermits(1)(readBrowse),
       rememberLiveBrowse: (input: LiveDiscovery) =>
         one.withPermits(1)(
@@ -312,10 +348,19 @@ function make(dataDir: string, usage?: UsageObservers) {
           }),
         ),
       update: (patch: Partial<Preferences>) =>
-        Effect.map(
-          change((previous) => ({ ...previous, ...patch })),
-          effective,
-        ),
+        Effect.gen(function* () {
+          if (!consent) return effective(yield* change((previous) => ({ ...previous, ...patch })));
+          const { analyticsEnabled, ...personal } = patch;
+
+          if (analyticsEnabled !== undefined) yield* consent.write(analyticsEnabled);
+
+          const saved =
+            Object.keys(personal).length > 0
+              ? yield* change((previous) => ({ ...previous, ...personal }))
+              : yield* one.withPermits(1)(stored);
+
+          return { ...effective(saved), analyticsEnabled: yield* consent.read };
+        }),
       interfaceLanguage: one.withPermits(1)(Effect.map(stored, (file) => file.interfaceLanguage)),
       setInterfaceLanguage: (choice: LanguageChoice) =>
         Effect.asVoid(change((previous) => ({ ...previous, interfaceLanguage: choice }))),

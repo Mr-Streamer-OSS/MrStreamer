@@ -11,7 +11,7 @@ Everything personal you saved before 0.0.24 belongs to Default, where it already
 - the Watchlist
 - viewing preferences: volume, languages, subtitle look, Home rows and the like
 
-The household's subscriptions, guides, downloads and recordings are shared by the installation, not by a profile.
+The household's subscriptions, guides, downloads and recordings are shared by the installation, not by a profile. The choice to share usage statistics also applies to the whole installation.
 
 Going back to an older release keeps working: it reads Default's viewing where it always did.
 

@@ -2451,6 +2451,7 @@ function make(deps: RecordingsDeps) {
         }),
       copy: (id: string) =>
         Effect.gen(function* () {
+          const owner = yield* personal.admit;
           const record = records.get(id);
 
           if (!record || record.status.kind === "missed") return null;
@@ -2486,7 +2487,7 @@ function make(deps: RecordingsDeps) {
             path: fileOf(record),
             container: "ts",
             title: { kind: "movie", id },
-            progress: yield* personal.read("recording", id, record.progress ?? null),
+            progress: yield* owner.read("recording", id, record.progress ?? null),
           } satisfies LocalCopy;
         }),
       recordProgress: (id: string, position: number, duration: number) =>

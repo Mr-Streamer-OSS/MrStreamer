@@ -1547,7 +1547,8 @@ function make(deps: DownloadsDeps) {
         ).pipe(Effect.tap(() => Effect.sync(tell))),
 
       copy: (id: string) =>
-        Effect.suspend(() => {
+        Effect.gen(function* () {
+          const owner = yield* personal.admit;
           const record = records.get(id);
 
           if (record?.state !== "complete" || !existsSync(mediaOf(record))) {
@@ -1556,14 +1557,14 @@ function make(deps: DownloadsDeps) {
               tell();
             }
 
-            return Effect.fail(
+            return yield* Effect.fail(
               new Failed({
                 error: { kind: "stream", failure: { kind: "unavailable", status: 404 } },
               }),
             );
           }
 
-          return personal.read("download", id, record.progress).pipe(
+          return yield* owner.read("download", id, record.progress).pipe(
             Effect.map(
               (progress) =>
                 ({
