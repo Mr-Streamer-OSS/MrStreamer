@@ -234,6 +234,9 @@ let reopen = () => {
  */
 let staysWithoutWindow = () => false;
 
+/** Internal idle exits reconcile downloads; system quits still dispose gracefully. */
+let idleQuit = false;
+
 /** How often an update waiting for recordings to end looks again. */
 const RECORDING_WAIT_MS = 5000;
 
@@ -901,17 +904,25 @@ async function start(): Promise<void> {
   const initialDownloads = runtime.runPromise(Effect.result(downloads.list));
 
   // A later published list takes precedence over the startup read.
-  void initialDownloads.then((result) => {
-    if (result._tag === "Success" && downloadList === null) acceptDownloads(result.success);
-  });
+  void initialDownloads.then(
+    (result) => {
+      if (result._tag === "Success" && downloadList === null) acceptDownloads(result.success);
+    },
+    () => {},
+  );
 
   const readDownloads = async () => {
-    const result = await runtime.runPromise(Effect.result(downloads.list));
+    try {
+      const result = await runtime.runPromise(Effect.result(downloads.list));
 
-    if (result._tag === "Failure") return false;
-    acceptDownloads(result.success);
+      if (result._tag === "Failure") return false;
+      acceptDownloads(result.success);
 
-    return true;
+      return true;
+    } catch {
+      // Defects and interrupted reads must leave lifecycle commands available to retry too.
+      return false;
+    }
   };
 
   const downloadCounts = () => {
@@ -1392,8 +1403,10 @@ async function start(): Promise<void> {
       !changingDownloads &&
       !live() &&
       !downloadsLive()
-    )
+    ) {
+      idleQuit = true;
       app.quit();
+    }
   });
 
   downloadsChanged = () => {
@@ -1445,23 +1458,33 @@ async function start(): Promise<void> {
     if (closing) return;
 
     // On macOS every Quit is the viewer's; a shutdown says so first.
-    if (!checkedQuit && !quitConfirmed && !shuttingDown && !restarting) {
+    if (
+      !checkedQuit &&
+      !quitConfirmed &&
+      !shuttingDown &&
+      !restarting &&
+      (isMac || quitChosen || idleQuit)
+    ) {
       event.preventDefault();
 
       if (checkingQuit) return;
       checkingQuit = true;
+      const idle = idleQuit;
+      idleQuit = false;
       void readDownloads().then((read) => {
         checkingQuit = false;
 
         if (!read) {
           quitChosen = false;
-          showWindow();
+
+          if (!mainWindow) mainWindow = open(true);
+          else showWindow();
           dialog.showErrorBox(t("Downloads"), t("Couldn't read background work. Try again."));
 
           return;
         }
 
-        if (!isMac && !quitChosen && !mainWindow && staysWithoutWindow()) return;
+        if (idle && !mainWindow && staysWithoutWindow()) return;
         checkedQuit = true;
         app.quit();
       });
@@ -1573,7 +1596,10 @@ function receiverAdapters(): ReceiverAdapter[] {
 // macOS keeps the app without a window. Other systems quit with their last, unless background work goes
 // on (see `staysWithoutWindow`).
 app.on("window-all-closed", () => {
-  if (!isMac && !staysWithoutWindow()) app.quit();
+  if (!isMac && !staysWithoutWindow()) {
+    idleQuit = true;
+    app.quit();
+  }
 });
 
 // One copy per profile: a second would keep its own copy of the settings and write over the
