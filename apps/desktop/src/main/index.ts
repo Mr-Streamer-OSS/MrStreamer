@@ -1091,12 +1091,26 @@ async function start(): Promise<void> {
       ...viewingHandlers({ viewing, settings }),
       ...customListHandlers({ customLists }),
       ...downloadHandlers({
+        chooseFolder: async (current) => {
+          const options: Electron.OpenDialogOptions = {
+            defaultPath: current,
+            properties: ["openDirectory", "createDirectory"],
+          };
+
+          const chosen = await (mainWindow
+            ? dialog.showOpenDialog(mainWindow, options)
+            : dialog.showOpenDialog(options));
+
+          return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
+        },
         downloads: {
           ...downloads,
           add: (title) => trackDownload(downloads.add(title)),
           retry: (id) => trackDownload(downloads.retry(id)),
           resume: (id) => trackDownload(downloads.resume(id)),
           resumeAll: trackDownload(downloads.resumeAll),
+          moveCopies: (ids) => trackDownload(downloads.moveCopies(ids)),
+          bulk: (ids, action) => trackDownload(downloads.bulk(ids, action)),
         },
       }),
       ...reminderHandlers({ reminders }),

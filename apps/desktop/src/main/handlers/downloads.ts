@@ -4,9 +4,16 @@ import type { Downloads } from "../services/downloads.ts";
 
 export function downloadHandlers({
   downloads,
+  chooseFolder,
 }: {
+  readonly chooseFolder: (current: string) => Promise<string | null>;
   readonly downloads: Pick<
     Downloads["Service"],
+    | "folder"
+    | "setFolder"
+    | "moveCopies"
+    | "cancelMove"
+    | "bulk"
     | "list"
     | "add"
     | "remove"
@@ -20,6 +27,20 @@ export function downloadHandlers({
   >;
 }): HandlersFor<"downloads"> {
   return {
+    "downloads.folder": () => downloads.folder,
+    "downloads.chooseFolder": () =>
+      Effect.gen(function* () {
+        const current = yield* downloads.folder;
+        const path = yield* Effect.promise(() => chooseFolder(current.path));
+
+        if (path === null) return null;
+        yield* downloads.setFolder(path);
+
+        return yield* downloads.folder;
+      }),
+    "downloads.moveCopies": ({ ids }) => Effect.as(downloads.moveCopies(ids), null),
+    "downloads.cancelMove": ({ id }) => Effect.as(downloads.cancelMove(id), null),
+    "downloads.bulk": ({ ids, action }) => downloads.bulk(ids, action),
     "downloads.list": () => downloads.list,
     "downloads.add": ({ title }) => downloads.add(title),
     "downloads.remove": ({ id }) => Effect.as(downloads.remove(id), null),

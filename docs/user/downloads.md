@@ -94,6 +94,12 @@ From 0.0.24, personal resume positions are saved separately. A version before 0.
 
 ## Where they are kept
 
-_In the downloads folder of Mr. Streamer's data folder._
+_A managed folder on this computer._
 
-Downloads are kept in the `downloads` folder inside Mr. Streamer's data folder, listed in the [privacy policy](../privacy.md#on-your-computer). Mr. Streamer manages that folder: use **Delete** rather than removing files by hand. A copy whose file is gone shows as missing and can only be deleted.
+Downloads start in the `downloads` folder inside Mr. Streamer's data folder, listed in the [privacy policy](../privacy.md#on-your-computer). From 0.0.24, choosing another folder changes where future downloads go. Existing copies stay where they are until explicitly moved.
+
+Moving selected finished copies keeps their identity, details, pictures, subtitles and each viewing profile's resume position. The original remains authoritative until the destination files are flushed and their new location is saved. Cancelling a move keeps the original. If a destination disappears or cannot be written, the move reports a failure; reconnect it and restart to recover an interrupted destination before retrying. A successful move can leave an extra original folder if that folder could not be removed.
+
+Bulk pause, resume, retry and delete apply only to the selected downloads. A partial result identifies failures so they can be retried. Deleting downloads does not delete recordings or unrelated copies. Mr. Streamer manages its copy folders: use **Delete** rather than removing files by hand. A copy whose file is gone shows as missing and can only be deleted.
+
+Versions before 0.0.24 do not understand chosen folders or moved copies. Return to 0.0.24 to use those copies.

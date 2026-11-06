@@ -2,7 +2,7 @@
 // (database.ts): one row per download in a table of its own, which builds before downloads never
 // read or erase. A row is the download's whole record as one document: the exact provider file it
 // was made from, what was kept of its details, how far its transfer got and how far the copy was
-// watched here. Its bytes and artwork are files in the app's downloads folder (services/downloads.ts).
+// watched here. Its bytes and artwork live in its managed folder (services/downloads.ts).
 // Erasing an account's viewing data leaves these rows: a copy is the viewer's until they delete it.
 // A row this build can't read, as one a later build wrote, is left as it is, and so are its files.
 // A key a record doesn't declare is read and written back with it: what a pause and a place in
@@ -82,6 +82,10 @@ const Stored = lazy(() =>
     listingKey: "string",
     sourceStamp: "string",
     container: "string",
+    /** Parent of this copy's UUID folder; absent for the default app-relative folder. */
+    "directory?": "string",
+    /** Incomplete destination owned by a move; directory stays authoritative until commit. */
+    "moveTo?": "string",
     about: About(),
     state: "'queued' | 'failed' | 'complete'",
     /** Why it failed, as `DownloadFailure` says; only while failed. */
@@ -135,6 +139,8 @@ export class DownloadStore extends Context.Service<
      * can't: what is kept for those isn't another download's to clean up.
      */
     readonly list: Effect.Effect<Inventory, Failed>;
+    readonly folder: Effect.Effect<string | null, Failed>;
+    setFolder(path: string): Effect.Effect<void, Failed>;
     /** Stores a download's record, new or changed. */
     put(download: StoredDownload): Effect.Effect<void, Failed>;
     /** Stores several records in one transaction: all of them, or none when it fails. */
@@ -144,6 +150,9 @@ export class DownloadStore extends Context.Service<
 >()("mrstreamer/DownloadStore") {}
 
 function prepareDownloads(db: DatabaseSync): void {
+  db.exec(
+    `create table if not exists download_folder (id integer primary key, path text not null)`,
+  );
   db.exec(`create table if not exists downloads (
     id text primary key,
     added_at integer not null,
@@ -169,6 +178,17 @@ export const downloadStoreLayer = Layer.effect(
       const remove = db.prepare("delete from downloads where id = ?");
 
       return {
+        folder: attempt(() => {
+          const row = db.prepare("select path from download_folder where id = 1").get();
+
+          return row ? String(row.path) : null;
+        }),
+        setFolder: (path: string) =>
+          attempt(() => {
+            db.prepare(
+              "insert into download_folder (id, path) values (1, ?) on conflict(id) do update set path = excluded.path",
+            ).run(path);
+          }),
         list: attempt((): Inventory => {
           const records: StoredDownload[] = [];
           const unreadable = new Set<string>();
@@ -242,5 +262,12 @@ function failureOf(stored: NonNullable<Stored["failure"]>): DownloadFailure {
 function closed(detail: () => string): DownloadStore["Service"] {
   const fail = Effect.suspend(() => unavailable(detail()));
 
-  return { list: fail, put: () => fail, putMany: () => fail, remove: () => fail };
+  return {
+    folder: fail,
+    setFolder: () => fail,
+    list: fail,
+    put: () => fail,
+    putMany: () => fail,
+    remove: () => fail,
+  };
 }

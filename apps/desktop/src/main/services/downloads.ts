@@ -1,7 +1,7 @@
 // Movies and episodes downloaded to this computer: the queue, its one transfer at a time, and the
 // copies that play without a subscription. Each download is a record in the database
-// (../platform/downloads-store.ts) and a folder of its own in the app's downloads folder, with
-// the file, a partial file while it transfers, and the artwork kept for it. Paths, addresses and
+// (../platform/downloads-store.ts) and a UUID folder in a managed household destination, with
+// the file, a partial file while it transfers, and the artwork kept for it. Media paths, addresses and
 // logins stay here; the window sees the records as `Download`s.
 //
 // One download transfers at a time, of whichever subscription: the first in the queue whose
@@ -41,8 +41,8 @@ import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { downloadFailure, type OperationObserver } from "../analytics/operations.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, rename, rm, writeFile, open, realpath, stat, cp } from "node:fs/promises";
+import { join, relative, isAbsolute } from "node:path";
 import {
   artworkUrl,
   type Download,
@@ -50,7 +50,11 @@ import {
   type DownloadList,
   type DownloadFailure,
   type DownloadSeries,
+  type DownloadFolder,
+  type DownloadBulkAction,
+  type DownloadBulkResult,
 } from "@mrstreamer/contracts/downloads";
+import type { AppError } from "@mrstreamer/contracts/errors";
 import type { EpisodeDetails, RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
@@ -100,6 +104,18 @@ export class Downloads extends Context.Service<
   Downloads,
   {
     readonly list: Effect.Effect<DownloadList, Failed>;
+    /** Current household destination and IDs with a move in flight. */
+    readonly folder: Effect.Effect<DownloadFolder, Failed>;
+    /** Validates and saves a folder for future transfers; existing files stay put. */
+    setFolder(path: string): Effect.Effect<void, Failed>;
+    /** Moves finished copies sequentially; the first failure stops the selection. */
+    moveCopies(ids: readonly string[]): Effect.Effect<void, Failed>;
+    /** Waits until the move stops, retaining its original when not yet committed. */
+    cancelMove(id: string): Effect.Effect<void, Failed>;
+    bulk(
+      ids: readonly string[],
+      action: DownloadBulkAction,
+    ): Effect.Effect<DownloadBulkResult, Failed>;
     /**
      * Queues a movie or an episode, by the exact version given, with its details and artwork kept
      * for the copy. One of the same account already queued or downloaded, or added while this
@@ -189,7 +205,7 @@ function make(deps: DownloadsDeps) {
     const root = join(deps.dataDir, "downloads");
     const changes = yield* PubSub.sliding<DownloadList>(4);
 
-    const folderOf = (id: string) => join(root, id);
+    const folderOf = (id: string) => join(records.get(id)?.directory ?? root, id);
 
     const mediaOf = (record: StoredDownload) =>
       join(folderOf(record.id), `media.${extensionOf(record.container)}`);
@@ -198,14 +214,18 @@ function make(deps: DownloadsDeps) {
 
     const records = new Map<string, StoredDownload>();
     const loaded = yield* Effect.result(store.list);
+    const configured = yield* Effect.result(store.folder);
+    let selectedFolder = configured._tag === "Success" ? (configured.success ?? root) : root;
 
     // Without its table nothing can be queued or listed either: each call says so, as the store
     // says it then, in the interface language of that moment. A read that works later still fails:
     // nothing on disk was checked against the table at the start.
     const unloaded =
-      loaded._tag === "Failure"
-        ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
-        : null;
+      configured._tag === "Failure"
+        ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
+        : loaded._tag === "Failure"
+          ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
+          : null;
 
     if (loaded._tag === "Failure") {
       yield* Effect.logWarning("[downloads] can't be read", loaded.failure.error);
@@ -218,7 +238,9 @@ function make(deps: DownloadsDeps) {
     const missing = new Set<string>();
     let active: Active | null = null;
     let ended = 0;
+    const artworkWork = new Map<string, Promise<void>>();
     let closing = false;
+    const moving = new Map<string, { cancelled: boolean; settled: Promise<void> }>();
 
     /**
      * Writes a record and keeps it. Every write is synchronous, as the database is: none can come
@@ -263,6 +285,21 @@ function make(deps: DownloadsDeps) {
 
       return last + 1;
     };
+
+    // A move never changes the authoritative folder until every copied file is flushed and
+    // its record commits. A restart discards only the explicitly recorded incomplete target.
+    for (const record of records.values()) {
+      if (!record.moveTo) continue;
+      yield* Effect.promise(async () => {
+        try {
+          await rm(join(record.moveTo!, record.id), { recursive: true, force: true });
+          const { moveTo: _moveTo, ...rest } = record;
+          write(rest);
+        } catch {
+          // Keep the recovery marker and original copy; the destination may be unplugged.
+        }
+      });
+    }
 
     // A copy renamed into place as the app stopped, before it was written down as complete.
     for (const record of records.values()) {
@@ -429,9 +466,9 @@ function make(deps: DownloadsDeps) {
         .toSorted((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
 
       const free = yield* Effect.promise(async () => {
-        await mkdir(root, { recursive: true }).catch(() => {});
+        if (selectedFolder === root) await mkdir(root, { recursive: true }).catch(() => {});
 
-        return disk.free(root);
+        return disk.free(selectedFolder);
       });
 
       return {
@@ -443,6 +480,7 @@ function make(deps: DownloadsDeps) {
             ...copies,
           ].map((record) => downloadOf(record, owners, busy)),
         ),
+        storage: { path: selectedFolder, moving: [...moving.keys()] },
         series: seriesOf(all),
         bytes: all.reduce(
           (sum, record) => sum + (active?.id === record.id ? active.received : record.received),
@@ -676,6 +714,12 @@ function make(deps: DownloadsDeps) {
       }));
 
       try {
+        if (
+          record.directory &&
+          record.directory !== root &&
+          !(await stat(record.directory)).isDirectory()
+        )
+          throw new Error("Download folder unavailable");
         await mkdir(folderOf(record.id), { recursive: true });
       } catch (cause) {
         return { kind: "failed", failure: { kind: "folder", detail: messageOf(cause) } };
@@ -828,22 +872,25 @@ function make(deps: DownloadsDeps) {
       const record = records.get(id);
 
       if (!record) return;
-      Effect.runSync(store.remove(id));
-      records.delete(id);
-      missing.delete(id);
+
+      if (moving.has(id)) throw new Error("Copy is moving");
       const transferring = active?.id === id ? active : null;
 
       if (transferring) {
-        transferring.controller.abort();
-        await transferring.settled;
+        write({ ...record, pausedAt: Date.now() });
+        await stopPaused(transferring);
       }
 
+      await artworkWork.get(id);
       await Effect.runPromise(playback.closeCopy(id));
+      // A failed deletion stays listed and retryable. Never acknowledge a failed disk write.
+      await rm(folderOf(id), { recursive: true, force: true });
+      Effect.runSync(store.remove(id));
+      records.delete(id);
+      missing.delete(id);
       await Effect.runPromise(
         savedSubtitles.forget(subtitlesOfCopy(id, record.title)).pipe(Effect.ignore),
       );
-      // What can't go now, as a file Windows still holds, goes as the app starts next.
-      await rm(folderOf(id), { recursive: true, force: true }).catch(() => {});
     };
 
     // Whatever plays decides which subscriptions' downloads wait.
@@ -861,6 +908,9 @@ function make(deps: DownloadsDeps) {
         closing = true;
         clearTimeout(telling);
         const stopping = active;
+
+        for (const work of moving.values()) work.cancelled = true;
+        await Promise.all([...moving.values()].map((work) => work.settled.catch(() => {})));
 
         if (!stopping) return;
         stopping.controller.abort();
@@ -881,7 +931,189 @@ function make(deps: DownloadsDeps) {
         error: { kind: "unexpected", detail: t("That download is no longer here.") },
       });
 
-    return {
+    const commands: Downloads["Service"] = {
+      moveCopies: (ids: readonly string[]) =>
+        attempt(async () => {
+          if (unloaded) await Effect.runPromise(unloaded);
+
+          for (const id of new Set(ids)) {
+            const record = records.get(id);
+
+            if (!record || record.state !== "complete") throw notFound();
+
+            if (closing || moving.has(id)) throw new Error("Copy is busy");
+            const destination = selectedFolder;
+
+            if ((record.directory ?? root) === destination) continue;
+            const work = { cancelled: false, settled: Promise.resolve() };
+            moving.set(id, work);
+            work.settled = (async () => {
+              await artworkWork.get(id);
+
+              if (record.moveTo)
+                throw new Error("Destination needs recovery; reconnect it and restart");
+              const source = folderOf(id);
+              const target = join(destination, id);
+
+              if ((await stat(mediaOf(record))).size !== record.size)
+                throw new Error("Source copy is missing or changed");
+              const inside = relative(source, destination);
+
+              if (!inside || (!inside.startsWith("..") && !isAbsolute(inside)))
+                throw new Error("Destination is inside this copy");
+
+              const check = () => {
+                if (work.cancelled || closing)
+                  throw new Error("Move cancelled; original copy kept");
+              };
+
+              // mkdir is exclusive: never replace an existing folder or unrelated files.
+              check();
+
+              if (!(await stat(destination)).isDirectory())
+                throw new Error("Destination unavailable");
+              const free = await disk.free(destination);
+
+              if (free !== null && record.size !== null && free < record.size)
+                throw new Error("Destination disk is full");
+              await mkdir(target);
+              let committed = false;
+
+              try {
+                update(id, (latest) => ({ ...latest, moveTo: destination }));
+
+                const copyTree = async (from: string, to: string): Promise<void> => {
+                  for (const entry of await readdir(from, { withFileTypes: true })) {
+                    check();
+                    const input = join(from, entry.name);
+                    const output = join(to, entry.name);
+
+                    if (entry.isDirectory()) {
+                      await mkdir(output);
+                      await copyTree(input, output);
+                    } else if (entry.isFile()) {
+                      await cp(input, output, { errorOnExist: true, force: false });
+                      const file = await open(output, "r+");
+
+                      try {
+                        await file.sync();
+                      } finally {
+                        await file.close();
+                      }
+
+                      if ((await stat(input)).size !== (await stat(output)).size)
+                        throw new Error("Incomplete copy");
+                    } else throw new Error("Copy contains an unsupported file");
+                  }
+
+                  await syncDirectory(to);
+                };
+
+                await copyTree(source, target);
+                await syncDirectory(destination);
+                check();
+                // Closing playback prevents a stale reader surviving deletion of its old files.
+                await Effect.runPromise(playback.closeCopy(id));
+                check();
+                update(id, (latest) => {
+                  const { moveTo: _moveTo, ...rest } = latest;
+
+                  return { ...rest, directory: destination };
+                });
+                committed = true;
+                missing.delete(id);
+                // A failed old-folder cleanup leaves a harmless duplicate, never loses the copy.
+                await rm(source, { recursive: true, force: true }).catch(() => {});
+              } finally {
+                if (!committed) {
+                  // Retain the marker if cleanup fails so a relaunch can retry it safely.
+                  await rm(target, { recursive: true, force: true });
+                  update(id, (latest) => {
+                    const { moveTo: _moveTo, ...rest } = latest;
+
+                    return rest;
+                  });
+                }
+              }
+            })();
+            tell();
+
+            try {
+              await work.settled;
+            } finally {
+              moving.delete(id);
+              tell();
+            }
+          }
+        }),
+      cancelMove: (id: string) =>
+        attempt(async () => {
+          const work = moving.get(id);
+
+          if (!work) return;
+          work.cancelled = true;
+          await work.settled.catch(() => {});
+        }),
+      bulk: (ids: readonly string[], action: DownloadBulkAction) =>
+        attempt(async () => {
+          if (unloaded) await Effect.runPromise(unloaded);
+          const succeeded: string[] = [];
+
+          const failed: { id: string; error: AppError }[] = [];
+
+          for (const id of new Set(ids)) {
+            try {
+              const record = records.get(id);
+
+              if (!record) throw notFound();
+
+              if (moving.has(id)) throw new Error("Copy is moving");
+              await Effect.runPromise(commands[action](id));
+              succeeded.push(id);
+            } catch (cause) {
+              failed.push({
+                id,
+                error: (cause instanceof Failed ? cause : failedWith(cause)).error,
+              });
+            }
+          }
+
+          tell();
+          wake();
+
+          return { succeeded, failed };
+        }),
+      folder: Effect.suspend(
+        () => unloaded ?? Effect.succeed({ path: selectedFolder, moving: [...moving.keys()] }),
+      ),
+      setFolder: (path: string) =>
+        attempt(async () => {
+          if (unloaded) await Effect.runPromise(unloaded);
+          const directory = await realpath(path);
+
+          if (!(await stat(directory)).isDirectory()) throw new Error("Not a folder");
+
+          for (const record of records.values()) {
+            const inside = relative(folderOf(record.id), directory);
+
+            if (!inside || (!inside.startsWith("..") && !isAbsolute(inside)))
+              throw new Error("Choose a folder outside managed copies");
+          }
+
+          const probe = join(directory, `.mrstreamer-${randomUUID()}`);
+          const file = await open(probe, "wx");
+
+          try {
+            await file.sync();
+          } finally {
+            await file.close();
+            await rm(probe);
+          }
+
+          Effect.runSync(store.setFolder(directory));
+          selectedFolder = directory;
+          tell();
+        }),
       list: Effect.suspend(() => {
         if (unloaded) return unloaded;
         lookForMissing();
@@ -945,6 +1177,7 @@ function make(deps: DownloadsDeps) {
 
           const record: StoredDownload = {
             id: randomUUID(),
+            ...defined({ directory: selectedFolder === root ? undefined : selectedFolder }),
             account: source.key,
             subscriptionId,
             title: raw,
@@ -968,7 +1201,12 @@ function make(deps: DownloadsDeps) {
           const result = yield* downloadOf(record, owners, busy);
           yield* attempt(async () => write(record));
           yield* Effect.forkIn(
-            Effect.promise(() => keepArtwork(record.id, kept.artwork)),
+            Effect.promise(() => {
+              const work = keepArtwork(record.id, kept.artwork);
+              artworkWork.set(record.id, work);
+
+              return work.finally(() => artworkWork.delete(record.id));
+            }),
             scope,
           );
           tell();
@@ -1136,6 +1374,8 @@ function make(deps: DownloadsDeps) {
       changes: Stream.fromPubSub(changes),
     };
 
+    return commands;
+
     /**
      * What a download keeps of its title's details, and where its pictures are online, from the
      * details the viewer just opened: a movie's, or an episode's with its series', and what that
@@ -1289,4 +1529,16 @@ function hostOf(server: string): string {
 
 function messageOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+/** Directory fsync is supported on Unix; Windows flushes copied files but cannot open directories. */
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const directory = await open(path, "r");
+
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
 }

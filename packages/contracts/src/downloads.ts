@@ -1,6 +1,6 @@
 // Movies and episodes downloaded to this computer, as the UI sees them. A download names the exact
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
-// with its own details, artwork and progress, after its subscription expired or was removed. Paths,
+// with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
 // addresses and logins stay in the main process; artwork comes through the app's own scheme.
 import type { AppError } from "./errors.ts";
 import type { RawTitleRef } from "./ondemand.ts";
@@ -107,6 +107,8 @@ export interface DownloadSeries {
  * newest first.
  */
 export interface DownloadList {
+  /** Desktop managed-folder state; older and mobile lists may omit it. */
+  readonly storage?: DownloadFolder;
   readonly items: readonly Download[];
   /**
    * What each series the items name (`Download.series`) listed when the latest of its downloads
@@ -150,4 +152,18 @@ export const ARTWORK_SCHEME = "mrstreamer";
 
 export function artworkUrl(id: string, artwork: DownloadArtwork): string {
   return `${ARTWORK_SCHEME}://download/${encodeURIComponent(id)}/${artwork}`;
+}
+
+/** Household folder for future downloads and explicit moves of selected finished copies. */
+export interface DownloadFolder {
+  readonly path: string;
+  readonly moving: readonly string[];
+}
+
+export type DownloadBulkAction = "pause" | "resume" | "retry" | "remove";
+
+/** Bulk commands report each selected result; a failed item stays retryable. */
+export interface DownloadBulkResult {
+  readonly succeeded: readonly string[];
+  readonly failed: readonly { readonly id: string; readonly error: AppError }[];
 }
