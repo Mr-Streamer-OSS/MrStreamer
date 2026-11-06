@@ -43,7 +43,9 @@ const hasFfmpeg = spawnSync(FFMPEG, ["-version"]).status === 0;
  * subscription by the provider's id; `service` is playback itself, and `tracksChanged` the
  * session ids it said that of so far. `dispose` ends it, as quitting the app does.
  */
-async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boolean } = {}) {
+async function connectedPlayback(
+  options: { slotReleaseMs?: number; ffmpeg?: boolean; rewind?: boolean } = {},
+) {
   const provider = await fakeProvider({
     maxConnections: 1,
     slotReleaseMs: options.slotReleaseMs ?? 0,
@@ -52,6 +54,13 @@ async function connectedPlayback(options: { slotReleaseMs?: number; ffmpeg?: boo
   const runtime = runtimeFor(
     Playback.layer({ userAgent, ffmpeg: options.ffmpeg ? FFMPEG : null }).pipe(
       Layer.provide(PlaybackCoordination.layer),
+      Layer.provide(
+        options.rewind
+          ? LiveCaptures.layer({ folder: await tempDir(), keepFree: 0 }).pipe(
+              Layer.provide(PlaybackCoordination.layer),
+            )
+          : Layer.empty,
+      ),
       Layer.provideMerge(
         Subscriptions.layer({
           dataDir: await tempDir(),
@@ -917,6 +926,107 @@ async function take(reader: ReadableStreamDefaultReader<Uint8Array>, bytes: numb
 }
 
 describe("live captures", () => {
+  it("serves retained bytes through public Playback HTTP after its view reader closes", async () => {
+    const { provider, playback } = await connectedPlayback({ rewind: true });
+    const session = await playback.open(liveChannels(provider)[0]!, LINUX);
+    const first = await firstBytes(session.url);
+    expect(first.status).toBe(200);
+    const before = await playback.timeline(session.sessionId);
+    expect(before).not.toBeNull();
+    first.stop();
+    await vi.waitFor(async () => {
+      expect((await playback.timeline(session.sessionId))!.end).toBeGreaterThan(before!.end);
+    });
+    const seek = await playback.seekLive(session.sessionId, before!.start);
+    expect(seek!.cursor).toBe(before!.start);
+    const replay = await firstBytes(session.url);
+    expect(replay.status).toBe(200);
+    expect(replay.bytes).toBeGreaterThan(0);
+    replay.stop();
+    const live = await playback.seekLive(session.sessionId, null);
+    expect(live!.cursor).toBe(live!.end);
+    await playback.close(session.sessionId);
+    expect(await playback.timeline(session.sessionId)).toBeNull();
+  });
+
+  it("retains a view through pause and seeks independently of an attached recording", async () => {
+    const { captures, key, provider, requests, open, folder } = await capturing();
+    const watch = new AbortController();
+    const record = new AbortController();
+
+    try {
+      const first = (
+        await captures.viewRequest(key, "watch", provider, watch.signal)
+      ).body!.getReader();
+
+      await take(first, 188 * 200);
+      const before = captures.timeline("watch")!;
+      expect(before.end).toBeGreaterThanOrEqual(before.start);
+
+      const recording = (
+        await captures.request(key, "record", provider, record.signal)
+      ).body!.getReader();
+
+      watch.abort();
+      await take(recording, 188 * 400);
+      expect(captures.timeline("watch")!.end).toBeGreaterThan(before.end);
+      expect(captures.seek("watch", before.start)).toBe(true);
+      const replay = new AbortController();
+
+      const retained = (
+        await captures.viewRequest(key, "watch", provider, replay.signal)
+      ).body!.getReader();
+
+      expect((await take(retained, 188))[0]).toBe(0x47);
+      expect(captures.timeline("watch")!.cursor).toBe(before.start);
+      replay.abort();
+      expect(captures.seek("watch", null)).toBe(true);
+      expect(captures.timeline("watch")!.cursor).toBe(captures.timeline("watch")!.end);
+      await captures.idle("watch");
+      expect(captures.timeline("watch")).toBeNull();
+      await take(recording, 188 * 200);
+      expect(open()).toBe(1);
+      expect(requests()).toBe(1);
+    } finally {
+      watch.abort();
+      record.abort();
+      await captures.idle("watch");
+      await captures.idle("record");
+    }
+
+    expect(open()).toBe(0);
+    expect(await bytesIn(folder)).toBe(0);
+  });
+
+  it("expires retained arrival time even below the disk cap and limits retention to an hour", async () => {
+    const store = historyStore({
+      folder: await tempDir(),
+      bytes: 4096,
+      pieceBytes: 188,
+      keepFree: 0,
+      retentionMs: 120 * 60_000,
+    });
+
+    const history = store.create();
+    const now = vi.spyOn(Date, "now");
+
+    try {
+      now.mockReturnValue(1_000);
+      history.append(new Uint8Array(188));
+      now.mockReturnValue(1_000 + 59 * 60_000);
+      history.append(new Uint8Array(1));
+      expect(history.bounds()!.start).toBe(1_000);
+      now.mockReturnValue(1_001 + 60 * 60_000);
+      history.append(new Uint8Array(1));
+      expect(await history.read(0)).toBe("evicted");
+      expect(history.bounds()!.start).toBe(1_000 + 59 * 60_000);
+      expect(history.offsetAt(1_000)).toBe(188);
+    } finally {
+      now.mockRestore();
+      await history.close();
+    }
+  });
+
   it("reads one provider request for every reader of the exact source, and ends it with the last", async () => {
     const { captures, key, otherKey, provider, requests, open } = await capturing();
     const watch = new AbortController();

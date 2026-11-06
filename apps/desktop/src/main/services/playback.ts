@@ -1,3 +1,4 @@
+import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { isCallable } from "../../../../../packages/contracts/src/callable.ts";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
@@ -396,7 +397,7 @@ interface LiveSession extends SessionBase {
   /** Re-encode the picture even when the player could decode it; see `open`. */
   readonly repair: boolean;
   /** The sound track chosen by PID, or null for the channel's first. */
-  readonly audio: number | null;
+  audio: number | null;
   /** Without a chosen track, the language whose sound plays when the channel has it. */
   readonly audioLanguage: string | null;
   /** The tracks the stream carries, once it has been inspected. */
@@ -700,10 +701,14 @@ export class Playback extends Context.Service<
       sessionId: string,
       selector?: PlaybackFailureSelector,
     ): Effect.Effect<StreamFailure | null>;
-    /**
-     * A channel's sound and subtitle tracks, from its program table; null until its stream has
-     * started, and for movies and episodes.
-     */
+    /** Arrival-time history available to this local MPEG-TS view; null on other routes. */
+    timeline(sessionId: string): Effect.Effect<LiveTimeline | null>;
+    seekLive(
+      sessionId: string,
+      at: number | null,
+      audio?: number | null,
+    ): Effect.Effect<LiveTimeline | null>;
+    /** A channel's tracks from its program table; null before inspection or for titles. */
     tracks(sessionId: string): Effect.Effect<ChannelTracks | null>;
     /** Fixed inspection/plan facts only, for the current session before engine teardown. */
     diagnostic(sessionId: string): Effect.Effect<PlaybackDiagnostic | null>;
@@ -3711,7 +3716,19 @@ function make(deps: PlaybackDeps) {
               ? await open(url, asking)
               : session.kind === "live" && session.format === "hls"
                 ? await captures.resource(shared, session.id, url, open, asking, session.joined)
-                : await captures.request(shared, session.id, (opened) => open(url, opened), asking);
+                : session.kind === "live" && !session.archive && !session.receiver
+                  ? await captures.viewRequest(
+                      shared,
+                      session.id,
+                      (opened) => open(url, opened),
+                      asking,
+                    )
+                  : await captures.request(
+                      shared,
+                      session.id,
+                      (opened) => open(url, opened),
+                      asking,
+                    );
         } catch (cause) {
           return {
             ok: false,
@@ -4310,7 +4327,7 @@ function make(deps: PlaybackDeps) {
             return {
               sessionId: session.id,
               channel,
-              url: `${base}/stream/${session.token}.${extension}`,
+              url: `${base}/stream/${session.token}.${extension}${session.format === "mpegts" && !session.archive && captures ? "?retained=1" : ""}`,
               format: session.delivery,
               ...defined({ archive: session.archive ?? undefined }),
             };
@@ -4522,6 +4539,23 @@ function make(deps: PlaybackDeps) {
           return session && !session.closed.signal.aborted ? session.diagnostic : null;
         }),
 
+      timeline: (sessionId: string) => Effect.sync(() => captures?.timeline(sessionId) ?? null),
+      seekLive: (sessionId: string, at: number | null, audio?: number | null) =>
+        Effect.sync(() => {
+          const session = sessions.get(sessionId);
+
+          if (
+            session?.kind !== "live" ||
+            session.archive ||
+            session.receiver ||
+            !captures?.seek(sessionId, at)
+          )
+            return null;
+
+          if (audio !== undefined) session.audio = audio;
+
+          return captures.timeline(sessionId);
+        }),
       tracks: (sessionId: string) =>
         Effect.sync(() => {
           const session = sessions.get(sessionId);

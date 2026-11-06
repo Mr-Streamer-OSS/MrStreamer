@@ -164,3 +164,11 @@ export type StreamFailure =
     /** The stream arrived, but its format cannot be played or converted here. */
     | { readonly kind: "unsupported"; readonly detail: string }
   ) & { readonly diagnostic?: PlaybackDiagnostic };
+
+/** Retained arrival-time window in epoch milliseconds. Null means this route cannot rewind. */
+export interface LiveTimeline {
+  readonly start: number;
+  readonly end: number;
+  readonly cursor: number;
+  readonly expired: boolean;
+}

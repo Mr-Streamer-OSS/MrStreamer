@@ -135,6 +135,8 @@ export interface LiveCapturesOptions {
   readonly keepFree?: number;
   /** SILENCE_MS unless given. */
   readonly silenceMs?: number;
+  /** Thirty minutes by default, at most sixty, always subject to the shared byte cap. */
+  readonly retentionMs?: number;
 }
 
 export class LiveCaptures extends Context.Service<
@@ -146,6 +148,17 @@ export class LiveCaptures extends Context.Service<
      * answer that isn't a stream, as a refusal, comes back as it is and is shared with nobody.
      * `owner` names the play or recording that reads it, and `signal` ends its reading.
      */
+    /** A view keeps capture running across reader cancellation, until idle(owner). TS only. */
+    viewRequest(
+      key: string,
+      owner: string,
+      open: (signal: AbortSignal) => Promise<Response>,
+      signal: AbortSignal,
+    ): Promise<Response>;
+    timeline(
+      owner: string,
+    ): { start: number; end: number; cursor: number; expired: boolean } | null;
+    seek(owner: string, at: number | null): boolean;
     request(
       key: string,
       owner: string,
@@ -204,9 +217,32 @@ function make(options: LiveCapturesOptions) {
       bytes: options.bytes ?? TEMPORARY_BYTES,
       pieceBytes: options.pieceBytes ?? PIECE_BYTES,
       keepFree: options.keepFree ?? DEFAULT_KEEP_FREE,
+      retentionMs: options.retentionMs ?? 30 * 60_000,
     });
 
     const entries = new Map<string, Entry>();
+
+    const views = new Map<
+      string,
+      { capture: Capture; pin: { cursor: number }; at: number | null }
+    >();
+
+    const viewOwners = new Set<string>();
+
+    const timeline = (owner: string) => {
+      const view = views.get(owner);
+      const bounds = view?.capture.history.bounds();
+
+      if (!view || !bounds) return null;
+      const at = view.at ?? bounds.end;
+
+      return {
+        ...bounds,
+        cursor: Math.max(bounds.start, Math.min(bounds.end, at)),
+        expired: at < bounds.start,
+      };
+    };
+
     const changes = yield* PubSub.unbounded<string>();
 
     const hls = hlsShares({
@@ -282,6 +318,31 @@ function make(options: LiveCapturesOptions) {
 
     /** A reader's answer, from `offset`. */
     const attach = (capture: Capture, owner: string, offset: number, signal: AbortSignal) => {
+      if (viewOwners.has(owner)) {
+        const previous = views.get(owner);
+
+        if (previous?.capture !== capture) {
+          if (previous) {
+            previous.capture.readers.delete(previous.pin);
+
+            if (previous.capture.readers.size === 0) own(closings, owner, close(previous.capture));
+          }
+
+          const pin = { cursor: 0 };
+          capture.readers.add(pin);
+          views.set(owner, { capture, pin, at: null });
+        }
+
+        const view = views.get(owner)!;
+
+        if (view.at !== null) {
+          offset = capture.history.offsetAt(view.at);
+
+          if (capture.origin !== null)
+            offset = capture.origin + Math.ceil((offset - capture.origin) / PACKET) * PACKET;
+        }
+      }
+
       const reading = { cursor: offset };
       capture.readers.add(reading);
       coordination.connected(owner, capture.key);
@@ -437,8 +498,9 @@ function make(options: LiveCapturesOptions) {
           const capture: Capture = {
             key,
             // Only what a reader hasn't read yet is kept.
-            history: store.create(() =>
-              Math.min(Infinity, ...[...readers].map((each) => each.cursor)),
+            history: store.create(
+              () => Math.min(Infinity, ...[...readers].map((each) => each.cursor)),
+              () => [...views.values()].some((view) => view.capture.readers === readers),
             ),
             controller,
             status: response.status,
@@ -478,12 +540,33 @@ function make(options: LiveCapturesOptions) {
           entry.kind === "open" ? [entry.capture] : [],
         );
 
-        await Promise.all([...open.map(close), hls.close()]);
+        const retained = [...views.values()].map((view) => view.capture);
+
+        await Promise.all([...[...new Set([...open, ...retained])].map(close), hls.close()]);
       }),
     );
 
     return {
       request,
+      viewRequest: async (
+        key: string,
+        owner: string,
+        open: (signal: AbortSignal) => Promise<Response>,
+        signal: AbortSignal,
+      ) => {
+        viewOwners.add(owner);
+
+        return request(key, owner, open, signal);
+      },
+      timeline,
+      seek: (owner: string, at: number | null) => {
+        const view = views.get(owner);
+
+        if (!view || (at !== null && !Number.isFinite(at))) return false;
+        view.at = at;
+
+        return true;
+      },
       resource: hls.resource,
       reading: (key: string) => {
         const entry = entries.get(key);
@@ -497,8 +580,19 @@ function make(options: LiveCapturesOptions) {
       fixedChanged: Stream.fromPubSub(changes),
       idle: async (owner: string) => {
         await hls.leave(owner);
-        // A request still opening may yet attach and leave, closing what it read last.
+        // Include requests still opening before releasing their view pin.
         await Promise.all(asking.get(owner) ?? []);
+        viewOwners.delete(owner);
+        const view = views.get(owner);
+        views.delete(owner);
+
+        if (view) {
+          view.capture.readers.delete(view.pin);
+
+          if (view.capture.readers.size === 0) own(closings, owner, close(view.capture));
+        }
+
+        // Requests opening when idle began have settled above.
         asking.delete(owner);
         const closed = closings.get(owner);
         closings.delete(owner);

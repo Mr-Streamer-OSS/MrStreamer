@@ -50,6 +50,8 @@ export interface HistoryBudget {
   readonly pieceBytes: number;
   /** Bytes the disk keeps free: below that, a piece stays in memory only. */
   readonly keepFree: number;
+  /** Retention duration, bounded to one hour. Defaults to thirty minutes. */
+  readonly retentionMs?: number;
 }
 
 /** The answer to a read: bytes from the offset, or that it is ahead of what arrived or evicted. */
@@ -58,6 +60,8 @@ type HistoryRead = Uint8Array | "ahead" | "evicted";
 export interface History {
   /** The offset after the last byte that arrived. */
   end(): number;
+  /** Arrival-time bounds of bytes still retained, or null before data arrives. */
+  bounds(): { readonly start: number; readonly end: number } | null;
   append(chunk: Uint8Array): void;
   /** Up to READ_BYTES from `offset`. */
   read(offset: number): Promise<HistoryRead>;
@@ -194,12 +198,16 @@ export function historyStore(budget: HistoryBudget) {
    * A new capture's history, in a folder of its own. `needed` answers the lowest offset a reader
    * still needs; without it every piece is kept.
    */
-  function create(needed: () => number = () => 0): History {
+  function create(needed: () => number = () => 0, retaining: () => boolean = () => true): History {
     const state = new HistoryState(
       join(budget.folder, String(++made)),
       budget.pieceBytes,
       (bytes) => (leaving += bytes),
       needed,
+      () =>
+        retaining()
+          ? Math.max(0, Math.min(budget.retentionMs ?? 30 * 60_000, 60 * 60_000))
+          : Infinity,
     );
 
     histories.add(state);
@@ -211,6 +219,8 @@ export function historyStore(budget: HistoryBudget) {
 
     return {
       end: () => state.end,
+      bounds: () =>
+        state.pieces.length ? { start: state.pieces[0]!.at, end: state.latest } : null,
       append: (chunk) => state.append(chunk),
       read: (offset) => state.read(offset),
       arrived: (offset, signal) => state.arrived(offset, signal),
@@ -238,6 +248,7 @@ const remove = (file: string) => rm(file, { force: true, maxRetries: 3, retryDel
 class HistoryState {
   readonly pieces: Piece[] = [];
   end = 0;
+  latest = 0;
   disk = 0;
   broken = false;
   closed = false;
@@ -251,17 +262,20 @@ class HistoryState {
   /** Hears of bytes evicted files take until they are removed: more, then fewer once gone. */
   private readonly leaving: (bytes: number) => void;
   private readonly needed: () => number;
+  private readonly retentionMs: () => number;
 
   constructor(
     folder: string,
     pieceBytes: number,
     leaving: (bytes: number) => void,
     needed: () => number,
+    retentionMs: () => number,
   ) {
     this.folder = folder;
     this.pieceBytes = pieceBytes;
     this.leaving = leaving;
     this.needed = needed;
+    this.retentionMs = retentionMs;
   }
 
   /** Whether every reader has read past `piece`, which then goes. */
@@ -278,6 +292,10 @@ class HistoryState {
 
   append(chunk: Uint8Array) {
     if (this.closed || this.done) return;
+    this.latest = Date.now();
+    const expired = this.pieces.findLast((piece) => piece.at < this.latest - this.retentionMs());
+
+    if (expired) void this.evictThrough(expired);
     let rest = chunk;
 
     while (rest.length > 0) {

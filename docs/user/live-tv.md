@@ -240,3 +240,9 @@ While you reorder favourites or a list, the keys are these alone:
 | Tab                             | Go to Cancel, Save and the chosen row's buttons |
 | Enter                           | Save                                            |
 | Escape                          | Cancel                                          |
+
+## Live rewind service
+
+From 0.0.24, local MPEG-TS views have a retained arrival-time window independent of the playing cursor. Pausing the view keeps capture running. Seeking restarts its local reader within retained history; Go live starts at the newest data. The target is 30 minutes, configurable up to 60, subject to the shared 2 GiB temporary-file cap and free-space reserve. An expired cursor is reported with the remaining window. Closing the view releases its history without stopping an attached recording.
+
+Watch controls are pending UI integration. HLS, catch-up and receiver playback do not expose this retained timeline. A provider interruption still uses the existing reconnect flow; a new capture starts a new window, without filling the missing time.

@@ -264,7 +264,7 @@ function mpegtsEngine(
       // picture behind live. Jump forward when that exceeds the maximum, keeping some buffer,
       // rather than play faster: a faster rate is audible and visible for half a minute. A
       // recording plays every second it has, however far ahead the data is.
-      liveBufferLatencyChasing: ends === null,
+      liveBufferLatencyChasing: ends === null && !url.includes("retained=1"),
       liveBufferLatencyMaxLatency: LIVE_MAX_LATENCY_S,
       liveBufferLatencyMinRemain: LIVE_KEEP_BUFFER_S,
     },

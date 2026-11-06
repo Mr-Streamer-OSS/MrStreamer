@@ -126,3 +126,9 @@ or process restart restores the source gate without clearing personal data. Sour
 rendered library/reminder actions are covered by `apps/android/test/preview.test.ts` and
 `apps/android/test/preview-screens.test.ts`. Installed phone/tablet navigation, Back, TalkBack,
 large text, provider transition and native effect absence remain separate Android acceptance.
+
+## Local retained timeline service
+
+The local MPEG-TS route exposes `playback.timeline` and `playback.seekLive`, with arrival-time bounds, a separate cursor and expiry reporting. Its view owner retains capture while the renderer cancels/reloads a reader; `playback.close` releases that owner while recording readers continue. Thirty minutes is the default target, at most sixty through capture configuration, within the existing shared temporary-file budget. HLS passthrough, HLS conversion, archives and receivers do not expose this timeline. The HLS resource cache is not a total memory ceiling.
+
+Focused source proof: `apps/desktop/test/playback.test.ts` covers retained-reader cancellation, seek/Go live, recording lifetime, cleanup and time expiry below the cap. `apps/desktop/test/renderer/live-rewind.test.ts` covers local pause and same-session reload without a second open. Watch controls and real UI/keyboard/readability/translation proof await the separate Paper A integration. These source tests do not establish decoded seek accuracy, track continuity across historical epochs, gap recovery, native resource behavior or a 30-minute runtime endurance result.

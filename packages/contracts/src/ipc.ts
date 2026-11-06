@@ -66,6 +66,7 @@ import {
   CODECS,
   type ChannelTracks,
   type LivePlaying,
+  type LiveTimeline,
   type StreamFailure,
   type StreamSession,
   type TitleSession,
@@ -422,6 +423,9 @@ export const ipcInputs = {
       "selector?": { kind: "'hls'", requestId: "string <= 256 | null" },
     }),
   "playback.diagnostic": () => type({ sessionId: "string" }),
+  "playback.timeline": () => type({ sessionId: "string" }),
+  "playback.seekLive": () =>
+    type({ sessionId: "string", at: "number | null", "audio?": "number.integer | null" }),
   "playback.tracks": () => type({ sessionId: "string" }),
   "playback.playing": () => type({ sessionId: "string" }),
   "output.status": none,
@@ -840,6 +844,8 @@ export interface IpcOutputs {
   "playback.failure": StreamFailure | null;
   "playback.diagnostic": PlaybackDiagnostic | null;
   /** A playing channel's sound and subtitle tracks; null until its stream has started. */
+  "playback.timeline": LiveTimeline | null;
+  "playback.seekLive": LiveTimeline | null;
   "playback.tracks": ChannelTracks | null;
   /** Which of a channel's streams its session plays, and those that failed first. */
   "playback.playing": LivePlaying | null;
