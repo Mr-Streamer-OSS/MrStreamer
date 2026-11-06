@@ -1723,6 +1723,8 @@ export const es: Translation = {
   "This recording rule’s airing history is full.":
     "El historial de emisiones de esta regla de grabación está lleno.",
   "Recording rules could not be read.": "No se pudieron leer las reglas de grabación.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Reinicia Mr. Streamer para volver a cargar las reglas de grabación.",
   "Recording rules could not be saved.": "No se pudieron guardar las reglas de grabación.",
   "This recording rule is no longer there.": "Esta regla de grabación ya no existe.",
   "The recording rule limit was reached.": "Se alcanzó el máximo de reglas de grabación.",

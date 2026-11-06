@@ -1651,6 +1651,8 @@ export const nl: Translation = {
   "This recording rule’s airing history is full.":
     "De uitzendgeschiedenis van deze opnameregel is vol.",
   "Recording rules could not be read.": "Opnameregels konden niet worden gelezen.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Herstart Mr. Streamer om de opnameregels opnieuw te laden.",
   "Recording rules could not be saved.": "Opnameregels konden niet worden opgeslagen.",
   "This recording rule is no longer there.": "Deze opnameregel bestaat niet meer.",
   "The recording rule limit was reached.": "Het maximum aantal opnameregels is bereikt.",

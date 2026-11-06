@@ -267,6 +267,7 @@ export class Recordings extends Context.Service<
     }>;
     /** The list after each change, and as recordings grow, about once a second. */
     readonly changes: Stream.Stream<readonly Recording[]>;
+    /** Lists saved rules; a refused startup inventory stays refused until the next start. */
     readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
     previewRule(plan: RecordingRulePlan): Effect.Effect<RecordingRulePreview, Failed>;
     saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;

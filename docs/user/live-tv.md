@@ -172,7 +172,7 @@ From 0.0.24, **Follow programme** records each airing of the programme's title o
 
 Each airing it finds is scheduled, with a ring in the grid. Its details read **Scheduled**, say the rule sets its padding and offer **Cancel schedule**, which lets that airing go while the rule follows the rest. Cancelled, stopped or deleted airings stay suppressed at their saved time and through overlapping guide shifts, also after a restart or a guide-source change. Unambiguous overlapping shifts follow the same airing; conflicting episode identities are treated separately unless the old airing is already settled or recording. A nonoverlapping replacement can be a new airing.
 
-There can be 20 rules, with 100 airings scheduled between them. A check reads up to 100 current or future guide matches per subscription per rule, and a rule remembers up to 1,000 airings; once full, it schedules no more and shows that its limit was reached. A rule that can't be saved or stopped says so and can be tried again. Recording still needs Mr. Streamer to be open.
+There can be 20 rules, with 100 airings scheduled between them. A check reads up to 100 current or future guide matches per subscription per rule, and a rule remembers up to 1,000 airings; once full, it schedules no more and shows that its limit was reached. A rule that can't be saved or stopped says so and can be tried again. If saved rules could not be read at startup, restore access to their saved data and restart Mr. Streamer to reload them. Recording still needs Mr. Streamer to be open.
 
 ### The Recordings page
 

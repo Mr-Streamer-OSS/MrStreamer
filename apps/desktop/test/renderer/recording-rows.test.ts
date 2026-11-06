@@ -59,6 +59,56 @@ async function rowOf(scheduled: Recording["scheduled"], over: Partial<Recording>
   };
 }
 
+it("shows restart guidance when recording rules cannot be read", async () => {
+  ipc.reset();
+  ipc.always("recordings.list", []);
+  ipc.always("recordings.schedules", []);
+  ipc.refuse("recordings.rules", {
+    kind: "unexpected",
+    detail: "Recording rules could not be read.",
+  });
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  onTestFinished(() => view.unmount());
+  await view.render(createElement(RecordingsPage));
+
+  const alert = await vi.waitFor(() => {
+    const found = document.querySelector("[role=alert]");
+
+    if (!found?.textContent?.includes("Recording rules could not be read."))
+      throw new Error("No rule read failure");
+
+    return found;
+  });
+
+  expect(alert.textContent).toContain("Restart Mr. Streamer to reload recording rules.");
+  expect(alert.querySelector("button:not([hidden])")).toBeNull();
+});
+
+it("recovers an ordinary recording read through Retry", async () => {
+  ipc.reset();
+  ipc.always("recordings.schedules", []);
+  ipc.always("recordings.rules", []);
+  ipc.refuse("recordings.list", { kind: "unexpected", detail: "Recordings could not be read." });
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  onTestFinished(() => view.unmount());
+  await view.render(createElement(RecordingsPage));
+
+  const retry = await vi.waitFor(() => {
+    const found = document.querySelector<HTMLButtonElement>("[role=alert] button:not([hidden])");
+
+    if (found?.textContent !== "Retry") throw new Error("No recording read Retry");
+
+    return found;
+  });
+
+  ipc.always("recordings.list", []);
+  await act(async () => retry.click());
+  await vi.waitFor(() => expect(document.querySelector("[role=alert]")).toBeNull());
+  expect(document.body.textContent).toContain(
+    "Nothing recorded yet. Record a channel from Live TV.",
+  );
+});
+
 it("counts a schedule saved partway through its programme late from when it was saved", async () => {
   const row = await rowOf({ schedule: "s1", from: at("12:00"), owed: at("12:20"), late: "busy" });
   expect(row.text).toContain("Started 5 min late. Every connection was in use.");

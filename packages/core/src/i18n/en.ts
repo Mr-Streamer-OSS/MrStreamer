@@ -1614,6 +1614,8 @@ export const en = {
   "This rule's guide could not be read.": "This rule's guide could not be read.",
   "This recording rule’s airing history is full.": "This recording rule’s airing history is full.",
   "Recording rules could not be read.": "Recording rules could not be read.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Restart Mr. Streamer to reload recording rules.",
   "Recording rules could not be saved.": "Recording rules could not be saved.",
   "This recording rule is no longer there.": "This recording rule is no longer there.",
   "The recording rule limit was reached.": "The recording rule limit was reached.",

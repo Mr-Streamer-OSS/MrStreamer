@@ -86,6 +86,8 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
   const logoOf = (owned: OwnedId) => channels.find((channel) => sameOwned(channel, owned)) ?? null;
   const count = recordings.length + scheduled.length + rules.length;
   const error = list.error ?? (standalone ? null : (schedules.error ?? ruleList.error));
+  // The rules read keeps startup failures until the next start; refetching cannot reload it.
+  const restartRequired = !standalone && ruleList.isError;
 
   return (
     <div className="flex h-full flex-col">
@@ -101,20 +103,20 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           {storage && <StorageLine storage={storage} settings={!standalone} />}
         </div>
         {error ? (
-          <div role="alert" className="flex items-center gap-3 pt-2 text-sm">
+          <div role="alert" className="flex flex-wrap items-center gap-3 pt-2 text-sm">
             <span className="text-destructive">{describeError(appError(error))}</span>
             <Button
+              hidden={restartRequired}
               size="sm"
               onClick={() => {
                 if (list.error) void list.refetch();
 
                 if (schedules.error && !standalone) void schedules.refetch();
-
-                if (ruleList.error && !standalone) void ruleList.refetch();
               }}
             >
               {t("Retry")}
             </Button>
+            {restartRequired && <span>{t("Restart Mr. Streamer to reload recording rules.")}</span>}
           </div>
         ) : list.data && (standalone || (schedules.data && ruleList.data)) && count === 0 ? (
           <p className="pt-2 text-[0.9375rem] text-muted-foreground">
