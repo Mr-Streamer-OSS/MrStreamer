@@ -1307,6 +1307,7 @@ export const es: Translation = {
   "Resume download": "Reanudar",
   "Pause all": "Pausar todo",
   "Resume all": "Reanudar todo",
+  "Pause and quit": "Pausar y salir",
   "Paused, resume download": "En pausa, reanudar descarga",
   "Resume download of {title}": "Reanudar descarga de {title}",
   // The close button on a playback error.
@@ -1446,6 +1447,23 @@ export const es: Translation = {
   "{title}, {time}, won't record while Mr. Streamer is closed.":
     "{title}, {time}, no se grabará mientras Mr. Streamer esté cerrado.",
   "Closing the window instead keeps recording.": "Si cierras la ventana, se sigue grabando.",
+  "Quit while downloading?": "¿Salir mientras descarga?",
+  "Quit while recording and downloading?": "¿Salir mientras graba y descarga?",
+  "Keep downloading": "Seguir descargando",
+  "Keep going": "Seguir",
+  "{count} downloads stop now. They continue from there when Mr. Streamer opens again.": {
+    one: "{count} descarga se detiene ahora. Sigue desde ahí cuando Mr. Streamer se abra de nuevo.",
+    other:
+      "{count} descargas se detienen ahora. Siguen desde ahí cuando Mr. Streamer se abra de nuevo.",
+  },
+  "{count} downloads stop, one at {percent}. They continue from there when Mr. Streamer opens again.":
+    {
+      one: "{count} descarga se detiene al {percent}. Sigue desde ahí cuando Mr. Streamer se abra de nuevo.",
+      other:
+        "{count} descargas se detienen, una al {percent}. Siguen desde ahí cuando Mr. Streamer se abra de nuevo.",
+    },
+  "Closing the window instead keeps downloading.": "Si cierras la ventana, se sigue descargando.",
+  "Closing the window instead keeps both going.": "Si cierras la ventana, ambas cosas siguen.",
   "{size} used": "{size} usados",
   "{size} of {limit} used": "{size} de {limit} usados",
   "keeps {size} free": "deja {size} libres",

@@ -1210,6 +1210,7 @@ export const en = {
   "Resume download": "Resume",
   "Pause all": "Pause all",
   "Resume all": "Resume all",
+  "Pause and quit": "Pause and quit",
   "Paused, resume download": "Paused, resume download",
   "Resume download of {title}": "Resume download of {title}",
   // The close button on a playback error.
@@ -1344,6 +1345,22 @@ export const en = {
   "{title}, {time}, won't record while Mr. Streamer is closed.":
     "{title}, {time}, won't record while Mr. Streamer is closed.",
   "Closing the window instead keeps recording.": "Closing the window instead keeps recording.",
+  "Quit while downloading?": "Quit while downloading?",
+  "Quit while recording and downloading?": "Quit while recording and downloading?",
+  "Keep downloading": "Keep downloading",
+  "Keep going": "Keep going",
+  "{count} downloads stop now. They continue from there when Mr. Streamer opens again.": {
+    one: "{count} download stops now. It continues from there when Mr. Streamer opens again.",
+    other: "{count} downloads stop now. They continue from there when Mr. Streamer opens again.",
+  },
+  "{count} downloads stop, one at {percent}. They continue from there when Mr. Streamer opens again.":
+    {
+      one: "{count} download stops at {percent}. It continues from there when Mr. Streamer opens again.",
+      other:
+        "{count} downloads stop, one at {percent}. They continue from there when Mr. Streamer opens again.",
+    },
+  "Closing the window instead keeps downloading.": "Closing the window instead keeps downloading.",
+  "Closing the window instead keeps both going.": "Closing the window instead keeps both going.",
   "{size} used": "{size} used",
   "{size} of {limit} used": "{size} of {limit} used",
   "keeps {size} free": "keeps {size} free",
