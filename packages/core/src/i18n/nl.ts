@@ -1623,4 +1623,39 @@ export const nl: Translation = {
     "Het gepauzeerde moment is verlopen. Afspelen gaat verder vanaf {time}.",
   "Rewind plays here only": "Terugspoelen werkt alleen hier",
   "This stream can't rewind": "Deze stream kan niet terugspoelen",
+  // Recording rules.
+  "Follow programme": "Programma volgen",
+  "Follow {title}": "{title} volgen",
+  "Every match": "Elke uitzending",
+  "New episodes only": "Alleen nieuwe afleveringen",
+  "The guide doesn't mark new episodes here.": "De gids markeert hier geen nieuwe afleveringen.",
+  "Choose at least one channel.": "Kies minstens één zender.",
+  "Nothing in the guide matches now. The rule keeps looking as the guide changes.":
+    "Niets in de gids komt nu overeen. De regel blijft zoeken terwijl de gids verandert.",
+  "{count} airings left out: the guide doesn't show them as new episodes.": {
+    one: "{count} uitzending weggelaten: de gids toont die niet als nieuwe aflevering.",
+    other: "{count} uitzendingen weggelaten: de gids toont ze niet als nieuwe afleveringen.",
+  },
+  "The guide lists more airings than one check reads. Later ones follow as these pass.":
+    "De gids toont meer uitzendingen dan één controle leest. Latere volgen zodra deze voorbij zijn.",
+  "Turn on rule": "Regel aanzetten",
+  "Stop following": "Niet meer volgen",
+  "{count} more": { one: "nog {count}", other: "nog {count}" },
+  "A rule following {title} records this. Its padding is the rule's.":
+    "Een regel die {title} volgt neemt dit op. De marge is die van de regel.",
+  "From a rule": "Via een regel",
+  Rules: "Regels",
+  "This rule's subscription is no longer there.":
+    "Het abonnement van deze regel bestaat niet meer.",
+  "This rule's guide could not be read.": "De gids van deze regel kon niet worden gelezen.",
+  "This recording rule’s airing history is full.":
+    "De uitzendgeschiedenis van deze opnameregel is vol.",
+  "Recording rules could not be read.": "Opnameregels konden niet worden gelezen.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Herstart Mr. Streamer om de opnameregels opnieuw te laden.",
+  "Recording rules could not be saved.": "Opnameregels konden niet worden opgeslagen.",
+  "This recording rule is no longer there.": "Deze opnameregel bestaat niet meer.",
+  "The recording rule limit was reached.": "Het maximum aantal opnameregels is bereikt.",
+  "A rule sets this schedule. Change the rule instead.":
+    "Een regel bepaalt deze planning. Wijzig de regel.",
 };

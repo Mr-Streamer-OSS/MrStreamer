@@ -1588,4 +1588,37 @@ export const en = {
     "Paused moment expired. Play resumes from {time}.",
   "Rewind plays here only": "Rewind plays here only",
   "This stream can't rewind": "This stream can't rewind",
+  // Recording rules.
+  "Follow programme": "Follow programme",
+  "Follow {title}": "Follow {title}",
+  "Every match": "Every match",
+  "New episodes only": "New episodes only",
+  "The guide doesn't mark new episodes here.": "The guide doesn't mark new episodes here.",
+  "Choose at least one channel.": "Choose at least one channel.",
+  "Nothing in the guide matches now. The rule keeps looking as the guide changes.":
+    "Nothing in the guide matches now. The rule keeps looking as the guide changes.",
+  "{count} airings left out: the guide doesn't show them as new episodes.": {
+    one: "{count} airing left out: the guide doesn't show it as a new episode.",
+    other: "{count} airings left out: the guide doesn't show them as new episodes.",
+  },
+  "The guide lists more airings than one check reads. Later ones follow as these pass.":
+    "The guide lists more airings than one check reads. Later ones follow as these pass.",
+  "Turn on rule": "Turn on rule",
+  "Stop following": "Stop following",
+  "{count} more": { one: "{count} more", other: "{count} more" },
+  "A rule following {title} records this. Its padding is the rule's.":
+    "A rule following {title} records this. Its padding is the rule's.",
+  "From a rule": "From a rule",
+  Rules: "Rules",
+  "This rule's subscription is no longer there.": "This rule's subscription is no longer there.",
+  "This rule's guide could not be read.": "This rule's guide could not be read.",
+  "This recording rule’s airing history is full.": "This recording rule’s airing history is full.",
+  "Recording rules could not be read.": "Recording rules could not be read.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Restart Mr. Streamer to reload recording rules.",
+  "Recording rules could not be saved.": "Recording rules could not be saved.",
+  "This recording rule is no longer there.": "This recording rule is no longer there.",
+  "The recording rule limit was reached.": "The recording rule limit was reached.",
+  "A rule sets this schedule. Change the rule instead.":
+    "A rule sets this schedule. Change the rule instead.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

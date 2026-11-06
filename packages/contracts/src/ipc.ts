@@ -83,6 +83,9 @@ import type { ActiveProfile } from "./profiles.ts";
 import type { Reminder, ReminderList } from "./reminders.ts";
 import {
   RecordingPlanSchema,
+  RecordingRulePlanSchema,
+  type RecordingRule,
+  type RecordingRulePreview,
   type Recording,
   type RecordingConnections,
   type RecordingStart,
@@ -324,6 +327,10 @@ export const ipcInputs = {
   "recordings.stop": () => type({ id: "string > 0" }),
   /** Deletes a recording that has ended, with its file. */
   "recordings.remove": () => type({ id: "string > 0" }),
+  "recordings.rules": none,
+  "recordings.previewRule": () => type({ plan: RecordingRulePlanSchema() }),
+  "recordings.saveRule": () => type({ plan: RecordingRulePlanSchema(), "id?": "string > 0" }),
+  "recordings.cancelRule": () => type({ id: "string > 0" }),
   "recordings.schedules": none,
   /**
    * How a schedule would stand, saving nothing: as the one `id` names would, changed to `plan`,
@@ -775,10 +782,15 @@ export interface IpcOutputs {
   "recordings.remove": null;
   /** Every schedule, by when it records next. Fails while they can't be read. */
   "recordings.schedules": readonly ScheduledRecording[];
-  /**
-   * Fails when the channel isn't listed, or the plan has no time to come: a programme whose padded
-   * end passed.
-   */
+  /** Saved rules with retryable background check failures. Fails if their ledger is unreadable. */
+  "recordings.rules": readonly RecordingRule[];
+  /** Bounded current/future matches, without saving. */
+  "recordings.previewRule": RecordingRulePreview;
+  /** Durably saves a rule before execution. */
+  "recordings.saveRule": RecordingRule;
+  /** Durably stops following future airings. */
+  "recordings.cancelRule": null;
+  /** Fails for rule-made schedules, an unlisted channel or a plan with no time to come. */
   "recordings.plan": ScheduledRecording;
   /** As saved. Fails as `recordings.plan` does, or when it can't be written. */
   "recordings.schedule": ScheduledRecording;

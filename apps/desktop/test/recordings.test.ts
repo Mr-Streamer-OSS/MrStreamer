@@ -2684,6 +2684,10 @@ const TRACKS_FIXTURE = "h264-subtitles.mpegts";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
+/** A time as the fake guide writes it (fake-provider.ts `xmltvTime`), to find a programme's entry. */
+const guideTime = (time: number) =>
+  `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
+
 /** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
 const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
@@ -2728,6 +2732,582 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     return { ...started, listing, programmePlan, clockTo };
   }
+
+  it("rule safety: old missed airings release queue budget after a long absence", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, quit, dataDir } =
+      await scheduling();
+
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+    const xml = (base: number) =>
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${Array.from(
+        { length: 100 },
+        (_, i) => {
+          const start = base + (i + 1) * MINUTE;
+
+          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>R2 title</title></programme>`;
+        },
+      ).join("")}</tv>`;
+
+    provider.serveGuide(xml(TEN_PAST));
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: "R2 title",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    expect(await recordings.schedules()).toHaveLength(100);
+    await quit();
+    const now = TEN_PAST + 10 * 24 * 60 * MINUTE;
+    vi.setSystemTime(now);
+    provider.serveGuide(xml(now));
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+
+    for (let i = 0; i < 3; i++) await again.recordings.check();
+
+    const preview = await again.recordings.previewRule({
+      title: "R2 title",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    expect(preview.matches).toHaveLength(100);
+    const planned = await again.recordings.schedules();
+    expect(planned).toHaveLength(100);
+  });
+
+  it("rule safety: removed busy subscription releases the shared queue", async () => {
+    const {
+      provider,
+      guide,
+      subscriptionId,
+      channel,
+      recordings,
+      roster,
+      subscriptions,
+      library,
+      listing,
+    } = await scheduling();
+
+    const { next } = await listing();
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+    provider.serveGuide(
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${Array.from(
+        { length: 100 },
+        (_, i) => {
+          const start = TEN_PAST + (i + 1) * MINUTE;
+
+          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>Fill</title></programme>`;
+        },
+      ).join("")}</tv>`,
+    );
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: "Fill",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    expect(await recordings.schedules()).toHaveLength(100);
+    const second = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
+    const added = await subscriptions.add(demoLogin(second));
+    await library.refresh(added.id);
+    await guide.refresh(added.id);
+    await roster.remove(subscriptionId, false);
+    await recordings.saveRule({
+      title: next.title,
+      channels: [{ subscriptionId: added.id, id: channel(GUIDED).id }],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    await recordings.check();
+    const all = await recordings.schedules();
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((each) => each.plan.channel.subscriptionId === added.id)).toBe(true);
+    expect((await recordings.rules())[0]?.error).toBe(
+      "This rule's subscription is no longer there.",
+    );
+  });
+  it("rule safety: global XMLTV supplies a subscription without its own guide", async () => {
+    const { provider, guide, subscriptions, library, recordings, channel } = await scheduling();
+    const source = await guide.addSource(`${provider.url}/xmltv.php?username=demo&password=demo`);
+    await guide.refreshSource(source.id);
+    const second = await fakeProvider({ live: true });
+    second.serveGuide(503);
+    const { id } = await subscriptions.add(demoLogin(second));
+    await library.refresh(id);
+    await expect(guide.refresh(id)).rejects.toMatchObject({
+      error: { kind: "provider-error", status: 503 },
+    });
+    const own = { subscriptionId: id, id: channel(GUIDED).id };
+    const listed = (await guide.listings([own]))[`${id}:${own.id}`]!;
+
+    if (!listed.next) throw new Error("No next programme from global XMLTV");
+    const status = (await guide.status()).find((each) => each.subscriptionId === id)!;
+    expect(status.availability).not.toBe("available");
+    expect(status.supplied.some((each) => each.source?.id === source.id)).toBe(true);
+    const plan = { title: listed.next.title, channels: [own], padding: { before: 0, after: 0 } };
+    expect((await recordings.previewRule(plan)).matches.length).toBeGreaterThan(0);
+    await recordings.saveRule(plan);
+    await recordings.check();
+    expect(
+      (await recordings.schedules()).some((each) => each.plan.channel.subscriptionId === id),
+    ).toBe(true);
+  });
+  it("rule safety: cancellation stays settled through consecutive overlapping shifts", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
+    const { next } = await listing();
+    const guideId = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+    const xml = `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"><title>${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num></programme></tv>`;
+    provider.serveGuide(xml);
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    const [made] = await recordings.schedules();
+    await recordings.cancel(made!.id);
+
+    for (const offset of [0.6, 1.2].map((factor) =>
+      Math.floor((next.stop - next.start) * factor),
+    )) {
+      provider.serveGuide(
+        xml.replace(
+          `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+          `start="${guideTime(next.start + offset)}" stop="${guideTime(next.stop + offset)}"`,
+        ),
+      );
+      await guide.refresh(subscriptionId);
+      await recordings.check();
+      expect(await recordings.schedules()).toEqual([]);
+    }
+  });
+  it("rule safety: retained work reserves the global queue before new matches", async () => {
+    const { provider, guide, subscriptionId, channel, recordings } = await scheduling();
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+    const xml = (a: boolean) =>
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${Array.from(
+        { length: a ? 200 : 100 },
+        (_, i) => {
+          const start = TEN_PAST + (i + 1) * MINUTE;
+
+          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>${i < 100 ? "Review B" : "Review A"}</title></programme>`;
+        },
+      ).join("")}</tv>`;
+
+    provider.serveGuide(xml(false));
+    await guide.refresh(subscriptionId);
+
+    const plan = (title: string) => ({
+      title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    const first = await recordings.saveRule(plan("Review A"));
+    await recordings.saveRule(plan("Review B"));
+    await recordings.check();
+    expect(await recordings.schedules()).toHaveLength(100);
+    provider.serveGuide(xml(true));
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    expect((await recordings.schedules()).length).toBeLessThanOrEqual(100);
+    await recordings.saveRule(plan("Review A"), first.id);
+    await recordings.check();
+    expect((await recordings.rules())[0]?.id).toBe(first.id);
+    expect(await recordings.schedules()).toHaveLength(100);
+  });
+  it("rule safety: archived matches never hide current or future airings", async () => {
+    const { provider, guide, subscriptionId, channel, recordings } = await scheduling();
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+    const programmes = Array.from({ length: 102 }, (_, i) => {
+      const start = TEN_PAST + (i - 100) * 30 * MINUTE - 15 * MINUTE;
+
+      return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + 30 * MINUTE)}"><title>Review series</title></programme>`;
+    }).join("");
+
+    provider.serveGuide(
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${programmes}</tv>`,
+    );
+    await guide.refresh(subscriptionId);
+
+    const preview = await recordings.previewRule({
+      title: "Review series",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    expect(preview.matches).toHaveLength(2);
+    expect(preview.matches[0]?.plan.start).toBe(TEN_PAST - 15 * MINUTE);
+    await recordings.saveRule({
+      title: "Review series",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    expect(
+      (await recordings.schedules()).some(
+        (each) => each.plan.kind === "programme" && each.plan.start === TEN_PAST - 15 * MINUTE,
+      ),
+    ).toBe(true);
+  });
+  it("rule safety: removed subscriptions never block healthy rules", async () => {
+    const {
+      subscriptionId,
+      recordings,
+      roster,
+      listing,
+      channel,
+      subscriptions,
+      library,
+      guide,
+      clockTo,
+    } = await scheduling();
+
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    await recordings.saveRule(plan);
+    const second = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
+    const { id } = await subscriptions.add(demoLogin(second));
+    await library.refresh(id);
+    await guide.refresh(id);
+    await recordings.saveRule({
+      ...plan,
+      channels: [{ subscriptionId: id, id: channel(GUIDED).id }],
+    });
+    await recordings.check();
+    await roster.remove(subscriptionId, false);
+    await clockTo(next.start);
+    const made = await until(recordings.list, (list) => list.length > 0, 1000);
+    expect(made).toHaveLength(1);
+    expect(second.streamRequests()).toBe(1);
+    expect((await recordings.rules())[0]?.error).toBe(
+      "This rule's subscription is no longer there.",
+    );
+  });
+  it.each(["cancelled", "deleted", "recording"] as const)(
+    "rule safety: identity-less %s airings survive chained shifts and restart without revival",
+    async (state) => {
+      const {
+        provider,
+        guide,
+        subscriptionId,
+        channel,
+        recordings,
+        listing,
+        clockTo,
+        dataDir,
+        quit,
+      } = await scheduling({ maxConnections: 2 });
+
+      const { next } = await listing();
+      const guideId = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+      const xml = (offset: number) =>
+        `<tv><channel id="${guideId}"><display-name>Test</display-name></channel><programme channel="${guideId}" start="${guideTime(next.start + offset)}" stop="${guideTime(next.stop + offset)}"><title>${next.title}</title></programme></tv>`;
+
+      provider.serveGuide(xml(0));
+      await guide.refresh(subscriptionId);
+      await recordings.saveRule({
+        title: next.title,
+        channels: [channel(GUIDED)],
+        padding: { before: 0, after: 0 },
+      });
+      await recordings.check();
+      const [schedule] = await recordings.schedules();
+
+      if (state === "cancelled") await recordings.cancel(schedule!.id);
+      else {
+        await clockTo(next.start);
+
+        const [record] = await until(
+          recordings.list,
+          (list) => list[0]?.status.kind === "recording",
+        );
+
+        if (state === "deleted") {
+          await recordings.stop(record!.id);
+          await recordings.remove(record!.id);
+        }
+      }
+
+      for (const offset of [0.6, 1.2].map((factor) =>
+        Math.floor((next.stop - next.start) * factor),
+      )) {
+        provider.serveGuide(xml(offset));
+        await guide.refresh(subscriptionId);
+        await recordings.check();
+        expect((await recordings.schedules()).filter((each) => each.id !== schedule!.id)).toEqual(
+          [],
+        );
+        expect(provider.streamRequests()).toBe(state === "cancelled" ? 0 : 1);
+      }
+
+      if (state === "recording") {
+        const [record] = await recordings.list();
+        await recordings.stop(record!.id);
+        await recordings.remove(record!.id);
+      }
+
+      await quit();
+      const again = await app(dataDir);
+      onTestFinished(again.quit);
+      await again.library.refresh(subscriptionId);
+      await again.guide.refresh(subscriptionId);
+      await again.recordings.check();
+      expect(await again.recordings.schedules()).toEqual([]);
+      expect(provider.streamRequests()).toBe(state === "cancelled" ? 0 : 1);
+    },
+  );
+
+  it("rule safety: retains a missed airing through restart and lists it as Missed", async () => {
+    const { recordings, listing, channel, quit, dataDir, subscriptionId } = await scheduling();
+    const { next } = await listing();
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    await quit();
+    vi.setSystemTime(next.stop + MINUTE);
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+    await again.recordings.check();
+    expect(await again.recordings.list()).toMatchObject([
+      { title: next.title, status: { kind: "missed" } },
+    ]);
+  });
+
+  it("previews and saves selected-channel rules, defaults to every airing and requires proven first runs", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    expect((await recordings.previewRule(plan)).matches).toHaveLength(1);
+    expect(await recordings.rules()).toEqual([]);
+    expect((await recordings.previewRule({ ...plan, mode: "new-only" })).unproven).toBe(1);
+
+    const xml = fakeGuide(provider.catalogue, TEN_PAST).replace(
+      `<title lang="en">${next.title}</title>`,
+      `<title lang="en">${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num><premiere/>`,
+    );
+
+    provider.serveGuide(xml);
+    await guide.refresh(subscriptionId);
+    expect((await recordings.previewRule({ ...plan, mode: "new-only" })).matches).toHaveLength(1);
+    const saved = await recordings.saveRule(plan);
+    expect(saved.plan.mode).toBe("every");
+    await recordings.check();
+    const [made] = await recordings.schedules();
+    expect(made).toMatchObject({ rule: saved.id, plan: { title: next.title, start: next.start } });
+    // The rule sets its airings: changing one as a manual schedule is refused, not reverted later.
+    await expect(
+      recordings.schedule({ ...made!.plan, padding: { before: 10, after: 10 } }, made!.id),
+    ).rejects.toMatchObject({ error: { kind: "invalid-input" } });
+    expect(await recordings.schedules()).toEqual([made]);
+    await recordings.cancelRule(saved.id);
+    await recordings.check();
+    expect(await recordings.rules()).toEqual([]);
+    expect(await recordings.schedules()).toEqual([]);
+  });
+
+  it("follows an observed episode's shifted guide time and never revives a cancelled occurrence after restart", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, listing, dataDir, quit } =
+      await scheduling();
+
+    const { next } = await listing();
+
+    const xml = fakeGuide(provider.catalogue, TEN_PAST).replace(
+      `<title lang="en">${next.title}</title>`,
+      `<title lang="en">${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num>`,
+    );
+
+    provider.serveGuide(xml);
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    const [before] = await recordings.schedules();
+
+    provider.serveGuide(
+      xml.replace(
+        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
+      ),
+    );
+    await guide.refresh(subscriptionId);
+    await recordings.check();
+    expect(await recordings.schedules()).toMatchObject([
+      { id: before!.id, next: { start: next.start + MINUTE } },
+    ]);
+    await recordings.cancel(before!.id);
+    await quit();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+    await again.recordings.check();
+    expect(await again.recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(0);
+  });
+
+  it("refuses failed rule writes and retries cancellation without losing its saved rule", async () => {
+    const { recordings, listing, channel, dataDir, provider } = await scheduling();
+    const { next } = await listing();
+
+    const plan = {
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    const saved = await recordings.saveRule(plan);
+    await recordings.check();
+    const path = join(dataDir, "recordings", "rules.json");
+    await rename(path, `${path}.saved`);
+    await mkdir(path);
+    await expect(recordings.cancelRule(saved.id)).rejects.toMatchObject({
+      error: { kind: "unexpected" },
+    });
+    expect((await recordings.rules()).map(({ id, plan }) => ({ id, plan }))).toEqual([saved]);
+    await rm(path, { recursive: true });
+    await rename(`${path}.saved`, path);
+    await recordings.cancelRule(saved.id);
+    await recordings.check();
+    expect(await recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(0);
+  });
+
+  it("keeps repeated airings in every-match previews but deduplicates proven new-only episodes", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
+    const { next } = await listing();
+
+    const xml = fakeGuide(provider.catalogue, TEN_PAST).replace(
+      /<title lang="en">[^<]+<\/title>/g,
+      `<title lang="en">Same episode</title><episode-num system="xmltv_ns">0.1.</episode-num><premiere>First showing</premiere>`,
+    );
+
+    provider.serveGuide(xml);
+    await guide.refresh(subscriptionId);
+
+    const plan = {
+      title: "Same episode",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    };
+
+    const every = await recordings.previewRule(plan);
+    expect(every.matches.length).toBeGreaterThan(1);
+    expect(every.matches.some((each) => each.plan.start === next.start)).toBe(true);
+    expect((await recordings.previewRule({ ...plan, mode: "new-only" })).matches).toHaveLength(1);
+    provider.serveGuide(
+      xml.replaceAll("<premiere>First showing</premiere>", "<previously-shown/>"),
+    );
+    await guide.refresh(subscriptionId);
+    expect((await recordings.previewRule({ ...plan, mode: "new-only" })).matches).toEqual([]);
+  });
+
+  it("settles a stopped and deleted rule occurrence durably before restart", async () => {
+    const { provider, subscriptionId, channel, recordings, listing, clockTo, dataDir, quit } =
+      await scheduling();
+
+    const { next } = await listing();
+    provider.serveGuide(fakeGuide(provider.catalogue, TEN_PAST));
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    await clockTo(next.start);
+    const [made] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(made?.status.kind).toBe("recording");
+    await recordings.stop(made!.id);
+    await recordings.remove(made!.id);
+    const requests = provider.streamRequests();
+    await quit();
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+    await again.recordings.check();
+    expect(await again.recordings.list()).toEqual([]);
+    expect(await again.recordings.schedules()).toEqual([]);
+    expect(provider.streamRequests()).toBe(requests);
+  });
+
+  it("starts no rule occurrence until its shifted identity is saved, then retries after a write failure", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, listing, clockTo, dataDir } =
+      await scheduling();
+
+    const { next } = await listing();
+
+    const xml = fakeGuide(provider.catalogue, TEN_PAST).replace(
+      `<title lang="en">${next.title}</title>`,
+      `<title lang="en">${next.title}</title><episode-num system="xmltv_ns">0.1.</episode-num>`,
+    );
+
+    provider.serveGuide(xml);
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: next.title,
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    const path = join(dataDir, "recordings", "rules.json");
+    await rename(path, `${path}.saved`);
+    await mkdir(path);
+
+    provider.serveGuide(
+      xml.replace(
+        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
+      ),
+    );
+    await guide.refresh(subscriptionId);
+    await clockTo(next.start + MINUTE);
+    expect((await recordings.schedules())[0]?.next?.start).toBe(next.start);
+    expect(provider.streamRequests()).toBe(0);
+    expect(await recordings.rules()).toMatchObject([
+      { error: "Recording rules could not be saved." },
+    ]);
+    expect(await recordings.list()).toEqual([]);
+    await rm(path, { recursive: true });
+    await rename(`${path}.saved`, path);
+    await recordings.check();
+    const [made] = await until(recordings.list, ([each]) => each?.status.kind === "recording");
+    expect(made?.scheduled?.from).toBe(next.start + MINUTE);
+    await recordings.stop(made!.id);
+    await recordings.check();
+    expect(await recordings.list()).toHaveLength(1);
+    expect(provider.streamRequests()).toBe(1);
+  });
 
   it("continues checking schedules after one lookup defect without another wake", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -2853,11 +3433,17 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await rename(manifest, `${manifest}.saved`);
     await mkdir(manifest);
     vi.setSystemTime(next.stop + 1000);
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
 
-    // Nobody presses Stop for it: a check writes it.
+    const [ended] = await until(
+      recordings.list,
+      ([first]) => first?.status.kind === "complete" && first.unsaved === true,
+    );
+
+    expect(ended).toMatchObject({ status: { kind: "complete" }, unsaved: true });
+
+    // Nobody presses Stop for it: a check writes it. Do not restore the stale manifest,
+    // which could overwrite a successful background retry once the directory is removed.
     await rm(manifest, { recursive: true });
-    await rename(`${manifest}.saved`, manifest);
     await recordings.check();
     await quit();
     const again = await app(dataDir);
@@ -3451,13 +4037,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     /** The guide, with the next programme ending `minutes` later (earlier, below 0). */
     const ending = async (minutes: number) => {
-      const at = (time: number) =>
-        `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
-
       provider.serveGuide(
         fakeGuide(provider.catalogue, TEN_PAST).replace(
-          `start="${at(next.start)}" stop="${at(next.stop)}"`,
-          `start="${at(next.start)}" stop="${at(next.stop + minutes * MINUTE)}"`,
+          `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+          `start="${guideTime(next.start)}" stop="${guideTime(next.stop + minutes * MINUTE)}"`,
         ),
       );
       await guide.refresh(subscriptionId);

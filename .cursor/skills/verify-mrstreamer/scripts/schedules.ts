@@ -46,6 +46,9 @@ const text = (d: Driver, expression: string) =>
   d.evaluate<string>(`${expression}?.innerText ?? ''`);
 
 export async function schedulesScenario(d: Driver) {
+  await ruleJourney(d);
+  await d.quit();
+  await d.launch();
   await size(d, 1280, 800);
   await d.click("Open global Search", "document.querySelector('button[aria-label=Search]')");
   await d.send("Input.insertText", { text: "TEST | H.264 + AAC" });
@@ -85,7 +88,7 @@ export async function schedulesScenario(d: Driver) {
   await d.send("Emulation.setTimezoneOverride", { timezoneId: "" });
 
   // 2 · The grid's next programme, its schedule panel, Once and a repeat.
-  await d.key("g", 71);
+  if (!(await d.exists(GRID))) await d.key("g", 71);
   await d.wait(() => d.exists(GRID));
   await d.wait(() => d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell]').length > 4`));
   await d.key("ArrowRight", 39);
@@ -347,4 +350,197 @@ export async function schedulesScenario(d: Driver) {
   );
   await d.capture("lang-de-edit");
   await d.key("Escape", 27);
+}
+
+const DIALOG = "document.querySelector('[role=dialog]')";
+
+async function grid(d: Driver) {
+  await d.click("Open Live TV", named("header button", "Live TV"));
+
+  if (!(await d.exists(GRID))) {
+    await d.wait(() => d.exists(named("button", "Record")));
+    await d.key("g", 71);
+  }
+
+  await d.wait(() => d.exists(GRID));
+  await d.wait(() => d.evaluate<boolean>(`${GRID}.querySelectorAll('[role=gridcell]').length > 4`));
+}
+
+const selected = (d: Driver) =>
+  d.evaluate<string>(
+    `document.querySelector('[role=grid] [role=gridcell][aria-selected=true]')?.getAttribute('aria-label') ?? ''`,
+  );
+
+async function ruleJourney(d: Driver) {
+  await size(d, 1280, 800);
+  await d.click("Open global Search", "document.querySelector('button[aria-label=Search]')");
+  await d.send("Input.insertText", { text: "TEST | H.264 + AAC" });
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "document.querySelector('[aria-label=\"Search results\"] [aria-selected=true]')?.textContent.includes('H.264 + AAC') ?? false",
+    ),
+  );
+  await d.key("Enter", 13);
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "!!document.querySelector('[data-view=watch]') && (document.querySelector('video')?.currentTime ?? 0) >= 1",
+    ),
+  );
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists("document.querySelector('[data-view=watch]')")));
+  await grid(d);
+  await d.key("ArrowRight", 39);
+  await d.wait(() => d.exists(DETAILS));
+  const record = named("[role=grid] [role=region] button", "Record");
+  await d.click("Record the next programme", record);
+  await d.wait(() => d.exists(PANEL));
+  await d.click("Follow programme", `${PANEL}.querySelector('[data-repeat=follow]')`);
+  await d.wait(async () => (await text(d, PANEL)).includes("Turn on rule"));
+  await d.wait(async () => {
+    const shown = await text(d, PANEL);
+
+    return shown.includes("MATCHES IN THE GUIDE") || shown.includes("Nothing in the guide matches");
+  });
+  d.observed["follow"] = await text(d, PANEL);
+  d.observed["followLabel"] = await d.evaluate<string>(`${PANEL}.getAttribute('aria-label')`);
+  d.observed["modes"] = await d.evaluate(
+    `[...${PANEL}.querySelectorAll('[data-mode]')].map(e => ({ mode: e.dataset.mode, checked: e.getAttribute('aria-checked'), disabled: e.disabled }))`,
+  );
+  d.observed["chips"] = await d.evaluate(
+    `[...${PANEL}.querySelectorAll('button[aria-pressed]')].map(e => ({ name: e.textContent, pressed: e.getAttribute('aria-pressed') }))`,
+  );
+  await d.capture("r1-guide-follow");
+
+  // Keys stay in the panel: the Record radios and padding move, the grid doesn't.
+  const before = await selected(d);
+  await d.evaluate(`${PANEL}.querySelector('[data-mode][aria-checked=true]').focus()`);
+  await d.key("ArrowRight", 39);
+  d.observed["modeAfterArrow"] = await d.evaluate(
+    `[...${PANEL}.querySelectorAll('[data-mode]')].find(e => e.getAttribute('aria-checked') === 'true')?.dataset.mode`,
+  );
+  await d.evaluate(`${PANEL}.querySelector('[role=spinbutton][aria-label=End]').focus()`);
+  await d.key("ArrowUp", 38);
+  await d.wait(async () => (await text(d, PANEL)).includes("6 min late"));
+  expect((await selected(d)) === before, "Keys in the rule panel moved the grid");
+  d.observed["focusInPanel"] = await d.evaluate<boolean>(
+    `${PANEL}.contains(document.activeElement)`,
+  );
+  expect(d.observed["modeAfterArrow"] === "every", "Disabled new-only accepted keyboard selection");
+  expect(d.observed["focusInPanel"] === true, "Padding keys lost panel focus");
+  await d.capture("r2-guide-follow-keys");
+
+  await d.click("Turn on rule", named("button", "Turn on rule", PANEL));
+  await d.wait(async () => !(await d.exists(PANEL)));
+  // The rule's first airing is the programme it was made from: its details read Scheduled.
+  await d.wait(() => d.exists(named("[role=grid] [role=region] button", "Scheduled")), 60_000);
+  await d.capture("r3-guide-rule-scheduled");
+  await d.click("Scheduled", named("[role=grid] [role=region] button", "Scheduled"));
+  await d.wait(() => d.exists(PANEL));
+  await d.wait(async () => (await text(d, PANEL)).includes("A rule following"));
+  d.observed["occurrence"] = await text(d, PANEL);
+  await d.capture("r4-guide-occurrence");
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists(PANEL)));
+
+  await d.click("Open Recordings", named("header button", "Recordings"));
+  await d.wait(() => d.exists("document.querySelector('section[aria-label=Rules] li')"));
+  await d.wait(() =>
+    d.evaluate<boolean>(
+      "[...document.querySelectorAll('section[aria-label=Scheduled] li')].some(row => row.textContent.includes('From a rule'))",
+    ),
+  );
+  d.observed["page"] = await text(d, "document.querySelector('#root')");
+  d.observed["occurrenceEdit"] = await d.evaluate<boolean>(
+    "[...document.querySelectorAll('section[aria-label=Scheduled] li')].some(row => row.textContent.includes('From a rule') && row.querySelector('button[aria-label^=Edit]'))",
+  );
+  expect(d.observed["occurrenceEdit"] === false, "Rule airing exposed manual Edit");
+  await d.capture("r5-recordings-rules-1280");
+  await d.click(
+    "Edit the rule",
+    "document.querySelector('section[aria-label=Rules] button[aria-label^=Edit]')",
+  );
+  await d.wait(() => d.exists(`${DIALOG}?.querySelector('[role=group]')`));
+  await d.wait(async () => (await text(d, DIALOG)).includes("Stop following"));
+  d.observed["edit"] = await text(d, DIALOG);
+  await d.capture("r6-recordings-rule-edit-1280");
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists(DIALOG)));
+
+  await size(d, 960, 600);
+  await d.capture("r7-recordings-rules-960");
+  await d.click(
+    "Edit at 960",
+    "document.querySelector('section[aria-label=Rules] button[aria-label^=Edit]')",
+  );
+  await d.wait(async () => (await text(d, DIALOG)).includes("Stop following"));
+  await d.capture("r8-recordings-rule-edit-960");
+  await d.key("Escape", 27);
+  await d.wait(async () => !(await d.exists(DIALOG)));
+  await d.evaluate(
+    "document.documentElement.style.fontSize = (parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.25) + 'px'",
+  );
+  await d.click(
+    "Edit, larger",
+    "document.querySelector('section[aria-label=Rules] button[aria-label^=Edit]')",
+  );
+  await d.wait(async () => (await text(d, DIALOG)).includes("Stop following"));
+  await d.capture("r8b-recordings-rule-edit-960-larger");
+  await d.key("Escape", 27);
+
+  for (const [locale, recordings, rules, stop] of [
+    ["en_GB", "Recordings", "Rules", "Stop following"],
+    ["nl_NL", "Opnames", "Regels", "Niet meer volgen"],
+    ["fr_FR", "Enregistrements", "Règles", "Ne plus suivre"],
+    ["es_ES", "Grabaciones", "Reglas", "Dejar de seguir"],
+    ["de_DE", "Aufnahmen", "Regeln", "Nicht mehr folgen"],
+  ] as const) {
+    await d.quit();
+    await d.launch(locale);
+    await size(d, 960, 600);
+    await d.click(recordings, named("header button", recordings));
+    const section = `document.querySelector('section[aria-label=${JSON.stringify(rules)}]')`;
+    await d.wait(() => d.exists(`${section}?.querySelector('li')`));
+    await d.capture(`rule-${locale}-rows`);
+    await d.click("Edit rule", `${section}.querySelector('li button')`);
+    await d.wait(async () => (await text(d, DIALOG)).includes(stop));
+    d.observed[`edit-${locale}`] = await text(d, DIALOG);
+    await d.capture(`rule-${locale}-edit`);
+    await d.evaluate(
+      "document.documentElement.style.fontSize = (parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.25) + 'px'",
+    );
+    await d.capture(`rule-${locale}-larger`);
+    await d.send("Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x: 800,
+      y: 500,
+      deltaX: 0,
+      deltaY: 600,
+    });
+    await d.wait(() =>
+      d.evaluate<boolean>(
+        `(() => { const b = ${named("button", stop, DIALOG)}; const r = b?.getBoundingClientRect(); return !!r && r.top >= 0 && r.bottom <= innerHeight; })()`,
+      ),
+    );
+    await d.capture(`rule-${locale}-actions-larger`);
+    await d.key("Escape", 27);
+    await d.wait(async () => !(await d.exists(DIALOG)));
+  }
+
+  await d.click(
+    "Open the rule's menu",
+    "document.querySelector('section[aria-label=Regeln] button[aria-label^=\"Mehr zu\"]')",
+  );
+  await d.click("Nicht mehr folgen", named("[role=menuitem]", "Nicht mehr folgen"));
+  await d.wait(
+    async () => !(await d.exists("document.querySelector('section[aria-label=Regeln]')")),
+  );
+  await d.wait(
+    () =>
+      d.evaluate<boolean>(
+        "![...document.querySelectorAll('section li')].some(row => row.textContent.includes('Über eine Regel'))",
+      ),
+    60_000,
+  );
+  d.observed["afterStop"] = await text(d, "document.querySelector('#root')");
+  await d.capture("r11-lang-de-stopped");
 }

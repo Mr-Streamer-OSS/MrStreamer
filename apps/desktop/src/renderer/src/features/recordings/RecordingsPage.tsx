@@ -6,7 +6,10 @@
 // records, or waits paused for the rest of its time, has Stop, an ended one Play and, in its menu,
 // Delete. One a schedule missed has no file: it says why, and Remove. A schedule's row says how
 // often it records, how its next time stands, and offers Edit, the schedule's controls in a
-// popover, and Cancel schedule in its menu. An action that fails says so in place of the reason.
+// popover, and Cancel schedule in its menu; one a rule made has no Edit, as the rule sets its
+// padding, and cancelling it lets that one airing go. Rules, after them, are each a programme
+// followed on its channels: what it records, Edit in a popover and Stop following in its menu.
+// An action that fails says so in place of the reason.
 // Narrower windows put the size, or a schedule's repeat, in the row's second line and the outcome
 // under the bar, and the heading keeps only the room left. A recording's outcome and why wrap
 // rather than cut off: two lines fit its row, and a longer one makes the row taller.
@@ -14,17 +17,18 @@
 // with nothing scheduled and no way to record, in the bar Downloads shares (DownloadsPage.tsx).
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
-import { useMutation, useMutationState, useQuery } from "@tanstack/react-query";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ellipsis, Play, Repeat2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type {
   Recording,
+  RecordingRule,
   RecordingStorage,
   ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
-import { formatBytes, formatDate, formatNumber, t } from "@mrstreamer/core/i18n";
+import { formatBytes, formatDate, formatList, formatNumber, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { ChannelLogo } from "../../components/ChannelLogo.tsx";
 import { Button } from "../../components/ui/button.tsx";
@@ -47,16 +51,25 @@ import {
   useRecordings,
   useRecordingStorage,
 } from "./recordings.ts";
-import { SchedulePanel } from "./SchedulePanel.tsx";
-import { basisOfSchedule, holdersText, repeatText, useSchedules } from "./schedules.ts";
+import { RulePanel, SchedulePanel } from "./SchedulePanel.tsx";
+import {
+  basisOfSchedule,
+  holdersText,
+  repeatText,
+  rulesQuery,
+  useRules,
+  useSchedules,
+} from "./schedules.ts";
 
 export function RecordingsPage({ standalone = false }: { standalone?: boolean }) {
   const list = useRecordings();
   const schedules = useSchedules();
+  const ruleList = useRules();
   const storage = useRecordingStorage().data;
   // Standing alone, what was recorded: nothing records or is scheduled without a subscription.
   const recordings = (list.data ?? []).filter((each) => !standalone || !isLive(each));
   const scheduled = standalone ? [] : (schedules.data ?? []);
+  const rules = standalone ? [] : (ruleList.data ?? []);
   const now = recordings.filter(isLive);
   const recorded = recordings.filter((each) => !isLive(each));
 
@@ -66,12 +79,15 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
       queries.channelsOf([
         ...recordings.map((each) => each.channel),
         ...scheduled.map((each) => each.plan.channel),
+        ...rules.flatMap((each) => each.plan.channels),
       ]),
     ).data ?? [];
 
   const logoOf = (owned: OwnedId) => channels.find((channel) => sameOwned(channel, owned)) ?? null;
-  const count = recordings.length + scheduled.length;
-  const error = list.error ?? (standalone ? null : schedules.error);
+  const count = recordings.length + scheduled.length + rules.length;
+  const error = list.error ?? (standalone ? null : (schedules.error ?? ruleList.error));
+  // The rules read keeps startup failures until the next start; refetching cannot reload it.
+  const restartRequired = !standalone && ruleList.isError;
 
   return (
     <div className="flex h-full flex-col">
@@ -87,9 +103,10 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           {storage && <StorageLine storage={storage} settings={!standalone} />}
         </div>
         {error ? (
-          <div role="alert" className="flex items-center gap-3 pt-2 text-sm">
+          <div role="alert" className="flex flex-wrap items-center gap-3 pt-2 text-sm">
             <span className="text-destructive">{describeError(appError(error))}</span>
             <Button
+              hidden={restartRequired && !list.isError && !schedules.isError}
               size="sm"
               onClick={() => {
                 if (list.error) void list.refetch();
@@ -99,8 +116,9 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
             >
               {t("Retry")}
             </Button>
+            {restartRequired && <span>{t("Restart Mr. Streamer to reload recording rules.")}</span>}
           </div>
-        ) : list.data && (standalone || schedules.data) && count === 0 ? (
+        ) : list.data && (standalone || (schedules.data && ruleList.data)) && count === 0 ? (
           <p className="pt-2 text-[0.9375rem] text-muted-foreground">
             {t("Nothing recorded yet. Record a channel from Live TV.")}
           </p>
@@ -116,9 +134,24 @@ export function RecordingsPage({ standalone = false }: { standalone?: boolean })
           ))}
         </Section>
         <Section
+          label={t("Rules")}
+          count={rules.length}
+          first={now.length === 0 && scheduled.length === 0}
+        >
+          {rules.map((each) => (
+            <RuleRow
+              key={each.id}
+              rule={each}
+              channels={channels.filter((channel) =>
+                each.plan.channels.some((owned) => sameOwned(channel, owned)),
+              )}
+            />
+          ))}
+        </Section>
+        <Section
           label={t("Recorded")}
           count={recorded.length}
-          first={now.length === 0 && scheduled.length === 0}
+          first={now.length === 0 && scheduled.length === 0 && rules.length === 0}
         >
           {recorded.map((each) => (
             <Row key={each.id} recording={each} channel={logoOf(each.channel)} />
@@ -448,7 +481,9 @@ function ScheduleRow({
       end: formatDate(next.stop, "time"),
     });
 
-  const repeat = repeatText(plan);
+  // A rule's airing: its padding is the rule's, so it is changed there.
+  const occurrence = schedule.rule !== undefined;
+  const repeat = occurrence ? t("From a rule") : repeatText(plan);
   const { word, reason } = standing(schedule, now);
   const recording = status.kind === "recording";
 
@@ -496,43 +531,45 @@ function ScheduleRow({
       </span>
       <span className="hidden w-16 flex-none xl:block" />
       <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 xl:w-[9.15rem]">
-        <Popover.Root open={editing} onOpenChange={setEditing}>
-          <Popover.Trigger
-            render={
-              <Button
-                size="sm"
-                aria-label={t("Edit {title}", { title: plan.title })}
-                className="px-3 data-popup-open:bg-white/16 data-popup-open:ring-2 data-popup-open:ring-ring data-popup-open:ring-inset"
-              >
-                {t("Edit")}
-              </Button>
-            }
-          />
-          <Popover.Portal>
-            <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
-              <Popover.Popup
-                aria-label={t("Schedule {title}", { title: plan.title })}
-                className={cn(
-                  menuSurface,
-                  "flex w-[42rem] max-w-[calc(100vw-2rem)] flex-col gap-3.5 p-4 transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
-                )}
-              >
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <h2 className="truncate text-[0.9375rem] font-semibold">{plan.title}</h2>
-                  <p className="truncate text-[0.8125rem] text-muted-foreground">
-                    {schedule.channelName}
-                  </p>
-                </div>
-                <SchedulePanel
-                  basis={basisOfSchedule(schedule)}
-                  channelName={schedule.channelName}
-                  schedule={schedule}
-                  onDone={() => setEditing(false)}
-                />
-              </Popover.Popup>
-            </Popover.Positioner>
-          </Popover.Portal>
-        </Popover.Root>
+        {!occurrence && (
+          <Popover.Root open={editing} onOpenChange={setEditing}>
+            <Popover.Trigger
+              render={
+                <Button
+                  size="sm"
+                  aria-label={t("Edit {title}", { title: plan.title })}
+                  className="px-3 data-popup-open:bg-white/16 data-popup-open:ring-2 data-popup-open:ring-ring data-popup-open:ring-inset"
+                >
+                  {t("Edit")}
+                </Button>
+              }
+            />
+            <Popover.Portal>
+              <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
+                <Popover.Popup
+                  aria-label={t("Schedule {title}", { title: plan.title })}
+                  className={cn(
+                    menuSurface,
+                    "flex w-[42rem] max-w-[calc(100vw-2rem)] flex-col gap-3.5 p-4 transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+                  )}
+                >
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <h2 className="truncate text-[0.9375rem] font-semibold">{plan.title}</h2>
+                    <p className="truncate text-[0.8125rem] text-muted-foreground">
+                      {schedule.channelName}
+                    </p>
+                  </div>
+                  <SchedulePanel
+                    basis={basisOfSchedule(schedule)}
+                    channelName={schedule.channelName}
+                    schedule={schedule}
+                    onDone={() => setEditing(false)}
+                  />
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
         <Menu.Root>
           <Menu.Trigger
             render={
@@ -555,6 +592,131 @@ function ScheduleRow({
                   className={cn(menuItem, "px-2 py-2")}
                 >
                   {t("Cancel schedule")}
+                </Menu.Item>
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * One rule, in the recordings' lanes: the first channel's logo, the title with its channels and
+ * padding, what it records where the bar is, then Edit with its menu, which has Stop following.
+ */
+function RuleRow({ rule, channels }: { rule: RecordingRule; channels: readonly LiveChannel[] }) {
+  const client = useQueryClient();
+  const { plan } = rule;
+  const [editing, setEditing] = useState(false);
+
+  const stop = useMutation({
+    mutationKey: ["rules", "cancel", rule.id],
+    mutationFn: () => call("recordings.cancelRule", { id: rule.id }),
+    onSuccess: () =>
+      client.setQueryData(rulesQuery().queryKey, (list) =>
+        list?.filter((each) => each.id !== rule.id),
+      ),
+  });
+
+  const failure = stop.error ? describeError(appError(stop.error)) : rule.error;
+
+  const padding = [
+    t("{minutes} min early", { minutes: plan.padding.before }),
+    t("{minutes} min late", { minutes: plan.padding.after }),
+  ].join(", ");
+
+  const mode = plan.mode === "new-only" ? t("New episodes only") : t("Every match");
+  const first = channels[0];
+
+  return (
+    <li className="flex h-[3.875rem] items-center gap-3.5 border-b border-border xl:h-[3.75rem] xl:gap-4">
+      <span className="flex h-8 w-12 flex-none xl:w-[3.3rem]">
+        {first && <ChannelLogo channel={first} />}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 xl:w-80 xl:flex-none">
+        <span className="truncate text-[0.9375rem] font-medium">{plan.title}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {formatList(channels.map((channel) => channel.title))}
+          <span className="xl:hidden"> · {mode}</span>
+        </span>
+      </div>
+      <div className="flex w-[23.5rem] flex-none flex-col gap-1.5 xl:w-[10.75rem]">
+        <span className="hidden items-center gap-1.5 text-xs text-muted-foreground xl:flex">
+          <Repeat2 aria-hidden className="size-3.5 flex-none" />
+          {mode}
+        </span>
+        <span
+          className={cn(
+            "truncate text-xs xl:hidden",
+            failure ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {failure ?? padding}
+        </span>
+      </div>
+      <span
+        className={cn(
+          "hidden min-w-0 flex-1 truncate text-[0.8125rem] xl:block",
+          failure ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
+        {failure ?? padding}
+      </span>
+      <span className="hidden w-16 flex-none xl:block" />
+      <div className="flex w-[7.5rem] flex-none justify-end gap-1.5 xl:w-[9.15rem]">
+        <Popover.Root open={editing} onOpenChange={setEditing}>
+          <Popover.Trigger
+            render={
+              <Button
+                size="sm"
+                aria-label={t("Edit {title}", { title: plan.title })}
+                className="px-3 data-popup-open:bg-white/16 data-popup-open:ring-2 data-popup-open:ring-ring data-popup-open:ring-inset"
+              >
+                {t("Edit")}
+              </Button>
+            }
+          />
+          <Popover.Portal>
+            <Popover.Positioner side="bottom" align="end" sideOffset={8} className="z-[60]">
+              <Popover.Popup
+                aria-label={t("Follow {title}", { title: plan.title })}
+                className={cn(
+                  menuSurface,
+                  "flex max-h-[var(--available-height)] w-[60rem] max-w-[calc(100vw-2rem)] flex-col gap-3.5 overflow-y-auto p-4 transition-[opacity,scale] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+                )}
+              >
+                <h2 className="truncate text-[0.9375rem] font-semibold">
+                  {t("Follow {title}", { title: plan.title })}
+                </h2>
+                <RulePanel rule={rule} onDone={() => setEditing(false)} />
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("More for {title}", { title: plan.title })}
+                disabled={stop.isPending}
+              />
+            }
+          >
+            <Ellipsis className="size-4" />
+          </Menu.Trigger>
+          <Menu.Portal>
+            <Menu.Positioner side="bottom" align="end" sideOffset={6} className="z-[60]">
+              <Menu.Popup className={cn(menuSurface, "text-[0.875rem] text-white")}>
+                <Menu.Item
+                  closeOnClick
+                  onClick={() => stop.mutate()}
+                  className={cn(menuItem, "px-2 py-2")}
+                >
+                  {t("Stop following")}
                 </Menu.Item>
               </Menu.Popup>
             </Menu.Positioner>

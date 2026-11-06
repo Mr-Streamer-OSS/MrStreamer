@@ -281,4 +281,61 @@ export interface ScheduledRecording {
    */
   readonly next: { readonly start: number; readonly stop: number } | null;
   readonly status: ScheduleStatus;
+  /**
+   * The rule that made it, for one airing a rule found. The rule sets its plan: `recordings.plan`
+   * and `recordings.schedule` refuse it, and `recordings.cancel` lets that one airing go.
+   */
+  readonly rule?: string;
 }
+
+/** Bounded title matching on explicitly selected channels. Every airing is the default. */
+export const RecordingRulePlanSchema = lazy(() =>
+  type({
+    title: "0 < string <= 512",
+    channels: type({ subscriptionId: "string > 0", id: "string > 0" })
+      .array()
+      .atLeastLength(1)
+      .atMostLength(100),
+    "mode?": "'every' | 'new-only'",
+    padding: {
+      before: `0 <= number.integer <= ${PADDING_MAX}`,
+      after: `0 <= number.integer <= ${PADDING_MAX}`,
+    },
+  }),
+);
+
+export type RecordingRulePlan = ReturnType<typeof RecordingRulePlanSchema>["infer"];
+
+/** Whether a guide programme's title is the one a rule follows: trimmed, in any case. */
+export function sameProgrammeTitle(a: string, b: string): boolean {
+  return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+}
+
+export interface RecordingRuleMatch {
+  readonly identity: string;
+  readonly episodeIdentity?: string;
+  readonly plan: Extract<RecordingPlan, { kind: "programme" }>;
+  readonly channelName: string;
+}
+
+export interface RecordingRulePreview {
+  readonly matches: readonly RecordingRuleMatch[];
+  /** The guide returned more results than this bounded preview reads. */
+  readonly limited: boolean;
+  /** Matches omitted because the guide does not establish an episode's first run. */
+  readonly unproven: number;
+}
+
+export interface RecordingRule {
+  /** Retryable check failure, or exhausted durable identity history. */
+  readonly error?: string;
+  readonly id: string;
+  readonly plan: RecordingRulePlan;
+}
+
+export const RECORDING_RULE_LIMITS = {
+  rules: 20,
+  matches: 100,
+  queued: 100,
+  history: 1000,
+} as const;

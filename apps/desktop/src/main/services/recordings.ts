@@ -53,18 +53,26 @@ import type {
   RecordingGapReason,
   RecordingLimits,
   RecordingPlan,
+  RecordingRule,
+  RecordingRulePlan,
+  RecordingRulePreview,
   RecordingStart,
   RecordingStorage,
   ScheduledRecording,
   ScheduleMiss,
   ScheduleStatus,
 } from "@mrstreamer/contracts/recordings";
-import { DEFAULT_KEEP_FREE, RECORDING_MAX_MS } from "@mrstreamer/contracts/recordings";
+import {
+  DEFAULT_KEEP_FREE,
+  RECORDING_MAX_MS,
+  RECORDING_RULE_LIMITS,
+} from "@mrstreamer/contracts/recordings";
+import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
-import { t } from "@mrstreamer/core/i18n";
+import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -93,6 +101,8 @@ import {
   type KeptStorage,
   type StoredRecording,
 } from "../recordings/store.ts";
+import { readRules, writeRules, type KeptRule } from "../recordings/rule-store.ts";
+import { planRule } from "../recordings/rules.ts";
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
@@ -257,6 +267,11 @@ export class Recordings extends Context.Service<
     }>;
     /** The list after each change, and as recordings grow, about once a second. */
     readonly changes: Stream.Stream<readonly Recording[]>;
+    /** Lists saved rules; a refused startup inventory stays refused until the next start. */
+    readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
+    previewRule(plan: RecordingRulePlan): Effect.Effect<RecordingRulePreview, Failed>;
+    saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;
+    cancelRule(id: string): Effect.Effect<void, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
     readonly schedules: Effect.Effect<readonly ScheduledRecording[], Failed>;
     /**
@@ -1390,6 +1405,39 @@ function make(deps: RecordingsDeps) {
       );
 
     // Schedules.
+    const rulesPath = join(root, "rules.json");
+    let rules = yield* Effect.promise(() => readRules(rulesPath));
+
+    const ruleFailure = (detail: PlainKey) =>
+      new Failed({ error: { kind: "unexpected", detail: t(detail) } });
+
+    const rulesUsable = Effect.suspend(() =>
+      rules === null
+        ? Effect.fail(ruleFailure("Recording rules could not be read."))
+        : schedulesUsable,
+    );
+
+    const persistRules = (next: KeptRule[]) =>
+      Effect.tap(
+        Effect.tryPromise({
+          try: () => writeRules(rulesPath, next),
+          catch: () => ruleFailure("Recording rules could not be saved."),
+        }),
+        () =>
+          Effect.sync(() => {
+            rules = next;
+          }),
+      );
+
+    // Main names each airing a rule found `rule:<uuid>`; the window reads `ScheduledRecording.rule`.
+    const isRuleSchedule = (id: string) => id.startsWith("rule:");
+
+    /** The rule that made schedule `id`, for its standing. */
+    const ruleOf = (id: string) =>
+      isRuleSchedule(id)
+        ? rules?.find((rule) => rule.occurrences.some((each) => each.id === id))?.id
+        : undefined;
+
     const schedulesPath = join(root, "schedules.json");
     const readKept = yield* Effect.promise(() => readSchedules(schedulesPath));
 
@@ -1456,11 +1504,228 @@ function make(deps: RecordingsDeps) {
           : Effect.void,
       ),
       Effect.tryPromise({
-        try: () => writeSchedules(schedulesPath, [...schedules.values()]),
+        try: () =>
+          writeSchedules(
+            schedulesPath,
+            [...schedules.values()].filter((each) => !isRuleSchedule(each.id)),
+          ),
         catch: () =>
           new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
       }),
     );
+
+    const ruleErrors = new Map<string, string>();
+    const blockedRules = new Set<string>();
+
+    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
+      Effect.gen(function* () {
+        yield* rulesUsable;
+        const matches = [];
+        let limited = false;
+
+        for (const subscriptionId of new Set(plan.channels.map((each) => each.subscriptionId))) {
+          const available = status.find((each) => each.subscriptionId === subscriptionId);
+
+          if (!available) return yield* ruleFailure("This rule's subscription is no longer there.");
+
+          // Availability describes only the subscription's own guide. Global XMLTV
+          // sources can supply its channels even when that own guide is absent.
+          if (available.availability !== "available" && available.supplied.length === 0)
+            return yield* ruleFailure("This rule's guide could not be read.");
+
+          const page = yield* guide.searchPage({
+            from: Date.now(),
+            subscriptionId,
+            query: plan.title,
+            channels: plan.channels
+              .filter((each) => each.subscriptionId === subscriptionId)
+              .map((each) => each.id),
+            limit: RECORDING_RULE_LIMITS.matches,
+          });
+
+          matches.push(...page.matches);
+          limited ||= page.next !== null;
+        }
+
+        return planRule(plan, matches, Date.now(), limited);
+      });
+
+    /** Durable identities precede schedules and capture. Settled identities never expire into
+     * eligibility; a full history stops admitting work until the viewer creates another rule. */
+    const reconcileRules = Effect.gen(function* () {
+      yield* rulesUsable;
+      const next: KeptRule[] = [];
+      ruleErrors.clear();
+      blockedRules.clear();
+
+      const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
+
+      // Retire dead work durably, retaining identities and observed intervals for suppression.
+      // Recent expired work still reaches the scheduler's ordinary Missed path.
+      const retained = (rules ?? []).map((rule) => ({
+        ...rule,
+        occurrences: rule.occurrences.map((each) => ({
+          ...each,
+          settled:
+            each.settled ||
+            (!startsOf.has(each.id) &&
+              ([...records.values()].some((record) => record.scheduled?.schedule === each.id) ||
+                (!recordingOf(each.id) &&
+                  (!saved.has(each.plan.channel.subscriptionId) ||
+                    each.plan.stop + each.plan.padding.after * 60_000 <=
+                      Date.now() - MISSED_KEPT_MS)))),
+        })),
+      }));
+
+      let queued = retained.reduce(
+        (count, rule) => count + rule.occurrences.filter((each) => !each.settled).length,
+        0,
+      );
+
+      const observed = new Set<string>();
+      const status = yield* guide.status;
+
+      for (const rule of retained) {
+        const checked = yield* Effect.result(previewRule(rule.plan, status));
+        const occurrences = rule.occurrences;
+
+        if (checked._tag === "Failure") {
+          blockedRules.add(rule.id);
+          ruleErrors.set(
+            rule.id,
+            checked.failure.error.kind === "unexpected"
+              ? checked.failure.error.detail
+              : t("This rule's guide could not be read."),
+          );
+
+          for (const each of occurrences) observed.add(each.id);
+          next.push(rule);
+          continue;
+        }
+
+        const preview = checked.success;
+
+        // Expired retained airings must reach the ordinary Missed path, even after restart.
+        for (const each of occurrences)
+          if (
+            !each.settled &&
+            (preview.matches.length === 0 ||
+              each.plan.stop + each.plan.padding.after * 60_000 <= Date.now())
+          )
+            observed.add(each.id);
+
+        for (const match of preview.matches) {
+          // Retain overlapping observations separately from the immutable capture plan.
+          // The guide can carry clipped old slots alongside a replacement; settled/active
+          // intervals keep their union so those old slots cannot erase suppression history.
+          const shifted = occurrences.filter((each) => {
+            const interval = each.observed ?? each.plan;
+
+            return (
+              ownedKey(each.plan.channel) === ownedKey(match.plan.channel) &&
+              (each.settled ||
+                recordingOf(each.id) ||
+                startsOf.has(each.id) ||
+                !preview.matches.some((candidate) => candidate.identity === each.identity)) &&
+              interval.start < match.plan.stop &&
+              match.plan.start < interval.stop &&
+              (!each.episodeIdentity ||
+                !match.episodeIdentity ||
+                each.episodeIdentity === match.episodeIdentity ||
+                each.settled ||
+                recordingOf(each.id) ||
+                startsOf.has(each.id))
+            );
+          });
+
+          const was =
+            occurrences.find((each) => each.identity === match.identity) ??
+            (shifted.length === 1 ? shifted[0] : undefined);
+
+          if (was) {
+            was.identity = match.identity;
+            const interval = was.observed ?? was.plan;
+            was.observed =
+              was.settled || recordingOf(was.id) || startsOf.has(was.id)
+                ? {
+                    start: Math.min(interval.start, match.plan.start),
+                    stop: Math.max(interval.stop, match.plan.stop),
+                  }
+                : { start: match.plan.start, stop: match.plan.stop };
+
+            if (!was.settled && !startsOf.has(was.id) && !recordingOf(was.id)) {
+              was.plan = match.plan;
+              was.channelName = match.channelName;
+            }
+          } else if (shifted.length > 0) {
+            // Ambiguous overlap cannot safely revive a settled or active airing.
+            continue;
+          } else if (
+            occurrences.length < RECORDING_RULE_LIMITS.history &&
+            queued < RECORDING_RULE_LIMITS.queued
+          ) {
+            occurrences.push({
+              ...match,
+              id: `rule:${randomUUID()}`,
+              settled: false,
+              observed: { start: match.plan.start, stop: match.plan.stop },
+            });
+            queued++;
+          }
+        }
+
+        for (const each of occurrences)
+          if (preview.matches.some((match) => match.identity === each.identity))
+            observed.add(each.id);
+
+        if (occurrences.length >= RECORDING_RULE_LIMITS.history)
+          ruleErrors.set(rule.id, t("This recording rule’s airing history is full."));
+        next.push({ ...rule, occurrences });
+      }
+
+      if (!isDeepStrictEqual(next, rules)) yield* persistRules(next);
+
+      const wanted = new Set(
+        next.flatMap((rule) =>
+          rule.occurrences
+            .filter((each) => !each.settled && observed.has(each.id))
+            .map((each) => each.id),
+        ),
+      );
+
+      for (const id of schedules.keys()) {
+        if (isRuleSchedule(id) && !wanted.has(id) && !startsOf.has(id) && !recordingOf(id))
+          schedules.delete(id);
+      }
+
+      for (const rule of next)
+        for (const each of rule.occurrences) {
+          if (each.settled || !observed.has(each.id) || startsOf.has(each.id)) continue;
+          const was = schedules.get(each.id);
+          schedules.set(each.id, {
+            id: each.id,
+            plan: each.plan,
+            channelName: each.channelName,
+            created: was?.created ?? Date.now(),
+            through: was?.through ?? each.plan.start - each.plan.padding.before * 60_000 - 1,
+          });
+        }
+    });
+
+    const settleRuleSchedule = (id: string) =>
+      Effect.gen(function* () {
+        if (!isRuleSchedule(id)) return;
+        yield* rulesUsable;
+
+        const next = (rules ?? []).map((rule) => ({
+          ...rule,
+          occurrences: rule.occurrences.map((each) =>
+            each.id === id ? { ...each, settled: true } : each,
+          ),
+        }));
+
+        if (!isDeepStrictEqual(next, rules)) yield* persistRules(next);
+      });
 
     /** Keeps `schedule` as `id`, or takes `id` out for null, putting it back if the write fails. */
     const keep = (id: string, schedule: KeptSchedule | null) =>
@@ -1557,12 +1822,15 @@ function make(deps: RecordingsDeps) {
         const { plan } = schedule;
         const on = nextOccurrence(plan, now);
 
+        const rule = ruleOf(schedule.id);
+
         const as = (status: ScheduleStatus, next = on): ScheduledRecording => ({
           id: schedule.id,
           plan,
           channelName: schedule.channelName,
           next,
           status,
+          ...(rule && { rule }),
         });
 
         // What records goes on whatever the guide says now, or a change made meanwhile, until its
@@ -1926,7 +2194,7 @@ function make(deps: RecordingsDeps) {
 
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
-      if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
+      if (schedules.size === 0 && !rules?.length && !unsaved.recordings && !unsaved.schedules) {
         if (shownSchedules.length > 0) {
           shownSchedules = [];
           yield* PubSub.publish(scheduleChanges, shownSchedules);
@@ -1934,6 +2202,16 @@ function make(deps: RecordingsDeps) {
 
         return resumeAt;
       }
+
+      const previousErrors = new Map(ruleErrors);
+      const ruleCheck = yield* Effect.result(reconcileRules);
+
+      if (ruleCheck._tag === "Failure" && (rules?.length ?? 0) > 0)
+        yield* Effect.logWarning("[recordings] rules could not be checked or saved; trying again");
+
+      if (ruleCheck._tag === "Failure")
+        for (const rule of rules ?? [])
+          ruleErrors.set(rule.id, t("Recording rules could not be saved."));
 
       const now = Date.now();
       const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
@@ -1948,6 +2226,12 @@ function make(deps: RecordingsDeps) {
       );
 
       for (const schedule of ordered) {
+        if (
+          isRuleSchedule(schedule.id) &&
+          (ruleCheck._tag === "Failure" || blockedRules.has(ruleOf(schedule.id) ?? ""))
+        )
+          continue;
+
         if (!saved.has(schedule.plan.channel.subscriptionId)) {
           schedules.delete(schedule.id);
           dirty = true;
@@ -2070,7 +2354,10 @@ function make(deps: RecordingsDeps) {
 
       const list = yield* standings(now);
 
-      if (!isDeepStrictEqual(list, shownSchedules)) {
+      if (
+        !isDeepStrictEqual(list, shownSchedules) ||
+        !isDeepStrictEqual(previousErrors, ruleErrors)
+      ) {
         shownSchedules = list;
         yield* PubSub.publish(scheduleChanges, list);
       }
@@ -2156,6 +2443,15 @@ function make(deps: RecordingsDeps) {
         if (id !== undefined && !was)
           return yield* new Failed({
             error: { kind: "unexpected", detail: t("This schedule is no longer there.") },
+          });
+
+        // Reconciling would put the rule's plan back: an airing a rule found changes with its rule.
+        if (id !== undefined && isRuleSchedule(id))
+          return yield* new Failed({
+            error: {
+              kind: "invalid-input",
+              detail: t("A rule sets this schedule. Change the rule instead."),
+            },
           });
         const found = yield* follow(plan);
 
@@ -2398,6 +2694,8 @@ function make(deps: RecordingsDeps) {
           // A schedule's time it recorded stays settled without it, so it never records again.
           const { scheduled } = record;
 
+          if (scheduled) yield* scheduling(settleRuleSchedule(scheduled.schedule));
+
           if (scheduled)
             yield* scheduling(
               Effect.suspend(() => {
@@ -2604,6 +2902,63 @@ function make(deps: RecordingsDeps) {
         return (yield* unkept).length === 0;
       }),
       changes: Stream.fromPubSub(changes),
+      rules: scheduling(
+        Effect.andThen(
+          rulesUsable,
+          Effect.sync(() =>
+            (rules ?? []).map(({ id, plan }) => ({
+              id,
+              plan,
+              ...(ruleErrors.has(id) && { error: ruleErrors.get(id)! }),
+            })),
+          ),
+        ),
+      ),
+      previewRule: (plan: RecordingRulePlan) =>
+        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status))),
+      saveRule: (plan: RecordingRulePlan, id?: string) =>
+        Effect.tap(
+          scheduling(
+            Effect.gen(function* () {
+              // Fails as the preview does: rules unread, or a channel's subscription not saved.
+              yield* previewRule(plan, yield* guide.status);
+              const was = rules?.find((each) => each.id === id);
+
+              if (id && !was) return yield* ruleFailure("This recording rule is no longer there.");
+
+              if (!was && (rules?.length ?? 0) >= RECORDING_RULE_LIMITS.rules)
+                return yield* ruleFailure("The recording rule limit was reached.");
+
+              const rule: KeptRule = {
+                id: id ?? randomUUID(),
+                plan: { ...plan, mode: plan.mode ?? "every" },
+                occurrences: was?.occurrences ?? [],
+              };
+
+              yield* persistRules(
+                was
+                  ? (rules ?? []).map((each) => (each.id === rule.id ? rule : each))
+                  : [...(rules ?? []), rule],
+              );
+
+              return { id: rule.id, plan: rule.plan };
+            }),
+          ),
+          () => wake,
+        ),
+      cancelRule: (id: string) =>
+        Effect.tap(
+          scheduling(
+            Effect.gen(function* () {
+              yield* rulesUsable;
+              const rule = rules?.find((each) => each.id === id);
+              yield* persistRules((rules ?? []).filter((each) => each.id !== id));
+
+              for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
+            }),
+          ),
+          () => wake,
+        ),
       schedules: scheduling(
         Effect.andThen(
           schedulesUsable,
@@ -2634,6 +2989,8 @@ function make(deps: RecordingsDeps) {
             Effect.gen(function* () {
               yield* schedulesUsable;
 
+              yield* settleRuleSchedule(id);
+
               if (schedules.has(id)) yield* keep(id, null);
             }),
           ),
@@ -2650,7 +3007,7 @@ function make(deps: RecordingsDeps) {
       ),
       live: Effect.sync(() => ({
         recording: [...records.values()].some(isLive),
-        scheduled: schedules.size > 0,
+        scheduled: schedules.size > 0 || (rules?.length ?? 0) > 0,
         unsaved: unsaved.recordings || unsaved.schedules,
       })),
       scheduleChanges: Stream.fromPubSub(scheduleChanges),

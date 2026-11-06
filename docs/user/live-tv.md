@@ -157,15 +157,26 @@ A recording uses one of its subscription's connections while it records. Mr. Str
 
 In the [guide grid](#the-guide), a programme that hasn't ended has **Record** in its details:
 
-- **Repeat**: **Once** records that programme and follows the guide if its end moves before recording starts; then it keeps that stop time. A weekday, or **Every day**, records the channel at that time of day, whatever is on then. Nothing follows a programme by its name.
+- **Repeat**: **Once** records that programme and follows the guide if its end moves before recording starts; then it keeps that stop time. A weekday, or **Every day**, records the channel at that time of day, whatever is on then. From 0.0.24, **Follow programme** makes a rule instead, which records the programme by its title, as below.
 - **Start** and **End** each add 0 to 60 minutes, before and after, 2 and 5 minutes to begin with. One recording lasts at most 12 hours.
 - The panel says whether a connection is free then. When none is, **Schedule anyway** keeps the schedule, and it records from when one frees up.
 
 A scheduled programme has a ring in the grid, and its details read **Scheduled**, to change or cancel it. Nothing playing or downloading stops for a schedule. When its time comes while Mr. Streamer is closed, the computer sleeps or every connection is in use, it records the rest of its time and says how late it started. A time that passes with nothing recorded is listed as **Missed**; after a long absence, only the last week's are. A once-only schedule waits while the guide lists another programme or none at that time, so it never records the wrong show.
 
+From 0.0.24, **Follow programme** records each airing of the programme's title on the channels you pick:
+
+- **Channels** offers the programme's channel, on to begin with, and the others in its subscription whose guide lists the same title.
+- **Record**: **Every match**, to begin with, records every airing, repeats included. **New episodes only** records an airing only when the guide gives its episode number and marks it as a premiere, not a repeat; it can't be picked while the guide marks none of them. The panel says how many it leaves out.
+- **Start** and **End** pad each airing as a schedule's do.
+- **Matches in the guide** lists the first 8 airings it would record now, counting the rest, and **On now** for one under way. **Turn on rule** saves it.
+
+Each airing it finds is scheduled, with a ring in the grid. Its details read **Scheduled**, say the rule sets its padding and offer **Cancel schedule**, which lets that airing go while the rule follows the rest. Cancelled, stopped or deleted airings stay suppressed at their saved time and through overlapping guide shifts, also after a restart or a guide-source change. Unambiguous overlapping shifts follow the same airing; conflicting episode identities are treated separately unless the old airing is already settled or recording. A nonoverlapping replacement can be a new airing.
+
+There can be 20 rules, with 100 airings scheduled between them. A check reads up to 100 current or future guide matches per subscription per rule, and a rule remembers up to 1,000 airings; once full, it schedules no more and shows that its limit was reached. A rule that can't be saved or stopped says so and can be tried again. If saved rules could not be read at startup, restore access to their saved data and restart Mr. Streamer to reload them. Recording still needs Mr. Streamer to be open.
+
 ### The Recordings page
 
-**Recordings**, in the top bar while anything is recorded or scheduled, lists **Now**, **Scheduled** and **Recorded**. Each row has the programme, the channel and its times, a bar of what was recorded against what was planned, and how it stands:
+**Recordings**, in the top bar while anything is recorded or scheduled, lists **Now**, **Scheduled** and **Recorded**, plus **Rules** from 0.0.24. Each row has the programme, the channel and its times, a bar of what was recorded against what was planned, and how it stands:
 
 - **Recording**, or **Paused** with why, while its time goes on. **Stop** ends it.
 - **Complete**: all of its time is there.
@@ -174,7 +185,7 @@ A scheduled programme has a ring in the grid, and its details read **Scheduled**
 - **Missing**: its file is no longer on this computer.
 - **Missed**: a scheduled time passed with nothing recorded. **Remove** takes the row away.
 
-A schedule's row has **Edit** and, in its menu, **Cancel schedule**. A recording that is still running can't be played yet; watch the channel live instead. An ended recording plays on this computer, as a download does, and keeps how far you got. Partial ones play, skipping what was missed. Recordings don't play on a TV and aren't in Continue watching. The menu beside an ended recording has **Delete**. Recordings stay until you delete them, also after their subscription is removed.
+A schedule's row has **Edit** and, in its menu, **Cancel schedule**; one a rule made reads **From a rule** and has no Edit. A rule's row has its title, channels, what it records and its padding, **Edit** to change them, and **Stop following** in its menu, which cancels the airings still to come and lets one recording now finish. A recording that is still running can't be played yet; watch the channel live instead. An ended recording plays on this computer, as a download does, and keeps how far you got. Partial ones play, skipping what was missed. Recordings don't play on a TV and aren't in Continue watching. The menu beside an ended recording has **Delete**. Recordings stay until you delete them, also after their subscription is removed.
 
 With no subscription saved, the Connect screen shows **Recordings** while any are kept.
 

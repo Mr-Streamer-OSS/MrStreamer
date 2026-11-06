@@ -1697,4 +1697,41 @@ export const fr: Translation = {
     "Le moment en pause a expiré. La lecture reprend à {time}.",
   "Rewind plays here only": "Le retour en arrière ne fonctionne qu’ici",
   "This stream can't rewind": "Ce flux ne peut pas revenir en arrière",
+  // Recording rules.
+  "Follow programme": "Suivre le programme",
+  "Follow {title}": "Suivre {title}",
+  "Every match": "Chaque diffusion",
+  "New episodes only": "Nouveaux épisodes seulement",
+  "The guide doesn't mark new episodes here.": "Le guide n'indique pas ici les nouveaux épisodes.",
+  "Choose at least one channel.": "Choisissez au moins une chaîne.",
+  "Nothing in the guide matches now. The rule keeps looking as the guide changes.":
+    "Rien ne correspond dans le guide pour l'instant. La règle continue de chercher à mesure que le guide change.",
+  "{count} airings left out: the guide doesn't show them as new episodes.": {
+    one: "{count} diffusion écartée : le guide ne l'indique pas comme nouvel épisode.",
+    many: "{count} de diffusions écartées : le guide ne les indique pas comme nouveaux épisodes.",
+    other: "{count} diffusions écartées : le guide ne les indique pas comme nouveaux épisodes.",
+  },
+  "The guide lists more airings than one check reads. Later ones follow as these pass.":
+    "Le guide liste plus de diffusions qu'une vérification n'en lit. Les suivantes viennent à mesure que celles-ci passent.",
+  "Turn on rule": "Activer la règle",
+  "Stop following": "Ne plus suivre",
+  "{count} more": { one: "{count} de plus", many: "{count} de plus", other: "{count} de plus" },
+  "A rule following {title} records this. Its padding is the rule's.":
+    "Une règle qui suit {title} enregistre ceci. Sa marge est celle de la règle.",
+  "From a rule": "Par une règle",
+  Rules: "Règles",
+  "This rule's subscription is no longer there.": "L’abonnement de cette règle n’existe plus.",
+  "This rule's guide could not be read.": "Le guide de cette règle n’a pas pu être lu.",
+  "This recording rule’s airing history is full.":
+    "L’historique des diffusions de cette règle d’enregistrement est plein.",
+  "Recording rules could not be read.": "Les règles d'enregistrement n'ont pas pu être lues.",
+  "Restart Mr. Streamer to reload recording rules.":
+    "Redémarrez Mr. Streamer pour recharger les règles d’enregistrement.",
+  "Recording rules could not be saved.":
+    "Les règles d'enregistrement n'ont pas pu être enregistrées.",
+  "This recording rule is no longer there.": "Cette règle d'enregistrement n'existe plus.",
+  "The recording rule limit was reached.":
+    "Le nombre maximal de règles d'enregistrement est atteint.",
+  "A rule sets this schedule. Change the rule instead.":
+    "Une règle définit cette programmation. Modifiez la règle.",
 };
