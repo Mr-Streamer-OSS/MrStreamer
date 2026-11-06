@@ -1,3 +1,27 @@
+import { Failed } from "@mrstreamer/core/failure";
+import type { IpcMainInvokeEvent } from "electron";
+import type { Json } from "@mrstreamer/contracts/json";
+import type { Result } from "@mrstreamer/contracts/errors";
+import { registerIpc, type IpcHandlers } from "../src/main/ipc.ts";
+import { subscriptionHandlers } from "../src/main/handlers/subscriptions.ts";
+
+const ipcBoundary = vi.hoisted(
+  () =>
+    new Map<
+      string,
+      (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>
+    >(),
+);
+
+vi.mock("electron", () => ({
+  ipcMain: {
+    handle: (
+      method: string,
+      handler: (event: IpcMainInvokeEvent, input: Json | undefined) => Promise<Result<unknown>>,
+    ) => ipcBoundary.set(method, handler),
+  },
+}));
+
 import {
   defaultPreferences,
   defaultSubscriptionPreferences,
@@ -1315,4 +1339,205 @@ it("personal events keep their admitted revision through switching away and back
   await runtime.runPromise(current.run(current.services.viewing.recordWatch("new A", channel)));
   await vi.waitFor(() => expect(viewingEvents()).toHaveLength(2));
   expect(viewingEvents()[1]?.owner).toEqual(again);
+});
+
+it("admits subscription removal without holding a personal permit during household erasure, refusing stale owners and retrying failed erasure", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const roster = await runtime.runPromise(Roster);
+  const subscriptions = await runtime.runPromise(Subscriptions);
+  const settings = await runtime.runPromise(Settings);
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const profiles = await promised(runtime, ProfileSessions);
+  const provider = await fakeProvider();
+  const source = await runtime.runPromise(roster.add(demoLogin(provider)));
+
+  const account = (await runtime.runPromise(subscriptions.saved)).find(
+    (row) => row.id === source.id,
+  )!.key;
+
+  const a = await profiles.admit();
+  const b = await profiles.create("B");
+
+  const write = Effect.flatMap(ViewingStore, (store) =>
+    store.commit({
+      accounts: [account, "unrelated"],
+      commandId: randomUUID(),
+      at: Date.now(),
+      decide: () => [
+        { account, event: { type: "favourite-added", channelId: "removed" } },
+        { account: "unrelated", event: { type: "favourite-added", channelId: "kept" } },
+      ],
+    }),
+  );
+
+  await runtime.runPromise(a.run(write));
+  await profiles.switch(b.id);
+  const admittedB = await profiles.admit();
+  await runtime.runPromise(admittedB.run(write));
+  await profiles.switch(a.owner.id);
+  const current = await profiles.admit();
+  registerIpc(
+    runtime.runPromiseExit,
+    subscriptionHandlers({ roster, subscriptions, settings }) as IpcHandlers,
+    () => true,
+    {
+      admit: sessions.admitFor,
+      handlers: () => ({}),
+    },
+  );
+  const frame = { processId: 1, routingId: 1 };
+  const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+
+  const invoke = (owner: typeof a.owner) =>
+    ipcBoundary.get("subscription.remove")!(event, {
+      __profile: owner,
+      input: { subscriptionId: source.id, eraseViewing: true },
+    });
+
+  expect((await invoke(a.owner)).ok).toBe(false);
+  expect((await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id)).toBe(
+    true,
+  );
+  expect(
+    await runtime.runPromise(
+      current.run(
+        Effect.flatMap(ViewingStore, (store) =>
+          Effect.map(store.read([account]), (state) => state.favourites.map(({ id }) => id)),
+        ),
+      ),
+    ),
+  ).toEqual(["removed"]);
+  const lock = new DatabaseSync(join(profileDirectory(dataDir, b.id), "mrstreamer.db"));
+
+  try {
+    lock.exec("begin immediate");
+    expect((await invoke(current.owner)).ok).toBe(false);
+    expect(
+      (await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id),
+    ).toBe(true);
+  } finally {
+    lock.exec("rollback");
+    lock.close();
+  }
+
+  expect(await invoke(current.owner)).toEqual({ ok: true, value: null });
+  expect((await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id)).toBe(
+    false,
+  );
+
+  for (const id of [a.owner.id, b.id]) {
+    await profiles.switch(id);
+    const admission = await profiles.admit();
+    expect(
+      await runtime.runPromise(
+        admission.run(
+          Effect.flatMap(ViewingStore, (store) =>
+            Effect.map(store.read([account, "unrelated"]), (state) =>
+              state.favourites.map(({ id }) => id),
+            ),
+          ),
+        ),
+      ),
+    ).toEqual(["kept"]);
+  }
+}, 10_000);
+
+it("applies configured profile locale after catalogue success, retains captured settings across queued switches, and retries refused locale on restore", async () => {
+  const dataDir = await tempDir();
+  const applied: { owner: { id: string; revision: number }; choice: string | undefined }[] = [];
+  let refuseCatalogue = false;
+  let refuseLocale = false;
+  let held = false;
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+
+  const open = () =>
+    runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: {
+            read: Effect.sync(() => {
+              if (refuseCatalogue) throw new Error("catalogue refused");
+
+              return true;
+            }),
+            write: () => Effect.void,
+          },
+          stopInteractive: () => Effect.void,
+          configured: (settings, owner) =>
+            Effect.gen(function* () {
+              if (held) {
+                held = false;
+                arrived.resolve();
+                yield* Effect.promise(() => release.promise);
+              }
+
+              const choice = yield* settings.interfaceLanguage;
+
+              if (refuseLocale)
+                return yield* Effect.fail(
+                  new Failed({ error: { kind: "unexpected", detail: "locale refused" } }),
+                );
+              applied.push({ owner, choice });
+            }),
+        },
+      }),
+    );
+
+  const first = open();
+  const profiles = await promised(first, ProfileSessions);
+  const a = await profiles.admit();
+  await first.runPromise(a.run(a.services.settings.setInterfaceLanguage("nl-NL")));
+  const b = await profiles.create("B");
+  refuseCatalogue = true;
+  await expect(profiles.switch(b.id)).rejects.toBeDefined();
+  expect(applied).toEqual([]);
+  refuseCatalogue = false;
+  refuseLocale = true;
+  await expect(profiles.switch(b.id)).rejects.toMatchObject({
+    error: { detail: "locale refused" },
+  });
+  await expect(profiles.admit()).rejects.toBeDefined();
+  expect(applied).toEqual([]);
+  refuseLocale = false;
+  await profiles.switch(b.id);
+  const admittedB = await profiles.admit();
+  await first.runPromise(admittedB.run(admittedB.services.settings.setInterfaceLanguage("de-DE")));
+  held = true;
+  const switchingA = profiles.switch(a.owner.id);
+  await arrived.promise;
+  const switchingB = profiles.switch(b.id);
+  release.resolve();
+  const ownerA = await switchingA;
+  const ownerB = await switchingB;
+  expect(applied.slice(-2)).toEqual([
+    { owner: ownerA, choice: "nl-NL" },
+    { owner: ownerB, choice: "de-DE" },
+  ]);
+  expect(ownerB.revision).toBeGreaterThan(admittedB.owner.revision);
+  await first.dispose();
+  refuseLocale = true;
+  const second = open();
+  const restored = await promised(second, ProfileSessions);
+  await expect(restored.admit()).rejects.toBeDefined();
+  refuseLocale = false;
+  await restored.switch(b.id);
+  expect(applied.at(-1)).toEqual({ owner: await restored.active(), choice: "de-DE" });
+  await second.dispose();
+  const third = open();
+  const restarted = await promised(third, ProfileSessions);
+  expect(applied.at(-1)).toEqual({ owner: await restarted.active(), choice: "de-DE" });
 });

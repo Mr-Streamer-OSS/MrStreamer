@@ -88,7 +88,7 @@ export interface MainConfig {
   /** Only configured after interactive playback and renderer isolation are ready. */
   readonly profiles?: Pick<
     Parameters<typeof ProfileSessions.layer>[0],
-    "stopInteractive" | "consent"
+    "stopInteractive" | "consent" | "configured"
   >;
 }
 

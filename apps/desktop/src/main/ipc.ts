@@ -212,6 +212,10 @@ export function registerIpc(
         // union of validated inputs, as the ordinary handler above does.
         const selected = personal.handlers(admitted)[method] as typeof handler | undefined;
 
+        // Removal drains every personal store under the household lifecycle lock. Admission
+        // validates the requested owner, but retaining its personal permit would deadlock that drain.
+        if (method === "subscription.remove") return yield* handler(input, frame);
+
         return yield* admitted.run(Effect.suspend(() => (selected ?? handler)(input, frame)));
       });
 

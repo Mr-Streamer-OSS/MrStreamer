@@ -34,7 +34,7 @@ import {
 } from "@mrstreamer/contracts/downloads";
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
-import { Failed } from "@mrstreamer/core/failure";
+import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { t } from "@mrstreamer/core/i18n";
 import { Guide } from "@mrstreamer/core/guide/service";
 import { updatesInApp } from "@mrstreamer/contracts/updates";
@@ -619,6 +619,13 @@ async function start(): Promise<void> {
       new Failed({ error: { kind: "unexpected", detail: "Playback is still starting." } }),
     );
 
+  // Restored-profile configuration runs while the runtime is being built. Retain its exact
+  // owner until main's language and tray bindings are ready, without reentering that runtime.
+  const profileLocale: {
+    pending: { choice: string | undefined; owner: ActiveProfile } | null;
+    apply: ((choice: string | undefined, owner: ActiveProfile) => void) | null;
+  } = { pending: null, apply: null };
+
   const runtime = ManagedRuntime.make(
     mainLayer({
       dataDir,
@@ -634,6 +641,17 @@ async function start(): Promise<void> {
           write: (enabled) => Effect.asVoid(Effect.promise(() => analytics.configure(enabled))),
         },
         stopInteractive: () => stopProfilePlayback(),
+        configured: (settings, owner) =>
+          Effect.gen(function* () {
+            const choice = yield* settings.interfaceLanguage;
+            yield* Effect.try({
+              try: () => {
+                if (profileLocale.apply) profileLocale.apply(choice, owner);
+                else profileLocale.pending = { choice, owner };
+              },
+              catch: failedWith,
+            });
+          }),
       },
       secrets: keychainSecrets(snap),
       userAgent,
@@ -903,7 +921,14 @@ async function start(): Promise<void> {
   // Replay initial consent once composition exists, including reads settled before it was ready.
   void analytics.loaded.then(refreshConsent).catch(() => {});
   // The interface language, before the window asks for it.
-  let language = languageFor(await runtime.runPromise(settings.interfaceLanguage));
+  const restoredLocale = profileLocale.pending;
+
+  let language = languageFor(
+    restoredLocale && sameProfile(restoredLocale.owner, runtime.runSync(profileSessions.active))
+      ? restoredLocale.choice
+      : await runtime.runPromise(settings.interfaceLanguage),
+  );
+
   applyLanguage(language);
 
   const exporter = diagnosticsExporter(dataDir, async () => {
@@ -1355,6 +1380,7 @@ async function start(): Promise<void> {
               if (sameProfile(active, admission.owner)) {
                 language = chosen;
                 applyLanguage(chosen);
+                refreshTray();
               }
 
               return chosen;
@@ -1596,6 +1622,18 @@ async function start(): Promise<void> {
       ]),
     );
   };
+
+  profileLocale.apply = (choice, owner) => {
+    if (!sameProfile(owner, runtime.runSync(profileSessions.active))) return;
+    language = languageFor(choice);
+    applyLanguage(language);
+    refreshTray();
+  };
+
+  if (profileLocale.pending) {
+    profileLocale.apply(profileLocale.pending.choice, profileLocale.pending.owner);
+    profileLocale.pending = null;
+  }
 
   staysWithoutWindow = () => {
     if (

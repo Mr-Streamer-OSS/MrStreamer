@@ -119,6 +119,7 @@ export interface ProfileAdmission {
 export function makeProfiles({
   dataDir,
   stopInteractive,
+  configured,
   usage,
   consent,
 }: {
@@ -126,6 +127,10 @@ export function makeProfiles({
   readonly consent?: InstallationConsent;
   readonly stopInteractive?: () => Effect.Effect<void, Failed>;
   readonly usage?: UsageObservers;
+  readonly configured?: (
+    settings: Settings["Service"],
+    owner: ActiveProfile,
+  ) => Effect.Effect<void, Failed>;
 }) {
   return Effect.gen(function* () {
     const storage = yield* profileStorage;
@@ -339,7 +344,7 @@ export function makeProfiles({
 
     const configure = (context: Context.Context<PersonalServices>, owner: ActiveProfile) =>
       Effect.gen(function* () {
-        const configured = yield* Effect.exit(
+        const catalogue = yield* Effect.exit(
           Effect.provideService(Context.get(shared, OnDemand).reconfigure, AdmittedSettings, {
             owner,
             settings: Context.get(context, Settings),
@@ -347,8 +352,12 @@ export function makeProfiles({
           }),
         );
 
-        if (Exit.isFailure(configured))
-          return yield* Effect.fail(failedWith(Cause.squash(configured.cause)));
+        if (Exit.isFailure(catalogue))
+          return yield* Effect.fail(failedWith(Cause.squash(catalogue.cause)));
+
+        // Configuration holds the lifecycle lock: the captured owner and Settings cannot change
+        // before this completes. Failure keeps admissions closed for the existing retry path.
+        if (configured) yield* configured(Context.get(context, Settings), { ...owner });
       });
 
     if (configuredFor === null) {

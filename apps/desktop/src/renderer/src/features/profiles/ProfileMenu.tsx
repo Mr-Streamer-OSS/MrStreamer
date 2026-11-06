@@ -140,7 +140,7 @@ export function ProfileMenu() {
             aria-label={t("Profiles")}
             className={cn(
               menuSurface,
-              "w-[18.75rem] max-w-[calc(100vw-2rem)] text-[0.8125rem] leading-4 text-foreground",
+              "w-[18.75rem] max-h-[var(--available-height)] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain text-[0.8125rem] leading-4 text-foreground",
             )}
           >
             {list.isError ? (
@@ -152,7 +152,7 @@ export function ProfileMenu() {
               <ul aria-label={t("Profiles")} aria-busy={list.isPending || undefined}>
                 {profiles.map((profile) => {
                   const current = profile.id === owner?.id;
-                  const row = "flex h-11 items-center gap-2.5 px-2";
+                  const row = "flex min-h-11 items-center gap-2.5 px-2 py-2";
 
                   if (confirming === profile.id)
                     return (

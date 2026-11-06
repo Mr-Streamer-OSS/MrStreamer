@@ -181,8 +181,12 @@ export const savedSubtitlesLayer = Layer.effect(
         do update set saved = excluded.saved`);
 
       const pruneResults = db.prepare(`delete from saved_subtitle_results where rowid in (
-        select rowid from saved_subtitle_results where
+        select rowid from saved_subtitle_results as result where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?
+        and not exists (select 1 from profile_subtitle_choices as choice where
+          choice.account = result.account and choice.kind = result.kind and choice.id = result.id
+          and choice.source_stamp = result.source_stamp and choice.listing_key = result.listing_key
+          and json_extract(choice.choice, '$.key') = result.result_key)
         order by rowid desc limit -1 offset 8)`);
 
       const touchResult = db.prepare(`delete from saved_subtitle_results where
@@ -394,7 +398,6 @@ export const savedSubtitlesLayer = Layer.effect(
           if (proof !== null) writeProof.run(...identity(file), key, proof);
         }
 
-        write.run(...identity(file), JSON.stringify(checked));
         choose(owner, file, checked);
 
         const cacheKey = internalKey(checked);
@@ -404,6 +407,14 @@ export const savedSubtitlesLayer = Layer.effect(
           rememberResult.run(...identity(file), cacheKey, JSON.stringify(result(checked)));
           pruneResults.run(...identity(file));
         }
+
+        // Older builds read this row as Default's choice. Other viewers only change references
+        // and shared result timing; compose Default again after updating those shared bytes.
+        const legacy = owner === DEFAULT_PROFILE_ID ? checked : read(file, DEFAULT_PROFILE_ID);
+        write.run(
+          ...identity(file),
+          JSON.stringify(legacy ?? { subtitle: null, timing: checked.timing }),
+        );
       };
 
       return {

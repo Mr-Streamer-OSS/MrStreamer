@@ -181,7 +181,7 @@ describe("saved exact-file subtitles", () => {
 });
 
 describe("bounded downloaded-result cache", () => {
-  it("retains eight recent results, restores each correction and erases every cached result with its account", async () => {
+  it("retains eight unreferenced results and selected cues, restores each correction and erases every cached result with its account", async () => {
     const dir = await tempDir();
 
     const runtime = runtimeFor(
@@ -192,7 +192,7 @@ describe("bounded downloaded-result cache", () => {
 
     const saved = await promised(runtime, SavedSubtitles);
 
-    for (let index = 0; index < 9; index++) {
+    for (let index = 0; index < 10; index++) {
       await saved.remember(file, { ...subtitle, release: `Cut ${index}` }, `result-${index}`);
       await saved.timing(file, { offset: index, speed: 1 });
     }
@@ -212,6 +212,57 @@ describe("bounded downloaded-result cache", () => {
 });
 
 describe("personal subtitle choices over shared exact-file data", () => {
+  it("retains every viewer's selected Off result beyond the unreferenced cache cap after restart", async () => {
+    const dir = await tempDir();
+
+    const open = async () => {
+      const runtime = runtimeFor(
+        mainLayer({
+          ...testConfig(dir),
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+          },
+        }),
+      );
+
+      return {
+        runtime,
+        profiles: await promised(runtime, ProfileSessions),
+        saved: await runtime.runPromise(SavedSubtitles),
+      };
+    };
+
+    const first = await open();
+    const a = await first.profiles.admit();
+    await first.runtime.runPromise(a.run(first.saved.remember(file, subtitle, "a")));
+    await first.runtime.runPromise(a.run(first.saved.timing(file, { offset: 3, speed: 1 }, "a")));
+    await first.runtime.runPromise(a.run(first.saved.hide(file)));
+    const b = await first.profiles.create("B");
+    await first.profiles.switch(b.id);
+    const admittedB = await first.profiles.admit();
+
+    for (let n = 0; n < 10; n++) {
+      await first.runtime.runPromise(
+        admittedB.run(first.saved.remember(file, { ...subtitle, release: `B ${n}` }, `b${n}`)),
+      );
+    }
+
+    await first.runtime.dispose();
+    const second = await open();
+    await second.profiles.switch(a.owner.id);
+    expect(
+      await second.runtime.runPromise((await second.profiles.admit()).run(second.saved.read(file))),
+    ).toEqual({
+      subtitle,
+      selection: "a",
+      shown: false,
+      timing: { offset: 3, speed: 1 },
+    });
+    // Unreferenced cues remain a bounded cache, rather than retaining every download.
+    expect(await second.runtime.runPromise(second.saved.result(file, "b0"))).toBeNull();
+  });
+
   it("keeps Default legacy and another viewer's Off through restart, sharing timing and proven cues", async () => {
     const dir = await tempDir();
     // The table and row an installed pre-profile release leaves, with no personal choices.
@@ -273,6 +324,23 @@ describe("personal subtitle choices over shared exact-file data", () => {
       }),
     );
     await runB(first.saved.hide(file));
+    // Read exactly the legacy selected row, as a pre-profile build does.
+    const older = new DatabaseSync(join(dir, "mrstreamer.db"));
+
+    try {
+      const row = older
+        .prepare("select saved from saved_subtitles where account = ? and kind = ? and id = ?")
+        .get(file.account, file.kind, file.id);
+
+      expect(JSON.parse(String(row?.saved))).toEqual({
+        subtitle,
+        resultKey: "first",
+        timing: { offset: 2, speed: 1 },
+      });
+    } finally {
+      older.close();
+    }
+
     await first.profiles.switch(a.owner.id);
     expect(
       await first.runtime.runPromise((await first.profiles.admit()).run(first.saved.read(file))),
