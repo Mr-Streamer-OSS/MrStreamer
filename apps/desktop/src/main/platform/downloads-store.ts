@@ -94,6 +94,8 @@ const Stored = lazy(() =>
     "moveDevice?": "string",
     /** Old folder to clean only after the new location is durably committed. */
     "moveFrom?": "string",
+    "moveToken?": "string",
+    "sourceToken?": "string",
     about: About(),
     state: "'queued' | 'failed' | 'complete'",
     /** Why it failed, as `DownloadFailure` says; only while failed. */
@@ -139,6 +141,10 @@ export interface Inventory {
   readonly unreadable: ReadonlySet<string>;
 }
 
+const Cleanup = type({ path: "string", "token?": "string", "device?": "string" });
+
+export type PendingCleanup = typeof Cleanup.infer;
+
 export class DownloadStore extends Context.Service<
   DownloadStore,
   {
@@ -150,9 +156,15 @@ export class DownloadStore extends Context.Service<
     readonly folder: Effect.Effect<string | null, Failed>;
     setFolder(path: string): Effect.Effect<void, Failed>;
     /** Stores a download's record, new or changed. */
-    put(download: StoredDownload): Effect.Effect<void, Failed>;
+    put(download: StoredDownload, durable?: boolean): Effect.Effect<void, Failed>;
     /** Stores several records in one transaction: all of them, or none when it fails. */
     putMany(downloads: readonly StoredDownload[]): Effect.Effect<void, Failed>;
+    readonly cleanups: Effect.Effect<readonly PendingCleanup[], Failed>;
+    deferCleanup(
+      download: StoredDownload,
+      pending: readonly PendingCleanup[],
+    ): Effect.Effect<void, Failed>;
+    forgetCleanup(path: string): Effect.Effect<void, Failed>;
     remove(id: string): Effect.Effect<void, Failed>;
   }
 >()("mrstreamer/DownloadStore") {}
@@ -160,6 +172,9 @@ export class DownloadStore extends Context.Service<
 function prepareDownloads(db: DatabaseSync): void {
   db.exec(
     `create table if not exists download_folder (id integer primary key, path text not null)`,
+  );
+  db.exec(
+    "create table if not exists download_cleanup (path text primary key, record text not null)",
   );
   db.exec(`create table if not exists downloads (
     id text primary key,
@@ -185,7 +200,48 @@ export const downloadStoreLayer = Layer.effect(
 
       const remove = db.prepare("delete from downloads where id = ?");
 
+      // Restore the connection's actual policy, including on a failed durable write.
+      const durable = (run: () => void) => {
+        const previous = Number(db.prepare("pragma synchronous").get()?.synchronous);
+        db.exec("pragma synchronous = full");
+
+        try {
+          run();
+        } finally {
+          db.exec(`pragma synchronous = ${previous}`);
+        }
+      };
+
+      const save = (download: StoredDownload) => {
+        write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
+      };
+
       return {
+        cleanups: attempt(() =>
+          db
+            .prepare("select record from download_cleanup")
+            .all()
+            .map((row) => Cleanup.assert(JSON.parse(String(row.record)))),
+        ),
+        deferCleanup: (download: StoredDownload, pending: readonly PendingCleanup[]) =>
+          attempt(() =>
+            durable(() =>
+              transaction(db, () => {
+                for (const item of pending)
+                  db.prepare("insert or replace into download_cleanup values (?, ?)").run(
+                    item.path,
+                    JSON.stringify(item),
+                  );
+                save(download);
+              }),
+            ),
+          ),
+        forgetCleanup: (path: string) =>
+          attempt(() =>
+            durable(() => {
+              db.prepare("delete from download_cleanup where path = ?").run(path);
+            }),
+          ),
         folder: attempt(() => {
           const row = db.prepare("select path from download_folder where id = 1").get();
 
@@ -210,17 +266,10 @@ export const downloadStoreLayer = Layer.effect(
 
           return { records, unreadable };
         }),
-        put: (download: StoredDownload) =>
+        put: (download: StoredDownload, flush = false) =>
           attempt(() => {
-            // A location or recovery intent must survive power loss before files are removed.
-            // Scope FULL to this synchronous write; other tables retain their existing policy.
-            db.exec("pragma synchronous = full");
-
-            try {
-              write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
-            } finally {
-              db.exec("pragma synchronous = normal");
-            }
+            if (flush) durable(() => save(download));
+            else save(download);
           }),
         putMany: (downloads: readonly StoredDownload[]) =>
           attempt(() =>
@@ -279,6 +328,9 @@ function closed(detail: () => string): DownloadStore["Service"] {
   const fail = Effect.suspend(() => unavailable(detail()));
 
   return {
+    cleanups: fail,
+    deferCleanup: () => fail,
+    forgetCleanup: () => fail,
     folder: fail,
     setFolder: () => fail,
     list: fail,

@@ -438,7 +438,7 @@ function seriesDetailsHold() {
 
 describe.skipIf(!hasTools)("downloads", () => {
   it.each(["copy", "cleanup"])(
-    "keeps interrupted move recovery when its drive disappears during %s and refuses deletion",
+    "tracks interrupted cleanup when its drive disappears during %s while allowing later move and deletion",
     async (phase) => {
       const started = await connected();
       const { downloads, provider, subscriptionId, find, dataDir } = started;
@@ -480,15 +480,19 @@ describe.skipIf(!hasTools)("downloads", () => {
       const again = await app(dataDir);
 
       try {
-        await expect(again.downloads.remove(saved.id)).rejects.toBeDefined();
         expect(await again.downloads.copy(saved.id)).toEqual(before);
+        const healthy = await tempDir();
+        await again.downloads.setFolder(healthy);
+        expect((await again.downloads.bulk([saved.id], "move")).succeeded).toEqual([saved.id]);
+        await again.downloads.remove(saved.id);
+        expect(await again.find(saved.id)).toBeUndefined();
         await actualFiles.rename(disconnected, destination);
       } finally {
         await again.quit();
       }
 
       const recovered = await app(dataDir);
-      expect((await recovered.downloads.bulk([saved.id], "move")).succeeded).toEqual([saved.id]);
+      expect(await readdir(destination)).toEqual([]);
       await recovered.quit();
     },
     LONG,
@@ -533,6 +537,45 @@ describe.skipIf(!hasTools)("downloads", () => {
       expect(await again.downloads.copy(saved.id)).toEqual(before);
       await again.quit();
     },
+  );
+
+  it.each(["source", "destination"])(
+    "names the unavailable %s without leaking filesystem paths",
+    async (which) => {
+      const { downloads, provider, subscriptionId, find } = await connected();
+      const source = await tempDir();
+      await downloads.setFolder(source);
+      const saved = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+      await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      const destination = await tempDir();
+      await downloads.setFolder(destination);
+      const absent = which === "source" ? source : destination;
+      await files.rename(absent, absent + "-offline");
+
+      try {
+        expect((await downloads.bulk([saved.id], "move")).failed).toEqual([
+          {
+            id: saved.id,
+            error: {
+              kind: "unexpected",
+              detail:
+                which === "source"
+                  ? "Source copy is missing or changed"
+                  : "Destination unavailable",
+            },
+          },
+        ]);
+      } finally {
+        await files.rename(absent + "-offline", absent);
+      }
+
+      expect(await downloads.copy(saved.id)).toMatchObject({ id: saved.id });
+    },
+    LONG,
   );
 
   it(
@@ -721,6 +764,121 @@ describe.skipIf(!hasTools)("downloads", () => {
   );
 
   it(
+    "deletes the committed destination while a disconnected source remains tracked for cleanup",
+    async () => {
+      const started = await connected();
+      const { downloads, provider, subscriptionId, find, dataDir } = started;
+      const old = await tempDir();
+      await downloads.setFolder(old);
+
+      const saved = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+
+      await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      const destination = await tempDir();
+      await downloads.setFolder(destination);
+      const unplugged = old + "-offline";
+
+      const disconnect = vi.spyOn(files, "rm").mockImplementationOnce(async () => {
+        await files.rename(old, unplugged);
+        throw new Error("disconnected");
+      });
+
+      try {
+        expect((await downloads.bulk([saved.id], "move")).succeeded).toEqual([saved.id]);
+      } finally {
+        disconnect.mockRestore();
+      }
+
+      await downloads.remove(saved.id);
+      expect(await find(saved.id)).toBeUndefined();
+      expect(await readdir(destination)).toEqual([]);
+      await started.quit();
+      await files.rename(unplugged, old);
+      const again = await app(dataDir);
+
+      try {
+        expect(await readdir(old)).toEqual([]);
+      } finally {
+        await again.quit();
+      }
+    },
+    LONG,
+  );
+
+  it.each([false, true])(
+    "recovers an interrupted target after parent identity changes, respecting ownership (%s)",
+    async (replaced) => {
+      const started = await connected();
+      const { downloads, provider, subscriptionId, find, dataDir } = started;
+      await downloads.setFolder(await tempDir());
+
+      const saved = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+
+      await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      const destination = join(dataDir, "downloads");
+      await mkdir(destination, { recursive: true });
+      await downloads.setFolder(destination);
+      const failed = vi.spyOn(streams, "pipeline").mockRejectedValueOnce(new Error("copy failed"));
+
+      const denied = vi.spyOn(files, "rm").mockImplementation(async (path, options) => {
+        if (String(path).startsWith(destination + "/")) throw new Error("locked");
+
+        return actualFiles.rm(path, options);
+      });
+
+      try {
+        expect((await downloads.bulk([saved.id], "move")).failed).toHaveLength(1);
+      } finally {
+        failed.mockRestore();
+        denied.mockRestore();
+      }
+
+      await started.quit();
+      const target = join(destination, (await readdir(destination))[0]!);
+
+      if (replaced) await writeFile(join(target, ".mrstreamer-owner"), "unrelated owner");
+
+      const statChanged = vi.spyOn(files, "stat").mockImplementation(async (...args) => {
+        const result = await actualFiles.stat(...args);
+
+        if (String(args[0]) === join(target, ".."))
+          Object.defineProperty(result, "ino", { value: 123456789 });
+
+        return result;
+      });
+
+      try {
+        const again = await app(dataDir);
+
+        try {
+          await again.downloads.setFolder(await tempDir());
+          expect((await again.downloads.bulk([saved.id], "move")).succeeded).toEqual([saved.id]);
+          await again.downloads.remove(saved.id);
+
+          if (replaced)
+            expect(await readFile(join(target, ".mrstreamer-owner"), "utf8")).toBe(
+              "unrelated owner",
+            );
+          else await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+        } finally {
+          await again.quit();
+        }
+      } finally {
+        statChanged.mockRestore();
+      }
+    },
+    LONG,
+  );
+
+  it(
     "treats a real symlink to the default root as the same destination",
     async () => {
       const started = await connected();
@@ -864,6 +1022,78 @@ describe.skipIf(!hasTools)("downloads", () => {
 
       await downloads.remove(saved.id);
       expect(await find(saved.id)).toBeUndefined();
+    },
+    LONG,
+  );
+
+  it(
+    "selects a healthy folder while an older copy parent is disconnected",
+    async () => {
+      const { provider, subscriptionId, downloads, find } = await connected();
+      const old = await tempDir();
+      await downloads.setFolder(old);
+
+      const saved = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+
+      await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("complete"), {
+        timeout: LONG,
+      });
+      const before = await downloads.copy(saved.id);
+      const unplugged = old + "-offline";
+      await files.rename(old, unplugged);
+
+      try {
+        const healthy = await tempDir();
+        await downloads.setFolder(healthy);
+        expect((await downloads.folder()).path).toBe(healthy);
+      } finally {
+        await files.rename(unplugged, old);
+      }
+
+      expect(await downloads.copy(saved.id)).toEqual(before);
+    },
+    LONG,
+  );
+
+  it.each(["direct", "bulk"])(
+    "publishes retained paused deletion failure through changes (%s)",
+    async (mode) => {
+      const { runtime, provider, subscriptionId, downloads, find, dataDir } = await connected();
+      const film = movie(provider, subscriptionId, "TEST | Two sound tracks");
+      provider.stallMovieFile(film.id, 30_000, 60_000);
+      const saved = await downloads.add(film.ref);
+      await downloads.pause(saved.id);
+      await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("paused"));
+      const told = await collect(runtime, downloads.changes);
+      await vi.waitFor(() =>
+        expect(told.at(-1)?.items.find((item) => item.id === saved.id)?.status.kind).toBe("paused"),
+      );
+
+      const denied = vi.spyOn(files, "rm").mockImplementation(async (path, options) => {
+        if (String(path).endsWith(saved.id))
+          throw Object.assign(new Error("denied"), { code: "EACCES" });
+
+        return actualFiles.rm(path, options);
+      });
+
+      const lock = mode === "bulk" ? new DatabaseSync(join(dataDir, "mrstreamer.db")) : null;
+      lock?.exec("begin immediate");
+
+      try {
+        if (mode === "direct") await expect(downloads.remove(saved.id)).rejects.toBeDefined();
+        else expect((await downloads.bulk([saved.id], "remove")).failed).toHaveLength(1);
+        await vi.waitFor(() =>
+          expect(told.at(-1)?.items.find((item) => item.id === saved.id)?.status.kind).toBe(
+            "failed",
+          ),
+        );
+      } finally {
+        lock?.exec("rollback");
+        lock?.close();
+        denied.mockRestore();
+      }
     },
     LONG,
   );

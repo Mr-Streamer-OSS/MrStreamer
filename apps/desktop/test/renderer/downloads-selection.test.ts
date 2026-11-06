@@ -155,6 +155,7 @@ describe("selected downloads", () => {
     await click(button(bar(page)!, "Move to Media"));
     await click(button(bar(page)!, "Done"));
     await click(box(page, "Past Lives"));
+    expect(button(bar(page)!, "Move to Media")?.disabled).toBe(true);
     await click(button(bar(page)!, "Move to Media"));
     expect(ipc.argsOf("downloads.bulk")).toHaveLength(1);
     await act(async () => pending.resolve({ succeeded: ["d1"], failed: [] }));

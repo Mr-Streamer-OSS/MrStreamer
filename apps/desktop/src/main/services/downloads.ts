@@ -42,7 +42,17 @@ import { downloadFailure, type OperationObserver } from "../analytics/operations
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, rename, rm, writeFile, open, realpath, stat } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  rename,
+  rm,
+  readFile,
+  writeFile,
+  open,
+  realpath,
+  stat,
+} from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import {
   artworkUrl,
@@ -55,7 +65,7 @@ import {
   type DownloadBulkAction,
   type DownloadBulkResult,
 } from "@mrstreamer/contracts/downloads";
-import type { AppError } from "@mrstreamer/contracts/errors";
+import { AppFailure, type AppError } from "@mrstreamer/contracts/errors";
 import type { EpisodeDetails, RawTitleRef, TitleRef } from "@mrstreamer/contracts/ondemand";
 import { Failed, failedWith } from "@mrstreamer/core/failure";
 import { seriesEpisodeSeasons } from "@mrstreamer/core/ondemand/details";
@@ -70,6 +80,7 @@ import {
   DownloadStore,
   type About,
   type PartIdentity,
+  type PendingCleanup,
   type SeriesKept,
   type StoredDownload,
 } from "../platform/downloads-store.ts";
@@ -220,6 +231,7 @@ function make(deps: DownloadsDeps) {
     const records = new Map<string, StoredDownload>();
     const loaded = yield* Effect.result(store.list);
     const configured = yield* Effect.result(store.folder);
+    const loadedCleanup = yield* Effect.result(store.cleanups);
     let selectedFolder = configured._tag === "Success" ? (configured.success ?? root) : root;
 
     // Without its table nothing can be queued or listed either: each call says so, as the store
@@ -230,7 +242,9 @@ function make(deps: DownloadsDeps) {
         ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
         : loaded._tag === "Failure"
           ? store.list.pipe(Effect.andThen(Effect.fail(loaded.failure)))
-          : null;
+          : loadedCleanup._tag === "Failure"
+            ? store.cleanups.pipe(Effect.andThen(Effect.fail(loadedCleanup.failure)))
+            : null;
 
     if (loaded._tag === "Failure") {
       yield* Effect.logWarning("[downloads] can't be read", loaded.failure.error);
@@ -256,16 +270,20 @@ function make(deps: DownloadsDeps) {
      * Writes a record and keeps it. Every write is synchronous, as the database is: none can come
      * between a removal's and its record going, so nothing writes a removed download back.
      */
-    const write = (record: StoredDownload) => {
-      Effect.runSync(store.put(record));
+    const write = (record: StoredDownload, durable = false) => {
+      Effect.runSync(store.put(record, durable));
       records.set(record.id, record);
     };
 
     /** Changes a download's record as it is now; one removed meanwhile stays removed. */
-    const update = (id: string, change: (latest: StoredDownload) => StoredDownload) => {
+    const update = (
+      id: string,
+      change: (latest: StoredDownload) => StoredDownload,
+      durable = false,
+    ) => {
       const latest = records.get(id);
 
-      if (latest) write(change(latest));
+      if (latest) write(change(latest), durable);
     };
 
     /** Writes several records in one transaction and keeps them: all of them, or none. */
@@ -296,39 +314,75 @@ function make(deps: DownloadsDeps) {
       return last + 1;
     };
 
-    // A move never changes the authoritative folder until every copied file is flushed and
-    // its record commits. A restart discards only the explicitly recorded incomplete target.
-    for (const record of records.values()) {
-      const { moveTo } = record;
+    // Cleanup is durable independently of the playable copy. An unavailable old volume must
+    // not prohibit another move or deletion. New folders carry a token across remounts; legacy
+    // markers retain their conservative parent check and may need manual cleanup.
+    const deferCleanup = (record: StoredDownload) => {
+      const pending: PendingCleanup[] = [];
 
-      if (!moveTo && !record.moveFrom) continue;
-      yield* Effect.promise(async () => {
+      if (record.moveTo)
+        pending.push({
+          path: join(record.moveTo, record.moveId ?? record.id),
+          ...defined({ token: record.moveToken, device: record.moveDevice }),
+        });
+
+      if (record.moveFrom)
+        pending.push({ path: record.moveFrom, ...defined({ token: record.sourceToken }) });
+
+      if (!pending.length) return;
+      const { moveFrom: _from, sourceToken: _source, ...clean } = unmarked(record);
+      Effect.runSync(store.deferCleanup(clean, pending));
+      records.set(record.id, clean);
+    };
+
+    const retryCleanup = async () => {
+      if (unloaded) return;
+
+      for (const item of Effect.runSync(store.cleanups)) {
         try {
-          if (moveTo) {
-            const parent = await stat(moveTo);
+          const parent = await stat(join(item.path, ".."));
 
-            if (record.moveDevice && record.moveDevice !== `${parent.dev}:${parent.ino}`) return;
-            await rm(join(moveTo, record.moveId ?? record.id), { recursive: true, force: true });
-            const after = await stat(moveTo);
+          if (item.token) {
+            try {
+              if ((await readFile(join(item.path, ".mrstreamer-owner"), "utf8")) !== item.token)
+                continue;
+            } catch (cause) {
+              if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+                try {
+                  await stat(item.path);
+                } catch (missing) {
+                  if (missing instanceof Error && "code" in missing && missing.code === "ENOENT")
+                    Effect.runSync(store.forgetCleanup(item.path));
+                }
+              }
 
-            if (record.moveDevice && record.moveDevice !== `${after.dev}:${after.ino}`) return;
+              continue;
+            }
+          } else if (!item.device || item.device !== `${parent.dev}:${parent.ino}`) continue;
+          await rm(item.path, { recursive: true, force: true });
+          const after = await stat(join(item.path, ".."));
+
+          if (parent.dev === after.dev && parent.ino === after.ino) {
+            await syncDirectory(join(item.path, ".."));
+            Effect.runSync(store.forgetCleanup(item.path));
           }
-
-          if (record.moveFrom) {
-            const parent = await stat(join(record.moveFrom, ".."));
-            await rm(record.moveFrom, { recursive: true, force: true });
-            const after = await stat(join(record.moveFrom, ".."));
-
-            if (parent.dev !== after.dev || parent.ino !== after.ino) return;
-          }
-
-          const { moveFrom: _moveFrom, ...clean } = unmarked(record);
-          write(clean);
         } catch {
-          // Keep the recovery marker and original copy; the destination may be unplugged.
+          // Offline, replaced or locked folders stay tracked, even after the copy is deleted.
         }
-      });
+      }
+    };
+
+    for (const record of records.values()) {
+      if (record.moveTo || record.moveFrom) {
+        try {
+          deferCleanup(record);
+        } catch {
+          /* Keep the original durable marker on save failure. */
+        }
+      }
     }
+
+    yield* Effect.promise(retryCleanup);
 
     // A copy renamed into place as the app stopped, before it was written down as complete.
     for (const record of records.values()) {
@@ -351,14 +405,21 @@ function make(deps: DownloadsDeps) {
       }
     }
 
+    const sweepingCleanup = yield* Effect.result(store.cleanups);
+
     // Folders no row names: left by a deletion that couldn't finish, or a download that went.
     // An unreadable record may name a moved folder too, so only a fully readable inventory can clean up.
-    if (inventory && inventory.unreadable.size === 0) {
+    if (inventory && sweepingCleanup._tag === "Success" && inventory.unreadable.size === 0) {
       const ownedFolders = new Set(
         [...records.values()].flatMap((record) =>
           record.folderId ? [record.id, record.folderId] : [record.id],
         ),
       );
+
+      // Pending folders remain reserved even after their authoritative copy was deleted.
+      for (const item of sweepingCleanup.success) {
+        ownedFolders.add(item.path.split(/[\\/]/).at(-1)!);
+      }
 
       yield* Effect.promise(async () => {
         const names = await readdir(root).catch(() => []);
@@ -910,11 +971,11 @@ function make(deps: DownloadsDeps) {
 
       if (moving.has(id) || removing.has(id)) throw moveError("Copy is busy");
 
-      if (record.moveTo || record.moveFrom)
-        throw moveError("Destination needs recovery; reconnect it and restart");
       removing.add(id);
 
       try {
+        deferCleanup(record);
+        await retryCleanup();
         const transferring = active?.id === id ? active : null;
 
         if (transferring) {
@@ -949,6 +1010,8 @@ function make(deps: DownloadsDeps) {
           }
         }
 
+        tell();
+        wake();
         throw cause;
       } finally {
         removing.delete(id);
@@ -1002,7 +1065,7 @@ function make(deps: DownloadsDeps) {
      * folder, with a `moveTo` marker naming the incomplete target, until every file is flushed;
      * only then does it commit. A copy already there counts as moved.
      */
-    const relocate = async (id: string): Promise<void> => {
+    const relocate = async (id: string): Promise<boolean> => {
       const record = records.get(id);
 
       if (!record || record.state !== "complete") throw notFound();
@@ -1018,17 +1081,31 @@ function make(deps: DownloadsDeps) {
 
       moving.set(id, work);
       work.settled = (async () => {
-        if (record.moveTo || record.moveFrom)
-          throw moveError("Destination needs recovery; reconnect it and restart");
+        deferCleanup(record);
+        await retryCleanup();
 
-        if ((await realpath(record.directory ?? root)) === (await realpath(destination))) return;
+        const sourceParent = await realpath(record.directory ?? root).catch(() => {
+          throw moveError("Source copy is missing or changed");
+        });
+
+        const destinationParent = await realpath(destination).catch(() => {
+          throw moveError("Destination unavailable");
+        });
+
+        if (sourceParent === destinationParent) return;
         await artworkWork.get(id);
 
         const source = folderOf(id);
         const moveId = randomUUID();
         const target = join(destination, moveId);
 
-        if ((await stat(mediaOf(record))).size !== record.size)
+        if (
+          (
+            await stat(mediaOf(record)).catch(() => {
+              throw moveError("Source copy is missing or changed");
+            })
+          ).size !== record.size
+        )
           throw moveError("Source copy is missing or changed");
 
         if (within(source, destination)) throw moveError("Destination is inside this copy");
@@ -1039,7 +1116,9 @@ function make(deps: DownloadsDeps) {
 
         check();
 
-        const parent = await stat(destination);
+        const parent = await stat(destination).catch(() => {
+          throw moveError("Destination unavailable");
+        });
 
         if (!parent.isDirectory()) throw moveError("Destination unavailable");
         const moveDevice = `${parent.dev}:${parent.ino}`;
@@ -1048,17 +1127,40 @@ function make(deps: DownloadsDeps) {
         if (free !== null && record.size !== null && free < record.size)
           throw moveError("Disk full. Free some space, then retry.");
         // Reserve a fresh UUID durably before creating anything at the destination.
-        update(id, (latest) => ({ ...latest, moveTo: destination, moveId, moveDevice }));
+        const token = randomUUID();
+        const ownership = await open(join(source, ".mrstreamer-owner"), "w");
+
+        try {
+          await ownership.writeFile(token);
+          await ownership.sync();
+        } finally {
+          await ownership.close();
+        }
+
+        await syncDirectory(source);
+        update(
+          id,
+          (latest) => ({ ...latest, moveTo: destination, moveId, moveDevice, moveToken: token }),
+          true,
+        );
         let committed = false;
-        let created = false;
 
         try {
           await mkdir(target);
-          created = true;
+          const targetOwner = await open(join(target, ".mrstreamer-owner"), "wx");
+
+          try {
+            await targetOwner.writeFile(token);
+            await targetOwner.sync();
+          } finally {
+            await targetOwner.close();
+          }
 
           const copyTree = async (from: string, to: string): Promise<void> => {
             for (const entry of await readdir(from, { withFileTypes: true })) {
               check();
+
+              if (entry.name === ".mrstreamer-owner") continue;
               const input = join(from, entry.name);
               const output = join(to, entry.name);
 
@@ -1099,40 +1201,29 @@ function make(deps: DownloadsDeps) {
           // Closing playback prevents a stale reader surviving deletion of its old files.
           await Effect.runPromise(playback.closeCopy(id));
           check();
-          update(id, (latest) => ({
-            ...unmarked(latest),
-            directory: destination,
-            folderId: moveId,
-            moveFrom: source,
-          }));
+          update(
+            id,
+            (latest) => ({
+              ...unmarked(latest),
+              directory: destination,
+              folderId: moveId,
+              moveFrom: source,
+              sourceToken: token,
+            }),
+            true,
+          );
           committed = true;
           missing.delete(id);
 
-          // A failed old-folder cleanup leaves a harmless duplicate, never loses the copy.
-          try {
-            const parent = await stat(join(source, ".."));
-            await rm(source, { recursive: true, force: true });
-            const after = await stat(join(source, ".."));
-
-            if (parent.dev === after.dev && parent.ino === after.ino)
-              update(id, ({ moveFrom: _moveFrom, ...latest }) => latest);
-          } catch {
-            // The committed location stays authoritative; startup retries the old-folder cleanup.
-          }
+          deferCleanup(records.get(id)!);
+          await retryCleanup();
         } finally {
           if (!committed) {
-            // Retain the marker if cleanup fails so a relaunch can retry it safely.
             try {
-              const currentParent = await stat(destination);
-
-              if (`${currentParent.dev}:${currentParent.ino}` === moveDevice) {
-                if (created) await rm(target, { recursive: true, force: true });
-                const after = await stat(destination);
-
-                if (`${after.dev}:${after.ino}` === moveDevice) update(id, unmarked);
-              }
+              deferCleanup(records.get(id)!);
+              await retryCleanup();
             } catch {
-              // Preserve both the original failure and the durable recovery intent.
+              // Preserve the original failure and the durable intent if bookkeeping fails.
             }
           }
         }
@@ -1141,6 +1232,8 @@ function make(deps: DownloadsDeps) {
 
       try {
         await work.settled;
+
+        return work.cancelled;
       } finally {
         moving.delete(id);
         tell();
@@ -1173,7 +1266,7 @@ function make(deps: DownloadsDeps) {
 
               if (moving.has(id) || removing.has(id)) throw moveError("Copy is busy");
 
-              if (action === "move") await relocate(id);
+              if (action === "move") cancelled = await relocate(id);
               else if (action === "remove") {
                 await removeOne(id);
                 tell();
@@ -1183,11 +1276,7 @@ function make(deps: DownloadsDeps) {
             } catch (cause) {
               const error = safeMoveFailure(cause).error;
 
-              if (
-                action === "move" &&
-                error.kind === "unexpected" &&
-                error.detail === t("Move cancelled; original copy kept")
-              )
+              if (action === "move" && cause instanceof MoveFailure && cause.cancelled)
                 cancelled = true;
               failed.push({ id, error });
             }
@@ -1211,7 +1300,10 @@ function make(deps: DownloadsDeps) {
 
           const copyFolders = await Promise.all(
             [...records.values()].map(async (record) =>
-              join(await realpath(record.directory ?? root), record.folderId ?? record.id),
+              join(
+                await realpath(record.directory ?? root).catch(() => record.directory ?? root),
+                record.folderId ?? record.id,
+              ),
             ),
           );
 
@@ -1695,23 +1787,16 @@ function unmarked({
   moveTo: _moveTo,
   moveId: _moveId,
   moveDevice: _moveDevice,
+  moveToken: _moveToken,
   ...rest
 }: StoredDownload): StoredDownload {
   return rest;
 }
 
 function safeMoveFailure(cause: unknown): Failed {
-  if (cause instanceof Failed) {
-    if (
-      cause instanceof MoveFailure ||
-      cause.error.kind !== "unexpected" ||
-      cause.error.detail === t("That download is no longer here.") ||
-      cause.error.detail === t("Downloads can't be opened.")
-    )
-      return cause;
+  if (cause instanceof Failed) return cause;
 
-    return moveError("The downloads folder can't be written. Retry, or check the disk.");
-  }
+  if (cause instanceof AppFailure) return failedWith(cause);
 
   if (cause instanceof Error && "code" in cause && cause.code === "ENOSPC")
     return moveError("Disk full. Free some space, then retry.");
@@ -1722,10 +1807,16 @@ function safeMoveFailure(cause: unknown): Failed {
   return moveError("The downloads folder can't be written. Retry, or check the disk.");
 }
 
-class MoveFailure extends Failed {}
+class MoveFailure extends Failed {
+  readonly cancelled: boolean;
+  constructor(message: MoveMessage) {
+    super({ error: { kind: "unexpected", detail: t(message) } });
+    this.cancelled = message === "Move cancelled; original copy kept";
+  }
+}
 
 function moveError(message: MoveMessage): Failed {
-  return new MoveFailure({ error: { kind: "unexpected", detail: t(message) } });
+  return new MoveFailure(message);
 }
 
 type MoveMessage =

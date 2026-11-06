@@ -256,6 +256,7 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
         {chosen.length > 0 && (
           <SelectionBar
             chosen={chosen}
+            pending={run.isPending}
             folder={storage ? folderName(storage.path) : null}
             start={start}
             finish={finish}
@@ -819,11 +820,13 @@ function Folder({ storage }: { storage: DownloadFolder }) {
  * it or Escape is pressed. Done clears the selection.
  */
 function SelectionBar({
+  pending,
   chosen,
   folder,
   start,
   finish,
 }: {
+  pending: boolean;
   chosen: readonly Download[];
   /** The last name of the household folder, or null where this computer has none to move to. */
   folder: string | null;
@@ -840,7 +843,8 @@ function SelectionBar({
         <Button
           key={action}
           size="sm"
-          className="max-w-full whitespace-normal wrap-anywhere text-left"
+          className="h-auto min-h-8 max-w-full py-1 whitespace-normal wrap-anywhere text-left"
+          disabled={pending}
           onClick={() => start(action, ids)}
           title={label}
         >
@@ -868,6 +872,7 @@ function SelectionBar({
       <Button
         size="sm"
         variant={confirming ? "destructive" : "secondary"}
+        disabled={pending}
         onBlur={() => setConfirming(false)}
         onKeyDown={(event) => {
           if (event.key === "Escape" && confirming) {

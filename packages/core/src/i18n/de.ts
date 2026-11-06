@@ -1211,7 +1211,7 @@ export const de: Translation = {
   "Subscription removed, copy kept": "Abonnement entfernt, Kopie behalten",
   "Delete copy": "Kopie löschen",
   "Destination folder already exists": "Der Zielordner existiert bereits",
-  "Copy is busy": "Die Kopie ist beschäftigt",
+  "Copy is busy": "Die Kopie wird gerade verwendet",
   "Destination needs recovery; reconnect it and restart":
     "Wiederherstellung nötig. Laufwerk verbinden und neu starten",
   "Source copy is missing or changed": "Die Quellkopie fehlt oder wurde geändert",
