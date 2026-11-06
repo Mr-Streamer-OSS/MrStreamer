@@ -17,7 +17,8 @@
 // Pause, Resume, Retry, Move to the folder for finished copies, and Delete, which asks again with
 // its count on a second press. Each answer is per download, a move's too: a row that failed says
 // why, stays selected and Try again runs the action again on those. A copy moving says so on its
-// row, with Cancel move, which keeps its original.
+// row, with Cancel move, which keeps its original before commit or the committed moved copy after
+// commit, and stops the remaining selection.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
 //   Downloads, and Recordings once any is kept, and Add subscription goes back to the form.
 import { useMutation } from "@tanstack/react-query";

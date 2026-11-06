@@ -680,6 +680,77 @@ describe.skipIf(!hasTools)("downloads", () => {
     LONG,
   );
 
+  it.each([false, true])(
+    "settles a refused Move destination with cancellation %s",
+    async (cancelled) => {
+      const started = await connected();
+      const { provider, subscriptionId, downloads, find } = started;
+
+      const first = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+
+      const second = await downloads.add(episode(provider, subscriptionId).ref);
+
+      await vi.waitFor(
+        async () => {
+          expect((await find(first.id))?.status.kind).toBe("complete");
+          expect((await find(second.id))?.status.kind).toBe("complete");
+        },
+        { timeout: LONG },
+      );
+      const before = [await downloads.copy(first.id), await downloads.copy(second.id)];
+      const destination = await tempDir();
+      await downloads.setFolder(destination);
+      const arrived = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      let waiting = true;
+
+      const checking = vi.spyOn(files, "stat").mockImplementation(async (...args) => {
+        const result = await actualFiles.stat(...args);
+
+        if (waiting && String(args[0]) === destination) {
+          waiting = false;
+          arrived.resolve();
+          await released.promise;
+          throw Object.assign(new Error("Destination disconnected"), { code: "ENOENT" });
+        }
+
+        return result;
+      });
+
+      try {
+        const moving = downloads.bulk([first.id, second.id], "move");
+        await arrived.promise;
+        const cancellation = cancelled ? downloads.cancelMove(first.id) : Promise.resolve();
+        released.resolve();
+        await cancellation;
+        const result = await moving;
+
+        expect(result.succeeded).toEqual(cancelled ? [] : [second.id]);
+        expect(result.failed).toEqual(
+          (cancelled ? [first.id, second.id] : [first.id]).map((id) => ({
+            id,
+            error: {
+              kind: "unexpected",
+              detail: cancelled ? "Move cancelled; original copy kept" : "Destination unavailable",
+            },
+          })),
+        );
+        expect(await downloads.copy(first.id)).toEqual(before[0]);
+
+        if (cancelled) expect(await downloads.copy(second.id)).toEqual(before[1]);
+        else
+          expect((await downloads.copy(second.id)).path.startsWith(destination + "/")).toBe(true);
+      } finally {
+        released.resolve();
+        checking.mockRestore();
+        await started.quit();
+      }
+    },
+    LONG,
+  );
+
   it(
     "excludes the whole delete selection before stopping the active transfer",
     async () => {
