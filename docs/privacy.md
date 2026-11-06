@@ -7,7 +7,7 @@ Mr. Streamer has no account and no ads, and doesn't sell data. Your provider's s
 - **The website.** Counted without a cookie or an identifier in your browser, unless your browser asks sites not to track.
 - **Your choices.** Turn statistics off in Settings > Privacy, and write to [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
 
-Last updated 31 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 6 November 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
 
@@ -65,7 +65,7 @@ Statistics never include what you watch, title or channel names, your provider o
 
 ### Usage statistics on iPhone
 
-The iPhone app asks whether you want to share basic usage statistics. Statistics stay off until you choose to share them, except when an upgrade retains your earlier deliberate choice. Refusing does not stop you connecting a provider. You can change the choice in Settings > Privacy. Builds without a configured PostHog project send nothing.
+The iPhone app does not prompt for statistics during setup or launch. Statistics stay off until you turn on **Share basic usage statistics** in Settings > Privacy, except when an upgrade retains your earlier deliberate choice. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
 
 When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
 

@@ -11,7 +11,6 @@ import { t } from "../i18n/navigation.ts";
 import { onScreen } from "../playback.ts";
 import { startReminders } from "../reminders.ts";
 import { holdLaunchScreen, StartupScreen } from "../startup-screen.tsx";
-import { requestStatisticsChoice } from "../statistics-consent.ts";
 import { startUp, useStartup } from "../startup.ts";
 import { onTelemetryScreen, startTelemetry } from "../telemetry/index.ts";
 import { WatchLayer } from "../watch.tsx";
@@ -40,7 +39,7 @@ export default function RootLayout() {
   const roster = useRoster();
   const startup = useStartup();
   const pathname = usePathname();
-  const asked = useRef(false);
+  const remindersStarted = useRef(false);
   useEffect(() => {
     startTelemetry();
     void startUp();
@@ -54,9 +53,8 @@ export default function RootLayout() {
   const opening = startup.kind === "opening";
   const restored = roster.kind === "ready" && roster.members.length > 0;
   useEffect(() => {
-    if (!opening && restored && !asked.current) {
-      asked.current = true;
-      requestStatisticsChoice();
+    if (!opening && restored && !remindersStarted.current) {
+      remindersStarted.current = true;
       // Once the tabs are mounted, so a tapped notification's programme can open over them.
       startReminders();
     }
