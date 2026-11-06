@@ -281,6 +281,11 @@ export interface ScheduledRecording {
    */
   readonly next: { readonly start: number; readonly stop: number } | null;
   readonly status: ScheduleStatus;
+  /**
+   * The rule that made it, for one airing a rule found. The rule sets its plan: `recordings.plan`
+   * and `recordings.schedule` refuse it, and `recordings.cancel` lets that one airing go.
+   */
+  readonly rule?: string;
 }
 
 /** Bounded title matching on explicitly selected channels. Every airing is the default. */
@@ -300,6 +305,11 @@ export const RecordingRulePlanSchema = lazy(() =>
 );
 
 export type RecordingRulePlan = ReturnType<typeof RecordingRulePlanSchema>["infer"];
+
+/** Whether a guide programme's title is the one a rule follows: trimmed, in any case. */
+export function sameProgrammeTitle(a: string, b: string): boolean {
+  return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+}
 
 export interface RecordingRuleMatch {
   readonly identity: string;

@@ -1726,4 +1726,6 @@ export const fr: Translation = {
   "This recording rule is no longer there.": "Cette règle d'enregistrement n'existe plus.",
   "The recording rule limit was reached.":
     "Le nombre maximal de règles d'enregistrement est atteint.",
+  "A rule sets this schedule. Change the rule instead.":
+    "Une règle définit cette programmation. Modifiez la règle.",
 };

@@ -35,7 +35,6 @@ import { queries } from "../../lib/queries.ts";
 import { cn } from "../../lib/utils.ts";
 import {
   holderText,
-  isRuleOccurrence,
   paddingRoom,
   planOf,
   planQuery,
@@ -64,7 +63,7 @@ type Props = {
 };
 
 export function SchedulePanel(props: Props) {
-  return props.schedule && isRuleOccurrence(props.schedule) ? (
+  return props.schedule?.rule ? (
     <OccurrencePanel {...props} schedule={props.schedule} />
   ) : (
     <ScheduleControls {...props} />

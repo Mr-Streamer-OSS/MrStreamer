@@ -1649,4 +1649,6 @@ export const nl: Translation = {
   "Recording rules could not be saved.": "Opnameregels konden niet worden opgeslagen.",
   "This recording rule is no longer there.": "Deze opnameregel bestaat niet meer.",
   "The recording rule limit was reached.": "Het maximum aantal opnameregels is bereikt.",
+  "A rule sets this schedule. Change the rule instead.":
+    "Een regel bepaalt deze planning. Wijzig de regel.",
 };

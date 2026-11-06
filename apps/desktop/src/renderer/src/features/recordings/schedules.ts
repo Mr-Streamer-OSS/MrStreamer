@@ -3,8 +3,8 @@
 // then follows those events, as recordings do. A guide programme finds its schedule by channel and
 // start: one made of it, or a repeat that records its channel at its weekday and time.
 //   Rules follow a programme by its title on chosen channels; main turns each airing it finds into
-// a schedule of its own, listed with the rest. The rules themselves change only from this window,
-// so their list is read once and kept as each save or cancel answers.
+// a schedule of its own, listed with the rest and naming its rule. The rules themselves change
+// only from this window, so their list is read once and kept as each save or cancel answers.
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
   RECORDING_MAX_MS,
@@ -12,6 +12,7 @@ import {
   type ConnectionHolder,
   type RecordingPadding,
   type RecordingPlan,
+  sameProgrammeTitle,
   type RecordingRulePlan,
   type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
@@ -283,21 +284,6 @@ export const rulePreviewQuery = (plan: RecordingRulePlan) =>
   });
 
 /**
- * Whether main made `schedule` for an airing a rule found. Its padding is the rule's, so it is
- * changed through the rule, and cancelling it lets that one airing go. Main names these schedules
- * `rule:<uuid>` (services/recordings.ts `isRuleSchedule`); the schedule list carries nothing else
- * that tells them apart.
- */
-export function isRuleOccurrence(schedule: ScheduledRecording): boolean {
-  return schedule.id.startsWith("rule:");
-}
-
-/** The same title as the rule planner compares them: trimmed, in any case. */
-function sameTitle(a: string, b: string): boolean {
-  return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
-}
-
-/**
  * The channels of `subscriptions` whose guide lists `title` from `from` on, for a rule to choose
  * from: one page of each subscription's guide search, as many as the rule planner reads.
  */
@@ -316,7 +302,7 @@ export const titleChannelsQuery = (title: string, subscriptions: readonly string
         );
 
         for (const { channel, programme } of page.matches)
-          if (sameTitle(programme.title, title)) found.set(ownedKey(channel), channel);
+          if (sameProgrammeTitle(programme.title, title)) found.set(ownedKey(channel), channel);
       }
 
       return [...found.values()].map((channel) => ({

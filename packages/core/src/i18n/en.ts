@@ -1614,4 +1614,6 @@ export const en = {
   "Recording rules could not be saved.": "Recording rules could not be saved.",
   "This recording rule is no longer there.": "This recording rule is no longer there.",
   "The recording rule limit was reached.": "The recording rule limit was reached.",
+  "A rule sets this schedule. Change the rule instead.":
+    "A rule sets this schedule. Change the rule instead.",
 } as const satisfies Readonly<Record<string, string | Plural>>;

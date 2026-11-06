@@ -2,6 +2,7 @@ import type { ProgrammeMatch } from "@mrstreamer/contracts/guide";
 import {
   RECORDING_MAX_MS,
   RECORDING_RULE_LIMITS,
+  sameProgrammeTitle,
   type RecordingRulePlan,
   type RecordingRulePreview,
 } from "@mrstreamer/contracts/recordings";
@@ -21,7 +22,7 @@ export function planRule(
   for (const { channel, programme } of matches) {
     if (
       !channels.has(ownedKey(channel)) ||
-      programme.title.trim().toLocaleLowerCase() !== plan.title.trim().toLocaleLowerCase() ||
+      !sameProgrammeTitle(programme.title, plan.title) ||
       programme.stop <= now
     )
       continue;

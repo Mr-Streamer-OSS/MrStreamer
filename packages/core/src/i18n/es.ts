@@ -1722,4 +1722,6 @@ export const es: Translation = {
   "Recording rules could not be saved.": "No se pudieron guardar las reglas de grabación.",
   "This recording rule is no longer there.": "Esta regla de grabación ya no existe.",
   "The recording rule limit was reached.": "Se alcanzó el máximo de reglas de grabación.",
+  "A rule sets this schedule. Change the rule instead.":
+    "Una regla define esta programación. Cambia la regla.",
 };

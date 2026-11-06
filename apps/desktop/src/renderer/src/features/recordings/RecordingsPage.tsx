@@ -55,7 +55,6 @@ import { RulePanel, SchedulePanel } from "./SchedulePanel.tsx";
 import {
   basisOfSchedule,
   holdersText,
-  isRuleOccurrence,
   repeatText,
   rulesQuery,
   useRules,
@@ -481,7 +480,7 @@ function ScheduleRow({
     });
 
   // A rule's airing: its padding is the rule's, so it is changed there.
-  const occurrence = isRuleOccurrence(schedule);
+  const occurrence = schedule.rule !== undefined;
   const repeat = occurrence ? t("From a rule") : repeatText(plan);
   const { word, reason } = standing(schedule, now);
   const recording = status.kind === "recording";

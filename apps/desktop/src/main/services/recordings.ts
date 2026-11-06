@@ -62,8 +62,6 @@ import type {
   ScheduleMiss,
   ScheduleStatus,
 } from "@mrstreamer/contracts/recordings";
-import { readRules, writeRules, type KeptRule } from "../recordings/rule-store.ts";
-import { planRule } from "../recordings/rules.ts";
 import {
   DEFAULT_KEEP_FREE,
   RECORDING_MAX_MS,
@@ -73,7 +71,7 @@ import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscript
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Failed } from "@mrstreamer/core/failure";
 import { Guide } from "@mrstreamer/core/guide/service";
-import { t } from "@mrstreamer/core/i18n";
+import { t, type PlainKey } from "@mrstreamer/core/i18n";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -102,6 +100,8 @@ import {
   type KeptStorage,
   type StoredRecording,
 } from "../recordings/store.ts";
+import { readRules, writeRules, type KeptRule } from "../recordings/rule-store.ts";
+import { planRule } from "../recordings/rules.ts";
 import { Library } from "./library.ts";
 import { Playback, type LocalCopy } from "./playback.ts";
 import { PlaybackCoordination } from "./playback-coordination.ts";
@@ -1405,7 +1405,9 @@ function make(deps: RecordingsDeps) {
     // Schedules.
     const rulesPath = join(root, "rules.json");
     let rules = yield* Effect.promise(() => readRules(rulesPath));
-    const ruleFailure = (detail: string) => new Failed({ error: { kind: "unexpected", detail } });
+
+    const ruleFailure = (detail: PlainKey) =>
+      new Failed({ error: { kind: "unexpected", detail: t(detail) } });
 
     const rulesUsable = Effect.suspend(() =>
       rules === null
@@ -1425,7 +1427,15 @@ function make(deps: RecordingsDeps) {
           }),
       );
 
+    // Main names each airing a rule found `rule:<uuid>`; the window reads `ScheduledRecording.rule`.
     const isRuleSchedule = (id: string) => id.startsWith("rule:");
+
+    /** The rule that made schedule `id`, for its standing. */
+    const ruleOf = (id: string) =>
+      isRuleSchedule(id)
+        ? rules?.find((rule) => rule.occurrences.some((each) => each.id === id))?.id
+        : undefined;
+
     const schedulesPath = join(root, "schedules.json");
     const readKept = yield* Effect.promise(() => readSchedules(schedulesPath));
 
@@ -1724,12 +1734,15 @@ function make(deps: RecordingsDeps) {
         const { plan } = schedule;
         const on = nextOccurrence(plan, now);
 
+        const rule = ruleOf(schedule.id);
+
         const as = (status: ScheduleStatus, next = on): ScheduledRecording => ({
           id: schedule.id,
           plan,
           channelName: schedule.channelName,
           next,
           status,
+          ...(rule && { rule }),
         });
 
         // What records goes on whatever the guide says now, or a change made meanwhile, until its
@@ -2331,6 +2344,15 @@ function make(deps: RecordingsDeps) {
           return yield* new Failed({
             error: { kind: "unexpected", detail: t("This schedule is no longer there.") },
           });
+
+        // Reconciling would put the rule's plan back: an airing a rule found changes with its rule.
+        if (id !== undefined && isRuleSchedule(id))
+          return yield* new Failed({
+            error: {
+              kind: "invalid-input",
+              detail: t("A rule sets this schedule. Change the rule instead."),
+            },
+          });
         const found = yield* follow(plan);
 
         if (!found.listed)
@@ -2791,6 +2813,7 @@ function make(deps: RecordingsDeps) {
         Effect.tap(
           scheduling(
             Effect.gen(function* () {
+              // Fails as the preview does: rules unread, or a channel's subscription not saved.
               yield* previewRule(plan);
               const was = rules?.find((each) => each.id === id);
 

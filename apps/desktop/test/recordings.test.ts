@@ -2684,6 +2684,10 @@ const TRACKS_FIXTURE = "h264-subtitles.mpegts";
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
+/** A time as the fake guide writes it (fake-provider.ts `xmltvTime`), to find a programme's entry. */
+const guideTime = (time: number) =>
+  `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
+
 /** Ten past seven in the evening, UTC: the fake guide's half-hour programmes start at :00 and :30. */
 const TEN_PAST = Date.UTC(2026, 9, 30, 19, 10);
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
@@ -2754,10 +2758,13 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const saved = await recordings.saveRule(plan);
     expect(saved.plan.mode).toBe("every");
     await recordings.check();
-    expect((await recordings.schedules())[0]?.plan).toMatchObject({
-      title: next.title,
-      start: next.start,
-    });
+    const [made] = await recordings.schedules();
+    expect(made).toMatchObject({ rule: saved.id, plan: { title: next.title, start: next.start } });
+    // The rule sets its airings: changing one as a manual schedule is refused, not reverted later.
+    await expect(
+      recordings.schedule({ ...made!.plan, padding: { before: 10, after: 10 } }, made!.id),
+    ).rejects.toMatchObject({ error: { kind: "invalid-input" } });
+    expect(await recordings.schedules()).toEqual([made]);
     await recordings.cancelRule(saved.id);
     await recordings.check();
     expect(await recordings.rules()).toEqual([]);
@@ -2785,13 +2792,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await recordings.check();
     const [before] = await recordings.schedules();
 
-    const at = (time: number) =>
-      `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
-
     provider.serveGuide(
       xml.replace(
-        `start="${at(next.start)}" stop="${at(next.stop)}"`,
-        `start="${at(next.start + MINUTE)}" stop="${at(next.stop - MINUTE)}"`,
+        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
       ),
     );
     await guide.refresh(subscriptionId);
@@ -2918,13 +2922,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     await rename(path, `${path}.saved`);
     await mkdir(path);
 
-    const at = (time: number) =>
-      `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
-
     provider.serveGuide(
       xml.replace(
-        `start="${at(next.start)}" stop="${at(next.stop)}"`,
-        `start="${at(next.start + MINUTE)}" stop="${at(next.stop - MINUTE)}"`,
+        `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+        `start="${guideTime(next.start + MINUTE)}" stop="${guideTime(next.stop - MINUTE)}"`,
       ),
     );
     await guide.refresh(subscriptionId);
@@ -3665,13 +3666,10 @@ describe.skipIf(!hasTools)("recording schedules", () => {
 
     /** The guide, with the next programme ending `minutes` later (earlier, below 0). */
     const ending = async (minutes: number) => {
-      const at = (time: number) =>
-        `${new Date(time + 2 * 60 * MINUTE).toISOString().slice(0, 19).replace(/[-T:]/g, "")} +0200`;
-
       provider.serveGuide(
         fakeGuide(provider.catalogue, TEN_PAST).replace(
-          `start="${at(next.start)}" stop="${at(next.stop)}"`,
-          `start="${at(next.start)}" stop="${at(next.stop + minutes * MINUTE)}"`,
+          `start="${guideTime(next.start)}" stop="${guideTime(next.stop)}"`,
+          `start="${guideTime(next.start)}" stop="${guideTime(next.stop + minutes * MINUTE)}"`,
         ),
       );
       await guide.refresh(subscriptionId);
