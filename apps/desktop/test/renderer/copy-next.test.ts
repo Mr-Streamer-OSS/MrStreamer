@@ -6,7 +6,7 @@
 // Next to try again. A next episode with no copy, one still downloading and the series' last
 // episode say so instead; a copy queued before series were kept ends as before. None of it asks a
 // provider, the viewing record or a receiver.
-import { ipc } from "./support.ts";
+import { ipc, SUBSCRIPTION } from "./support.ts";
 import { runs } from "./title-engine-stand-in.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -503,6 +503,89 @@ it("retries a refused final close save after the copy has closed", async () => {
     duration: 2700,
   });
 });
+
+it.each(["local", "receiver"] as const)(
+  "preserves a copy's resume after closing a sought provider title on %s output",
+  async (output) => {
+    const local = {
+      offers: [],
+      airplayRoutes: null,
+      scanning: false,
+      receivers: [],
+      output: { kind: "local" },
+    } as const;
+
+    const title = { kind: "movie", subscriptionId: SUBSCRIPTION, id: "m1" } as const;
+
+    const providerSession = {
+      title,
+      sessionId: "provider",
+      url: "http://127.0.0.1/title/provider.mp4",
+      duration: 2700,
+      audio: [],
+      subtitles: [],
+    };
+
+    ipc.always("playback.openTitle", providerSession);
+    ipc.always("output.openTitle", { ...providerSession, shows: [] });
+    ipc.always("output.playTitle", {
+      generation: 1,
+      sessionId: "provider",
+      item: { kind: "title", title },
+      state: "playing",
+      position: 30,
+      at: Date.now(),
+      duration: 2700,
+      subtitles: false,
+    });
+    await act(async () => ipc.emit("output.changed", local));
+
+    try {
+      await act(async () => {
+        void titlePlayer.open(
+          {
+            kind: "provider",
+            title,
+            name: "Film",
+            detail: "",
+            artworkUrl: null,
+            originalLanguage: "en",
+          },
+          0,
+        );
+      });
+      await act(async () => runs.at(-1)?.start());
+      await act(async () => titlePlayer.seek(30));
+      await act(async () => runs.at(-1)?.start());
+      expect(titlePlayer.state().position).toBe(30);
+
+      if (output === "receiver") {
+        const tv = { id: "tv", kind: "cast", name: "Fake TV" } as const;
+        await act(async () =>
+          ipc.emit("output.changed", {
+            ...local,
+            receivers: [tv],
+            output: { kind: "receiver", receiver: tv, volume: null, failure: null, media: null },
+          }),
+        );
+        expect(titlePlayer.onReceiver()).toBe(true);
+        expect(ipc.argsOf("output.playTitle")).toMatchObject([{ position: 30 }]);
+      }
+
+      await act(async () => titlePlayer.close());
+      await act(async () => ipc.emit("output.changed", local));
+      ipc.always("downloads.list", listOf(pilot));
+      await watch(pilot, { progress: { position: 4, duration: 2700 } });
+      // The five-second resume lead-in starts here at zero without an intentional seek.
+      expect(titlePlayer.state()).toMatchObject({ position: 0, duration: 2700 });
+      await act(async () => titlePlayer.close());
+      expect(ipc.argsOf("downloads.recordProgress")).toEqual([]);
+    } finally {
+      await act(async () => titlePlayer.close());
+      await act(async () => ipc.emit("output.changed", local));
+    }
+  },
+);
 
 it("saves an explicit seek to zero on close without resetting a never-started copy", async () => {
   ipc.always("downloads.list", listOf(pilot));
