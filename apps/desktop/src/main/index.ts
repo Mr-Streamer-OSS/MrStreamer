@@ -1239,25 +1239,31 @@ async function start(): Promise<void> {
     const name = app.getName();
     const counts = downloadCounts();
 
-    const status = [
-      `${t("Downloading")} ${counts.active}`,
-      `${t("Queued")} ${counts.queued}`,
-      `${t("Waiting")} ${counts.waiting}`,
-      `${t("Paused")} ${counts.paused}`,
-    ].join(" · ");
+    // Nonzero counts only, as "Downloading 2 · Queued 1"; none while only recordings keep the app.
+    const status = (
+      [
+        [t("Downloading"), counts.active],
+        [t("Queued"), counts.queued],
+        [t("Waiting"), counts.waiting],
+        [t("Paused"), counts.paused],
+      ] as const
+    )
+      .flatMap(([words, count]) => (count > 0 ? [`${words} ${count}`] : []))
+      .join(" · ");
 
-    tray.setToolTip(`${name} · ${status}`);
+    tray.setToolTip(status ? `${name} · ${status}` : name);
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: status, enabled: false },
+        { label: status, enabled: false, visible: status !== "" },
         { label: t("Open {app}", { app: name }), click: showWindow },
         {
           label: downloadsLive()
             ? !isMac && !live()
               ? t("Pause and quit")
-              : t("Pause all")
-            : t("Resume all"),
-          enabled: !changingDownloads && (downloadsLive() || counts.paused > 0),
+              : t("Pause downloads")
+            : t("Resume downloads"),
+          visible: downloadsLive() || counts.paused > 0,
+          enabled: !changingDownloads,
           click: () => {
             if (changingDownloads) return;
             changingDownloads = true;
@@ -1279,7 +1285,14 @@ async function start(): Promise<void> {
               });
           },
         },
-        { label: t("Quit {app}", { app: name }), click: quit },
+        {
+          // The ellipsis says Quit asks first (see `askToQuit`).
+          label:
+            !quitConfirmed && (recordingNow() || downloadsLive())
+              ? t("Quit {app}…", { app: name })
+              : t("Quit {app}", { app: name }),
+          click: quit,
+        },
       ]),
     );
   };

@@ -10,6 +10,17 @@ import { electronExecutable } from "./session.ts";
 import { SOURCE_LOCALE } from "../../../../packages/contracts/src/language.ts";
 import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
 
+/** Whether the process still runs: signal 0 only checks it exists. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runDownloadsBackground(
   build: Record<string, unknown> & { executable: string },
 ) {
@@ -33,7 +44,7 @@ export async function runDownloadsBackground(
       },
       proof: { scenario: "downloads-background", build },
       limits: [
-        "Linux fake-provider source journey only. Native tray input, OS wakefulness, manual sleep, macOS and Windows require separate native proof. Explicit Quit dialog is verified after designer integration.",
+        "Linux fake-provider source journey only. Native tray input, OS wakefulness, manual sleep, macOS and Windows require separate native proof.",
       ],
       done: "downloads-background",
     },
@@ -85,20 +96,12 @@ export async function runDownloadsBackground(
       await d.click("Pause all", button("button", t("Pause all")));
       await d.wait(() => d.exists(button("button", t("Resume all"))));
       await d.capture("paused-before-close");
-      const pausedInstance = started;
+      const pausedPid = started?.pid;
 
-      if (!pausedInstance?.pid) throw new Error("Missing paused process identity.");
+      if (!pausedPid) throw new Error("Missing paused process identity.");
       action("Close with only paused downloads");
       await d.page.send("Page.close").catch(() => undefined);
-      await d.wait(async () => {
-        try {
-          process.kill(pausedInstance.pid!, 0);
-
-          return false;
-        } catch {
-          return true;
-        }
-      });
+      await d.wait(async () => !alive(pausedPid));
       observed["pausedOnlyExited"] = true;
       d = await start("resume runnable queue");
       await d.wait(() => d.exists("document.querySelector('header')"));
@@ -109,30 +112,21 @@ export async function runDownloadsBackground(
       await d.wait(() => d.exists(button("button", t("Pause all"))));
       await d.capture("before-close");
       const instance = started;
+      const pid = instance?.pid;
 
-      if (!instance?.pid) throw new Error("No verified process identity.");
+      if (!instance || !pid) throw new Error("No verified process identity.");
       action("Close the window, leaving the queue running");
       await d.page.send("Page.close").catch(() => undefined);
-
-      const alive = () => {
-        try {
-          process.kill(instance.pid!, 0);
-
-          return true;
-        } catch {
-          return false;
-        }
-      };
 
       await d.wait(async () => {
         const targets = type({ type: "string" })
           .array()
           .assert(await (await fetch(`http://127.0.0.1:${instance.port}/json/list`)).json());
 
-        return alive() && targets.every((target) => target.type !== "page");
+        return alive(pid) && targets.every((target) => target.type !== "page");
       });
       observed["closedRendererWhileAlive"] = true;
-      await d.wait(async () => !alive(), 30_000);
+      await d.wait(async () => !alive(pid), 30_000);
       const folders = await readdir(join(profile, "downloads"));
 
       if (folders.length !== 2) throw new Error("Both queued copies must finish after Close.");

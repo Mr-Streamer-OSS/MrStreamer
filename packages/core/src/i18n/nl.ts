@@ -1236,6 +1236,9 @@ export const nl: Translation = {
   "Pause all": "Alles pauzeren",
   "Resume all": "Alles hervatten",
   "Pause and quit": "Pauzeren en afsluiten",
+  "Pause downloads": "Downloads pauzeren",
+  "Resume downloads": "Downloads hervatten",
+  "Quit {app}…": "{app} afsluiten…",
   "Paused, resume download": "Gepauzeerd, download hervatten",
   "Resume download of {title}": "Download van {title} hervatten",
   // The close button on a playback error.

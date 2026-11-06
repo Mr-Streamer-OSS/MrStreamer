@@ -1211,6 +1211,9 @@ export const en = {
   "Pause all": "Pause all",
   "Resume all": "Resume all",
   "Pause and quit": "Pause and quit",
+  "Pause downloads": "Pause downloads",
+  "Resume downloads": "Resume downloads",
+  "Quit {app}…": "Quit {app}…",
   "Paused, resume download": "Paused, resume download",
   "Resume download of {title}": "Resume download of {title}",
   // The close button on a playback error.

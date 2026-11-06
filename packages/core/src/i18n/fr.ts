@@ -1299,6 +1299,9 @@ export const fr: Translation = {
   "Pause all": "Tout mettre en pause",
   "Resume all": "Tout reprendre",
   "Pause and quit": "Mettre en pause et quitter",
+  "Pause downloads": "Mettre les téléchargements en pause",
+  "Resume downloads": "Reprendre les téléchargements",
+  "Quit {app}…": "Quitter {app}…",
   "Paused, resume download": "En pause, reprendre le téléchargement",
   "Resume download of {title}": "Reprendre le téléchargement de {title}",
   // The close button on a playback error.

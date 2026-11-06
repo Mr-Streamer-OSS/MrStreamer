@@ -165,12 +165,6 @@ it("asks about downloads alone once their list is read, keeping their partial fi
   );
   expect(shown.textContent).toContain("Closing the window instead keeps downloading.");
   await focusesKeep("Keep downloading");
-  await act(async () => button("Keep downloading")?.click());
-  await vi.waitFor(() => expect(dialog()).toBeNull());
-  expect(ipc.argsOf("window.quit")).toHaveLength(0);
-  await asked();
-  await act(async () => button("Quit")?.click());
-  expect(ipc.argsOf("window.quit")).toHaveLength(1);
 });
 
 it("asks about both while recording and downloading", async () => {

@@ -76,7 +76,7 @@ Quitting the app, pausing, or playback taking the connection, keeps the download
 
 Closing the window keeps active, queued and waiting downloads running. With downloads alone, the window closes fully, so Home cannot use a provider connection in the background. Open Mr. Streamer from its native menu or launch it again to return.
 
-The native menu shows counts only, with Open, Pause all or Resume all, and Quit. On Windows and Linux, when downloads alone keep the app running, **Pause and quit** saves their pauses before exiting. Paused, failed, missing and completed copies alone do not keep the app running. Once all downloads and recording obligations finish, it exits automatically. macOS keeps the app open until Quit.
+The native menu shows how many downloads transfer, queue, wait or are paused, with Open, **Pause downloads** or **Resume downloads**, and Quit, which ends in … while it will ask first. On Windows and Linux, when downloads alone keep the app running, **Pause and quit** saves their pauses before exiting. Paused, failed, missing and completed copies alone do not keep the app running. Once all downloads and recording obligations finish, it exits automatically. macOS keeps the app open until Quit.
 
 Explicit Quit asks while downloads can run or a recording is live. Quit retains partial download files for the provider-checked continuation described above. A failed pause save leaves the app open to retry. Actual transfers, recordings and receiver playback ask the system to keep the app awake while allowing display sleep. Manual sleep and shutdown still work. Mr. Streamer does not start at login, install a background service or wake the computer.
 
