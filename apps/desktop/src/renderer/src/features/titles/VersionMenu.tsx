@@ -1,6 +1,6 @@
 import { Menu } from "@base-ui/react/menu";
 import { Check, ChevronRight } from "lucide-react";
-import { Fragment, useState, type ReactElement, type ReactNode } from "react";
+import { Fragment, useState, type ComponentProps, type ReactNode } from "react";
 import type { Title, TitleVersion } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { languageName } from "@mrstreamer/core/ondemand/tracks";
@@ -47,7 +47,7 @@ export function VersionMenu({
   picked: OwnedId | null;
   automatic?: OwnedId;
   onPick: (version: OwnedId | null) => void;
-  trigger?: ReactElement<Record<string, unknown>>;
+  trigger?: ComponentProps<typeof Menu.Trigger>["render"];
   children: ReactNode;
   /** Episode alternatives play immediately and do not change a series version preference. */
   remember?: boolean;

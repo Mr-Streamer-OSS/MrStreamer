@@ -1,9 +1,12 @@
 // Run the built desktop on an isolated fake-provider profile: Close must release the renderer,
 // finish the runnable queue and exit on Windows/Linux. A paused queue must exit without resuming.
 import { type } from "arktype";
+import type { preflight } from "./control.ts";
+import type { Observations } from "./language.ts";
+import { execFileSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ownedRun, type Started } from "./downloads-run.ts";
 import { pictureServer } from "./downloads-queue.ts";
 import { electronExecutable } from "./session.ts";
@@ -21,13 +24,11 @@ function alive(pid: number): boolean {
   }
 }
 
-export async function runDownloadsBackground(
-  build: Record<string, unknown> & { executable: string },
-) {
+export async function runDownloadsBackground(build: Awaited<ReturnType<typeof preflight>>) {
   if (process.platform === "darwin") throw new Error("Automatic exit is a Windows/Linux journey.");
   setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
   let started: Started | undefined;
-  const observed: Record<string, unknown> = {};
+  const observed: Observations = {};
   await ownedRun(
     {
       build,
@@ -157,7 +158,27 @@ if (process.argv[1]?.endsWith("downloads-background.ts")) {
     new URL("../../../../apps/desktop/out/main/index.js", import.meta.url),
   );
 
+  const pkg = type({ version: "string" }).assert(
+    JSON.parse(
+      await readFile(new URL("../../../../apps/desktop/package.json", import.meta.url), "utf8"),
+    ),
+  );
+
+  const ffmpeg = process.env["MR_STREAMER_FFMPEG"] || "ffmpeg";
+
+  const ffprobe = process.env["MR_STREAMER_FFMPEG"]
+    ? join(dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe")
+    : "ffprobe";
+
+  const version = (tool: string) =>
+    execFileSync(tool, ["-version"], { encoding: "utf8" }).split("\n")[0];
+
   await runDownloadsBackground({
+    appVersion: pkg.version,
+    revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    ffmpeg: version(ffmpeg),
+    ffprobe: version(ffprobe),
+    display: process.platform !== "linux" || Boolean(process.env["DISPLAY"]),
     executable: await electronExecutable(),
     mainSha256: createHash("sha256").update(main).digest("hex"),
   });

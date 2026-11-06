@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Built-app search acceptance. Linux: xvfb-run -a node apps/desktop/test/e2e/search-app.ts
 // --output .local/search-app/run-N. Uses only disposable profiles and fake external services.
 // Inspector pauses add an interruptible delay before the actual registered guide work runs.
@@ -32,10 +33,10 @@ await mkdir(output, { recursive: false });
 const desktop = resolve("apps/desktop");
 const bundle = await readFile(join(desktop, "out/main/index.js"), "utf8");
 const profile = await mkdtemp(join(tmpdir(), "mrstreamer-search-"));
-const events: unknown[] = [];
+const events: Json[] = [];
 const cases: { name: string; status: string; error?: string }[] = [];
 const logs: string[] = [];
-const inspectorErrors: unknown[] = [];
+const inspectorErrors: Json[] = [];
 const guideDelayMs = 4500;
 let app: ChildProcess | undefined;
 let page: Page | undefined;
@@ -44,7 +45,7 @@ let failure = false;
 const providers: Awaited<ReturnType<typeof startFakeProvider>>[] = [];
 let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
 
-const proof: Record<string, unknown> = {
+const proof: Record<string, Json | undefined> = {
   revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   mainSha256: createHash("sha256").update(bundle).digest("hex"),
   harnessSha256: createHash("sha256")
@@ -66,7 +67,7 @@ const live = () => {
   return page;
 };
 
-async function send(method: string, params: Record<string, unknown> = {}) {
+async function send(method: string, params: Record<string, Json | undefined> = {}) {
   const reply = await live().send(method, params);
   assert(!reply.error, `${method}: ${JSON.stringify(reply.error)}`);
 

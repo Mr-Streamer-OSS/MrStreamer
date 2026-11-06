@@ -166,6 +166,8 @@ A schedule's row has **Edit** and, in its menu, **Cancel schedule**. A recording
 
 With no subscription saved, the Connect screen shows **Recordings** while any are kept.
 
+From 0.0.24, each recording’s resume position belongs to the Default viewing profile. Existing positions carry over and stay with the exact recording after a restart or subscription removal. Background recording updates leave them alone. If saving a new position fails, the last saved position stays available and playback can try saving again. Earlier versions keep positions in the recording inventory; watching there does not replace Default’s positions when you return to 0.0.24.
+
 ### When a recording is interrupted
 
 When the stream breaks, the disk fails or fills, a [storage limit](#where-recordings-are-kept) is reached, the computer sleeps, Mr. Streamer crashes, or the computer shuts down, the recording pauses. It goes on in the same file with the rest of its time once Mr. Streamer runs, the computer is awake, a connection is free and there's room. The time in between is a gap, listed on its row. Nothing fills a gap, from catch-up or anywhere else.

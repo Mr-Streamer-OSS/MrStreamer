@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { randomUUID } from "node:crypto";
 import type { Driver } from "./installed-upgrade.ts";
 
@@ -51,7 +52,7 @@ interface Phase {
     type: string;
     requestAt: number;
     ackAt?: number;
-    params: Record<string, unknown>;
+    params: Record<string, Json | undefined>;
     reply?: Awaited<ReturnType<MediaDriver["page"]["send"]>>;
     error?: string;
   }[];

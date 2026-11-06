@@ -1,3 +1,6 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../../packages/contracts/src/json-value.ts";
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 // Native Electron diagnostic. Run serially for each frozen build, with the same executable:
 // xvfb-run -a node apps/desktop/test/e2e/download-performance.ts --app-dir /build/apps/desktop \
 //   --executable /path/to/electron --revision SHA --output .local/native-download/before
@@ -11,13 +14,15 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import type { DownloadList } from "@mrstreamer/contracts/downloads";
+import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import type { SeriesDetails } from "@mrstreamer/contracts/ondemand";
 import { freePort, stop } from "../../../../.cursor/skills/verify-mrstreamer/scripts/session.ts";
 import { startFakeProvider, fixture } from "../fake-provider.ts";
 import { startFakeTmdb } from "../fake-tmdb.ts";
 import { connect, key, waitFor, type Page } from "./app.ts";
 import { seedCopies, slowProvider } from "./download-performance-fixture.ts";
+
+const TraceBatch = arkType({ value: JsonValue.array() });
 
 const { values } = parseArgs({
   options: {
@@ -44,7 +49,10 @@ const clip = join(profile, "seed.mp4");
 
 await writeFile(clip, fixture("title-h264-aac.mp4"));
 
-const results: Record<string, unknown> = {
+const results: Record<
+  string,
+  Json | Download | Awaited<ReturnType<typeof catalogueIdentity>> | undefined
+> = {
   revision: values.revision,
   appDir,
   executable,
@@ -75,7 +83,7 @@ let provider: Awaited<ReturnType<typeof startFakeProvider>> | undefined;
 let proxy: Awaited<ReturnType<typeof slowProvider>> | undefined;
 let tmdb: Awaited<ReturnType<typeof startFakeTmdb>> | undefined;
 const logs: string[] = [];
-const trace: unknown[] = [];
+const trace: Json[] = [];
 let profiling = false;
 let tracing = false;
 let traceComplete = false;
@@ -112,7 +120,7 @@ async function manifest(directory: string): Promise<Record<string, string>> {
   return hashes;
 }
 
-async function checked(method: string, params: Record<string, unknown> = {}) {
+async function checked(method: string, params: Record<string, Json | undefined> = {}) {
   assert(page);
   const reply = await page.send(method, params);
 
@@ -412,9 +420,7 @@ try {
   await checked("Profiler.setSamplingInterval", { interval: 1000 });
   await checked("Profiler.start");
   profiling = true;
-  page!.on("Tracing.dataCollected", (params) =>
-    trace.push(...(params as { value: unknown[] }).value),
-  );
+  page!.on("Tracing.dataCollected", (params) => trace.push(...TraceBatch.assert(params).value));
 
   page!.on("Tracing.tracingComplete", () => {
     traceComplete = true;
@@ -424,7 +430,7 @@ try {
     options: "record-as-much-as-possible",
   });
   tracing = true;
-  const samples: Record<string, unknown>[] = [];
+  const samples: Record<string, Json | undefined>[] = [];
   results["scroll"] = samples;
 
   for (let index = 0; index < 35; index++) {
@@ -462,7 +468,7 @@ try {
 
     const observed = await page!.evaluate<{
       input: { top: number; observedTop?: number; scroll: number | null; raf: number | null };
-      events: unknown[];
+      events: Json[];
       commits: number;
       epochOffset: number;
     }>(
@@ -498,7 +504,7 @@ try {
     );
   }
 
-  const cpu = (await checked("Profiler.stop")) as { profile: unknown };
+  const cpu = arkType({ profile: JsonValue }).assert(await checked("Profiler.stop"));
   profiling = false;
   await writeFile(join(output, "renderer.cpuprofile"), JSON.stringify(cpu.profile));
   await checked("Tracing.end");
@@ -562,7 +568,7 @@ try {
   await page!.evaluate(
     `document.querySelector('[aria-label="Cancel download of S1 E1"]').scrollIntoView({block:'center'})`,
   );
-  const positive: unknown[] = [];
+  const positive: Json[] = [];
   results["positiveControl"] = positive;
 
   for (let i = 0; i < 2; i++) {

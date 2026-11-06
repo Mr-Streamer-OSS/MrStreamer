@@ -160,8 +160,14 @@ function stored(): Entry | undefined {
   try {
     const value: Json = JSON.parse(sessionStorage.getItem(ENTRY) ?? "null");
 
-    if (!(value !== null && value === Object(value))) return undefined;
-    const codes: Partial<Record<keyof Entry, unknown>> = Object(value);
+    if (!(value instanceof Object)) return undefined;
+
+    const codes = {
+      entry_source: "entry_source" in value ? value.entry_source : undefined,
+      entry_medium: "entry_medium" in value ? value.entry_medium : undefined,
+      entry_campaign: "entry_campaign" in value ? value.entry_campaign : undefined,
+    };
+
     const entry_source = pick(Object.keys(SOURCES) as Source[], String(codes.entry_source));
     const entry_medium = pick(MEDIUMS, String(codes.entry_medium));
     const entry_campaign = pick(CAMPAIGNS, String(codes.entry_campaign));

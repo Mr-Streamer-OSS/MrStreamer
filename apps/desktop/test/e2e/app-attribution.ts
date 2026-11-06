@@ -1,3 +1,4 @@
+import type { Json } from "../../../../packages/contracts/src/json.ts";
 import { type as arkType } from "arktype";
 // Attribution diagnostics for measure-app.ts's probes, run in the same disposable instance:
 // steady-state V8 profiles and Chromium traces of playing Live TV, Home and Watch, and the
@@ -72,7 +73,7 @@ export type AttributionContext = {
 async function command<T>(
   page: Page,
   method: string,
-  params: Record<string, unknown> = {},
+  params: Record<string, Json | undefined> = {},
   timeoutMs = 120_000,
 ) {
   const reply = await page.send(method, params, timeoutMs);

@@ -174,7 +174,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     "es-ES": "cuenta atras",
   };
 
-  const searches: unknown[] = [];
+  const searches: { locale: Locale; synonym: string; focused: string | null }[] = [];
 
   for (const next of LOCALES) {
     await nav("General");
@@ -192,7 +192,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
     searches.push({
       locale,
       synonym: synonyms[next],
-      focused: await d.evaluate("document.activeElement.getAttribute('aria-label')"),
+      focused: await d.evaluate<string | null>("document.activeElement.getAttribute('aria-label')"),
     });
     await d.capture(`search-${locale}`);
     await find(translate(locale, "Interface language"), "interface-language");
@@ -389,7 +389,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
   await nav("Subtitles");
   d.observed["sectionScroll"] = {
     before: scroll,
-    after: await d.evaluate("document.querySelector('main:not([hidden])').scrollTop"),
+    after: await d.evaluate<number>("document.querySelector('main:not([hidden])').scrollTop"),
   };
   expect(
     (await d.evaluate<number>("document.querySelector('main:not([hidden])').scrollTop")) === scroll,
@@ -450,7 +450,7 @@ export async function settingsScenario(d: Driver): Promise<void> {
   d.observed["onlineSubtitleIntent"] = {
     focused: "Online subtitle search",
     videoBefore: beforeTime,
-    videoAfter: await d.evaluate("document.querySelector('video').currentTime"),
+    videoAfter: await d.evaluate<number>("document.querySelector('video').currentTime"),
   };
   await d.capture("online-subtitles-intent-over-playing-title");
   await nav("General");

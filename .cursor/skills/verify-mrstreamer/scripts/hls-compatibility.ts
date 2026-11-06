@@ -3,7 +3,7 @@ import type { Driver } from "./language.ts";
 
 const video = `(() => { const v = document.querySelector('video'); return { time: v?.currentTime ?? 0, width: v?.videoWidth ?? 0, audio: v?.webkitAudioDecodedByteCount ?? 0, frames: v?.webkitDecodedFrameCount ?? 0, dropped: v?.webkitDroppedFrameCount ?? 0, paused: v?.paused ?? true, text: document.querySelector('[data-view=watch]')?.innerText ?? '' }; })()`;
 
-interface Playing {
+export interface Playing {
   time: number;
   width: number;
   audio: number;

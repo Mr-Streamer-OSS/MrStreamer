@@ -1,3 +1,5 @@
+import { type as arkType } from "arktype";
+import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
 import { spawnSync } from "node:child_process";
@@ -18,6 +20,9 @@ import type { OperationObserver } from "../src/main/analytics/operations.ts";
 import type { AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { OperationOutcome } from "../src/main/analytics/operations.ts";
 import { fileDisk, type Disk } from "../src/main/downloads/transfer.ts";
+import { Database } from "../src/main/platform/database.ts";
+import { Profiles } from "../src/main/platform/profile-store.ts";
+import { copyProgress } from "../src/main/platform/profile-copy-progress.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
@@ -811,6 +816,90 @@ describe.skipIf(!hasTools)("downloads", () => {
     await failsWith({ kind: "folder", detail: expect.any(String) });
     const items = (await downloads.list()).items;
     expect(items.every((item) => item.status.kind !== "complete")).toBe(true);
+  }, 60_000);
+
+  it("lists incomplete downloads without seeding personal progress", async () => {
+    const { provider, subscriptionId, downloads, dataDir } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.exec("create table profile_copy_progress (unreadable text)");
+      const queued = await downloads.add(film.ref);
+      db.exec("drop table profile_copy_progress");
+      db.exec("begin immediate");
+
+      try {
+        expect(
+          (await downloads.list()).items.find((item) => item.id === queued.id)?.progress,
+        ).toBeNull();
+      } finally {
+        db.exec("rollback");
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates personal copy positions once, separates exact copies, and retries refused writes", async () => {
+    const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await quit();
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    // What an earlier build kept in the download record, written as its inventory saves it.
+    const legacy = (to: DatabaseSync) =>
+      to
+        .prepare(
+          "update downloads set record = json_set(record, '$.progress', json(?)) where id = ?",
+        )
+        .run(JSON.stringify({ position: 4, duration: 8, at: Date.now() }), done.id);
+
+    const other = randomUUID();
+    legacy(db);
+    db.prepare(
+      "insert into downloads (id, added_at, record) select ?, added_at, json_set(record, '$.id', ?) from downloads where id = ?",
+    ).run(other, other, done.id);
+    // The upgrade fixture has no personal table, as in the previous release.
+    db.exec("drop table if exists profile_copy_progress");
+    db.close();
+    await cp(join(dataDir, "downloads", done.id), join(dataDir, "downloads", other), {
+      recursive: true,
+    });
+    const again = await app(dataDir);
+    expect((await again.downloads.copy(done.id)).progress).toEqual({ position: 4, duration: 8 });
+    await again.downloads.recordProgress(done.id, 0, 8);
+    expect((await again.downloads.copy(other)).progress).toEqual({ position: 4, duration: 8 });
+    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      lock.exec("begin immediate");
+      await expect(again.downloads.recordProgress(done.id, 6, 8)).rejects.toMatchObject({
+        error: { kind: "unexpected" },
+      });
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+
+    expect((await again.downloads.copy(done.id)).progress).toEqual({ position: 0, duration: 8 });
+    await again.downloads.recordProgress(other, 7, 8);
+    await again.roster.remove(subscriptionId, true);
+    await again.quit();
+    // A background inventory writer still holding the upgrade's document saves it later.
+    const inventory = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    legacy(inventory);
+    inventory.close();
+    const last = await app(dataDir);
+    onTestFinished(last.quit);
+    expect((await last.downloads.copy(done.id)).progress).toEqual({ position: 0, duration: 8 });
+    expect((await last.downloads.copy(other)).progress).toEqual({ position: 7, duration: 8 });
+    expect((await last.find(done.id))?.progress).toEqual({ position: 0, duration: 8 });
   }, 60_000);
 
   it("ends unfinished downloads with their subscription and keeps its copies playable after a restart", async () => {
@@ -2255,9 +2344,11 @@ describe.skipIf(!hasTools)("an episode's series", () => {
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
     const row = (id: string) =>
-      JSON.parse(
-        String(db.prepare("select record from downloads where id = ?").get(id)?.["record"]),
-      ) as Record<string, unknown>;
+      arkType({ "[string]": JsonValue }).assert(
+        JSON.parse(
+          String(db.prepare("select record from downloads where id = ?").get(id)?.["record"]),
+        ),
+      );
 
     const { series: _kept, ...older } = row(before.id);
     const update = db.prepare("update downloads set record = ? where id = ?");
@@ -2399,3 +2490,30 @@ it("observes actual download runs, successful completion, disk failure and cance
   ]);
   expect(starts).toBe(4);
 }, 60_000);
+
+it("seeds legacy copy positions only into Default and keeps each owner's explicit writes", async () => {
+  const db = new DatabaseSync(":memory:");
+  onTestFinished(() => db.close());
+  let owner = "default";
+
+  const personal = await Effect.runPromise(
+    copyProgress.pipe(
+      Effect.provideService(Database, { db }),
+      Effect.provideService(Profiles, {
+        active: Effect.sync(() => ({ id: owner, revision: 1 })),
+      }),
+    ),
+  );
+
+  const legacy = { position: 42, duration: 90 };
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual(legacy);
+  owner = "another-profile";
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toBeNull();
+  await Effect.runPromise(personal.write("download", "copy", 7, 90));
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual({
+    position: 7,
+    duration: 90,
+  });
+  owner = "default";
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual(legacy);
+});

@@ -596,7 +596,7 @@ export async function guideGridScrollScenario(d: Driver) {
     // Indexing about half a million programmes.
     600_000,
   );
-  d.observed["guideStatus"] = await d.evaluate<unknown>(
+  d.observed["guideStatus"] = await d.evaluate<Json>(
     "(async () => (await window.mrStreamer.invoke('guide.status')).value.map(g => ({ channels: g.channels, listed: g.listed, processing: g.processing })))()",
   );
   await d.click("Open Live TV", named("header button", "Live TV"));

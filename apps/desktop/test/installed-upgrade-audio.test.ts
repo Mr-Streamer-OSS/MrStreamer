@@ -37,7 +37,10 @@ function standIn() {
     diagnosticReadError: null as Error | null,
     onPublicRead: () => {},
     onRejectedPoll: (_what: string, _attempt: number) => {},
-    commands: [] as { method: string; params: Record<string, unknown> }[],
+    commands: [] as {
+      method: string;
+      params: NonNullable<Parameters<AudioDriver["page"]["send"]>[1]>;
+    }[],
     waits: [] as { what: string; timeout: number }[],
     timeouts: [] as Error[],
     budgets: [] as number[],
