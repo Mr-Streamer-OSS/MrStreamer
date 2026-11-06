@@ -10,7 +10,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
-import { basename, join } from "node:path";
+import { basename, join, sep } from "node:path";
 import { Writable } from "node:stream";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -742,6 +742,87 @@ describe.skipIf(!hasTools)("downloads", () => {
         if (cancelled) expect(await downloads.copy(second.id)).toEqual(before[1]);
         else
           expect((await downloads.copy(second.id)).path.startsWith(destination + "/")).toBe(true);
+      } finally {
+        released.resolve();
+        checking.mockRestore();
+        await started.quit();
+      }
+    },
+    LONG,
+  );
+
+  it.each([false, true])(
+    "settles a refused Move destination realpath with cancellation %s",
+    async (cancelled) => {
+      const started = await connected();
+      const { provider, subscriptionId, downloads, find } = started;
+
+      const first = await downloads.add(
+        movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
+      );
+
+      const second = await downloads.add(episode(provider, subscriptionId).ref);
+
+      await vi.waitFor(
+        async () => {
+          expect((await find(first.id))?.status.kind).toBe("complete");
+          expect((await find(second.id))?.status.kind).toBe("complete");
+        },
+        { timeout: LONG },
+      );
+      const before = [await downloads.copy(first.id), await downloads.copy(second.id)] as const;
+      const bytes = await Promise.all(before.map((copy) => readFile(copy.path)));
+      const destination = await tempDir();
+      await downloads.setFolder(destination);
+      const arrived = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      let waiting = true;
+
+      const checking = vi.spyOn(files, "realpath").mockImplementation(async (...args) => {
+        const result = await actualFiles.realpath(...args);
+
+        if (waiting && String(args[0]) === destination) {
+          waiting = false;
+          arrived.resolve();
+          await released.promise;
+          throw Object.assign(new Error("Destination disconnected"), { code: "ENOENT" });
+        }
+
+        return result;
+      });
+
+      try {
+        const moving = downloads.bulk([first.id, second.id], "move");
+        await arrived.promise;
+        const cancellation = cancelled ? downloads.cancelMove(first.id) : Promise.resolve();
+        released.resolve();
+        await cancellation;
+        const result = await moving;
+
+        expect(result.succeeded).toEqual(cancelled ? [] : [second.id]);
+        expect(result.failed).toEqual(
+          (cancelled ? [first.id, second.id] : [first.id]).map((id) => ({
+            id,
+            error: {
+              kind: "unexpected",
+              detail: cancelled ? "Move cancelled; original copy kept" : "Destination unavailable",
+            },
+          })),
+        );
+        expect(await downloads.copy(first.id)).toEqual(before[0]);
+
+        expect(await readFile(before[0].path)).toEqual(bytes[0]);
+
+        if (cancelled) {
+          expect(await downloads.copy(second.id)).toEqual(before[1]);
+          expect(await readFile(before[1].path)).toEqual(bytes[1]);
+          expect(await readdir(destination)).toEqual([]);
+        } else {
+          const moved = await downloads.copy(second.id);
+          expect(moved.path.startsWith(destination + sep)).toBe(true);
+          expect(await readFile(moved.path)).toEqual(bytes[1]);
+          await expect(stat(before[1].path)).rejects.toMatchObject({ code: "ENOENT" });
+        }
       } finally {
         released.resolve();
         checking.mockRestore();
