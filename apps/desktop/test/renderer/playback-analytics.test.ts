@@ -205,6 +205,9 @@ it("reports a live mid-play network failure on its closed binding while recovery
     }),
   );
 
+  // Fake time must not outrun the optional HLS import that attaches the stream.
+  await act(async () => vi.dynamicImportSettled());
+
   for (let second = 0; second < 40; second++) {
     player.element.currentTime += 1;
     await act(async () => vi.advanceTimersByTimeAsync(1000));
