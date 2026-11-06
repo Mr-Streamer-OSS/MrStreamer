@@ -1571,9 +1571,14 @@ function closeTitle(keepObservation = false): void {
   if (!receiver && !keepObservation) observation.end();
   const { now, phase } = store.getState();
 
-  if (!now) return;
+  if (!now) {
+    sought = false;
+
+    return;
+  }
 
   if (receiver) {
+    sought = false;
     generation++;
     stopCountdown();
     stopTicking();
