@@ -4268,6 +4268,8 @@ function make(deps: PlaybackDeps) {
               { discard: true },
             );
 
+            yield* coordination.whileAsked(turn);
+
             const { session, probe } = yield* fileSession(
               randomUUID(),
               { kind: "copy", copy: copy.id, file: subtitlesOfCopy(copy.id, copy.title) },
@@ -4283,6 +4285,10 @@ function make(deps: PlaybackDeps) {
               null,
               copy.owner,
             );
+
+            yield* coordination
+              .whileAsked(turn)
+              .pipe(Effect.tapError(() => Scope.close(session.scope, Exit.void)));
 
             return {
               sessionId: session.id,
@@ -4524,7 +4530,10 @@ function make(deps: PlaybackDeps) {
         }),
 
       closeAll,
-      closeForProfile: Effect.andThen(coordination.begin, closeAll),
+      closeForProfile: Effect.andThen(
+        coordination.begin,
+        Effect.andThen(closeAll, coordination.exclusive(closeAll)),
+      ),
 
       closeOf: (subscriptionId: string) =>
         coordination.exclusive(

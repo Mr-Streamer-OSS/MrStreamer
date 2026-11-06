@@ -3,6 +3,9 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "Playback could not be saved. Try again.":
+    "Die Wiedergabe konnte nicht gespeichert werden. Versuche es erneut.",
+  "Viewing profile changed. Try again.": "Das Profil wurde gewechselt. Versuche es erneut.",
   "Update to {version}": "Auf {version} aktualisieren",
   "You have {version}": "Du hast {version}",
   "Find a setting": "Einstellung suchen",

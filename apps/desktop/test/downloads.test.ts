@@ -2085,7 +2085,8 @@ describe.skipIf(!hasTools)("downloads", () => {
   }, 60_000);
 
   it("lists incomplete downloads without seeding personal progress", async () => {
-    const { provider, subscriptionId, downloads, dataDir } = await connected();
+    const { provider, subscriptionId, downloads, dataDir, runtime } = await connected();
+    await (await promised(runtime, Profiles)).active();
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
     provider.stallMovieFile(film.id, 200_000, 60_000);
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));

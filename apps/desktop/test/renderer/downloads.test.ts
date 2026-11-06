@@ -97,6 +97,14 @@ afterEach(() => {
 
 beforeEach(() => {
   ipc.reset();
+  ipc.always("output.status", {
+    owner: { id: "default", revision: 1 },
+    offers: [],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
   useUi.setState(useUi.getInitialState(), true);
 });
 
@@ -1149,7 +1157,7 @@ describe("the top bar's word on the downloads", () => {
     expect(app.querySelector("h1")?.textContent).toBe("Downloads");
     // The copy closed as Back closes it, keeping where it got to.
     expect(ipc.argsOf("downloads.recordProgress")).toEqual([
-      { id: "copy", position: 1195, duration: 6360 },
+      { id: "copy", position: 1195, duration: 6360, owner: { id: "default", revision: 1 } },
     ]);
   });
 

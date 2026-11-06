@@ -1,0 +1,298 @@
+// @vitest-environment happy-dom
+import { ipc, SAVED } from "./support.ts";
+import { QueryClient } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
+import type { OutputStatus } from "@mrstreamer/contracts/output";
+import type { DownloadList } from "@mrstreamer/contracts/downloads";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
+import {
+  call,
+  callForProfile,
+  selectProfileOwner,
+  profileOwner,
+} from "../../src/renderer/src/lib/ipc.ts";
+import {
+  acceptPreferences,
+  currentPreferences,
+  syncPreferences,
+} from "../../src/renderer/src/lib/preferences.ts";
+import { keepViewing, queries, rosterOf } from "../../src/renderer/src/lib/queries.ts";
+import { downloadsQuery, syncDownloads } from "../../src/renderer/src/lib/downloads.ts";
+import { outputs } from "../../src/renderer/src/player/output.ts";
+import {
+  applyLanguage,
+  changeLanguage,
+  loadLanguage,
+} from "../../src/renderer/src/app/language.ts";
+import {
+  createProfile,
+  removeProfile,
+  profileListQuery,
+  profileStatus,
+  switchProfile,
+  syncProfiles,
+} from "../../src/renderer/src/features/profiles/profiles.ts";
+import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
+import { player } from "../../src/renderer/src/player/player.ts";
+import { useUi } from "../../src/renderer/src/app/ui-store.ts";
+
+const A: ActiveProfile = { id: "default", revision: 1 };
+const B: ActiveProfile = { id: "b", revision: 2 };
+const AGAIN: ActiveProfile = { id: "default", revision: 3 };
+
+const english: InterfaceLanguage = {
+  choice: "system",
+  system: "en-US",
+  locale: "en-US",
+  formats: "en-US",
+};
+
+const dutch: InterfaceLanguage = {
+  choice: "nl-NL",
+  system: "en-US",
+  locale: "nl-NL",
+  formats: "nl-NL",
+};
+
+const german: InterfaceLanguage = {
+  choice: "de-DE",
+  system: "en-US",
+  locale: "de-DE",
+  formats: "de-DE",
+};
+
+const local = (owner: ActiveProfile): OutputStatus => ({
+  owner,
+  offers: [],
+  airplayRoutes: null,
+  scanning: false,
+  receivers: [],
+  output: { kind: "local" },
+});
+
+const viewing = (sequence: number) => ({
+  sequence,
+  favourites: [],
+  recent: [],
+  continueWatching: [],
+  marked: [],
+});
+
+let client: QueryClient;
+let stop = () => {};
+
+beforeEach(() => {
+  ipc.reset();
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  applyLanguage(english);
+});
+
+afterEach(() => {
+  stop();
+  stop = () => {};
+
+  titlePlayer.close();
+  player.reset();
+  client.clear();
+  vi.restoreAllMocks();
+  applyLanguage(english);
+});
+
+it("refuses an old read and a deferred command after switching away and back to the same source IDs", async () => {
+  selectProfileOwner(A);
+  const held = ipc.hold("viewing.get");
+  const pending = call("viewing.get");
+
+  const refused = expect(pending).rejects.toMatchObject({
+    error: { kind: "unexpected", detail: "Viewing profile changed. Try again." },
+  });
+
+  selectProfileOwner(B);
+  selectProfileOwner(AGAIN);
+  held.resolve(viewing(999));
+  await refused;
+  await expect(
+    callForProfile(A, "viewing.setFavourite", {
+      commandId: "same-command",
+      channel: { subscriptionId: SAVED.id, id: "same" },
+      favourite: true,
+    }),
+  ).rejects.toMatchObject({
+    error: { kind: "unexpected", detail: "Viewing profile changed. Try again." },
+  });
+  expect(ipc.argsOf("viewing.setFavourite")).toEqual([]);
+  ipc.always("viewing.get", viewing(3));
+  expect(await call("viewing.get")).toEqual(viewing(3));
+});
+
+it("keeps settled old viewing and preferences replies out of the new viewer's cache", async () => {
+  selectProfileOwner(A);
+  ipc.always("viewing.get", viewing(999));
+  const oldViewing = await call("viewing.get");
+  const oldPreferences = await call("preferences.get");
+  selectProfileOwner(B);
+  selectProfileOwner(AGAIN);
+  client.setQueryData(queries.subscriptions().queryKey, [SAVED]);
+  const latest = viewing(3);
+  client.setQueryData(queries.viewing().queryKey, latest);
+  keepViewing(client, oldViewing, rosterOf(client));
+  expect(client.getQueryData(queries.viewing().queryKey)).toEqual(latest);
+  expect(() => acceptPreferences(client, oldPreferences)).toThrow("Viewing profile changed");
+  stop = syncPreferences(client, () => {});
+  ipc.emit("profiles.preferencesChanged", {
+    owner: A,
+    snapshot: { revision: 999, preferences: { ...defaultPreferences, volume: 0.1 } },
+  });
+  expect(currentPreferences(client)).toBeUndefined();
+  ipc.emit("preferences.changed", { revision: 999, preferences: defaultPreferences });
+  expect(currentPreferences(client)).toBeUndefined();
+  ipc.emit("profiles.preferencesChanged", {
+    owner: AGAIN,
+    snapshot: { revision: 1, preferences: { ...defaultPreferences, volume: 0.7 } },
+  });
+  expect(currentPreferences(client)?.volume).toBe(0.7);
+});
+
+it("accepts download progress and output events only from the current revision, including away and back", () => {
+  selectProfileOwner(A);
+  selectProfileOwner(B);
+  selectProfileOwner(AGAIN);
+  stop = syncDownloads(client);
+
+  const current: DownloadList = {
+    profile: AGAIN,
+    items: [],
+    series: {},
+    bytes: 30,
+    free: 70,
+    ended: 0,
+  };
+
+  ipc.emit("downloads.changed", current);
+  ipc.emit("downloads.changed", { ...current, profile: A, bytes: 999 });
+  ipc.emit("downloads.changed", { items: [], series: {}, bytes: 888, free: 70, ended: 0 });
+  expect(client.getQueryData(downloadsQuery().queryKey)).toEqual(current);
+  outputs.clearForProfile(AGAIN);
+  ipc.emit("output.changed", { ...local(A), scanning: true });
+  ipc.emit("output.changed", {
+    offers: [],
+    airplayRoutes: null,
+    scanning: true,
+    receivers: [],
+    output: { kind: "local" },
+  });
+  expect(outputs.status().scanning).toBe(false);
+  ipc.emit("output.changed", { ...local(AGAIN), scanning: true });
+  expect(outputs.status().scanning).toBe(true);
+});
+
+it.each(["read", "save"] as const)(
+  "discards an old language %s in the promise-to-application window",
+  async (operation) => {
+    selectProfileOwner(A);
+    const held = operation === "read" ? ipc.hold("language.get") : ipc.hold("language.set");
+    const task = operation === "read" ? loadLanguage(client) : changeLanguage(client, "de-DE");
+    const result = Promise.allSettled([task]);
+    // IPC receives its valid answer first; ownership changes before its caller applies that answer.
+    held.resolve(german);
+    queueMicrotask(() => {
+      selectProfileOwner(B);
+      selectProfileOwner(AGAIN);
+      client.setQueryData(queries.language().queryKey, dutch);
+      applyLanguage(dutch);
+    });
+    await result;
+    expect(document.documentElement.lang).toBe("nl-NL");
+    expect(client.getQueryData(queries.language().queryKey)).toEqual(dutch);
+    ipc.always("language.get", german);
+    ipc.always("language.set", german);
+
+    if (operation === "read") await loadLanguage(client);
+    else await changeLanguage(client, "de-DE");
+    expect(document.documentElement.lang).toBe("de-DE");
+  },
+);
+
+it("leaves the background-Quit view intact and reports a refused switch reload until retry succeeds", async () => {
+  useUi.setState({ ...useUi.getInitialState(), view: "downloads" }, true);
+  ipc.always("output.status", local(A));
+  stop = syncProfiles(client);
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: A, pending: false, error: null }),
+  );
+  expect(useUi.getState().view).toBe("downloads");
+  ipc.always("profiles.switch", B);
+  ipc.always("output.status", local(B));
+  ipc.refuse("language.get", { kind: "unexpected", detail: "Profile language read refused." });
+  await expect(switchProfile(client, B.id)).rejects.toMatchObject({
+    error: { kind: "unexpected", detail: "Profile language read refused." },
+  });
+  expect(profileOwner()).toEqual(B);
+  expect(profileStatus()).toMatchObject({ owner: B, pending: false });
+  expect(profileStatus().error).not.toBeNull();
+  ipc.always("language.get", dutch);
+  ipc.emit("profiles.activeChanged", B);
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null }),
+  );
+  expect(document.documentElement.lang).toBe("nl-NL");
+});
+
+it("keeps profile lifecycle mutations at the public owner-bearing contract", async () => {
+  selectProfileOwner(A);
+  ipc.always("profiles.list", [{ ...A, name: "Default", deleting: false }]);
+  expect(await client.fetchQuery(profileListQuery())).toHaveLength(1);
+  ipc.always("profiles.create", { id: B.id, name: "B", deleting: false });
+  await createProfile(client, "B");
+  expect(ipc.argsOf("profiles.create")).toEqual([{ name: "B", current: A }]);
+  ipc.always("profiles.remove", null);
+  await removeProfile(client, B.id);
+  expect(ipc.argsOf("profiles.remove")).toEqual([{ id: B.id, current: A }]);
+});
+
+it("refuses a profile switch when the current copy's progress cannot be saved", async () => {
+  selectProfileOwner(A);
+  outputs.clearForProfile(A);
+  ipc.always("playback.openCopy", {
+    owner: A,
+    sessionId: "copy-session",
+    copy: "same-copy",
+    url: "http://127.0.0.1/title/copy.mp4",
+    duration: 100,
+    audio: [],
+    subtitles: [],
+    progress: { position: 35, duration: 100 },
+  });
+  void titlePlayer.open(
+    {
+      kind: "copy",
+      copy: "same-copy",
+      title: { kind: "movie", id: "same-movie" },
+      name: "Copy",
+      detail: null,
+      artworkUrl: null,
+      originalLanguage: null,
+    },
+    0,
+  );
+  await vi.waitFor(() =>
+    expect(titlePlayer.state()).toMatchObject({ position: 30, duration: 100 }),
+  );
+  ipc.refuse("downloads.recordProgress", { kind: "unexpected", detail: "Save refused." });
+  ipc.always("profiles.switch", B);
+  ipc.always("output.status", local(B));
+  await expect(switchProfile(client, B.id)).rejects.toMatchObject({
+    error: { kind: "unexpected", detail: "Playback could not be saved. Try again." },
+  });
+  expect(ipc.argsOf("profiles.switch")).toEqual([]);
+  expect(profileOwner()).toEqual(A);
+  expect(titlePlayer.state().now).toMatchObject({ kind: "copy", copy: "same-copy" });
+  expect(ipc.argsOf("downloads.recordProgress")).toEqual([
+    { owner: A, id: "same-copy", position: 30, duration: 100 },
+  ]);
+  ipc.always("downloads.recordProgress", null);
+  titlePlayer.close();
+  await titlePlayer.saved();
+});

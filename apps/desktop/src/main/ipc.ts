@@ -130,14 +130,17 @@ export function registerIpc(
       let expected: ActiveProfile | undefined;
 
       if (type.keywords.object.root.allows(raw) && "__profile" in raw && "input" in raw) {
-        const owner = ActiveProfileSchema()(raw.__profile);
+        if (raw.__profile !== undefined) {
+          const owner = ActiveProfileSchema()(raw.__profile);
 
-        if (owner instanceof type.errors)
-          return {
-            ok: false,
-            error: { kind: "invalid-input", detail: "Invalid viewing profile admission." },
-          };
-        expected = owner;
+          if (owner instanceof type.errors)
+            return {
+              ok: false,
+              error: { kind: "invalid-input", detail: "Invalid viewing profile admission." },
+            };
+          expected = owner;
+        }
+
         raw = raw.input;
       }
 

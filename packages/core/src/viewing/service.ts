@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The viewing record service: favourites, watch history, how far movies and episodes got and the
 // episodes marked by hand, as events per account. Commands carry an id, so sending one again
 // changes nothing more; the store appends a command's events and the state they add up to in one
@@ -189,6 +190,11 @@ export interface RawTitleFilter {
 }
 
 /** Where the events and the state they add up to are kept. */
+/** Immutable desktop owner; native/default callers keep the ordinary changes stream. */
+export class ViewingProfile extends Context.Service<ViewingProfile, ActiveProfile>()(
+  "mrstreamer/ViewingProfile",
+) {}
+
 export class ViewingStore extends Context.Service<
   ViewingStore,
   {
@@ -362,6 +368,10 @@ export class ViewingRecord extends Context.Service<
     erase(account: string): Effect.Effect<void, Failed>;
     /** The sequence after each committed change. */
     readonly changes: Stream.Stream<number>;
+    readonly profileChanges?: Stream.Stream<{
+      readonly owner: ActiveProfile | null;
+      readonly sequence: number;
+    }>;
   }
 >()("mrstreamer/ViewingRecord") {
   static readonly layer = Layer.effect(ViewingRecord, make());
@@ -546,6 +556,11 @@ function make() {
     const listed = yield* ViewingSeries;
     const changes = yield* PubSub.unbounded<number>();
 
+    const profileChanges = yield* PubSub.unbounded<{
+      readonly owner: ActiveProfile | null;
+      readonly sequence: number;
+    }>();
+
     // The first start with the record brings in the lists preferences.json kept, which were the
     // original subscription's. The file loses them only after the import commits; a retry after a
     // crash finds the marker and imports nothing twice. Lists wait for an account to import into.
@@ -714,7 +729,12 @@ function make() {
               : events({ ...found, stored }, owners, look),
         });
 
+        const owner = yield* Effect.serviceOption(ViewingProfile);
         yield* PubSub.publish(changes, stored.sequence);
+        yield* PubSub.publish(profileChanges, {
+          owner: owner._tag === "Some" ? owner.value : null,
+          sequence: stored.sequence,
+        });
 
         return shown({ ...found, stored });
       });
@@ -974,6 +994,7 @@ function make() {
         }),
       erase: (key: string) => store.erase(key),
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
   });
 }

@@ -69,6 +69,14 @@ let unmount = () => {};
 
 beforeEach(() => {
   ipc.reset();
+  ipc.always("output.status", {
+    owner: { id: "default", revision: 1 },
+    offers: [],
+    airplayRoutes: null,
+    scanning: false,
+    receivers: [],
+    output: { kind: "local" },
+  });
   useUi.setState(useUi.getInitialState(), true);
   ipc.always("subscription.list", []);
   ipc.always("downloads.list", { items: [], series: {}, bytes: 0, free: null, ended: 0 });

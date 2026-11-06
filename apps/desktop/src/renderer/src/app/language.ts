@@ -5,19 +5,25 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import type { InterfaceLanguage, LanguageChoice, Locale } from "@mrstreamer/contracts/language";
 import { currentLanguage, onLanguageChange, setLanguage } from "@mrstreamer/core/i18n";
-import { call } from "../lib/ipc.ts";
+import { AppFailure } from "@mrstreamer/contracts/errors";
+import { t } from "@mrstreamer/core/i18n";
+import { callForProfile, profileOwner, currentProfile, currentProfileReply } from "../lib/ipc.ts";
 import { queries } from "../lib/queries.ts";
 
 /** Shows the window's text in `language`, and tells assistive technology which one it is. */
-function applyLanguage(language: InterfaceLanguage): void {
+export function applyLanguage(language: InterfaceLanguage): void {
   setLanguage(language);
   document.documentElement.lang = language.locale;
 }
 
 /** Reads the language before the first paint. English when the main process can't say. */
 export async function loadLanguage(client: QueryClient): Promise<void> {
+  const owner = profileOwner();
+
   try {
-    const language = await call("language.get");
+    const language = await callForProfile(owner, "language.get");
+
+    if (!currentProfile(owner) || !currentProfileReply(language)) return;
     client.setQueryData(queries.language().queryKey, language);
     applyLanguage(language);
   } catch {
@@ -39,7 +45,11 @@ export function useLocale(): Locale {
  * such as collection names, is asked for again.
  */
 export async function changeLanguage(client: QueryClient, choice: LanguageChoice): Promise<void> {
-  const language = await call("language.set", { choice });
+  const owner = profileOwner();
+  const language = await callForProfile(owner, "language.set", { choice });
+
+  if (!currentProfile(owner) || !currentProfileReply(language))
+    throw new AppFailure({ kind: "unexpected", detail: t("Viewing profile changed. Try again.") });
   client.setQueryData(queries.language().queryKey, language);
   applyLanguage(language);
   await client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "language" });

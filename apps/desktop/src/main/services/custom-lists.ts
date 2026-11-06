@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The viewer's channel lists: named, in an order of the viewer's, each holding exact channels of
 // any saved subscriptions in an order of its own. Nothing joins two subscriptions' channels, and
 // no channel is ever found by its name.
@@ -40,7 +41,7 @@ import {
   type StoredMember,
 } from "../platform/custom-lists-store.ts";
 import { Library } from "./library.ts";
-import { Settings } from "./preferences.ts";
+import { Settings, AdmittedSettings } from "./preferences.ts";
 import { sameSource, Subscriptions, type SavedSubscription } from "./subscription.ts";
 
 export class CustomLists extends Context.Service<
@@ -94,6 +95,7 @@ export class CustomLists extends Context.Service<
     }): Effect.Effect<readonly CustomList[], Failed>;
     /** Says so after each change of a list. */
     readonly changes: Stream.Stream<void>;
+    readonly profileChanges?: Stream.Stream<ActiveProfile | null>;
   }
 >()("mrstreamer/CustomLists") {
   static readonly layer = Layer.effect(CustomLists, make());
@@ -180,6 +182,14 @@ function make() {
     const settings = yield* Settings;
     const store = yield* CustomListStore;
     const changes = yield* PubSub.unbounded<void>();
+    const profileChanges = yield* PubSub.unbounded<ActiveProfile | null>();
+
+    const announce = Effect.gen(function* () {
+      const admitted = yield* Effect.serviceOption(AdmittedSettings);
+      yield* PubSub.publish(changes, undefined);
+      yield* PubSub.publish(profileChanges, admitted._tag === "Some" ? admitted.value.owner : null);
+    });
+
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
     const listChanged = new Failed({ error: { kind: "list-changed" } });
     /** The fetch of its channels each subscription's channels in lists were last aligned to. */
@@ -270,8 +280,7 @@ function make() {
     });
 
     /** Answers the lists after a change, told to the UI once stored when it changed anything. */
-    const after = (changed: boolean) =>
-      Effect.andThen(changed ? PubSub.publish(changes, undefined) : Effect.void, lists);
+    const after = (changed: boolean) => Effect.andThen(changed ? announce : Effect.void, lists);
 
     const nameOf = (name: string) => {
       const trimmed = name.trim();
@@ -394,6 +403,7 @@ function make() {
         }),
 
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
 
     return service;

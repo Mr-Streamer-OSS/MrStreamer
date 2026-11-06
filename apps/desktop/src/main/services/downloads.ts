@@ -487,10 +487,13 @@ function make(deps: DownloadsDeps) {
       record: StoredDownload,
       owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
       busy: ReadonlySet<string>,
+      captured?: ReturnType<typeof personal.of>,
     ) =>
       Effect.map(
         record.state === "complete"
-          ? personal.read("download", record.id, record.progress)
+          ? captured
+            ? captured.read("download", record.id, record.progress)
+            : personal.read("download", record.id, record.progress)
           : Effect.succeed(null),
         (progress): Download => ({
           id: record.id,
@@ -560,6 +563,7 @@ function make(deps: DownloadsDeps) {
     };
 
     const view = Effect.gen(function* () {
+      const admitted = yield* personal.admit;
       const owners = yield* accounts;
       const busy = yield* coordination.busy;
       const all = [...records.values()];
@@ -580,13 +584,14 @@ function make(deps: DownloadsDeps) {
       });
 
       return {
+        profile: admitted.owner,
         items: yield* Effect.all(
           [
             ...queue.filter(leads),
             ...queue.filter((record) => record.state === "queued" && !leads(record)),
             ...queue.filter((record) => record.state === "failed"),
             ...copies,
-          ].map((record) => downloadOf(record, owners, busy)),
+          ].map((record) => downloadOf(record, owners, busy, admitted)),
         ),
         storage: { path: selectedFolder, moving: [...moving.keys()] },
         series: seriesOf(all),

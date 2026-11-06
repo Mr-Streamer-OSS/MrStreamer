@@ -13,7 +13,11 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import {
+  DEFAULT_PROFILE_ID,
+  type ActiveProfile,
+  type LocalProfile,
+} from "@mrstreamer/contracts/profiles";
 import { Failed } from "@mrstreamer/core/failure";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
@@ -108,13 +112,6 @@ export function profileDirectory(dataDir: string, profileId: string): string {
   return profileId === DEFAULT_PROFILE_ID
     ? dataDir
     : join(dataDir, "profiles", createHash("sha256").update(profileId).digest("hex"));
-}
-
-/** Stored lifecycle metadata. Deleting owners stay tombstoned until their files are removed. */
-export interface LocalProfile {
-  readonly id: string;
-  readonly name: string;
-  readonly deleting: boolean;
 }
 
 /** Private persistence port for the profile service; never changes household tables. */

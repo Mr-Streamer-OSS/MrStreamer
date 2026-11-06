@@ -384,3 +384,15 @@ export function sameList(a: ChannelList, b: ChannelList): boolean {
     (a.kind !== "custom" || (b.kind === "custom" && a.id === b.id))
   );
 }
+
+/** Profile changes discard personal navigation, retaining household jobs and the startup initializer. */
+export function resetForProfile(): void {
+  resetForAccount();
+  useUi.setState({
+    settings: null,
+    subscription: null,
+    settingsTarget: null,
+    onlineSubtitles: false,
+    searchFrom: "",
+  });
+}

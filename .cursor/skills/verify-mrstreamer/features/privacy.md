@@ -10,3 +10,9 @@ Read only the area needed for the changed path.
 - For policy and acceptance limits, read [Policy and acceptance limits](privacy/limits.md).
 - For desktop playback diagnostics, read [Desktop playback diagnostics](privacy/diagnostics.md).
 - For iOS consent and diagnostics, read [iOS consent and diagnostics](privacy/ios.md).
+
+## Viewing-profile isolation
+
+Personal viewing records, Watchlists, channel lists, preferences and local-copy progress are scoped to an admitted profile. Default retains the original files and database connection; private profiles use separate personal databases. `apps/desktop/test/profiles.test.ts` proves identical source/content/command IDs stay separate, profile deletion retains household files, and source erasure visits every profile. Erasure across separate databases is non-atomic: a partial failure is visible, earlier erasures stay committed, subscription removal does not claim success, and retry cannot revive invalidated admissions. Deletion tombstones precede handle disposal and personal-directory removal; actual native close/removal failures remain unproven.
+
+Analytics consent remains installation-owned. The profile Settings overlay reads and updates the existing Analytics owner; opting out in profile B is read consistently after switching and restarting in the public Analytics-backed test. No profile-specific consent copy is used. The remaining viewing preferences, including the TMDB key, are personal. The visible profile controls and their full UI privacy journey belong to the separate designer/evidence run; lifecycle exposure stays gated during the backend handoff.

@@ -1,4 +1,4 @@
-import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
+import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
@@ -698,7 +698,8 @@ async function start(): Promise<void> {
     }),
   );
 
-  stopProfilePlayback = () => Effect.andThen(playback.closeForProfile, output.disconnect);
+  stopProfilePlayback = () =>
+    Effect.andThen(playback.closeForProfile, Effect.andThen(output.scan(false), output.disconnect));
 
   // Back from sleep or unlocked, the clock may have moved past where a guide hands a channel on,
   // and past a reminder's or a schedule's start.
@@ -811,20 +812,28 @@ async function start(): Promise<void> {
   );
   dimensionsReady = true;
 
-  const publishPreferences = (profileId: string, snapshot: IpcEvents["preferences.changed"]) => {
-    if (!mainWindow) return;
-    emit(mainWindow.webContents, "profiles.preferencesChanged", { profileId, snapshot });
+  const initialOwner = await runtime.runPromise(profiles.active);
+  const initialDefaultOwner = initialOwner.id === DEFAULT_PROFILE_ID ? initialOwner : null;
 
-    if (profileId === DEFAULT_PROFILE_ID && runtime.runSync(profiles.active).id === profileId)
+  const sameProfile = (a: ActiveProfile, b: ActiveProfile) =>
+    a.id === b.id && a.revision === b.revision;
+
+  const publishPreferences = (
+    owner: ActiveProfile | null,
+    snapshot: IpcEvents["preferences.changed"],
+  ) => {
+    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    emit(mainWindow.webContents, "profiles.preferencesChanged", { owner, snapshot });
+
+    if (owner.id === DEFAULT_PROFILE_ID)
       emit(mainWindow.webContents, "preferences.changed", snapshot);
   };
 
-  const stalePreferences = (profileId: string) => {
-    if (!mainWindow) return;
-    emit(mainWindow.webContents, "profiles.preferencesStale", { profileId });
+  const stalePreferences = (owner: ActiveProfile | null) => {
+    if (!mainWindow || !owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+    emit(mainWindow.webContents, "profiles.preferencesStale", { owner });
 
-    if (profileId === DEFAULT_PROFILE_ID && runtime.runSync(profiles.active).id === profileId)
-      emit(mainWindow.webContents, "preferences.stale", null);
+    if (owner.id === DEFAULT_PROFILE_ID) emit(mainWindow.webContents, "preferences.stale", null);
   };
 
   const preferences = await runtime.runPromise(
@@ -845,16 +854,20 @@ async function start(): Promise<void> {
             }),
         }),
       reconfigure: onDemand.reconfigure,
-      publish: (snapshot) => publishPreferences(DEFAULT_PROFILE_ID, snapshot),
-      stale: () => stalePreferences(DEFAULT_PROFILE_ID),
+      publish: (snapshot) => publishPreferences(initialDefaultOwner, snapshot),
+      stale: () => stalePreferences(initialDefaultOwner),
     }),
   );
 
-  const publications = new Map<string, PreferencePublication>([[DEFAULT_PROFILE_ID, preferences]]);
+  const profileKey = (owner: ActiveProfile) => JSON.stringify([owner.id, owner.revision]);
+
+  const publications = new Map<string, PreferencePublication>(
+    initialDefaultOwner ? [[profileKey(initialDefaultOwner), preferences]] : [],
+  );
 
   const preferencesFor = (admission: ProfileAdmission) =>
     Effect.suspend(() => {
-      const retained = publications.get(admission.owner.id);
+      const retained = publications.get(profileKey(admission.owner));
 
       if (retained) return Effect.succeed(retained);
       const scoped = admission.services.settings;
@@ -871,12 +884,12 @@ async function start(): Promise<void> {
               }),
           }),
         reconfigure: onDemand.reconfigure,
-        publish: (snapshot) => publishPreferences(admission.owner.id, snapshot),
-        stale: () => stalePreferences(admission.owner.id),
+        publish: (snapshot) => publishPreferences(admission.owner, snapshot),
+        stale: () => stalePreferences(admission.owner),
       }).pipe(
         Effect.tap((publication) =>
           Effect.sync(() => {
-            publications.set(admission.owner.id, publication);
+            publications.set(profileKey(admission.owner), publication);
           }),
         ),
       );
@@ -947,26 +960,26 @@ async function start(): Promise<void> {
           return;
         }
 
-        const { profileId } = change;
+        const { owner } = change;
 
-        const legacy =
-          profileId === DEFAULT_PROFILE_ID && runtime.runSync(profiles.active).id === profileId;
+        if (!owner || !sameProfile(owner, runtime.runSync(profiles.active))) return;
+        const legacy = owner.id === DEFAULT_PROFILE_ID;
 
         if (change.kind === "viewing" || change.kind === "erased") {
           const sequence = change.kind === "viewing" ? change.sequence : 0;
-          emit(mainWindow.webContents, "profiles.viewingChanged", { profileId, sequence });
+          emit(mainWindow.webContents, "profiles.viewingChanged", { owner, sequence });
 
           if (legacy) emit(mainWindow.webContents, "viewing.changed", { sequence });
         }
 
         if (change.kind === "watchlist" || change.kind === "erased") {
-          emit(mainWindow.webContents, "profiles.watchlistChanged", { profileId });
+          emit(mainWindow.webContents, "profiles.watchlistChanged", { owner });
 
           if (legacy) emit(mainWindow.webContents, "watchlist.changed", null);
         }
 
         if (change.kind === "lists" || change.kind === "erased") {
-          emit(mainWindow.webContents, "profiles.listsChanged", { profileId });
+          emit(mainWindow.webContents, "profiles.listsChanged", { owner });
 
           if (legacy) emit(mainWindow.webContents, "customLists.changed", null);
         }

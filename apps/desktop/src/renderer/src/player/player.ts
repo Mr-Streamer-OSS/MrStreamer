@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { readPreferences, updatePreferences } from "../lib/preferences.ts";
 import { t } from "@mrstreamer/core/i18n";
@@ -81,7 +82,7 @@ import { dvbPagePresent } from "@mrstreamer/core/subtitles/dvb";
 import type { Cue } from "@mrstreamer/core/subtitles/webvtt";
 import { appError, describeError } from "../lib/errors.ts";
 import { flashNote } from "../features/watch/flash-state.ts";
-import { call, listen } from "../lib/ipc.ts";
+import { call, callForProfile, listen, profileOwner, currentProfile } from "../lib/ipc.ts";
 import { decoders } from "./decoders.ts";
 import {
   createEngine,
@@ -274,6 +275,7 @@ export function receiverState(phase: PlayerState["phase"]): ReceiverState | null
 
 const observation = new PlaybackObservation("live");
 let explicitlySelected: LiveChannel | null = null;
+let selectedOwner: ActiveProfile | null = null;
 
 function selectForWatching(channel: LiveChannel): void {
   if (!observation.hasRun() || !sameOwned(explicitlySelected, channel)) {
@@ -380,6 +382,7 @@ const subtitleKey = (track: Pick<SubtitleTrack, "id" | "page" | "format">) =>
  * since when it says so now, null while it says anything else.
  */
 let onReceiver: {
+  readonly owner: ActiveProfile | null;
   load: number | null;
   started: boolean;
   played: number;
@@ -460,6 +463,7 @@ function failed(problem: PlaybackProblem): PlayerPhase {
 function begin(channel: LiveChannel, preview = false): Promise<void> {
   if (!claim.keep()) return Promise.resolve();
   recovery = UNTRIED;
+  selectedOwner = profileOwner();
 
   return start(channel, false, preview);
 }
@@ -510,7 +514,9 @@ async function start(
   retained?: StreamSession,
   replay = false,
 ): Promise<void> {
-  if (!claim.keep()) return;
+  const owner = selectedOwner;
+
+  if (!claim.keep() || !currentProfile(owner)) return;
 
   if (outputs.remote()) {
     // Nothing previews while a receiver has playback: it would take the provider's connection.
@@ -711,7 +717,7 @@ async function start(
   }
 
   if (!retained)
-    void call("viewing.recordWatch", {
+    void callForProfile(owner, "viewing.recordWatch", {
       commandId: crypto.randomUUID(),
       channel: ownedId(channel),
     }).catch(() => {});
@@ -736,7 +742,9 @@ async function start(
  * there, or the reconnect it is at.
  */
 async function startOnReceiver(channel: LiveChannel): Promise<void> {
-  if (!claim.keep()) return;
+  const owner = selectedOwner;
+
+  if (!claim.keep() || !currentProfile(owner)) return;
   const mine = ++selection;
   const measurement = observation.measurement();
   const first = recovery.reconnects === 0;
@@ -748,7 +756,7 @@ async function startOnReceiver(channel: LiveChannel): Promise<void> {
   live();
   declaredTracks = null;
   recentSubtitlePackets = [];
-  onReceiver = { load: null, started: false, played: 0, since: null };
+  onReceiver = { owner, load: null, started: false, played: 0, since: null };
   store.setState({
     channel,
     stopped: false,
@@ -825,7 +833,7 @@ function followReceiver(media: RemoteMedia): void {
   const mine = selection;
   void loadStream(mine, media.sessionId);
   void loadTracks(mine, media.sessionId);
-  void call("viewing.recordWatch", {
+  void callForProfile(onReceiver.owner, "viewing.recordWatch", {
     commandId: crypto.randomUUID(),
     channel: ownedId(channel),
   }).catch(() => {});
@@ -1312,12 +1320,13 @@ function applyVolume(): void {
 function saveVolume(): void {
   const { volume, muted } = store.getState();
   const draft = { volume, muted };
+  const owner = profileOwner();
   pendingVolume = draft;
 
   if (volumeSave) clearTimeout(volumeSave);
   volumeSave = setTimeout(() => {
     volumeSave = null;
-    void updatePreferences(draft)
+    void updatePreferences(draft, undefined, owner)
       .then((preferences) => {
         if (pendingVolume === draft)
           savedSound = { volume: preferences.volume, muted: preferences.muted };
@@ -1657,15 +1666,34 @@ export const player = {
     if (onReceiver) return;
 
     if (!claim.take()) return;
+    selectedOwner = profileOwner();
     explicitlySelected = channel;
     observation.adoptRemote();
     selection++;
     tune(channel);
     recovery = UNTRIED;
     live();
-    onReceiver = { load: media.generation, started: false, played: 0, since: null };
+    onReceiver = {
+      owner: selectedOwner,
+      load: media.generation,
+      started: false,
+      played: 0,
+      since: null,
+    };
     store.setState({ channel, stopped: false, phase: { kind: "tuning", since: media.at } });
     followReceiver(media);
+  },
+
+  /** Ends the old viewer's selection, rewind view, timers and unsaved local sound intent. */
+  clearForProfile(): void {
+    if (volumeSave) clearTimeout(volumeSave);
+    volumeSave = null;
+    pendingVolume = null;
+    savedSound = { volume: 1, muted: false };
+    player.reset();
+    selectedOwner = null;
+    store.setState(store.getInitialState(), true);
+    flashNote(null);
   },
 
   /** Stops and forgets the selected channel, for when the subscription changes. */
@@ -1748,9 +1776,13 @@ export const player = {
     store.setState({ audioId: id });
 
     if (track.language) {
-      void updatePreferences({ audioLanguage: track.language }).catch((cause: unknown) => {
-        flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
-      });
+      const owner = profileOwner();
+      void updatePreferences({ audioLanguage: track.language }, undefined, owner).catch(
+        (cause: unknown) => {
+          if (!currentProfile(owner)) return;
+          flashNote(`${t("Sound")}: ${describeError(appError(cause))}`, true);
+        },
+      );
     }
 
     const own = current?.engine.tracks;

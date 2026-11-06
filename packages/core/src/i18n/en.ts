@@ -4,6 +4,8 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Playback could not be saved. Try again.": "Playback could not be saved. Try again.",
+  "Viewing profile changed. Try again.": "Viewing profile changed. Try again.",
   "Update to {version}": "Update to {version}",
   "You have {version}": "You have {version}",
   "Find a setting": "Find a setting",

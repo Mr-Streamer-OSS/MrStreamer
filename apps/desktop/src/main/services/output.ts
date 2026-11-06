@@ -1,3 +1,4 @@
+import { AdmittedSettings } from "./preferences.ts";
 import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { AdmittedViewing } from "./profiles.ts";
 import {
@@ -125,8 +126,14 @@ export interface Shown {
   readonly artworkUrl?: string | null | undefined;
 }
 
+interface OutputAdmission {
+  readonly owner: ActiveProfile | undefined;
+  readonly current: () => boolean;
+}
+
 /** What plays on the receiver, with what this service needs to follow it. */
 interface Playing {
+  readonly admission: OutputAdmission;
   readonly measurement: RemotePlaybackObserver | undefined;
   readonly generation: number;
   readonly sessionId: string;
@@ -143,6 +150,7 @@ interface Playing {
 
 /** A title opened for the receiver. */
 interface OpenedTitle {
+  readonly admission: OutputAdmission;
   readonly record: ViewingRecord["Service"];
   readonly measurement: string | null;
   /** The public open turn that prepared this session, when one was supplied. */
@@ -160,10 +168,10 @@ interface OpenedTitle {
 export class Output extends Context.Service<
   Output,
   {
-    readonly status: Effect.Effect<OutputStatus>;
+    readonly status: Effect.Effect<OutputStatus, Failed>;
     readonly changes: Stream.Stream<OutputStatus>;
     /** Looks for receivers while `on`. Plays and changes nothing. */
-    scan(on: boolean): Effect.Effect<void>;
+    scan(on: boolean): Effect.Effect<void, Failed>;
     /** Connects to a receiver the status lists. What plays here goes on. */
     connect(receiverId: string): Effect.Effect<OutputStatus, Failed>;
     /**
@@ -265,6 +273,27 @@ function make(deps: OutputDeps) {
     const coordination = yield* PlaybackCoordination;
     const viewing = yield* ViewingRecord;
     const updates = yield* PubSub.unbounded<OutputStatus>();
+    const legacyAdmission: OutputAdmission = { owner: undefined, current: () => true };
+
+    const admit = Effect.map(Effect.serviceOption(AdmittedSettings), (scope): OutputAdmission =>
+      scope._tag === "Some"
+        ? { owner: scope.value.owner, current: scope.value.current }
+        : legacyAdmission,
+    );
+
+    const staleAdmission = () =>
+      new Failed({
+        error: {
+          kind: "unexpected",
+          detail: "Viewing profile changed; retry this receiver request.",
+        },
+      });
+
+    const current = (admission: OutputAdmission) =>
+      Effect.suspend(() => (admission.current() ? Effect.void : Effect.fail(staleAdmission())));
+
+    let discoveryAdmission = legacyAdmission;
+    let connectionAdmission = legacyAdmission;
     /** Changes to what is connected and what plays run one at a time. */
     const one = (yield* Semaphore.make(1)).withPermits(1);
     const adapters = deps.adapters;
@@ -300,7 +329,12 @@ function make(deps: OutputDeps) {
     /** Titles opened for the receiver, by session. */
     const opened = new Map<string, OpenedTitle>();
 
-    const snapshot = (): OutputStatus => ({
+    const snapshot = (admission: OutputAdmission = connectionAdmission): OutputStatus => ({
+      ...defined({
+        owner:
+          playing?.admission.owner ??
+          (output.kind === "local" ? admission.owner : connectionAdmission.owner),
+      }),
       offers: adapters.map((each) => each.kind),
       airplayRoutes: routes,
       scanning,
@@ -308,7 +342,9 @@ function make(deps: OutputDeps) {
       output,
     });
 
-    const publish = () => void PubSub.publishUnsafe(updates, snapshot());
+    const publish = (admission: OutputAdmission = playing?.admission ?? connectionAdmission) => {
+      if (admission.current()) PubSub.publishUnsafe(updates, snapshot(admission));
+    };
 
     const failed = (failure: OutputFailure) => new Failed({ error: { kind: "output", failure } });
 
@@ -376,34 +412,49 @@ function make(deps: OutputDeps) {
       });
 
     /** What plays now doesn't any more, and why, with the receiver still there. */
-    const mediaFailed = (failure: OutputFailure, stop: boolean) =>
+    const mediaFailed = (
+      failure: OutputFailure,
+      stop: boolean,
+      was = playing,
+      connection = connected,
+    ) =>
       Effect.gen(function* () {
-        const was = playing;
-        was?.measurement?.failure(
+        // Capture when the callback is queued, before a later session can replace this one.
+        if (!was || playing !== was || connected !== connection || !was.admission.current()) return;
+        was.measurement?.failure(
           appFailure({ kind: "output", failure }),
           appDiagnostic({ kind: "output", failure }),
         );
         yield* drop(true);
 
-        if (stop && was && connected) {
-          yield* Effect.promise(() => connected!.connection.stop(was.generation).catch(() => {}));
+        if (playing !== null || connected !== connection || !was.admission.current()) return;
+
+        if (stop && connection) {
+          yield* Effect.promise(() => connection.connection.stop(was.generation).catch(() => {}));
+
+          if (playing !== null || connected !== connection || !was.admission.current()) return;
         }
 
         if (output.kind === "receiver") output = { ...output, media: null, failure };
-        publish();
+        publish(was.admission);
       });
 
     /** The receiver's own news of what it plays. */
     function hear(adapter: ReceiverAdapter, event: AdapterEvent): void {
+      if (event.type !== "receivers" && event.type !== "routes" && !connectionAdmission.current())
+        return;
+
       switch (event.type) {
         case "receivers":
+          if (!discoveryAdmission.current()) return;
           found.set(adapter.kind, event.receivers);
 
-          return publish();
+          return publish(discoveryAdmission);
         case "routes":
+          if (!discoveryAdmission.current()) return;
           routes = event.available;
 
-          return publish();
+          return publish(discoveryAdmission);
         case "volume":
           if (connected?.adapter !== adapter || output.kind !== "receiver") return;
 
@@ -421,6 +472,8 @@ function make(deps: OutputDeps) {
           return later(mediaFailed(event.failure, false));
         case "released": {
           const was = connected;
+          const ended = playing;
+          const admission = connectionAdmission;
 
           if (was?.adapter !== adapter) return;
 
@@ -429,11 +482,13 @@ function make(deps: OutputDeps) {
             one(
               Effect.gen(function* () {
                 // Another receiver took its place before this got its turn: the news is old.
-                if (connected !== was) return;
+                if (connected !== was || playing !== ended || !admission.current()) return;
                 yield* drop(true);
+
+                if (connected !== was || playing !== null || !admission.current()) return;
                 connected = null;
                 output = { kind: "local" };
-                publish();
+                publish(admission);
               }),
             ),
           );
@@ -441,6 +496,8 @@ function make(deps: OutputDeps) {
 
         case "lost": {
           const was = connected;
+          const ended = playing;
+          const admission = connectionAdmission;
 
           if (was?.adapter !== adapter || output.kind !== "receiver") return;
           const { receiver } = output;
@@ -452,11 +509,13 @@ function make(deps: OutputDeps) {
           return later(
             one(
               Effect.gen(function* () {
-                if (connected !== was) return;
+                if (connected !== was || playing !== ended || !admission.current()) return;
                 yield* drop(true);
+
+                if (connected !== was || playing !== null || !admission.current()) return;
                 connected = null;
                 output = { kind: "lost", receiver, failure: event.failure };
-                publish();
+                publish(admission);
               }),
             ),
           );
@@ -467,31 +526,46 @@ function make(deps: OutputDeps) {
     /** What the receiver says of a load. Only the one that plays now counts. */
     function status(said: TransportStatus): void {
       const now = playing;
+      const connection = connected;
 
-      if (!now || said.generation !== now.generation || output.kind !== "receiver") return;
+      if (
+        !now ||
+        !now.admission.current() ||
+        said.generation !== now.generation ||
+        output.kind !== "receiver"
+      )
+        return;
 
       if (said.state === "stopped" || (said.state === "ended" && now.item.kind === "channel")) {
         // It holds the load no more. A channel has no end: its stream stopped, and the session
         // knows why. Stopped from the receiver's side otherwise, which is nobody's failure.
         return later(
           Effect.gen(function* () {
+            if (playing !== now || connected !== connection || !now.admission.current()) return;
+
             const stream =
               now.item.kind === "channel" ? yield* playback.failure(now.sessionId) : null;
 
-            if (playing !== now) return;
+            if (playing !== now || connected !== connection || !now.admission.current()) return;
 
             // A stream that broke is an incident the viewer may retry; otherwise the play is over.
             if (stream) now.measurement?.failure(streamFailure(stream), streamDiagnostic(stream));
             else now.measurement?.end();
             yield* drop(true);
 
-            if (output.kind !== "receiver") return;
+            if (
+              playing !== null ||
+              connected !== connection ||
+              !now.admission.current() ||
+              output.kind !== "receiver"
+            )
+              return;
             output = {
               ...output,
               media: null,
               failure: stream ? { kind: "stream", failure: stream } : null,
             };
-            publish();
+            publish(now.admission);
           }),
         );
       }
@@ -590,11 +664,14 @@ function make(deps: OutputDeps) {
       measurement: string | null,
     ) =>
       Effect.gen(function* () {
+        const admission = title?.admission ?? (yield* admit);
+        yield* current(admission);
         const mine = ++generation;
         const watch = new AbortController();
         const offset = title?.offset ?? 0;
 
         const now: Playing = {
+          admission,
           measurement: deps.observePlayback?.(
             item.kind === "channel" ? "live" : "vod",
             measurement,
@@ -689,7 +766,8 @@ function make(deps: OutputDeps) {
     );
 
     /** `connection` is the receiver from now on, with nothing sent to it yet. */
-    const take = (connection: Connection, adapter: ReceiverAdapter) => {
+    const take = (connection: Connection, adapter: ReceiverAdapter, admission: OutputAdmission) => {
+      connectionAdmission = admission;
       connected = { connection, adapter };
       addressTurn = 0;
       output = {
@@ -703,11 +781,14 @@ function make(deps: OutputDeps) {
     };
 
     /** Connects to `known`, a receiver `adapter` listed, in place of the one before. */
-    const connectTo = (adapter: ReceiverAdapter, known: Receiver) =>
+    const connectTo = (adapter: ReceiverAdapter, known: Receiver, admission: OutputAdmission) =>
       one(
         Effect.gen(function* () {
+          yield* current(admission);
           // One receiver at a time: the one before goes first, with what it played.
           yield* release;
+          yield* current(admission);
+          connectionAdmission = admission;
           const mine = new AbortController();
           connecting = mine;
           output = { kind: "connecting", protocol: adapter.kind, receiver: known };
@@ -731,11 +812,22 @@ function make(deps: OutputDeps) {
             ),
             Effect.tapError(() =>
               Effect.sync(() => {
+                if (connectionAdmission !== admission) return;
                 output = { kind: "local" };
-                publish();
+                publish(admission);
               }),
             ),
           );
+
+          if (!admission.current()) {
+            if (connection && connection !== connected?.connection)
+              yield* Effect.promise(() => connection.disconnect().catch(() => {}));
+
+            if (connectionAdmission === admission && output.kind === "connecting")
+              output = { kind: "local" };
+
+            return yield* staleAdmission();
+          }
 
           if (!connection) {
             output = { kind: "local" };
@@ -744,7 +836,7 @@ function make(deps: OutputDeps) {
             return snapshot();
           }
 
-          take(connection, adapter);
+          take(connection, adapter, admission);
 
           return snapshot();
         }),
@@ -757,8 +849,14 @@ function make(deps: OutputDeps) {
      * told meanwhile. It stays, with what it plays, when the list closes with nothing picked or
      * with the same receiver. Only another receiver takes its place, once that one answered.
      */
-    const pickWith = (adapter: ReceiverAdapter, place: ListPlace, request: string | undefined) =>
+    const pickWith = (
+      adapter: ReceiverAdapter,
+      place: ListPlace,
+      request: string | undefined,
+      admission: OutputAdmission,
+    ) =>
       Effect.gen(function* () {
+        yield* current(admission);
         const mine = new AbortController();
         const list = { wait: mine, request };
         // One list at a time, from when it is asked for: the wait at the one before ends, and
@@ -777,14 +875,17 @@ function make(deps: OutputDeps) {
             yield* one(
               Effect.sync(() => {
                 // Given up before its turn came: no list opens.
-                if (mine.signal.aborted) return;
+                if (mine.signal.aborted || !admission.current()) return;
                 connecting = mine;
 
                 if (connected) return;
+                connectionAdmission = admission;
                 output = { kind: "connecting", protocol: adapter.kind, receiver: null };
                 publish();
               }),
             );
+
+            yield* current(admission);
 
             return yield* told((signal) =>
               adapter.connect({ kind: "picker", anchor }, until(signal)),
@@ -801,6 +902,17 @@ function make(deps: OutputDeps) {
 
             if (listing === list) listing = null;
             const picked = waited._tag === "Success" ? waited.success : null;
+
+            if (!admission.current()) {
+              if (picked && picked !== connected?.connection)
+                yield* Effect.promise(() => picked.disconnect().catch(() => {}));
+
+              if (connectionAdmission === admission && output.kind === "connecting")
+                output = { kind: "local" };
+
+              return yield* staleAdmission();
+            }
+
             // Given up from here meanwhile, which fails nothing. `left` when the viewer went
             // elsewhere: back to this computer, or to a receiver the app lists.
             const given = mine.signal.aborted;
@@ -819,7 +931,7 @@ function make(deps: OutputDeps) {
                   yield* release;
                 }
 
-                take(picked, adapter);
+                take(picked, adapter, admission);
               }
             } else if (
               !picked &&
@@ -852,48 +964,72 @@ function make(deps: OutputDeps) {
     });
 
     return {
-      status: Effect.sync(snapshot),
+      status: Effect.gen(function* () {
+        const admission = yield* admit;
+        yield* current(
+          playing?.admission ?? (output.kind === "local" ? admission : connectionAdmission),
+        );
+
+        return snapshot(admission);
+      }),
       changes: Stream.fromPubSub(updates),
 
       scan: (on: boolean) =>
-        Effect.sync(() => {
-          if (scanning === on) return;
-          scanning = on;
+        Effect.flatMap(admit, (admission) =>
+          Effect.andThen(
+            current(admission),
+            Effect.sync(() => {
+              discoveryAdmission = admission;
 
-          for (const adapter of adapters) adapter.scan(on);
-          publish();
-        }),
+              if (scanning === on) return;
+              scanning = on;
+
+              for (const adapter of adapters) adapter.scan(on);
+              publish(admission);
+            }),
+          ),
+        ),
 
       connect: (receiverId: string) =>
-        Effect.suspend(() => {
-          const adapter = adapters.find((each) =>
-            found.get(each.kind)?.some((listed) => listed.id === receiverId),
-          );
+        Effect.flatMap(admit, (admission) =>
+          Effect.andThen(
+            current(admission),
+            Effect.suspend(() => {
+              const adapter = adapters.find((each) =>
+                found.get(each.kind)?.some((listed) => listed.id === receiverId),
+              );
 
-          const known = [...found.values()].flat().find((each) => each.id === receiverId);
+              const known = [...found.values()].flat().find((each) => each.id === receiverId);
 
-          if (!adapter || !known) return Effect.fail(failed({ kind: "unreachable" }));
-          // The system's list gives way as this is asked, also one that still waits for its place.
-          listing?.wait.abort();
+              if (!adapter || !known) return Effect.fail(failed({ kind: "unreachable" }));
+              // The system's list gives way as this is asked, also one that still waits for its place.
+              listing?.wait.abort();
 
-          return connectTo(adapter, known);
-        }),
+              return connectTo(adapter, known, admission);
+            }),
+          ),
+        ),
 
       pick: (place: ListPlace, request?: string) =>
-        Effect.suspend(() => {
-          const adapter = adapters.find((each) => each.kind === "airplay");
+        Effect.flatMap(admit, (admission) =>
+          Effect.andThen(
+            current(admission),
+            Effect.suspend(() => {
+              const adapter = adapters.find((each) => each.kind === "airplay");
 
-          if (!adapter) {
-            return Effect.fail(
-              failed({
-                kind: "unavailable",
-                detail: "This build has no system list of receivers.",
-              }),
-            );
-          }
+              if (!adapter) {
+                return Effect.fail(
+                  failed({
+                    kind: "unavailable",
+                    detail: "This build has no system list of receivers.",
+                  }),
+                );
+              }
 
-          return pickWith(adapter, place, request);
-        }),
+              return pickWith(adapter, place, request, admission);
+            }),
+          ),
+        ),
 
       closePicker: (request?: string) =>
         Effect.sync(() => {
@@ -979,6 +1115,8 @@ function make(deps: OutputDeps) {
 
         return one(
           Effect.gen(function* () {
+            const admission = yield* admit;
+            yield* current(admission);
             const admitted = yield* Effect.serviceOption(AdmittedViewing);
 
             // Standalone/older callers have no profile admission; retain their supplied record.
@@ -1012,7 +1150,9 @@ function make(deps: OutputDeps) {
               shows: ["text"],
             };
 
+            yield* current(admission);
             opened.set(session.sessionId, {
+              admission,
               record,
               info,
               offset: session.offset,

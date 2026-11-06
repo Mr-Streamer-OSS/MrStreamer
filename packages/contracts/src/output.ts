@@ -1,3 +1,4 @@
+import type { ActiveProfile } from "./profiles.ts";
 // Where playback goes: this computer, or a receiver on the local network that plays what the app
 // sends it. The main process owns the receiver and what it plays; the UI shows the status it is
 // sent and asks for changes. A receiver plays from an address this computer serves on the local
@@ -90,6 +91,8 @@ export type Output =
   | { readonly kind: "lost"; readonly receiver: Receiver; readonly failure: OutputFailure };
 
 export interface OutputStatus {
+  /** Immutable owner of this observation; absent only for standalone/older transports. */
+  readonly owner?: ActiveProfile;
   /** What this build sends to; empty where it can't reach any receiver. */
   readonly offers: readonly ReceiverKind[];
   /** Whether the system sees an AirPlay receiver; null where AirPlay isn't offered. */

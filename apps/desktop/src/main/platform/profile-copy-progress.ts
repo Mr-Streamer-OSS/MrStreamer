@@ -1,3 +1,4 @@
+import { AdmittedSettings } from "../services/preferences.ts";
 // Personal resume positions for household copies. Inventory documents retain their legacy
 // positions for older builds, but only an explicit playback write changes this table.
 import type { DatabaseSync } from "node:sqlite";
@@ -103,7 +104,11 @@ export const copyProgress = Effect.gen(function* () {
       }),
   });
 
-  const admit = Effect.map(profiles.active, of);
+  const admit = Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
+    admitted._tag === "Some"
+      ? Effect.succeed(of(admitted.value.owner))
+      : Effect.map(profiles.active, of),
+  );
 
   return {
     admit,

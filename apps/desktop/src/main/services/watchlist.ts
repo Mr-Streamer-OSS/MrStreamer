@@ -1,3 +1,5 @@
+import { AdmittedSettings } from "./preferences.ts";
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The watchlist: movies and whole series the viewer saved to watch later. It is apart from the
 // viewing record: playing, finishing or leaving Continue watching changes no entry, and saving or
 // removing one changes nothing of how far a title got.
@@ -74,6 +76,7 @@ export class Watchlist extends Context.Service<
     remove(entry: OwnedId): Effect.Effect<void, Failed>;
     /** Says so after each title saved or removed. */
     readonly changes: Stream.Stream<void>;
+    readonly profileChanges?: Stream.Stream<ActiveProfile | null>;
   }
 >()("mrstreamer/Watchlist") {
   static readonly layer = Layer.effect(Watchlist, make());
@@ -85,6 +88,14 @@ function make() {
     const onDemand = yield* OnDemand;
     const store = yield* WatchlistStore;
     const changes = yield* PubSub.unbounded<void>();
+    const profileChanges = yield* PubSub.unbounded<ActiveProfile | null>();
+
+    const announce = Effect.gen(function* () {
+      const admitted = yield* Effect.serviceOption(AdmittedSettings);
+      yield* PubSub.publish(changes, undefined);
+      yield* PubSub.publish(profileChanges, admitted._tag === "Some" ? admitted.value.owner : null);
+    });
+
     const noSubscription = new Failed({ error: { kind: "no-subscription" } });
     /** The fetch of its lists each subscription's record was last brought in line with, by its id. */
     let alignedTo: ReadonlyMap<string, number> = new Map();
@@ -256,7 +267,7 @@ function make() {
           });
 
           if (!first) return yield* missing;
-          yield* PubSub.publish(changes, undefined);
+          yield* announce;
 
           return yield* entryOf(found, first);
         }),
@@ -276,10 +287,11 @@ function make() {
             id: entry.id,
             stands: () => subscriptions.standsNow(owner),
           });
-          yield* PubSub.publish(changes, undefined);
+          yield* announce;
         }),
 
       changes: Stream.fromPubSub(changes),
+      profileChanges: Stream.fromPubSub(profileChanges),
     };
   });
 }

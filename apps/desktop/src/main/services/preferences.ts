@@ -1,6 +1,7 @@
 import type { Json } from "@mrstreamer/contracts/json";
 
-import { type } from "arktype";
+import { type, type Type } from "arktype";
+import { readFile } from "node:fs/promises";
 import { LiveDiscovery, RememberedLiveBrowse } from "@mrstreamer/contracts/live-browse";
 import { ownedId, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { homeRows } from "@mrstreamer/core/home/rows";
@@ -24,7 +25,7 @@ import {
 // through `setInterfaceLanguage`.
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
+import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { profileDirectory } from "../platform/profile-store.ts";
 import type { LanguageChoice } from "@mrstreamer/contracts/language";
 import {
@@ -85,6 +86,29 @@ async function readStored(path: string): Promise<Stored | null> {
     return null;
 
   return { ...data, ...parsed };
+}
+
+/** Private files have no legacy downgrade contract: only a missing file starts with defaults. */
+async function readPrivatePreferences<T>(
+  path: string,
+  schema: Type<T>,
+): Promise<Type<T>["infer"] | null> {
+  let bytes: string;
+
+  try {
+    bytes = await readFile(path, "utf8");
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return null;
+    throw cause;
+  }
+
+  const data: unknown = JSON.parse(bytes);
+  const parsed = schema(data);
+
+  if (parsed instanceof type.errors)
+    throw new Error(`Viewing preferences could not be read: ${parsed.summary}`);
+
+  return parsed;
 }
 
 /** Installation consent remains owned by Analytics, including while another viewer is active. */
@@ -173,7 +197,10 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
 
     /** The file as last read or written. Only runs while holding `one`. */
     const stored = Effect.promise(async () => {
-      current ??= (await readStored(path)) ?? {
+      // Default retains the format handling older releases use at its original path.
+      current ??= (await (profileId === DEFAULT_PROFILE_ID
+        ? readStored(path)
+        : readPrivatePreferences(path, Stored()))) ?? {
         ...defaultPreferences,
         ...defaultSubscriptionPreferences,
       };
@@ -244,7 +271,9 @@ function make(dataDir: string, usage: UsageObservers | undefined, profileId: str
       Effect.promise(async () => {
         const kept =
           added.get(subscription.id) ??
-          (await readJsonFile(addedPath(subscription), SubscriptionPreferences())) ??
+          (await (profileId === DEFAULT_PROFILE_ID
+            ? readJsonFile(addedPath(subscription), SubscriptionPreferences())
+            : readPrivatePreferences(addedPath(subscription), SubscriptionPreferences()))) ??
           defaultSubscriptionPreferences;
 
         added.set(subscription.id, kept);
@@ -569,6 +598,7 @@ export function withInstallationConsent(
 export class AdmittedSettings extends Context.Service<
   AdmittedSettings,
   {
+    readonly owner: ActiveProfile;
     readonly settings: Settings["Service"];
     readonly current: () => boolean;
   }

@@ -1,3 +1,4 @@
+import { syncProfiles, subscribeProfiles, profileStatus } from "../features/profiles/profiles.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { hasTitles, ownedKey } from "@mrstreamer/contracts/subscription";
@@ -35,9 +36,19 @@ import { withoutTitles, useUi, type View } from "./ui-store.ts";
 
 /** The window, and the question Quit asks while a recording's time goes on, whatever it shows. */
 export function App() {
+  const client = useQueryClient();
+  const profile = useSyncExternalStore(subscribeProfiles, profileStatus);
+  useEffect(() => syncProfiles(client), [client]);
+
   return (
     <>
-      <Screen />
+      {profile.pending ? null : profile.error !== null ? (
+        <p className="p-10 text-sm text-destructive" role="alert">
+          {describeError(appError(profile.error))}
+        </p>
+      ) : (
+        <Screen key={profile.owner ? `${profile.owner.id}:${profile.owner.revision}` : "initial"} />
+      )}
       <QuitDialog />
     </>
   );

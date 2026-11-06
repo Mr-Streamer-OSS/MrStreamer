@@ -110,6 +110,8 @@ export interface DownloadSeries {
 export interface DownloadList {
   /** Desktop managed-folder state; older and mobile lists may omit it. */
   readonly storage?: DownloadFolder;
+  /** The personal progress owner captured before listing household copies. Absent on older transports. */
+  readonly profile?: ActiveProfile;
   readonly items: readonly Download[];
   /**
    * What each series the items name (`Download.series`) listed when the latest of its downloads

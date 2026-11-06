@@ -1,9 +1,18 @@
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { type } from "arktype";
 import { lazy } from "@mrstreamer/contracts/lazy";
 import { queryOptions, type QueryClient, type QueryOptions } from "@tanstack/react-query";
 import type { PreferenceSnapshot } from "@mrstreamer/contracts/ipc";
 import type { Preferences } from "@mrstreamer/contracts/preferences";
-import { call, listen } from "./ipc.ts";
+import {
+  call,
+  callForProfile,
+  listen,
+  profileOwner,
+  currentProfile,
+  currentProfileReply,
+  ownProfileReply,
+} from "./ipc.ts";
 
 const key = ["preferences"] as const;
 let connected: QueryClient | undefined;
@@ -24,6 +33,8 @@ export function acceptPreferences(
   client: QueryClient,
   incoming: PreferenceSnapshot,
 ): PreferenceSnapshot {
+  if (!currentProfileReply(incoming))
+    throw new Error("Viewing profile changed before preferences were accepted.");
   const previous = client.getQueryData<PreferenceSnapshot>(key);
 
   if (previous && previous.revision >= incoming.revision) return previous;
@@ -95,6 +106,8 @@ const newest: Exclude<
   QueryOptions<PreferenceSnapshot>["structuralSharing"],
   boolean | undefined
 > = (previous, incoming) => {
+  if (Revisioned().allows(incoming) && !currentProfileReply(incoming)) return previous;
+
   if (
     Revisioned().allows(previous) &&
     Revisioned().allows(incoming) &&
@@ -125,12 +138,15 @@ export function currentPreferences(client = connected): Preferences | undefined 
 
 /** Players can read/save outside React; composition attaches their renderer cache once. */
 export async function readPreferences(client = connected): Promise<Preferences> {
+  const owner = profileOwner();
+
   try {
     const snapshot = await call("preferences.get");
 
     return (client ? acceptPreferences(client, snapshot) : snapshot).preferences;
   } catch (error) {
-    if (client) void client.invalidateQueries({ queryKey: key, refetchType: "none" });
+    if (client && currentProfile(owner))
+      void client.invalidateQueries({ queryKey: key, refetchType: "none" });
     throw error;
   }
 }
@@ -138,8 +154,9 @@ export async function readPreferences(client = connected): Promise<Preferences> 
 export async function updatePreferences(
   patch: Partial<Preferences>,
   client = connected,
+  owner: ActiveProfile | null = profileOwner(),
 ): Promise<Preferences> {
-  const snapshot = await call("preferences.update", patch);
+  const snapshot = await callForProfile(owner, "preferences.update", patch);
 
   return (client ? acceptPreferences(client, snapshot) : snapshot).preferences;
 }
@@ -155,15 +172,29 @@ export function syncPreferences(
   const current = client.getQueryData<PreferenceSnapshot>(key);
 
   if (current) apply(current.preferences);
-  const changed = listen("preferences.changed", (snapshot) => acceptPreferences(client, snapshot));
+
+  const changed = listen("preferences.changed", (snapshot) => {
+    if (profileOwner() === null) acceptPreferences(client, snapshot);
+  });
+
+  const ownedChanged = listen("profiles.preferencesChanged", ({ owner, snapshot }) => {
+    if (ownProfileReply(snapshot, owner)) acceptPreferences(client, snapshot);
+  });
+
+  const ownedStale = listen("profiles.preferencesStale", ({ owner }) => {
+    if (currentProfile(owner)) void client.invalidateQueries({ queryKey: key });
+  });
 
   const stale = listen("preferences.stale", () => {
+    if (profileOwner() !== null) return;
     void client.invalidateQueries({ queryKey: key });
   });
 
   return () => {
     changed();
     stale();
+    ownedChanged();
+    ownedStale();
     consumers.delete(client);
 
     if (connected === client) connected = undefined;

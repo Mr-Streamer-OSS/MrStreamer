@@ -24,3 +24,16 @@ export interface ActiveProfile {
 export const ActiveProfileSchema = lazy(() =>
   type({ id: "string > 0", revision: "number.integer >= 1" }),
 );
+
+/** Desktop transport metadata. Domain method schemas still validate only `input`. */
+export interface ProfileRequest<Input> {
+  readonly __profile: ActiveProfile | undefined;
+  readonly input: Input | undefined;
+}
+
+/** A local viewing profile, including deletion that can be retried after a storage refusal. */
+export interface LocalProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly deleting: boolean;
+}
