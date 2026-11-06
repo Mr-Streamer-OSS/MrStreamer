@@ -486,3 +486,53 @@ it("asks no provider, record or receiver, and picks the saved languages in the n
 
   expect(reaching).toEqual([]);
 });
+
+it("retries a refused final close save after the copy has closed", async () => {
+  ipc.always("downloads.list", listOf(pilot));
+  await watch(pilot, { progress: { position: 600, duration: 2700 } });
+  const refused = ipc.hold("downloads.recordProgress");
+  await act(async () => titlePlayer.close());
+  await act(async () => refused.reject(LOCKED));
+  expect(titlePlayer.state().now).toBeNull();
+  const writes = ipc.argsOf("downloads.recordProgress").length;
+  await wait(10_000);
+  expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(writes + 1);
+  expect(ipc.argsOf("downloads.recordProgress").at(-1)).toEqual({
+    id: "pilot",
+    position: 595,
+    duration: 2700,
+  });
+});
+
+it("saves an explicit seek to zero on close without resetting a never-started copy", async () => {
+  ipc.always("downloads.list", listOf(pilot));
+  await watch(pilot, { progress: { position: 600, duration: 2700 } });
+  await act(async () => titlePlayer.seek(0));
+  await act(async () => runs.at(-1)?.start());
+  await act(async () => titlePlayer.close());
+  expect(ipc.argsOf("downloads.recordProgress").at(-1)).toEqual({
+    id: "pilot",
+    position: 0,
+    duration: 2700,
+  });
+  const writes = ipc.argsOf("downloads.recordProgress").length;
+  await watch(pilot, { progress: null });
+  expect(titlePlayer.state()).toMatchObject({ position: 0, duration: 2700 });
+  await act(async () => titlePlayer.close());
+  expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(writes);
+});
+
+it("stops retrying a refused close save when the download has been deleted", async () => {
+  ipc.always("downloads.list", listOf(pilot));
+  await watch(pilot, { progress: { position: 600, duration: 2700 } });
+  const refused = ipc.hold("downloads.recordProgress");
+  await act(async () => titlePlayer.close());
+  await act(async () => refused.reject(LOCKED));
+  const writes = ipc.argsOf("downloads.recordProgress").length;
+  ipc.always("downloads.list", listOf());
+  await wait(10_000);
+  expect(ipc.argsOf("downloads.recordProgress")).toHaveLength(writes);
+  const reads = ipc.argsOf("downloads.list").length;
+  await wait(10_000);
+  expect(ipc.argsOf("downloads.list")).toHaveLength(reads);
+});

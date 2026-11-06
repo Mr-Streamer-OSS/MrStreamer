@@ -54,7 +54,7 @@ _The same player, with no request to your provider._
 
 A copy plays in the same player as everything else: the timeline, the 10-second skips, speed, sound tracks, the file's own subtitles and their timing and look all work. The line under the title says **Offline**. Subtitles you downloaded online for that exact version before it finished downloading come with the copy, with your timing; searching for new ones needs the version from your subscription. A copy plays on this computer only, not on a TV.
 
-How far you got is kept with the copy. It is separate from your progress in the same title online.
+From 0.0.24, how far you got in each copy belongs to the Default viewing profile. Existing positions carry over, including after removing a subscription or restarting the app. Transfer and artwork updates leave that position alone. It is separate from your progress in the same title online.
 
 Playing a copy makes no request to your provider. Its details and pictures were saved when you downloaded it. Statistics and update checks still run as set.
 
@@ -77,6 +77,8 @@ Quitting the app, pausing, or playback taking the connection, keeps the download
 _0.0.19 and earlier ignore pauses and your queue order._
 
 Mr. Streamer 0.0.19 and earlier ignore pauses and your queue order. Unfinished downloads, including paused ones, can run in the order you added them. The saved pause and order fields survive ordinary use there. Back on 0.0.20 or later, unfinished downloads you paused are paused again, and the queue returns to your order.
+
+From 0.0.24, personal resume positions are saved separately. A version before 0.0.24 sees the positions last kept in its download records. Watching there does not replace Default’s positions when you return to 0.0.24.
 
 ## Where they are kept
 
