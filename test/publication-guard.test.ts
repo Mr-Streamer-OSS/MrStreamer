@@ -680,6 +680,7 @@ describe("the website", () => {
         ["apps/marketing/src/page.ts", true],
         ["apps/marketing/README.md", false],
         [".cursor/skills/verify-mrstreamer/features/website.md", false],
+        [".cursor/skills/verify-mrstreamer/features/website/routes.md", false],
         ["pnpm-lock.yaml", true],
       ] as const) {
         git("reset", "-q", "--hard", base);
