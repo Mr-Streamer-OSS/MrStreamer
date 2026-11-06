@@ -224,9 +224,11 @@ describe("a recording that plays", () => {
 
   /** Plays `programme` and lets its clock run to `seconds`, a fraction of a millisecond in. */
   const playing = async (programme: Programme, seconds: number) => {
-    ipc.always("playback.open", session(minute, programme.stop));
+    const opened = session(minute, programme.stop);
+    ipc.always("playback.open", opened);
     player.playArchive(een, programme);
-    await vi.advanceTimersByTimeAsync(0);
+    // The optional HLS chunk must finish loading and attach the source before its clock moves.
+    await vi.waitFor(() => expect(video.src).toBe(opened.url));
     video.currentTime = seconds;
     await vi.advanceTimersByTimeAsync(1000);
     expect(player.state().phase.kind).toBe("playing");

@@ -150,7 +150,9 @@ export function registerIpc(
       let owned: ReturnType<typeof track> | undefined;
 
       if (
-        (method === "guide.search" || method === "guide.searchList") &&
+        (method === "guide.search" ||
+          method === "guide.searchList" ||
+          method === "guide.searchPage") &&
         type.keywords.object.root.allows(input) &&
         "request" in input &&
         input.request !== undefined

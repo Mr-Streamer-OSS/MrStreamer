@@ -134,7 +134,7 @@ interface UiState {
 /** Navigation and overlay state for the window. */
 export const useUi = create<UiState>(() => ({
   account: 0,
-  view: "home",
+  view: window.location.hash === "#background-quit" ? "downloads" : "home",
   watching: false,
   playingTitle: false,
   details: null,

@@ -55,6 +55,7 @@ function start(handler: IpcHandlers["guide.search"] = () => Effect.never) {
   const handlers: Partial<IpcHandlers> = {
     "guide.search": handler,
     "guide.searchList": () => Effect.never,
+    "guide.searchPage": () => Effect.never,
     "guide.cancelSearch": () => Effect.succeed(null),
   };
 
@@ -80,6 +81,23 @@ describe("owned guide-search IPC", () => {
     await Promise.all([otherView, otherWindow]);
     expect(a.listenerCount("destroyed")).toBe(0);
     expect(b.listenerCount("destroyed")).toBe(0);
+  });
+
+  it("cancels a named guide page search like a palette search", async () => {
+    start();
+    const a = sender(1);
+
+    const page = invoke("guide.searchPage", a, {
+      subscriptionId: "fixture",
+      query: "fixture",
+      limit: 50,
+      request: request("guide-search"),
+    });
+
+    expect(a.listenerCount("destroyed")).toBe(1);
+    await cancel(a, request("guide-search"));
+    expect(await page).toMatchObject({ ok: false });
+    expect(a.listenerCount("destroyed")).toBe(0);
   });
 
   it("keeps file cleanup held until interrupted work has stopped", async () => {

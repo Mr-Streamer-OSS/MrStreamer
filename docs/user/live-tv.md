@@ -117,6 +117,18 @@ _⌘K or Ctrl K searches channels, programmes, movies and series in every subscr
 
 ⌘K (Ctrl K on Windows and Linux) searches every channel, movies and series, and the programmes on now and later today, in every subscription. Pick a channel, or a programme that's on, to watch it. Pick a later programme to read about it, or a movie or series to see its details. Opened from Live TV, it starts with what the list's field searched for. Live TV searches the list it shows from [that field](#the-guide), and Movies and Series their own titles from a field in their tabs; see [Movies and series](movies-and-series.md#finding-something). Channel name results use the same safe groups and **Show copies**. Right expands and Left collapses while the search field keeps focus. Programme results keep their own rows after movies and series.
 
+### Every guide day
+
+From 0.0.24, which isn't in Stable yet, **Search the guide**, the calendar beside the reminders bell in Live TV, searches programme titles on every day your guide keeps: days that passed as far back as it keeps them, and days to come as far as it reaches. It opens with what the list's field searched for, and the last row of ⌘K's results, **Search every guide day for …**, opens it for what you typed there.
+
+Each match shows its day, start time, channel and title, then what the guide says of the episode: S2 E4 when the guide gives valid season and episode numbers, otherwise the number as the guide writes it for the screen, with the episode title, **Shown before** for a repeat and **Premiere** when the guide says so. A guide that gives no episode number, or one that can't be read, still shows the programme, without a number. Mr. Streamer never calls an episode new because the guide marks it as a new show, leaves out a repeat mark or calls it a premiere.
+
+**Days** narrows the search to any day, before today, today, tomorrow or the next 7 days, and **Channels** to all channels or the list you were looking at, up to 100 channels. With several subscriptions saved, **Subscription** picks whose guide is searched: each subscription's channels, guide mappings and saved searches are its own. Results come 50 at a time in order of start; **Show more** adds the next ones. Changing the words or a filter starts again from the first.
+
+**Save search** keeps the words and filters under the words' name, up to 20 per subscription; saving the same words and name replaces its filters. Distinct words with the same shortened name get a numbered name. Today, Tomorrow, Before today and Next 7 days stay relative to the day you apply the saved search. Click a saved search to search it again, and the cross beside it to remove it. If a save fails, the saved searches stay as they were and Mr. Streamer says so, with **Retry**. If the saved searches can't be read, Mr. Streamer says so and saves nothing over them.
+
+Down or Enter in the field moves to the matches. Up and Down move between them, Home and End jump, and Enter opens one: its description, **Watch** while it's on and **Remind me** before it starts. Escape goes back to the field, clears it, and then closes guide search, returning focus to its opener. When opened with the header calendar, focus returns to that calendar.
+
 ## Reminders
 
 _Remind me on a programme to come, and Mr. Streamer tells you when it starts._
@@ -178,7 +190,7 @@ When Mr. Streamer can't save a Stop or a recording's end, its row says **Not sav
 
 ### Closing, quitting and updates
 
-Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. On Windows and Linux a tray icon then has **Open Mr. Streamer** and **Quit Mr. Streamer**, and Mr. Streamer quits by itself once nothing records, nothing is scheduled and what it had to save about them is saved.
+Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. Runnable downloads also keep the app running. The native menu shows download counts, **Open Mr. Streamer**, download Pause/Resume and **Quit Mr. Streamer**. On Windows and Linux, Mr. Streamer quits by itself once no downloads can run, nothing records, nothing is scheduled and what it had to save about recordings is saved. Paused downloads alone do not keep it running.
 
 Quitting while something records, with ⌘Q, Ctrl+Q or the tray, asks first. **Quit while recording?** offers **Quit**, which stops the recordings and keeps what they recorded, and **Keep recording**. A schedule still to come doesn't record while Mr. Streamer is closed. A shutdown or logout doesn't ask: recordings whose time remains go on when Mr. Streamer starts again.
 
@@ -228,3 +240,25 @@ While you reorder favourites or a list, the keys are these alone:
 | Tab                             | Go to Cancel, Save and the chosen row's buttons |
 | Enter                           | Save                                            |
 | Escape                          | Cancel                                          |
+
+## Live rewind
+
+_From 0.0.24. Pause and rewind a channel while it goes on arriving._
+
+When a channel plays on this computer as MPEG-TS, Watch shows a timeline under its controls. It spans what Mr. Streamer has kept of the channel since it started playing: up to the last 30 minutes, less when the temporary folder's 2 GiB, shared with recordings and other channels, or the 5 GB it leaves free on the disk runs out first. The times at its ends are the oldest moment kept and now. Next to them, Watch says **Live**, or how far behind live you are, and how much is kept.
+
+- **Pause** stops the picture while the channel keeps arriving. **Play** goes on from where it stopped.
+- **Back 10 seconds** and **Forward 10 seconds** skip and resume playback; forward past now goes live.
+- Drag the timeline and let go to watch from there.
+- **Go live** returns to now.
+
+When you pause longer than the channel is kept, the moment you paused at is gone; Watch says so, and Play goes on from the oldest moment still kept. Switching channel and Stop let go of what was kept, while a recording of the channel goes on; quitting empties it too.
+
+| Key                         | While watching a channel with a timeline |
+| --------------------------- | ---------------------------------------- |
+| Space, K                    | Pause, and play on                       |
+| J, L                        | Back or forward 10 seconds               |
+| End                         | Go live                                  |
+| Left, Right on the timeline | 10 seconds; Page Up, Page Down a minute  |
+
+An HLS channel has this timeline only after local codec repair converts clear muxed MPEG-TS segments to MPEG-TS output. Replay uses the picture and sound captured in that output. Choosing another sound track restarts capture and its timeline. Direct HLS, including encrypted streams, separate audio renditions, fMP4, byte ranges and low-latency parts, has no retained timeline. Catch-up programmes and a channel playing on a TV also have no timeline. Their keys say **This stream can't rewind**, or **Rewind plays here only** on a TV. When the provider breaks off, the channel reconnects as before and its timeline starts again from then.
