@@ -3,7 +3,7 @@
 Mr. Streamer has no account and no ads, and doesn't sell data. Your provider's streams go directly between your device and it, and the app's statistics never include what you watch.
 
 - **On your device.** Logins, lists, history and downloads stay on your device.
-- **App statistics.** On by default on a computer, off until you choose on iPhone. Never what you watch, your searches or your login.
+- **App statistics.** On by default on a computer and on new iPhone installs with the default-on correction. Earlier iPhone builds require a choice. Never what you watch, your searches or your login.
 - **The website.** Counted without a cookie or an identifier in your browser, unless your browser asks sites not to track.
 - **Your choices.** Turn statistics off in Settings > Privacy, and write to [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
 
@@ -65,9 +65,9 @@ Statistics never include what you watch, title or channel names, your provider o
 
 ### Usage statistics on iPhone
 
-Earlier iPhone test builds ask about statistics during setup or launch. Builds containing the onboarding privacy correction remove that prompt and offer sharing only through **Share basic usage statistics** in Settings > Privacy. Statistics stay off until you deliberately choose to share, except when an upgrade retains your earlier deliberate choice. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
+Earlier iPhone test builds ask about statistics during setup or launch. Builds containing the onboarding privacy correction remove that prompt. Builds containing the later default-on correction turn statistics on for new installations and offer an off switch through **Share basic usage statistics** in Settings > Privacy. Earlier onboarding-correction builds default to off until you choose to share. Upgrades preserve saved On and Off choices; an existing undecided setting stays off. Unreadable or corrupt statistics files keep collection off without replacing the saved data. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
 
-When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
+When an upgrade finds an existing undecided setting, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
 
 While sharing is on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
 
@@ -112,7 +112,7 @@ _To know what to fix and support, and to answer you. Never for advertising._
 - **Messages**, to answer you and fix what you report.
 - **The restricted review provider**, to authenticate authorised reviewers and deliver the sample catalogue, guide, pictures and media needed to review the app.
 
-For **optional iPhone statistics**, our basis is your consent (GDPR Article 6(1)(a)). You can refuse without losing access to provider setup, or withdraw through Settings > Privacy. The iPhone statistics section explains what Off does and the limits when saving fails. Withdrawal does not undo processing that was lawful before it, and does not itself erase records already received.
+You can turn **optional iPhone statistics** off without losing access to provider setup through Settings > Privacy. The iPhone statistics section explains what Off does and the limits when saving fails. Turning statistics off does not itself erase records already received.
 
 For **desktop statistics, website analytics and messages**, our basis is legitimate interest (GDPR Article 6(1)(f)): understanding reliability and use, improving the app and website, and answering requests. You can object by email, and stop new statistics or website analytics through the controls below. For operating and securing the restricted review provider, our basis is also legitimate interest: making the app available for review through authentication and sample delivery.
 
