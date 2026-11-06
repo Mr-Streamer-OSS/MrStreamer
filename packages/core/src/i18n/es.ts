@@ -1695,4 +1695,31 @@ export const es: Translation = {
     "El momento en pausa ha caducado. La reproducción sigue desde las {time}.",
   "Rewind plays here only": "El retroceso solo funciona aquí",
   "This stream can't rewind": "Este stream no puede retroceder",
+  // Recording rules.
+  "Follow programme": "Seguir el programa",
+  "Follow {title}": "Seguir {title}",
+  "Every match": "Cada emisión",
+  "New episodes only": "Solo episodios nuevos",
+  "The guide doesn't mark new episodes here.": "La guía no marca aquí los episodios nuevos.",
+  "Choose at least one channel.": "Elige al menos un canal.",
+  "Nothing in the guide matches now. The rule keeps looking as the guide changes.":
+    "Ahora nada coincide en la guía. La regla sigue buscando a medida que cambia la guía.",
+  "{count} airings left out: the guide doesn't show them as new episodes.": {
+    one: "{count} emisión omitida: la guía no la muestra como episodio nuevo.",
+    many: "{count} de emisiones omitidas: la guía no las muestra como episodios nuevos.",
+    other: "{count} emisiones omitidas: la guía no las muestra como episodios nuevos.",
+  },
+  "The guide lists more airings than one check reads. Later ones follow as these pass.":
+    "La guía muestra más emisiones de las que lee una comprobación. Las siguientes llegan a medida que pasan estas.",
+  "Turn on rule": "Activar la regla",
+  "Stop following": "Dejar de seguir",
+  "{count} more": { one: "{count} más", many: "{count} más", other: "{count} más" },
+  "A rule following {title} records this. Its padding is the rule's.":
+    "Una regla que sigue {title} graba esto. Su margen es el de la regla.",
+  "From a rule": "Por una regla",
+  Rules: "Reglas",
+  "Recording rules could not be read.": "No se pudieron leer las reglas de grabación.",
+  "Recording rules could not be saved.": "No se pudieron guardar las reglas de grabación.",
+  "This recording rule is no longer there.": "Esta regla de grabación ya no existe.",
+  "The recording rule limit was reached.": "Se alcanzó el máximo de reglas de grabación.",
 };

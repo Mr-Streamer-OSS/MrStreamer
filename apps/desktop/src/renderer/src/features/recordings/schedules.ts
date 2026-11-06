@@ -2,18 +2,24 @@
 // them and says when any changes (`recordings.schedulesChanged`), so the list is read once and
 // then follows those events, as recordings do. A guide programme finds its schedule by channel and
 // start: one made of it, or a repeat that records its channel at its weekday and time.
+//   Rules follow a programme by its title on chosen channels; main turns each airing it finds into
+// a schedule of its own, listed with the rest. The rules themselves change only from this window,
+// so their list is read once and kept as each save or cancel answers.
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
   RECORDING_MAX_MS,
+  RECORDING_RULE_LIMITS,
   type ConnectionHolder,
   type RecordingPadding,
   type RecordingPlan,
+  type RecordingRulePlan,
   type ScheduledRecording,
 } from "@mrstreamer/contracts/recordings";
 import type { IpcInput } from "@mrstreamer/contracts/ipc";
-import { sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
+import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { ownedId, ownedKey, sameOwned, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { formatDate, formatList, t, type PlainKey } from "@mrstreamer/core/i18n";
-import { call } from "../../lib/ipc.ts";
+import { call, searchCall } from "../../lib/ipc.ts";
 import { defined } from "@mrstreamer/core/defined";
 
 export const schedulesQuery = () =>
@@ -256,3 +262,67 @@ export function holdersText(holders: readonly ConnectionHolder[]): string {
     ),
   );
 }
+
+export const rulesQuery = () =>
+  queryOptions({
+    queryKey: ["rules"],
+    queryFn: () => call("recordings.rules"),
+    staleTime: Infinity,
+  });
+
+export function useRules() {
+  return useQuery(rulesQuery());
+}
+
+/** What a rule as edited would record now, as `recordings.previewRule` plans it, saving nothing. */
+export const rulePreviewQuery = (plan: RecordingRulePlan) =>
+  queryOptions({
+    queryKey: ["rules", "preview", plan],
+    queryFn: () => call("recordings.previewRule", { plan }),
+    enabled: plan.channels.length > 0,
+  });
+
+/**
+ * Whether main made `schedule` for an airing a rule found. Its padding is the rule's, so it is
+ * changed through the rule, and cancelling it lets that one airing go. Main names these schedules
+ * `rule:<uuid>` (services/recordings.ts `isRuleSchedule`); the schedule list carries nothing else
+ * that tells them apart.
+ */
+export function isRuleOccurrence(schedule: ScheduledRecording): boolean {
+  return schedule.id.startsWith("rule:");
+}
+
+/** The same title as the rule planner compares them: trimmed, in any case. */
+function sameTitle(a: string, b: string): boolean {
+  return a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+}
+
+/**
+ * The channels of `subscriptions` whose guide lists `title` from `from` on, for a rule to choose
+ * from: one page of each subscription's guide search, as many as the rule planner reads.
+ */
+export const titleChannelsQuery = (title: string, subscriptions: readonly string[], from: number) =>
+  queryOptions({
+    queryKey: ["rules", "channels", title, subscriptions],
+    queryFn: async ({ signal }) => {
+      const found = new Map<string, LiveChannel>();
+
+      for (const subscriptionId of subscriptions) {
+        const page = await searchCall(
+          "guide.searchPage",
+          { subscriptionId, query: title, from, limit: RECORDING_RULE_LIMITS.matches },
+          signal,
+          "recording-rule",
+        );
+
+        for (const { channel, programme } of page.matches)
+          if (sameTitle(programme.title, title)) found.set(ownedKey(channel), channel);
+      }
+
+      return [...found.values()].map((channel) => ({
+        owned: ownedId(channel),
+        name: channel.title,
+      }));
+    },
+    staleTime: 5 * MINUTE_MS,
+  });

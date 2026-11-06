@@ -1636,4 +1636,32 @@ export const de: Translation = {
     "Die pausierte Stelle ist abgelaufen. Die Wiedergabe geht ab {time} weiter.",
   "Rewind plays here only": "Zurückspulen gibt es nur hier",
   "This stream can't rewind": "Dieser Stream kann nicht zurückspulen",
+  // Recording rules.
+  "Follow programme": "Sendung folgen",
+  "Follow {title}": "{title} folgen",
+  "Every match": "Jede Ausstrahlung",
+  "New episodes only": "Nur neue Folgen",
+  "The guide doesn't mark new episodes here.":
+    "Der Programmführer markiert hier keine neuen Folgen.",
+  "Choose at least one channel.": "Wähle mindestens einen Sender.",
+  "Nothing in the guide matches now. The rule keeps looking as the guide changes.":
+    "Im Programmführer passt gerade nichts. Die Regel sucht weiter, wenn er sich ändert.",
+  "{count} airings left out: the guide doesn't show them as new episodes.": {
+    one: "{count} Ausstrahlung ausgelassen: Der Programmführer zeigt sie nicht als neue Folge.",
+    other:
+      "{count} Ausstrahlungen ausgelassen: Der Programmführer zeigt sie nicht als neue Folgen.",
+  },
+  "The guide lists more airings than one check reads. Later ones follow as these pass.":
+    "Der Programmführer listet mehr Ausstrahlungen, als eine Prüfung liest. Spätere folgen, wenn diese vorbei sind.",
+  "Turn on rule": "Regel einschalten",
+  "Stop following": "Nicht mehr folgen",
+  "{count} more": { one: "{count} weitere", other: "{count} weitere" },
+  "A rule following {title} records this. Its padding is the rule's.":
+    "Eine Regel, die {title} folgt, nimmt das auf. Der Puffer ist der der Regel.",
+  "From a rule": "Über eine Regel",
+  Rules: "Regeln",
+  "Recording rules could not be read.": "Aufnahmeregeln konnten nicht gelesen werden.",
+  "Recording rules could not be saved.": "Aufnahmeregeln konnten nicht gespeichert werden.",
+  "This recording rule is no longer there.": "Diese Aufnahmeregel gibt es nicht mehr.",
+  "The recording rule limit was reached.": "Die Höchstzahl an Aufnahmeregeln ist erreicht.",
 };
