@@ -157,11 +157,15 @@ A recording uses one of its subscription's connections while it records. Mr. Str
 
 In the [guide grid](#the-guide), a programme that hasn't ended has **Record** in its details:
 
-- **Repeat**: **Once** records that programme and follows the guide if its end moves before recording starts; then it keeps that stop time. A weekday, or **Every day**, records the channel at that time of day, whatever is on then. Nothing follows a programme by its name.
+- **Repeat**: **Once** records that programme and follows the guide if its end moves before recording starts; then it keeps that stop time. A weekday, or **Every day**, records the channel at that time of day, whatever is on then. These manual schedules do not follow a programme by its name.
 - **Start** and **End** each add 0 to 60 minutes, before and after, 2 and 5 minutes to begin with. One recording lasts at most 12 hours.
 - The panel says whether a connection is free then. When none is, **Schedule anyway** keeps the schedule, and it records from when one frees up.
 
 A scheduled programme has a ring in the grid, and its details read **Scheduled**, to change or cancel it. Nothing playing or downloading stops for a schedule. When its time comes while Mr. Streamer is closed, the computer sleeps or every connection is in use, it records the rest of its time and says how late it started. A time that passes with nothing recorded is listed as **Missed**; after a long absence, only the last week's are. A once-only schedule waits while the guide lists another programme or none at that time, so it never records the wrong show.
+
+From 0.0.24, programme-following rules match a title on selected channels. Every matching airing is the default. New-only requires a source-qualified episode number and an explicit premiere in the guide, without a repeat flag; a missing repeat flag alone proves nothing. Repeated airings remain separate with Every match. A future time can move when the same source-qualified episode replaces its overlapping guide entry. Without that identity, the app cannot establish that two differently timed entries are the same occurrence.
+
+Rules keep at most 100 queued occurrences together and read at most 100 guide matches per selected subscription in a check, across up to 100 selected channels. There can be 20 rules. Each rule retains 1,000 occurrence identities; once full, it admits no further occurrences. Cancelling an occurrence, stopping its recording or deleting its result never makes it eligible again after restart. A failed rule save or cancellation reports an error and remains retryable. Recording still requires Mr. Streamer to be running.
 
 ### The Recordings page
 

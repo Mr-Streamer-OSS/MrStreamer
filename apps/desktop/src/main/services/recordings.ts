@@ -53,13 +53,22 @@ import type {
   RecordingGapReason,
   RecordingLimits,
   RecordingPlan,
+  RecordingRule,
+  RecordingRulePlan,
+  RecordingRulePreview,
   RecordingStart,
   RecordingStorage,
   ScheduledRecording,
   ScheduleMiss,
   ScheduleStatus,
 } from "@mrstreamer/contracts/recordings";
-import { DEFAULT_KEEP_FREE, RECORDING_MAX_MS } from "@mrstreamer/contracts/recordings";
+import { readRules, writeRules, type KeptRule } from "../recordings/rule-store.ts";
+import { planRule } from "../recordings/rules.ts";
+import {
+  DEFAULT_KEEP_FREE,
+  RECORDING_MAX_MS,
+  RECORDING_RULE_LIMITS,
+} from "@mrstreamer/contracts/recordings";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Failed } from "@mrstreamer/core/failure";
@@ -257,6 +266,10 @@ export class Recordings extends Context.Service<
     }>;
     /** The list after each change, and as recordings grow, about once a second. */
     readonly changes: Stream.Stream<readonly Recording[]>;
+    readonly rules: Effect.Effect<readonly RecordingRule[], Failed>;
+    previewRule(plan: RecordingRulePlan): Effect.Effect<RecordingRulePreview, Failed>;
+    saveRule(plan: RecordingRulePlan, id?: string): Effect.Effect<RecordingRule, Failed>;
+    cancelRule(id: string): Effect.Effect<void, Failed>;
     /** Every schedule, by when it records next. Fails while schedules.json can't be read. */
     readonly schedules: Effect.Effect<readonly ScheduledRecording[], Failed>;
     /**
@@ -1390,6 +1403,29 @@ function make(deps: RecordingsDeps) {
       );
 
     // Schedules.
+    const rulesPath = join(root, "rules.json");
+    let rules = yield* Effect.promise(() => readRules(rulesPath));
+    const ruleFailure = (detail: string) => new Failed({ error: { kind: "unexpected", detail } });
+
+    const rulesUsable = Effect.suspend(() =>
+      rules === null
+        ? Effect.fail(ruleFailure("Recording rules could not be read."))
+        : schedulesUsable,
+    );
+
+    const persistRules = (next: KeptRule[]) =>
+      Effect.tap(
+        Effect.tryPromise({
+          try: () => writeRules(rulesPath, next),
+          catch: () => ruleFailure("Recording rules could not be saved."),
+        }),
+        () =>
+          Effect.sync(() => {
+            rules = next;
+          }),
+      );
+
+    const isRuleSchedule = (id: string) => id.startsWith("rule:");
     const schedulesPath = join(root, "schedules.json");
     const readKept = yield* Effect.promise(() => readSchedules(schedulesPath));
 
@@ -1456,11 +1492,142 @@ function make(deps: RecordingsDeps) {
           : Effect.void,
       ),
       Effect.tryPromise({
-        try: () => writeSchedules(schedulesPath, [...schedules.values()]),
+        try: () =>
+          writeSchedules(
+            schedulesPath,
+            [...schedules.values()].filter((each) => !isRuleSchedule(each.id)),
+          ),
         catch: () =>
           new Failed({ error: { kind: "unexpected", detail: t("Schedules could not be saved.") } }),
       }),
     );
+
+    const previewRule = (plan: RecordingRulePlan) =>
+      Effect.gen(function* () {
+        yield* rulesUsable;
+        const matches = [];
+        let limited = false;
+
+        for (const subscriptionId of new Set(plan.channels.map((each) => each.subscriptionId))) {
+          const page = yield* guide.searchPage({
+            subscriptionId,
+            query: plan.title,
+            channels: plan.channels
+              .filter((each) => each.subscriptionId === subscriptionId)
+              .map((each) => each.id),
+            limit: RECORDING_RULE_LIMITS.matches,
+          });
+
+          matches.push(...page.matches);
+          limited ||= page.next !== null;
+        }
+
+        return planRule(plan, matches, Date.now(), limited);
+      });
+
+    /** Durable identities precede schedules and capture. Settled identities never expire into
+     * eligibility; a full history stops admitting work until the viewer creates another rule. */
+    const reconcileRules = Effect.gen(function* () {
+      yield* rulesUsable;
+      const next: KeptRule[] = [];
+      let queued = 0;
+      const observed = new Set<string>();
+
+      for (const rule of rules ?? []) {
+        const preview = yield* previewRule(rule.plan);
+
+        const occurrences = rule.occurrences.map((each) => ({
+          ...each,
+          settled:
+            each.settled ||
+            each.plan.stop + each.plan.padding.after * 60_000 <= Date.now() ||
+            (!startsOf.has(each.id) &&
+              [...records.values()].some((record) => record.scheduled?.schedule === each.id)),
+        }));
+
+        for (const match of preview.matches) {
+          // An episode is not an airing: retain repeats. Only an unambiguous replacement
+          // overlapping the old airing can move its occurrence, with observed source identity.
+          const shifted = match.episodeIdentity
+            ? occurrences.filter(
+                (each) =>
+                  each.episodeIdentity === match.episodeIdentity &&
+                  !preview.matches.some((candidate) => candidate.identity === each.identity) &&
+                  each.plan.start < match.plan.stop &&
+                  match.plan.start < each.plan.stop,
+              )
+            : [];
+
+          const was =
+            occurrences.find((each) => each.identity === match.identity) ??
+            (shifted.length === 1 ? shifted[0] : undefined);
+
+          if (was) {
+            was.identity = match.identity;
+
+            if (!was.settled && !startsOf.has(was.id)) {
+              was.plan = match.plan;
+              was.channelName = match.channelName;
+            }
+          } else if (
+            occurrences.length < RECORDING_RULE_LIMITS.history &&
+            queued + occurrences.filter((each) => !each.settled).length <
+              RECORDING_RULE_LIMITS.queued
+          ) {
+            occurrences.push({ ...match, id: `rule:${randomUUID()}`, settled: false });
+          }
+        }
+
+        for (const each of occurrences)
+          if (preview.matches.some((match) => match.identity === each.identity))
+            observed.add(each.id);
+        queued += occurrences.filter((each) => !each.settled).length;
+        next.push({ ...rule, occurrences });
+      }
+
+      if (!isDeepStrictEqual(next, rules)) yield* persistRules(next);
+
+      const wanted = new Set(
+        next.flatMap((rule) =>
+          rule.occurrences
+            .filter((each) => !each.settled && observed.has(each.id))
+            .map((each) => each.id),
+        ),
+      );
+
+      for (const id of schedules.keys()) {
+        if (isRuleSchedule(id) && !wanted.has(id) && !startsOf.has(id) && !recordingOf(id))
+          schedules.delete(id);
+      }
+
+      for (const rule of next)
+        for (const each of rule.occurrences) {
+          if (each.settled || !observed.has(each.id) || startsOf.has(each.id)) continue;
+          const was = schedules.get(each.id);
+          schedules.set(each.id, {
+            id: each.id,
+            plan: each.plan,
+            channelName: each.channelName,
+            created: was?.created ?? Date.now(),
+            through: was?.through ?? Date.now(),
+          });
+        }
+    });
+
+    const settleRuleSchedule = (id: string) =>
+      Effect.gen(function* () {
+        if (!isRuleSchedule(id)) return;
+        yield* rulesUsable;
+
+        const next = (rules ?? []).map((rule) => ({
+          ...rule,
+          occurrences: rule.occurrences.map((each) =>
+            each.id === id ? { ...each, settled: true } : each,
+          ),
+        }));
+
+        if (!isDeepStrictEqual(next, rules)) yield* persistRules(next);
+      });
 
     /** Keeps `schedule` as `id`, or takes `id` out for null, putting it back if the write fails. */
     const keep = (id: string, schedule: KeptSchedule | null) =>
@@ -1926,7 +2093,7 @@ function make(deps: RecordingsDeps) {
 
       // With none kept, nothing is asked of the lists, the guide or the clock: a schedule saved
       // wakes the next check.
-      if (schedules.size === 0 && !unsaved.recordings && !unsaved.schedules) {
+      if (schedules.size === 0 && !rules?.length && !unsaved.recordings && !unsaved.schedules) {
         if (shownSchedules.length > 0) {
           shownSchedules = [];
           yield* PubSub.publish(scheduleChanges, shownSchedules);
@@ -1934,6 +2101,11 @@ function make(deps: RecordingsDeps) {
 
         return resumeAt;
       }
+
+      const ruleCheck = yield* Effect.result(reconcileRules);
+
+      if (ruleCheck._tag === "Failure" && (rules?.length ?? 0) > 0)
+        yield* Effect.logWarning("[recordings] rules could not be checked or saved; trying again");
 
       const now = Date.now();
       const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
@@ -1948,6 +2120,8 @@ function make(deps: RecordingsDeps) {
       );
 
       for (const schedule of ordered) {
+        if (isRuleSchedule(schedule.id) && ruleCheck._tag === "Failure") continue;
+
         if (!saved.has(schedule.plan.channel.subscriptionId)) {
           schedules.delete(schedule.id);
           dirty = true;
@@ -2398,6 +2572,8 @@ function make(deps: RecordingsDeps) {
           // A schedule's time it recorded stays settled without it, so it never records again.
           const { scheduled } = record;
 
+          if (scheduled) yield* scheduling(settleRuleSchedule(scheduled.schedule));
+
           if (scheduled)
             yield* scheduling(
               Effect.suspend(() => {
@@ -2604,6 +2780,51 @@ function make(deps: RecordingsDeps) {
         return (yield* unkept).length === 0;
       }),
       changes: Stream.fromPubSub(changes),
+      rules: scheduling(
+        Effect.andThen(
+          rulesUsable,
+          Effect.sync(() => (rules ?? []).map(({ id, plan }) => ({ id, plan }))),
+        ),
+      ),
+      previewRule: (plan: RecordingRulePlan) => scheduling(previewRule(plan)),
+      saveRule: (plan: RecordingRulePlan, id?: string) =>
+        Effect.tap(
+          scheduling(
+            Effect.gen(function* () {
+              yield* previewRule(plan);
+              const was = rules?.find((each) => each.id === id);
+
+              if (id && !was) return yield* ruleFailure("This recording rule is no longer there.");
+
+              if (!was && (rules?.length ?? 0) >= RECORDING_RULE_LIMITS.rules)
+                return yield* ruleFailure("The recording rule limit was reached.");
+
+              const rule: KeptRule = {
+                id: id ?? randomUUID(),
+                plan: { ...plan, mode: plan.mode ?? "every" },
+                occurrences: was?.occurrences ?? [],
+              };
+
+              yield* persistRules([...(rules ?? []).filter((each) => each.id !== rule.id), rule]);
+
+              return { id: rule.id, plan: rule.plan };
+            }),
+          ),
+          () => wake,
+        ),
+      cancelRule: (id: string) =>
+        Effect.tap(
+          scheduling(
+            Effect.gen(function* () {
+              yield* rulesUsable;
+              const rule = rules?.find((each) => each.id === id);
+              yield* persistRules((rules ?? []).filter((each) => each.id !== id));
+
+              for (const each of rule?.occurrences ?? []) schedules.delete(each.id);
+            }),
+          ),
+          () => wake,
+        ),
       schedules: scheduling(
         Effect.andThen(
           schedulesUsable,
@@ -2634,6 +2855,8 @@ function make(deps: RecordingsDeps) {
             Effect.gen(function* () {
               yield* schedulesUsable;
 
+              yield* settleRuleSchedule(id);
+
               if (schedules.has(id)) yield* keep(id, null);
             }),
           ),
@@ -2650,7 +2873,7 @@ function make(deps: RecordingsDeps) {
       ),
       live: Effect.sync(() => ({
         recording: [...records.values()].some(isLive),
-        scheduled: schedules.size > 0,
+        scheduled: schedules.size > 0 || (rules?.length ?? 0) > 0,
         unsaved: unsaved.recordings || unsaved.schedules,
       })),
       scheduleChanges: Stream.fromPubSub(scheduleChanges),
