@@ -1,4 +1,4 @@
-# The app's and the website's checks, on every pull request and push to main;
+# The app's and the website's checks, on every pull request, push to main and manual dispatch;
 # docs/maintainers/ci.md shows how the workflows fit together.
 #
 # Check always runs and reports. Test and Website run when their inputs changed, and whenever the
@@ -17,6 +17,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
   workflow_call:
     inputs:
       sha:
