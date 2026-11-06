@@ -12,7 +12,7 @@ socket.on("error", () => process.exit(1));
 
 socket.on("close", () => process.exit(1));
 
-socket.write(`${process.pid}\n`);
+socket.write(`${process.argv[3]}:${process.pid}\n`);
 
 // From the test: "=<line>" to write as it is, "!exit <code>", or "!stay".
 createInterface({ input: socket }).on("line", (line) => {

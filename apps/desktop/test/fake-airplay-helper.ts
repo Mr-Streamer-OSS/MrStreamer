@@ -18,6 +18,7 @@
 //   const connection = await connecting;
 //   await connection.load(media, signal);
 //   helper.status("playing", 12, 180);
+import { randomUUID } from "node:crypto";
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -67,6 +68,7 @@ export interface FakeAirplayHelper {
 export async function startFakeAirplayHelper(
   options: { readonly protocol?: number } = {},
 ): Promise<FakeAirplayHelper> {
+  const token = randomUUID();
   const commands: SentCommand[] = [];
   const pids: number[] = [];
   const sockets = new Set<Socket>();
@@ -154,8 +156,16 @@ export async function startFakeAirplayHelper(
     });
     // A killed process resets the socket, and readline passes that on as an error of its own.
     const lines = createInterface({ input: socket }).on("error", () => {});
-    // The relay names its process first; everything after is the adapter's.
-    lines.once("line", (pid) => {
+    // Only our relay may name a process and pass on the adapter's commands.
+    lines.once("line", (hello) => {
+      const [key, pid] = hello.split(":");
+
+      if (key !== token) {
+        socket.destroy();
+
+        return;
+      }
+
       pids.push(Number(pid));
       current = socket;
       detecting = false;
@@ -180,6 +190,7 @@ export async function startFakeAirplayHelper(
     args: [
       fileURLToPath(new URL("./fake-airplay-helper.mjs", import.meta.url)),
       String((server.address() as AddressInfo).port),
+      token,
     ],
     commands,
     pids,
