@@ -613,3 +613,106 @@ it.each([
     expect(document.querySelector("[role=alert]")).toBeNull();
   },
 );
+
+it("switches profiles from Connect and from standalone Downloads, and offers them on standalone Recordings", async () => {
+  useUi.setState(useUi.getInitialState(), true);
+  ipc.always("profiles.active", A);
+  ipc.always("profiles.list", [
+    { id: A.id, name: "Default", deleting: false },
+    { id: B.id, name: "Sam", deleting: false },
+  ]);
+  ipc.always("output.status", local(A));
+  ipc.always("language.get", english);
+  ipc.always("subscription.list", []);
+  ipc.always("downloads.list", {
+    items: [
+      {
+        id: "kept",
+        title: { kind: "movie", id: "m1" },
+        subscription: null,
+        name: "Past Lives",
+        episodeName: null,
+        year: 2023,
+        duration: 6360,
+        originalLanguage: "ko",
+        posterUrl: null,
+        wideUrl: null,
+        size: 2_300_000_000,
+        status: { kind: "complete" },
+        progress: null,
+        series: null,
+      },
+    ],
+    series: {},
+    bytes: 2_300_000_000,
+    free: 212_000_000_000,
+    ended: 0,
+  });
+  ipc.always("recordings.list", [
+    {
+      id: "r1",
+      channel: { subscriptionId: "gone", id: "11" },
+      channelName: "Estuary Max",
+      title: "Weather Watch",
+      start: Date.now() - 2 * 60 * 60_000,
+      stop: Date.now() - 60 * 60_000,
+      ended: Date.now() - 60 * 60_000,
+      bytes: 900_000_000,
+      status: { kind: "complete" },
+    },
+  ]);
+  ipc.always("recordings.schedules", []);
+  ipc.always("recordings.storage", {
+    folder: "/home/viewer/Videos",
+    used: 900_000_000,
+    free: 312_000_000_000,
+    keepFree: 5 * 1024 ** 3,
+    space: null,
+  });
+
+  const view = queryView(client);
+  unmount = view.unmount;
+  await view.render(createElement(TooltipProvider, null, createElement(App)));
+  await vi.waitFor(() => expect(document.querySelector("form")).not.toBeNull());
+
+  // Connect, before any subscription: the avatar switches the owner.
+  const ui = menu();
+  await vi.waitFor(() => expect(ui.named(t("Downloads"))).toBeDefined());
+  await vi.waitFor(() =>
+    expect(ui.named(t("Profile: {name}", { name: t("Default") }))).toBeDefined(),
+  );
+  ipc.always("profiles.switch", B);
+  ipc.always("profiles.active", B);
+  ipc.always("output.status", local(B));
+  await ui.press(t("Profile: {name}", { name: t("Default") }));
+  await ui.press("SSam");
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null }),
+  );
+  expect(ipc.argsOf("profiles.switch")).toEqual([{ id: B.id, current: A }]);
+  await vi.waitFor(() => expect(ui.named(t("Profile: {name}", { name: "Sam" }))).toBeDefined());
+
+  // Downloads opened from Connect stands alone, its bar ending in the same avatar.
+  await ui.press(t("Downloads"));
+  await vi.waitFor(() => expect(document.querySelector("form")).toBeNull());
+  await vi.waitFor(() =>
+    expect(document.querySelector("header")?.textContent).toContain(t("Add subscription")),
+  );
+  expect(ui.named(t("Profile: {name}", { name: "Sam" }))?.closest("header")).toBeTruthy();
+  ipc.always("profiles.switch", AGAIN);
+  ipc.always("profiles.active", AGAIN);
+  ipc.always("output.status", local(AGAIN));
+  await ui.press(t("Profile: {name}", { name: "Sam" }));
+  await ui.press("DDefault");
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: AGAIN, pending: false, error: null }),
+  );
+  expect(ipc.argsOf("profiles.switch").at(-1)).toEqual({ id: A.id, current: B });
+
+  // The switch went back to Connect; Recordings from there stands alone with the avatar too.
+  await vi.waitFor(() => expect(document.querySelector("form")).not.toBeNull());
+  await vi.waitFor(() => expect(ui.named(t("Recordings"))).toBeDefined());
+  await ui.press(t("Recordings"));
+  await vi.waitFor(() => expect(document.body.textContent).toContain("Weather Watch"));
+  expect(ui.named(t("Profile: {name}", { name: t("Default") }))?.closest("header")).toBeTruthy();
+});

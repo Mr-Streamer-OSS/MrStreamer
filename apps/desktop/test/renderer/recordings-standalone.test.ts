@@ -113,8 +113,10 @@ it("opens what was recorded from Connect, plays it, and goes back to Add subscri
   await until(() => window.textContent?.includes("Weather Watch") ?? false);
   expect(window.querySelector("form")).toBeNull();
   expect(
-    [...window.querySelectorAll("header button")].map((each) => each.textContent?.trim()),
-  ).toEqual(["Recordings", "Add subscription"]);
+    [...window.querySelectorAll("header button")].map(
+      (each) => each.getAttribute("aria-label") ?? each.textContent?.trim(),
+    ),
+  ).toEqual(["Recordings", "Add subscription", "Profiles"]);
   expect(window.querySelector("section[aria-label=Recorded]")).not.toBeNull();
   expect(window.querySelector("section[aria-label=Scheduled]")).toBeNull();
   expect(button(window, "Storage")).toBeUndefined();

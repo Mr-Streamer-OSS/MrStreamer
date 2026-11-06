@@ -752,8 +752,10 @@ describe("with no subscription saved", () => {
     expect(app.textContent).toContain("Subscription removed, copy kept");
     // Only Downloads is a page here.
     expect(
-      [...app.querySelectorAll("header button")].map((each) => each.textContent?.trim()),
-    ).toEqual(["Downloads", "Add subscription"]);
+      [...app.querySelectorAll("header button")].map(
+        (each) => each.getAttribute("aria-label") ?? each.textContent?.trim(),
+      ),
+    ).toEqual(["Downloads", "Add subscription", "Profiles"]);
     // A copy plays over it, with nothing in its bar that needs a subscription.
     const opened = ipc.hold("playback.openCopy");
     await click(button(app, "Watch offline"));
