@@ -317,6 +317,7 @@ export async function liveRewindScenario(
     const beforeRecovery = await video();
     fixture.breakStream();
     await d.wait(() => Promise.resolve(fixture.streams().requests > expectedRequests), 60_000);
+    await d.wait(() => d.exists(`${group}?.querySelector('input')`), 60_000);
     await picture("rewind-recovered");
     const recovered = await video();
     check(
