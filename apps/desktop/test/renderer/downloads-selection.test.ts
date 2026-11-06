@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 // The Downloads page's household folder and selected downloads: Change folder through main's
 // picker, the round boxes that select rows and series, the bar's actions sent only for the
-// downloads they fit, Delete's second press, per-download answers with Try again, a move one copy
-// at a time that stops at its first failure, Cancel move, and where the keyboard goes.
+// downloads they fit, Delete's second press, per-download answers with Try again, a moving copy's
+// row, Cancel move, and where the keyboard goes.
 import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -146,7 +146,6 @@ describe("selected downloads", () => {
   it("sends each action only for the selected downloads it fits", async () => {
     ipc.always("downloads.list", list([running, stopped, download()]));
     ipc.answer("downloads.bulk", ({ ids }) => ({ succeeded: ids, failed: [] }));
-    ipc.always("downloads.moveCopies", null);
     const page = await show();
     expect(bar(page)).toBeNull();
 
@@ -161,8 +160,8 @@ describe("selected downloads", () => {
     expect(ipc.argsOf("downloads.bulk")).toEqual([
       { ids: ["running"], action: "pause" },
       { ids: ["stopped"], action: "retry" },
+      { ids: ["d1"], action: "move" },
     ]);
-    expect(ipc.argsOf("downloads.moveCopies")).toEqual([{ ids: ["d1"] }]);
     // Nothing paused here, so there is nothing to resume.
     expect(button(bar(page)!, "Resume")).toBeUndefined();
     expect(page.querySelector('[role="status"]')?.textContent).toBe("1 of 1 done");
@@ -214,33 +213,35 @@ describe("selected downloads", () => {
     expect(row(page, "d2").textContent).not.toContain("Permission denied");
   });
 
-  it("moves copies one at a time, stops at the first failure and tries it and the rest again", async () => {
+  it("says which copy is moving, and tries only the copies that failed to move again", async () => {
     const copies = ["a", "b", "c"].map((id) => download({ id, name: `Copy ${id}` }));
     ipc.always("downloads.list", list(copies));
     const full = { kind: "unexpected", detail: "Destination disk is full" } as const;
-    ipc.always("downloads.moveCopies", null);
-    const second = ipc.hold("downloads.moveCopies", ({ ids }) => ids[0] === "b");
+    const moving = ipc.hold("downloads.bulk");
     const page = await show();
 
     for (const id of ["a", "b", "c"]) await click(box(page, `Copy ${id}`));
 
     await click(button(bar(page)!, "Move to Media"));
+    expect(ipc.argsOf("downloads.bulk")).toEqual([{ ids: ["a", "b", "c"], action: "move" }]);
     // Main says which copy is moving: its row says so, with Cancel move instead of Delete.
     await act(async () => ipc.emit("downloads.changed", list(copies, ["b"])));
     await until(() => row(page, "b").textContent!.includes("Moving to Media"));
     expect(button(row(page, "b"), "Cancel move")).toBeDefined();
     expect(button(row(page, "b"), "Delete")).toBeUndefined();
 
-    await act(async () => second.reject(full));
+    await act(async () =>
+      moving.resolve({ succeeded: ["a", "c"], failed: [{ id: "b", error: full }] }),
+    );
     await act(async () => ipc.emit("downloads.changed", list(copies)));
     await until(() => !row(page, "b").textContent!.includes("Moving to Media"));
-    expect(ipc.argsOf("downloads.moveCopies")).toEqual([{ ids: ["a"] }, { ids: ["b"] }]);
-    expect(page.querySelector('[role="status"]')?.textContent).toContain("1 of 3 done");
+    expect(page.querySelector('[role="status"]')?.textContent).toContain("2 of 3 done");
     expect(row(page, "b").textContent).toContain("Destination disk is full");
 
+    ipc.answer("downloads.bulk", ({ ids }) => ({ succeeded: ids, failed: [] }));
     await click(button(page.querySelector('[role="status"]')!, "Try again"));
-    expect(ipc.argsOf("downloads.moveCopies").slice(2)).toEqual([{ ids: ["b"] }, { ids: ["c"] }]);
-    expect(page.querySelector('[role="status"]')?.textContent).toBe("2 of 2 done");
+    expect(ipc.argsOf("downloads.bulk").at(-1)).toEqual({ ids: ["b"], action: "move" });
+    expect(page.querySelector('[role="status"]')?.textContent).toBe("1 of 1 done");
   });
 
   it("cancels a copy's move from its row", async () => {

@@ -160,7 +160,8 @@ export interface DownloadFolder {
   readonly moving: readonly string[];
 }
 
-export type DownloadBulkAction = "pause" | "resume" | "retry" | "remove";
+/** `move` takes a finished copy to the household folder, under the same ID. */
+export type DownloadBulkAction = "pause" | "resume" | "retry" | "remove" | "move";
 
 /** Bulk commands report each selected result; a failed item stays retryable. */
 export interface DownloadBulkResult {

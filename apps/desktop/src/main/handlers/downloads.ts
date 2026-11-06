@@ -11,7 +11,6 @@ export function downloadHandlers({
     Downloads["Service"],
     | "folder"
     | "setFolder"
-    | "moveCopies"
     | "cancelMove"
     | "bulk"
     | "list"
@@ -27,7 +26,6 @@ export function downloadHandlers({
   >;
 }): HandlersFor<"downloads"> {
   return {
-    "downloads.folder": () => downloads.folder,
     "downloads.chooseFolder": () =>
       Effect.gen(function* () {
         const current = yield* downloads.folder;
@@ -38,7 +36,6 @@ export function downloadHandlers({
 
         return yield* downloads.folder;
       }),
-    "downloads.moveCopies": ({ ids }) => Effect.as(downloads.moveCopies(ids), null),
     "downloads.cancelMove": ({ id }) => Effect.as(downloads.cancelMove(id), null),
     "downloads.bulk": ({ ids, action }) => downloads.bulk(ids, action),
     "downloads.list": () => downloads.list,

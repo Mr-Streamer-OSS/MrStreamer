@@ -108,10 +108,12 @@ export class Downloads extends Context.Service<
     readonly folder: Effect.Effect<DownloadFolder, Failed>;
     /** Validates and saves a folder for future transfers; existing files stay put. */
     setFolder(path: string): Effect.Effect<void, Failed>;
-    /** Moves finished copies sequentially; the first failure stops the selection. */
-    moveCopies(ids: readonly string[]): Effect.Effect<void, Failed>;
     /** Waits until the move stops, retaining its original when not yet committed. */
     cancelMove(id: string): Effect.Effect<void, Failed>;
+    /**
+     * Runs one action on each selected download and answers for each: pause, resume, retry,
+     * remove, or move a finished copy to the selected folder. One failing leaves the rest going.
+     */
     bulk(
       ids: readonly string[],
       action: DownloadBulkAction,
@@ -289,12 +291,13 @@ function make(deps: DownloadsDeps) {
     // A move never changes the authoritative folder until every copied file is flushed and
     // its record commits. A restart discards only the explicitly recorded incomplete target.
     for (const record of records.values()) {
-      if (!record.moveTo) continue;
+      const { moveTo } = record;
+
+      if (!moveTo) continue;
       yield* Effect.promise(async () => {
         try {
-          await rm(join(record.moveTo!, record.id), { recursive: true, force: true });
-          const { moveTo: _moveTo, ...rest } = record;
-          write(rest);
+          await rm(join(moveTo, record.id), { recursive: true, force: true });
+          write(unmarked(record));
         } catch {
           // Keep the recovery marker and original copy; the destination may be unplugged.
         }
@@ -931,121 +934,109 @@ function make(deps: DownloadsDeps) {
         error: { kind: "unexpected", detail: t("That download is no longer here.") },
       });
 
-    const commands: Downloads["Service"] = {
-      moveCopies: (ids: readonly string[]) =>
-        attempt(async () => {
-          if (unloaded) await Effect.runPromise(unloaded);
+    /**
+     * Moves one finished copy to the selected folder under its own UUID. The record keeps its old
+     * folder, with a `moveTo` marker naming the incomplete target, until every file is flushed;
+     * only then does it commit. A copy already there counts as moved.
+     */
+    const relocate = async (id: string): Promise<void> => {
+      const record = records.get(id);
 
-          for (const id of new Set(ids)) {
-            const record = records.get(id);
+      if (!record || record.state !== "complete") throw notFound();
 
-            if (!record || record.state !== "complete") throw notFound();
+      if (closing) throw new Error("Copy is busy");
+      const destination = selectedFolder;
 
-            if (closing || moving.has(id)) throw new Error("Copy is busy");
-            const destination = selectedFolder;
+      if ((record.directory ?? root) === destination) return;
+      const work = { cancelled: false, settled: Promise.resolve() };
+      moving.set(id, work);
+      work.settled = (async () => {
+        await artworkWork.get(id);
 
-            if ((record.directory ?? root) === destination) continue;
-            const work = { cancelled: false, settled: Promise.resolve() };
-            moving.set(id, work);
-            work.settled = (async () => {
-              await artworkWork.get(id);
+        if (record.moveTo) throw new Error("Destination needs recovery; reconnect it and restart");
+        const source = folderOf(id);
+        const target = join(destination, id);
 
-              if (record.moveTo)
-                throw new Error("Destination needs recovery; reconnect it and restart");
-              const source = folderOf(id);
-              const target = join(destination, id);
+        if ((await stat(mediaOf(record))).size !== record.size)
+          throw new Error("Source copy is missing or changed");
 
-              if ((await stat(mediaOf(record))).size !== record.size)
-                throw new Error("Source copy is missing or changed");
-              const inside = relative(source, destination);
+        if (within(source, destination)) throw new Error("Destination is inside this copy");
 
-              if (!inside || (!inside.startsWith("..") && !isAbsolute(inside)))
-                throw new Error("Destination is inside this copy");
+        const check = () => {
+          if (work.cancelled || closing) throw new Error("Move cancelled; original copy kept");
+        };
 
-              const check = () => {
-                if (work.cancelled || closing)
-                  throw new Error("Move cancelled; original copy kept");
-              };
+        check();
 
-              // mkdir is exclusive: never replace an existing folder or unrelated files.
+        if (!(await stat(destination)).isDirectory()) throw new Error("Destination unavailable");
+        const free = await disk.free(destination);
+
+        if (free !== null && record.size !== null && free < record.size)
+          throw new Error("Destination disk is full");
+        // mkdir is exclusive: never replace an existing folder or unrelated files.
+        await mkdir(target);
+        let committed = false;
+
+        try {
+          update(id, (latest) => ({ ...latest, moveTo: destination }));
+
+          const copyTree = async (from: string, to: string): Promise<void> => {
+            for (const entry of await readdir(from, { withFileTypes: true })) {
               check();
+              const input = join(from, entry.name);
+              const output = join(to, entry.name);
 
-              if (!(await stat(destination)).isDirectory())
-                throw new Error("Destination unavailable");
-              const free = await disk.free(destination);
+              if (entry.isDirectory()) {
+                await mkdir(output);
+                await copyTree(input, output);
+              } else if (entry.isFile()) {
+                await cp(input, output, { errorOnExist: true, force: false });
+                const file = await open(output, "r+");
 
-              if (free !== null && record.size !== null && free < record.size)
-                throw new Error("Destination disk is full");
-              await mkdir(target);
-              let committed = false;
-
-              try {
-                update(id, (latest) => ({ ...latest, moveTo: destination }));
-
-                const copyTree = async (from: string, to: string): Promise<void> => {
-                  for (const entry of await readdir(from, { withFileTypes: true })) {
-                    check();
-                    const input = join(from, entry.name);
-                    const output = join(to, entry.name);
-
-                    if (entry.isDirectory()) {
-                      await mkdir(output);
-                      await copyTree(input, output);
-                    } else if (entry.isFile()) {
-                      await cp(input, output, { errorOnExist: true, force: false });
-                      const file = await open(output, "r+");
-
-                      try {
-                        await file.sync();
-                      } finally {
-                        await file.close();
-                      }
-
-                      if ((await stat(input)).size !== (await stat(output)).size)
-                        throw new Error("Incomplete copy");
-                    } else throw new Error("Copy contains an unsupported file");
-                  }
-
-                  await syncDirectory(to);
-                };
-
-                await copyTree(source, target);
-                await syncDirectory(destination);
-                check();
-                // Closing playback prevents a stale reader surviving deletion of its old files.
-                await Effect.runPromise(playback.closeCopy(id));
-                check();
-                update(id, (latest) => {
-                  const { moveTo: _moveTo, ...rest } = latest;
-
-                  return { ...rest, directory: destination };
-                });
-                committed = true;
-                missing.delete(id);
-                // A failed old-folder cleanup leaves a harmless duplicate, never loses the copy.
-                await rm(source, { recursive: true, force: true }).catch(() => {});
-              } finally {
-                if (!committed) {
-                  // Retain the marker if cleanup fails so a relaunch can retry it safely.
-                  await rm(target, { recursive: true, force: true });
-                  update(id, (latest) => {
-                    const { moveTo: _moveTo, ...rest } = latest;
-
-                    return rest;
-                  });
+                try {
+                  await file.sync();
+                } finally {
+                  await file.close();
                 }
-              }
-            })();
-            tell();
 
-            try {
-              await work.settled;
-            } finally {
-              moving.delete(id);
-              tell();
+                if ((await stat(input)).size !== (await stat(output)).size)
+                  throw new Error("Incomplete copy");
+              } else throw new Error("Copy contains an unsupported file");
             }
+
+            await syncDirectory(to);
+          };
+
+          await copyTree(source, target);
+          await syncDirectory(destination);
+          check();
+          // Closing playback prevents a stale reader surviving deletion of its old files.
+          await Effect.runPromise(playback.closeCopy(id));
+          check();
+          update(id, (latest) => ({ ...unmarked(latest), directory: destination }));
+          committed = true;
+          missing.delete(id);
+          // A failed old-folder cleanup leaves a harmless duplicate, never loses the copy.
+          await rm(source, { recursive: true, force: true }).catch(() => {});
+        } finally {
+          if (!committed) {
+            // Retain the marker if cleanup fails so a relaunch can retry it safely.
+            await rm(target, { recursive: true, force: true });
+            update(id, unmarked);
           }
-        }),
+        }
+      })();
+      tell();
+
+      try {
+        await work.settled;
+      } finally {
+        moving.delete(id);
+        tell();
+      }
+    };
+
+    const commands: Downloads["Service"] = {
       cancelMove: (id: string) =>
         attempt(async () => {
           const work = moving.get(id);
@@ -1058,17 +1049,16 @@ function make(deps: DownloadsDeps) {
         attempt(async () => {
           if (unloaded) await Effect.runPromise(unloaded);
           const succeeded: string[] = [];
-
           const failed: { id: string; error: AppError }[] = [];
 
           for (const id of new Set(ids)) {
             try {
-              const record = records.get(id);
-
-              if (!record) throw notFound();
+              if (!records.has(id)) throw notFound();
 
               if (moving.has(id)) throw new Error("Copy is moving");
-              await Effect.runPromise(commands[action](id));
+
+              if (action === "move") await relocate(id);
+              else await Effect.runPromise(commands[action](id));
               succeeded.push(id);
             } catch (cause) {
               failed.push({
@@ -1077,9 +1067,6 @@ function make(deps: DownloadsDeps) {
               });
             }
           }
-
-          tell();
-          wake();
 
           return { succeeded, failed };
         }),
@@ -1093,12 +1080,8 @@ function make(deps: DownloadsDeps) {
 
           if (!(await stat(directory)).isDirectory()) throw new Error("Not a folder");
 
-          for (const record of records.values()) {
-            const inside = relative(folderOf(record.id), directory);
-
-            if (!inside || (!inside.startsWith("..") && !isAbsolute(inside)))
-              throw new Error("Choose a folder outside managed copies");
-          }
+          if ([...records.keys()].some((id) => within(folderOf(id), directory)))
+            throw new Error("Choose a folder outside managed copies");
 
           const probe = join(directory, `.mrstreamer-${randomUUID()}`);
           const file = await open(probe, "wx");
@@ -1541,4 +1524,16 @@ async function syncDirectory(path: string): Promise<void> {
   } finally {
     await directory.close();
   }
+}
+
+/** Whether `path` is `parent` or inside it. */
+function within(parent: string, path: string): boolean {
+  const inside = relative(parent, path);
+
+  return !inside || (!inside.startsWith("..") && !isAbsolute(inside));
+}
+
+/** A record without its move marker: the move committed, or its target was cleaned up. */
+function unmarked({ moveTo: _moveTo, ...rest }: StoredDownload): StoredDownload {
+  return rest;
 }

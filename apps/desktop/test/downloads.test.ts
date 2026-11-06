@@ -456,7 +456,7 @@ describe.skipIf(!hasTools)("downloads", () => {
         copying.mockRejectedValueOnce(Object.assign(new Error(failure), { code: failure }));
 
       try {
-        await expect(downloads.moveCopies([saved.id])).rejects.toBeDefined();
+        expect((await downloads.bulk([saved.id], "move")).failed).toMatchObject([{ id: saved.id }]);
         expect(await downloads.copy(saved.id)).toEqual(before);
         expect(await readFile(before.path)).not.toHaveLength(0);
       } finally {
@@ -518,22 +518,26 @@ describe.skipIf(!hasTools)("downloads", () => {
       });
 
       try {
-        const moving = downloads.moveCopies([saved.id]);
-
-        const rejected = expect(moving).rejects.toMatchObject({
-          error: { detail: "Move cancelled; original copy kept" },
-        });
+        const moving = downloads.bulk([saved.id], "move");
 
         await copyingStarted;
         expect((await downloads.folder()).moving).toEqual([saved.id]);
         const cancelling = downloads.cancelMove(saved.id);
         release();
         await cancelling;
-        await rejected;
+        expect(await moving).toEqual({
+          succeeded: [],
+          failed: [
+            {
+              id: saved.id,
+              error: expect.objectContaining({ detail: "Move cancelled; original copy kept" }),
+            },
+          ],
+        });
         expect(await downloads.copy(saved.id)).toEqual(before);
         disconnected = true;
         copying.mockRejectedValueOnce(new Error("Disk full during copy"));
-        await expect(downloads.moveCopies([saved.id])).rejects.toBeDefined();
+        expect((await downloads.bulk([saved.id], "move")).failed).toMatchObject([{ id: saved.id }]);
         expect(await downloads.copy(saved.id)).toEqual(before);
       } finally {
         release();
@@ -544,7 +548,7 @@ describe.skipIf(!hasTools)("downloads", () => {
       await started.quit();
       const again = await app(dataDir);
       expect(await again.downloads.copy(saved.id)).toEqual(before);
-      await again.downloads.moveCopies([saved.id]);
+      expect((await again.downloads.bulk([saved.id], "move")).succeeded).toEqual([saved.id]);
       expect((await again.downloads.copy(saved.id)).path).toBe(
         join(destination, saved.id, "media.mkv"),
       );
@@ -605,7 +609,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     const before = await find(saved.id);
     const destination = await tempDir();
     await downloads.setFolder(destination);
-    await downloads.moveCopies([saved.id]);
+    expect(await downloads.bulk([saved.id], "move")).toEqual({ succeeded: [saved.id], failed: [] });
     expect(await find(saved.id)).toEqual(before);
     const copy = await downloads.copy(saved.id);
     expect(copy.path).toBe(join(destination, saved.id, "media.mkv"));

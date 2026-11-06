@@ -1109,7 +1109,6 @@ async function start(): Promise<void> {
           retry: (id) => trackDownload(downloads.retry(id)),
           resume: (id) => trackDownload(downloads.resume(id)),
           resumeAll: trackDownload(downloads.resumeAll),
-          moveCopies: (ids) => trackDownload(downloads.moveCopies(ids)),
           bulk: (ids, action) => trackDownload(downloads.bulk(ids, action)),
         },
       }),

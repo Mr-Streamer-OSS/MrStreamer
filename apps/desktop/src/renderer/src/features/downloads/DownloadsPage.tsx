@@ -15,9 +15,9 @@
 //   Under the heading, the household folder new downloads go to, with Change folder. Each row,
 // and each series, has a round box to select it; with any selected, a bar offers what fits them:
 // Pause, Resume, Retry, Move to the folder for finished copies, and Delete, which asks again with
-// its count on a second press. Each answer is per download: a row that failed says why, stays
-// selected and Try again runs the action again on those. A copy moving says so on its row, with
-// Cancel move, which keeps the original.
+// its count on a second press. Each answer is per download, a move's too: a row that failed says
+// why, stays selected and Try again runs the action again on those. A copy moving says so on its
+// row, with Cancel move, which keeps its original.
 //   With no subscription saved the page stands alone, opened from Connect: its bar has only
 //   Downloads, and Recordings once any is kept, and Add subscription goes back to the form.
 import { useMutation } from "@tanstack/react-query";
@@ -64,21 +64,16 @@ function handOn(had: Element | null) {
   if (other instanceof HTMLButtonElement && !other.disabled) other.focus();
 }
 
-/** What the selection bar runs: a bulk command, or moving finished copies to the folder. */
-type Action = DownloadBulkAction | "move";
-
 /** The latest action's answer: how many of how many went, and why each other one didn't. */
 interface Outcome {
-  readonly action: Action;
+  readonly action: DownloadBulkAction;
   readonly total: number;
   readonly done: number;
   readonly failed: ReadonlyMap<string, AppError>;
-  /** The failed ones, and for a move the ones after the first failure it never tried. */
-  readonly again: readonly string[];
 }
 
 /** Which of `items` each action applies to: only these are sent, so its count is honest. */
-function applicable(items: readonly Download[], action: Action): string[] {
+function applicable(items: readonly Download[], action: DownloadBulkAction): string[] {
   return items.flatMap(({ id, status }) =>
     (
       action === "pause"
@@ -94,34 +89,6 @@ function applicable(items: readonly Download[], action: Action): string[] {
       ? [id]
       : [],
   );
-}
-
-/**
- * Runs `action` on `ids`. A move goes one copy at a time so each answer is its own, and stops at
- * the first that fails or is cancelled, as main would: the rest stay where they are. A call that
- * fails whole fails each of its downloads.
- */
-async function perform(action: Action, ids: readonly string[]): Promise<DownloadBulkResult> {
-  if (action !== "move") {
-    try {
-      return await call("downloads.bulk", { ids: [...ids], action });
-    } catch (cause) {
-      return { succeeded: [], failed: ids.map((id) => ({ id, error: appError(cause) })) };
-    }
-  }
-
-  const succeeded: string[] = [];
-
-  for (const id of ids) {
-    try {
-      await call("downloads.moveCopies", { ids: [id] });
-      succeeded.push(id);
-    } catch (cause) {
-      return { succeeded, failed: [{ id, error: appError(cause) }] };
-    }
-  }
-
-  return { succeeded, failed: [] };
 }
 
 /** The last name in a folder's path, as a button names where it moves copies. */
@@ -167,23 +134,24 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
       return next;
     });
 
+  // Main answers for each download; a call that fails whole fails each of them.
   const run = useMutation({
-    mutationFn: ({ action, ids }: { action: Action; ids: readonly string[] }) =>
-      perform(action, ids),
-    onSuccess: ({ succeeded, failed }, { action, ids }) => {
-      const went = new Set(succeeded);
+    mutationFn: ({ action, ids }: { action: DownloadBulkAction; ids: readonly string[] }) =>
+      call("downloads.bulk", { ids: [...ids], action }).catch((cause): DownloadBulkResult => ({
+        succeeded: [],
+        failed: ids.map((id) => ({ id, error: appError(cause) })),
+      })),
+    onSuccess: ({ succeeded, failed }, { action, ids }) =>
       setOutcome({
         action,
         total: ids.length,
         done: succeeded.length,
         failed: new Map(failed.map(({ id, error }) => [id, error])),
-        again: ids.filter((id) => !went.has(id)),
-      });
-    },
+      }),
   });
 
   // Pressed again while one is under way, an action does nothing; it stays pressable.
-  const start = (action: Action, ids: readonly string[]) => {
+  const start = (action: DownloadBulkAction, ids: readonly string[]) => {
     if (run.isPending || ids.length === 0) return;
     setOutcome(null);
     run.mutate({ action, ids });
@@ -281,19 +249,19 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
         <div role="status" className="empty:hidden mb-3 flex items-center gap-3 text-[0.8125rem]">
           {outcome && (
             <>
-              <span className={cn(outcome.again.length > 0 && "text-destructive")}>
+              <span className={cn(outcome.failed.size > 0 && "text-destructive")}>
                 {t("{done} of {total} done", {
                   done: outcome.done,
                   total: outcome.total,
                 })}
               </span>
-              {outcome.again.length > 0 && (
+              {outcome.failed.size > 0 && (
                 <Button
                   size="sm"
                   onClick={() =>
                     start(
                       outcome.action,
-                      outcome.again.filter((id) => items.some((item) => item.id === id)),
+                      items.flatMap(({ id }) => (outcome.failed.has(id) ? [id] : [])),
                     )
                   }
                 >
@@ -844,12 +812,12 @@ function SelectionBar({
   chosen: readonly Download[];
   /** The last name of the household folder, or null where this computer has none to move to. */
   folder: string | null;
-  start: (action: Action, ids: readonly string[]) => void;
+  start: (action: DownloadBulkAction, ids: readonly string[]) => void;
   finish: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
 
-  const button = (action: Action, label: string) => {
+  const button = (action: DownloadBulkAction, label: string) => {
     const ids = applicable(chosen, action);
 
     return (
