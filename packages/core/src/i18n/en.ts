@@ -1176,6 +1176,18 @@ export const en = {
   "Subscription removed, copy kept": "Subscription removed, copy kept",
   "Delete copy": "Delete copy",
   // The Downloads page's folder and selected downloads.
+  "Destination folder already exists": "Destination folder already exists",
+  "Copy is busy": "Copy is busy",
+  "Destination needs recovery; reconnect it and restart":
+    "Destination needs recovery; reconnect it and restart",
+  "Source copy is missing or changed": "Source copy is missing or changed",
+  "Destination is inside this copy": "Destination is inside this copy",
+  "Move cancelled; original copy kept": "Move cancelled; original copy kept",
+  "Destination unavailable": "Destination unavailable",
+  "Incomplete copy": "Incomplete copy",
+  "Copy contains an unsupported file": "Copy contains an unsupported file",
+  "Not a folder": "Not a folder",
+  "Choose a folder outside managed copies": "Choose a folder outside managed copies",
   "New downloads go to {folder}": "New downloads go to {folder}",
   "Change folder": "Change folder",
   "Select {name}": "Select {name}",

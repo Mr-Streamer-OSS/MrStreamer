@@ -1109,7 +1109,10 @@ async function start(): Promise<void> {
           retry: (id) => trackDownload(downloads.retry(id)),
           resume: (id) => trackDownload(downloads.resume(id)),
           resumeAll: trackDownload(downloads.resumeAll),
-          bulk: (ids, action) => trackDownload(downloads.bulk(ids, action)),
+          bulk: (ids, action) =>
+            action === "resume" || action === "retry"
+              ? trackDownload(downloads.bulk(ids, action))
+              : downloads.bulk(ids, action),
         },
       }),
       ...reminderHandlers({ reminders }),

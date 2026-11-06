@@ -86,6 +86,14 @@ const Stored = lazy(() =>
     "directory?": "string",
     /** Incomplete destination owned by a move; directory stays authoritative until commit. */
     "moveTo?": "string",
+    /** UUID folder for a moved copy; older copies use their record ID. */
+    "folderId?": "string",
+    /** UUID reserved before creating an incomplete move target. */
+    "moveId?": "string",
+    /** Device and inode of the selected destination when the move was admitted. */
+    "moveDevice?": "string",
+    /** Old folder to clean only after the new location is durably committed. */
+    "moveFrom?": "string",
     about: About(),
     state: "'queued' | 'failed' | 'complete'",
     /** Why it failed, as `DownloadFailure` says; only while failed. */
@@ -204,7 +212,15 @@ export const downloadStoreLayer = Layer.effect(
         }),
         put: (download: StoredDownload) =>
           attempt(() => {
-            write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
+            // A location or recovery intent must survive power loss before files are removed.
+            // Scope FULL to this synchronous write; other tables retain their existing policy.
+            db.exec("pragma synchronous = full");
+
+            try {
+              write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
+            } finally {
+              db.exec("pragma synchronous = normal");
+            }
           }),
         putMany: (downloads: readonly StoredDownload[]) =>
           attempt(() =>

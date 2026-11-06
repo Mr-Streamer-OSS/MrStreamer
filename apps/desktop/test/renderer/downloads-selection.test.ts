@@ -7,7 +7,7 @@ import { ipc, SUBSCRIPTION } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Download, DownloadList } from "@mrstreamer/contracts/downloads";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
 import { DownloadsPage } from "../../src/renderer/src/features/downloads/DownloadsPage.tsx";
@@ -57,12 +57,13 @@ const stopped = download({
   status: { kind: "failed", failure: { kind: "disk-full", needed: null } },
 });
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+const settle = () => new Promise<void>((resolve) => queueMicrotask(resolve));
 
 async function until(ready: () => boolean): Promise<void> {
-  for (let tries = 0; tries < 100 && !ready(); tries++) await act(settle);
-
-  if (!ready()) throw new Error("The window never showed what the test waited for.");
+  await vi.waitFor(async () => {
+    await act(settle);
+    expect(ready()).toBe(true);
+  });
 }
 
 let unmount = () => {};
@@ -127,8 +128,11 @@ describe("the Downloads page's folder", () => {
       detail: "Choose a folder outside managed copies",
     });
     await click(button(page, "Change folder"));
-    expect(page.querySelector('[role="alert"]')?.textContent).toContain(
-      "Choose a folder outside managed copies",
+    await until(
+      () =>
+        page
+          .querySelector('[role="alert"]')
+          ?.textContent?.includes("Choose a folder outside managed copies") === true,
     );
 
     // Main's word on the new folder is what the page shows.
@@ -143,6 +147,21 @@ describe("the Downloads page's folder", () => {
 });
 
 describe("selected downloads", () => {
+  it("keeps bulk admission after Done and ignores the dismissed result", async () => {
+    ipc.always("downloads.list", list([download()]));
+    const pending = ipc.hold("downloads.bulk");
+    const page = await show();
+    await click(box(page, "Past Lives"));
+    await click(button(bar(page)!, "Move to Media"));
+    await click(button(bar(page)!, "Done"));
+    await click(box(page, "Past Lives"));
+    await click(button(bar(page)!, "Move to Media"));
+    expect(ipc.argsOf("downloads.bulk")).toHaveLength(1);
+    await act(async () => pending.resolve({ succeeded: ["d1"], failed: [] }));
+    await until(() => !page.querySelector('[role="status"]')?.textContent);
+    expect(page.querySelector('[role="status"]')?.textContent).toBe("");
+  });
+
   it("sends each action only for the selected downloads it fits", async () => {
     ipc.always("downloads.list", list([running, stopped, download()]));
     ipc.answer("downloads.bulk", ({ ids }) => ({ succeeded: ids, failed: [] }));

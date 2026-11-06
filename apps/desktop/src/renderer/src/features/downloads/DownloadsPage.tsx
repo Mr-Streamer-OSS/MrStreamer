@@ -120,6 +120,8 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const chosen = items.filter((item) => selected.has(item.id));
+  const admission = useRef(false);
+  const generation = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
 
   const select = (ids: readonly string[], on: boolean) =>
@@ -136,31 +138,44 @@ export function DownloadsPage({ standalone = false }: { standalone?: boolean }) 
 
   // Main answers for each download; a call that fails whole fails each of them.
   const run = useMutation({
-    mutationFn: ({ action, ids }: { action: DownloadBulkAction; ids: readonly string[] }) =>
+    mutationFn: ({
+      action,
+      ids,
+    }: {
+      action: DownloadBulkAction;
+      ids: readonly string[];
+      generation: number;
+    }) =>
       call("downloads.bulk", { ids: [...ids], action }).catch((cause): DownloadBulkResult => ({
         succeeded: [],
         failed: ids.map((id) => ({ id, error: appError(cause) })),
       })),
-    onSuccess: ({ succeeded, failed }, { action, ids }) =>
+    onSuccess: ({ succeeded, failed }, { action, ids, generation: started }) => {
+      if (started !== generation.current) return;
       setOutcome({
         action,
         total: ids.length,
         done: succeeded.length,
         failed: new Map(failed.map(({ id, error }) => [id, error])),
-      }),
+      });
+    },
+    onSettled: () => {
+      admission.current = false;
+    },
   });
 
   // Pressed again while one is under way, an action does nothing; it stays pressable.
   const start = (action: DownloadBulkAction, ids: readonly string[]) => {
-    if (run.isPending || ids.length === 0) return;
+    if (admission.current || ids.length === 0) return;
+    admission.current = true;
     setOutcome(null);
-    run.mutate({ action, ids });
+    run.mutate({ action, ids, generation: generation.current });
   };
 
   const finish = () => {
     setSelected(new Set());
     setOutcome(null);
-    run.reset();
+    generation.current++;
   };
 
   const picking: Picking = {
@@ -822,7 +837,13 @@ function SelectionBar({
 
     return (
       ids.length > 0 && (
-        <Button key={action} size="sm" onClick={() => start(action, ids)}>
+        <Button
+          key={action}
+          size="sm"
+          className="max-w-full whitespace-normal wrap-anywhere text-left"
+          onClick={() => start(action, ids)}
+          title={label}
+        >
           {label}
         </Button>
       )
@@ -834,7 +855,7 @@ function SelectionBar({
       role="group"
       aria-label={t("{count} selected", { count: chosen.length })}
       data-selection
-      className="mb-3 flex h-11 items-center gap-2 rounded-full bg-accent pr-1.5 pl-4"
+      className="mb-3 flex min-h-11 flex-wrap items-center gap-2 py-1.5"
     >
       <span className="text-[0.8125rem] font-semibold tabular-nums">
         {t("{count} selected", { count: chosen.length })}
