@@ -1,0 +1,185 @@
+// Run the built desktop on an isolated fake-provider profile: Close must release the renderer,
+// finish the runnable queue and exit on Windows/Linux. A paused queue must exit without resuming.
+import { type } from "arktype";
+import type { preflight } from "./control.ts";
+import type { Observations } from "./language.ts";
+import { execFileSync } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
+import { ownedRun, type Started } from "./downloads-run.ts";
+import { pictureServer } from "./downloads-queue.ts";
+import { electronExecutable } from "./session.ts";
+import { SOURCE_LOCALE } from "../../../../packages/contracts/src/language.ts";
+import { setLanguage, t } from "../../../../packages/core/src/i18n.ts";
+
+/** Whether the process still runs: signal 0 only checks it exists. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function runDownloadsBackground(build: Awaited<ReturnType<typeof preflight>>) {
+  if (process.platform === "darwin") throw new Error("Automatic exit is a Windows/Linux journey.");
+  setLanguage({ locale: SOURCE_LOCALE, formats: SOURCE_LOCALE });
+  let started: Started | undefined;
+  const observed: Observations = {};
+  await ownedRun(
+    {
+      build,
+      style: "series",
+      watchWindow: true,
+      prefix: "downloads-background-",
+      observed,
+      pictures: pictureServer,
+      driver: (_page, base) => base,
+      describe: (instance) => {
+        started = instance;
+
+        return { ...instance };
+      },
+      proof: { scenario: "downloads-background", build },
+      limits: [
+        "Linux fake-provider source journey only. Native tray input, OS wakefulness, manual sleep, macOS and Windows require separate native proof.",
+      ],
+      done: "downloads-background",
+    },
+    async ({ start, provider, profile, action }) => {
+      const button = (selector: string, words: string) =>
+        `[...document.querySelectorAll(${JSON.stringify(selector)})].find(b => b.textContent.trim() === ${JSON.stringify(words)})`;
+
+      const first = provider.titles.movies.find((movie) =>
+        movie.name.startsWith("TEST | Two sound tracks"),
+      );
+
+      const second = provider.titles.movies.find((movie) =>
+        movie.name.startsWith("TEST | Old AVI"),
+      );
+
+      if (!first || !second) throw new Error("Missing fixture movies.");
+      provider.stallMovieFile(first.id, 200_000, 120_000);
+      provider.stallMovieFile(second.id, 200_000, 4000);
+      let d = await start("runnable queue");
+      await d.wait(() =>
+        d.page.evaluate<boolean>("document.querySelectorAll('form input').length >= 3"),
+      );
+
+      for (const [index, value] of [provider.url, "demo", "demo"].entries()) {
+        await d.click(
+          `Connect field ${index + 1}`,
+          `document.querySelectorAll('form input')[${index}]`,
+        );
+        await d.page.send("Input.insertText", { text: value });
+      }
+
+      await d.click("Connect", "document.querySelector('form button[type=submit]')");
+      await d.wait(() => d.exists("document.querySelector('header')"));
+
+      for (const movie of [first, second]) {
+        await d.click("Movies", button("header button", t("Movies")));
+        await d.click("All movies", button("nav button", t("All movies")));
+        const name = movie.name.replace(/^TEST \| /, "").replace(/ \(.*$/, "");
+        await d.click(
+          "Movie details",
+          `[...document.querySelectorAll('button[title]')].find(b => b.title.includes(${JSON.stringify(name)}))`,
+        );
+        await d.click("Download", button('[role="dialog"] button', t("Download")));
+        await d.wait(async () => /%|Queued/.test(await d.text('[role="dialog"]')));
+        await d.key("Escape", 27);
+      }
+
+      await d.click("Downloads", button("header button", t("Downloads")));
+      await d.click("Pause all", button("button", t("Pause all")));
+      await d.wait(() => d.exists(button("button", t("Resume all"))));
+      await d.capture("paused-before-close");
+      const pausedPid = started?.pid;
+
+      if (!pausedPid) throw new Error("Missing paused process identity.");
+      action("Close with only paused downloads");
+      await d.page.send("Page.close").catch(() => undefined);
+      await d.wait(async () => !alive(pausedPid));
+      observed["pausedOnlyExited"] = true;
+      d = await start("resume runnable queue");
+      await d.wait(() => d.exists("document.querySelector('header')"));
+      await d.click("Downloads", button("header button", t("Downloads")));
+      await d.wait(() => d.exists(button("button", t("Resume all"))));
+      provider.stallMovieFile(first.id, 400_000, 4000);
+      await d.capture("before-immediate-resume-close");
+      const instance = started;
+      const pid = instance?.pid;
+
+      if (!instance || !pid) throw new Error("No verified process identity.");
+      action("Close the window, leaving the queue running");
+      // Close in the same renderer turn as the successful Resume answer, before a 250ms event.
+      await d.page
+        .evaluate(
+          `window.mrStreamer.invoke("downloads.resumeAll").then(result => {
+        if (!result.ok) throw new Error("Resume refused");
+        window.close();
+      })`,
+        )
+        .catch(() => undefined);
+
+      await d.wait(async () => {
+        const targets = type({ type: "string" })
+          .array()
+          .assert(await (await fetch(`http://127.0.0.1:${instance.port}/json/list`)).json());
+
+        return alive(pid) && targets.every((target) => target.type !== "page");
+      });
+      observed["closedRendererWhileAlive"] = true;
+      await d.wait(async () => !alive(pid), 30_000);
+      const folders = await readdir(join(profile, "downloads"));
+
+      if (folders.length !== 2) throw new Error("Both queued copies must finish after Close.");
+
+      for (const folder of folders) {
+        const files = await readdir(join(profile, "downloads", folder));
+
+        if (!files.some((file) => file.startsWith("media.") && !file.endsWith(".part")))
+          throw new Error("Close interrupted a runnable copy.");
+      }
+
+      observed["completedAfterClose"] = folders.length;
+      // Let the fixture observe the final socket close before shared teardown records its slots.
+      await d.wait(async () => provider.activeStreams() === 0);
+    },
+  );
+}
+
+// Standalone entry point keeps the shared control helper outside this ticket's ownership.
+if (process.argv[1]?.endsWith("downloads-background.ts")) {
+  const main = await readFile(
+    new URL("../../../../apps/desktop/out/main/index.js", import.meta.url),
+  );
+
+  const pkg = type({ version: "string" }).assert(
+    JSON.parse(
+      await readFile(new URL("../../../../apps/desktop/package.json", import.meta.url), "utf8"),
+    ),
+  );
+
+  const ffmpeg = process.env["MR_STREAMER_FFMPEG"] || "ffmpeg";
+
+  const ffprobe = process.env["MR_STREAMER_FFMPEG"]
+    ? join(dirname(ffmpeg), process.platform === "win32" ? "ffprobe.exe" : "ffprobe")
+    : "ffprobe";
+
+  const version = (tool: string) =>
+    execFileSync(tool, ["-version"], { encoding: "utf8" }).split("\n")[0];
+
+  await runDownloadsBackground({
+    appVersion: pkg.version,
+    revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    ffmpeg: version(ffmpeg),
+    ffprobe: version(ffprobe),
+    display: process.platform !== "linux" || Boolean(process.env["DISPLAY"]),
+    executable: await electronExecutable(),
+    mainSha256: createHash("sha256").update(main).digest("hex"),
+  });
+}

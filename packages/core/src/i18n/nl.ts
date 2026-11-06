@@ -1235,6 +1235,10 @@ export const nl: Translation = {
   "Resume download": "Hervatten",
   "Pause all": "Alles pauzeren",
   "Resume all": "Alles hervatten",
+  "Pause and quit": "Pauzeren en afsluiten",
+  "Pause downloads": "Downloads pauzeren",
+  "Resume downloads": "Downloads hervatten",
+  "Quit {app}…": "{app} afsluiten…",
   "Paused, resume download": "Gepauzeerd, download hervatten",
   "Resume download of {title}": "Download van {title} hervatten",
   // The close button on a playback error.
@@ -1372,6 +1376,31 @@ export const nl: Translation = {
     "{title}, {time}, wordt niet opgenomen zolang Mr. Streamer gesloten is.",
   "Closing the window instead keeps recording.":
     "Sluit je in plaats daarvan het venster, dan gaat de opname door.",
+  "Quit?": "Afsluiten?",
+  "Couldn't read background work. Try again.":
+    "Achtergrondtaken konden niet worden gelezen. Probeer het opnieuw.",
+  "Downloading {count}": "Downloaden: {count}",
+  "Queued {count}": "In wachtrij: {count}",
+  "Waiting {count}": "Wachtend: {count}",
+  "Paused {count}": "Gepauzeerd: {count}",
+  "Quit while downloading?": "Afsluiten tijdens downloaden?",
+  "Quit while recording and downloading?": "Afsluiten tijdens opname en downloaden?",
+  "Keep downloading": "Blijven downloaden",
+  "Keep going": "Laten doorgaan",
+  "{count} downloads stop now. They continue from there when Mr. Streamer opens again.": {
+    one: "{count} download stopt nu. Hij gaat daar verder als Mr. Streamer weer opent.",
+    other: "{count} downloads stoppen nu. Ze gaan daar verder als Mr. Streamer weer opent.",
+  },
+  "{count} downloads stop, one at {percent}. They continue from there when Mr. Streamer opens again.":
+    {
+      one: "{count} download stopt op {percent}. Hij gaat daar verder als Mr. Streamer weer opent.",
+      other:
+        "{count} downloads stoppen, één op {percent}. Ze gaan daar verder als Mr. Streamer weer opent.",
+    },
+  "Closing the window instead keeps downloading.":
+    "Sluit je in plaats daarvan het venster, dan gaat het downloaden door.",
+  "Closing the window instead keeps both going.":
+    "Sluit je in plaats daarvan het venster, dan gaan beide door.",
   "{size} used": "{size} gebruikt",
   "{size} of {limit} used": "{size} van {limit} gebruikt",
   "keeps {size} free": "houdt {size} vrij",

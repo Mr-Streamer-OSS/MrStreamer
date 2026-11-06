@@ -48,6 +48,10 @@ A provider can take a moment to free the slot of the preview **Stop playing and 
 
 Without a subscription saved, Connect offers Downloads and Recordings once either keeps something: Recordings then lists Recorded only, with no Scheduled or Storage link, and plays a recording over the page (`recordings-standalone.test.ts`). In the window, `quit-dialog.test.ts` proves the Quit while recording dialog's text, its focus on Keep recording, Keep recording leaving the app running and Quit.
 
+## Background download coexistence
+
+The lifecycle in `apps/desktop/src/main/index.ts` keeps recording, schedule and unsaved-recording obligations alongside runnable downloads. Pausing downloads cannot exit Windows/Linux while those recording obligations remain. Once both kinds settle, the windowless app exits; macOS stays open until Quit. Only actual captures, transfers and receiver playback request app wakefulness, with display sleep allowed. Closing a downloads-only window destroys its renderer, preventing a hidden Home preview. Native power, tray and mixed recording/download acceptance require matching platform journeys.
+
 ## Default local-copy progress
 
 A recording's resume position follows [Default local-copy progress](downloads.md#default-local-copy-progress), with copy kind `recording`. Opening its local copy seeds Default’s legacy position; listing recordings does not. Refused progress writes remain pending in the main runtime for its next retry check, even if the player closes or schedules cannot be read. Its focused tests and candidate acceptance journey are listed there.
