@@ -65,7 +65,7 @@ Statistics never include what you watch, title or channel names, your provider o
 
 ### Usage statistics on iPhone
 
-The iPhone app doesn't ask about statistics during setup or launch; older versions asked. Statistics stay off until you turn on **Share basic usage statistics** in Settings > Privacy, except when an upgrade retains your earlier deliberate choice. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
+Earlier iPhone test builds ask about statistics during setup or launch. Builds containing the onboarding privacy correction remove that prompt and offer sharing only through **Share basic usage statistics** in Settings > Privacy. Statistics stay off until you deliberately choose to share, except when an upgrade retains your earlier deliberate choice. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
 
 When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
 
