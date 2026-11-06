@@ -3,11 +3,11 @@
 Mr. Streamer has no account and no ads, and doesn't sell data. Your provider's streams go directly between your device and it, and the app's statistics never include what you watch.
 
 - **On your device.** Logins, lists, history and downloads stay on your device.
-- **App statistics.** On by default on a computer, off until you choose on iPhone. Never what you watch, your searches or your login.
+- **App statistics.** On by default on a computer and on new iPhone installs with the default-on correction. Earlier iPhone builds require a choice. Never what you watch, your searches or your login.
 - **The website.** Counted without a cookie or an identifier in your browser, unless your browser asks sites not to track.
 - **Your choices.** Turn statistics off in Settings > Privacy, and write to [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app).
 
-Last updated 31 October 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
+Last updated 6 November 2026. Earlier versions are in the [history on GitHub](https://github.com/Mr-Streamer-OSS/MrStreamer/commits/main/docs/privacy.md).
 
 Mr. Streamer is a free, open-source IPTV player for your computer and iPhone. It has no Mr. Streamer account or in-app purchases, shows no ads and doesn't sell data. When you connect your own provider, its streams and requests go directly between your device and the services you connect. We also operate a restricted sample provider for app review, described below.
 
@@ -65,9 +65,9 @@ Statistics never include what you watch, title or channel names, your provider o
 
 ### Usage statistics on iPhone
 
-The iPhone app asks whether you want to share basic usage statistics. Statistics stay off until you choose to share them, except when an upgrade retains your earlier deliberate choice. Refusing does not stop you connecting a provider. You can change the choice in Settings > Privacy. Builds without a configured PostHog project send nothing.
+Earlier iPhone test builds ask about statistics during setup or launch. Builds containing the onboarding privacy correction remove that prompt. Builds containing the later default-on correction turn statistics on for new installations and offer an off switch through **Share basic usage statistics** in Settings > Privacy. Earlier onboarding-correction builds default to off until you choose to share. Upgrades preserve saved On and Off choices; an existing undecided setting stays off. Unreadable or corrupt statistics files keep collection off without replacing the saved data. Sharing is optional and is not needed to connect a provider or use the app. You can turn it off in the same place. Builds without a configured PostHog project send nothing.
 
-When an upgrade finds no deliberate choice, it discards the previous installation identity, unsent pre-consent events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
+When an upgrade finds an existing undecided setting, it discards the previous installation identity, unsent legacy events and unfinished playback statistics. Choosing to share later does not send that backlog. Turning sharing off stops new capture and delivery. When the changed choice is saved successfully, unsent statistics are cleared. If saving fails, the previous choice and queued statistics can remain on the device; a later launch can restore that choice and send those statistics. Turning sharing off cannot recall a request already received or delete statistics already held by PostHog.
 
 While sharing is on, the app sends the same kinds of events as above, for what the iPhone app has: the first and daily observations, opening Home, Live, Movies, Series, title details, Search, Settings, Downloads or the player, starting a search, switching to another channel, adding, removing or refreshing a subscription, a live channel or a movie or episode starting and stopping and for how many seconds it played, and playback failing with one of the fixed reasons. Only time you could see or hear it counts: in the player, Picture in Picture or AirPlay, or a preview on Home you unmuted. Not paused, loading or the silent preview.
 
@@ -112,7 +112,7 @@ _To know what to fix and support, and to answer you. Never for advertising._
 - **Messages**, to answer you and fix what you report.
 - **The restricted review provider**, to authenticate authorised reviewers and deliver the sample catalogue, guide, pictures and media needed to review the app.
 
-For **optional iPhone statistics**, our basis is your consent (GDPR Article 6(1)(a)). You can refuse without losing access to provider setup, or withdraw through Settings > Privacy. The iPhone statistics section explains what Off does and the limits when saving fails. Withdrawal does not undo processing that was lawful before it, and does not itself erase records already received.
+You can turn **optional iPhone statistics** off without losing access to provider setup through Settings > Privacy. The iPhone statistics section explains what Off does and the limits when saving fails. Turning statistics off does not itself erase records already received.
 
 For **desktop statistics, website analytics and messages**, our basis is legitimate interest (GDPR Article 6(1)(f)): understanding reliability and use, improving the app and website, and answering requests. You can object by email, and stop new statistics or website analytics through the controls below. For operating and securing the restricted review provider, our basis is also legitimate interest: making the app available for review through authentication and sample delivery.
 
@@ -168,7 +168,7 @@ An earlier private-beta installation can still retain a demo subscription or dow
 _Turn statistics and site analytics off, and delete your data._
 
 - **Statistics on desktop.** Turn off **Share basic usage statistics** in Settings > Privacy. Sending stops at once, events waiting to be sent are cleared, and it stays off after a restart. Turning it back on keeps the same identifier and sends nothing about the time it was off, including playback that continued meanwhile.
-- **Statistics on iPhone.** Statistics stay off until you choose to share them, except when an upgrade retains an earlier deliberate choice. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
+- **Statistics on iPhone.** New installations with the default-on correction start with statistics on. Saved choices stay in effect; earlier onboarding-correction builds default to off. Change **Share basic usage statistics** in Settings > Privacy. Turning it off stops sending at once. When the changed choice is saved successfully, waiting events are cleared and it stays off after the app restarts. If saving fails, a later launch can restore the earlier choice and queued statistics.
 - **Website analytics.** Turn off **Site analytics** at the foot of any page of mrstreamer.app. The choice applies to that browser only, and clearing the site's data from your browser turns them back on.
 - **Subtitle search on desktop** is off until you turn it on. On iPhone, nothing is asked of SubDL until you save your own key and choose **Find online**; **Remove** in Settings > Subtitles deletes the key.
 - **Casting** happens only after you open the receiver list and pick a device, on desktop and with Play on TV on iPhone. On iPhone, AirPlay uses the system controls for the receiver you choose. The Android 0.1.0 source route likewise starts casting only after you choose a TV; its NSD discovery runs only while the receiver list is open, without an iOS Local Network prompt. Installed Android and receiver outcomes remain unqualified.
@@ -223,7 +223,7 @@ Your device also contacts your provider, TMDB and image hosts directly. Their lo
 
 _Access, correction, deletion and more, by email to privacy@mrstreamer.app._
 
-For personal data we hold, you can request access, correction, restriction or deletion, object where the basis is legitimate interest, and withdraw consent for iPhone statistics. Other rights, including portability, apply where the law provides them. Email [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app). We will respond within one month; if a lawful extension is needed, we will explain it within that first month.
+For personal data we hold, you can request access, correction, restriction or deletion, object where the basis is legitimate interest, and turn off iPhone statistics. Other rights, including portability, apply where the law provides them. Email [privacy@mrstreamer.app](mailto:privacy@mrstreamer.app). We will respond within one month; if a lawful extension is needed, we will explain it within that first month.
 
 Statistics use a random installation identifier, not your name or email address. An email alone may not identify your installation's records. Desktop users who still have it can provide the `installationId` from `analytics.json` privately. The iPhone app does not display that identifier. Do not send your provider password, stream addresses or other people's data.
 

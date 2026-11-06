@@ -7,11 +7,10 @@ import { useDownloads } from "../downloads.ts";
 import { t } from "../i18n/onboarding.ts";
 import { openLink } from "../open-link.ts";
 import { ProviderForm } from "../provider-form.tsx";
-import { requestStatisticsChoice } from "../statistics-consent.ts";
 import { colors, TextButton } from "../ui.tsx";
 
 /**
- * Welcome, an optional statistics choice, then the ordinary cancellable provider form.
+ * Welcome, then the ordinary cancellable provider form.
  * Welcome lays out inside the safe area, so its stretched content fits the screen exactly and
  * only scrolls when it truly overflows (large text, downloads). The form keeps native automatic
  * and keyboard insets. Its text is in the interface language, which can't change while it shows:
@@ -72,11 +71,7 @@ export default function Connect() {
               </Text>
             </View>
             <View style={styles.space} />
-            <TextButton
-              label={t("Add provider")}
-              primary
-              onPress={() => requestStatisticsChoice(() => setForm(true))}
-            />
+            <TextButton label={t("Add provider")} primary onPress={() => setForm(true)} />
           </>
         )}
         <TextButton

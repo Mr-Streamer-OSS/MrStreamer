@@ -10,7 +10,7 @@ import { keychain } from "./keychain.ts";
 
 // The interface language as a viewer meets it: System default follows the iPhone's first
 // language the app speaks, else English; a language picked in Settings shows at once, Settings'
-// title too, and is the one the next launch opens in, Connect's welcome and statistics question
+// title too, and is the one the next launch opens in, Connect's welcome and provider form
 // included, whatever the iPhone's languages. A provider's own name stays as it is. The real
 // screens run with React DOM on a happy-dom window over the files stand-in; a relaunch is a
 // fresh module graph over the same files.
@@ -183,6 +183,7 @@ async function launch(route: "settings" | "connect") {
 
   return {
     text: () => container.textContent ?? "",
+    server: () => find("connect-server"),
     language: () => find("settings-interface-language").getAttribute("aria-label"),
     status: () => find("settings-tmdb-status").getAttribute("aria-label"),
     /** Picks `label` from the sheet Interface language opens. */
@@ -253,7 +254,9 @@ it("shows a picked language at once and opens in it after a relaunch", async () 
   const connect = await launch("connect");
   expect(connect.text()).toContain("Provider toevoegen");
   connect.press("Provider toevoegen");
-  expect(scenario.alerts[0]?.title).toBe("Gebruiksstatistieken delen?");
+  expect(scenario.alerts).toEqual([]);
+  expect(connect.text()).toContain("Voeg je provider toe");
+  expect(connect.server()).not.toBeNull();
 });
 
 it("words a provider's failure in the language, keeping its address as it is", async () => {

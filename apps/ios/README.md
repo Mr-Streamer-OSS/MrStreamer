@@ -8,8 +8,8 @@ own native adapters: the Keychain, app storage, one managed native player and th
 key commands, programme reminders and forgetting cached logins). Nothing of it is in the desktop's
 install, build or packages.
 
-The empty-roster Connect screen shows the selected welcome, Add provider, then a native statistics
-choice before the ordinary provider form. Both answers continue. Back cancels an unfinished login;
+The empty-roster Connect screen shows the selected welcome, then Add provider opens the ordinary
+provider form directly, with no statistics prompt. Back cancels an unfinished login;
 Privacy policy and existing offline copies remain accessible. New onboarding has no demo entry.
 Existing labelled Demo providers remain usable and need no login or Keychain item. Its original generated movie
 and two episodes use the ordinary catalogue,
@@ -653,13 +653,13 @@ Each responsibility has one owner, a plain module with a store the screens read:
   version picked in each title's details by subscription and TMDB id, as the desktop keeps them,
   and beta 2's subscription for an older build to show. `src/files.ts` writes every file whole, through a file
   beside it. Removing a subscription keeps its history unless the viewer deletes it too.
-- `src/telemetry/`: product statistics, off until a deliberate opt-in. One owner
+- `src/telemetry/`: product statistics, on by default for new installs in builds containing the default-on correction. Earlier onboarding-correction builds default to off. One owner
   keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,
   and builds every event from fixed observations: the app's activity, the player's state and
   the screen on show. Deliberate beta On/Off choices survive; undecided beta identities, outbox
-  and unfinished work are discarded before capture, recovery or delivery. Restored providers
-  receive the same choice after startup without reconnecting. Failed storage keeps statistics
-  off while setup remains usable. Events and properties are in `docs/telemetry.md`.
+  and unfinished work are discarded before capture, recovery or delivery. Settings > Privacy turns sharing off or on; neither setup nor a launch with restored providers asks. Only confirmed absence of both statistics files receives the new default, which is saved before capture. Corrupt or unreadable files stay off without overwriting them. Failed storage
+  keeps statistics off for that launch while setup remains usable; a later launch can restore the
+  previous saved choice. Events and properties are in `docs/telemetry.md`.
 - `src/secrets.ts`: passwords in the Keychain. Keychain items outlive the app, so the first launch
   after installing removes what an earlier install left there, by an index of the ids it wrote;
   writes, removals and clearing run one at a time so none loses another's change to the index.

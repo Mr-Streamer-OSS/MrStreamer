@@ -4,20 +4,24 @@ For the desktop default referenced below, read [Desktop consent](desktop.md).
 
 ## iOS consent
 
-The desktop default above is unchanged. iOS requires a deliberate opt-in through the selected
-welcome B and native alert C. Add provider asks before the form; both answers continue. Back
-cancels an unfinished login. Privacy policy and the no-provider Downloads entry stay usable.
-Saved providers restore normally and undecided installs get the same alert after startup.
-Settings changes the existing statistics owner's choice.
+The desktop default is unchanged. Builds containing the iOS default-on correction enable
+statistics on new installs and offer an opt-out in Settings > Privacy > Share basic usage statistics.
+Earlier onboarding-correction builds default to off. Add provider opens the form directly, with no statistics prompt.
+Back cancels an unfinished login. Privacy policy and the no-provider Downloads entry stay usable.
+Saved providers restore normally without a startup statistics prompt. Settings changes the
+existing statistics owner's setting. Verify a fresh install starts On, Settings Off survives a
+relaunch, saved On/Off choices stay authoritative and an existing undecided setting stays off.
+Corrupt or unreadable files must leave collection off without replacing saved data.
 
-Run `pnpm exec vitest run apps/ios/test/telemetry.test.ts apps/ios/test/connect-form.test.ts
-apps/ios/test/startup-root.test.ts` for the loopback request/upgrade/storage contracts and public
-controls with native stand-ins. Deliberate beta On/Off stays; null-choice beta outbox, identity
-and unfinished work must disappear before recovery or delivery and must not return on opt-in
-or relaunch. Failed storage leaves collection off. These source tests do not prove native
-alerts, keyboard, VoiceOver or hardware acceptance. Use the Mac mini/device workflow with an
-isolated simulator for native controls and screenshots; physical-iPhone candidate acceptance
-remains a separate release gate.
+Run `pnpm exec vitest run apps/ios/test/statistics-default.test.ts apps/ios/test/telemetry.test.ts apps/ios/test/connect-form.test.ts apps/ios/test/startup-root.test.ts apps/ios/test/interface-language.test.ts`
+for the loopback request/upgrade/storage contracts and public controls with native stand-ins.
+Deliberate beta On/Off stays; null-choice beta outbox, identity and unfinished work must disappear
+before recovery or delivery and must not return on opt-in or relaunch. Failed storage leaves
+collection off. These source tests do not prove native navigation, keyboard, VoiceOver or
+hardware acceptance. Native controls and screenshots need an allocated isolated simulator.
+Packaged Info.plist and privacy-manifest reconciliation remain native checks. PiP, AirPlay and
+background audio stay enabled; Apple's requested audible physical-device Home Screen recording
+is pending from the owner and cannot be replaced by simulator proof.
 
 ## iOS diagnostics
 

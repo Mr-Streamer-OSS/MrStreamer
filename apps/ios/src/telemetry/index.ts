@@ -3,11 +3,12 @@ import { type } from "arktype";
 import type { AnalyticsSettings } from "@mrstreamer/contracts/analytics";
 import Constants from "expo-constants";
 import { AppState, Platform } from "react-native";
-import { readJson, writeJson } from "../files.ts";
+import { writeJson } from "../files.ts";
 import { onPlaybackFailure, playbackClock, playbackState, type Playback } from "../playback.ts";
 import { useStore } from "../store.ts";
 import { Analytics, type PlaybackView } from "./analytics.ts";
 import { IosBuild, type IosAction, type IosFeature } from "./model.ts";
+import { readAnalyticsRecord } from "./storage.ts";
 import { analyticsTransport } from "./transport.ts";
 import { defined } from "@mrstreamer/core/defined";
 
@@ -20,7 +21,7 @@ let owner: Analytics | null = null;
 function analytics(): Analytics {
   owner ??= new Analytics({
     store: {
-      load: () => readJson("analytics.json"),
+      load: readAnalyticsRecord,
       save: (record) => writeJson("analytics.json", record),
     },
     transport: analyticsTransport({
@@ -71,7 +72,7 @@ export function setStatistics(enabled: boolean): AnalyticsSettings {
   return analytics().configure(enabled);
 }
 
-/** Null until a deliberate choice can be read or saved by the statistics owner. */
+/** The saved setting or new-install default; null for undecided or unavailable storage. */
 export function statisticsChoice(): "on" | "off" | null {
   return analytics().choice;
 }

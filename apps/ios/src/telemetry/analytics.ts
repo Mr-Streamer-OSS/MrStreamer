@@ -99,9 +99,14 @@ export class Analytics {
   constructor(ports: AnalyticsPorts) {
     this.ports = ports;
 
+    let missing = false;
+
     try {
       const saved = ports.store.load();
-      const record = saved === null ? fresh() : AnalyticsRecord()(saved);
+      missing = saved === null;
+
+      const record =
+        saved === null ? { ...fresh(), choice: "on" as const } : AnalyticsRecord()(saved);
 
       if (record instanceof type.errors) throw new Error("Analytics state unavailable.");
       this.record = loaded(record);
@@ -112,9 +117,12 @@ export class Analytics {
 
     this.settings = store(this.snapshot());
 
-    // Old beta records collected by default without a choice. Erase that work before any
-    // observation, recovery or delivery can run, including after a later opt-in.
-    if (this.record?.choice === null) this.save(this.record);
+    // Save a new installation's default before collection. Undecided legacy records stay off
+    // and lose their old work before observation, recovery or delivery, even after enabling.
+    if (this.record && (missing || this.record.choice === null)) {
+      this.save(this.record);
+    }
+
     // A stop saved before iOS ended the app last time is that run's end.
     const unfinished = this.record?.unfinished;
 
@@ -127,7 +135,7 @@ export class Analytics {
     }
   }
 
-  /** Only a successfully read or saved deliberate choice counts as consent. */
+  /** The saved setting, including a new installation's default; null for undecided legacy state. */
   get choice(): AnalyticsRecord["choice"] {
     return this.available ? (this.record?.choice ?? null) : null;
   }

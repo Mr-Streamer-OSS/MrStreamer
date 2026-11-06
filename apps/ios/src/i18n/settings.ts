@@ -27,8 +27,8 @@ export const t = catalogue(
     "Share basic usage statistics": "Share basic usage statistics",
     "Counts app use, the screens you open, and whether playback works and for how long.":
       "Counts app use, the screens you open, and whether playback works and for how long.",
-    "No viewing history, searches or provider details. Off until you choose to share.":
-      "No viewing history, searches or provider details. Off until you choose to share.",
+    "No viewing history, searches or provider details. Turn off here at any time.":
+      "No viewing history, searches or provider details. Turn off here at any time.",
     "Privacy policy": "Privacy policy",
     Diagnostics: "Diagnostics",
     About: "About",
@@ -165,8 +165,8 @@ export const t = catalogue(
       "Share basic usage statistics": "Basisgebruiksstatistieken delen",
       "Counts app use, the screens you open, and whether playback works and for how long.":
         "Telt het gebruik van de app, de schermen die je opent en of afspelen werkt en hoe lang.",
-      "No viewing history, searches or provider details. Off until you choose to share.":
-        "Geen kijkgeschiedenis, zoekopdrachten of providergegevens. Uit tot je kiest om te delen.",
+      "No viewing history, searches or provider details. Turn off here at any time.":
+        "Geen kijkgeschiedenis, zoekopdrachten of providergegevens. Je kunt dit hier op elk moment uitzetten.",
       "Privacy policy": "Privacybeleid",
       Diagnostics: "Diagnostiek",
       About: "Over",
@@ -304,8 +304,8 @@ export const t = catalogue(
       "Share basic usage statistics": "Partager les statistiques d’utilisation de base",
       "Counts app use, the screens you open, and whether playback works and for how long.":
         "Compte l’utilisation de l’app, les écrans ouverts, et si la lecture fonctionne et combien de temps.",
-      "No viewing history, searches or provider details. Off until you choose to share.":
-        "Ni historique de visionnage, ni recherches, ni détails du fournisseur. Désactivé tant que vous ne choisissez pas de partager.",
+      "No viewing history, searches or provider details. Turn off here at any time.":
+        "Ni historique de visionnage, ni recherches, ni détails du fournisseur. Désactivez ici à tout moment.",
       "Privacy policy": "Politique de confidentialité",
       Diagnostics: "Diagnostic",
       About: "À propos",
@@ -447,8 +447,8 @@ export const t = catalogue(
       "Share basic usage statistics": "Grundlegende Nutzungsstatistiken teilen",
       "Counts app use, the screens you open, and whether playback works and for how long.":
         "Zählt die App-Nutzung, die geöffneten Bildschirme und ob und wie lange die Wiedergabe funktioniert.",
-      "No viewing history, searches or provider details. Off until you choose to share.":
-        "Kein Wiedergabeverlauf, keine Suchen oder Anbieterdaten. Aus, bis du das Teilen wählst.",
+      "No viewing history, searches or provider details. Turn off here at any time.":
+        "Kein Wiedergabeverlauf, keine Suchen oder Anbieterdaten. Hier jederzeit ausschaltbar.",
       "Privacy policy": "Datenschutzerklärung",
       Diagnostics: "Diagnose",
       About: "Info",
@@ -587,8 +587,8 @@ export const t = catalogue(
       "Share basic usage statistics": "Compartir estadísticas básicas de uso",
       "Counts app use, the screens you open, and whether playback works and for how long.":
         "Cuenta el uso de la app, las pantallas que abres y si la reproducción funciona y durante cuánto tiempo.",
-      "No viewing history, searches or provider details. Off until you choose to share.":
-        "Ni historial, ni búsquedas, ni datos del proveedor. Desactivado hasta que elijas compartir.",
+      "No viewing history, searches or provider details. Turn off here at any time.":
+        "Ni historial, ni búsquedas, ni datos del proveedor. Puedes desactivarlo aquí cuando quieras.",
       "Privacy policy": "Política de privacidad",
       Diagnostics: "Diagnóstico",
       About: "Acerca de",

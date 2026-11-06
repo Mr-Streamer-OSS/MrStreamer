@@ -147,7 +147,7 @@ export const OUTBOX_LIMIT = 64;
 export const ATTEMPTS = 3;
 
 /**
- * `analytics.json`. `choice` is the viewer's own statistics choice, null until they make one.
+ * `analytics.json`. `choice` is the saved statistics setting, including On for new installs. Null is legacy undecided state.
  * `unfinished` is the current run's stop as it stands, sent at the next launch if the app ends
  * before the run does: iOS ends apps in the background without telling them.
  */

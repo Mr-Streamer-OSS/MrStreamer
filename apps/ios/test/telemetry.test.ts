@@ -1,5 +1,6 @@
 import { type as arkType } from "arktype";
 import { JsonValue } from "../../../packages/contracts/src/json-value.ts";
+import { readJson } from "../src/files.ts";
 import type { Json } from "@mrstreamer/contracts/json";
 import { nativePlayer } from "./native-player.ts";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -32,6 +33,11 @@ vi.mock("../src/files.ts", () => ({
     if (storageFails) throw new Error("Unwritable");
     files.set(name, JSON.stringify(value));
   },
+}));
+
+// The file boundary itself is exercised with real stand-in files in statistics-default.test.ts.
+vi.mock("../src/telemetry/storage.ts", () => ({
+  readAnalyticsRecord: () => readJson("analytics.json"),
 }));
 
 const fakePlayer = nativePlayer();
@@ -195,22 +201,12 @@ const opens = async () => ({
 
 const login = [USERNAME, PASSWORD];
 
-describe("before the viewer chooses", () => {
-  it("capture nothing before a saved opt-in, then report only subsequent activity", async () => {
+describe("the installation default and saved choices", () => {
+  it("reports new-install activity without a prompt or settings interaction", async () => {
     const app = await launch();
-    app.onTelemetryScreen("/live");
-    app.onSearchText(SEARCH);
-    await quiet();
-    expect(captured).toEqual([]);
-    expect(stored()).toMatchObject({
-      choice: null,
-      installationId: null,
-      pending: [],
-      unfinished: null,
-    });
-    expect(app.statisticsChoice()).toBeNull();
-    app.setStatistics(true);
     await until(() => captured.length === 2);
+    expect(stored()).toMatchObject({ choice: "on" });
+    expect(app.statisticsChoice()).toBe("on");
     expect(names()).toEqual(["installation_observed", "app_active_day"]);
     const [first, second] = captured;
     expect(first?.["distinct_id"]).toBe(second?.["distinct_id"]);
