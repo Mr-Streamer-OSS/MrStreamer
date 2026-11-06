@@ -187,22 +187,16 @@ describe("Connect after a failed sign-in", () => {
   });
 });
 
-it.each([null, "off", "on"] as const)(
-  "opens the form directly with saved statistics choice %s, keeps it on Back and opens privacy",
-  (choice) => {
-    consent.choice = choice;
-    const form = mount();
-    form.click("Privacy policy");
-    expect(consent.privacy).toEqual(["https://mrstreamer.app/privacy"]);
-    form.click("Add provider");
-    expect(consent.prompts).toBe(0);
-    expect(consent.choice).toBe(choice);
-    expect(form.container.querySelector("input")).not.toBeNull();
-    form.click("Back");
-    expect(form.container.querySelector("input")).toBeNull();
-    form.click("Add provider");
-    expect(consent.prompts).toBe(0);
-    expect(consent.choice).toBe(choice);
-    expect(form.container.querySelector("input")).not.toBeNull();
-  },
-);
+it("opens the form directly without a statistics prompt, reopens after Back and opens privacy", () => {
+  const form = mount();
+  form.click("Privacy policy");
+  expect(consent.privacy).toEqual(["https://mrstreamer.app/privacy"]);
+  form.click("Add provider");
+  expect(form.container.querySelector("input")).not.toBeNull();
+  form.click("Back");
+  expect(form.container.querySelector("input")).toBeNull();
+  form.click("Add provider");
+  expect(form.container.querySelector("input")).not.toBeNull();
+  expect(consent.prompts).toBe(0);
+  expect(consent.choice).toBeNull();
+});

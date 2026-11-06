@@ -9,9 +9,7 @@ key commands, programme reminders and forgetting cached logins). Nothing of it i
 install, build or packages.
 
 The empty-roster Connect screen shows the selected welcome, then Add provider opens the ordinary
-provider form directly. The current source has no statistics prompt on setup or restored-provider launch; earlier
-installed builds can still show it. This source change does not announce a public release.
-Back cancels an unfinished login;
+provider form directly, with no statistics prompt. Back cancels an unfinished login;
 Privacy policy and existing offline copies remain accessible. New onboarding has no demo entry.
 Existing labelled Demo providers remain usable and need no login or Keychain item. Its original generated movie
 and two episodes use the ordinary catalogue,
@@ -659,10 +657,10 @@ Each responsibility has one owner, a plain module with a store the screens read:
   keeps the viewer's choice, a random installation id and a bounded outbox in `analytics.json`,
   and builds every event from fixed observations: the app's activity, the player's state and
   the screen on show. Deliberate beta On/Off choices survive; undecided beta identities, outbox
-  and unfinished work are discarded before capture, recovery or delivery. Sharing is optional in Settings > Privacy and is not required to use the app.
-  Restored providers open without a statistics prompt; saved deliberate choices remain in effect.
-  Failed storage keeps statistics off for that launch while setup remains usable; a later launch
-  can restore the previous saved choice. Events and properties are in `docs/telemetry.md`.
+  and unfinished work are discarded before capture, recovery or delivery. Sharing is only turned
+  on in Settings > Privacy; neither setup nor a launch with restored providers asks. Failed storage
+  keeps statistics off for that launch while setup remains usable; a later launch can restore the
+  previous saved choice. Events and properties are in `docs/telemetry.md`.
 - `src/secrets.ts`: passwords in the Keychain. Keychain items outlive the app, so the first launch
   after installing removes what an earlier install left there, by an index of the ids it wrote;
   writes, removals and clearing run one at a time so none loses another's change to the index.
