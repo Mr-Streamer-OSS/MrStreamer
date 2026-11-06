@@ -1049,9 +1049,22 @@ it("refuses missing or stale desktop ownership after switching away and back", a
   expect((await profiles.admitFor(again)).owner).toEqual(again);
 });
 
-it.each(["{", '{"volume":"unreadable"}'])(
+it.each(["broken JSON", "invalid volume", "private syntax", "private schema"] as const)(
   "refuses unreadable private preferences without saving defaults over them: %s",
-  async (bytes) => {
+  async (example) => {
+    const privateValue = `p${randomUUID().slice(0, 7)}`;
+
+    const bytes = {
+      "broken JSON": "{",
+      "invalid volume": '{"volume":"unreadable"}',
+      "private syntax": privateValue,
+      "private schema": JSON.stringify({
+        ...defaultPreferences,
+        ...defaultSubscriptionPreferences,
+        liveView: privateValue,
+      }),
+    }[example];
+
     const dataDir = await tempDir();
     const dir = profileDirectory(dataDir, "viewer-b");
     await mkdir(dir, { recursive: true });
@@ -1071,6 +1084,18 @@ it.each(["{", '{"volume":"unreadable"}'])(
 
     const settings = await promised(runtime, Settings);
     await expect(settings.get()).rejects.toBeDefined();
+
+    const detail = await settings.get().then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+
+    expect(detail).not.toBeNull();
+    expect(String(detail)).not.toContain(privateValue);
+    expect(JSON.stringify(detail)).not.toContain(privateValue);
+
+    if (detail instanceof Error) expect(detail.cause).toBeUndefined();
+
     await expect(settings.update({ volume: 0.5 })).rejects.toBeDefined();
     expect(await readFile(path, "utf8")).toBe(bytes);
     await writeFile(

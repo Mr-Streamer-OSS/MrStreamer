@@ -4,6 +4,8 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "Viewing preferences could not be read. Repair the file or switch profiles.":
+    "Viewing preferences could not be read. Repair the file or switch profiles.",
   "This viewing profile is unavailable or being deleted.":
     "This viewing profile is unavailable or being deleted.",
   "This viewing profile is being deleted.": "This viewing profile is being deleted.",

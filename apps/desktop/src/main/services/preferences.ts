@@ -1,4 +1,5 @@
 import type { Json } from "@mrstreamer/contracts/json";
+import { t } from "@mrstreamer/core/i18n";
 
 import { type, type Type } from "arktype";
 import { readFile } from "node:fs/promises";
@@ -102,13 +103,17 @@ async function readPrivatePreferences<T>(
     throw cause;
   }
 
-  const data: unknown = JSON.parse(bytes);
-  const parsed = schema(data);
+  // Parser diagnostics can echo stored values, including the viewer's private API key.
+  try {
+    const data: unknown = JSON.parse(bytes);
+    const parsed = schema(data);
 
-  if (parsed instanceof type.errors)
-    throw new Error(`Viewing preferences could not be read: ${parsed.summary}`);
+    if (!(parsed instanceof type.errors)) return parsed;
+  } catch {
+    // Preserve the failed file, but never include its contents in an error or log.
+  }
 
-  return parsed;
+  throw new Error(t("Viewing preferences could not be read. Repair the file or switch profiles."));
 }
 
 /** Installation consent remains owned by Analytics, including while another viewer is active. */

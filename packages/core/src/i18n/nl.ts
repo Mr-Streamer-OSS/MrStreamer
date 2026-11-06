@@ -3,6 +3,8 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "Viewing preferences could not be read. Repair the file or switch profiles.":
+    "De kijkvoorkeuren konden niet worden gelezen. Herstel het bestand of wissel van profiel.",
   "This viewing profile is unavailable or being deleted.":
     "Dit kijkprofiel is niet beschikbaar of wordt verwijderd.",
   "This viewing profile is being deleted.": "Dit kijkprofiel wordt verwijderd.",

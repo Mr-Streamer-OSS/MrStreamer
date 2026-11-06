@@ -1264,7 +1264,7 @@ async function start(): Promise<void> {
         },
       }),
       ...reminderHandlers({ reminders }),
-      ...profileHandlers({ profiles, sessions: profileSessions, enabled: true }),
+      ...profileHandlers({ profiles }),
       ...recordingHandlers({
         recordings,
         library,
