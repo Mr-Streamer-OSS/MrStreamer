@@ -343,54 +343,50 @@ function make(deps: DownloadsDeps) {
       owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
       busy: ReadonlySet<string>,
     ) =>
-      Effect.gen(function* () {
-        const progress = yield* personal.read("download", record.id, record.progress);
-
-        return {
-          id: record.id,
-          title: record.title,
-          subscription: owners.get(record.account) ?? null,
-          name: record.about.name,
-          episodeName: record.about.episodeName,
-          year: record.about.year,
-          duration: record.about.duration,
-          originalLanguage: record.about.originalLanguage,
-          posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
-          wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
-          size:
-            record.state === "complete"
-              ? record.received
+      Effect.map(personal.read("download", record.id, record.progress), (progress): Download => ({
+        id: record.id,
+        title: record.title,
+        subscription: owners.get(record.account) ?? null,
+        name: record.about.name,
+        episodeName: record.about.episodeName,
+        year: record.about.year,
+        duration: record.about.duration,
+        originalLanguage: record.about.originalLanguage,
+        posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
+        wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
+        size:
+          record.state === "complete"
+            ? record.received
+            : active?.id === record.id
+              ? active.size
+              : record.size,
+        status:
+          record.state === "complete"
+            ? { kind: missing.has(record.id) ? "missing" : "complete" }
+            : record.state === "failed"
+              ? {
+                  kind: "failed",
+                  failure: record.failure ?? {
+                    kind: "app",
+                    error: { kind: "unexpected", detail: t("This download stopped.") },
+                  },
+                }
               : active?.id === record.id
-                ? active.size
-                : record.size,
-          status:
-            record.state === "complete"
-              ? { kind: missing.has(record.id) ? "missing" : "complete" }
-              : record.state === "failed"
                 ? {
-                    kind: "failed",
-                    failure: record.failure ?? {
-                      kind: "app",
-                      error: { kind: "unexpected", detail: t("This download stopped.") },
-                    },
+                    kind: "transferring",
+                    received: active.received,
+                    size: active.size,
+                    rate: active.rate,
+                    restarted: active.restarted,
                   }
-                : active?.id === record.id
-                  ? {
-                      kind: "transferring",
-                      received: active.received,
-                      size: active.size,
-                      rate: active.rate,
-                      restarted: active.restarted,
-                    }
-                  : record.pausedAt !== undefined
-                    ? { kind: "paused", received: record.received, size: record.size }
-                    : busy.has(record.subscriptionId)
-                      ? { kind: "waiting" }
-                      : { kind: "queued" },
-          progress,
-          series: seriesKeyOf(record),
-        } satisfies Download;
-      });
+                : record.pausedAt !== undefined
+                  ? { kind: "paused", received: record.received, size: record.size }
+                  : busy.has(record.subscriptionId)
+                    ? { kind: "waiting" }
+                    : { kind: "queued" },
+        progress,
+        series: seriesKeyOf(record),
+      }));
 
     /** What each series of the downloads listed, by its key: as its latest queued one read it. */
     const seriesOf = (all: readonly StoredDownload[]) => {
@@ -1073,13 +1069,11 @@ function make(deps: DownloadsDeps) {
         }),
 
       recordProgress: (id: string, position: number, duration: number) =>
-        attempt(async () => {
-          const record = records.get(id);
-
-          if (record?.state !== "complete") throw notFound();
-          await Effect.runPromise(personal.write("download", id, position, duration));
-          tell();
-        }),
+        Effect.suspend(() =>
+          records.get(id)?.state === "complete"
+            ? personal.write("download", id, position, duration)
+            : Effect.fail(notFound()),
+        ).pipe(Effect.tap(() => Effect.sync(tell))),
 
       copy: (id: string) =>
         Effect.suspend(() => {

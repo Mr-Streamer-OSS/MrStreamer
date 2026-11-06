@@ -30,6 +30,7 @@ import { Deferred, Effect, Layer, Stream } from "effect";
 import * as TestClock from "effect/testing/TestClock";
 import { installingOnceStopsKept } from "../src/main/recordings/restart.ts";
 import { occurrences } from "../src/main/recordings/schedules.ts";
+import { readRecordings } from "../src/main/recordings/store.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { Library } from "../src/main/services/library.ts";
@@ -2208,40 +2209,7 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect(heard.at(-1)?.[0]?.status).toEqual({ kind: "missing" });
   });
 
-  it("retries a refused personal write without changing the saved position while schedules cannot be read", async () => {
-    const { dataDir, channel, recordings, quit } = await connected();
-    const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
-
-    if (answer.kind !== "started") throw new Error("Not started");
-    const { id } = answer.recording;
-    await until(recordings.list, ([first]) => first?.status.kind === "complete");
-    await recordings.recordProgress(id, 12, 90);
-    await quit();
-    await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
-    const again = await app(dataDir);
-    onTestFinished(again.quit);
-    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
-
-    try {
-      lock.exec("begin immediate");
-      await expect(again.recordings.recordProgress(id, 42, 90)).rejects.toMatchObject({
-        error: { kind: "unexpected" },
-      });
-    } finally {
-      lock.exec("rollback");
-      lock.close();
-    }
-
-    expect((await again.recordings.copy(id))?.progress).toEqual({ position: 12, duration: 90 });
-    await again.recordings.recordProgress(id, 42, 90);
-    await again.recordings.check();
-    await again.quit();
-    const last = await app(dataDir);
-    onTestFinished(last.quit);
-    expect((await last.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-  });
-
-  it("seeds legacy recording progress once and keeps zero across inventory updates and provider removal", async () => {
+  it("seeds legacy recording progress once, retries a refused write and keeps zero across inventory updates and provider removal", async () => {
     const { dataDir, channel, recordings, quit, roster, subscriptionId } = await connected();
     const answer = await recordings.start(channel(TRACKS), Date.now() + 1500, {});
 
@@ -2251,50 +2219,45 @@ describe.skipIf(!hasTools)("recordings", () => {
     await roster.remove(subscriptionId, true);
     await quit();
     const path = join(dataDir, "recordings", "recordings.json");
-
-    const legacy = await import("../src/main/recordings/store.ts").then(({ readRecordings }) =>
-      readRecordings(path),
-    );
+    const legacy = await readRecordings(path);
 
     if (legacy.kind !== "read") throw new Error("Unreadable fixture");
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        recordings: legacy.items.map((record) => ({
-          ...record,
-          progress: { position: 42, duration: 90 },
-        })),
-      }),
-    );
+
+    // What an earlier build kept in the inventory; a stale writer may save it again later.
+    const stale = JSON.stringify({
+      version: 1,
+      recordings: legacy.items.map((record) => ({
+        ...record,
+        progress: { position: 42, duration: 90 },
+      })),
+    });
+
+    await writeFile(path, stale);
+    await writeFile(join(dataDir, "recordings", "schedules.json"), "{ not json");
     const again = await app(dataDir);
-    const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    onTestFinished(again.quit);
 
-    try {
-      lock.exec("begin immediate");
-      await expect(again.recordings.copy(id)).rejects.toMatchObject({
-        error: { kind: "unexpected" },
-      });
-    } finally {
-      lock.exec("rollback");
-      lock.close();
-    }
+    // Refused personal writes, seeding first and then playback, keep the last saved value.
+    const refused = async <A>(run: () => Promise<A>) => {
+      const lock = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
+      try {
+        lock.exec("begin immediate");
+        await expect(run()).rejects.toMatchObject({ error: { kind: "unexpected" } });
+      } finally {
+        lock.exec("rollback");
+        lock.close();
+      }
+    };
+
+    await refused(() => again.recordings.copy(id));
+    expect((await again.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
+    await refused(() => again.recordings.recordProgress(id, 0, 90));
     expect((await again.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
     await again.recordings.recordProgress(id, 0, 90);
     await again.recordings.check();
     await again.quit();
-    // A stale inventory document must never restore its old playback position.
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        recordings: legacy.items.map((record) => ({
-          ...record,
-          progress: { position: 42, duration: 90 },
-        })),
-      }),
-    );
+    await writeFile(path, stale);
     const last = await app(dataDir);
     onTestFinished(last.quit);
     expect((await last.recordings.copy(id))?.progress).toEqual({ position: 0, duration: 90 });

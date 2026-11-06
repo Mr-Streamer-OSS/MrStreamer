@@ -1,6 +1,5 @@
 // Downloads through the real main runtime: the fake provider at the HTTP boundary, ffprobe and
 // the loopback proxy for copies, and a disk that can fail the way a full or missing one does.
-import type { StoredDownload } from "../src/main/platform/downloads-store.ts";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
@@ -824,18 +823,19 @@ describe.skipIf(!hasTools)("downloads", () => {
     await quit();
     const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
 
-    const stored = JSON.parse(
-      String(db.prepare("select record from downloads where id = ?").get(done.id)?.record),
-    ) as StoredDownload;
+    // What an earlier build kept in the download record, written as its inventory saves it.
+    const legacy = (to: DatabaseSync) =>
+      to
+        .prepare(
+          "update downloads set record = json_set(record, '$.progress', json(?)) where id = ?",
+        )
+        .run(JSON.stringify({ position: 4, duration: 8, at: Date.now() }), done.id);
 
     const other = randomUUID();
-    const legacy = { ...stored, progress: { position: 4, duration: 8, at: Date.now() } };
-    db.prepare("update downloads set record = ? where id = ?").run(JSON.stringify(legacy), done.id);
-    db.prepare("insert into downloads (id, added_at, record) values (?, ?, ?)").run(
-      other,
-      stored.addedAt,
-      JSON.stringify({ ...legacy, id: other }),
-    );
+    legacy(db);
+    db.prepare(
+      "insert into downloads (id, added_at, record) select ?, added_at, json_set(record, '$.id', ?) from downloads where id = ?",
+    ).run(other, other, done.id);
     // The upgrade fixture has no personal table, as in the previous release.
     db.exec("drop table if exists profile_copy_progress");
     db.close();
@@ -864,9 +864,7 @@ describe.skipIf(!hasTools)("downloads", () => {
     await again.quit();
     // A background inventory writer still holding the upgrade's document saves it later.
     const inventory = new DatabaseSync(join(dataDir, "mrstreamer.db"));
-    inventory
-      .prepare("update downloads set record = ? where id = ?")
-      .run(JSON.stringify(legacy), done.id);
+    legacy(inventory);
     inventory.close();
     const last = await app(dataDir);
     onTestFinished(last.quit);

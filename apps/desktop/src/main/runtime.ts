@@ -332,7 +332,9 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const watchlist = Watchlist.layer.pipe(Layer.provide(stores));
   const customLists = CustomLists.layer.pipe(Layer.provide(stores));
 
-  const personalCopies = Layer.mergeAll(database, profilesLayer.pipe(Layer.provide(database)));
+  // Downloads and recordings keep resume positions under the active profile.
+  const profiles = profilesLayer.pipe(Layer.provide(database));
+  const personalCopies = Layer.mergeAll(database, profiles);
 
   const downloads = Downloads.layer({
     dataDir,
@@ -366,7 +368,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
         downloads,
         reminders,
         recordings,
-        profilesLayer.pipe(Layer.provide(database)),
+        profiles,
       ),
     ),
     Layer.provideMerge(services),

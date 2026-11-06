@@ -77,18 +77,6 @@ The Back/notice fold probe checks 960 down to 320 CSS px in 20 px steps, stoppin
 
 ## Default local-copy progress
 
-From 0.0.24, `apps/desktop/src/main/platform/profile-copy-progress.ts` keeps resume
-positions in the existing database under the active Default profile, copy kind and local
-copy ID. Copy reads seed a missing position from its legacy document once, including
-absence and zero; only explicit playback writes replace it. Provider removal, another copy
-of the same title/channel, artwork, transfer and recording-inventory writes cannot replace
-that personal position. No additional profile or switching UI is exposed. Failed personal
-writes report failure, retain the last saved position and allow an explicit retry.
+From 0.0.24, `apps/desktop/src/main/platform/profile-copy-progress.ts` keeps resume positions in the existing database under the active Default profile, copy kind and local copy ID. Copy reads seed a missing position from its legacy document once, including absence and zero; only explicit playback writes replace it. Provider removal, another copy of the same title/channel, artwork, transfer and recording-inventory writes cannot replace that personal position. No additional profile or switching UI is exposed. Failed personal writes report failure, retain the last saved position and allow an explicit retry.
 
-Focused public runtime tests cover migration, restart, zero reset, stale inventory writes,
-provider removal and refused SQLite writes followed by retry. They use temporary profiles
-and fake providers; they do not prove keyboard playback, translated resume controls, native
-playback or installed upgrade behavior. For candidate acceptance, run the existing isolated
-UI journey, resume a migrated copy, seek back to zero, leave and reopen it after a restart
-and subscription removal, then verify keyboard focus/readability and a supported translated
-interface. Retain candidate build identity and screenshots; service tests alone are not UI proof.
+Focused public runtime tests in `apps/desktop/test/downloads.test.ts` and `apps/desktop/test/recordings.test.ts` cover migration, restart, zero reset, stale inventory writes, provider removal and refused SQLite writes followed by retry. They use temporary profiles and fake providers; they do not prove keyboard playback, translated resume controls, native playback or installed upgrade behavior. For candidate acceptance, run the existing isolated UI journey, resume a migrated copy, seek back to zero, leave and reopen it after a restart and subscription removal, then verify keyboard focus/readability and a supported translated interface. Retain candidate build identity and screenshots; service tests alone are not UI proof.
