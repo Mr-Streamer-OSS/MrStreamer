@@ -183,6 +183,7 @@ export const savedSubtitlesLayer = Layer.effect(
       const pruneResults = db.prepare(`delete from saved_subtitle_results where rowid in (
         select rowid from saved_subtitle_results as result where
         account = ? and kind = ? and id = ? and source_stamp = ? and listing_key = ?
+        and result_key != ''
         and not exists (select 1 from profile_subtitle_choices as choice where
           choice.account = result.account and choice.kind = result.kind and choice.id = result.id
           and choice.source_stamp = result.source_stamp and choice.listing_key = result.listing_key
@@ -303,8 +304,20 @@ export const savedSubtitlesLayer = Layer.effect(
         );
 
       const seedDefault = (file: SubtitleFile) => {
-        if (choiceRow.get(DEFAULT_PROFILE_ID, ...identity(file))) return;
+        const row = choiceRow.get(DEFAULT_PROFILE_ID, ...identity(file));
         const legacy = legacyRead(file);
+
+        // Older builds kept embedded timing in the selected row. Migrate it once to the
+        // shared file-track slot before Default's downloaded choice can replace that row.
+        // A null Default choice instead marks a compatibility placeholder, not saved file timing.
+        if (
+          legacy?.subtitle === null &&
+          (!row || JSON.parse(String(row.choice)) !== null) &&
+          !cachedResult(file, NO_RESULT)
+        )
+          rememberResult.run(...identity(file), NO_RESULT, JSON.stringify(result(legacy)));
+
+        if (row) return;
 
         if (!legacy) {
           writeChoice.run(DEFAULT_PROFILE_ID, ...identity(file), "null");
@@ -329,12 +342,12 @@ export const savedSubtitlesLayer = Layer.effect(
         seedDefault(file);
         const row = choiceRow.get(owner, ...identity(file));
 
-        if (!row) return null;
+        if (!row) return cachedResult(file, NO_RESULT);
         const parsed: unknown = JSON.parse(String(row.choice));
 
-        if (parsed === null) return null;
+        if (parsed === null) return cachedResult(file, NO_RESULT);
         const choice = Choice.assert(parsed);
-        const held = choice.key === null ? legacyRead(file) : cachedResult(file, choice.key);
+        const held = cachedResult(file, choice.key ?? NO_RESULT);
 
         if (!held) return null;
 
@@ -400,13 +413,11 @@ export const savedSubtitlesLayer = Layer.effect(
 
         choose(owner, file, checked);
 
-        const cacheKey = internalKey(checked);
-
-        if (cacheKey) {
-          touchResult.run(...identity(file), cacheKey);
-          rememberResult.run(...identity(file), cacheKey, JSON.stringify(result(checked)));
-          pruneResults.run(...identity(file));
-        }
+        // The empty result key holds shared embedded timing, independently of Default's
+        // legacy selected row. It is not a downloaded result and never ages out with those.
+        touchResult.run(...identity(file), key);
+        rememberResult.run(...identity(file), key, JSON.stringify(result(checked)));
+        pruneResults.run(...identity(file));
 
         // Older builds read this row as Default's choice. Other viewers only change references
         // and shared result timing; compose Default again after updating those shared bytes.

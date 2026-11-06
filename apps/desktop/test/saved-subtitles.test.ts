@@ -212,6 +212,93 @@ describe("bounded downloaded-result cache", () => {
 });
 
 describe("personal subtitle choices over shared exact-file data", () => {
+  it("shares embedded timing across viewers and restart without changing Default's downloaded choice", async () => {
+    const dir = await tempDir();
+
+    const open = async () => {
+      const runtime = runtimeFor(
+        mainLayer({
+          ...testConfig(dir),
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+          },
+        }),
+      );
+
+      return {
+        runtime,
+        profiles: await promised(runtime, ProfileSessions),
+        saved: await runtime.runPromise(SavedSubtitles),
+      };
+    };
+
+    const first = await open();
+    const a = await first.profiles.admit();
+    await first.runtime.runPromise(
+      a.run(first.saved.remember(file, subtitle, "a", { offset: 3, speed: 24 / 25 })),
+    );
+    await first.runtime.runPromise(a.run(first.saved.hide(file)));
+
+    const downloaded = {
+      subtitle,
+      selection: "a",
+      shown: false,
+      timing: { offset: 3, speed: 24 / 25 },
+    };
+
+    const b = await first.profiles.create("B");
+    await first.profiles.switch(b.id);
+    const admittedB = await first.profiles.admit();
+    expect(await first.runtime.runPromise(admittedB.run(first.saved.read(file)))).toBeNull();
+    await first.runtime.runPromise(
+      admittedB.run(first.saved.timing(file, { offset: 7, speed: 1 })),
+    );
+    expect(await first.runtime.runPromise(admittedB.run(first.saved.read(file)))).toEqual({
+      subtitle: null,
+      timing: { offset: 7, speed: 1 },
+    });
+
+    // C has never selected or timed a subtitle: its read distinguishes shared from personal timing.
+    const c = await first.profiles.create("C");
+    await first.profiles.switch(c.id);
+    expect(
+      await first.runtime.runPromise((await first.profiles.admit()).run(first.saved.read(file))),
+    ).toEqual({ subtitle: null, timing: { offset: 7, speed: 1 } });
+    expect(
+      await first.runtime.runPromise(
+        (await first.profiles.admit()).run(first.saved.read({ ...file, listingKey: "other-file" })),
+      ),
+    ).toBeNull();
+    await first.profiles.switch(a.owner.id);
+    expect(
+      await first.runtime.runPromise((await first.profiles.admit()).run(first.saved.read(file))),
+    ).toEqual(downloaded);
+    await first.runtime.dispose();
+
+    const second = await open();
+
+    try {
+      for (const id of [b.id, c.id]) {
+        await second.profiles.switch(id);
+        expect(
+          await second.runtime.runPromise(
+            (await second.profiles.admit()).run(second.saved.read(file)),
+          ),
+        ).toEqual({ subtitle: null, timing: { offset: 7, speed: 1 } });
+      }
+
+      await second.profiles.switch(a.owner.id);
+      expect(
+        await second.runtime.runPromise(
+          (await second.profiles.admit()).run(second.saved.read(file)),
+        ),
+      ).toEqual(downloaded);
+    } finally {
+      await second.runtime.dispose();
+    }
+  });
+
   it("retains every viewer's selected Off result beyond the unreferenced cache cap after restart", async () => {
     const dir = await tempDir();
 
