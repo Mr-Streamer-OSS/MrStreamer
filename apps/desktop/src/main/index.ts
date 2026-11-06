@@ -352,6 +352,7 @@ function openWindow(
   keeps: () => boolean,
   changed: (window: BrowserWindow) => void,
   observe: (window: BrowserWindow) => void,
+  backgroundQuit = false,
 ): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -434,8 +435,11 @@ function openWindow(
   observe(window);
   const devServer = process.env["ELECTRON_RENDERER_URL"];
 
-  if (devServer) void window.loadURL(devServer);
-  else void window.loadFile(join(import.meta.dirname, "../renderer/index.html"));
+  if (devServer) void window.loadURL(`${devServer}${backgroundQuit ? "#background-quit" : ""}`);
+  else
+    void window.loadFile(join(import.meta.dirname, "../renderer/index.html"), {
+      hash: backgroundQuit ? "background-quit" : "",
+    });
 
   return window;
 }
@@ -894,11 +898,21 @@ async function start(): Promise<void> {
   void runtime.runFork(
     Stream.runForEach(downloads.changes, (list) => Effect.sync(() => acceptDownloads(list))),
   );
-  const initialDownloads = await runtime.runPromise(Effect.result(downloads.list));
+  const initialDownloads = runtime.runPromise(Effect.result(downloads.list));
 
   // A later published list takes precedence over the startup read.
-  if (initialDownloads._tag === "Success" && downloadList === null)
-    acceptDownloads(initialDownloads.success);
+  void initialDownloads.then((result) => {
+    if (result._tag === "Success" && downloadList === null) acceptDownloads(result.success);
+  });
+
+  const readDownloads = async () => {
+    const result = await runtime.runPromise(Effect.result(downloads.list));
+
+    if (result._tag === "Failure") return false;
+    acceptDownloads(result.success);
+
+    return true;
+  };
 
   const downloadCounts = () => {
     const items = downloadList?.items ?? [];
@@ -920,9 +934,10 @@ async function start(): Promise<void> {
   // Actual transfers, captures and receiver playback keep the app awake, with display sleep allowed.
   let awake: number | null = null;
   let receiverPlaying = false;
+  let capturing = false;
 
   const keepAwake = () => {
-    const working = receiverPlaying || recordingNow() || downloadCounts().active > 0;
+    const working = receiverPlaying || capturing || downloadCounts().active > 0;
 
     if (working && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
 
@@ -1191,12 +1206,14 @@ async function start(): Promise<void> {
    * app also opens again when launched. Gone once the window is back.
    */
   let tray: Tray | null = null;
+  let trayState = "";
 
-  const open = () => {
+  const open = (backgroundQuit = false) => {
     tray?.destroy();
     tray = null;
+    trayState = "";
 
-    return openWindow(closeStreams, keeps, followList, watch);
+    return openWindow(closeStreams, keeps, followList, watch, backgroundQuit);
   };
 
   mainWindow = open();
@@ -1242,26 +1259,39 @@ async function start(): Promise<void> {
     // Nonzero counts only, as "Downloading 2 · Queued 1"; none while only recordings keep the app.
     const status = (
       [
-        [t("Downloading"), counts.active],
-        [t("Queued"), counts.queued],
-        [t("Waiting"), counts.waiting],
-        [t("Paused"), counts.paused],
+        [t("Downloading {count}", { count: counts.active }), counts.active],
+        [t("Queued {count}", { count: counts.queued }), counts.queued],
+        [t("Waiting {count}", { count: counts.waiting }), counts.waiting],
+        [t("Paused {count}", { count: counts.paused }), counts.paused],
       ] as const
     )
-      .flatMap(([words, count]) => (count > 0 ? [`${words} ${count}`] : []))
+      .flatMap(([words, count]) => (count > 0 ? [words] : []))
       .join(" · ");
 
+    const pause = downloadsLive();
+
+    const label = pause
+      ? !isMac && !live()
+        ? t("Pause and quit")
+        : t("Pause downloads")
+      : t("Resume downloads");
+
+    const quitLabel =
+      !quitConfirmed && (recordingNow() || pause)
+        ? t("Quit {app}…", { app: name })
+        : t("Quit {app}", { app: name });
+
+    const state = JSON.stringify([name, status, label, quitLabel, changingDownloads]);
+
+    if (state === trayState) return;
+    trayState = state;
     tray.setToolTip(status ? `${name} · ${status}` : name);
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: status, enabled: false, visible: status !== "" },
         { label: t("Open {app}", { app: name }), click: showWindow },
         {
-          label: downloadsLive()
-            ? !isMac && !live()
-              ? t("Pause and quit")
-              : t("Pause downloads")
-            : t("Resume downloads"),
+          label,
           visible: downloadsLive() || counts.paused > 0,
           enabled: !changingDownloads,
           click: () => {
@@ -1270,7 +1300,7 @@ async function start(): Promise<void> {
             refreshTray();
             void runtime
               .runPromise(
-                Effect.match(downloadsLive() ? downloads.pauseAll : downloads.resumeAll, {
+                Effect.match(pause ? downloads.pauseAll : downloads.resumeAll, {
                   onFailure: () => {
                     // A failed write leaves the app running and the command available to retry.
                     showWindow();
@@ -1279,7 +1309,8 @@ async function start(): Promise<void> {
                   onSuccess: () => {},
                 }),
               )
-              .finally(() => {
+              .finally(async () => {
+                await readDownloads();
                 changingDownloads = false;
                 void runtime.runFork(settle);
               });
@@ -1287,10 +1318,7 @@ async function start(): Promise<void> {
         },
         {
           // The ellipsis says Quit asks first (see `askToQuit`).
-          label:
-            !quitConfirmed && (recordingNow() || downloadsLive())
-              ? t("Quit {app}…", { app: name })
-              : t("Quit {app}", { app: name }),
+          label: quitLabel,
           click: quit,
         },
       ]),
@@ -1298,10 +1326,36 @@ async function start(): Promise<void> {
   };
 
   staysWithoutWindow = () => {
-    if (closing || leaving || (!live() && !downloadsLive())) return false;
+    if (
+      closing ||
+      leaving ||
+      (!live() &&
+        downloadList !== null &&
+        !downloadsLive() &&
+        !(isMac && downloadCounts().paused > 0))
+    )
+      return false;
+
+    if (isMac && !recordingNow() && !downloadsLive() && downloadCounts().paused === 0) return false;
 
     if (!tray) {
-      tray = new Tray(nativeImage.createFromPath(trayIcon).resize({ width: 16, height: 16 }));
+      let icon = nativeImage.createFromPath(trayIcon).resize({ width: 16, height: 16 });
+
+      if (isMac) {
+        // A monochrome play mark at Retina resolution; macOS supplies its menu-bar tint.
+        const pixels = Buffer.alloc(32 * 32 * 4);
+
+        for (let y = 6; y < 26; y++) {
+          for (let x = 10; x < 25 - Math.abs(y - 15.5) * 1.5; x++)
+            pixels[(y * 32 + x) * 4 + 3] = 255;
+        }
+
+        icon = nativeImage.createFromBitmap(pixels, { width: 32, height: 32, scaleFactor: 2 });
+        icon.setTemplateImage(true);
+      }
+
+      tray = new Tray(icon);
+      trayState = "";
       tray.on("click", showWindow);
       refreshTray();
     }
@@ -1312,6 +1366,21 @@ async function start(): Promise<void> {
   // A pause must finish saving before an idle exit can hand the profile to the next app.
   const settle = Effect.sync(() => {
     keepAwake();
+
+    if (
+      isMac &&
+      tray &&
+      !recordingNow() &&
+      downloadList !== null &&
+      !downloadsLive() &&
+      downloadCounts().paused === 0
+    ) {
+      tray.destroy();
+      tray = null;
+      trayState = "";
+    }
+
+    if (isMac && !mainWindow) staysWithoutWindow();
     refreshTray();
 
     if (
@@ -1331,8 +1400,24 @@ async function start(): Promise<void> {
     void runtime.runFork(settle);
   };
 
-  void runtime.runFork(settle);
-  void runtime.runFork(Stream.runForEach(recordings.changes, () => settle));
+  void runtime.runFork(
+    Effect.andThen(Effect.result(recordings.list), (result) => {
+      if (result._tag === "Success")
+        capturing = result.success.some((each) => each.status.kind === "recording");
+
+      return settle;
+    }),
+  );
+  void runtime.runFork(
+    Stream.runForEach(recordings.changes, (list) =>
+      Effect.andThen(
+        Effect.sync(() => {
+          capturing = list.some((each) => each.status.kind === "recording");
+        }),
+        settle,
+      ),
+    ),
+  );
   void runtime.runFork(Stream.runForEach(recordings.scheduleChanges, () => settle));
 
   /**
@@ -1341,7 +1426,8 @@ async function start(): Promise<void> {
    * ask, and a shutdown leaves what records to go on when the app runs again.
    */
   const askToQuit = () => {
-    showWindow();
+    if (!mainWindow) mainWindow = open(true);
+    else showWindow();
     const window = mainWindow;
 
     if (!window) return;
@@ -1351,11 +1437,39 @@ async function start(): Promise<void> {
     else ask();
   };
 
+  let checkingQuit = false;
+  let checkedQuit = false;
   // First, so the profile is handed on only by a quit that goes ahead.
   app.prependListener("before-quit", (event) => {
     // Once closing, the runtime is going: nothing more to ask or tell it.
     if (closing) return;
+
     // On macOS every Quit is the viewer's; a shutdown says so first.
+    if (!checkedQuit && !quitConfirmed && !shuttingDown && !restarting) {
+      event.preventDefault();
+
+      if (checkingQuit) return;
+      checkingQuit = true;
+      void readDownloads().then((read) => {
+        checkingQuit = false;
+
+        if (!read) {
+          quitChosen = false;
+          showWindow();
+          dialog.showErrorBox(t("Downloads"), t("Couldn't read background work. Try again."));
+
+          return;
+        }
+
+        if (!isMac && !quitChosen && !mainWindow && staysWithoutWindow()) return;
+        checkedQuit = true;
+        app.quit();
+      });
+
+      return;
+    }
+
+    checkedQuit = false;
     const chosen = isMac || quitChosen;
     quitChosen = false;
 

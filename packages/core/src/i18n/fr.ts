@@ -1445,6 +1445,13 @@ export const fr: Translation = {
     "{title}, {time}, ne sera pas enregistré tant que Mr. Streamer est fermé.",
   "Closing the window instead keeps recording.":
     "Fermer plutôt la fenêtre permet de continuer l'enregistrement.",
+  "Quit?": "Quitter ?",
+  "Couldn't read background work. Try again.":
+    "Impossible de lire les tâches en arrière-plan. Réessayez.",
+  "Downloading {count}": "Téléchargements : {count}",
+  "Queued {count}": "En file : {count}",
+  "Waiting {count}": "En attente : {count}",
+  "Paused {count}": "En pause : {count}",
   "Quit while downloading?": "Quitter pendant le téléchargement ?",
   "Quit while recording and downloading?":
     "Quitter pendant l'enregistrement et le téléchargement ?",

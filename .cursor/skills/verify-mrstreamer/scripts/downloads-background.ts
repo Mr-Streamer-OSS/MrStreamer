@@ -108,15 +108,21 @@ export async function runDownloadsBackground(
       await d.click("Downloads", button("header button", t("Downloads")));
       await d.wait(() => d.exists(button("button", t("Resume all"))));
       provider.stallMovieFile(first.id, 400_000, 4000);
-      await d.click("Resume all", button("button", t("Resume all")));
-      await d.wait(() => d.exists(button("button", t("Pause all"))));
-      await d.capture("before-close");
+      await d.capture("before-immediate-resume-close");
       const instance = started;
       const pid = instance?.pid;
 
       if (!instance || !pid) throw new Error("No verified process identity.");
       action("Close the window, leaving the queue running");
-      await d.page.send("Page.close").catch(() => undefined);
+      // Close in the same renderer turn as the successful Resume answer, before a 250ms event.
+      await d.page
+        .evaluate(
+          `window.mrStreamer.invoke("downloads.resumeAll").then(result => {
+        if (!result.ok) throw new Error("Resume refused");
+        window.close();
+      })`,
+        )
+        .catch(() => undefined);
 
       await d.wait(async () => {
         const targets = type({ type: "string" })
@@ -139,6 +145,8 @@ export async function runDownloadsBackground(
       }
 
       observed["completedAfterClose"] = folders.length;
+      // Let the fixture observe the final socket close before shared teardown records its slots.
+      await d.wait(async () => provider.activeStreams() === 0);
     },
   );
 }

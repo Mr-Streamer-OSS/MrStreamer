@@ -102,7 +102,7 @@ beforeEach(() => {
 });
 
 async function mount(): Promise<void> {
-  const view = queryView(new QueryClient());
+  const view = queryView(new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   onTestFinished(() => view.unmount());
   await view.render(createElement(QuitDialog));
 }
@@ -177,3 +177,22 @@ it("asks about both while recording and downloading", async () => {
   expect(shown.textContent).toContain("Closing the window instead keeps both going.");
   await focusesKeep("Keep going");
 });
+
+it.each(["downloads.list", "recordings.list"] as const)(
+  "keeps a failed %s read retryable without inventing empty counts",
+  async (method) => {
+    ipc.refuse(method, { kind: "unexpected", detail: "Read refused" });
+    await mount();
+    await act(async () => ipc.emit("window.leaveAsked", null));
+    await vi.waitFor(() =>
+      expect(dialog()?.textContent).toContain("Couldn't read background work. Try again."),
+    );
+    expect(dialog()?.textContent).not.toContain("Quit while recording?");
+    expect(button("Quit")).toBeUndefined();
+    expect(ipc.argsOf("window.quit")).toHaveLength(0);
+    ipc.always(method, method === "downloads.list" ? downloads() : [recording]);
+    await act(async () => button("Try again")?.click());
+    await vi.waitFor(() => expect(dialog()?.textContent).toContain("Quit while recording?"));
+    await focusesKeep("Keep recording");
+  },
+);

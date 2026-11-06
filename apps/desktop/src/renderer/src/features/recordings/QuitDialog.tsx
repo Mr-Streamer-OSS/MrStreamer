@@ -72,8 +72,20 @@ export function QuitDialog() {
   const live = useLiveRecordings();
   const running = downloads.data ?? { count: 0, percent: null };
 
-  const words =
-    running.count === 0 ? asking.recording : live.length === 0 ? asking.downloading : asking.both;
+  const failed = recordings.isError || downloads.isError;
+  const unknown = failed || (running.count === 0 && live.length === 0);
+
+  const words = unknown
+    ? ({
+        title: "Quit?",
+        keep: "Keep going",
+        closing: "Closing the window instead keeps both going.",
+      } as const)
+    : running.count === 0
+      ? asking.recording
+      : live.length === 0
+        ? asking.downloading
+        : asking.both;
 
   return (
     <Dialog.Root
@@ -89,15 +101,33 @@ export function QuitDialog() {
           <Dialog.Title className="text-[15.75px] leading-[20px] font-semibold tracking-[-0.01em] text-white">
             {t(words.title)}
           </Dialog.Title>
-          <QuitDetails running={running} closing={words.closing} />
+          {failed ? (
+            <Dialog.Description className="pt-2 text-sm text-white">
+              {t("Couldn't read background work. Try again.")}
+            </Dialog.Description>
+          ) : (
+            <QuitDetails running={running} closing={words.closing} />
+          )}
           <div className="flex justify-end gap-[7px] pt-4">
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => void confirmQuit().catch(() => {})}
-            >
-              {t("Quit")}
-            </Button>
+            {failed ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  void recordings.refetch();
+                  void downloads.refetch();
+                }}
+              >
+                {t("Try again")}
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void confirmQuit().catch(() => {})}
+              >
+                {t("Quit")}
+              </Button>
+            )}
             <Button ref={keep} variant="primary" size="sm" className="shadow-none" onClick={close}>
               {t(words.keep)}
             </Button>

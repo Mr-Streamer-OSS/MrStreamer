@@ -1376,6 +1376,13 @@ export const nl: Translation = {
     "{title}, {time}, wordt niet opgenomen zolang Mr. Streamer gesloten is.",
   "Closing the window instead keeps recording.":
     "Sluit je in plaats daarvan het venster, dan gaat de opname door.",
+  "Quit?": "Afsluiten?",
+  "Couldn't read background work. Try again.":
+    "Achtergrondtaken konden niet worden gelezen. Probeer het opnieuw.",
+  "Downloading {count}": "Downloaden: {count}",
+  "Queued {count}": "In wachtrij: {count}",
+  "Waiting {count}": "Wachtend: {count}",
+  "Paused {count}": "Gepauzeerd: {count}",
   "Quit while downloading?": "Afsluiten tijdens downloaden?",
   "Quit while recording and downloading?": "Afsluiten tijdens opname en downloaden?",
   "Keep downloading": "Blijven downloaden",

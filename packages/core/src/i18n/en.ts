@@ -1348,6 +1348,12 @@ export const en = {
   "{title}, {time}, won't record while Mr. Streamer is closed.":
     "{title}, {time}, won't record while Mr. Streamer is closed.",
   "Closing the window instead keeps recording.": "Closing the window instead keeps recording.",
+  "Quit?": "Quit?",
+  "Couldn't read background work. Try again.": "Couldn't read background work. Try again.",
+  "Downloading {count}": "Downloading {count}",
+  "Queued {count}": "Queued {count}",
+  "Waiting {count}": "Waiting {count}",
+  "Paused {count}": "Paused {count}",
   "Quit while downloading?": "Quit while downloading?",
   "Quit while recording and downloading?": "Quit while recording and downloading?",
   "Keep downloading": "Keep downloading",
