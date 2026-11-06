@@ -1159,13 +1159,15 @@ describe("live captures", () => {
       (await captures.request(key, "record", provider, record.signal)).body!.getReader(),
     ];
 
-    for (const reader of readers) {
-      await expect(
-        (async () => {
-          for (;;) if ((await reader.read()).done) return;
-        })(),
-      ).rejects.toThrow("The provider stopped sending.");
-    }
+    await Promise.all(
+      readers.map(async (reader) => {
+        await expect(
+          (async () => {
+            for (;;) if ((await reader.read()).done) return;
+          })(),
+        ).rejects.toThrow("The provider stopped sending.");
+      }),
+    );
 
     await Promise.all([captures.idle("watch"), captures.idle("record")]);
     expect(open()).toBe(0);
