@@ -10,7 +10,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import type { AddressInfo } from "node:net";
-import { basename, join } from "node:path";
+import { basename, join, sep } from "node:path";
 import { Writable } from "node:stream";
 import type { Download, DownloadFailure } from "@mrstreamer/contracts/downloads";
 import type { TitleRef } from "@mrstreamer/contracts/ondemand";
@@ -819,7 +819,7 @@ describe.skipIf(!hasTools)("downloads", () => {
           expect(await readdir(destination)).toEqual([]);
         } else {
           const moved = await downloads.copy(second.id);
-          expect(moved.path.startsWith(destination + "/")).toBe(true);
+          expect(moved.path.startsWith(destination + sep)).toBe(true);
           expect(await readFile(moved.path)).toEqual(bytes[1]);
           await expect(stat(before[1].path)).rejects.toMatchObject({ code: "ENOENT" });
         }
