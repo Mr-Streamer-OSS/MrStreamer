@@ -8,6 +8,6 @@ Subscriptions, guides, downloaded files, recordings, subtitle timing and usage-s
 
 Use the profile avatar in the window bar. Choose **New profile**, enter a name and choose **Add**. Choose another profile to switch. To delete an inactive profile, choose its trash button and confirm. Default and the active profile cannot be deleted. Deleting removes that profile’s lists, progress and settings while keeping household media. A failed deletion stays visible with Retry.
 
-If configuration or a private read fails, the error stays visible. Retry attempts the durably selected profile again; the profile menu also lets you select another viewer. Failed reads never replace personal data with defaults.
+If configuration or a named profile's preferences cannot be read, the error stays visible. Retry attempts the durably selected profile again; the profile menu also lets you select another viewer. Unreadable named-profile files are kept without exposing their contents or replacing them with defaults. Default retains its older-file compatibility behavior.
 
 Before returning to a release that supports only Default, switch to Default. A single-profile build that recognizes the registry refuses personal-copy progress when a named profile is active. Older builds read Default’s original files and cannot read another profile’s personal state. Installed downgrade compatibility after switching has not been verified.
