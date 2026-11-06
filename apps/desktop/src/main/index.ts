@@ -21,7 +21,11 @@ import {
   Tray,
   type Rectangle,
 } from "electron";
-import { ARTWORK_SCHEME, DOWNLOAD_ARTWORK } from "@mrstreamer/contracts/downloads";
+import {
+  ARTWORK_SCHEME,
+  DOWNLOAD_ARTWORK,
+  type DownloadList,
+} from "@mrstreamer/contracts/downloads";
 import type { IpcEvent, IpcEvents, IpcInput } from "@mrstreamer/contracts/ipc";
 import { Diagnostics } from "@mrstreamer/core/diagnostics";
 import { Failed } from "@mrstreamer/core/failure";
@@ -226,7 +230,7 @@ let reopen = () => {
 
 /**
  * Whether the app stays, without a window, as Windows and Linux close their last: while a
- * recording's time goes on or a schedule is kept. Set once the app started.
+ * recording's time goes on, a schedule is kept, or downloads can run. Set once the app started.
  */
 let staysWithoutWindow = () => false;
 
@@ -581,7 +585,7 @@ async function start(): Promise<void> {
   let recordingNow = () => false;
   /** Whether every recording the viewer stopped is kept as stopped. Set once recordings are read. */
   let stopsKept = () => Promise.resolve(true);
-  /** The viewer confirmed Quit while recording, or an update restarts: the quit asks no more. */
+  /** The viewer confirmed Quit with background work, or an update restarts: the quit asks no more. */
   let quitConfirmed = false;
   /**
    * The viewer chose Quit on Windows or Linux, from the tray or with Ctrl+Q. Any other quit there
@@ -879,8 +883,55 @@ async function start(): Promise<void> {
   forward(playback.readingAhead, "playback.readingAhead", (sessionId) => ({ sessionId }));
   forward(playback.tracksChanged, "playback.tracksChanged", (sessionId) => ({ sessionId }));
   forward(playback.fixed, "playback.fixed", (change) => change);
-  // A receiver plays from this computer, so it stays awake while one does. The display may sleep.
+  let downloadList: DownloadList | null = null;
+  let downloadsChanged = () => {};
+
+  const acceptDownloads = (list: DownloadList) => {
+    downloadList = list;
+    downloadsChanged();
+  };
+
+  void runtime.runFork(
+    Stream.runForEach(downloads.changes, (list) => Effect.sync(() => acceptDownloads(list))),
+  );
+  const initialDownloads = await runtime.runPromise(Effect.result(downloads.list));
+
+  // A later published list takes precedence over the startup read.
+  if (initialDownloads._tag === "Success" && downloadList === null)
+    acceptDownloads(initialDownloads.success);
+
+  const downloadCounts = () => {
+    const items = downloadList?.items ?? [];
+
+    return {
+      active: items.filter((each) => each.status.kind === "transferring").length,
+      queued: items.filter((each) => each.status.kind === "queued").length,
+      waiting: items.filter((each) => each.status.kind === "waiting").length,
+      paused: items.filter((each) => each.status.kind === "paused").length,
+    };
+  };
+
+  const downloadsLive = () => {
+    const counts = downloadCounts();
+
+    return counts.active + counts.queued + counts.waiting > 0;
+  };
+
+  // Actual transfers, captures and receiver playback keep the app awake, with display sleep allowed.
   let awake: number | null = null;
+  let receiverPlaying = false;
+
+  const keepAwake = () => {
+    const working = receiverPlaying || recordingNow() || downloadCounts().active > 0;
+
+    if (working && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
+
+    if (!working && awake !== null) {
+      powerSaveBlocker.stop(awake);
+      awake = null;
+    }
+  };
+
   runtime.runFork(
     Stream.runForEach(output.changes, (status) =>
       Effect.sync(() => {
@@ -890,14 +941,8 @@ async function start(): Promise<void> {
         if (away && status.output.kind === "local") mainWindow?.destroy();
 
         if (mainWindow) emit(mainWindow.webContents, "output.changed", status);
-        const playing = status.output.kind === "receiver" && status.output.media !== null;
-
-        if (playing && awake === null) awake = powerSaveBlocker.start("prevent-app-suspension");
-
-        if (!playing && awake !== null) {
-          powerSaveBlocker.stop(awake);
-          awake = null;
-        }
+        receiverPlaying = status.output.kind === "receiver" && status.output.media !== null;
+        keepAwake();
       }),
     ),
   );
@@ -1009,6 +1054,7 @@ async function start(): Promise<void> {
           yield* settings.setInterfaceLanguage(choice);
           language = languageFor(choice);
           applyLanguage(language);
+          refreshTray();
 
           return language;
         }),
@@ -1127,6 +1173,9 @@ async function start(): Promise<void> {
    */
   const watch = (window: BrowserWindow) => {
     trackForeground(window);
+    window.on("closed", () => {
+      if (isMac) staysWithoutWindow();
+    });
     window.webContents.on("before-input-event", (event, input) => {
       if (isMac || input.type !== "keyDown" || !input.control || input.alt || input.shift) return;
 
@@ -1138,7 +1187,7 @@ async function start(): Promise<void> {
   };
 
   /**
-   * While Windows or Linux keep the app without a window, the tray opens it again, or quits; the
+   * While background work keeps the app without a window, the tray opens it again, or quits; the
    * app also opens again when launched. Gone once the window is back.
    */
   let tray: Tray | null = null;
@@ -1182,37 +1231,100 @@ async function start(): Promise<void> {
     return now.recording || now.scheduled || now.unsaved;
   };
 
+  // Only counts leave the app window: no title, subscription or profile names in native menus.
+  let changingDownloads = false;
+
+  const refreshTray = () => {
+    if (!tray) return;
+    const name = app.getName();
+    const counts = downloadCounts();
+
+    const status = [
+      `${t("Downloading")} ${counts.active}`,
+      `${t("Queued")} ${counts.queued}`,
+      `${t("Waiting")} ${counts.waiting}`,
+      `${t("Paused")} ${counts.paused}`,
+    ].join(" · ");
+
+    tray.setToolTip(`${name} · ${status}`);
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: status, enabled: false },
+        { label: t("Open {app}", { app: name }), click: showWindow },
+        {
+          label: downloadsLive()
+            ? !isMac && !live()
+              ? t("Pause and quit")
+              : t("Pause all")
+            : t("Resume all"),
+          enabled: !changingDownloads && (downloadsLive() || counts.paused > 0),
+          click: () => {
+            if (changingDownloads) return;
+            changingDownloads = true;
+            refreshTray();
+            void runtime
+              .runPromise(
+                Effect.match(downloadsLive() ? downloads.pauseAll : downloads.resumeAll, {
+                  onFailure: () => {
+                    // A failed write leaves the app running and the command available to retry.
+                    showWindow();
+                    dialog.showErrorBox(t("Downloads"), t("Couldn't save. Try again."));
+                  },
+                  onSuccess: () => {},
+                }),
+              )
+              .finally(() => {
+                changingDownloads = false;
+                void runtime.runFork(settle);
+              });
+          },
+        },
+        { label: t("Quit {app}", { app: name }), click: quit },
+      ]),
+    );
+  };
+
   staysWithoutWindow = () => {
-    if (closing || leaving || !live()) return false;
+    if (closing || leaving || (!live() && !downloadsLive())) return false;
 
     if (!tray) {
-      const name = app.getName();
       tray = new Tray(nativeImage.createFromPath(trayIcon).resize({ width: 16, height: 16 }));
-      tray.setToolTip(name);
-      tray.setContextMenu(
-        Menu.buildFromTemplate([
-          { label: t("Open {app}", { app: name }), click: showWindow },
-          { label: t("Quit {app}", { app: name }), click: quit },
-        ]),
-      );
       tray.on("click", showWindow);
+      refreshTray();
     }
 
     return true;
   };
 
-  // Kept without a window, the app goes once nothing records and no schedule is kept.
+  // A pause must finish saving before an idle exit can hand the profile to the next app.
   const settle = Effect.sync(() => {
-    // Not while an update waits to restart it once the last recording ended.
-    if (tray && !mainWindow && !closing && !restarting && !live()) app.quit();
+    keepAwake();
+    refreshTray();
+
+    if (
+      !isMac &&
+      tray &&
+      !mainWindow &&
+      !closing &&
+      !restarting &&
+      !changingDownloads &&
+      !live() &&
+      !downloadsLive()
+    )
+      app.quit();
   });
 
+  downloadsChanged = () => {
+    void runtime.runFork(settle);
+  };
+
+  void runtime.runFork(settle);
   void runtime.runFork(Stream.runForEach(recordings.changes, () => settle));
   void runtime.runFork(Stream.runForEach(recordings.scheduleChanges, () => settle));
 
   /**
-   * Quit asks first while a recording's time goes on, in the window, opened again if it was
-   * closed: Quit there confirms, through `window.quit`. A shutdown or an update's restart doesn't
+   * Quit asks first while a recording's time goes on or downloads can run, in the window, reopened if
+   * closed: Quit there confirms through `window.quit`. A shutdown or an update's restart doesn't
    * ask, and a shutdown leaves what records to go on when the app runs again.
    */
   const askToQuit = () => {
@@ -1234,7 +1346,7 @@ async function start(): Promise<void> {
     const chosen = isMac || quitChosen;
     quitChosen = false;
 
-    if (chosen && !quitConfirmed && !shuttingDown && recordingNow()) {
+    if (chosen && !quitConfirmed && !shuttingDown && (recordingNow() || downloadsLive())) {
       event.preventDefault();
       askToQuit();
 
@@ -1260,6 +1372,12 @@ async function start(): Promise<void> {
       .off("suspend", sleeps)
       .off("shutdown", shutsDown);
     tray?.destroy();
+
+    if (awake !== null) {
+      powerSaveBlocker.stop(awake);
+      awake = null;
+    }
+
     // Streams close right away, so no ffmpeg or provider connection outlives the app.
     runtime.runSyncExit(playback.closeAll);
     // Exits instead of quitting again: with nothing left to write, closing can finish before this
@@ -1325,7 +1443,7 @@ function receiverAdapters(): ReceiverAdapter[] {
   return adapters;
 }
 
-// macOS keeps the app without a window. Other systems quit with their last, unless recordings go
+// macOS keeps the app without a window. Other systems quit with their last, unless background work goes
 // on (see `staysWithoutWindow`).
 app.on("window-all-closed", () => {
   if (!isMac && !staysWithoutWindow()) app.quit();

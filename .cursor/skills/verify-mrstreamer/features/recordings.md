@@ -47,3 +47,7 @@ Shared capture (`main/playback/live-capture.ts`, `live-history.ts`, `hls-capture
 A provider can take a moment to free the slot of the preview **Stop playing and record** just closed: capture asks again after 0.5 and 1.5 s when refused, as playback does.
 
 Without a subscription saved, Connect offers Downloads and Recordings once either keeps something: Recordings then lists Recorded only, with no Scheduled or Storage link, and plays a recording over the page (`recordings-standalone.test.ts`). In the window, `quit-dialog.test.ts` proves the Quit while recording dialog's text, its focus on Keep recording, Keep recording leaving the app running and Quit.
+
+## Background download coexistence
+
+The lifecycle in `apps/desktop/src/main/index.ts` keeps recording, schedule and unsaved-recording obligations alongside runnable downloads. Pausing downloads cannot exit Windows/Linux while those recording obligations remain. Once both kinds settle, the windowless app exits; macOS stays open until Quit. Only actual captures, transfers and receiver playback request app wakefulness, with display sleep allowed. Closing a downloads-only window destroys its renderer, preventing a hidden Home preview. Native power, tray and mixed recording/download acceptance require matching platform journeys.

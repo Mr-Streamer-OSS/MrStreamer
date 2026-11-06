@@ -176,7 +176,7 @@ When Mr. Streamer can't save a Stop or a recording's end, its row says **Not sav
 
 ### Closing, quitting and updates
 
-Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. On Windows and Linux a tray icon then has **Open Mr. Streamer** and **Quit Mr. Streamer**, and Mr. Streamer quits by itself once nothing records, nothing is scheduled and what it had to save about them is saved.
+Closing the window never asks. While a recording's time goes on or a schedule is kept, Mr. Streamer keeps running without its window, and opening it again shows the window. Runnable downloads also keep the app running. The native menu shows download counts, **Open Mr. Streamer**, download Pause/Resume and **Quit Mr. Streamer**. On Windows and Linux, Mr. Streamer quits by itself once no downloads can run, nothing records, nothing is scheduled and what it had to save about recordings is saved. Paused downloads alone do not keep it running.
 
 Quitting while something records, with ⌘Q, Ctrl+Q or the tray, asks first. **Quit while recording?** offers **Quit**, which stops the recordings and keeps what they recorded, and **Keep recording**. A schedule still to come doesn't record while Mr. Streamer is closed. A shutdown or logout doesn't ask: recordings whose time remains go on when Mr. Streamer starts again.
 
