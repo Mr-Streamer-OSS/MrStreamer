@@ -2222,26 +2222,18 @@ it.each(["downloads.pause", "recordings.stop", "window.quit"] as const)(
     const selected = await profiles.active();
     const entered: string[] = [];
 
+    const control = (name: string) => () =>
+      Effect.sync(() => {
+        entered.push(name);
+
+        return null;
+      });
+
     // This IPC fixture registers only the four methods exercised here.
     const handlers: Partial<IpcHandlers> = {
-      "downloads.pause": () =>
-        Effect.sync(() => {
-          entered.push("downloads.pause");
-
-          return null;
-        }),
-      "recordings.stop": () =>
-        Effect.sync(() => {
-          entered.push("recordings.stop");
-
-          return null;
-        }),
-      "window.quit": () =>
-        Effect.sync(() => {
-          entered.push("window.quit");
-
-          return null;
-        }),
+      "downloads.pause": control("downloads.pause"),
+      "recordings.stop": control("recordings.stop"),
+      "window.quit": control("window.quit"),
       "preferences.get": () =>
         Effect.sync(() => {
           entered.push("preferences.get");

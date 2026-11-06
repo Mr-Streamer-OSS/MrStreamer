@@ -374,20 +374,12 @@ export function makeProfiles({
           return yield* Effect.fail(failedWith(Cause.squash(catalogue.cause)));
 
         // Configuration holds the lifecycle lock: the captured owner and Settings cannot change
-        // before this completes. Failure keeps admissions closed for the existing retry path.
-        if (configured) {
-          const result = yield* Effect.exit(
-            Effect.suspend(() => configured(Context.get(context, Settings), { ...owner })),
-          );
-
-          if (Exit.isFailure(result)) {
-            const failure = Cause.findErrorOption(result.cause);
-
-            return yield* Effect.fail(
-              failure._tag === "Some" ? failure.value : failedWith(Cause.squash(result.cause)),
-            );
-          }
-        }
+        // before this completes. Failure keeps admissions closed for the existing retry path; a
+        // typed Failed keeps its advice and a thrown callback becomes Failed.
+        if (configured)
+          yield* Effect.suspend(() =>
+            configured(Context.get(context, Settings), { ...owner }),
+          ).pipe(Effect.catchDefect((defect) => Effect.fail(failedWith(defect))));
       });
 
     if (configuredFor === null) {
