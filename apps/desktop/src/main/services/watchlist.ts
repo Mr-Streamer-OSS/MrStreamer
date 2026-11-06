@@ -1,5 +1,3 @@
-import { AdmittedSettings } from "./preferences.ts";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The watchlist: movies and whole series the viewer saved to watch later. It is apart from the
 // viewing record: playing, finishing or leaving Continue watching changes no entry, and saving or
 // removing one changes nothing of how far a title got.
@@ -22,6 +20,8 @@ import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 //
 // Which title an entry is now, the lists say each time the watchlist is read, so an entry no
 // provider lists any more stays, without a title, and has one again when it is listed again.
+import { AdmittedSettings } from "./preferences.ts";
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { TitleKind, TitleListsStatus } from "@mrstreamer/contracts/ondemand";
 import { hasTitles, type OwnedId } from "@mrstreamer/contracts/subscription";
 import type { WatchlistPage, WatchlistSort } from "@mrstreamer/contracts/watchlist";

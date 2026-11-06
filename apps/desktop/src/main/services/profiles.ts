@@ -4,7 +4,11 @@ import { Watchlist } from "./watchlist.ts";
 import { CustomLists } from "./custom-lists.ts";
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import {
+  DEFAULT_PROFILE_ID,
+  sameProfile,
+  type ActiveProfile,
+} from "@mrstreamer/contracts/profiles";
 import {
   ViewingStore,
   ViewingRecord,
@@ -25,9 +29,9 @@ import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
-import { profileStorage } from "../platform/profile-store.ts";
-import { WatchlistStore } from "../platform/watchlist-store.ts";
-import { CustomListStore } from "../platform/custom-lists-store.ts";
+import { profileDirectory, profileStorage } from "../platform/profile-store.ts";
+import { WatchlistStore, watchlistStoreLayer } from "../platform/watchlist-store.ts";
+import { CustomListStore, customListStoreLayer } from "../platform/custom-lists-store.ts";
 import {
   Settings,
   AdmittedSettings,
@@ -35,14 +39,10 @@ import {
   type InstallationConsent,
 } from "./preferences.ts";
 import { Subscriptions, type SavedSubscription } from "./subscription.ts";
-import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import type { UsageObservers } from "../analytics/observers.ts";
 import * as Layer from "effect/Layer";
 import { Database, databaseLayer } from "../platform/database.ts";
-import { profileDirectory } from "../platform/profile-store.ts";
 import { observedViewingStoreLayer } from "../platform/viewing-store.ts";
-import { watchlistStoreLayer } from "../platform/watchlist-store.ts";
-import { customListStoreLayer } from "../platform/custom-lists-store.ts";
 
 /**
  * Construct once for an admitted owner and retain the returned services for late reads, writes
@@ -155,6 +155,8 @@ export function makeProfiles({
     >();
 
     const refused = (detail: string) => new Failed({ error: { kind: "unexpected", detail } });
+    /** Whether `owner` is still the active visit; a retained admission answers this later. */
+    const isActive = (owner: ActiveProfile) => sameProfile(owner, active);
 
     const existing = (id: string) =>
       Effect.flatMap(storage.list, (rows) => {
@@ -266,6 +268,13 @@ export function makeProfiles({
       }),
     );
 
+    const expectedOwner = (expected?: ActiveProfile) =>
+      Effect.suspend(() =>
+        expected && !isActive(expected)
+          ? Effect.fail(refused("Viewing profile changed; retry this request."))
+          : Effect.void,
+      );
+
     const admitFor = (expected?: ActiveProfile) =>
       one.withPermits(1)(
         Effect.gen(function* () {
@@ -275,8 +284,7 @@ export function makeProfiles({
                 "Viewing profile configuration did not finish; select the profile again to retry.",
               );
 
-          if (expected && (expected.id !== active.id || expected.revision !== active.revision))
-            return yield* refused("Viewing profile changed; retry this request.");
+          yield* expectedOwner(expected);
           const owner = { ...active };
           const handle = yield* opened(owner.id);
           const epoch = handle.epoch;
@@ -308,7 +316,7 @@ export function makeProfiles({
                       {
                         owner,
                         settings: Context.get(handle.context, Settings),
-                        current: () => active.id === owner.id && active.revision === owner.revision,
+                        current: () => isActive(owner),
                       },
                     ),
                   );
@@ -335,7 +343,7 @@ export function makeProfiles({
           Effect.provideService(Context.get(shared, OnDemand).reconfigure, AdmittedSettings, {
             owner,
             settings: Context.get(context, Settings),
-            current: () => active.id === owner.id && active.revision === owner.revision,
+            current: () => isActive(owner),
           }),
         );
 
@@ -356,13 +364,6 @@ export function makeProfiles({
         }),
       );
     }
-
-    const expectedOwner = (expected?: ActiveProfile) =>
-      Effect.suspend(() =>
-        expected && (expected.id !== active.id || expected.revision !== active.revision)
-          ? Effect.fail(refused("Viewing profile changed; retry this request."))
-          : Effect.void,
-      );
 
     const activeRead: Effect.Effect<ActiveProfile, Failed> = Effect.sync(() => ({ ...active }));
 
@@ -413,7 +414,7 @@ export function makeProfiles({
             yield* Effect.provideService(stopInteractive(), AdmittedSettings, {
               owner: leaving,
               settings: Context.get(previous.context, Settings),
-              current: () => active.id === leaving.id && active.revision === leaving.revision,
+              current: () => isActive(leaving),
             });
             // Publish only after the durable selection commits; a failed save leaves the old owner.
             active = yield* storage.select(id);

@@ -1,4 +1,8 @@
-import { ActiveProfileSchema, type ActiveProfile } from "@mrstreamer/contracts/profiles";
+import {
+  ActiveProfileSchema,
+  ownedByProfile,
+  type ActiveProfile,
+} from "@mrstreamer/contracts/profiles";
 import type { ProfileAdmission } from "./services/profiles.ts";
 import type { Type } from "arktype";
 import { ipcMain, type WebContents } from "electron";
@@ -202,8 +206,7 @@ export function registerIpc(
       }
 
       let work = Effect.gen(function* () {
-        if (!personal || method.startsWith("profiles.") || method.startsWith("analytics."))
-          return yield* handler(input, frame);
+        if (!personal || !ownedByProfile(method)) return yield* handler(input, frame);
         const admitted = yield* personal.admit(expected);
         // The mapping keeps per-method types at construction; this loop already dispatches the
         // union of validated inputs, as the ordinary handler above does.

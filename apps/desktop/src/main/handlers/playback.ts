@@ -1,4 +1,3 @@
-import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { Failed } from "@mrstreamer/core/failure";
@@ -29,7 +28,8 @@ export function playbackHandlers({
   analytics,
   profiles,
 }: {
-  readonly profiles?: Pick<Profiles["Service"], "active">;
+  /** Whose viewing an open belongs to: the admitted owner, or the active one. */
+  readonly profiles: Pick<Profiles["Service"], "active">;
   readonly playback: Playback["Service"];
   readonly coordination: Pick<PlaybackCoordination["Service"], "begin" | "passed">;
   readonly library: Pick<Library["Service"], "channel">;
@@ -40,8 +40,6 @@ export function playbackHandlers({
   readonly settings: Pick<Settings["Service"], "get" | "ofSubscription">;
   readonly analytics: Pick<Analytics, "admitPlayback" | "playbackFailureObserver">;
 }): HandlersFor<"playback"> {
-  const admittedOwner = profiles?.active ?? Effect.succeed({ id: DEFAULT_PROFILE_ID, revision: 1 });
-
   return {
     "playback.open": (
       {
@@ -59,7 +57,7 @@ export function playbackHandlers({
     ) => {
       const token = analytics.admitPlayback("live", preview ? undefined : measurement, frame);
 
-      return Effect.flatMap(admittedOwner, (owner) =>
+      return Effect.flatMap(profiles.active, (owner) =>
         observeOpen(
           coordination,
           () => analytics.playbackFailureObserver(token ?? undefined),
@@ -95,7 +93,7 @@ export function playbackHandlers({
     "playback.openTitle": ({ title, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
 
-      return Effect.flatMap(admittedOwner, (owner) =>
+      return Effect.flatMap(profiles.active, (owner) =>
         observeOpen(
           coordination,
           () => analytics.playbackFailureObserver(token ?? undefined),
@@ -120,7 +118,7 @@ export function playbackHandlers({
     "playback.openCopy": ({ copy, decoders, measurement }, frame) => {
       const token = analytics.admitPlayback("vod", measurement, frame);
 
-      return Effect.flatMap(admittedOwner, (owner) =>
+      return Effect.flatMap(profiles.active, (owner) =>
         observeOpen(
           coordination,
           () => analytics.playbackFailureObserver(token ?? undefined),

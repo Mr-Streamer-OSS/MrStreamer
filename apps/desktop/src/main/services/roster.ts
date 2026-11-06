@@ -1,9 +1,9 @@
-import { ProfileSessions } from "./profiles.ts";
 // What happens around the saved subscriptions changing, beyond storing them: a new one's lists
 // are fetched and join the others while what plays goes on, one whose login was entered again has
 // its lists fetched under it, and one that goes takes what was loaded from it with it. Each of
 // these touches the subscription it is about and no other: a stream of another subscription
 // plays on, and the others' lists stay as they are.
+import { ProfileSessions } from "./profiles.ts";
 import { Guide } from "@mrstreamer/core/guide/service";
 import type { LoginInput } from "@mrstreamer/contracts/ipc";
 import type { CatalogueStatus } from "@mrstreamer/contracts/library";

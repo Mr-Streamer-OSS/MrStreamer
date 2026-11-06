@@ -1,4 +1,3 @@
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The viewing record service: favourites, watch history, how far movies and episodes got and the
 // episodes marked by hand, as events per account. Commands carry an id, so sending one again
 // changes nothing more; the store appends a command's events and the state they add up to in one
@@ -35,6 +34,7 @@ import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // an app that remembers a channel's streams after its list drops some does; else the channel the
 // catalogue lists now. Starring, unstarring, showing and ordering favourites all go by that one
 // answer. Recent channels and watching go by the catalogue alone.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import { seriesOf, type TitleRef } from "@mrstreamer/contracts/ondemand";
 import { ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";

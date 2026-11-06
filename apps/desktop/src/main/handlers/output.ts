@@ -1,4 +1,3 @@
-import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import type { Profiles } from "../platform/profile-store.ts";
 import { ownedId } from "@mrstreamer/contracts/subscription";
 import { observeOpen } from "../analytics/playback.ts";
@@ -22,7 +21,8 @@ export function outputHandlers({
   pickList,
   profiles,
 }: {
-  readonly profiles?: Pick<Profiles["Service"], "active">;
+  /** Whose viewing an open belongs to: the admitted owner, or the active one. */
+  readonly profiles: Pick<Profiles["Service"], "active">;
   readonly output: Pick<
     Output["Service"],
     | "status"
@@ -50,8 +50,6 @@ export function outputHandlers({
   >;
   readonly pickList: HandlersFor<"output">["output.pick"];
 }): HandlersFor<"output"> {
-  const admittedOwner = profiles?.active ?? Effect.succeed({ id: DEFAULT_PROFILE_ID, revision: 1 });
-
   return {
     "output.status": () => output.status,
     "output.scan": ({ on }) => Effect.as(output.scan(on), null),
@@ -70,7 +68,7 @@ export function outputHandlers({
           ? measurement.control
           : undefined;
 
-      return Effect.flatMap(admittedOwner, (owner) =>
+      return Effect.flatMap(profiles.active, (owner) =>
         observeOpen(
           coordination,
           () => analytics.playbackFailureObserver(token ?? undefined),
@@ -100,7 +98,7 @@ export function outputHandlers({
           ? measurement.control
           : undefined;
 
-      return Effect.flatMap(admittedOwner, (owner) =>
+      return Effect.flatMap(profiles.active, (owner) =>
         observeOpen(
           coordination,
           () => analytics.playbackFailureObserver(token ?? undefined),

@@ -585,22 +585,18 @@ function followCopies(now: CopyNow, list: DownloadList): void {
  * Saves how far the title got, when there is a title and a length to measure it against. Once
  * an episode with none left after it is in its credits, finds out whether its series is
  * finished, after the progress is saved. Both say when this play began: an episode marked during
- * it keeps its mark.
+ * it keeps its mark. Answers whether main kept it, true when there was nothing to keep here.
  */
-function save(): void {
+function save(): Promise<boolean> {
   // What a receiver plays, the main process saves, from what the receiver confirmed.
-  if (receiver) return;
+  if (receiver) return Promise.resolve(true);
   const { now, position, duration, next } = store.getState();
 
-  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought))) return;
+  if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought)))
+    return Promise.resolve(true);
 
   // A copy keeps its own, whatever its subscription's record says.
-  if (now.kind === "copy") {
-    void saveCopy(now, position, duration);
-
-    return;
-  }
-
+  if (now.kind === "copy") return saveCopy(now, position, duration);
   const owner = playOwner;
 
   let saved: Promise<unknown> = callForProfile(owner, "viewing.recordProgress", {
@@ -616,10 +612,14 @@ function save(): void {
     saved = saved.then(() => finishSeries(now, mine));
   }
 
-  saving = saved.then(
-    () => {},
-    () => {},
+  const kept = saved.then(
+    () => true,
+    () => false,
   );
+
+  saving = kept.then(() => {});
+
+  return kept;
 }
 
 /**
@@ -655,15 +655,11 @@ function saveCopy(
   const pending = { timer: null as ReturnType<typeof setTimeout> | null };
   copySaves.set(key, pending);
 
-  const kept = (
-    now.recording
-      ? owner
-        ? call("recordings.recordProgress", progress)
-        : callForProfile(null, "recordings.recordProgress", progress)
-      : owner
-        ? call("downloads.recordProgress", progress)
-        : callForProfile(null, "downloads.recordProgress", progress)
-  ).then(
+  const method = now.recording ? "recordings.recordProgress" : "downloads.recordProgress";
+
+  // The progress names its owner, so a retry after a switch still saves to that viewer. An
+  // unowned save from before the window had a profile goes only while there still is none.
+  const kept = (owner ? call(method, progress) : callForProfile(null, method, progress)).then(
     () => {
       if (copySaves.get(key) === pending) copySaves.delete(key);
 
@@ -2238,34 +2234,7 @@ export const titlePlayer = {
   },
 
   /** Persist the old viewer before asking main to select another; refusal keeps this play retryable. */
-  async prepareProfileSwitch(): Promise<boolean> {
-    if (receiver) return true;
-    const { now, position, duration, next } = store.getState();
-
-    if (!now || !duration || (position <= 0 && !(now.kind === "copy" && sought))) return true;
-
-    if (now.kind === "copy") return saveCopy(now, position, duration);
-    const owner = playOwner;
-
-    try {
-      await callForProfile(owner, "viewing.recordProgress", {
-        commandId: crypto.randomUUID(),
-        title: now.title,
-        position: Math.min(position, duration),
-        duration,
-        since: openedAt,
-      });
-
-      if (!currentProfile(owner)) return false;
-
-      if (next === null && isFinished(position, duration))
-        await finishSeries(now, { play, since: openedAt, owner });
-
-      return true;
-    } catch {
-      return false;
-    }
-  },
+  prepareProfileSwitch: save,
 
   /** Cancels the old viewer's controller while retaining its explicitly owned save retries. */
   clearForProfile(): void {

@@ -1,6 +1,6 @@
-import { AdmittedSettings } from "../services/preferences.ts";
 // Personal resume positions for household copies. Inventory documents retain their legacy
 // positions for older builds, but only an explicit playback write changes this table.
+import { AdmittedSettings } from "../services/preferences.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { type } from "arktype";

@@ -1,5 +1,5 @@
 import { type } from "arktype";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import { ownedByProfile, sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { t } from "@mrstreamer/core/i18n";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import type {
@@ -43,10 +43,7 @@ export const profileOwner = () => selectedProfile;
 export function currentProfile(owner: ActiveProfile | null): boolean {
   return (
     owner === selectedProfile ||
-    (!!owner &&
-      !!selectedProfile &&
-      owner.id === selectedProfile.id &&
-      owner.revision === selectedProfile.revision)
+    (!!owner && !!selectedProfile && sameProfile(owner, selectedProfile))
   );
 }
 
@@ -56,7 +53,8 @@ export function selectProfileOwner(owner: ActiveProfile | null): void {
   selectedProfile = owner ? { ...owner } : null;
 }
 
-function profileChanged(): AppFailure {
+/** A reply or command begun for a viewer who is no longer selected. */
+export function profileChanged(): AppFailure {
   return new AppFailure({ kind: "unexpected", detail: t("Viewing profile changed. Try again.") });
 }
 
@@ -78,9 +76,7 @@ export async function call<M extends IpcMethod>(
   const generation = profileGeneration;
 
   const transport: IpcArgs<M> =
-    owner && !method.startsWith("profiles.") && !method.startsWith("analytics.")
-      ? [{ __profile: owner, input: args[0] }]
-      : args;
+    owner && ownedByProfile(method) ? [{ __profile: owner, input: args[0] }] : args;
 
   const result = await window.mrStreamer.invoke(method, ...transport);
 

@@ -1,8 +1,8 @@
-import type { ActiveProfile } from "./profiles.ts";
 // Where playback goes: this computer, or a receiver on the local network that plays what the app
 // sends it. The main process owns the receiver and what it plays; the UI shows the status it is
 // sent and asks for changes. A receiver plays from an address this computer serves on the local
 // network, so it never sees a provider address.
+import type { ActiveProfile } from "./profiles.ts";
 import type { TitleRef } from "./ondemand.ts";
 import type { AudioTrack, StreamFailure, SubtitleFormat, SubtitleTrack } from "./playback.ts";
 import type { OwnedId } from "./subscription.ts";

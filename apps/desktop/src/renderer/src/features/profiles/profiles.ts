@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import { sameProfile, type ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { AppFailure } from "@mrstreamer/contracts/errors";
 import { t } from "@mrstreamer/core/i18n";
 import { applyLanguage } from "../../app/language.ts";
@@ -10,6 +10,7 @@ import {
   currentProfile,
   currentProfileReply,
   listen,
+  profileChanged,
   profileOwner,
   selectProfileOwner,
 } from "../../lib/ipc.ts";
@@ -17,10 +18,6 @@ import { queries } from "../../lib/queries.ts";
 import { player } from "../../player/player.ts";
 import { titlePlayer } from "../../player/title-player.ts";
 import { outputs } from "../../player/output.ts";
-
-function changed(): AppFailure {
-  return new AppFailure({ kind: "unexpected", detail: t("Viewing profile changed. Try again.") });
-}
 
 async function reloadLanguage(
   client: QueryClient,
@@ -30,7 +27,7 @@ async function reloadLanguage(
   const language = await callForProfile(owner, "language.get");
 
   if (generation !== lifetime || !currentProfile(owner) || !currentProfileReply(language))
-    throw changed();
+    throw profileChanged();
   client.setQueryData(queries.language().queryKey, language);
   applyLanguage(language);
 }
@@ -73,10 +70,10 @@ async function changeOwner(
   owner: ActiveProfile,
   generation: number,
 ): Promise<void> {
-  if (generation !== lifetime) throw changed();
+  if (generation !== lifetime) throw profileChanged();
   const before = profileOwner();
 
-  if (before && owner.revision < before.revision) throw changed();
+  if (before && owner.revision < before.revision) throw profileChanged();
   const same = currentProfile(owner);
 
   if (before && !same) {
@@ -100,7 +97,7 @@ async function changeOwner(
     generation !== lifetime ||
     (current && !currentProfile(owner) && current.revision >= owner.revision)
   )
-    throw changed();
+    throw profileChanged();
   client.clear();
   selectProfileOwner(owner);
 
@@ -114,14 +111,9 @@ function acceptOwner(
   owner: ActiveProfile,
   generation = lifetime,
 ): Promise<void> {
-  if (generation !== lifetime) return Promise.reject(changed());
+  if (generation !== lifetime) return Promise.reject(profileChanged());
 
-  if (
-    applying &&
-    applying.generation === generation &&
-    applying.owner.id === owner.id &&
-    applying.owner.revision === owner.revision
-  )
+  if (applying && applying.generation === generation && sameProfile(applying.owner, owner))
     return applying.promise;
 
   if (
@@ -139,15 +131,11 @@ function acceptOwner(
       .then(() => changeOwner(client, owner, generation))
       .then(
         () => {
-          if (generation !== lifetime || !currentProfile(owner)) throw changed();
+          if (generation !== lifetime || !currentProfile(owner)) throw profileChanged();
           publish({ owner, pending: false, error: null });
         },
         (cause: unknown) => {
-          if (
-            generation === lifetime &&
-            status.owner?.id === owner.id &&
-            status.owner.revision === owner.revision
-          )
+          if (generation === lifetime && status.owner && sameProfile(status.owner, owner))
             publish({ owner, pending: false, error: cause });
           throw cause;
         },
@@ -200,7 +188,7 @@ let switching = false;
 export async function switchProfile(client: QueryClient, id: string): Promise<void> {
   const owner = profileOwner();
 
-  if (!owner || switching) throw changed();
+  if (!owner || switching) throw profileChanged();
   switching = true;
 
   try {
@@ -210,7 +198,7 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
         detail: t("Playback could not be saved. Try again."),
       });
 
-    if (!currentProfile(owner)) throw changed();
+    if (!currentProfile(owner)) throw profileChanged();
     const selected = await callForProfile(owner, "profiles.switch", { id, current: owner });
     await acceptOwner(client, selected);
   } finally {
@@ -226,17 +214,17 @@ export const profileListQuery = () => ({
 export async function createProfile(client: QueryClient, name: string): Promise<void> {
   const owner = profileOwner();
 
-  if (!owner) throw changed();
+  if (!owner) throw profileChanged();
   await callForProfile(owner, "profiles.create", { name, current: owner });
 
-  if (!currentProfile(owner)) throw changed();
+  if (!currentProfile(owner)) throw profileChanged();
   await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
 }
 
 export async function removeProfile(client: QueryClient, id: string): Promise<void> {
   const owner = profileOwner();
 
-  if (!owner) throw changed();
+  if (!owner) throw profileChanged();
 
   try {
     await callForProfile(owner, "profiles.remove", { id, current: owner });
@@ -246,5 +234,5 @@ export async function removeProfile(client: QueryClient, id: string): Promise<vo
       await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
   }
 
-  if (!currentProfile(owner)) throw changed();
+  if (!currentProfile(owner)) throw profileChanged();
 }

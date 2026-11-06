@@ -1,11 +1,10 @@
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
-import { AppFailure } from "@mrstreamer/contracts/errors";
 // Where playback goes, as the UI knows it: this computer, or a receiver on the network. The main
 // process owns the receiver and what it plays (see main/services/output.ts) and says what it
 // last confirmed; this keeps that for the views, and passes on what the viewer chooses.
 //
 // The two player controllers follow it: with a receiver connected, what they are asked to play
 // goes there and their state is the receiver's. Nothing here plays or stops anything by itself.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { createStore, useStore } from "zustand";
 import type {
   Output,
@@ -24,6 +23,7 @@ import {
   currentProfile,
   currentProfileReply,
   ownProfileReply,
+  profileChanged,
 } from "../lib/ipc.ts";
 
 export interface OutputState {
@@ -190,11 +190,7 @@ export const outputs = {
     const owner = profileOwner();
     const snapshot = await callForProfile(owner, "output.status");
 
-    if (!currentProfile(owner) || !take(snapshot))
-      throw new AppFailure({
-        kind: "unexpected",
-        detail: t("Viewing profile changed. Try again."),
-      });
+    if (!currentProfile(owner) || !take(snapshot)) throw profileChanged();
   },
   status: (): OutputStatus => store.getState().status,
   /** The receiver that has playback, or had it until its connection broke; null when it plays here. */

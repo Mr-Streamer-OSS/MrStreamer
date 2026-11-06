@@ -1,4 +1,3 @@
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // Movies and episodes downloaded to this computer: the queue, its one transfer at a time, and the
 // copies that play without a subscription. Each download is a record in the database
 // (../platform/downloads-store.ts) and a UUID folder in a managed household destination, with
@@ -38,6 +37,7 @@ import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // queued download listed; which copies go together and what plays next are worked out from those
 // (see @mrstreamer/core/downloads/series). An episode queued before this, or by an earlier build,
 // has no series and stands alone.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { downloadFailure, type OperationObserver } from "../analytics/operations.ts";
 import { randomUUID } from "node:crypto";

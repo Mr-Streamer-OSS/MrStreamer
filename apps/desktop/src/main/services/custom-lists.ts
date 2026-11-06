@@ -1,4 +1,3 @@
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // The viewer's channel lists: named, in an order of the viewer's, each holding exact channels of
 // any saved subscriptions in an order of its own. Nothing joins two subscriptions' channels, and
 // no channel is ever found by its name.
@@ -23,6 +22,7 @@ import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // it went is stored for none. That is asked in the change's own transaction, so a removal that
 // erases the account comes wholly before or after it. Each change is told to the UI after it is
 // stored. Nothing here logs the name of a list or a channel.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import type { CustomList, CustomListMember } from "@mrstreamer/contracts/custom-lists";
 import { CUSTOM_LIST_NAME_MAX } from "@mrstreamer/contracts/custom-lists";
 import type { CatalogueStatus, LiveChannel } from "@mrstreamer/contracts/library";

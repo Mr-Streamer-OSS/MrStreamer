@@ -5,9 +5,13 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import type { InterfaceLanguage, LanguageChoice, Locale } from "@mrstreamer/contracts/language";
 import { currentLanguage, onLanguageChange, setLanguage } from "@mrstreamer/core/i18n";
-import { AppFailure } from "@mrstreamer/contracts/errors";
-import { t } from "@mrstreamer/core/i18n";
-import { callForProfile, profileOwner, currentProfile, currentProfileReply } from "../lib/ipc.ts";
+import {
+  callForProfile,
+  currentProfile,
+  currentProfileReply,
+  profileChanged,
+  profileOwner,
+} from "../lib/ipc.ts";
 import { queries } from "../lib/queries.ts";
 
 /** Shows the window's text in `language`, and tells assistive technology which one it is. */
@@ -48,8 +52,7 @@ export async function changeLanguage(client: QueryClient, choice: LanguageChoice
   const owner = profileOwner();
   const language = await callForProfile(owner, "language.set", { choice });
 
-  if (!currentProfile(owner) || !currentProfileReply(language))
-    throw new AppFailure({ kind: "unexpected", detail: t("Viewing profile changed. Try again.") });
+  if (!currentProfile(owner) || !currentProfileReply(language)) throw profileChanged();
   client.setQueryData(queries.language().queryKey, language);
   applyLanguage(language);
   await client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "language" });

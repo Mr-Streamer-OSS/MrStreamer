@@ -1,8 +1,12 @@
-import { DEFAULT_PROFILE_ID, type ActiveProfile } from "@mrstreamer/contracts/profiles";
-import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
 // Composition root: creates the window and wires the services to IPC.
 // First, so that everything main imports fetches with it.
 import "./fetch.ts";
+import {
+  DEFAULT_PROFILE_ID,
+  sameProfile,
+  type ActiveProfile,
+} from "@mrstreamer/contracts/profiles";
+import { ProfileSessions, type ProfileAdmission } from "./services/profiles.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -815,9 +819,6 @@ async function start(): Promise<void> {
   const initialOwner = await runtime.runPromise(profiles.active);
   const initialDefaultOwner = initialOwner.id === DEFAULT_PROFILE_ID ? initialOwner : null;
 
-  const sameProfile = (a: ActiveProfile, b: ActiveProfile) =>
-    a.id === b.id && a.revision === b.revision;
-
   const publishPreferences = (
     owner: ActiveProfile | null,
     snapshot: IpcEvents["preferences.changed"],
@@ -1351,10 +1352,7 @@ async function start(): Promise<void> {
               const active = yield* profileSessions.active;
               const chosen = languageFor(choice);
 
-              if (
-                active.id === admission.owner.id &&
-                active.revision === admission.owner.revision
-              ) {
+              if (sameProfile(active, admission.owner)) {
                 language = chosen;
                 applyLanguage(chosen);
               }

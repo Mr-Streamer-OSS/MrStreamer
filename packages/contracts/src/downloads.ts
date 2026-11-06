@@ -1,8 +1,8 @@
-import type { ActiveProfile } from "./profiles.ts";
 // Movies and episodes downloaded to this computer, as the UI sees them. A download names the exact
 // provider file it was made from, but a finished copy needs no subscription: it plays from disk,
 // with its own details, artwork and progress, after its subscription expired or was removed. Media paths,
 // addresses and logins stay in the main process; artwork comes through the app's own scheme.
+import type { ActiveProfile } from "./profiles.ts";
 import type { AppError } from "./errors.ts";
 import type { RawTitleRef } from "./ondemand.ts";
 import type { AudioTrack, StreamFailure, SubtitleTrack } from "./playback.ts";

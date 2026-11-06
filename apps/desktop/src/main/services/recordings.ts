@@ -1,4 +1,3 @@
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // Recordings: local copies of a live channel, captured by this app while it runs. The viewer
 // starts one on the channel they see, until a stop time; it ends there, or when the viewer stops
 // it or quits, and what it captured stays until the viewer deletes it, whatever room it takes. An
@@ -40,6 +39,7 @@ import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 // for its start, and holds while the guide lists another programme or none then: it never records
 // another show by its title or time. Each start reads its subscription's login as it is then, so
 // a replaced login is the one used, and a removed subscription takes its schedules with it.
+import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
 import { copyProgress } from "../platform/profile-copy-progress.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, statfs, writeFile } from "node:fs/promises";
