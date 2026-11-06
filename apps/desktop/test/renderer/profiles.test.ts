@@ -716,3 +716,23 @@ it("switches profiles from Connect and from standalone Downloads, and offers the
   await vi.waitFor(() => expect(document.body.textContent).toContain("Weather Watch"));
   expect(ui.named(t("Profile: {name}", { name: t("Default") }))?.closest("header")).toBeTruthy();
 });
+
+it("defers Quit background reads until the restored profile admission is ready", async () => {
+  useUi.setState(useUi.getInitialState(), true);
+  const active = ipc.hold("profiles.active");
+  ipc.always("profiles.active", B);
+  ipc.always("output.status", local(B));
+  ipc.always("language.get", english);
+  ipc.always("subscription.list", []);
+  const view = queryView(client);
+  unmount = view.unmount;
+  await view.render(createElement(TooltipProvider, null, createElement(App)));
+  expect(ipc.argsOf("recordings.list")).toEqual([]);
+  expect(ipc.argsOf("downloads.list")).toEqual([]);
+  await act(async () => active.resolve(B));
+  await vi.waitFor(() => {
+    expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null });
+    expect(ipc.argsOf("recordings.list")).toHaveLength(1);
+    expect(ipc.argsOf("downloads.list")).toHaveLength(1);
+  });
+});

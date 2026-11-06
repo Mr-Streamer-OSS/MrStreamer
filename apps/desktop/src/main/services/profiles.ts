@@ -375,7 +375,19 @@ export function makeProfiles({
 
         // Configuration holds the lifecycle lock: the captured owner and Settings cannot change
         // before this completes. Failure keeps admissions closed for the existing retry path.
-        if (configured) yield* configured(Context.get(context, Settings), { ...owner });
+        if (configured) {
+          const result = yield* Effect.exit(
+            Effect.suspend(() => configured(Context.get(context, Settings), { ...owner })),
+          );
+
+          if (Exit.isFailure(result)) {
+            const failure = Cause.findErrorOption(result.cause);
+
+            return yield* Effect.fail(
+              failure._tag === "Some" ? failure.value : failedWith(Cause.squash(result.cause)),
+            );
+          }
+        }
       });
 
     if (configuredFor === null) {
@@ -502,9 +514,17 @@ export function makeProfiles({
                 if (row.deleting) return Effect.void;
                 const handle = yield* opened(row.id);
 
-                return yield* row.id === DEFAULT_PROFILE_ID && defaultForget
+                const settle = yield* row.id === DEFAULT_PROFILE_ID && defaultForget
                   ? defaultForget
                   : Context.get(handle.context, Settings).prepareForget(subscription);
+
+                // Settlement runs after household admission ends; deletion still drains this owner.
+                return handle.one.withPermits(1)(
+                  Effect.gen(function* () {
+                    if (handle.closed) return;
+                    yield* settle;
+                  }),
+                );
               }),
             );
 
@@ -521,13 +541,14 @@ export function makeProfiles({
               handle.erased.set(account, (handle.erased.get(account) ?? 0) + 1);
             const rows = yield* storage.list;
 
+            if (rows.some((row) => row.deleting))
+              return yield* refused(
+                t("Finish deleting the pending profile before erasing a source."),
+              );
+
             // Separate owner databases cannot commit atomically together. Completed erasures remain
             // erased if a later owner fails. Return that failure; retrying erases the entire set again.
             for (const row of rows) {
-              if (row.deleting)
-                return yield* refused(
-                  t("Finish deleting the pending profile before erasing a source."),
-                );
               const handle = yield* opened(row.id);
               yield* handle.one.withPermits(PROFILE_OPERATIONS)(
                 row.id === DEFAULT_PROFILE_ID && defaultErase

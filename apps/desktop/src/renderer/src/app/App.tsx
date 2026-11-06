@@ -59,7 +59,7 @@ export function App() {
       ) : (
         <Screen key={profile.owner ? `${profile.owner.id}:${profile.owner.revision}` : "initial"} />
       )}
-      <QuitDialog />
+      {!profile.pending && <QuitDialog />}
     </>
   );
 }

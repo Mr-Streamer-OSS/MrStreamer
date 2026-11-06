@@ -38,10 +38,16 @@ export interface ProfileRequest<Input> {
 
 /**
  * Whether a desktop request runs as its sender's profile. Profile lifecycle and the
- * installation's Analytics consent belong to no single viewer.
+ * installation's Analytics consent and safe stop/Quit controls belong to no single viewer.
  */
 export function ownedByProfile(method: string): boolean {
-  return !method.startsWith("profiles.") && !method.startsWith("analytics.");
+  return (
+    !method.startsWith("profiles.") &&
+    !method.startsWith("analytics.") &&
+    method !== "downloads.pause" &&
+    method !== "recordings.stop" &&
+    method !== "window.quit"
+  );
 }
 
 /** A local viewing profile, including deletion that can be retried after a storage refusal. */

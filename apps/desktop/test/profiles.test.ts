@@ -31,7 +31,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { playlistGroupId } from "@mrstreamer/core/playlist/import";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
@@ -2050,3 +2050,226 @@ it("refuses a viewing command when its named source is erased while its channel 
   await refused;
   expect(await runtime.runPromise(store.titles("account", {}))).toEqual([]);
 });
+
+it.each(["startup", "switch"] as const)(
+  "keeps a rejected configured callback retryable after %s",
+  async (phase) => {
+    const dataDir = await tempDir();
+    let refuse = false;
+
+    const open = () =>
+      runtimeFor(
+        mainLayer({
+          ...testConfig(dataDir),
+          profiles: {
+            consent: { read: Effect.succeed(true), write: () => Effect.void },
+            stopInteractive: () => Effect.void,
+            configured: () =>
+              Effect.promise(async () => {
+                if (refuse) throw new Error("fixture configured callback refused");
+              }),
+          },
+        }),
+      );
+
+    if (phase === "startup") {
+      const earlier = open();
+      const saved = await promised(earlier, ProfileSessions);
+      const b = await saved.create("B");
+      await saved.switch(b.id);
+      await earlier.dispose();
+      refuse = true;
+    }
+
+    const runtime = open();
+    const profiles = await promised(runtime, ProfileSessions);
+
+    if (phase === "switch") {
+      const b = await profiles.create("B");
+      refuse = true;
+      await expect(profiles.switch(b.id)).rejects.toMatchObject({
+        error: { detail: "fixture configured callback refused" },
+      });
+    }
+
+    await expect(profiles.admit()).rejects.toMatchObject({
+      error: { detail: "fixture configured callback refused" },
+    });
+    const selected = await profiles.active();
+    refuse = false;
+    expect(await profiles.switch(selected.id, selected)).toEqual(selected);
+    expect((await profiles.admit()).owner).toEqual(selected);
+  },
+);
+
+// This refusal uses POSIX directory permissions; Windows and root ignore that fault fixture.
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "refuses erasure before changing any owner while a later profile deletion is pending",
+  async () => {
+    const dataDir = await tempDir();
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () => Effect.void,
+        },
+      }),
+    );
+
+    const profiles = await promised(runtime, ProfileSessions);
+    const roster = await promised(runtime, Roster);
+    const provider = await fakeProvider();
+    const source = await roster.add(demoLogin(provider));
+    const library = await promised(runtime, Library);
+    await library.refresh(source.id);
+    const a = await profiles.admit();
+    const channel = { subscriptionId: source.id, id: "2014" };
+    await runtime.runPromise(a.run(a.services.viewing.setFavourite("kept", channel, true)));
+    const b = await profiles.create("B");
+    await profiles.switch(b.id);
+    await profiles.switch(a.owner.id);
+    const parent = join(dataDir, "profiles");
+    const mode = (await stat(parent)).mode & 0o777;
+    await chmod(parent, 0o500);
+
+    try {
+      await expect(profiles.remove(b.id)).rejects.toBeDefined();
+    } finally {
+      await chmod(parent, mode);
+    }
+
+    expect((await profiles.list()).find(({ id }) => id === b.id)?.deleting).toBe(true);
+    await expect(roster.remove(source.id, true)).rejects.toBeDefined();
+    const current = await profiles.admit();
+    expect(
+      (await runtime.runPromise(current.run(current.services.viewing.state))).favourites,
+    ).toEqual([channel]);
+    await profiles.remove(b.id);
+    await roster.remove(source.id, true);
+    const erased = await profiles.admit();
+    expect(
+      (await runtime.runPromise(erased.run(erased.services.viewing.state))).favourites,
+    ).toEqual([]);
+  },
+);
+
+it("settles source cleanup without recreating an inactive profile deleted in the meantime", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const profiles = await promised(runtime, ProfileSessions);
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const roster = await promised(runtime, Roster);
+  const provider = await fakeProvider();
+  const source = await roster.add(demoLogin(provider));
+  const subscriptions = await promised(runtime, Subscriptions);
+  const saved = (await subscriptions.saved()).find(({ id }) => id === source.id);
+
+  if (!saved) throw new Error("No saved source");
+  const b = await profiles.create("B");
+  await profiles.switch(b.id);
+  const admitted = await profiles.admit();
+  await runtime.runPromise(admitted.run(admitted.services.settings.update({ volume: 0.25 })));
+  await profiles.switch(DEFAULT_PROFILE_ID);
+  const settle = await runtime.runPromise(sessions.prepareForget(saved));
+  await profiles.remove(b.id);
+  await expect(stat(profileDirectory(dataDir, b.id))).rejects.toMatchObject({ code: "ENOENT" });
+  await runtime.runPromise(settle);
+  await expect(stat(profileDirectory(dataDir, b.id))).rejects.toMatchObject({ code: "ENOENT" });
+  expect((await profiles.list()).map(({ id }) => id)).toEqual([DEFAULT_PROFILE_ID]);
+});
+
+it.each(["downloads.pause", "recordings.stop", "window.quit"] as const)(
+  "%s remains available after configuration refuses while personal reads stay guarded",
+  async (method) => {
+    const dataDir = await tempDir();
+    let refuse = false;
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: {
+            read: Effect.sync(() => {
+              if (refuse) throw new Error("fixture configuration refused");
+
+              return true;
+            }),
+            write: () => Effect.void,
+          },
+          stopInteractive: () => Effect.void,
+        },
+      }),
+    );
+
+    const profiles = await promised(runtime, ProfileSessions);
+    const sessions = await runtime.runPromise(ProfileSessions);
+    const b = await profiles.create("B");
+    refuse = true;
+    await expect(profiles.switch(b.id)).rejects.toBeDefined();
+    await expect(profiles.admit()).rejects.toBeDefined();
+    const selected = await profiles.active();
+    const entered: string[] = [];
+
+    // This IPC fixture registers only the four methods exercised here.
+    const handlers: Partial<IpcHandlers> = {
+      "downloads.pause": () =>
+        Effect.sync(() => {
+          entered.push("downloads.pause");
+
+          return null;
+        }),
+      "recordings.stop": () =>
+        Effect.sync(() => {
+          entered.push("recordings.stop");
+
+          return null;
+        }),
+      "window.quit": () =>
+        Effect.sync(() => {
+          entered.push("window.quit");
+
+          return null;
+        }),
+      "preferences.get": () =>
+        Effect.sync(() => {
+          entered.push("preferences.get");
+
+          return { revision: 1, preferences: defaultPreferences };
+        }),
+    };
+
+    registerIpc(runtime.runPromiseExit, handlers as IpcHandlers, () => true, {
+      admit: sessions.admitFor,
+      handlers: () => ({}),
+    });
+    const frame = { processId: 1, routingId: 1 };
+    const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+    expect(
+      await ipcBoundary.get(method)!(event, {
+        __profile: { ...selected },
+        input: method === "window.quit" ? undefined : { id: "held" },
+      }),
+    ).toEqual({ ok: true, value: null });
+    expect(
+      (
+        await ipcBoundary.get("preferences.get")!(event, {
+          __profile: { ...selected },
+          input: undefined,
+        })
+      ).ok,
+    ).toBe(false);
+    expect(entered).toEqual([method]);
+  },
+);
