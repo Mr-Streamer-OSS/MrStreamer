@@ -13,7 +13,7 @@ This guide covers the latest desktop release. See [Updates and channels](updates
 
 _One folder on your computer, by system._
 
-Mr. Streamer keeps everything on your computer, in one folder:
+Mr. Streamer keeps its app data in this folder:
 
 | System                  | Folder                                                                                                  |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -22,7 +22,7 @@ Mr. Streamer keeps everything on your computer, in one folder:
 | Windows, from the Store | `%LOCALAPPDATA%\Packages\MrStreamerOSS.Mr.Streamer_5yzg1erdm3xmr\LocalCache\Roaming\Mr. Streamer Store` |
 | Linux                   | `~/.config/Mr. Streamer`                                                                                |
 
-It holds your subscriptions, each with its encrypted password or playlist link, the channels you mapped to a guide, the encrypted addresses of your guides in Settings > Guides with the names you gave them, your preferences, favourites, watchlist, watch history and how far you got in movies and episodes, copies of each subscription's channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, a diagnostics log, and the analytics preference, random installation identifier and statistics waiting to be sent, described in the privacy policy. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off; only the copy from the Microsoft Store takes its folder with it. Delete the folder to remove everything but the password's key in your keychain and a downloaded update; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
+It holds your subscriptions, each with its encrypted password or playlist link, the channels you mapped to a guide, the encrypted addresses of your guides in Settings > Guides with the names you gave them, your preferences, favourites, watchlist, watch history and how far you got in movies and episodes, copies of each subscription's channel list, programme guide and movie and series lists, what TMDB said about your movies and series, your update channel, a diagnostics log, and the analytics preference, random installation identifier and statistics waiting to be sent, described in the privacy policy. Chromium's cache of posters and pictures there stays under 64 MB. Uninstalling leaves the folder in place, so a reinstall picks up where you left off; only the copy from the Microsoft Store takes its folder with it. Delete the folder to remove the data kept there. Downloaded media and accompanying files in a chosen folder outside it remain until you delete them separately. The password's key in your keychain and a downloaded update also remain; the [privacy policy](../privacy.md#deleting-your-data) says where those are.
 
 Your password, or a playlist's link, uses your system's storage encryption. Linux can use a fixed-key fallback instead of a keyring. See [Security](../security.md#your-login).
 

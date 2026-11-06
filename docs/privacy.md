@@ -19,7 +19,7 @@ _What stays on your device, the statistics each app sends and what the website c
 
 ### On your computer
 
-Most of what the desktop app handles never reaches us. It stays in its data folder ([where it is](user/troubleshooting.md#where-your-data-is)):
+Most of what the desktop app handles never reaches us. It stays in its data folder ([where it is](user/troubleshooting.md#where-your-data-is)); from 0.0.24, downloaded media and accompanying files can instead live in a folder you choose:
 
 - your subscriptions: server address, username, and password or playlist link
 - preferences, including your own TMDB key if you entered one
@@ -185,7 +185,7 @@ In the desktop app:
 - **Delete** on a download deletes the copy with its details, pictures, progress and subtitles.
 - **Delete** on a recording removes its saved video and recording entry. Removing a subscription stops its active recordings and keeps saved recordings until you delete them.
 - **The cross** on a reminder in Live TV's reminders list deletes it.
-- **Deleting the data folder** deletes everything else, including the statistics setting, so a new folder starts with statistics on. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS or the matching entry in your Linux keyring. A downloaded update stays in `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows or `~/.cache/mrstreamer-updater` on Linux until you delete that folder.
+- **Deleting the data folder** deletes the data kept there, including the statistics setting, so a new folder starts with statistics on. Downloaded media and accompanying files in a chosen folder outside the data folder remain until you delete them. To also remove the password key, delete "Mr. Streamer Safe Storage" in Keychain Access on macOS or the matching entry in your Linux keyring. A downloaded update stays in `~/Library/Caches/mrstreamer-updater` on macOS, `%LOCALAPPDATA%\mrstreamer-updater` on Windows or `~/.cache/mrstreamer-updater` on Linux until you delete that folder.
 - **Statistics already sent** are not erased by local removal or turning the setting off. If you still have the desktop `installationId` in `analytics.json`, you can supply it privately with a request through the contact below. It may help identify the records; it does not itself perform deletion.
 
 Removing a subscription or turning statistics off keeps an installation identifier already stored in `analytics.json`. A fresh profile can have no identifier until its first foreground observation. Deleting the data folder removes the local identifier; a new profile gets a new one when observed. This does not delete statistics already sent.
