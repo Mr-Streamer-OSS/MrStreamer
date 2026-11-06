@@ -2254,8 +2254,16 @@ describe.skipIf(!hasTools)("recordings", () => {
     expect((await again.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
     await refused(() => again.recordings.recordProgress(id, 0, 90));
     expect((await again.recordings.copy(id))?.progress).toEqual({ position: 42, duration: 90 });
-    await again.recordings.recordProgress(id, 0, 90);
-    await again.recordings.check();
+    // The final player save can fail just as the player closes: the runtime retries it.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_001);
+
+    try {
+      await again.recordings.check();
+    } finally {
+      clock.mockRestore();
+    }
+
+    expect((await again.recordings.copy(id))?.progress).toEqual({ position: 0, duration: 90 });
     await again.quit();
     await writeFile(path, stale);
     const last = await app(dataDir);

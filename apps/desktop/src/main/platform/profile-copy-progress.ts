@@ -1,6 +1,7 @@
 // Personal resume positions for household copies. Inventory documents retain their legacy
 // positions for older builds, but only an explicit playback write changes this table.
 import type { DatabaseSync } from "node:sqlite";
+import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
 import { type } from "arktype";
 import * as Effect from "effect/Effect";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
@@ -25,6 +26,7 @@ const SCHEMA = `create table if not exists profile_copy_progress (
 export const copyProgress = Effect.gen(function* () {
   const opened = yield* Database;
   const profiles = yield* Profiles;
+  let initialized = false;
 
   const access = <A>(run: (db: DatabaseSync, owner: string) => A) =>
     Effect.gen(function* () {
@@ -33,7 +35,10 @@ export const copyProgress = Effect.gen(function* () {
       if ("failure" in opened) return yield* unavailable(opened.failure);
 
       return yield* attempt(() => {
-        opened.db.exec(SCHEMA);
+        if (!initialized) {
+          opened.db.exec(SCHEMA);
+          initialized = true;
+        }
 
         return run(opened.db, owner.id);
       });
@@ -54,11 +59,13 @@ export const copyProgress = Effect.gen(function* () {
         const row =
           select() ??
           transaction(db, () => {
-            if (legacy) Position.assert(legacy);
+            const seed = owner === DEFAULT_PROFILE_ID ? legacy : null;
+
+            if (seed) Position.assert(seed);
             db.prepare(
               `insert or ignore into profile_copy_progress
               (profile_id, kind, copy_id, position, duration) values (?, ?, ?, ?, ?)`,
-            ).run(owner, kind, id, legacy?.position ?? null, legacy?.duration ?? null);
+            ).run(owner, kind, id, seed?.position ?? null, seed?.duration ?? null);
 
             return select();
           });

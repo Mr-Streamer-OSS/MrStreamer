@@ -349,6 +349,12 @@ function finalOf(
 function make(deps: RecordingsDeps) {
   return Effect.gen(function* () {
     const personal = yield* copyProgress;
+
+    const pendingProgress = new Map<
+      string,
+      { position: number; duration: number; retryAt: number }
+    >();
+
     const subscriptions = yield* Subscriptions;
     const library = yield* Library;
     const guide = yield* Guide;
@@ -1888,8 +1894,26 @@ function make(deps: RecordingsDeps) {
 
       if (asleep !== null && Date.now() - asleep < CHECK_MS) return asleep + CHECK_MS;
       asleep = null;
+
+      for (const [id, progress] of pendingProgress) {
+        if (!records.has(id)) {
+          pendingProgress.delete(id);
+          continue;
+        }
+
+        if (Date.now() < progress.retryAt) continue;
+        progress.retryAt = Date.now() + RETRY_MS;
+
+        const saved = yield* Effect.result(
+          personal.write("recording", id, progress.position, progress.duration),
+        );
+
+        if (saved._tag === "Success" && pendingProgress.get(id) === progress)
+          pendingProgress.delete(id);
+      }
+
       const paused = yield* resumeDue(Date.now());
-      const resumeAt = paused ? Date.now() + RETRY_MS : null;
+      const resumeAt = paused || pendingProgress.size > 0 ? Date.now() + RETRY_MS : null;
 
       if (readKept.kind !== "read") {
         // What recordings.json couldn't keep is written again whatever schedules.json holds.
@@ -2055,7 +2079,10 @@ function make(deps: RecordingsDeps) {
         each.next && each.next.start > now ? [each.next.start] : [],
       );
 
-      return Math.min(now + (retry || paused ? RETRY_MS : CHECK_MS), ...starts);
+      return Math.min(
+        now + (retry || paused || pendingProgress.size > 0 ? RETRY_MS : CHECK_MS),
+        ...starts,
+      );
     });
 
     const checkOnce = scheduling(checkNow).pipe(
@@ -2471,7 +2498,16 @@ function make(deps: RecordingsDeps) {
             return yield* new Failed({
               error: { kind: "unexpected", detail: t("This recording is no longer there.") },
             });
-          yield* personal.write("recording", id, position, duration);
+          const progress = { position, duration, retryAt: Date.now() + RETRY_MS };
+          pendingProgress.set(id, progress);
+          yield* personal.write("recording", id, position, duration).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                if (pendingProgress.get(id) === progress) pendingProgress.delete(id);
+              }),
+            ),
+            Effect.onError(() => wake),
+          );
         }),
       storage: storageNow,
       setLimits: (limits: RecordingLimits) =>

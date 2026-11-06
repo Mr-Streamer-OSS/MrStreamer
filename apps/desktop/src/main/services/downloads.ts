@@ -343,50 +343,55 @@ function make(deps: DownloadsDeps) {
       owners: ReadonlyMap<string, { readonly id: string; readonly name: string }>,
       busy: ReadonlySet<string>,
     ) =>
-      Effect.map(personal.read("download", record.id, record.progress), (progress): Download => ({
-        id: record.id,
-        title: record.title,
-        subscription: owners.get(record.account) ?? null,
-        name: record.about.name,
-        episodeName: record.about.episodeName,
-        year: record.about.year,
-        duration: record.about.duration,
-        originalLanguage: record.about.originalLanguage,
-        posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
-        wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
-        size:
-          record.state === "complete"
-            ? record.received
-            : active?.id === record.id
-              ? active.size
-              : record.size,
-        status:
-          record.state === "complete"
-            ? { kind: missing.has(record.id) ? "missing" : "complete" }
-            : record.state === "failed"
-              ? {
-                  kind: "failed",
-                  failure: record.failure ?? {
-                    kind: "app",
-                    error: { kind: "unexpected", detail: t("This download stopped.") },
-                  },
-                }
+      Effect.map(
+        record.state === "complete"
+          ? personal.read("download", record.id, record.progress)
+          : Effect.succeed(null),
+        (progress): Download => ({
+          id: record.id,
+          title: record.title,
+          subscription: owners.get(record.account) ?? null,
+          name: record.about.name,
+          episodeName: record.about.episodeName,
+          year: record.about.year,
+          duration: record.about.duration,
+          originalLanguage: record.about.originalLanguage,
+          posterUrl: record.about.poster ? artworkUrl(record.id, "poster") : null,
+          wideUrl: record.about.wide ? artworkUrl(record.id, "wide") : null,
+          size:
+            record.state === "complete"
+              ? record.received
               : active?.id === record.id
+                ? active.size
+                : record.size,
+          status:
+            record.state === "complete"
+              ? { kind: missing.has(record.id) ? "missing" : "complete" }
+              : record.state === "failed"
                 ? {
-                    kind: "transferring",
-                    received: active.received,
-                    size: active.size,
-                    rate: active.rate,
-                    restarted: active.restarted,
+                    kind: "failed",
+                    failure: record.failure ?? {
+                      kind: "app",
+                      error: { kind: "unexpected", detail: t("This download stopped.") },
+                    },
                   }
-                : record.pausedAt !== undefined
-                  ? { kind: "paused", received: record.received, size: record.size }
-                  : busy.has(record.subscriptionId)
-                    ? { kind: "waiting" }
-                    : { kind: "queued" },
-        progress,
-        series: seriesKeyOf(record),
-      }));
+                : active?.id === record.id
+                  ? {
+                      kind: "transferring",
+                      received: active.received,
+                      size: active.size,
+                      rate: active.rate,
+                      restarted: active.restarted,
+                    }
+                  : record.pausedAt !== undefined
+                    ? { kind: "paused", received: record.received, size: record.size }
+                    : busy.has(record.subscriptionId)
+                      ? { kind: "waiting" }
+                      : { kind: "queued" },
+          progress,
+          series: seriesKeyOf(record),
+        }),
+      );
 
     /** What each series of the downloads listed, by its key: as its latest queued one read it. */
     const seriesOf = (all: readonly StoredDownload[]) => {
@@ -900,6 +905,9 @@ function make(deps: DownloadsDeps) {
 
           const answer = (known: StoredDownload) =>
             Effect.gen(function* () {
+              const owners = yield* accounts;
+              const busy = yield* coordination.busy;
+
               if (known.state === "failed") {
                 yield* attempt(async () =>
                   update(known.id, ({ failure: _failure, pausedAt: _pausedAt, ...rest }) => ({
@@ -911,13 +919,7 @@ function make(deps: DownloadsDeps) {
                 wake();
               }
 
-              const owners = yield* accounts;
-
-              return yield* downloadOf(
-                records.get(known.id) ?? known,
-                owners,
-                yield* coordination.busy,
-              );
+              return yield* downloadOf(records.get(known.id) ?? known, owners, busy);
             });
 
           const known = knownOf();
@@ -926,6 +928,8 @@ function make(deps: DownloadsDeps) {
           // Asked first: a title its provider doesn't list now isn't queued.
           const file = yield* onDemand.file(title);
           const kept = yield* aboutOf(raw, subscriptionId);
+          const owners = yield* accounts;
+          const busy = yield* coordination.busy;
 
           // Both took a while. A subscription removed or logged in anew meanwhile had its unfinished
           // downloads ended without this one (a removal ends them again once it is gone, after
@@ -961,6 +965,7 @@ function make(deps: DownloadsDeps) {
             progress: null,
           };
 
+          const result = yield* downloadOf(record, owners, busy);
           yield* attempt(async () => write(record));
           yield* Effect.forkIn(
             Effect.promise(() => keepArtwork(record.id, kept.artwork)),
@@ -969,7 +974,7 @@ function make(deps: DownloadsDeps) {
           tell();
           wake();
 
-          return yield* downloadOf(record, yield* accounts, yield* coordination.busy);
+          return result;
         }),
 
       remove: (id: string) =>

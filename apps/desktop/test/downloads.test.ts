@@ -18,6 +18,9 @@ import type { OperationObserver } from "../src/main/analytics/operations.ts";
 import type { AnalyticsFailure } from "@mrstreamer/contracts/analytics";
 import type { OperationOutcome } from "../src/main/analytics/operations.ts";
 import { fileDisk, type Disk } from "../src/main/downloads/transfer.ts";
+import { Database } from "../src/main/platform/database.ts";
+import { Profiles } from "../src/main/platform/profile-store.ts";
+import { copyProgress } from "../src/main/platform/profile-copy-progress.ts";
 import { mainLayer } from "../src/main/runtime.ts";
 import { Downloads } from "../src/main/services/downloads.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
@@ -812,6 +815,30 @@ describe.skipIf(!hasTools)("downloads", () => {
     const items = (await downloads.list()).items;
     expect(items.every((item) => item.status.kind !== "complete")).toBe(true);
   }, 60_000);
+
+  it("lists incomplete downloads without seeding personal progress", async () => {
+    const { provider, subscriptionId, downloads, dataDir } = await connected();
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(film.id, 200_000, 60_000);
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.exec("create table profile_copy_progress (unreadable text)");
+      const queued = await downloads.add(film.ref);
+      db.exec("drop table profile_copy_progress");
+      db.exec("begin immediate");
+
+      try {
+        expect(
+          (await downloads.list()).items.find((item) => item.id === queued.id)?.progress,
+        ).toBeNull();
+      } finally {
+        db.exec("rollback");
+      }
+    } finally {
+      db.close();
+    }
+  });
 
   it("migrates personal copy positions once, separates exact copies, and retries refused writes", async () => {
     const { provider, dataDir, subscriptionId, downloads, find, quit } = await connected();
@@ -2459,3 +2486,30 @@ it("observes actual download runs, successful completion, disk failure and cance
   ]);
   expect(starts).toBe(4);
 }, 60_000);
+
+it("seeds legacy copy positions only into Default and keeps each owner's explicit writes", async () => {
+  const db = new DatabaseSync(":memory:");
+  onTestFinished(() => db.close());
+  let owner = "default";
+
+  const personal = await Effect.runPromise(
+    copyProgress.pipe(
+      Effect.provideService(Database, { db }),
+      Effect.provideService(Profiles, {
+        active: Effect.sync(() => ({ id: owner, revision: 1 })),
+      }),
+    ),
+  );
+
+  const legacy = { position: 42, duration: 90 };
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual(legacy);
+  owner = "another-profile";
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toBeNull();
+  await Effect.runPromise(personal.write("download", "copy", 7, 90));
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual({
+    position: 7,
+    duration: 90,
+  });
+  owner = "default";
+  expect(await Effect.runPromise(personal.read("download", "copy", legacy))).toEqual(legacy);
+});
