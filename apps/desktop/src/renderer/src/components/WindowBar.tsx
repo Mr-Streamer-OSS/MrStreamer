@@ -22,6 +22,7 @@ import {
   type View,
 } from "../app/ui-store.ts";
 import { DownloadsNotice, useDownloadsStatus } from "../features/downloads/DownloadsNotice.tsx";
+import { ProfileMenu } from "../features/profiles/ProfileMenu.tsx";
 import { useAnyRecording, useLiveRecordings } from "../features/recordings/recordings.ts";
 import {
   UpdateNotice,
@@ -226,6 +227,7 @@ export function WindowBar({
             )}
           </>
         )}
+        <ProfileMenu />
       </div>
     </BarFrame>
   );

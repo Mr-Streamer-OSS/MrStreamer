@@ -544,39 +544,72 @@ it.each([AGAIN, B])(
   },
 );
 
-it("keeps the window bar to the brand while the viewer's profile can't load, and restores it after Retry", async () => {
-  useUi.setState(useUi.getInitialState(), true);
-  ipc.always("profiles.active", B);
-  ipc.always("output.status", local(B));
-  ipc.always("subscription.list", [SAVED]);
-  ipc.always("liveBrowse.get", { kind: "all" });
-  ipc.always("library.categories", []);
-  ipc.always("library.browse", browseResult([]));
-  ipc.always("viewing.get", viewing(0));
-  ipc.always("ondemand.status", { lists: [], metadata: null });
-  ipc.refuse("language.get", { kind: "unexpected", detail: "Configuration unfinished." });
+it.each([
+  { recovery: "Retry", empty: false },
+  { recovery: "another profile", empty: false },
+  { recovery: "Retry", empty: true },
+  { recovery: "another profile", empty: true },
+])(
+  "keeps recovery controls available and restores navigation through %j",
+  async ({ recovery, empty }) => {
+    useUi.setState(useUi.getInitialState(), true);
+    ipc.always("profiles.active", B);
+    ipc.always("profiles.list", [
+      { id: A.id, name: "Default", deleting: false },
+      { id: B.id, name: "Sam", deleting: false },
+    ]);
+    ipc.always("output.status", local(B));
+    ipc.always("subscription.list", empty ? [] : [SAVED]);
+    ipc.always("liveBrowse.get", { kind: "all" });
+    ipc.always("library.categories", []);
+    ipc.always("library.browse", browseResult([]));
+    ipc.always("viewing.get", viewing(0));
+    ipc.always("ondemand.status", { lists: [], metadata: null });
+    ipc.refuse("language.get", { kind: "unexpected", detail: "Configuration unfinished." });
 
-  const named = () =>
-    [...document.querySelectorAll("button")].map(
-      (button) => button.getAttribute("aria-label") ?? button.textContent?.trim(),
+    const named = () =>
+      [...document.querySelectorAll("button")].map(
+        (button) => button.getAttribute("aria-label") ?? button.textContent?.trim(),
+      );
+
+    const view = queryView(client);
+    unmount = view.unmount;
+    await view.render(createElement(TooltipProvider, null, createElement(App)));
+    await vi.waitFor(() => expect(document.querySelector("[role=alert]")).not.toBeNull());
+
+    // The bar stays the window's drag area, with nothing that opens a page no one can show.
+    const bar = document.querySelector("header");
+    expect(bar?.classList.contains("drag")).toBe(true);
+    await vi.waitFor(() =>
+      expect(named()).toEqual([t("Profile: {name}", { name: "Sam" }), t("Retry")]),
     );
+    expect(bar?.textContent).toBe("mr. streamerS");
 
-  const view = queryView(client);
-  unmount = view.unmount;
-  await view.render(createElement(TooltipProvider, null, createElement(App)));
-  await vi.waitFor(() => expect(document.querySelector("[role=alert]")).not.toBeNull());
+    ipc.always("language.get", english);
 
-  // The bar stays the window's drag area, with nothing that opens a page no one can show.
-  const bar = document.querySelector("header");
-  expect(bar?.classList.contains("drag")).toBe(true);
-  expect(bar?.textContent).toBe("mr. streamer");
-  expect(named()).toEqual([t("Retry")]);
+    if (recovery === "Retry") {
+      ipc.always("profiles.switch", B);
+      await menu().press(t("Retry"));
+    } else {
+      ipc.always("profiles.switch", AGAIN);
+      ipc.always("profiles.active", AGAIN);
+      ipc.always("output.status", local(AGAIN));
+      await menu().press(t("Profile: {name}", { name: "Sam" }));
+      await menu().press("DDefault");
+      expect(ipc.argsOf("profiles.switch").at(-1)).toEqual({ id: A.id, current: B });
+    }
 
-  ipc.always("language.get", english);
-  ipc.always("profiles.switch", B);
-  await menu().press(t("Retry"));
-  await vi.waitFor(() =>
-    expect(named()).toEqual(expect.arrayContaining([t("Home"), t("Search"), t("Settings")])),
-  );
-  expect(document.querySelector("[role=alert]")).toBeNull();
-});
+    if (empty) {
+      await vi.waitFor(() => expect(profileStatus().error).toBeNull());
+      expect(named()).not.toContain(t("Search"));
+      expect(named()).not.toContain(t("Settings"));
+      expect(profileOwner()).toEqual(recovery === "Retry" ? B : AGAIN);
+    } else {
+      await vi.waitFor(() =>
+        expect(named()).toEqual(expect.arrayContaining([t("Home"), t("Search"), t("Settings")])),
+      );
+    }
+
+    expect(document.querySelector("[role=alert]")).toBeNull();
+  },
+);

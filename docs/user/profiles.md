@@ -1,12 +1,12 @@
 # Viewing profiles
 
-Profile controls are held off while isolation fixes await independent recheck and built-app proof. The profile menu described below is implemented but currently unmounted; lifecycle changes are refused. Default keeps the personal state saved before profiles were introduced, in its original files.
+Use local viewing profiles to keep each viewer's lists, progress and preferences separate. Default keeps the personal state saved before profiles were introduced, in its original files.
 
 Each profile keeps its own favourites, recent channels, channel lists, Watchlist, movie and episode progress, watched marks, downloaded-copy and recording progress, and viewing preferences. Subtitle selection, Off and visibility are personal too.
 
 Subscriptions, guides, downloaded files, recordings, subtitle timing and usage-statistics consent are shared by the installation. Switching stops interactive playback after saving its progress; household downloads and recordings continue.
 
-Once enabled, use the avatar beside Settings. Choose **New profile**, enter a name and choose **Add**. Choose another profile to switch. To delete an inactive profile, choose its trash button and confirm. Default and the active profile cannot be deleted. Deleting removes that profile’s lists, progress and settings while keeping household media. A failed deletion stays visible with Retry.
+Use the profile avatar in the window bar. Choose **New profile**, enter a name and choose **Add**. Choose another profile to switch. To delete an inactive profile, choose its trash button and confirm. Default and the active profile cannot be deleted. Deleting removes that profile’s lists, progress and settings while keeping household media. A failed deletion stays visible with Retry.
 
 If configuration or a private read fails, the error stays visible. Retry attempts the durably selected profile again; the profile menu also lets you select another viewer. Failed reads never replace personal data with defaults.
 
