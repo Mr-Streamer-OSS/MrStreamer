@@ -241,8 +241,24 @@ While you reorder favourites or a list, the keys are these alone:
 | Enter                           | Save                                            |
 | Escape                          | Cancel                                          |
 
-## Live rewind service
+## Live rewind
 
-From 0.0.24, local MPEG-TS views have a retained arrival-time window independent of the playing cursor. Pausing the view keeps capture running. Seeking restarts its local reader within retained history; Go live starts at the newest data. The target is 30 minutes, configurable up to 60, subject to the shared 2 GiB temporary-file cap and free-space reserve. An expired cursor is reported with the remaining window. Closing the view releases its history without stopping an attached recording.
+_From 0.0.24. Pause and rewind a channel while it goes on arriving._
 
-Watch controls are pending UI integration. HLS, catch-up and receiver playback do not expose this retained timeline. A provider interruption still uses the existing reconnect flow; a new capture starts a new window, without filling the missing time.
+When a channel plays on this computer as MPEG-TS, Watch shows a timeline under its controls. It spans what Mr. Streamer has kept of the channel since it started playing: up to the last 30 minutes, less when the temporary folder's 2 GiB, shared with recordings and other channels, or the 5 GB it leaves free on the disk runs out first. The times at its ends are the oldest moment kept and now. Next to them, Watch says **Live**, or how far behind live you are, and how much is kept.
+
+- **Pause** stops the picture while the channel keeps arriving. **Play** goes on from where it stopped.
+- **Back 10 seconds** and **Forward 10 seconds** skip; forward past now goes live.
+- Drag the timeline and let go to watch from there.
+- **Go live** returns to now.
+
+When you pause longer than the channel is kept, the moment you paused at is gone; Watch says so, and Play goes on from the oldest moment still kept. Switching channel and Stop let go of what was kept, while a recording of the channel goes on; quitting empties it too.
+
+| Key                         | While watching a channel with a timeline |
+| --------------------------- | ---------------------------------------- |
+| Space, K                    | Pause, and play on                       |
+| J, L                        | Back or forward 10 seconds               |
+| End                         | Go live                                  |
+| Left, Right on the timeline | 10 seconds; Page Up, Page Down a minute  |
+
+HLS channels, catch-up programmes and a channel playing on a TV have no timeline. Their keys say **This stream can't rewind**, or **Rewind plays here only** on a TV. When the provider breaks off, the channel reconnects as before and its timeline starts again from then.

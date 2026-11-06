@@ -1634,4 +1634,13 @@ export const es: Translation = {
     one: "{count} programa por ahora",
     other: "{count} programas por ahora",
   },
+  "Live rewind": "Retroceso en directo",
+  Live: "En directo",
+  "{time} behind live": "{time} por detrás del directo",
+  "{time} kept": "{time} guardados",
+  "Go live": "Ir al directo",
+  "Paused moment expired. Play resumes from {time}.":
+    "El momento en pausa ha caducado. La reproducción sigue desde las {time}.",
+  "Rewind plays here only": "El retroceso solo funciona aquí",
+  "This stream can't rewind": "Este stream no puede retroceder",
 };

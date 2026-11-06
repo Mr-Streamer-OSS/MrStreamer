@@ -1530,4 +1530,14 @@ export const en = {
     one: "{count} programme so far",
     other: "{count} programmes so far",
   },
+  // Live rewind.
+  "Live rewind": "Live rewind",
+  Live: "Live",
+  "{time} behind live": "{time} behind live",
+  "{time} kept": "{time} kept",
+  "Go live": "Go live",
+  "Paused moment expired. Play resumes from {time}.":
+    "Paused moment expired. Play resumes from {time}.",
+  "Rewind plays here only": "Rewind plays here only",
+  "This stream can't rewind": "This stream can't rewind",
 } as const satisfies Readonly<Record<string, string | Plural>>;

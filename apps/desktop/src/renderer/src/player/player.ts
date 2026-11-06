@@ -231,7 +231,9 @@ export interface PlayerState {
    * and the player picks again.
    */
   readonly fixed: boolean;
+  /** The retained window of a local MPEG-TS view and where it plays; null where it can't rewind. */
   readonly timeline: LiveTimeline | null;
+  /** That view is paused while its capture goes on. */
   readonly paused: boolean;
 }
 
@@ -304,13 +306,22 @@ interface Recording {
 let archived: Recording | null = null;
 
 /**
- * The open stream, and for a recording, which, from where the provider's recording starts, and
- * for how long it plays.
+ * A local MPEG-TS view's retained session, which pause and seeks reload without opening another.
+ * The cursor is `cursorOrigin` plus the picture's position, once the reload after a seek has
+ * reported where it starts; until then, and while paused, it is the stored timeline's cursor.
  */
 let retainedSession: StreamSession | null = null;
 let rewindSelection = 0;
 let cursorOrigin = 0;
+let cursorSettled = true;
 
+/** How close to the newest retained data still counts as live. */
+export const LIVE_EDGE_MS = 5000;
+
+/**
+ * The open stream, and for a recording, which, from where the provider's recording starts, and
+ * for how long it plays.
+ */
 let current: {
   readonly sessionId: string;
   readonly engine: Engine;
@@ -383,6 +394,15 @@ let recovery = UNTRIED;
 /** The viewer asked for this computer, so the channel goes on here when the receiver is let go of. */
 let returning = false;
 
+/** Where the retained view is, in arrival time. */
+function liveCursor(): number {
+  const { paused, timeline } = store.getState();
+
+  return paused || !cursorSettled
+    ? (timeline?.cursor ?? cursorOrigin)
+    : cursorOrigin + video.currentTime * 1000;
+}
+
 function cancelZap(): void {
   if (zapTimer) clearTimeout(zapTimer);
   zapTimer = null;
@@ -396,6 +416,7 @@ function release(): void {
   if (!current) return;
   retainedSession = null;
   rewindSelection++;
+  cursorSettled = true;
   store.setState({ timeline: null, paused: false });
 
   if (sameOwned(tuned, store.getState().channel)) channelPlayed += current.engine.played();
@@ -658,6 +679,7 @@ async function start(
       .then((timeline) => {
         if (mine !== selection) return;
         cursorOrigin = (timeline?.cursor ?? Date.now()) - video.currentTime * 1000;
+        cursorSettled = true;
         store.setState({ timeline, paused: false });
       })
       .catch(() => {});
@@ -1445,11 +1467,7 @@ export const player = {
     const timeline = await call("playback.timeline", { sessionId: session.sessionId });
 
     if (retainedSession !== session) return;
-
-    const cursor = store.getState().paused
-      ? (store.getState().timeline?.cursor ?? cursorOrigin)
-      : cursorOrigin + video.currentTime * 1000;
-
+    const cursor = liveCursor();
     store.setState({
       timeline: timeline ? { ...timeline, cursor, expired: cursor < timeline.start } : null,
     });
@@ -1457,9 +1475,10 @@ export const player = {
 
   /** Pauses the picture while the main process keeps this view's capture running. */
   pause(): void {
-    if (!store.getState().timeline || onReceiver) return;
-    const timeline = store.getState().timeline!;
-    const cursor = cursorOrigin + video.currentTime * 1000;
+    const { timeline, paused } = store.getState();
+
+    if (!timeline || paused || onReceiver) return;
+    const cursor = liveCursor();
     video.pause();
     current?.engine.destroy();
     store.setState({ paused: true, timeline: { ...timeline, cursor } });
@@ -1481,12 +1500,31 @@ export const player = {
     });
 
     if (retainedSession !== session || requested !== rewindSelection || !timeline) return;
+    cursorSettled = false;
     store.setState({ timeline, paused: false });
     await start(channel, false, false, session);
   },
 
   goLive(): Promise<void> {
     return player.seekLive(null);
+  },
+
+  /** Pauses a retained view, or plays it on from where it paused. */
+  togglePause(): void {
+    if (store.getState().paused) player.resume();
+    else player.pause();
+  },
+
+  /** Moves the retained cursor by `ms`; reaching the newest data goes live. */
+  skip(ms: number): Promise<void> {
+    const { timeline } = store.getState();
+
+    if (!timeline) return Promise.resolve();
+    const target = liveCursor() + ms;
+
+    return target >= timeline.end - LIVE_EDGE_MS
+      ? player.goLive()
+      : player.seekLive(Math.max(timeline.start, target));
   },
 
   /** Returns to the channel that played before this one. */
@@ -1563,7 +1601,7 @@ export const player = {
    */
   resume(): void {
     if (!onReceiver && store.getState().paused) {
-      void player.seekLive(store.getState().timeline?.cursor ?? cursorOrigin);
+      void player.seekLive(liveCursor());
 
       return;
     }
@@ -1679,12 +1717,7 @@ export const player = {
     const own = current?.engine.tracks;
 
     if (own) own.setAudio(id);
-    else if (store.getState().timeline)
-      void player.seekLive(
-        store.getState().paused
-          ? store.getState().timeline!.cursor
-          : cursorOrigin + video.currentTime * 1000,
-      );
+    else if (store.getState().timeline) void player.seekLive(liveCursor());
     else void begin(channel);
   },
 
