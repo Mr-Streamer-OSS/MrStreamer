@@ -25,7 +25,6 @@ const signIns: Array<{ server: string; fail: () => void; succeed: () => void }> 
 
 const consent = vi.hoisted(() => ({
   choice: null as "on" | "off" | null,
-  answers: [] as Array<{ text: string; onPress: () => void }>,
   prompts: 0,
   privacy: [] as string[],
 }));
@@ -71,8 +70,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 vi.mock("react-native", async () => ({
   ...(await import("./react-native.ts")).reactNative,
   Alert: {
-    alert: (_title: string, _message: string, answers: typeof consent.answers) => {
-      consent.answers = answers;
+    alert: () => {
       consent.prompts++;
     },
   },
@@ -91,7 +89,6 @@ afterEach(() => {
   unmount();
   signIns.length = 0;
   consent.choice = null;
-  consent.answers = [];
   consent.prompts = 0;
   consent.privacy = [];
 });
@@ -119,9 +116,6 @@ function mount() {
           .dispatchEvent(new Event("click", { bubbles: true })),
       );
     },
-    choose(label: string) {
-      React.act(() => consent.answers.find((each) => each.text === label)!.onPress());
-    },
     type(name: "server" | "username" | "password", value: string) {
       React.act(() => {
         // React tracks the value it last rendered; setting it through the prototype lets the
@@ -142,7 +136,6 @@ function mount() {
 function filledForm() {
   const form = mount();
   form.click("Add provider");
-  form.choose("Don't share");
   form.type("server", "http://a.example");
   form.type("username", "demo");
   form.type("password", "secret");
@@ -194,20 +187,22 @@ describe("Connect after a failed sign-in", () => {
   });
 });
 
-it.each(["Don't share", "Share"])(
-  "continues through %s, keeps the choice on Back and opens privacy",
-  (answer) => {
+it.each([null, "off", "on"] as const)(
+  "opens the form directly with saved statistics choice %s, keeps it on Back and opens privacy",
+  (choice) => {
+    consent.choice = choice;
     const form = mount();
     form.click("Privacy policy");
     expect(consent.privacy).toEqual(["https://mrstreamer.app/privacy"]);
     form.click("Add provider");
-    expect(form.container.querySelector("input")).toBeNull();
-    form.choose(answer);
-    expect(consent.choice).toBe(answer === "Share" ? "on" : "off");
+    expect(consent.prompts).toBe(0);
+    expect(consent.choice).toBe(choice);
     expect(form.container.querySelector("input")).not.toBeNull();
     form.click("Back");
+    expect(form.container.querySelector("input")).toBeNull();
     form.click("Add provider");
-    expect(consent.prompts).toBe(1);
+    expect(consent.prompts).toBe(0);
+    expect(consent.choice).toBe(choice);
     expect(form.container.querySelector("input")).not.toBeNull();
   },
 );

@@ -9,7 +9,8 @@ key commands, programme reminders and forgetting cached logins). Nothing of it i
 install, build or packages.
 
 The empty-roster Connect screen shows the selected welcome, then Add provider opens the ordinary
-provider form directly. There is no statistics prompt on setup or restored-provider launch.
+provider form directly. The current source has no statistics prompt on setup or restored-provider launch; earlier
+installed builds can still show it. This source change does not announce a public release.
 Back cancels an unfinished login;
 Privacy policy and existing offline copies remain accessible. New onboarding has no demo entry.
 Existing labelled Demo providers remain usable and need no login or Keychain item. Its original generated movie

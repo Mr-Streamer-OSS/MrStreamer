@@ -163,12 +163,12 @@ it("keeps the splash until routes are known, then mounts saved-account navigatio
     expect(container.querySelector('[data-route="(tabs)"]')).not.toBeNull();
     expect(container.querySelector('[data-route="connect"]')).toBeNull();
     expect(container.querySelector("[data-watch]")).not.toBeNull();
-    expect(scenario.prompts).toBe(1);
+    expect(scenario.prompts).toBe(0);
     await React.act(async () => {
       scenario.finish();
     });
     expect(currentStartup().kind).toBe("open");
-    expect(scenario.prompts).toBe(1);
+    expect(scenario.prompts).toBe(0);
   } finally {
     React.act(() => root.unmount());
     vi.useRealTimers();
