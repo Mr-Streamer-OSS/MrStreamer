@@ -136,7 +136,14 @@ export async function liveRewindScenario(
     streams(): { requests: number; active: number };
   },
 ) {
-  const samples: Record<string, unknown>[] = [];
+  const samples: {
+    stage: string;
+    at: string;
+    historyBytes: number;
+    mainRssKiB: number;
+    streams: ReturnType<typeof fixture.streams>;
+  }[] = [];
+
   d.observed["resources"] = samples;
 
   const resources = async (stage: string) => {
