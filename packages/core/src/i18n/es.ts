@@ -1718,6 +1718,10 @@ export const es: Translation = {
     "Una regla que sigue {title} graba esto. Su margen es el de la regla.",
   "From a rule": "Por una regla",
   Rules: "Reglas",
+  "This rule's subscription is no longer there.": "La suscripción de esta regla ya no existe.",
+  "This rule's guide could not be read.": "No se pudo leer la guía de esta regla.",
+  "This recording rule’s airing history is full.":
+    "El historial de emisiones de esta regla de grabación está lleno.",
   "Recording rules could not be read.": "No se pudieron leer las reglas de grabación.",
   "Recording rules could not be saved.": "No se pudieron guardar las reglas de grabación.",
   "This recording rule is no longer there.": "Esta regla de grabación ya no existe.",

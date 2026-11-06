@@ -16,7 +16,7 @@ import { currentLanguage, formatDate, t } from "@mrstreamer/core/i18n";
 import { useUi } from "../../app/ui-store.ts";
 import { call, listen } from "../../lib/ipc.ts";
 import { titlePlayer } from "../../player/title-player.ts";
-import { schedulesQuery, useSchedules } from "./schedules.ts";
+import { rulesQuery, schedulesQuery, useSchedules } from "./schedules.ts";
 
 const recordingsQuery = () =>
   queryOptions({
@@ -42,6 +42,7 @@ export function syncRecordings(client: QueryClient): () => void {
     void client.cancelQueries({ queryKey, exact: true });
     client.setQueryData(queryKey, list);
     void client.invalidateQueries({ queryKey: [...queryKey, "plan"] });
+    void client.invalidateQueries({ queryKey: rulesQuery().queryKey, exact: true });
   });
 
   return () => {

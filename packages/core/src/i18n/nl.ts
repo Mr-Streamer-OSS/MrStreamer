@@ -1645,6 +1645,11 @@ export const nl: Translation = {
     "Een regel die {title} volgt neemt dit op. De marge is die van de regel.",
   "From a rule": "Via een regel",
   Rules: "Regels",
+  "This rule's subscription is no longer there.":
+    "Het abonnement van deze regel bestaat niet meer.",
+  "This rule's guide could not be read.": "De gids van deze regel kon niet worden gelezen.",
+  "This recording rule’s airing history is full.":
+    "De uitzendgeschiedenis van deze opnameregel is vol.",
   "Recording rules could not be read.": "Opnameregels konden niet worden gelezen.",
   "Recording rules could not be saved.": "Opnameregels konden niet worden opgeslagen.",
   "This recording rule is no longer there.": "Deze opnameregel bestaat niet meer.",

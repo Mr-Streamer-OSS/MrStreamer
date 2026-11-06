@@ -1720,6 +1720,10 @@ export const fr: Translation = {
     "Une règle qui suit {title} enregistre ceci. Sa marge est celle de la règle.",
   "From a rule": "Par une règle",
   Rules: "Règles",
+  "This rule's subscription is no longer there.": "L’abonnement de cette règle n’existe plus.",
+  "This rule's guide could not be read.": "Le guide de cette règle n’a pas pu être lu.",
+  "This recording rule’s airing history is full.":
+    "L’historique des diffusions de cette règle d’enregistrement est plein.",
   "Recording rules could not be read.": "Les règles d'enregistrement n'ont pas pu être lues.",
   "Recording rules could not be saved.":
     "Les règles d'enregistrement n'ont pas pu être enregistrées.",

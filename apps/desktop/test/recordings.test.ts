@@ -2733,6 +2733,131 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     return { ...started, listing, programmePlan, clockTo };
   }
 
+  it("rule safety: old missed airings release queue budget after a long absence", async () => {
+    const { provider, guide, subscriptionId, channel, recordings, quit, dataDir } =
+      await scheduling();
+
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+
+    const xml = (base: number) =>
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${Array.from(
+        { length: 100 },
+        (_, i) => {
+          const start = base + (i + 1) * MINUTE;
+
+          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>R2 title</title></programme>`;
+        },
+      ).join("")}</tv>`;
+
+    provider.serveGuide(xml(TEN_PAST));
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: "R2 title",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    expect(await recordings.schedules()).toHaveLength(100);
+    await quit();
+    const now = TEN_PAST + 10 * 24 * 60 * MINUTE;
+    vi.setSystemTime(now);
+    provider.serveGuide(xml(now));
+    const again = await app(dataDir);
+    onTestFinished(again.quit);
+    await again.library.refresh(subscriptionId);
+    await again.guide.refresh(subscriptionId);
+
+    for (let i = 0; i < 3; i++) await again.recordings.check();
+
+    const preview = await again.recordings.previewRule({
+      title: "R2 title",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+
+    expect(preview.matches).toHaveLength(100);
+    const planned = await again.recordings.schedules();
+    expect(planned).toHaveLength(100);
+  });
+
+  it("rule safety: removed busy subscription releases the shared queue", async () => {
+    const {
+      provider,
+      guide,
+      subscriptionId,
+      channel,
+      recordings,
+      roster,
+      subscriptions,
+      library,
+      listing,
+    } = await scheduling();
+
+    const { next } = await listing();
+    const id = provider.catalogue.channels.find((each) => each.name === GUIDED)!.guideId!;
+    provider.serveGuide(
+      `<tv><channel id="${id}"><display-name>Test</display-name></channel>${Array.from(
+        { length: 100 },
+        (_, i) => {
+          const start = TEN_PAST + (i + 1) * MINUTE;
+
+          return `<programme channel="${id}" start="${guideTime(start)}" stop="${guideTime(start + MINUTE)}"><title>Fill</title></programme>`;
+        },
+      ).join("")}</tv>`,
+    );
+    await guide.refresh(subscriptionId);
+    await recordings.saveRule({
+      title: "Fill",
+      channels: [channel(GUIDED)],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    expect(await recordings.schedules()).toHaveLength(100);
+    const second = await fakeProvider({ live: true, maxConnections: 1, slotReleaseMs: 0 });
+    const added = await subscriptions.add(demoLogin(second));
+    await library.refresh(added.id);
+    await guide.refresh(added.id);
+    await roster.remove(subscriptionId, false);
+    await recordings.saveRule({
+      title: next.title,
+      channels: [{ subscriptionId: added.id, id: channel(GUIDED).id }],
+      padding: { before: 0, after: 0 },
+    });
+    await recordings.check();
+    await recordings.check();
+    const all = await recordings.schedules();
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((each) => each.plan.channel.subscriptionId === added.id)).toBe(true);
+    expect((await recordings.rules())[0]?.error).toBe(
+      "This rule's subscription is no longer there.",
+    );
+  });
+  it("rule safety: global XMLTV supplies a subscription without its own guide", async () => {
+    const { provider, guide, subscriptions, library, recordings, channel } = await scheduling();
+    const source = await guide.addSource(`${provider.url}/xmltv.php?username=demo&password=demo`);
+    await guide.refreshSource(source.id);
+    const second = await fakeProvider({ live: true });
+    second.serveGuide(503);
+    const { id } = await subscriptions.add(demoLogin(second));
+    await library.refresh(id);
+    await expect(guide.refresh(id)).rejects.toMatchObject({
+      error: { kind: "provider-error", status: 503 },
+    });
+    const own = { subscriptionId: id, id: channel(GUIDED).id };
+    const listed = (await guide.listings([own]))[`${id}:${own.id}`]!;
+
+    if (!listed.next) throw new Error("No next programme from global XMLTV");
+    const status = (await guide.status()).find((each) => each.subscriptionId === id)!;
+    expect(status.availability).not.toBe("available");
+    expect(status.supplied.some((each) => each.source?.id === source.id)).toBe(true);
+    const plan = { title: listed.next.title, channels: [own], padding: { before: 0, after: 0 } };
+    expect((await recordings.previewRule(plan)).matches.length).toBeGreaterThan(0);
+    await recordings.saveRule(plan);
+    await recordings.check();
+    expect(
+      (await recordings.schedules()).some((each) => each.plan.channel.subscriptionId === id),
+    ).toBe(true);
+  });
   it("rule safety: cancellation stays settled through consecutive overlapping shifts", async () => {
     const { provider, guide, subscriptionId, channel, recordings, listing } = await scheduling();
     const { next } = await listing();
@@ -2870,7 +2995,9 @@ describe.skipIf(!hasTools)("recording schedules", () => {
     const made = await until(recordings.list, (list) => list.length > 0, 1000);
     expect(made).toHaveLength(1);
     expect(second.streamRequests()).toBe(1);
-    expect((await recordings.rules())[0]?.error).toBe("Recording rules could not be read.");
+    expect((await recordings.rules())[0]?.error).toBe(
+      "This rule's subscription is no longer there.",
+    );
   });
   it.each(["cancelled", "deleted", "recording"] as const)(
     "rule safety: identity-less %s airings survive chained shifts and restart without revival",

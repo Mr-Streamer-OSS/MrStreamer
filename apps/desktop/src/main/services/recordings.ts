@@ -67,6 +67,7 @@ import {
   RECORDING_MAX_MS,
   RECORDING_RULE_LIMITS,
 } from "@mrstreamer/contracts/recordings";
+import type { GuideStatus } from "@mrstreamer/contracts/guide";
 import { ownedId, ownedKey, type OwnedId } from "@mrstreamer/contracts/subscription";
 import { streamsToPlay } from "@mrstreamer/core/catalogue/variants";
 import { Failed } from "@mrstreamer/core/failure";
@@ -1512,23 +1513,24 @@ function make(deps: RecordingsDeps) {
       }),
     );
 
-    const ruleErrors = new Map<string, PlainKey>();
+    const ruleErrors = new Map<string, string>();
     const blockedRules = new Set<string>();
 
-    const previewRule = (plan: RecordingRulePlan) =>
+    const previewRule = (plan: RecordingRulePlan, status: readonly GuideStatus[]) =>
       Effect.gen(function* () {
         yield* rulesUsable;
         const matches = [];
-        const status = yield* guide.status;
         let limited = false;
 
         for (const subscriptionId of new Set(plan.channels.map((each) => each.subscriptionId))) {
-          if (
-            !status.some(
-              (each) => each.subscriptionId === subscriptionId && each.availability === "available",
-            )
-          )
-            return yield* ruleFailure("Recording rules could not be read.");
+          const available = status.find((each) => each.subscriptionId === subscriptionId);
+
+          if (!available) return yield* ruleFailure("This rule's subscription is no longer there.");
+
+          // Availability describes only the subscription's own guide. Global XMLTV
+          // sources can supply its channels even when that own guide is absent.
+          if (available.availability !== "available" && available.supplied.length === 0)
+            return yield* ruleFailure("This rule's guide could not be read.");
 
           const page = yield* guide.searchPage({
             from: Date.now(),
@@ -1555,7 +1557,10 @@ function make(deps: RecordingsDeps) {
       ruleErrors.clear();
       blockedRules.clear();
 
-      // Reserve every retained occurrence before any rule can admit new work.
+      const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
+
+      // Retire dead work durably, retaining identities and observed intervals for suppression.
+      // Recent expired work still reaches the scheduler's ordinary Missed path.
       const retained = (rules ?? []).map((rule) => ({
         ...rule,
         occurrences: rule.occurrences.map((each) => ({
@@ -1563,7 +1568,11 @@ function make(deps: RecordingsDeps) {
           settled:
             each.settled ||
             (!startsOf.has(each.id) &&
-              [...records.values()].some((record) => record.scheduled?.schedule === each.id)),
+              ([...records.values()].some((record) => record.scheduled?.schedule === each.id) ||
+                (!recordingOf(each.id) &&
+                  (!saved.has(each.plan.channel.subscriptionId) ||
+                    each.plan.stop + each.plan.padding.after * 60_000 <=
+                      Date.now() - MISSED_KEPT_MS)))),
         })),
       }));
 
@@ -1573,14 +1582,20 @@ function make(deps: RecordingsDeps) {
       );
 
       const observed = new Set<string>();
+      const status = yield* guide.status;
 
       for (const rule of retained) {
-        const checked = yield* Effect.result(previewRule(rule.plan));
+        const checked = yield* Effect.result(previewRule(rule.plan, status));
         const occurrences = rule.occurrences;
 
         if (checked._tag === "Failure") {
           blockedRules.add(rule.id);
-          ruleErrors.set(rule.id, "Recording rules could not be read.");
+          ruleErrors.set(
+            rule.id,
+            checked.failure.error.kind === "unexpected"
+              ? checked.failure.error.detail
+              : t("This rule's guide could not be read."),
+          );
 
           for (const each of occurrences) observed.add(each.id);
           next.push(rule);
@@ -1663,7 +1678,7 @@ function make(deps: RecordingsDeps) {
             observed.add(each.id);
 
         if (occurrences.length >= RECORDING_RULE_LIMITS.history)
-          ruleErrors.set(rule.id, "The recording rule limit was reached.");
+          ruleErrors.set(rule.id, t("This recording rule’s airing history is full."));
         next.push({ ...rule, occurrences });
       }
 
@@ -2187,6 +2202,7 @@ function make(deps: RecordingsDeps) {
         return resumeAt;
       }
 
+      const previousErrors = new Map(ruleErrors);
       const ruleCheck = yield* Effect.result(reconcileRules);
 
       if (ruleCheck._tag === "Failure" && (rules?.length ?? 0) > 0)
@@ -2194,7 +2210,7 @@ function make(deps: RecordingsDeps) {
 
       if (ruleCheck._tag === "Failure")
         for (const rule of rules ?? [])
-          ruleErrors.set(rule.id, "Recording rules could not be saved.");
+          ruleErrors.set(rule.id, t("Recording rules could not be saved."));
 
       const now = Date.now();
       const saved = new Set((yield* subscriptions.saved).map((each) => each.id));
@@ -2337,7 +2353,10 @@ function make(deps: RecordingsDeps) {
 
       const list = yield* standings(now);
 
-      if (!isDeepStrictEqual(list, shownSchedules)) {
+      if (
+        !isDeepStrictEqual(list, shownSchedules) ||
+        !isDeepStrictEqual(previousErrors, ruleErrors)
+      ) {
         shownSchedules = list;
         yield* PubSub.publish(scheduleChanges, list);
       }
@@ -2889,18 +2908,19 @@ function make(deps: RecordingsDeps) {
             (rules ?? []).map(({ id, plan }) => ({
               id,
               plan,
-              ...(ruleErrors.has(id) && { error: t(ruleErrors.get(id)!) }),
+              ...(ruleErrors.has(id) && { error: ruleErrors.get(id)! }),
             })),
           ),
         ),
       ),
-      previewRule: (plan: RecordingRulePlan) => scheduling(previewRule(plan)),
+      previewRule: (plan: RecordingRulePlan) =>
+        scheduling(Effect.flatMap(guide.status, (status) => previewRule(plan, status))),
       saveRule: (plan: RecordingRulePlan, id?: string) =>
         Effect.tap(
           scheduling(
             Effect.gen(function* () {
               // Fails as the preview does: rules unread, or a channel's subscription not saved.
-              yield* previewRule(plan);
+              yield* previewRule(plan, yield* guide.status);
               const was = rules?.find((each) => each.id === id);
 
               if (id && !was) return yield* ruleFailure("This recording rule is no longer there.");

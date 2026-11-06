@@ -790,7 +790,7 @@ export interface IpcOutputs {
   "recordings.saveRule": RecordingRule;
   /** Durably stops following future airings. */
   "recordings.cancelRule": null;
-  /** Fails when the channel isn't listed or a programme's padded end passed. */
+  /** Fails for rule-made schedules, an unlisted channel or a plan with no time to come. */
   "recordings.plan": ScheduledRecording;
   /** As saved. Fails as `recordings.plan` does, or when it can't be written. */
   "recordings.schedule": ScheduledRecording;

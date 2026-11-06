@@ -745,15 +745,17 @@ function RuleFields({
         {failure ? (
           <div role="alert">
             <p className="text-destructive">{describeError(appError(failure))}</p>
-            <Button
-              size="sm"
-              onClick={() => {
-                void preview.refetch();
-                void found.refetch();
-              }}
-            >
-              {t("Retry")}
-            </Button>
+            {!save.error && !stop.error && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  void preview.refetch();
+                  void found.refetch();
+                }}
+              >
+                {t("Retry")}
+              </Button>
+            )}
           </div>
         ) : channels.length === 0 ? (
           <p className="text-muted-foreground">{t("Choose at least one channel.")}</p>

@@ -1660,6 +1660,12 @@ export const de: Translation = {
     "Eine Regel, die {title} folgt, nimmt das auf. Der Puffer ist der der Regel.",
   "From a rule": "Über eine Regel",
   Rules: "Regeln",
+  "This rule's subscription is no longer there.":
+    "Das Abonnement dieser Regel ist nicht mehr vorhanden.",
+  "This rule's guide could not be read.":
+    "Der Programmführer dieser Regel konnte nicht gelesen werden.",
+  "This recording rule’s airing history is full.":
+    "Der Sendungsverlauf dieser Aufnahmeregel ist voll.",
   "Recording rules could not be read.": "Aufnahmeregeln konnten nicht gelesen werden.",
   "Recording rules could not be saved.": "Aufnahmeregeln konnten nicht gespeichert werden.",
   "This recording rule is no longer there.": "Diese Aufnahmeregel gibt es nicht mehr.",
