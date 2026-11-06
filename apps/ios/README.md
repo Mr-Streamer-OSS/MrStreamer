@@ -132,7 +132,9 @@ Actual background and physical-device acceptance remain separate from source and
 ## Where it stands
 
 - **iOS 0.1.0**, build 17, went to Apple App Review on 27 October 2026 with manual release. It
-  remains `WAITING_FOR_REVIEW` as of 4 November 2026. None of the work below changes that build or its review
+  is `REJECTED` as of the 6 November 2026 readback, with `UNRESOLVED_ISSUES` on its submission.
+  This branch prepares a corrected 0.1.0 (21) candidate from merged source `96e2734a`; it has not
+  been built or uploaded. Build 17 remains the rejected build, with manual release retained
   ([iOS app card](https://github.com/orgs/Mr-Streamer-OSS/projects/1?pane=issue&itemId=288133475)).
 - **iOS 0.2.0** is the parity wave on `main`: M3U playlists, XMLTV guides and channel mapping, the
   guide grid, programme Search, catch-up, custom lists, reminders, Live audio and subtitle tracks,
@@ -1054,8 +1056,9 @@ proof out: `src/app/proof.tsx` loads it only in development.
 ## Signed iPhone candidates and TestFlight
 
 The app installs as `app.mrstreamer.player`, the desktop's `appId`, in development and release
-builds alike. Its version is its own, not the desktop's: `app.json` names `0.2.0` with
-`ios.buildNumber` `20`. Build 20 was archived from frozen source
+builds alike. On `release/ios-0.1`, `app.json` names candidate `0.1.0` with
+`ios.buildNumber` `21`, based on merged source `96e2734a`. It has not been built or uploaded.
+The 0.2.0 line stays on `main`. Build 20 of 0.2.0 was archived from frozen source
 `99570bc6762add379589f7d999cb075a7a4f725b`, uploaded once and delivered to the existing
 Private iPhone testing internal group on 4 November 2026. Apple readback confirms `VALID`, upload
 `COMPLETE`, `IN_BETA_TESTING` and group membership; the inspected archive and IPA contain device
@@ -1064,13 +1067,15 @@ not submit 0.2.0 to App Review or release it publicly. Build 19 was archived fro
 internal TestFlight group on 3 November 2026, where App Store Connect shows it VALID and in beta
 testing; it has Play on TV and the Downloads header ring. Build 18, archived from `7229b687`,
 predates both and stays in that group. Build 17 of 0.1.0 went to App Review on 27 October 2026
-with manual release and remains `WAITING_FOR_REVIEW`; leave that build and its review as they are.
+with manual release; the 6 November 2026 readback reports `REJECTED` and submission
+`UNRESOLVED_ISSUES`. The corrected candidate retains manual release.
 Before each archive, read the current App Store Connect build and upload inventory again, confirm
-the candidate number is unused or allocate the next unused number; build 20 is now used. Record the dated
+the candidate number is unused or allocate the next unused number. The root's 6 November 2026
+11:38 GET inventory found builds 1–20 used and 21 unused; 21 is not reserved. Record the dated
 readback and allocation on the candidate's project card.
-The submitted 0.1.0 candidate used `supportsTablet: false`, requesting iPhone device family 1
+The rejected 0.1.0 (17) candidate used `supportsTablet: false`, requesting iPhone device family 1
 without a native iPad target; Apple's iPhone compatibility mode on iPad is separate. The
-next-release source sets `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
+corrected 0.1.0 (21) candidate source retains `supportsTablet: true`, requesting iPhone and iPad families 1 and 2.
 Inspect `UIDeviceFamily` in the actual archive/export before delivery; configuration alone does
 not prove the tablet target is present in that build.
 
