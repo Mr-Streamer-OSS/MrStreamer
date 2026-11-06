@@ -23,7 +23,13 @@ import { TitleFilters, type FilterOptions } from "./title-filters.ts";
 import { LiveBrowseQuery, LiveDiscovery, type LiveBrowseResult } from "./live-browse.ts";
 import type { Result } from "./errors.ts";
 import type { DiagnosticsPreview } from "./diagnostics.ts";
-import type { CopySession, Download, DownloadList } from "./downloads.ts";
+import type {
+  CopySession,
+  Download,
+  DownloadList,
+  DownloadFolder,
+  DownloadBulkResult,
+} from "./downloads.ts";
 import {
   type GuideSearchPage,
   GUIDE_DAY_MS,
@@ -599,6 +605,10 @@ export const ipcInputs = {
    */
   "customLists.arrange": () =>
     type({ list: listId(), revision: "number.integer >= 0", order: listId().array() }),
+  "downloads.chooseFolder": none,
+  "downloads.cancelMove": () => type({ id: "string > 0" }),
+  "downloads.bulk": () =>
+    type({ ids: "string[]", action: "'pause' | 'resume' | 'retry' | 'remove' | 'move'" }),
   "downloads.list": none,
   /** A movie or one episode, by the exact version the viewer chose, at the end of the queue. */
   "downloads.add": () => type({ title: TitleRef() }),
@@ -969,6 +979,9 @@ export interface IpcOutputs {
    * doesn't show one of the channels named: the window reads the lists again.
    */
   "customLists.arrange": readonly CustomList[];
+  "downloads.chooseFolder": DownloadFolder | null;
+  "downloads.cancelMove": null;
+  "downloads.bulk": DownloadBulkResult;
   "downloads.list": DownloadList;
   /**
    * Queued, with the title's details and artwork kept on this computer. One already downloaded or

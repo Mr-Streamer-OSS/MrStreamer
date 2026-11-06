@@ -2,7 +2,7 @@
 // (database.ts): one row per download in a table of its own, which builds before downloads never
 // read or erase. A row is the download's whole record as one document: the exact provider file it
 // was made from, what was kept of its details, how far its transfer got and how far the copy was
-// watched here. Its bytes and artwork are files in the app's downloads folder (services/downloads.ts).
+// watched here. Its bytes and artwork live in its managed folder (services/downloads.ts).
 // Erasing an account's viewing data leaves these rows: a copy is the viewer's until they delete it.
 // A row this build can't read, as one a later build wrote, is left as it is, and so are its files.
 // A key a record doesn't declare is read and written back with it: what a pause and a place in
@@ -82,6 +82,20 @@ const Stored = lazy(() =>
     listingKey: "string",
     sourceStamp: "string",
     container: "string",
+    /** Parent of this copy's UUID folder; absent for the default app-relative folder. */
+    "directory?": "string",
+    /** Incomplete destination owned by a move; directory stays authoritative until commit. */
+    "moveTo?": "string",
+    /** UUID folder for a moved copy; older copies use their record ID. */
+    "folderId?": "string",
+    /** UUID reserved before creating an incomplete move target. */
+    "moveId?": "string",
+    /** Device and inode of the selected destination when the move was admitted. */
+    "moveDevice?": "string",
+    /** Old folder to clean only after the new location is durably committed. */
+    "moveFrom?": "string",
+    "moveToken?": "string",
+    "sourceToken?": "string",
     about: About(),
     state: "'queued' | 'failed' | 'complete'",
     /** Why it failed, as `DownloadFailure` says; only while failed. */
@@ -127,6 +141,10 @@ export interface Inventory {
   readonly unreadable: ReadonlySet<string>;
 }
 
+const Cleanup = type({ path: "string", "token?": "string", "device?": "string" });
+
+export type PendingCleanup = typeof Cleanup.infer;
+
 export class DownloadStore extends Context.Service<
   DownloadStore,
   {
@@ -135,15 +153,29 @@ export class DownloadStore extends Context.Service<
      * can't: what is kept for those isn't another download's to clean up.
      */
     readonly list: Effect.Effect<Inventory, Failed>;
+    readonly folder: Effect.Effect<string | null, Failed>;
+    setFolder(path: string): Effect.Effect<void, Failed>;
     /** Stores a download's record, new or changed. */
-    put(download: StoredDownload): Effect.Effect<void, Failed>;
+    put(download: StoredDownload, durable?: boolean): Effect.Effect<void, Failed>;
     /** Stores several records in one transaction: all of them, or none when it fails. */
     putMany(downloads: readonly StoredDownload[]): Effect.Effect<void, Failed>;
+    readonly cleanups: Effect.Effect<readonly PendingCleanup[], Failed>;
+    deferCleanup(
+      download: StoredDownload,
+      pending: readonly PendingCleanup[],
+    ): Effect.Effect<void, Failed>;
+    forgetCleanup(path: string): Effect.Effect<void, Failed>;
     remove(id: string): Effect.Effect<void, Failed>;
   }
 >()("mrstreamer/DownloadStore") {}
 
 function prepareDownloads(db: DatabaseSync): void {
+  db.exec(
+    `create table if not exists download_folder (id integer primary key, path text not null)`,
+  );
+  db.exec(
+    "create table if not exists download_cleanup (path text primary key, record text not null)",
+  );
   db.exec(`create table if not exists downloads (
     id text primary key,
     added_at integer not null,
@@ -168,7 +200,59 @@ export const downloadStoreLayer = Layer.effect(
 
       const remove = db.prepare("delete from downloads where id = ?");
 
+      // Restore the connection's actual policy, including on a failed durable write.
+      const durable = (run: () => void) => {
+        const previous = Number(db.prepare("pragma synchronous").get()?.synchronous);
+        db.exec("pragma synchronous = full");
+
+        try {
+          run();
+        } finally {
+          db.exec(`pragma synchronous = ${previous}`);
+        }
+      };
+
+      const save = (download: StoredDownload) => {
+        write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
+      };
+
       return {
+        cleanups: attempt(() =>
+          db
+            .prepare("select record from download_cleanup")
+            .all()
+            .map((row) => Cleanup.assert(JSON.parse(String(row.record)))),
+        ),
+        deferCleanup: (download: StoredDownload, pending: readonly PendingCleanup[]) =>
+          attempt(() =>
+            durable(() =>
+              transaction(db, () => {
+                for (const item of pending)
+                  db.prepare("insert or replace into download_cleanup values (?, ?)").run(
+                    item.path,
+                    JSON.stringify(item),
+                  );
+                save(download);
+              }),
+            ),
+          ),
+        forgetCleanup: (path: string) =>
+          attempt(() =>
+            durable(() => {
+              db.prepare("delete from download_cleanup where path = ?").run(path);
+            }),
+          ),
+        folder: attempt(() => {
+          const row = db.prepare("select path from download_folder where id = 1").get();
+
+          return row ? String(row.path) : null;
+        }),
+        setFolder: (path: string) =>
+          attempt(() => {
+            db.prepare(
+              "insert into download_folder (id, path) values (1, ?) on conflict(id) do update set path = excluded.path",
+            ).run(path);
+          }),
         list: attempt((): Inventory => {
           const records: StoredDownload[] = [];
           const unreadable = new Set<string>();
@@ -182,9 +266,10 @@ export const downloadStoreLayer = Layer.effect(
 
           return { records, unreadable };
         }),
-        put: (download: StoredDownload) =>
+        put: (download: StoredDownload, flush = false) =>
           attempt(() => {
-            write.run(download.id, download.addedAt, JSON.stringify(Stored().assert(download)));
+            if (flush) durable(() => save(download));
+            else save(download);
           }),
         putMany: (downloads: readonly StoredDownload[]) =>
           attempt(() =>
@@ -242,5 +327,15 @@ function failureOf(stored: NonNullable<Stored["failure"]>): DownloadFailure {
 function closed(detail: () => string): DownloadStore["Service"] {
   const fail = Effect.suspend(() => unavailable(detail()));
 
-  return { list: fail, put: () => fail, putMany: () => fail, remove: () => fail };
+  return {
+    cleanups: fail,
+    deferCleanup: () => fail,
+    forgetCleanup: () => fail,
+    folder: fail,
+    setFolder: () => fail,
+    list: fail,
+    put: () => fail,
+    putMany: () => fail,
+    remove: () => fail,
+  };
 }
