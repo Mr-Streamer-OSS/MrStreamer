@@ -1117,6 +1117,7 @@ function make(deps: DownloadsDeps) {
         check();
 
         const parent = await stat(destination).catch(() => {
+          check();
           throw moveError("Destination unavailable");
         });
 
