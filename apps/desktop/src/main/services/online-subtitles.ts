@@ -25,6 +25,7 @@ import {
   type SubtitleCandidate,
   type SubtitleQuery,
 } from "../subtitles/service-client.ts";
+import { AdmittedSettings } from "./preferences.ts";
 import { SubtitleAccounts } from "./subtitle-accounts.ts";
 
 /** The exact file a local session plays: same session, account and file, none observed replaced. */
@@ -88,8 +89,10 @@ export class OnlineSubtitles extends Context.Service<
     Layer.effect(OnlineSubtitles, make(deps));
 }
 
+type OwnedSession = SubtitleSession & { readonly admission: AdmittedSettings["Service"] | null };
+
 interface Search {
-  readonly session: SubtitleSession;
+  readonly session: OwnedSession;
   readonly controller: AbortController;
   readonly candidates: Map<string, SubtitleCandidate>;
   readonly removeListener: () => void;
@@ -133,17 +136,28 @@ function make(deps: Parameters<typeof subtitleServiceClient>[0]) {
 
     const current = (id: string) =>
       Effect.gen(function* () {
+        const admitted = yield* Effect.serviceOption(AdmittedSettings);
+        const admission = admitted._tag === "Some" ? admitted.value : null;
         const session = yield* sessions.resolve(id);
 
-        if (!session || session.signal.aborted || !(yield* session.standing))
+        if (
+          !session ||
+          (admission && !admission.current()) ||
+          session.signal.aborted ||
+          !(yield* session.standing)
+        )
           return yield* unavailable(t("This exact file is no longer playing here."));
 
-        return session;
+        return { ...session, admission };
       });
 
-    const guarded = (session: SubtitleSession) =>
+    const guarded = (session: OwnedSession) =>
       Effect.gen(function* () {
-        if (session.signal.aborted || !(yield* session.standing))
+        if (
+          (session.admission && !session.admission.current()) ||
+          session.signal.aborted ||
+          !(yield* session.standing)
+        )
           return yield* unavailable(t("This exact file changed or stopped playing here."));
       });
 

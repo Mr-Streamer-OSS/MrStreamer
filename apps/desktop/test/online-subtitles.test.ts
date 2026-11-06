@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mainLayer } from "../src/main/runtime.ts";
+import { ProfileSessions } from "../src/main/services/profiles.ts";
+import { testConfig } from "./support.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { databaseLayer } from "../src/main/platform/database.ts";
@@ -40,6 +43,7 @@ async function setup(savedDir?: string) {
   const calls: string[] = [];
   let hold: ReturnType<typeof Promise.withResolvers<void>> | null = null;
   let entered: ReturnType<typeof Promise.withResolvers<void>> | null = null;
+  let sessionHold: { entered: () => void; promise: Promise<void> } | null = null;
 
   const fetcher: typeof fetch = async (input, init) => {
     const url = String(input);
@@ -72,16 +76,24 @@ async function setup(savedDir?: string) {
   };
 
   const playing = (id: string) =>
-    Effect.sync(() =>
-      active && id === sessionId
+    Effect.gen(function* () {
+      const held = sessionHold;
+
+      if (held) {
+        sessionHold = null;
+        held.entered();
+        yield* Effect.promise(() => held.promise);
+      }
+
+      return active && id === sessionId
         ? {
             file,
             signal: controller.signal,
             standing: Effect.sync(() => active),
             proof: () => null,
           }
-        : null,
-    );
+        : null;
+    });
 
   const layer = OnlineSubtitles.layer({ userAgent: "fixture", fetch: fetcher }).pipe(
     Layer.provideMerge(
@@ -108,6 +120,13 @@ async function setup(savedDir?: string) {
     service: await promised(runtime, OnlineSubtitles),
     storage: await promised(runtime, SavedSubtitles),
     calls,
+    holdSession() {
+      const held = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      sessionHold = { entered: started.resolve, promise: held.promise };
+
+      return { entered: started.promise, release: held.resolve };
+    },
     stop() {
       active = false;
       controller.abort();
@@ -311,3 +330,113 @@ it("refuses a delayed correction for a result replaced by another choice", async
   expect((await app.service.saved("playing-4k"))?.timing).toEqual({ offset: 0, speed: 1 });
   await app.runtime.dispose();
 });
+
+it.each(["search", "download"] as const)(
+  "refuses an old admitted %s after switching away and back on the same file",
+  async (stage) => {
+    const dir = await tempDir();
+    const state = await setup(dir);
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () => Effect.void,
+        },
+      }),
+    );
+
+    const profiles = await promised(runtime, ProfileSessions);
+    const a = await profiles.admit();
+    const b = await profiles.create("B");
+    const online = await state.runtime.runPromise(OnlineSubtitles);
+    const run = <A, E>(work: Effect.Effect<A, E>) => state.runtime.runPromise(a.run(work));
+    await state.service.configure({ ...preferences, service: "subdl" }, credentials);
+    const found = await run(online.search("playing-4k"));
+    const held = state.hold();
+
+    const pending = run(
+      stage === "search"
+        ? Effect.asVoid(online.search("playing-4k"))
+        : Effect.asVoid(online.choose("playing-4k", found.results[0]!.id)),
+    );
+
+    const rejected = expect(pending).rejects.toBeDefined();
+    await held.entered;
+    await profiles.switch(b.id);
+    const admittedB = await profiles.admit();
+    const saved = await state.runtime.runPromise(SavedSubtitles);
+    await state.runtime.runPromise(
+      admittedB.run(
+        saved.remember(
+          file,
+          {
+            service: "subdl",
+            language: "nl",
+            release: "B's cut",
+            cues: [{ start: 1, end: 2, text: "B" }],
+          },
+          "b",
+        ),
+      ),
+    );
+    await state.runtime.runPromise(admittedB.run(saved.hide(file)));
+    await profiles.switch(a.owner.id);
+    held.release();
+    await rejected;
+    const newA = await profiles.admit();
+    expect(await state.runtime.runPromise(newA.run(saved.read(file)))).toBeNull();
+    await expect(run(online.show("playing-4k", "b"))).rejects.toBeDefined();
+    await profiles.switch(b.id);
+    expect(
+      await state.runtime.runPromise((await profiles.admit()).run(saved.read(file))),
+    ).toMatchObject({ selection: "b", shown: false, subtitle: { release: "B's cut" } });
+  },
+);
+
+it.each(["show", "hide"] as const)(
+  "refuses a late admitted %s after a session lookup crosses an away/back switch",
+  async (operation) => {
+    const dir = await tempDir();
+    const state = await setup(dir);
+
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () => Effect.void,
+        },
+      }),
+    );
+
+    const profiles = await promised(runtime, ProfileSessions);
+    const a = await profiles.admit();
+    const b = await profiles.create("B");
+    await state.storage.remember(
+      file,
+      { service: "subdl", language: "nl", release: "A", cues: [{ start: 1, end: 2, text: "A" }] },
+      "a",
+    );
+
+    if (operation === "show") await state.storage.hide(file);
+    const online = await state.runtime.runPromise(OnlineSubtitles);
+    const held = state.holdSession();
+
+    const pending = state.runtime.runPromise(
+      a.run(operation === "show" ? online.show("playing-4k", "a") : online.hide("playing-4k")),
+    );
+
+    const rejected = expect(pending).rejects.toBeDefined();
+    await held.entered;
+    await profiles.switch(b.id);
+    await profiles.switch(a.owner.id);
+    held.release();
+    await rejected;
+    const saved = await state.runtime.runPromise(SavedSubtitles);
+    expect(
+      (await state.runtime.runPromise((await profiles.admit()).run(saved.read(file))))?.shown,
+    ).toBe(operation === "show" ? false : undefined);
+  },
+);
