@@ -37,6 +37,8 @@ export interface StreamSession {
   /** Loopback URL that proxies the provider stream. Carries no credentials. */
   readonly url: string;
   readonly format: StreamFormat;
+  /** Local HLS conversion fixes audio for this capture; another track opens a fresh capture. */
+  readonly convertedHls?: boolean;
   /**
    * For a recording from the catch-up archive, the stretch it plays: from where the provider's
    * recording begins, which can be up to a minute before the start asked for when the provider

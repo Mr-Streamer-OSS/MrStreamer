@@ -9,8 +9,8 @@
 // none pins anything. A disk that fails a write keeps memory only from then on, so what reads
 // the live edge goes on.
 //
-// Each piece remembers when its first byte arrived: `offsetAt` finds the newest retained piece
-// that began at or before a time, a packet boundary to start reading from.
+// Each piece indexes arrivals at most four times a second, independently of its byte size.
+// Seeking reports the indexed arrival actually served, rather than the requested time.
 import { mkdir, open, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -36,6 +36,7 @@ interface Piece {
   readonly offset: number;
   /** When its first byte arrived. */
   readonly at: number;
+  readonly marks: { offset: number; at: number }[];
   bytes: number;
   /** Its bytes while in memory, in order; null once on disk or evicted. */
   chunks: Uint8Array[] | null;
@@ -67,8 +68,9 @@ export interface History {
   read(offset: number): Promise<HistoryRead>;
   /** Settles once something arrives past `offset`, the history ends, or `signal` aborts. */
   arrived(offset: number, signal: AbortSignal): Promise<void>;
-  /** Where the newest retained piece that began at or before `time` starts. */
+  /** Offset of the indexed arrival at or before `time`, clamped to retained bytes. */
   offsetAt(time: number): number;
+  positionAt(time: number): { offset: number; at: number };
   /** No more bytes come; readers read what is retained. */
   finish(): void;
   finished(): boolean;
@@ -224,7 +226,8 @@ export function historyStore(budget: HistoryBudget) {
       append: (chunk) => state.append(chunk),
       read: (offset) => state.read(offset),
       arrived: (offset, signal) => state.arrived(offset, signal),
-      offsetAt: (time) => state.offsetAt(time),
+      offsetAt: (time) => state.positionAt(time).offset,
+      positionAt: (time) => state.positionAt(time),
       finish: () => state.finish(),
       finished: () => state.done,
       close: async () => {
@@ -311,9 +314,14 @@ class HistoryState {
       let current = this.pieces.at(-1);
 
       if (!current?.chunks || current.file || current.bytes >= this.pieceBytes) {
-        current = { offset: this.end, at: Date.now(), bytes: 0, chunks: [], file: null };
+        current = { offset: this.end, at: Date.now(), marks: [], bytes: 0, chunks: [], file: null };
         this.pieces.push(current);
       }
+
+      const last = current.marks.at(-1);
+
+      if (!last || this.latest - last.at >= 250)
+        current.marks.push({ offset: this.end, at: this.latest });
 
       const take = Math.min(rest.length, this.pieceBytes - current.bytes);
       current.chunks!.push(rest.subarray(0, take));
@@ -444,8 +452,13 @@ class HistoryState {
     });
   }
 
-  offsetAt(time: number) {
-    return this.pieces.findLast((each) => each.at <= time)?.offset ?? this.start();
+  positionAt(time: number) {
+    const piece = this.pieces.findLast((each) => each.at <= time) ?? this.pieces[0];
+
+    return (
+      piece?.marks.findLast((mark) => mark.at <= time) ??
+      piece?.marks[0] ?? { offset: this.end, at: this.latest }
+    );
   }
 
   finish() {

@@ -8,14 +8,43 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
 import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { closeWatch, openWatch } from "../../src/renderer/src/app/ui-store.ts";
+import { useFlash, flashNote } from "../../src/renderer/src/features/watch/flash-state.ts";
 import { WatchScreen } from "../../src/renderer/src/features/watch/WatchScreen.tsx";
 import type { Engine } from "../../src/renderer/src/player/engine.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 
-const engines = vi.hoisted(() => ({ opened: 0, destroyed: 0 }));
+const media = vi.hoisted(() => {
+  const handlers = new Map<string, (() => void) | null>();
+
+  const session = {
+    playbackState: "none",
+    setPositionState() {},
+    setActionHandler(name: string, handler: (() => void) | null) {
+      handlers.set(name, handler);
+    },
+  };
+
+  Object.defineProperty(navigator, "mediaSession", { value: session, configurable: true });
+  vi.stubGlobal(
+    "MediaMetadata",
+    class {
+      constructor(_value: MediaMetadataInit) {}
+    },
+  );
+
+  return { handlers, session };
+});
+
+const engines = vi.hoisted(() => ({
+  opened: 0,
+  destroyed: 0,
+  args: [] as unknown[][],
+  waiting: (_waiting: boolean) => {},
+}));
 
 vi.mock("../../src/renderer/src/player/engine.ts", () => ({
-  createEngine(): Engine {
+  createEngine(...args: unknown[]): Engine {
+    engines.args.push(args);
     engines.opened++;
     let destroyed = false;
 
@@ -25,7 +54,9 @@ vi.mock("../../src/renderer/src/player/engine.ts", () => ({
       tracks: null,
       onFailure() {},
       onEnded() {},
-      onWaiting() {},
+      onWaiting(callback) {
+        engines.waiting = callback;
+      },
       onPrivateData() {},
       played: () => 0,
       info: () => ({
@@ -69,7 +100,10 @@ it("pauses locally and resumes, seeks and goes live on the retained session with
   player.play(watched);
   await vi.waitFor(() => expect(engines.opened).toBe(1));
   await player.refreshTimeline();
+  engines.waiting(true);
+  expect(player.state().waiting).toBe(true);
   player.pause();
+  expect(player.state().waiting).toBe(false);
   expect(pause).toHaveBeenCalledOnce();
   player.resume();
   await vi.waitFor(() => expect(engines.opened).toBe(2));
@@ -80,6 +114,8 @@ it("pauses locally and resumes, seeks and goes live on the retained session with
   expect(ipc.argsOf("playback.open")).toHaveLength(1);
   expect(ipc.argsOf("playback.close")).toHaveLength(0);
   expect(engines.destroyed).toBe(3);
+  expect(ipc.argsOf("viewing.recordWatch")).toHaveLength(1);
+  expect(engines.args.at(-1)?.[5]).toBe(false);
   player.stop();
   expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "watched" }]);
 });
@@ -143,6 +179,141 @@ it("Watch offers no timeline on a stream that can't rewind, and says so for its 
   await press("k");
   expect(pause).not.toHaveBeenCalled();
   expect(container.textContent).toContain("This stream can't rewind");
+});
+
+it("keeps pause against a delayed seek and leaves failed seeks retryable", async () => {
+  const end = Date.now();
+  const timeline = { start: end - 60_000, end, cursor: end, expired: false };
+  answer(timeline);
+  player.play(watched);
+  await vi.waitFor(() => expect(player.state().timeline).not.toBeNull());
+  const pending = ipc.hold("playback.seekLive");
+  const seeking = player.seekLive(end - 30_000);
+  player.pause();
+  pending.resolve({ ...timeline, cursor: end - 30_000 });
+  await seeking;
+  expect(player.state().paused).toBe(true);
+  const opened = engines.opened;
+  ipc.refuse("playback.seekLive", { kind: "unexpected", detail: "Seek unavailable" });
+  await expect(player.seekLive(end - 20_000)).resolves.toBeUndefined();
+  expect(player.state().paused).toBe(true);
+  expect(engines.opened).toBe(opened);
+  expect(useFlash.getState().note).toMatchObject({ failed: true });
+  flashNote(null);
+  ipc.always("playback.seekLive", null);
+  await expect(player.seekLive(end - 20_000)).resolves.toBeUndefined();
+  expect(player.state().paused).toBe(true);
+  expect(engines.opened).toBe(opened);
+  expect(useFlash.getState().note).toMatchObject({ failed: true });
+  ipc.always("playback.seekLive", { ...timeline, cursor: end - 20_000 });
+  await player.seekLive(end - 20_000);
+  expect(player.state().paused).toBe(false);
+  expect(engines.args.at(-1)?.[5]).toBe(true);
+  expect(useFlash.getState().note).toBeNull();
+});
+
+it("sends resume and signed skips from the displayed cursor", async () => {
+  const end = Date.now();
+  answer({ start: end - 60_000, end, cursor: end - 30_000, expired: false });
+  player.play(watched);
+  await vi.waitFor(() => expect(player.state().timeline).not.toBeNull());
+  player.pause();
+  const paused = player.state().timeline!.cursor;
+  player.resume();
+  await vi.waitFor(() => expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBe(paused));
+  await vi.waitFor(() => expect(player.state().paused).toBe(false));
+  await player.skip(-10_000);
+  expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBeCloseTo(paused - 10_000, -2);
+  await player.skip(10_000);
+  expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBeCloseTo(paused + 10_000, -2);
+});
+
+it("keeps a frozen decoded picture after releasing the paused decoder", async () => {
+  const end = Date.now();
+  answer({ start: end - 60_000, end, cursor: end, expired: false });
+  player.play(watched);
+  await vi.waitFor(() => expect(player.state().timeline).not.toBeNull());
+  Object.defineProperty(player.element, "videoWidth", { configurable: true, get: () => 64 });
+  Object.defineProperty(player.element, "videoHeight", { configurable: true, get: () => 64 });
+  const drawImage = vi.fn();
+
+  const context: Pick<CanvasRenderingContext2D, "drawImage" | "clearRect"> = {
+    drawImage,
+    clearRect() {},
+  };
+
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+    context as CanvasRenderingContext2D,
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+    "data:image/png;base64,frozen",
+  );
+  player.pause();
+  expect(drawImage).toHaveBeenCalledWith(player.element, 0, 0);
+  expect(player.element.poster).toBe("data:image/png;base64,frozen");
+  player.stop();
+  expect(player.element.getAttribute("poster")).toBeNull();
+  Reflect.deleteProperty(player.element, "videoWidth");
+  Reflect.deleteProperty(player.element, "videoHeight");
+});
+
+it("reopens converted HLS when picking audio instead of reusing the old converter", async () => {
+  const end = Date.now();
+  answer({ start: end - 60_000, end, cursor: end, expired: false });
+  ipc.always("playback.open", {
+    sessionId: "watched",
+    channel: watched,
+    url: "http://localhost/live.ts",
+    format: "mpegts",
+    convertedHls: true,
+  });
+  ipc.always("playback.tracks", {
+    audio: [
+      { id: 1, language: "en", default: true, label: "English" },
+      { id: 2, language: "nl", default: false, label: "Dutch" },
+    ],
+    subtitles: [],
+    playing: 1,
+  });
+  player.play(watched);
+  await vi.waitFor(() => expect(player.state().tracks?.audio).toHaveLength(2));
+  player.setAudio(2);
+  await vi.waitFor(() => expect(ipc.argsOf("playback.open")).toHaveLength(2));
+  expect(ipc.argsOf("playback.open").at(-1)?.audio).toBe(2);
+  expect(ipc.argsOf("playback.seekLive")).toHaveLength(0);
+});
+
+it("OS pause and play retain the local channel and report its paused state", async () => {
+  vi.useFakeTimers();
+  const end = Date.now();
+  await watch({ start: end - 60_000, end, cursor: end, expired: false });
+  await act(async () => media.handlers.get("pause")?.());
+  expect(player.state().paused).toBe(true);
+  expect(media.session.playbackState).toBe("paused");
+  expect(ipc.argsOf("playback.close")).toHaveLength(0);
+  await act(async () => media.handlers.get("play")?.());
+  expect(ipc.argsOf("playback.seekLive")).toHaveLength(1);
+});
+
+it("commits the slider's Home key to the oldest retained moment", async () => {
+  vi.useFakeTimers();
+  const end = Date.now();
+
+  const { container } = await watch({
+    start: end - 60_000,
+    end,
+    cursor: end - 20_000,
+    expired: false,
+  });
+
+  const thumb = container.querySelector<HTMLElement>('input[aria-label="Position"]');
+  expect(thumb).not.toBeNull();
+  await act(async () => {
+    thumb!.focus();
+    thumb!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    thumb!.dispatchEvent(new KeyboardEvent("keyup", { key: "Home", bubbles: true }));
+  });
+  expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBe(end - 60_000);
 });
 
 const watched: LiveChannel = {

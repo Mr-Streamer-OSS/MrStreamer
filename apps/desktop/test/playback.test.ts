@@ -947,6 +947,195 @@ describe("live captures", () => {
       await history.close();
     }
   });
+  it("resolves a seek within one piece to the arrival of the actual historical packets", async () => {
+    const history = historyStore({
+      folder: await tempDir(),
+      bytes: 4096,
+      pieceBytes: 188 * 100,
+      keepFree: 0,
+    }).create();
+
+    const now = vi.spyOn(Date, "now");
+
+    try {
+      for (let second = 0; second < 30; second++) {
+        now.mockReturnValue(1000 + second * 1000);
+        history.append(new Uint8Array(188).fill(second));
+      }
+
+      const offset = history.offsetAt(26_500);
+      expect(((await history.read(offset)) as Uint8Array)[0]).toBe(25);
+      expect(offset).toBe(25 * 188);
+    } finally {
+      now.mockRestore();
+      await history.close();
+    }
+  });
+
+  it("closes the sole paused view's provider and history before service disposal", async () => {
+    const { captures, key, provider, open, folder } = await capturing();
+    const watch = new AbortController();
+
+    try {
+      const reader = (
+        await captures.viewRequest(key, "watch", provider, watch.signal)
+      ).body!.getReader();
+
+      await take(reader, 188 * 200);
+      watch.abort();
+      expect(open()).toBe(1);
+      await captures.idle("watch");
+      expect(open()).toBe(0);
+      expect(await bytesIn(folder)).toBe(0);
+    } finally {
+      watch.abort();
+      await captures.idle("watch");
+    }
+  });
+
+  it.each([128_000, 2_000_000])(
+    "replays decoded historical color and PID identity at %i bit/s",
+    async (rate) => {
+      const { captures, key } = await capturing({ pieceBytes: 188 * 22_000 });
+
+      const clip = (color: string, pid: number) => {
+        const result = spawnSync(FFMPEG, [
+          "-v",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          `color=${color}:size=64x64:rate=10`,
+          "-t",
+          "1",
+          "-c:v",
+          "mpeg2video",
+          "-mpegts_start_pid",
+          String(pid),
+          "-muxrate",
+          String(rate),
+          "-f",
+          "mpegts",
+          "pipe:1",
+        ]);
+
+        expect(result.status, result.stderr.toString()).toBe(0);
+
+        return result.stdout;
+      };
+
+      const red = clip("red", 256);
+      const blue = clip("blue", 512);
+      let feed!: ReadableStreamDefaultController<Uint8Array>;
+      const watch = new AbortController();
+      const replay = new AbortController();
+      const now = vi.spyOn(Date, "now");
+
+      try {
+        now.mockReturnValue(1_000);
+
+        const response = await captures.viewRequest(
+          key,
+          "identity",
+          async (signal) =>
+            new Response(
+              new ReadableStream({
+                start(controller) {
+                  feed = controller;
+                  signal.addEventListener("abort", () => controller.close(), { once: true });
+                },
+              }),
+            ),
+          watch.signal,
+        );
+
+        feed.enqueue(red);
+        const previous = response.body!.getReader();
+        await previous.read();
+        now.mockReturnValue(11_000);
+        feed.enqueue(blue);
+        await vi.waitFor(() => expect(captures.timeline("identity")!.end).toBe(11_000));
+        expect(captures.seek("identity", 5_000)).toBe(true);
+        expect(captures.timeline("identity")!.cursor).toBe(1_000);
+        await previous.read();
+        watch.abort();
+        feed.enqueue(blue);
+
+        const reader = (
+          await captures.viewRequest(
+            key,
+            "identity",
+            async () => {
+              throw Error("duplicate provider");
+            },
+            replay.signal,
+          )
+        ).body!.getReader();
+
+        const { value } = await reader.read();
+
+        const decoded = spawnSync(
+          FFMPEG,
+          [
+            "-v",
+            "error",
+            "-i",
+            "pipe:0",
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+          ],
+          { input: value },
+        );
+
+        expect(decoded.status, decoded.stderr.toString()).toBe(0);
+        expect(decoded.stdout[0]).toBeGreaterThan(200);
+        expect(decoded.stdout[2]).toBeLessThan(40);
+
+        const tracks = spawnSync(
+          FFPROBE,
+          ["-v", "error", "-show_entries", "stream=id", "-of", "json", "pipe:0"],
+          { input: value },
+        );
+
+        expect(JSON.parse(tracks.stdout.toString()).streams[0].id).toBe("0x100");
+        replay.abort();
+
+        const latest = (
+          await captures.viewRequest(
+            key,
+            "identity",
+            async () => {
+              throw Error("duplicate provider");
+            },
+            new AbortController().signal,
+          )
+        ).body!.getReader();
+
+        const next = await latest.read();
+        expect(next.value?.[0]).toBe(0x47);
+
+        const current = spawnSync(
+          FFPROBE,
+          ["-v", "error", "-show_entries", "stream=id", "-of", "json", "pipe:0"],
+          { input: next.value },
+        );
+
+        expect(JSON.parse(current.stdout.toString()).streams[0].id).toBe("0x200");
+        await latest.cancel();
+      } finally {
+        now.mockRestore();
+        watch.abort();
+        replay.abort();
+        await captures.idle("identity");
+      }
+    },
+  );
+
   it("retains converted clear TS HLS across a cancelled decoder and replays decoded media", async () => {
     const host = await startFakeHls({ live: { segmentMs: 6000 } });
 

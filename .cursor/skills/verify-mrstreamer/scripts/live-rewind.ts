@@ -1,8 +1,97 @@
 // Run with xvfb-run -a pnpm verify:desktop live-rewind. The optional
 // REWIND_EXPIRY=1 journey waits for the real thirty-minute window to expire.
+import { spawnSync } from "node:child_process";
+import type { Writable } from "node:stream";
+import type { FakeChannel } from "../../../../apps/desktop/test/fake-provider.ts";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Driver } from "./language.ts";
+
+let identityStream: Buffer | null = null;
+let breakRequested = false;
+
+/** Fault injection belongs to the owned fake provider, never a product IPC setter. */
+export function breakRewindStream() {
+  breakRequested = true;
+}
+
+/** A constant-rate fixture with decoded seconds encoded as eight black/white squares. */
+export function rewindStreams(channel: FakeChannel, out: Writable, signal: AbortSignal) {
+  if (!channel.fixture) return out.end();
+
+  if (!identityStream) {
+    const boxes = [
+      "drawbox=x=0:y=0:w=256:h=32:color=black:t=fill",
+      ...Array.from(
+        { length: 8 },
+        (_, bit) =>
+          `drawbox=x=${bit * 32}:y=0:w=32:h=32:color=white:t=fill:enable='mod(floor(t/${2 ** bit}),2)'`,
+      ),
+    ];
+
+    const made = spawnSync(
+      process.env["MR_STREAMER_FFMPEG"] || "ffmpeg",
+      [
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=640x360:rate=25:duration=180",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=180",
+        "-vf",
+        boxes.join(","),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-g",
+        "25",
+        "-b:v",
+        "400k",
+        "-maxrate",
+        "400k",
+        "-bufsize",
+        "800k",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-muxrate",
+        "900k",
+        "-f",
+        "mpegts",
+        "pipe:1",
+      ],
+      { maxBuffer: 32 * 1024 ** 2 },
+    );
+
+    if (made.status !== 0) throw Error(`Identity fixture failed: ${String(made.stderr)}`);
+    identityStream = made.stdout;
+  }
+
+  const data = identityStream;
+  const step = Math.ceil(900_000 / 8 / 10 / 188) * 188;
+  let offset = 0;
+
+  const timer = setInterval(() => {
+    if (breakRequested) {
+      breakRequested = false;
+      clearInterval(timer);
+      out.end();
+
+      return;
+    }
+
+    out.write(data.subarray(offset, offset + step));
+    offset = offset + step >= data.length ? 0 : offset + step;
+  }, 100);
+
+  signal.addEventListener("abort", () => clearInterval(timer), { once: true });
+}
 
 const group = "document.querySelector('[data-live-timeline]')";
 
@@ -32,6 +121,7 @@ export async function liveRewindScenario(
   d: Driver,
   fixture: {
     pid: number;
+    breakStream(): void;
     streams(): { requests: number; active: number };
   },
 ) {
@@ -61,8 +151,18 @@ export async function liveRewindScenario(
       frames: number;
       audio: number;
       paused: boolean;
+      identity: number;
+      cursor: number;
+      start: number;
+      end: number;
     }>(`(() => {
-    const v = document.querySelector('video'); return { time: v?.currentTime ?? 0,
+    const v = document.querySelector('video');
+    const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+    const ctx = c.getContext('2d'); if (v.videoWidth) ctx.drawImage(v, 0, 0, 640, 360);
+    let identity = 0;
+    for (let bit = 0; bit < 8; bit++) if (ctx.getImageData(bit * 32 + 16, 16, 1, 1).data[0] > 180) identity += 2 ** bit;
+    const slider = document.querySelector('[data-live-timeline] input');
+    return { identity, cursor: Number(slider.value), start: Number(slider.min), end: Number(slider.max), time: v?.currentTime ?? 0,
       width: v?.videoWidth ?? 0, frames: v?.getVideoPlaybackQuality().totalVideoFrames ?? 0,
       audio: v?.webkitAudioDecodedByteCount ?? 0, paused: v?.paused ?? true };
   })()`);
@@ -97,8 +197,12 @@ export async function liveRewindScenario(
   await picture("rewind-playing");
   await resources("playing");
   const initial = fixture.streams();
+  let expectedRequests = initial.requests;
+  const pausedIdentity = await video();
   await d.key("k", 75);
   await d.wait(() => d.exists(`${group}?.querySelector('button[aria-label=Play]')`));
+  const pausedPoster = await d.evaluate<string>("document.querySelector('video').poster");
+  check(pausedPoster.startsWith("data:image/png"), "Pause lost the decoded frame");
   const end = await d.evaluate<number>(`${group}.querySelector('input').max * 1`);
   await d.wait(
     () => d.evaluate<boolean>(`${group}.querySelector('input').max * 1 > ${end + 12000}`),
@@ -109,6 +213,8 @@ export async function liveRewindScenario(
     "Pause opened or ended the provider stream",
   );
   await d.wait(async () => (await bytes(join(d.profile, "live-history"))) > 0, 120_000);
+  const frozen = await d.evaluate<string>("document.querySelector('video').poster");
+  check(frozen === pausedPoster, "The paused picture changed while capture advanced");
   await resources("paused-capturing");
   await d.capture("rewind-paused");
 
@@ -123,10 +229,26 @@ export async function liveRewindScenario(
   } else d.observed["expiry"] = "Not run; REWIND_EXPIRY=1 waits for production retention";
   await d.key("k", 75);
   await picture("rewind-resumed");
+  const resumed = await video();
+  check(
+    Math.abs(resumed.identity - pausedIdentity.identity) <= 5,
+    "Resume decoded the wrong historical interval",
+  );
+  check(resumed.end - resumed.cursor > 8000, "Resume jumped to live");
   await d.key("j", 74);
   await picture("rewind-j");
+  const backward = await video();
+  check(
+    Math.abs(backward.identity - Math.max(0, resumed.identity - 10)) <= 5,
+    "J decoded the wrong historical interval",
+  );
   await d.key("l", 76);
   await picture("rewind-l");
+  const forward = await video();
+  check(
+    Math.abs(forward.identity - backward.identity - 10) <= 5,
+    "L decoded the wrong historical interval",
+  );
   await d.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300, y: 500 });
   await d.click(
     "Forward control before slider",
@@ -135,6 +257,9 @@ export async function liveRewindScenario(
   await d.key("Tab", 9);
   await d.key("Home", 36);
   await picture("rewind-slider");
+  const slider = await video();
+  check(slider.cursor - slider.start < 5000, "Slider Home did not commit its cursor");
+  check(slider.identity < 5, "Slider Home decoded the wrong historical interval");
   await d.key("Tab", 9);
   d.observed["sliderNextFocus"] = await d.evaluate<string>(
     "document.activeElement?.textContent ?? ''",
@@ -162,6 +287,21 @@ export async function liveRewindScenario(
     mobile: false,
   });
 
+  if (process.env["REWIND_RECOVERY"] === "1") {
+    const beforeRecovery = await video();
+    fixture.breakStream();
+    await d.wait(() => Promise.resolve(fixture.streams().requests > expectedRequests), 60_000);
+    await picture("rewind-recovered");
+    const recovered = await video();
+    check(
+      recovered.start > beforeRecovery.start,
+      "Recovery mixed the old and new capture timelines",
+    );
+    check(recovered.identity < 10, "Recovery decoded the old capture");
+    expectedRequests = fixture.streams().requests;
+    d.observed["recovery"] = { beforeRecovery, recovered };
+  }
+
   // Start a recording through the normal Live TV popover, then stop Watch from Recordings.
   await d.key("Escape", 27);
   await d.click("Open Live TV", named("Live TV"));
@@ -184,7 +324,7 @@ export async function liveRewindScenario(
   const from = (await recordings())[0]!.bytes;
   await d.wait(async () => (await recordings())[0]!.bytes > from, 30_000);
   check(
-    fixture.streams().active === 1 && fixture.streams().requests === initial.requests,
+    fixture.streams().active === 1 && fixture.streams().requests === expectedRequests,
     "View close stopped or duplicated attached recording",
   );
   await d.wait(async () => (await bytes(join(d.profile, "live-history"))) === 0);

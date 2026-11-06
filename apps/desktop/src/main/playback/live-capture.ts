@@ -229,7 +229,13 @@ function make(options: LiveCapturesOptions) {
      * Each view's capture, the reader that holds its history while no decoder reads, and where
      * its next reader starts, null at live. `viewOwners` asked through viewRequest.
      */
-    type View = { capture: Capture; pin: { cursor: number }; at: number | null };
+    type View = {
+      capture: Capture;
+      pin: { cursor: number };
+      at: number | null;
+      nextOffset: number | null;
+      generation: number;
+    };
 
     const views = new Map<string, View>();
     const viewOwners = new Set<string>();
@@ -337,19 +343,20 @@ function make(options: LiveCapturesOptions) {
           if (previous) unpin(owner, previous);
           const pin = { cursor: 0 };
           capture.readers.add(pin);
-          views.set(owner, { capture, pin, at: null });
+          views.set(owner, { capture, pin, at: null, nextOffset: null, generation: 0 });
         }
 
         const view = views.get(owner)!;
 
-        if (view.at !== null) {
-          offset = capture.history.offsetAt(view.at);
+        if (view.nextOffset !== null) {
+          offset = view.nextOffset;
 
           if (capture.origin !== null)
             offset = capture.origin + Math.ceil((offset - capture.origin) / PACKET) * PACKET;
         }
       }
 
+      const generation = views.get(owner)?.generation;
       const reading = { cursor: offset };
       capture.readers.add(reading);
       coordination.connected(owner, capture.key);
@@ -396,6 +403,10 @@ function make(options: LiveCapturesOptions) {
 
               if (read instanceof Uint8Array) {
                 reading.cursor += read.length;
+                const view = views.get(owner);
+
+                if (view?.capture === capture && view.generation === generation)
+                  view.nextOffset = reading.cursor;
 
                 return controller.enqueue(read);
               }
@@ -561,6 +572,7 @@ function make(options: LiveCapturesOptions) {
         open: (signal: AbortSignal) => Promise<Response>,
         signal: AbortSignal,
       ) => {
+        if (signal.aborted) return Promise.reject(signal.reason);
         viewOwners.add(owner);
 
         return request(key, owner, open, signal);
@@ -570,7 +582,10 @@ function make(options: LiveCapturesOptions) {
         const view = views.get(owner);
 
         if (!view || (at !== null && !Number.isFinite(at))) return false;
-        view.at = at;
+        view.generation++;
+        const resolved = at === null ? null : view.capture.history.positionAt(at);
+        view.at = resolved?.at ?? null;
+        view.nextOffset = resolved?.offset ?? null;
 
         return true;
       },

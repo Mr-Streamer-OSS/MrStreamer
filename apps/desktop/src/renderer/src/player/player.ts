@@ -426,6 +426,7 @@ function release(): void {
   if (recording) recording.of.at = recording.from + Math.round(current.engine.played());
   observation.unbind();
   current.engine.destroy();
+  video.removeAttribute("poster");
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
   current = null;
@@ -506,6 +507,7 @@ async function start(
   repair = false,
   preview = false,
   retained?: StreamSession,
+  replay = false,
 ): Promise<void> {
   if (!claim.keep()) return;
 
@@ -529,7 +531,6 @@ async function start(
     release();
   } else {
     current?.engine.destroy();
-    current = null;
     recentSubtitlePackets = [];
     clearSubtitles(video);
   }
@@ -611,7 +612,8 @@ async function start(
   }
 
   retainedSession = session;
-  observation.bind(session.sessionId);
+
+  if (!retained) observation.bind(session.sessionId);
   // The provider's recording can start before the moment asked for, as Xtream's start on a whole
   // minute: what plays is counted from where it starts, and lasts to the window's end.
   const span = session.archive;
@@ -619,7 +621,15 @@ async function start(
   const opened =
     recording && span ? { of: recording, from: span.start, length: span.end - span.start } : null;
 
-  let engine = createEngine(session.format, video, session.url, sound, opened?.length ?? null);
+  let engine = createEngine(
+    session.format,
+    video,
+    session.url,
+    sound,
+    opened?.length ?? null,
+    replay,
+  );
+
   current = { sessionId: session.sessionId, engine, archived: opened };
   engine.onPlayback?.((state) => {
     if (mine === selection) observation.note(state);
@@ -697,10 +707,11 @@ async function start(
     void loadTracks(mine, session.sessionId);
   }
 
-  void call("viewing.recordWatch", {
-    commandId: crypto.randomUUID(),
-    channel: ownedId(channel),
-  }).catch(() => {});
+  if (!retained)
+    void call("viewing.recordWatch", {
+      commandId: crypto.randomUUID(),
+      channel: ownedId(channel),
+    }).catch(() => {});
   playing.onWaiting((waiting) => {
     if (mine === selection) store.setState({ waiting });
   });
@@ -1479,9 +1490,25 @@ export const player = {
 
     if (!timeline || paused || onReceiver) return;
     const cursor = liveCursor();
+    rewindSelection++;
+    selection++;
     video.pause();
+
+    // The decoder can release its network and buffers while its last decoded picture stays visible.
+    if (video.videoWidth && video.videoHeight) {
+      const frame = document.createElement("canvas");
+      frame.width = video.videoWidth;
+      frame.height = video.videoHeight;
+      const context = frame.getContext("2d");
+
+      if (context) {
+        context.drawImage(video, 0, 0);
+        video.poster = frame.toDataURL("image/png");
+      }
+    }
+
     current?.engine.destroy();
-    store.setState({ paused: true, timeline: { ...timeline, cursor } });
+    store.setState({ paused: true, waiting: false, timeline: { ...timeline, cursor } });
   },
 
   /** Reloads this session from retained history; null returns to the live edge. */
@@ -1493,16 +1520,24 @@ export const player = {
 
     const requested = ++rewindSelection;
 
-    const timeline = await call("playback.seekLive", {
-      sessionId: session.sessionId,
-      at,
-      audio: store.getState().audioId,
-    });
+    try {
+      const timeline = await call("playback.seekLive", {
+        sessionId: session.sessionId,
+        at,
+        audio: store.getState().audioId,
+      });
 
-    if (retainedSession !== session || requested !== rewindSelection || !timeline) return;
-    cursorSettled = false;
-    store.setState({ timeline, paused: false });
-    await start(channel, false, false, session);
+      if (retainedSession !== session || requested !== rewindSelection) return;
+
+      if (!timeline) throw new Error("Retained history is unavailable");
+      cursorSettled = false;
+      flashNote(null);
+      store.setState({ timeline, paused: false });
+      await start(channel, false, false, session, at !== null);
+    } catch (cause) {
+      if (retainedSession === session && requested === rewindSelection)
+        flashNote(`${t("Live rewind")}: ${describeError(appError(cause))}`, true);
+    }
   },
 
   goLive(): Promise<void> {
@@ -1717,7 +1752,8 @@ export const player = {
     const own = current?.engine.tracks;
 
     if (own) own.setAudio(id);
-    else if (store.getState().timeline) void player.seekLive(liveCursor());
+    else if (store.getState().timeline && !retainedSession?.convertedHls)
+      void player.seekLive(liveCursor());
     else void begin(channel);
   },
 

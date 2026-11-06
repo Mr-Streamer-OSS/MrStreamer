@@ -1263,7 +1263,7 @@ function make(deps: PlaybackDeps) {
                 signal,
                 [],
                 variant.url,
-                keyOf(session, variant),
+                null,
               );
 
               if (!answer.ok) throw new HlsInputFailure(answer.failure);
@@ -4351,8 +4351,9 @@ function make(deps: PlaybackDeps) {
             return {
               sessionId: session.id,
               channel,
-              url: `${base}/stream/${session.token}.${extension}${session.format === "mpegts" && !session.archive && captures ? "?retained=1" : ""}`,
+              url: `${base}/stream/${session.token}.${extension}${session.delivery === "mpegts" && !session.archive && captures ? "?retained=1" : ""}`,
               format: session.delivery,
+              convertedHls: session.format === "hls" && session.delivery === "mpegts",
               ...defined({ archive: session.archive ?? undefined }),
             };
           }),
