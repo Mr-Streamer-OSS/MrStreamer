@@ -451,6 +451,7 @@ describe.skipIf(!hasTools)("downloads", () => {
         timeout: LONG,
       });
       const destination = await tempDir();
+
       await downloads.setFolder(destination);
       const before = await downloads.copy(saved.id);
       const disconnected = destination + "-disconnected";
@@ -544,10 +545,13 @@ describe.skipIf(!hasTools)("downloads", () => {
     async (which) => {
       const { downloads, provider, subscriptionId, find } = await connected();
       const source = await tempDir();
+
       await downloads.setFolder(source);
+
       const saved = await downloads.add(
         movie(provider, subscriptionId, "TEST | Two sound tracks").ref,
       );
+
       await vi.waitFor(async () => expect((await find(saved.id))?.status.kind).toBe("complete"), {
         timeout: LONG,
       });
