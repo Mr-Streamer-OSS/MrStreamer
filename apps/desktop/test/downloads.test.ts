@@ -1619,6 +1619,73 @@ describe.skipIf(!hasTools)("downloads", () => {
     expect(items.every((item) => item.status.kind !== "complete")).toBe(true);
   }, 60_000);
 
+  it("reports refused startup completion recovery and recovers the same copy on restart", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find, playback, subtitles } = started;
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await downloads.recordProgress(done.id, 3, 10);
+    const copy = await downloads.copy(done.id);
+    const session = await playback.openCopy(copy, DECODERS);
+    await subtitles.timing(session.sessionId, { offset: -2, speed: 1 });
+    const keptSubtitles = await subtitles.saved(session.sessionId);
+    expect(keptSubtitles).not.toBeNull();
+    await playback.close(session.sessionId);
+    await started.quit();
+
+    // The file was renamed, but the app stopped before its completion reached the inventory.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    onTestFinished(() => db.close());
+    db.prepare(
+      "update downloads set record = json_set(record, '$.state', 'queued') where id = ?",
+    ).run(done.id);
+    db.exec(`create trigger refuse_recovery before insert on downloads
+      begin select raise(abort, 'recovery inventory refused'); end`);
+    const sent = provider.fileBytes();
+    const refused = await app(dataDir);
+
+    const failure = {
+      error: { kind: "unexpected", detail: expect.stringContaining("recovery inventory refused") },
+    };
+
+    await expect(refused.downloads.list()).rejects.toMatchObject(failure);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await refused.quit();
+
+    // Another start still reports the refusal; it must not have claimed durable completion.
+    const stillRefused = await app(dataDir);
+    await expect(stillRefused.downloads.list()).rejects.toMatchObject(failure);
+    await stillRefused.quit();
+    db.exec("drop trigger refuse_recovery");
+
+    const recovered = await app(dataDir);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" }, progress: { position: 3, duration: 10 } },
+    ]);
+    expect(await recovered.downloads.copy(done.id)).toEqual(copy);
+
+    const played = await recovered.playback.openCopy(
+      await recovered.downloads.copy(done.id),
+      DECODERS,
+    );
+
+    expect(await recovered.subtitles.saved(played.sessionId)).toEqual(keptSubtitles);
+    await recovered.playback.close(played.sessionId);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await recovered.quit();
+
+    const again = await app(dataDir);
+    expect((await again.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" }, progress: { position: 3, duration: 10 } },
+    ]);
+    expect(await again.downloads.copy(done.id)).toEqual(copy);
+    expect(provider.fileBytes()).toBe(sent);
+    await again.quit();
+  }, 60_000);
+
   it("lists incomplete downloads without seeding personal progress", async () => {
     const { provider, subscriptionId, downloads, dataDir } = await connected();
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");

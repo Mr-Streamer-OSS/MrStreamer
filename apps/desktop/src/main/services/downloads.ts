@@ -237,7 +237,7 @@ function make(deps: DownloadsDeps) {
     // Without its table nothing can be queued or listed either: each call says so, as the store
     // says it then, in the interface language of that moment. A read that works later still fails:
     // nothing on disk was checked against the table at the start.
-    const unloaded =
+    let unloaded =
       configured._tag === "Failure"
         ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
         : loaded._tag === "Failure"
@@ -400,7 +400,14 @@ function make(deps: DownloadsDeps) {
           completedAt: Date.now(),
         };
 
-        yield* store.put(complete).pipe(Effect.ignore);
+        const saved = yield* Effect.result(store.put(complete));
+
+        if (saved._tag === "Failure") {
+          // Keep the renamed file for the next start; this run cannot claim completion or transfer it.
+          unloaded = Effect.fail(saved.failure);
+          break;
+        }
+
         records.set(record.id, complete);
       }
     }
@@ -597,7 +604,7 @@ function make(deps: DownloadsDeps) {
      * is told once it is out.
      */
     const tell = () => {
-      if (closing) return;
+      if (unloaded || closing) return;
 
       if (viewing) stale = true;
 
@@ -660,7 +667,7 @@ function make(deps: DownloadsDeps) {
         const refused = new Set<string>();
 
         for (;;) {
-          if (active || closing) return;
+          if (unloaded || active || closing) return;
 
           if (again) refused.clear();
           again = false;
@@ -1570,6 +1577,8 @@ function make(deps: DownloadsDeps) {
 
       subscriptionGone: (subscriptionId: string) =>
         Effect.promise(async () => {
+          if (unloaded) return;
+
           const gone = [...records.values()].filter(
             (record) => record.subscriptionId === subscriptionId && record.state !== "complete",
           );
