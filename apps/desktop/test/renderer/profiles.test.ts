@@ -486,3 +486,36 @@ it("startup Retry configures the exact restored owner before loading private sta
   );
   expect(ipc.argsOf("profiles.switch")).toEqual([{ id: B.id, current: B }]);
 });
+
+it.each([AGAIN, B])(
+  "keeps a superseding successful selection %j when recovery finishes late",
+  async (next) => {
+    ipc.always("profiles.active", A);
+    ipc.always("output.status", local(A));
+    stop = syncProfiles(client);
+    await vi.waitFor(() =>
+      expect(profileStatus()).toMatchObject({ owner: A, pending: false, error: null }),
+    );
+    vi.spyOn(titlePlayer, "prepareProfileSwitch").mockResolvedValue(true);
+    ipc.always("profiles.active", B);
+    ipc.always("output.status", local(B));
+    ipc.refuse("profiles.switch", { kind: "unexpected", detail: "Configuration refused." });
+    const language = ipc.hold("language.get");
+    const pending = switchProfile(client, B.id);
+    const refused = expect(pending).rejects.toBeDefined();
+    await vi.waitFor(() => expect(profileOwner()).toEqual(B));
+    await vi.waitFor(() => expect(ipc.argsOf("language.get")).toHaveLength(2));
+    ipc.always("language.get", english);
+    ipc.always("output.status", local(next));
+    ipc.emit("profiles.activeChanged", next);
+
+    if (next !== B)
+      await vi.waitFor(() =>
+        expect(profileStatus()).toMatchObject({ owner: next, pending: false, error: null }),
+      );
+
+    language.resolve(dutch);
+    await refused;
+    expect(profileStatus()).toMatchObject({ owner: next, pending: false, error: null });
+  },
+);

@@ -57,6 +57,7 @@ function publish(next: ProfileStatus): void {
 }
 
 let lifetime = 0;
+let selectionAttempt = 0;
 
 let applying: {
   readonly owner: ActiveProfile;
@@ -166,7 +167,11 @@ export function syncProfiles(client: QueryClient): () => void {
     });
   };
 
-  const stop = listen("profiles.activeChanged", apply);
+  const stop = listen("profiles.activeChanged", (owner) => {
+    selectionAttempt++;
+    apply(owner);
+  });
+
   void call("profiles.active")
     .then(async (owner) => {
       if (!alive || generation !== lifetime) return;
@@ -203,6 +208,7 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
 
   if (!owner || switching) throw profileChanged();
   switching = true;
+  const attempt = ++selectionAttempt;
   let selectionRequested = false;
 
   try {
@@ -225,12 +231,20 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
     try {
       const selected = await call("profiles.active");
 
-      if (generation === lifetime && currentProfile(owner) && !sameProfile(selected, owner)) {
+      if (
+        attempt === selectionAttempt &&
+        generation === lifetime &&
+        currentProfile(owner) &&
+        !sameProfile(selected, owner)
+      ) {
         await acceptOwner(client, selected).catch(() => {});
-        publish({ owner: selected, pending: false, error: cause });
+
+        if (attempt === selectionAttempt && generation === lifetime && currentProfile(selected))
+          publish({ owner: selected, pending: false, error: cause });
       }
     } catch {
-      if (generation === lifetime) publish({ owner: profileOwner(), pending: false, error: cause });
+      if (attempt === selectionAttempt && generation === lifetime)
+        publish({ owner: profileOwner(), pending: false, error: cause });
     }
 
     throw cause;

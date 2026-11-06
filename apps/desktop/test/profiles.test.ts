@@ -1651,121 +1651,134 @@ it("subscription update waiting on household writes cannot hold the permit sourc
   expect(Exit.isSuccess(result)).toBe(true);
 });
 
-it("keeps untouched-source callbacks usable but refuses erased-source callbacks begun after failed removal restores the source", async () => {
-  const dataDir = await tempDir();
+it.each(["first", "later"])(
+  "keeps untouched-source callbacks usable after the %s profile refuses erasure",
+  async (lockedProfile) => {
+    const dataDir = await tempDir();
 
-  const runtime = runtimeFor(
-    mainLayer({
-      ...testConfig(dataDir),
-      profiles: {
-        consent: { read: Effect.succeed(true), write: () => Effect.void },
-        stopInteractive: () => Effect.void,
-      },
-    }),
-  );
-
-  const roster = await runtime.runPromise(Roster);
-  const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
-  const other = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
-  const library = await runtime.runPromise(Library);
-  await runtime.runPromise(library.refresh(source.id));
-  await runtime.runPromise(library.refresh(other.id));
-  const profiles = await promised(runtime, ProfileSessions);
-  const sessions = await runtime.runPromise(ProfileSessions);
-  const b = await profiles.create("B");
-  await profiles.switch(b.id);
-  const retainedB = await profiles.admit();
-
-  const keptLists = await runtime.runPromise(
-    retainedB.run(
-      retainedB.services.lists.create({
-        id: "b-list",
-        name: "B",
-        channel: { subscriptionId: source.id, id: "2014" },
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () => Effect.void,
+        },
       }),
-    ),
-  );
+    );
 
-  const member = keptLists[0]!.members[0]!.member;
-  await profiles.switch(DEFAULT_PROFILE_ID);
-  const retained = await profiles.admit();
-  await runtime.runPromise(
-    retained.run(retained.services.lists.create({ id: "retained-list", name: "Saved" })),
-  );
-  const onDemand = await runtime.runPromise(OnDemand);
-  await runtime.runPromise(onDemand.refresh(source.id));
-  const subscriptions = await runtime.runPromise(Subscriptions);
+    const roster = await runtime.runPromise(Roster);
+    const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+    const other = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+    const library = await runtime.runPromise(Library);
+    await runtime.runPromise(library.refresh(source.id));
+    await runtime.runPromise(library.refresh(other.id));
+    const profiles = await promised(runtime, ProfileSessions);
+    const sessions = await runtime.runPromise(ProfileSessions);
+    const b = await profiles.create("B");
+    await profiles.switch(b.id);
+    const retainedB = await profiles.admit();
 
-  const account = (await runtime.runPromise(subscriptions.saved)).find(
-    (row) => row.id === source.id,
-  )!.key;
-
-  const erased = { subscriptionId: source.id, id: "2014" };
-  const untouched = { subscriptionId: other.id, id: "2014" };
-  await runtime.runPromise(
-    retained.run(retained.services.viewing.recordWatch("same-receipt", erased)),
-  );
-  const lock = new DatabaseSync(join(profileDirectory(dataDir, b.id), "mrstreamer.db"));
-
-  try {
-    lock.exec("begin immediate");
-    await expect(
-      runtime.runPromise(subscriptions.remove(source.id, { erase: sessions.eraseSource(account) })),
-    ).rejects.toBeDefined();
-  } finally {
-    lock.exec("rollback");
-    lock.close();
-  }
-
-  expect((await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id)).toBe(
-    true,
-  );
-  await expect(
-    runtime.runPromise(retained.run(retained.services.viewing.recordWatch("same-receipt", erased))),
-  ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
-
-  const lateLists = await Promise.allSettled([
-    runtime.runPromise(
-      retained.run(retained.services.lists.setMember("retained-list", erased, true)),
-    ),
-    runtime.runPromise(
-      retained.run(
-        retained.services.watchlist.save("movie", { subscriptionId: source.id, id: "90002" }),
+    const keptLists = await runtime.runPromise(
+      retainedB.run(
+        retainedB.services.lists.create({
+          id: "b-list",
+          name: "B",
+          channel: { subscriptionId: source.id, id: "2014" },
+        }),
       ),
-    ),
-  ]);
+    );
 
-  expect(lateLists.map((result) => result.status)).toEqual(["rejected", "rejected"]);
-  await expect(
-    runtime.runPromise(retainedB.run(retainedB.services.lists.removeMember("b-list", member))),
-  ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
-  await runtime.runPromise(
-    retained.run(retained.services.lists.setMember("retained-list", untouched, true)),
-  );
+    const member = keptLists[0]!.members[0]!.member;
+    await profiles.switch(DEFAULT_PROFILE_ID);
+    const retained = await profiles.admit();
+    await runtime.runPromise(
+      retained.run(retained.services.lists.create({ id: "retained-list", name: "Saved" })),
+    );
+    const onDemand = await runtime.runPromise(OnDemand);
+    await runtime.runPromise(onDemand.refresh(source.id));
+    const subscriptions = await runtime.runPromise(Subscriptions);
 
-  await runtime.runPromise(
-    retained.run(retained.services.viewing.recordWatch("untouched", untouched)),
-  );
-  expect((await runtime.runPromise(retained.run(retained.services.viewing.state))).recent).toEqual([
-    untouched,
-  ]);
-  const fresh = await profiles.admit();
-  await runtime.runPromise(
-    fresh.run(fresh.services.lists.setMember("retained-list", erased, true)),
-  );
-  await runtime.runPromise(fresh.run(fresh.services.viewing.recordWatch("fresh", erased)));
-  expect((await runtime.runPromise(fresh.run(fresh.services.viewing.state))).recent).toContainEqual(
-    erased,
-  );
-  await profiles.switch(b.id);
-  const freshB = await profiles.admit();
-  await runtime.runPromise(freshB.run(freshB.services.lists.removeMember("b-list", member)));
-  expect(
-    (await runtime.runPromise(freshB.run(freshB.services.lists.lists))).find(
-      (list) => list.id === "b-list",
-    )?.members,
-  ).toEqual([]);
-});
+    const account = (await runtime.runPromise(subscriptions.saved)).find(
+      (row) => row.id === source.id,
+    )!.key;
+
+    const erased = { subscriptionId: source.id, id: "2014" };
+    const untouched = { subscriptionId: other.id, id: "2014" };
+    await runtime.runPromise(
+      retained.run(retained.services.viewing.recordWatch("same-receipt", erased)),
+    );
+
+    const lock = new DatabaseSync(
+      join(lockedProfile === "first" ? dataDir : profileDirectory(dataDir, b.id), "mrstreamer.db"),
+    );
+
+    try {
+      lock.exec("begin immediate");
+      await expect(
+        runtime.runPromise(
+          subscriptions.remove(source.id, { erase: sessions.eraseSource(account) }),
+        ),
+      ).rejects.toBeDefined();
+    } finally {
+      lock.exec("rollback");
+      lock.close();
+    }
+
+    expect(
+      (await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id),
+    ).toBe(true);
+    await expect(
+      runtime.runPromise(
+        retained.run(retained.services.viewing.recordWatch("same-receipt", erased)),
+      ),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    await expect(
+      runtime.runPromise(retainedB.run(retainedB.services.viewing.recordWatch("late-b", erased))),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+
+    const lateLists = await Promise.allSettled([
+      runtime.runPromise(
+        retained.run(retained.services.lists.setMember("retained-list", erased, true)),
+      ),
+      runtime.runPromise(
+        retained.run(
+          retained.services.watchlist.save("movie", { subscriptionId: source.id, id: "90002" }),
+        ),
+      ),
+    ]);
+
+    expect(lateLists.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+    await expect(
+      runtime.runPromise(retainedB.run(retainedB.services.lists.removeMember("b-list", member))),
+    ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+    await runtime.runPromise(
+      retained.run(retained.services.lists.setMember("retained-list", untouched, true)),
+    );
+
+    await runtime.runPromise(
+      retained.run(retained.services.viewing.recordWatch("untouched", untouched)),
+    );
+    expect(
+      (await runtime.runPromise(retained.run(retained.services.viewing.state))).recent,
+    ).toEqual(lockedProfile === "first" ? [untouched, erased] : [untouched]);
+    const fresh = await profiles.admit();
+    await runtime.runPromise(
+      fresh.run(fresh.services.lists.setMember("retained-list", erased, true)),
+    );
+    await runtime.runPromise(fresh.run(fresh.services.viewing.recordWatch("fresh", erased)));
+    expect(
+      (await runtime.runPromise(fresh.run(fresh.services.viewing.state))).recent,
+    ).toContainEqual(erased);
+    await profiles.switch(b.id);
+    const freshB = await profiles.admit();
+    await runtime.runPromise(freshB.run(freshB.services.lists.removeMember("b-list", member)));
+    expect(
+      (await runtime.runPromise(freshB.run(freshB.services.lists.lists))).find(
+        (list) => list.id === "b-list",
+      )?.members,
+    ).toEqual([]);
+  },
+);
 
 it("refuses a viewing command when its named source is erased while its channel read waits", async () => {
   const dataDir = await tempDir();

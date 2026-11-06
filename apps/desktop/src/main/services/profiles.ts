@@ -514,8 +514,12 @@ export function makeProfiles({
       eraseSource: (account: string, defaultErase?: Effect.Effect<void, Failed>) =>
         one.withPermits(1)(
           Effect.gen(function* () {
-            const rows = yield* storage.list;
             const admitted = { ...active };
+
+            // Invalidate every retained callback before opening or erasing any owner can fail.
+            for (const handle of handles.values())
+              handle.erased.set(account, (handle.erased.get(account) ?? 0) + 1);
+            const rows = yield* storage.list;
 
             // Separate owner databases cannot commit atomically together. Completed erasures remain
             // erased if a later owner fails. Return that failure; retrying erases the entire set again.
@@ -525,7 +529,6 @@ export function makeProfiles({
                   t("Finish deleting the pending profile before erasing a source."),
                 );
               const handle = yield* opened(row.id);
-              handle.erased.set(account, (handle.erased.get(account) ?? 0) + 1);
               yield* handle.one.withPermits(PROFILE_OPERATIONS)(
                 row.id === DEFAULT_PROFILE_ID && defaultErase
                   ? defaultErase
