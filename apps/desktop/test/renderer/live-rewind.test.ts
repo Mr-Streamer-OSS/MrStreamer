@@ -6,6 +6,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { LiveChannel } from "@mrstreamer/contracts/library";
+import { defaultPreferences } from "@mrstreamer/contracts/preferences";
 import type { LiveTimeline } from "@mrstreamer/contracts/playback";
 import { closeWatch, openWatch } from "../../src/renderer/src/app/ui-store.ts";
 import { useFlash, flashNote } from "../../src/renderer/src/features/watch/flash-state.ts";
@@ -36,6 +37,7 @@ const media = vi.hoisted(() => {
 });
 
 const engines = vi.hoisted(() => ({
+  started: Promise.resolve(),
   opened: 0,
   destroyed: 0,
   args: [] as unknown[][],
@@ -50,7 +52,7 @@ vi.mock("../../src/renderer/src/player/engine.ts", () => ({
 
     return {
       name: "mpegts.js",
-      started: Promise.resolve(),
+      started: engines.started,
       tracks: null,
       onFailure() {},
       onEnded() {},
@@ -89,6 +91,9 @@ afterEach(() => {
     player.reset();
   });
   ipc.reset();
+  engines.started = Promise.resolve();
+  Reflect.deleteProperty(player.element, "videoWidth");
+  Reflect.deleteProperty(player.element, "videoHeight");
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -233,8 +238,8 @@ it("keeps a frozen decoded picture after releasing the paused decoder", async ()
   answer({ start: end - 60_000, end, cursor: end, expired: false });
   player.play(watched);
   await vi.waitFor(() => expect(player.state().timeline).not.toBeNull());
-  Object.defineProperty(player.element, "videoWidth", { configurable: true, get: () => 64 });
-  Object.defineProperty(player.element, "videoHeight", { configurable: true, get: () => 64 });
+  Object.defineProperty(player.element, "videoWidth", { configurable: true, get: () => 3840 });
+  Object.defineProperty(player.element, "videoHeight", { configurable: true, get: () => 2160 });
   const drawImage = vi.fn();
 
   const context: Pick<CanvasRenderingContext2D, "drawImage" | "clearRect"> = {
@@ -245,14 +250,26 @@ it("keeps a frozen decoded picture after releasing the paused decoder", async ()
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
     context as CanvasRenderingContext2D,
   );
-  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
-    "data:image/png;base64,frozen",
-  );
+
+  const encode = vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(function (
+    this: HTMLCanvasElement,
+  ) {
+    expect(this.width).toBeLessThanOrEqual(960);
+    expect(this.height).toBeLessThanOrEqual(540);
+
+    return "data:image/jpeg;base64,frozen";
+  });
+
   player.pause();
-  expect(drawImage).toHaveBeenCalledWith(player.element, 0, 0);
-  expect(player.element.poster).toBe("data:image/png;base64,frozen");
+  expect(drawImage).toHaveBeenCalledWith(player.element, 0, 0, 960, 540);
+  expect(encode).toHaveBeenCalledWith("image/jpeg", 0.8);
+  expect(player.element.poster).toBe("data:image/jpeg;base64,frozen");
+  await player.seekLive(end - 10_000);
+  expect(player.element.poster).toBe("");
+  player.pause();
   player.stop();
   expect(player.element.getAttribute("poster")).toBeNull();
+  expect(player.element.poster).toBe("");
   Reflect.deleteProperty(player.element, "videoWidth");
   Reflect.deleteProperty(player.element, "videoHeight");
 });
@@ -286,13 +303,22 @@ it("reopens converted HLS when picking audio instead of reusing the old converte
 it("OS pause and play retain the local channel and report its paused state", async () => {
   vi.useFakeTimers();
   const end = Date.now();
-  await watch({ start: end - 60_000, end, cursor: end, expired: false });
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause");
+  await watch({ start: end - 60_000, end, cursor: end - 30_000, expired: false });
+  expect(play.mock.instances.some((element) => element instanceof HTMLAudioElement)).toBe(true);
   await act(async () => media.handlers.get("pause")?.());
   expect(player.state().paused).toBe(true);
   expect(media.session.playbackState).toBe("paused");
+  expect(pause.mock.instances.some((element) => element instanceof HTMLAudioElement)).toBe(true);
   expect(ipc.argsOf("playback.close")).toHaveLength(0);
   await act(async () => media.handlers.get("play")?.());
   expect(ipc.argsOf("playback.seekLive")).toHaveLength(1);
+  const cursor = player.state().timeline!.cursor;
+  await act(async () => media.handlers.get("seekbackward")?.());
+  expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBeCloseTo(cursor - 10_000, -2);
+  await act(async () => media.handlers.get("seekforward")?.());
+  expect(ipc.argsOf("playback.seekLive").at(-1)?.at).toBeCloseTo(cursor + 10_000, -2);
 });
 
 it("commits the slider's Home key to the oldest retained moment", async () => {
@@ -334,7 +360,7 @@ function answer(timeline: LiveTimeline | null) {
   ipc.always("playback.open", {
     sessionId: "watched",
     channel: watched,
-    url: `http://127.0.0.1/live.ts${timeline ? "?retained=1" : ""}`,
+    url: "http://127.0.0.1/live.ts",
     format: "mpegts",
   });
   ipc.always("playback.timeline", timeline);
@@ -379,3 +405,40 @@ function button(name: string): HTMLButtonElement {
 
   return found;
 }
+
+it.each(["preferences", "engine"] as const)(
+  "keeps Pause while a retained start waits for %s",
+  async (boundary) => {
+    const end = Date.now();
+    answer({ start: end - 60_000, end, cursor: end - 30_000, expired: false });
+    player.play(watched);
+    await vi.waitFor(() => expect(player.state().timeline).not.toBeNull());
+    const opened = engines.opened;
+    const preferenceReads = ipc.methods().filter((method) => method === "preferences.get").length;
+    const preferences = boundary === "preferences" ? ipc.hold("preferences.get") : null;
+    const started = Promise.withResolvers<void>();
+
+    if (boundary === "engine") engines.started = started.promise;
+    const seeking = player.seekLive(end - 20_000);
+    await vi.waitFor(() =>
+      expect(
+        boundary === "engine"
+          ? engines.opened > opened
+          : ipc.methods().filter((method) => method === "preferences.get").length > preferenceReads,
+      ).toBe(true),
+    );
+    player.pause();
+    preferences?.resolve({ revision: 100, preferences: defaultPreferences });
+    started.resolve();
+    await seeking;
+    engines.started = Promise.resolve();
+    expect(player.state().paused).toBe(true);
+    expect(player.state().waiting).toBe(false);
+
+    if (boundary === "preferences") expect(engines.opened).toBe(opened);
+    engines.waiting(true);
+    expect(player.state().waiting).toBe(false);
+    player.stop();
+    expect(ipc.argsOf("playback.close")).toEqual([{ sessionId: "watched" }]);
+  },
+);

@@ -1263,6 +1263,42 @@ describe("live captures", () => {
     expect(await bytesIn(folder)).toBe(0);
   });
 
+  it("re-resolves an evicted pending seek on attachment and reports its expired cursor", async () => {
+    const { captures, key, provider } = await capturing();
+    const watch = new AbortController();
+
+    const first = (
+      await captures.viewRequest(key, "watch", provider, watch.signal)
+    ).body!.getReader();
+
+    await take(first, 188 * 200);
+    watch.abort();
+    const oldest = captures.timeline("watch")!.start;
+    expect(captures.seek("watch", oldest)).toBe(true);
+    const now = vi.spyOn(Date, "now").mockReturnValue(oldest + 31 * 60_000);
+
+    try {
+      await vi.waitFor(() => expect(captures.timeline("watch")!.start).toBeGreaterThan(oldest));
+      const resumed = new AbortController();
+
+      try {
+        const reader = (
+          await captures.viewRequest(key, "watch", provider, resumed.signal)
+        ).body!.getReader();
+
+        expect((await take(reader, 188))[0]).toBe(0x47);
+        const timeline = captures.timeline("watch")!;
+        expect(timeline.expired).toBe(true);
+        expect(timeline.cursor).toBe(timeline.start);
+      } finally {
+        resumed.abort();
+      }
+    } finally {
+      now.mockRestore();
+      await captures.idle("watch");
+    }
+  });
+
   it("expires retained arrival time even below the disk cap and limits retention to an hour", async () => {
     const store = historyStore({
       folder: await tempDir(),

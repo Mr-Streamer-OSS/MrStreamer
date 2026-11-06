@@ -349,7 +349,10 @@ function make(options: LiveCapturesOptions) {
         const view = views.get(owner)!;
 
         if (view.nextOffset !== null) {
-          offset = view.nextOffset;
+          // Re-resolve only a new attachment. Active readers still fail with FellBehind.
+          const oldest = capture.history.positionAt(-Infinity);
+          offset = Math.max(view.nextOffset, oldest.offset);
+          view.nextOffset = offset;
 
           if (capture.origin !== null)
             offset = capture.origin + Math.ceil((offset - capture.origin) / PACKET) * PACKET;

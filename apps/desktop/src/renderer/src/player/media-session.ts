@@ -334,8 +334,12 @@ export function useLiveSession(channel: LiveChannel | null): void {
   }, [view, channel, programme, retained]);
 
   useEffect(() => showState(view, playing ? "playing" : "paused"), [view, playing]);
-  // On a receiver the channel makes no sound here. `stopped` tells its Stop from a preview's end.
+  // A retained pause destroys local audio too, so keep its OS carrier through pause/resume.
+  // On a receiver, `stopped` tells its Stop from a preview's end.
   const remote = useOutput((state) => state.status.output.kind === "receiver");
   const stopped = usePlayer((state) => state.stopped);
-  useCarried(remote && channel !== null && (live || stopped), playing);
+  useCarried(
+    channel !== null && ((remote && (live || stopped)) || (!remote && retained && live)),
+    playing,
+  );
 }

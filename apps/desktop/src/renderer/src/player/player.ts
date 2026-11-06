@@ -426,6 +426,7 @@ function release(): void {
   if (recording) recording.of.at = recording.from + Math.round(current.engine.played());
   observation.unbind();
   current.engine.destroy();
+  video.poster = "";
   video.removeAttribute("poster");
   clearSubtitles(video);
   void call("playback.close", { sessionId: current.sessionId }).catch(() => {});
@@ -531,6 +532,8 @@ async function start(
     release();
   } else {
     current?.engine.destroy();
+    video.poster = "";
+    video.removeAttribute("poster");
     recentSubtitlePackets = [];
     clearSubtitles(video);
   }
@@ -1497,13 +1500,14 @@ export const player = {
     // The decoder can release its network and buffers while its last decoded picture stays visible.
     if (video.videoWidth && video.videoHeight) {
       const frame = document.createElement("canvas");
-      frame.width = video.videoWidth;
-      frame.height = video.videoHeight;
+      const scale = Math.min(1, 960 / video.videoWidth, 540 / video.videoHeight);
+      frame.width = Math.round(video.videoWidth * scale);
+      frame.height = Math.round(video.videoHeight * scale);
       const context = frame.getContext("2d");
 
       if (context) {
-        context.drawImage(video, 0, 0);
-        video.poster = frame.toDataURL("image/png");
+        context.drawImage(video, 0, 0, frame.width, frame.height);
+        video.poster = frame.toDataURL("image/jpeg", 0.8);
       }
     }
 

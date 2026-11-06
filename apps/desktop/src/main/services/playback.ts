@@ -4351,7 +4351,7 @@ function make(deps: PlaybackDeps) {
             return {
               sessionId: session.id,
               channel,
-              url: `${base}/stream/${session.token}.${extension}${session.delivery === "mpegts" && !session.archive && captures ? "?retained=1" : ""}`,
+              url: `${base}/stream/${session.token}.${extension}`,
               format: session.delivery,
               convertedHls: session.format === "hls" && session.delivery === "mpegts",
               ...defined({ archive: session.archive ?? undefined }),
