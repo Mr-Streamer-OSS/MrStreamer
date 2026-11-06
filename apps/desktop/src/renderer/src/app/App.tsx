@@ -48,7 +48,7 @@ export function App() {
     <>
       {profile.pending ? null : profile.error !== null ? (
         <>
-          <WindowBar />
+          <WindowBar recovery />
           <div className="flex items-center gap-4 p-10 text-sm" role="alert">
             <p className="text-destructive">{describeError(appError(profile.error))}</p>
             <Button size="sm" onClick={() => setAttempt((count) => count + 1)}>

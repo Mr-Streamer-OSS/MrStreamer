@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { ipc, SAVED } from "./support.ts";
+import { browseResult } from "./browse-support.ts";
 import { QueryClient } from "@tanstack/react-query";
 import { act, createElement } from "react";
 import { queryView } from "./mount.ts";
@@ -38,6 +39,8 @@ import {
   syncProfiles,
 } from "../../src/renderer/src/features/profiles/profiles.ts";
 import { ProfileMenu } from "../../src/renderer/src/features/profiles/ProfileMenu.tsx";
+import { App } from "../../src/renderer/src/app/App.tsx";
+import { TooltipProvider } from "../../src/renderer/src/components/ui/tooltip.tsx";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -540,3 +543,40 @@ it.each([AGAIN, B])(
     expect(profileStatus()).toMatchObject({ owner: next, pending: false, error: null });
   },
 );
+
+it("keeps the window bar to the brand while the viewer's profile can't load, and restores it after Retry", async () => {
+  useUi.setState(useUi.getInitialState(), true);
+  ipc.always("profiles.active", B);
+  ipc.always("output.status", local(B));
+  ipc.always("subscription.list", [SAVED]);
+  ipc.always("liveBrowse.get", { kind: "all" });
+  ipc.always("library.categories", []);
+  ipc.always("library.browse", browseResult([]));
+  ipc.always("viewing.get", viewing(0));
+  ipc.always("ondemand.status", { lists: [], metadata: null });
+  ipc.refuse("language.get", { kind: "unexpected", detail: "Configuration unfinished." });
+
+  const named = () =>
+    [...document.querySelectorAll("button")].map(
+      (button) => button.getAttribute("aria-label") ?? button.textContent?.trim(),
+    );
+
+  const view = queryView(client);
+  unmount = view.unmount;
+  await view.render(createElement(TooltipProvider, null, createElement(App)));
+  await vi.waitFor(() => expect(document.querySelector("[role=alert]")).not.toBeNull());
+
+  // The bar stays the window's drag area, with nothing that opens a page no one can show.
+  const bar = document.querySelector("header");
+  expect(bar?.classList.contains("drag")).toBe(true);
+  expect(bar?.textContent).toBe("mr. streamer");
+  expect(named()).toEqual([t("Retry")]);
+
+  ipc.always("language.get", english);
+  ipc.always("profiles.switch", B);
+  await menu().press(t("Retry"));
+  await vi.waitFor(() =>
+    expect(named()).toEqual(expect.arrayContaining([t("Home"), t("Search"), t("Settings")])),
+  );
+  expect(document.querySelector("[role=alert]")).toBeNull();
+});

@@ -64,9 +64,18 @@ const anyKept = (list: DownloadList) => list.items.length > 0;
  * place also says how the downloads stand while one is under way, waits or stopped, except over
  * the Downloads page itself while its name is in the bar. Where even the other names, or Back,
  * don't fit beside those words, Downloads and Update keep their icons alone, with their words
- * on hover and focus.
+ * on hover and focus. In `recovery`, while the viewer's profile can't load and no page is mounted,
+ * the bar keeps only the brand and its drag area: nothing in it opens a page, Search or Settings.
  */
-export function WindowBar({ className, onBack }: { className?: string; onBack?: () => void }) {
+export function WindowBar({
+  className,
+  onBack,
+  recovery = false,
+}: {
+  className?: string;
+  onBack?: () => void;
+  recovery?: boolean;
+}) {
   const view = useUi((state) => state.view);
   // An unmapped playlist has live TV only; explicit mapping enables the title pages.
   const subscriptions = useSubscriptions();
@@ -127,22 +136,23 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
   const [backRoom, backFold] = useFolds(status?.text, updateWords, locale);
   const folded = fold !== "none";
 
-  const back =
-    onBack ??
-    (settingsOpen
-      ? () => useUi.setState({ settings: null })
-      : watching
-        ? closeWatch
-        : detailsOpen
-          ? () => void backDetails()
-          : savedOpen
-            ? () => useUi.setState({ savedEntry: null })
-            : null);
+  const back = recovery
+    ? null
+    : (onBack ??
+      (settingsOpen
+        ? () => useUi.setState({ settings: null })
+        : watching
+          ? closeWatch
+          : detailsOpen
+            ? () => void backDetails()
+            : savedOpen
+              ? () => useUi.setState({ savedEntry: null })
+              : null));
 
   return (
     <BarFrame className={className}>
       <Brand />
-      {back ? (
+      {recovery ? null : back ? (
         <div ref={backRoom} className="flex min-w-0 flex-1 overflow-hidden">
           <button
             onMouseDown={(event) => event.preventDefault()}
@@ -172,39 +182,48 @@ export function WindowBar({ className, onBack }: { className?: string; onBack?: 
         </nav>
       )}
       <div className="ml-auto flex items-center gap-1.5">
-        <UpdateNotice compact={(back ? backFold : fold) === "arrow"} />
-        <TmdbProgress />
-        {back ? (
-          <DownloadsNotice status={status} compact={backFold === "arrow"} />
-        ) : folded && shown.some((entry) => entry.view === "downloads") ? (
-          <DownloadsNotice
-            status={status}
-            page
-            current={view === "downloads"}
-            compact={fold === "arrow"}
-          />
-        ) : (
-          view !== "downloads" && <DownloadsNotice status={status} />
+        {/* Each of these can open Settings or a page. */}
+        {!recovery && (
+          <>
+            <UpdateNotice compact={(back ? backFold : fold) === "arrow"} />
+            <TmdbProgress />
+            {back ? (
+              <DownloadsNotice status={status} compact={backFold === "arrow"} />
+            ) : folded && shown.some((entry) => entry.view === "downloads") ? (
+              <DownloadsNotice
+                status={status}
+                page
+                current={view === "downloads"}
+                compact={fold === "arrow"}
+              />
+            ) : (
+              view !== "downloads" && <DownloadsNotice status={status} />
+            )}
+          </>
         )}
         {!alone && (
           <>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("Search")}
-              onClick={() => useUi.setState({ searchOpen: true })}
-            >
-              <Search />
-            </Button>
-            <Button
-              variant={settingsOpen ? "secondary" : "ghost"}
-              size="icon-sm"
-              aria-label={t("Settings")}
-              aria-pressed={settingsOpen}
-              onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
-            >
-              <Settings />
-            </Button>
+            {!recovery && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("Search")}
+                  onClick={() => useUi.setState({ searchOpen: true })}
+                >
+                  <Search />
+                </Button>
+                <Button
+                  variant={settingsOpen ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  aria-label={t("Settings")}
+                  aria-pressed={settingsOpen}
+                  onClick={() => useUi.setState({ settings: settingsOpen ? null : "general" })}
+                >
+                  <Settings />
+                </Button>
+              </>
+            )}
           </>
         )}
       </div>
