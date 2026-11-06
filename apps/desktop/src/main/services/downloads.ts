@@ -176,9 +176,9 @@ export class Downloads extends Context.Service<
     ): Effect.Effect<{ readonly path: string; readonly type: string } | null>;
     /**
      * A subscription is going: its unfinished downloads end, their transfer and files with them.
-     * Its copies stay.
+     * Its copies stay. A refused recovery or cleanup fails removal so the subscription can retry.
      */
-    subscriptionGone(subscriptionId: string): Effect.Effect<void>;
+    subscriptionGone(subscriptionId: string): Effect.Effect<void, Failed>;
     /** The list after every change, each later than the last, a few times a second at most. */
     readonly changes: Stream.Stream<DownloadList>;
   }
@@ -1576,8 +1576,8 @@ function make(deps: DownloadsDeps) {
         }),
 
       subscriptionGone: (subscriptionId: string) =>
-        Effect.promise(async () => {
-          if (unloaded) return;
+        attempt(async () => {
+          if (unloaded) await Effect.runPromise(unloaded);
 
           const gone = [...records.values()].filter(
             (record) => record.subscriptionId === subscriptionId && record.state !== "complete",
@@ -1605,6 +1605,8 @@ function make(deps: DownloadsDeps) {
                   records.set(record.id, failed);
                 }
               }
+
+              throw cause;
             }
           }
 
