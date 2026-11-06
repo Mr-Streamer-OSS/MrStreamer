@@ -1017,7 +1017,9 @@ describe.skipIf(!hasTools)("downloads", () => {
       });
 
       try {
-        await downloads.subscriptionGone(subscriptionId);
+        await expect(downloads.subscriptionGone(subscriptionId)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
         expect((await downloads.list()).ended).toBe(0);
         expect((await find(saved.id))?.status.kind).toBe("failed");
       } finally {
@@ -1617,6 +1619,317 @@ describe.skipIf(!hasTools)("downloads", () => {
     await failsWith({ kind: "folder", detail: expect.any(String) });
     const items = (await downloads.list()).items;
     expect(items.every((item) => item.status.kind !== "complete")).toBe(true);
+  }, 60_000);
+
+  it("reports refused startup completion recovery and recovers the same copy on restart", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find, playback, subtitles } = started;
+    const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await downloads.recordProgress(done.id, 3, 10);
+    const copy = await downloads.copy(done.id);
+    const session = await playback.openCopy(copy, DECODERS);
+    await subtitles.timing(session.sessionId, { offset: -2, speed: 1 });
+    const keptSubtitles = await subtitles.saved(session.sessionId);
+    expect(keptSubtitles).not.toBeNull();
+    await playback.close(session.sessionId);
+    await started.quit();
+
+    // The file was renamed, but the app stopped before its completion reached the inventory.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    onTestFinished(() => db.close());
+    db.prepare(
+      "update downloads set record = json_set(record, '$.state', 'queued') where id = ?",
+    ).run(done.id);
+    db.exec(`create trigger refuse_recovery before insert on downloads
+      begin select raise(abort, 'recovery inventory refused'); end`);
+    const sent = provider.fileBytes();
+    const refused = await app(dataDir);
+
+    const failure = {
+      error: { kind: "unexpected", detail: expect.stringContaining("recovery inventory refused") },
+    };
+
+    await expect(refused.downloads.list()).rejects.toMatchObject(failure);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await refused.quit();
+
+    // Another start still reports the refusal; it must not have claimed durable completion.
+    const stillRefused = await app(dataDir);
+    await expect(stillRefused.downloads.list()).rejects.toMatchObject(failure);
+    await stillRefused.quit();
+    db.exec("drop trigger refuse_recovery");
+
+    const recovered = await app(dataDir);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" }, progress: { position: 3, duration: 10 } },
+    ]);
+    expect(await recovered.downloads.copy(done.id)).toEqual(copy);
+    const played = await recovered.playback.openCopy(copy, DECODERS);
+    expect(await recovered.subtitles.saved(played.sessionId)).toEqual(keptSubtitles);
+    await recovered.playback.close(played.sessionId);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await recovered.quit();
+
+    const again = await app(dataDir);
+    expect((await again.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" }, progress: { position: 3, duration: 10 } },
+    ]);
+    expect(await again.downloads.copy(done.id)).toEqual(copy);
+    expect(provider.fileBytes()).toBe(sent);
+    await again.quit();
+  }, 60_000);
+
+  it("refuses account removal while the startup inventory is unreadable and retries after repair", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find } = started;
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await started.quit();
+
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.exec("alter table downloads rename column record to unreadable");
+      const refused = await app(dataDir);
+
+      try {
+        await expect(refused.downloads.list()).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+        await expect(refused.roster.remove(subscriptionId, false)).rejects.toMatchObject({
+          error: { kind: "unexpected" },
+        });
+        expect((await refused.subscriptions.list()).map((each) => each.id)).toContain(
+          subscriptionId,
+        );
+        expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      } finally {
+        await refused.quit();
+        db.exec("alter table downloads rename column unreadable to record");
+      }
+    } finally {
+      db.close();
+    }
+
+    const recovered = await app(dataDir);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" } },
+    ]);
+    await recovered.roster.remove(subscriptionId, false);
+    expect(await recovered.subscriptions.list()).toEqual([]);
+    expect((await recovered.downloads.list()).items).toMatchObject([
+      { id: done.id, status: { kind: "complete" } },
+    ]);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    await recovered.quit();
+  }, 60_000);
+
+  it("refuses account removal until startup recovery can save, then removes only unfinished downloads", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find } = started;
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+
+    const otherProvider = await fakeProvider();
+    const other = await started.subscriptions.add(demoLogin(otherProvider));
+    await started.onDemand.refresh(other.id);
+    const otherFilm = movie(otherProvider, other.id, "TEST | Index at the end");
+    const otherDone = await downloads.add(otherFilm.ref);
+    await vi.waitFor(async () => expect((await find(otherDone.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+
+    const held = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
+    provider.stallMovieFile(held.id, 30_000, 60_000);
+    const unfinished = await downloads.add(held.ref);
+    await downloads.pause(unfinished.id);
+    await started.quit();
+
+    // A completed rename whose inventory save was interrupted, beside a genuinely unfinished row.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+    onTestFinished(() => db.close());
+    db.prepare(
+      "update downloads set record = json_set(record, '$.state', 'queued') where id = ?",
+    ).run(done.id);
+    db.exec(`create trigger refuse_recovery before insert on downloads
+      begin select raise(abort, 'recovery inventory refused'); end`);
+
+    const refused = await app(dataDir);
+
+    const failure = {
+      error: { kind: "unexpected", detail: expect.stringContaining("recovery inventory refused") },
+    };
+
+    await expect(refused.downloads.list()).rejects.toMatchObject(failure);
+
+    const removal = await refused.roster.remove(subscriptionId, true).then(
+      () => "removed",
+      (cause: unknown) => cause,
+    );
+
+    expect(removal).toMatchObject(failure);
+    expect((await refused.subscriptions.list()).map((each) => each.id)).toContain(subscriptionId);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+    await refused.quit();
+    db.exec("drop trigger refuse_recovery");
+
+    const retry = await app(dataDir);
+    expect((await retry.downloads.list()).items.map((each) => each.id)).toEqual(
+      expect.arrayContaining([done.id, otherDone.id, unfinished.id]),
+    );
+    await retry.roster.remove(subscriptionId, true);
+    expect((await retry.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+    expect((await retry.downloads.list()).items.map((each) => each.id).sort()).toEqual(
+      [done.id, otherDone.id].sort(),
+    );
+    await expect(stat(join(dataDir, "downloads", unfinished.id))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await retry.quit();
+
+    const again = await app(dataDir);
+    expect((await again.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+    const items = (await again.downloads.list()).items;
+    expect(items.map((each) => each.id).sort()).toEqual([done.id, otherDone.id].sort());
+    expect(items.every((each) => each.status.kind === "complete")).toBe(true);
+    expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+    expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+    await again.quit();
+  }, 60_000);
+
+  it("keeps account removal retryable when a late admitted download refuses cleanup", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find } = started;
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    const otherProvider = await fakeProvider();
+    const other = await started.subscriptions.add(demoLogin(otherProvider));
+    await started.onDemand.refresh(other.id);
+    const otherFilm = movie(otherProvider, other.id, "TEST | Index at the end");
+    const otherDone = await downloads.add(otherFilm.ref);
+    await vi.waitFor(async () => expect((await find(otherDone.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await started.quit();
+
+    // Recover a completed rename before exercising removal beside ordinary unfinished copies.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.prepare(
+        "update downloads set record = json_set(record, '$.state', 'queued') where id = ?",
+      ).run(done.id);
+    } finally {
+      db.close();
+    }
+
+    const tmdb = await startFakeTmdb();
+    onTestFinished(() => tmdb.close());
+    const current = await app(dataDir, undefined, tmdb);
+    expect((await current.find(done.id))?.status.kind).toBe("complete");
+    const firstFilm = movie(provider, subscriptionId, "TEST | Two sound tracks");
+    const lateFilm = movie(provider, subscriptionId, "TEST | Old AVI");
+    provider.stallMovieFile(firstFilm.id, 30_000, 60_000);
+    provider.stallMovieFile(lateFilm.id, 30_000, 60_000);
+    const first = await current.downloads.add(firstFilm.ref);
+    await current.downloads.pause(first.id);
+    const firstDrain = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const lateDrain = Promise.withResolvers<void>();
+    const releaseLate = Promise.withResolvers<void>();
+    let lateId: string | undefined;
+
+    const fault = vi.spyOn(files, "rm").mockImplementation(async (path, options) => {
+      if (String(path) === join(dataDir, "downloads", first.id)) {
+        firstDrain.resolve();
+        await releaseFirst.promise;
+      }
+
+      if (lateId && String(path) === join(dataDir, "downloads", lateId)) {
+        lateDrain.resolve();
+        await releaseLate.promise;
+        throw Object.assign(new Error("late cleanup denied"), { code: "EACCES" });
+      }
+
+      return actualFiles.rm(path, options);
+    });
+
+    try {
+      const removal = current.roster.remove(subscriptionId, true).then(
+        () => "removed",
+        (cause: unknown) => cause,
+      );
+
+      await firstDrain.promise;
+      const late = await current.downloads.add(lateFilm.ref);
+      lateId = late.id;
+      await current.downloads.pause(late.id);
+      // Start lookup while saved, finish while the mandatory final drain excludes the source.
+      tmdb.failSeasons("hold");
+      const asked = tmdb.seasonRequests().length;
+      const adding = current.downloads.add(episode(provider, subscriptionId).ref);
+      void adding.catch(() => {});
+      await vi.waitFor(() => expect(tmdb.seasonRequests().length).toBeGreaterThan(asked));
+      releaseFirst.resolve();
+      await lateDrain.promise;
+      tmdb.failSeasons(null);
+      await expect(adding).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+      await expect(current.downloads.add(firstFilm.ref)).rejects.toMatchObject({
+        error: { kind: "no-subscription" },
+      });
+      releaseLate.resolve();
+      expect(await removal).toMatchObject({ error: { kind: "unexpected" } });
+      expect((await current.subscriptions.list()).map((each) => each.id).sort()).toEqual(
+        [subscriptionId, other.id].sort(),
+      );
+      expect(await current.subscriptions.sourceOf(subscriptionId)).toMatchObject({
+        id: subscriptionId,
+      });
+      expect((await current.find(late.id))?.status.kind).toBe("failed");
+      expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+      fault.mockRestore();
+      await current.roster.remove(subscriptionId, true);
+      expect((await current.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+
+      for (const id of [first.id, late.id])
+        await expect(stat(join(dataDir, "downloads", id))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+    } finally {
+      releaseFirst.resolve();
+      releaseLate.resolve();
+      tmdb.failSeasons(null);
+      fault.mockRestore();
+      await current.quit();
+    }
+
+    const again = await app(dataDir);
+
+    try {
+      expect((await again.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+      const items = (await again.downloads.list()).items;
+      expect(items.map((each) => each.id).sort()).toEqual([done.id, otherDone.id].sort());
+      expect(items.every((each) => each.status.kind === "complete")).toBe(true);
+      expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+    } finally {
+      await again.quit();
+    }
   }, 60_000);
 
   it("lists incomplete downloads without seeding personal progress", async () => {

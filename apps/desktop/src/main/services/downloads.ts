@@ -176,9 +176,10 @@ export class Downloads extends Context.Service<
     ): Effect.Effect<{ readonly path: string; readonly type: string } | null>;
     /**
      * A subscription is going: its unfinished downloads end, their transfer and files with them.
-     * Its copies stay.
+     * Its copies stay. Unreadable startup inventory or refused recovery refuses removal until a
+     * healthy restart. Failed cleanup keeps the subscription available for retry in the same run.
      */
-    subscriptionGone(subscriptionId: string): Effect.Effect<void>;
+    subscriptionGone(subscriptionId: string): Effect.Effect<void, Failed>;
     /** The list after every change, each later than the last, a few times a second at most. */
     readonly changes: Stream.Stream<DownloadList>;
   }
@@ -234,10 +235,10 @@ function make(deps: DownloadsDeps) {
     const loadedCleanup = yield* Effect.result(store.cleanups);
     let selectedFolder = configured._tag === "Success" ? (configured.success ?? root) : root;
 
-    // Without its table nothing can be queued or listed either: each call says so, as the store
-    // says it then, in the interface language of that moment. A read that works later still fails:
-    // nothing on disk was checked against the table at the start.
-    const unloaded =
+    // Without a complete startup inventory nothing can be queued or listed. A later successful
+    // read cannot validate files skipped at startup; a new start must check them. A refused
+    // recovery save below also latches its original failure until the next start retries it.
+    let unloaded =
       configured._tag === "Failure"
         ? store.folder.pipe(Effect.andThen(Effect.fail(configured.failure)))
         : loaded._tag === "Failure"
@@ -400,7 +401,13 @@ function make(deps: DownloadsDeps) {
           completedAt: Date.now(),
         };
 
-        yield* store.put(complete).pipe(Effect.ignore);
+        const saved = yield* Effect.result(store.put(complete));
+
+        if (saved._tag === "Failure") {
+          unloaded = Effect.fail(saved.failure);
+          break;
+        }
+
         records.set(record.id, complete);
       }
     }
@@ -597,7 +604,7 @@ function make(deps: DownloadsDeps) {
      * is told once it is out.
      */
     const tell = () => {
-      if (closing) return;
+      if (unloaded || closing) return;
 
       if (viewing) stale = true;
 
@@ -660,7 +667,7 @@ function make(deps: DownloadsDeps) {
         const refused = new Set<string>();
 
         for (;;) {
-          if (active || closing) return;
+          if (unloaded || active || closing) return;
 
           if (again) refused.clear();
           again = false;
@@ -1374,10 +1381,9 @@ function make(deps: DownloadsDeps) {
           const owners = yield* accounts;
           const busy = yield* coordination.busy;
 
-          // Both took a while. A subscription removed or logged in anew meanwhile had its unfinished
-          // downloads ended without this one (a removal ends them again once it is gone, after
-          // this look), and the same title may have been added meanwhile: that one is the answer.
-          // Nothing waits between the second look and the write.
+          // Both took a while. A removal drains unfinished downloads while the subscription is
+          // excluded, before deleting its login. Check its source again and use an existing copy
+          // if the same title was added meanwhile.
           if (!(yield* subscriptions.stands(source))) {
             return yield* new Failed({ error: { kind: "no-subscription" } });
           }
@@ -1410,7 +1416,12 @@ function make(deps: DownloadsDeps) {
           };
 
           const result = yield* downloadOf(record, owners, busy);
-          yield* attempt(async () => write(record));
+          yield* attempt(async () => {
+            // Keep this source check and publication synchronous: no await may separate them.
+            if (!subscriptions.standsNow(source))
+              throw new Failed({ error: { kind: "no-subscription" } });
+            write(record);
+          });
           yield* Effect.forkIn(
             Effect.promise(() => {
               const work = keepArtwork(record.id, kept.artwork);
@@ -1569,7 +1580,9 @@ function make(deps: DownloadsDeps) {
         }),
 
       subscriptionGone: (subscriptionId: string) =>
-        Effect.promise(async () => {
+        attempt(async () => {
+          if (unloaded) await Effect.runPromise(unloaded);
+
           const gone = [...records.values()].filter(
             (record) => record.subscriptionId === subscriptionId && record.state !== "complete",
           );
@@ -1596,6 +1609,8 @@ function make(deps: DownloadsDeps) {
                   records.set(record.id, failed);
                 }
               }
+
+              throw cause;
             }
           }
 
