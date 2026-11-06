@@ -1,3 +1,7 @@
+## Maintenance
+
+When product changes alter a documented path, update that feature entry in the same change and re-drive it. For a full audit, follow [maintenance](#maintain-the-verification-map), the adapted pstack maintenance loop. Report source and live coverage separately. Keep run notes in `.local/`, not in committed maps. Ask the installed stack workflows to implement or review product work; this skill adds no commit, PR, merge, release or deployment authority.
+
 # Maintain the verification map
 
 This is the repo adaptation of pstack's [maintain-verification-skill](https://github.com/cursor/plugins/blob/ccb5507cec1546dc88135c1139c811e6c59115ba/pstack/skills/maintain-verification-skill/SKILL.md), kept inside `verify-mrstreamer` to avoid another overlapping skill.
