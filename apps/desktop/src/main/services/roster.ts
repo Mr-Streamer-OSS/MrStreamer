@@ -25,7 +25,6 @@ import { Settings } from "./preferences.ts";
 import { Recordings } from "./recordings.ts";
 import { Reminders } from "./reminders.ts";
 import { Subscriptions, type Source } from "./subscription.ts";
-import { defined } from "@mrstreamer/core/defined";
 
 /** Lists older than this are fetched again in the background when the app starts. */
 const LISTS_MAX_AGE: Duration.Input = "12 hours";
@@ -207,7 +206,14 @@ function make() {
           // Erased as it goes, and not before: while the removal waits its turn the subscription
           // is saved still, and what is starred or saved for it then has to go with the rest.
           yield* subscriptions.remove(subscriptionId, {
-            ...defined({ erase: eraseViewing ? viewing.erase(subscription.key) : undefined }),
+            // The source is excluded during this reversible phase. Drain media admitted during
+            // the first pass before login deletion; a refusal restores the saved source for retry.
+            erase: Effect.gen(function* () {
+              yield* downloads.subscriptionGone(subscriptionId);
+              yield* recordings.subscriptionGone(subscriptionId);
+
+              if (eraseViewing) yield* viewing.erase(subscription.key);
+            }),
             // After login deletion, each owner settles before the folder goes. Settings uses
             // its existing turn both as the write barrier and to update remembered discovery.
             settle: [
@@ -220,9 +226,6 @@ function make() {
           });
           // An open asked for as it went has had its turn by now, and found it saved still.
           yield* playback.closeOf(subscriptionId);
-          // As has a download queued, or a recording started, as it went.
-          yield* downloads.subscriptionGone(subscriptionId);
-          yield* recordings.subscriptionGone(subscriptionId);
         }),
 
       refreshDue: Effect.flatMap(subscriptions.sources, (sources) =>

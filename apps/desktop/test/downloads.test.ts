@@ -1777,6 +1777,128 @@ describe.skipIf(!hasTools)("downloads", () => {
     await again.quit();
   }, 60_000);
 
+  it("keeps account removal retryable when a late admitted download refuses cleanup", async () => {
+    const started = await connected();
+    const { provider, subscriptionId, downloads, dataDir, find } = started;
+    const film = movie(provider, subscriptionId, "TEST | Index at the end");
+    const done = await downloads.add(film.ref);
+    await vi.waitFor(async () => expect((await find(done.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    const otherProvider = await fakeProvider();
+    const other = await started.subscriptions.add(demoLogin(otherProvider));
+    await started.onDemand.refresh(other.id);
+    const otherFilm = movie(otherProvider, other.id, "TEST | Index at the end");
+    const otherDone = await downloads.add(otherFilm.ref);
+    await vi.waitFor(async () => expect((await find(otherDone.id))?.status.kind).toBe("complete"), {
+      timeout: LONG,
+    });
+    await started.quit();
+
+    // Recover a completed rename before exercising removal beside ordinary unfinished copies.
+    const db = new DatabaseSync(join(dataDir, "mrstreamer.db"));
+
+    try {
+      db.prepare(
+        "update downloads set record = json_set(record, '$.state', 'queued') where id = ?",
+      ).run(done.id);
+    } finally {
+      db.close();
+    }
+
+    const tmdb = await startFakeTmdb();
+    onTestFinished(() => tmdb.close());
+    const current = await app(dataDir, undefined, tmdb);
+    expect((await current.find(done.id))?.status.kind).toBe("complete");
+    const firstFilm = movie(provider, subscriptionId, "TEST | Two sound tracks");
+    const lateFilm = movie(provider, subscriptionId, "TEST | Old AVI");
+    provider.stallMovieFile(firstFilm.id, 30_000, 60_000);
+    provider.stallMovieFile(lateFilm.id, 30_000, 60_000);
+    const first = await current.downloads.add(firstFilm.ref);
+    await current.downloads.pause(first.id);
+    const firstDrain = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const lateDrain = Promise.withResolvers<void>();
+    const releaseLate = Promise.withResolvers<void>();
+    let lateId: string | undefined;
+
+    const fault = vi.spyOn(files, "rm").mockImplementation(async (path, options) => {
+      if (String(path) === join(dataDir, "downloads", first.id)) {
+        firstDrain.resolve();
+        await releaseFirst.promise;
+      }
+
+      if (lateId && String(path) === join(dataDir, "downloads", lateId)) {
+        lateDrain.resolve();
+        await releaseLate.promise;
+        throw Object.assign(new Error("late cleanup denied"), { code: "EACCES" });
+      }
+
+      return actualFiles.rm(path, options);
+    });
+
+    try {
+      const removal = current.roster.remove(subscriptionId, true).then(
+        () => "removed",
+        (cause: unknown) => cause,
+      );
+
+      await firstDrain.promise;
+      const late = await current.downloads.add(lateFilm.ref);
+      lateId = late.id;
+      await current.downloads.pause(late.id);
+      // Start lookup while saved, finish while the mandatory final drain excludes the source.
+      tmdb.failSeasons("hold");
+      const asked = tmdb.seasonRequests().length;
+      const adding = current.downloads.add(episode(provider, subscriptionId).ref);
+      void adding.catch(() => {});
+      await vi.waitFor(() => expect(tmdb.seasonRequests().length).toBeGreaterThan(asked));
+      releaseFirst.resolve();
+      await lateDrain.promise;
+      tmdb.failSeasons(null);
+      await expect(adding).rejects.toBeDefined();
+      await expect(current.downloads.add(firstFilm.ref)).rejects.toBeDefined();
+      releaseLate.resolve();
+      expect(await removal).toMatchObject({ error: { kind: "unexpected" } });
+      expect((await current.subscriptions.list()).map((each) => each.id).sort()).toEqual(
+        [subscriptionId, other.id].sort(),
+      );
+      expect(await current.subscriptions.sourceOf(subscriptionId)).toMatchObject({
+        id: subscriptionId,
+      });
+      expect((await current.find(late.id))?.status.kind).toBe("failed");
+      expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+      fault.mockRestore();
+      await current.roster.remove(subscriptionId, true);
+      expect((await current.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+
+      for (const id of [first.id, late.id])
+        await expect(stat(join(dataDir, "downloads", id))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+    } finally {
+      releaseFirst.resolve();
+      releaseLate.resolve();
+      tmdb.failSeasons(null);
+      fault.mockRestore();
+      await current.quit();
+    }
+
+    const again = await app(dataDir);
+
+    try {
+      expect((await again.subscriptions.list()).map((each) => each.id)).toEqual([other.id]);
+      const items = (await again.downloads.list()).items;
+      expect(items.map((each) => each.id).sort()).toEqual([done.id, otherDone.id].sort());
+      expect(items.every((each) => each.status.kind === "complete")).toBe(true);
+      expect(digest(await copyOf(dataDir, done.id))).toBe(digest(film.bytes));
+      expect(digest(await copyOf(dataDir, otherDone.id))).toBe(digest(otherFilm.bytes));
+    } finally {
+      await again.quit();
+    }
+  }, 60_000);
+
   it("lists incomplete downloads without seeding personal progress", async () => {
     const { provider, subscriptionId, downloads, dataDir } = await connected();
     const film = movie(provider, subscriptionId, "TEST | Two sound tracks and subtitles (MULTI)");
