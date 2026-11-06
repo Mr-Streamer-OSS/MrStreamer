@@ -3,6 +3,7 @@ import {
   ownedByProfile,
   type ActiveProfile,
 } from "@mrstreamer/contracts/profiles";
+import { householdMutations } from "./handlers/subscriptions.ts";
 import type { ProfileAdmission } from "./services/profiles.ts";
 import type { Type } from "arktype";
 import { ipcMain, type WebContents } from "electron";
@@ -213,14 +214,16 @@ export function registerIpc(
         const selected = personal.handlers(admitted)[method] as typeof handler | undefined;
 
         // These household writes serialize with removal, which drains personal permits.
-        // Validate exact ownership first, then release the permit before waiting on that write lock.
-        if (
-          method === "subscription.remove" ||
-          method === "subscription.add" ||
-          method === "subscription.update" ||
-          method === "subscription.recheck"
-        )
-          return yield* (selected ?? handler)(input, frame);
+        // Capture the admitted context under a short permit, then release it before that write lock.
+        // Forked catalogue work retains its original Settings and current-owner check.
+        if (householdMutations.has(method)) {
+          const context = yield* admitted.run(Effect.context<never>());
+
+          return yield* Effect.provideContext(
+            Effect.suspend(() => (selected ?? handler)(input, frame)),
+            context,
+          );
+        }
 
         return yield* admitted.run(Effect.suspend(() => (selected ?? handler)(input, frame)));
       });

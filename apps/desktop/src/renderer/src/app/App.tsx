@@ -40,8 +40,7 @@ import { withoutTitles, useUi, type View } from "./ui-store.ts";
 export function App() {
   const client = useQueryClient();
   const profile = useSyncExternalStore(subscribeProfiles, profileStatus);
-  // Retry starts profile sync again: it reads the active profile and reloads its language and
-  // output, which is what a failed start or a failed reload after a switch left undone.
+  // Retry configures the exact durable selection before reloading its language and output.
   const [attempt, setAttempt] = useState(0);
   useEffect(() => syncProfiles(client), [client, attempt]);
 

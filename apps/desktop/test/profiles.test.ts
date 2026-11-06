@@ -28,6 +28,9 @@ import {
 } from "@mrstreamer/contracts/preferences";
 import type { Connection, ReceiverAdapter, AdapterEvent } from "../src/main/receivers/adapter.ts";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { playlistGroupId } from "@mrstreamer/core/playlist/import";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -69,7 +72,7 @@ import { analyticsFixture } from "./e2e/analytics-fixture.ts";
 import { CustomLists } from "../src/main/services/custom-lists.ts";
 import { Library } from "../src/main/services/library.ts";
 import { OnDemand } from "../src/main/services/ondemand.ts";
-import { Settings } from "../src/main/services/preferences.ts";
+import { Settings, AdmittedSettings } from "../src/main/services/preferences.ts";
 import { Roster } from "../src/main/services/roster.ts";
 import { Subscriptions } from "../src/main/services/subscription.ts";
 import { Watchlist } from "../src/main/services/watchlist.ts";
@@ -636,6 +639,141 @@ it("refuses an old catalogue read after held file facts cross a profile switch a
   const current = await app.runPromise(admittedB.run(service.collection(query)));
   expect(current.total).toBeGreaterThan(0);
 });
+
+it("household IPC background catalogue work retains admitted settings and refuses a switched owner after file reads", async () => {
+  const dataDir = await tempDir();
+
+  const app = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const roster = await app.runPromise(Roster);
+  const subscriptions = await app.runPromise(Subscriptions);
+  const settings = await app.runPromise(Settings);
+  const profiles = await promised(app, ProfileSessions);
+  const sessions = await app.runPromise(ProfileSessions);
+  const source = await app.runPromise(roster.add(demoLogin(await fakeProvider())));
+  const a = await profiles.create("A");
+  await profiles.switch(a.id);
+  const admitted = await profiles.admit();
+  await app.runPromise(
+    admitted.run(admitted.services.settings.update({ titleLanguage: "fr", adultTitles: true })),
+  );
+  const context = await app.context();
+  const facts = Context.get(context, VerifiedFiles);
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  let hold = true;
+
+  const isolated = runtimeFor(
+    OnDemand.layer({
+      dataDir,
+      worker: testConfig(dataDir).catalogueWorker,
+      tmdbKey: null,
+      userAgent,
+      region: testConfig(dataDir).region,
+    }).pipe(
+      Layer.provide(
+        Layer.succeedContext(
+          Context.add(context, VerifiedFiles, {
+            ...facts,
+            read: (account, stamp) =>
+              Effect.gen(function* () {
+                if (hold) {
+                  hold = false;
+                  arrived.resolve();
+                  yield* Effect.promise(() => release.promise);
+                }
+
+                return yield* facts.read(account, stamp);
+              }),
+          }),
+        ),
+      ),
+    ),
+  );
+
+  const catalogue = await isolated.runPromise(OnDemand);
+  const scope = await app.runPromise(Scope.make());
+  onTestFinished(() => Effect.runPromise(Scope.close(scope, Exit.void)));
+  const done = Promise.withResolvers<Exit.Exit<unknown, Failed>>();
+
+  const seen: {
+    owner: string | null;
+    language: string | undefined;
+    adults: boolean | undefined;
+  }[] = [];
+
+  const handlers = subscriptionHandlers({ roster, subscriptions, settings });
+  registerIpc(app.runPromiseExit, handlers as IpcHandlers, () => true, {
+    admit: sessions.admitFor,
+    handlers: () => ({
+      "subscription.update": (input, frame) =>
+        Effect.gen(function* () {
+          const result = yield* handlers["subscription.update"](input, frame);
+          yield* Effect.forkIn(
+            Effect.gen(function* () {
+              const captured = yield* Effect.serviceOption(AdmittedSettings);
+              const personal = captured._tag === "Some" ? captured.value.settings : settings;
+              const preferences = yield* personal.get;
+              seen.push({
+                owner: captured._tag === "Some" ? captured.value.owner.id : null,
+                language: preferences.titleLanguage,
+                adults: preferences.adultTitles,
+              });
+
+              const exit = yield* Effect.exit(
+                catalogue.collection({
+                  kind: "movie",
+                  id: "all",
+                  offset: 0,
+                  limit: 20,
+                  filters: {},
+                }),
+              );
+
+              const retained = yield* personal.get;
+              seen.push({
+                owner: captured._tag === "Some" ? captured.value.owner.id : null,
+                language: retained.titleLanguage,
+                adults: retained.adultTitles,
+              });
+              done.resolve(exit);
+            }),
+            scope,
+          );
+
+          return result;
+        }),
+    }),
+  });
+  const frame = { processId: 1, routingId: 1 };
+  const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+  expect(
+    (
+      await ipcBoundary.get("subscription.update")!(event, {
+        __profile: admitted.owner,
+        input: { subscriptionId: source.id, name: "Renamed" },
+      })
+    ).ok,
+  ).toBe(true);
+  await arrived.promise;
+  await profiles.switch(DEFAULT.id);
+  release.resolve();
+  const completed = await done.promise;
+  expect.soft(seen).toEqual([
+    { owner: a.id, language: "fr", adults: true },
+    { owner: a.id, language: "fr", adults: true },
+  ]);
+  expect(Exit.isFailure(completed)).toBe(true);
+}, 10_000);
 
 it("keeps a failed post-selection configuration visible and retries it before admitting work", async () => {
   const dataDir = await tempDir();
@@ -1584,72 +1722,116 @@ it("recovers from unreadable selected preferences using the exact durable owner 
   expect((await profiles.admit()).owner.id).toBe(before.id);
 });
 
-it("subscription update waiting on household writes cannot hold the permit source erasure drains", async () => {
-  const dataDir = await tempDir();
+it.each(["subscription.update", "playlist.map"] as const)(
+  "%s waiting on household writes cannot hold the permit source erasure drains",
+  async (method) => {
+    const dataDir = await tempDir();
 
-  const runtime = runtimeFor(
-    mainLayer({
-      ...testConfig(dataDir),
-      profiles: {
-        consent: { read: Effect.succeed(true), write: () => Effect.void },
-        stopInteractive: () => Effect.void,
-      },
-    }),
-  );
-
-  const subscriptions = await runtime.runPromise(Subscriptions);
-  const roster = await runtime.runPromise(Roster);
-  const settings = await runtime.runPromise(Settings);
-  const sessions = await runtime.runPromise(ProfileSessions);
-  const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
-  const other = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
-  const account = (await runtime.runPromise(subscriptions.saved))[0]!.key;
-  const owner = await runtime.runPromise(sessions.active);
-  const removing = Promise.withResolvers<void>();
-  const entered = Promise.withResolvers<void>();
-  const handlers = subscriptionHandlers({ roster, subscriptions, settings });
-  registerIpc(runtime.runPromiseExit, handlers as IpcHandlers, () => true, {
-    admit: sessions.admitFor,
-    handlers: () => ({
-      "subscription.update": (input) =>
-        Effect.andThen(
-          Effect.sync(() => entered.resolve()),
-          handlers["subscription.update"](input, "1:1"),
-        ),
-    }),
-  });
-
-  const removal = runtime.runPromiseExit(
-    subscriptions.remove(source.id, {
-      erase: Effect.gen(function* () {
-        removing.resolve();
-        yield* Effect.promise(() => entered.promise);
-        yield* sessions.eraseSource(account).pipe(
-          Effect.timeout("500 millis"),
-          Effect.mapError(
-            () =>
-              new Failed({
-                error: { kind: "unexpected", detail: "Personal permits did not drain." },
-              }),
-          ),
-        );
+    const runtime = runtimeFor(
+      mainLayer({
+        ...testConfig(dataDir),
+        profiles: {
+          consent: { read: Effect.succeed(true), write: () => Effect.void },
+          stopInteractive: () => Effect.void,
+        },
       }),
-    }),
-  );
+    );
 
-  await removing.promise;
-  const frame = { processId: 1, routingId: 1 };
-  const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+    const subscriptions = await runtime.runPromise(Subscriptions);
+    const roster = await runtime.runPromise(Roster);
+    const settings = await runtime.runPromise(Settings);
+    const sessions = await runtime.runPromise(ProfileSessions);
+    const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
 
-  const update = ipcBoundary.get("subscription.update")!(event, {
-    __profile: { ...owner },
-    input: { subscriptionId: other.id, name: "Renamed" },
-  });
+    const server = createServer((_request, response) => {
+      response.end('#EXTM3U\n#EXTINF:-1 group-title="Films",Film\nhttp://example.test/film.mp4\n');
+    });
 
-  const result = await removal;
-  await update;
-  expect(Exit.isSuccess(result)).toBe(true);
-});
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    onTestFinished(
+      () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    );
+    const address = server.address() as AddressInfo;
+
+    const other = await runtime.runPromise(
+      subscriptions.add({
+        server: `http://127.0.0.1:${address.port}/list.m3u`,
+        username: "",
+        password: "",
+      }),
+    );
+
+    const account = (await runtime.runPromise(subscriptions.saved))[0]!.key;
+    const owner = await runtime.runPromise(sessions.active);
+    const removing = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const handlers = subscriptionHandlers({ roster, subscriptions, settings });
+    registerIpc(runtime.runPromiseExit, handlers as IpcHandlers, () => true, {
+      admit: sessions.admitFor,
+      handlers: () => ({
+        "subscription.update": (input) =>
+          Effect.andThen(
+            Effect.sync(() => entered.resolve()),
+            handlers["subscription.update"](input, "1:1"),
+          ),
+        "playlist.map": (input) =>
+          Effect.andThen(
+            Effect.sync(() => entered.resolve()),
+            handlers["playlist.map"](input, "1:1"),
+          ),
+      }),
+    });
+
+    const removal = runtime.runPromiseExit(
+      subscriptions.remove(source.id, {
+        erase: Effect.gen(function* () {
+          removing.resolve();
+          yield* Effect.promise(() => entered.promise);
+          yield* sessions.eraseSource(account).pipe(
+            Effect.timeout("500 millis"),
+            Effect.mapError(
+              () =>
+                new Failed({
+                  error: { kind: "unexpected", detail: "Personal permits did not drain." },
+                }),
+            ),
+          );
+        }),
+      }),
+    );
+
+    await removing.promise;
+    const frame = { processId: 1, routingId: 1 };
+    const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+
+    const update = ipcBoundary.get(method)!(event, {
+      __profile: { ...owner },
+      input:
+        method === "playlist.map"
+          ? { subscriptionId: other.id, group: playlistGroupId("Films"), mode: "movie" }
+          : { subscriptionId: other.id, name: "Renamed" },
+    });
+
+    const result = await removal;
+    expect((await update).ok).toBe(true);
+    expect(Exit.isSuccess(result)).toBe(true);
+    expect(
+      (await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id),
+    ).toBe(false);
+
+    if (method === "playlist.map") {
+      expect(
+        await runtime.runPromise(subscriptions.playlistGroups(other.id, "", 0, 20)),
+      ).toMatchObject({
+        groups: [{ mode: "movie" }],
+      });
+    }
+  },
+);
 
 it.each(["first", "later"])(
   "keeps untouched-source callbacks usable after the %s profile refuses erasure",

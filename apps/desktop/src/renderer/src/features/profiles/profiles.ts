@@ -58,6 +58,7 @@ function publish(next: ProfileStatus): void {
 
 let lifetime = 0;
 let selectionAttempt = 0;
+let recoverySelection: ActiveProfile | null = null;
 
 let applying: {
   readonly owner: ActiveProfile;
@@ -133,6 +134,8 @@ function acceptOwner(
       .then(
         () => {
           if (generation !== lifetime || !currentProfile(owner)) throw profileChanged();
+
+          if (recoverySelection && sameProfile(recoverySelection, owner)) recoverySelection = null;
           publish({ owner, pending: false, error: null });
         },
         (cause: unknown) => {
@@ -212,7 +215,10 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
   let selectionRequested = false;
 
   try {
-    if (status.error === null && !(await titlePlayer.prepareProfileSwitch()))
+    // Only a confirmed committed selection makes the former viewer's playback save obsolete.
+    const recovering = recoverySelection && sameProfile(recoverySelection, owner);
+
+    if (!recovering && !(await titlePlayer.prepareProfileSwitch()))
       throw new AppFailure({
         kind: "unexpected",
         detail: t("Playback could not be saved. Try again."),
@@ -221,6 +227,8 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
     if (!currentProfile(owner)) throw profileChanged();
     selectionRequested = true;
     const selected = await callForProfile(owner, "profiles.switch", { id, current: owner });
+
+    if (!sameProfile(selected, owner)) recoverySelection = selected;
     await acceptOwner(client, selected);
   } catch (cause) {
     if (!selectionRequested) throw cause;
@@ -237,6 +245,7 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
         currentProfile(owner) &&
         !sameProfile(selected, owner)
       ) {
+        recoverySelection = selected;
         await acceptOwner(client, selected).catch(() => {});
 
         if (attempt === selectionAttempt && generation === lifetime && currentProfile(selected))

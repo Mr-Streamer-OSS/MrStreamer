@@ -470,6 +470,27 @@ it("retries a durably selected owner without saving obsolete playback again", as
   expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null });
 });
 
+it("still requires playback to save after an uncommitted switch and refused recovery read", async () => {
+  ipc.always("profiles.active", A);
+  ipc.always("output.status", local(A));
+  stop = syncProfiles(client);
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: A, pending: false, error: null }),
+  );
+  const save = vi.spyOn(titlePlayer, "prepareProfileSwitch").mockResolvedValue(true);
+  ipc.refuse("profiles.switch", { kind: "unexpected", detail: "Selection refused." });
+  ipc.refuse("profiles.active", { kind: "unexpected", detail: "Owner read refused." });
+  await expect(switchProfile(client, B.id)).rejects.toBeDefined();
+  expect(profileOwner()).toEqual(A);
+  expect(profileStatus().error).not.toBeNull();
+  save.mockResolvedValue(false);
+  ipc.always("profiles.switch", B);
+  await expect(switchProfile(client, B.id)).rejects.toMatchObject({
+    error: { kind: "unexpected", detail: "Playback could not be saved. Try again." },
+  });
+  expect(ipc.argsOf("profiles.switch")).toHaveLength(1);
+});
+
 it("startup Retry configures the exact restored owner before loading private state", async () => {
   ipc.always("profiles.active", B);
   ipc.always("output.status", local(B));
