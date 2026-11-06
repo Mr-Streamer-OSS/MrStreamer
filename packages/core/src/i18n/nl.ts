@@ -6,6 +6,21 @@ export const nl: Translation = {
   "Playback could not be saved. Try again.":
     "Afspelen kon niet worden opgeslagen. Probeer het opnieuw.",
   "Viewing profile changed. Try again.": "Kijkprofiel gewijzigd. Probeer het opnieuw.",
+  Default: "Standaard",
+  Profiles: "Profielen",
+  "Profile: {name}": "Profiel: {name}",
+  "Profile name": "Profielnaam",
+  "New profile": "Nieuw profiel",
+  "Adding…": "Toevoegen…",
+  "Switching…": "Wisselen…",
+  "Deleting…": "Verwijderen…",
+  "Delete {name}": "{name} verwijderen",
+  "Retry deleting {name}": "{name} opnieuw verwijderen",
+  "Deleting didn't finish": "Verwijderen is niet afgerond",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "{name} verwijderen? Lijsten, voortgang en instellingen verdwijnen. Opnames en downloads blijven.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Opnames en downloads zijn gedeeld. Lijsten, voortgang en favorieten blijven bij elk profiel.",
   "Update to {version}": "Bijwerken naar {version}",
   "You have {version}": "Je hebt {version}",
   "Find a setting": "Zoek een instelling",

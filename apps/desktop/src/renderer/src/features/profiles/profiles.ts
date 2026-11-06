@@ -237,8 +237,14 @@ export async function removeProfile(client: QueryClient, id: string): Promise<vo
   const owner = profileOwner();
 
   if (!owner) throw changed();
-  await callForProfile(owner, "profiles.remove", { id, current: owner });
+
+  try {
+    await callForProfile(owner, "profiles.remove", { id, current: owner });
+  } finally {
+    // A refused deletion can leave the profile marked deleting, which the list shows for retry.
+    if (currentProfile(owner))
+      await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
+  }
 
   if (!currentProfile(owner)) throw changed();
-  await client.invalidateQueries({ queryKey: profileListQuery().queryKey });
 }

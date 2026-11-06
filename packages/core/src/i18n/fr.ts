@@ -5,6 +5,21 @@ import type { Translation } from "../i18n.ts";
 export const fr: Translation = {
   "Playback could not be saved. Try again.": "La lecture n’a pas pu être enregistrée. Réessayez.",
   "Viewing profile changed. Try again.": "Le profil a changé. Réessayez.",
+  Default: "Par défaut",
+  Profiles: "Profils",
+  "Profile: {name}": "Profil : {name}",
+  "Profile name": "Nom du profil",
+  "New profile": "Nouveau profil",
+  "Adding…": "Ajout…",
+  "Switching…": "Changement…",
+  "Deleting…": "Suppression…",
+  "Delete {name}": "Supprimer {name}",
+  "Retry deleting {name}": "Réessayer de supprimer {name}",
+  "Deleting didn't finish": "La suppression n’a pas abouti",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "Supprimer {name} ? Ses listes, sa progression et ses réglages disparaissent. Les enregistrements et téléchargements restent.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Les enregistrements et téléchargements sont partagés. Les listes, la progression et les favoris restent propres à chaque profil.",
   "Update to {version}": "Mettre à jour vers {version}",
   "You have {version}": "Vous avez {version}",
   "Find a setting": "Rechercher un réglage",

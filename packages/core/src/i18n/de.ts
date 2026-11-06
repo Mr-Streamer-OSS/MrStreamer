@@ -6,6 +6,21 @@ export const de: Translation = {
   "Playback could not be saved. Try again.":
     "Die Wiedergabe konnte nicht gespeichert werden. Versuche es erneut.",
   "Viewing profile changed. Try again.": "Das Profil wurde gewechselt. Versuche es erneut.",
+  Default: "Standard",
+  Profiles: "Profile",
+  "Profile: {name}": "Profil: {name}",
+  "Profile name": "Profilname",
+  "New profile": "Neues Profil",
+  "Adding…": "Wird hinzugefügt…",
+  "Switching…": "Wird gewechselt…",
+  "Deleting…": "Wird gelöscht…",
+  "Delete {name}": "{name} löschen",
+  "Retry deleting {name}": "{name} erneut löschen",
+  "Deleting didn't finish": "Löschen wurde nicht abgeschlossen",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "{name} löschen? Listen, Fortschritt und Einstellungen werden entfernt. Aufnahmen und Downloads bleiben.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Aufnahmen und Downloads sind gemeinsam. Listen, Fortschritt und Favoriten bleiben bei jedem Profil.",
   "Update to {version}": "Auf {version} aktualisieren",
   "You have {version}": "Du hast {version}",
   "Find a setting": "Einstellung suchen",

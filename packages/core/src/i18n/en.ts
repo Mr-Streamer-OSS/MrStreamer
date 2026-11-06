@@ -6,6 +6,21 @@ import type { Plural } from "../i18n.ts";
 export const en = {
   "Playback could not be saved. Try again.": "Playback could not be saved. Try again.",
   "Viewing profile changed. Try again.": "Viewing profile changed. Try again.",
+  Default: "Default",
+  Profiles: "Profiles",
+  "Profile: {name}": "Profile: {name}",
+  "Profile name": "Profile name",
+  "New profile": "New profile",
+  "Adding…": "Adding…",
+  "Switching…": "Switching…",
+  "Deleting…": "Deleting…",
+  "Delete {name}": "Delete {name}",
+  "Retry deleting {name}": "Retry deleting {name}",
+  "Deleting didn't finish": "Deleting didn't finish",
+  "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.":
+    "Delete {name}? Their lists, progress and settings go. Recordings and downloads stay.",
+  "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.":
+    "Recordings and downloads are shared. Lists, progress and favourites stay with each profile.",
   "Update to {version}": "Update to {version}",
   "You have {version}": "You have {version}",
   "Find a setting": "Find a setting",

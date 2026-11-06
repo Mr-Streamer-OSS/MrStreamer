@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 import { ipc, SAVED } from "./support.ts";
 import { QueryClient } from "@tanstack/react-query";
+import { act, createElement } from "react";
+import { queryView } from "./mount.ts";
+import { t } from "@mrstreamer/core/i18n";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ActiveProfile } from "@mrstreamer/contracts/profiles";
+import type { ActiveProfile, LocalProfile } from "@mrstreamer/contracts/profiles";
 import type { InterfaceLanguage } from "@mrstreamer/contracts/language";
 import type { OutputStatus } from "@mrstreamer/contracts/output";
 import type { DownloadList } from "@mrstreamer/contracts/downloads";
@@ -34,6 +37,7 @@ import {
   switchProfile,
   syncProfiles,
 } from "../../src/renderer/src/features/profiles/profiles.ts";
+import { ProfileMenu } from "../../src/renderer/src/features/profiles/ProfileMenu.tsx";
 import { titlePlayer } from "../../src/renderer/src/player/title-player.ts";
 import { player } from "../../src/renderer/src/player/player.ts";
 import { useUi } from "../../src/renderer/src/app/ui-store.ts";
@@ -295,4 +299,152 @@ it("refuses a profile switch when the current copy's progress cannot be saved", 
   ipc.always("downloads.recordProgress", null);
   titlePlayer.close();
   await titlePlayer.saved();
+});
+
+/** The profile menu's controls, found as a person finds them: by name, in the open popup. */
+function menu() {
+  const named = (name: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => (button.getAttribute("aria-label") ?? button.textContent?.trim()) === name,
+    );
+
+  const press = (name: string) =>
+    act(async () => {
+      const button = named(name);
+
+      if (!button) throw new Error(`Missing button: ${name}`);
+      button.click();
+    });
+
+  return {
+    named,
+    press,
+    rows: () =>
+      [...document.querySelectorAll<HTMLLIElement>("[role=dialog] li")].map((row) => ({
+        text: row.textContent,
+        current: row.getAttribute("aria-current") === "true",
+      })),
+    alert: () => document.querySelector("[role=dialog] [role=alert]")?.textContent ?? null,
+    type: (text: string) =>
+      act(async () => {
+        const field = document.querySelector<HTMLInputElement>("[role=dialog] input")!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+          field,
+          text,
+        );
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }),
+  };
+}
+
+async function openMenu() {
+  ipc.always("output.status", local(A));
+  stop = syncProfiles(client);
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: A, pending: false, error: null }),
+  );
+  const view = queryView(client);
+  unmount = view.unmount;
+  await view.render(createElement(ProfileMenu));
+  await vi.waitFor(() =>
+    expect(menu().named(t("Profile: {name}", { name: t("Default") }))).toBeDefined(),
+  );
+  await menu().press(t("Profile: {name}", { name: t("Default") }));
+}
+
+let unmount = () => {};
+
+afterEach(() => {
+  unmount();
+  unmount = () => {};
+});
+
+it("creates a profile and keeps a refused deletion listed with Retry until it succeeds", async () => {
+  let rows: LocalProfile[] = [
+    { id: A.id, name: "Default", deleting: false },
+    { id: "sam", name: "Sam", deleting: false },
+  ];
+
+  ipc.answer("profiles.list", () => rows);
+  await openMenu();
+  const ui = menu();
+  // A row's text is its avatar's initial, then its name and state.
+  await vi.waitFor(() =>
+    expect(ui.rows()).toEqual([
+      { text: "D" + "Default", current: true },
+      { text: "S" + "Sam", current: false },
+    ]),
+  );
+  // Default and the active profile can't be deleted.
+  expect(ui.named("Delete Default")).toBeUndefined();
+
+  ipc.answer("profiles.create", ({ name }) => {
+    const made = { id: "mila", name, deleting: false };
+    rows = [...rows, made];
+
+    return made;
+  });
+  await ui.press("New profile");
+  await ui.type("  Mila ");
+  await ui.press("Add");
+  await vi.waitFor(() => expect(ui.rows().map((row) => row.text)).toContain("MMila"));
+  expect(ipc.argsOf("profiles.create")).toEqual([{ name: "Mila", current: A }]);
+  expect(document.querySelector("[role=dialog] input")).toBeNull();
+
+  const held = ipc.hold("profiles.remove");
+  await ui.press("Delete Sam");
+  expect(ui.rows()[1]?.text).toContain("Recordings and downloads stay.");
+  await ui.press("Delete");
+  await vi.waitFor(() => expect(ui.named("Deleting…")).toBeDefined());
+  // Main keeps the tombstone when it can't finish removing the profile's files.
+  rows = rows.map((row) => (row.id === "sam" ? { ...row, deleting: true } : row));
+  held.reject({ kind: "unexpected", detail: "Disk busy." });
+  await vi.waitFor(() => expect(ui.alert()).toContain("Disk busy."));
+  await vi.waitFor(() =>
+    expect(ui.rows()[1]?.text).toBe("S" + "Sam" + "Deleting didn't finish" + "Retry"),
+  );
+
+  ipc.always("profiles.remove", null);
+  rows = rows.filter((row) => row.id !== "sam");
+  await ui.press("Retry deleting Sam");
+  await vi.waitFor(() => expect(ui.rows().map((row) => row.text)).toEqual(["DDefault", "MMila"]));
+  expect(ui.alert()).toBeNull();
+  expect(ipc.argsOf("profiles.remove")).toEqual([
+    { id: "sam", current: A },
+    { id: "sam", current: A },
+  ]);
+});
+
+it("shows a refused switch in the viewer's language with Retry, which switches once main accepts", async () => {
+  ipc.always("language.get", dutch);
+  ipc.always("profiles.list", [
+    { id: A.id, name: "Default", deleting: false },
+    { id: B.id, name: "Sam", deleting: false },
+  ]);
+  await openMenu();
+  const ui = menu();
+  expect(ui.named("Profiel: Standaard")).toBeDefined();
+  await vi.waitFor(() =>
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain(
+      "Lijsten, voortgang en favorieten blijven bij elk profiel.",
+    ),
+  );
+
+  const held = ipc.hold("profiles.switch");
+  await ui.press("SSam");
+  await vi.waitFor(() => expect(ui.named("SSamWisselen…")).toBeDefined());
+  held.reject({ kind: "unexpected", detail: "TMDB configuration refused." });
+  await vi.waitFor(() => expect(ui.alert()).toContain("TMDB configuration refused."));
+  expect(profileOwner()).toEqual(A);
+
+  ipc.always("profiles.switch", B);
+  ipc.always("output.status", local(B));
+  await ui.press(t("Retry"));
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null }),
+  );
+  expect(ipc.argsOf("profiles.switch")).toEqual([
+    { id: B.id, current: A },
+    { id: B.id, current: A },
+  ]);
 });
