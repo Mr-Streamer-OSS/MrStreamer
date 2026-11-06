@@ -48,12 +48,15 @@ export function App() {
   return (
     <>
       {profile.pending ? null : profile.error !== null ? (
-        <div className="flex items-center gap-4 p-10 text-sm" role="alert">
-          <p className="text-destructive">{describeError(appError(profile.error))}</p>
-          <Button size="sm" onClick={() => setAttempt((count) => count + 1)}>
-            {t("Retry")}
-          </Button>
-        </div>
+        <>
+          <WindowBar />
+          <div className="flex items-center gap-4 p-10 text-sm" role="alert">
+            <p className="text-destructive">{describeError(appError(profile.error))}</p>
+            <Button size="sm" onClick={() => setAttempt((count) => count + 1)}>
+              {t("Retry")}
+            </Button>
+          </div>
+        </>
       ) : (
         <Screen key={profile.owner ? `${profile.owner.id}:${profile.owner.revision}` : "initial"} />
       )}

@@ -6,7 +6,14 @@
 import { Popover } from "@base-ui/react/popover";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Plus, Trash2 } from "lucide-react";
-import { useState, useSyncExternalStore, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useState,
+  useSyncExternalStore,
+  useRef,
+  useLayoutEffect,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { DEFAULT_PROFILE_ID, type LocalProfile } from "@mrstreamer/contracts/profiles";
 import { t } from "@mrstreamer/core/i18n";
 import { Button } from "../../components/ui/button.tsx";
@@ -62,6 +69,19 @@ export function ProfileMenu() {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
+
+  const newButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const rows = useRef(new Map<string, HTMLButtonElement>());
+  const previous = useRef({ confirming, naming });
+  useLayoutEffect(() => {
+    const before = previous.current;
+
+    if (confirming) cancelButton.current?.focus();
+    else if (before.confirming) (rows.current.get(before.confirming) ?? newButton.current)?.focus();
+    else if (before.naming && !naming) newButton.current?.focus();
+    previous.current = { confirming, naming };
+  }, [confirming, naming]);
 
   const stopNaming = () => {
     setNaming(false);
@@ -164,7 +184,12 @@ export function ProfileMenu() {
                           )}
                         </p>
                         <div className="flex justify-end gap-2">
-                          <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                          <Button
+                            ref={cancelButton}
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setConfirming(null)}
+                          >
                             {t("Cancel")}
                           </Button>
                           <Button
@@ -207,6 +232,10 @@ export function ProfileMenu() {
                       className={cn("group flex items-center rounded-lg", current && "bg-accent")}
                     >
                       <button
+                        ref={(element) => {
+                          if (element) rows.current.set(profile.id, element);
+                          else rows.current.delete(profile.id);
+                        }}
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => !current && send({ kind: "switch", id: profile.id })}
                         aria-busy={busy("switch", profile.id) || undefined}
@@ -276,6 +305,7 @@ export function ProfileMenu() {
               </form>
             ) : (
               <button
+                ref={newButton}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => setNaming(true)}
                 className={cn(

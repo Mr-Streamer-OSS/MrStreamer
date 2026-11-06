@@ -3,6 +3,26 @@
 import type { Translation } from "../i18n.ts";
 
 export const nl: Translation = {
+  "This viewing profile is unavailable or being deleted.":
+    "Dit kijkprofiel is niet beschikbaar of wordt verwijderd.",
+  "This viewing profile is being deleted.": "Dit kijkprofiel wordt verwijderd.",
+  "Profile switching requires the installation consent owner.":
+    "Profielwisselen vereist de toestemmingsinstellingen van deze installatie.",
+  "Viewing profile changed; retry this request.": "Kijkprofiel gewijzigd. Probeer het opnieuw.",
+  "Viewing profile configuration did not finish; select the profile again to retry.":
+    "Het kijkprofiel is niet volledig ingesteld. Selecteer het opnieuw.",
+  "This profile admission has ended; retry the operation.":
+    "Deze profielaanvraag is verlopen. Probeer het opnieuw.",
+  "A profile name must contain 1 to 80 characters.":
+    "Een profielnaam moet 1 tot 80 tekens bevatten.",
+  "Profile switching is not enabled until interactive isolation is ready.":
+    "Profielwisselen is nog niet beschikbaar.",
+  "Finish deleting the pending profile before erasing a source.":
+    "Voltooi het verwijderen van het profiel voordat je een bron wist.",
+  "Profile isolation is not ready.": "Profielen zijn nog niet beschikbaar.",
+  "Viewing profile changed; retry this subtitle choice.":
+    "Kijkprofiel gewijzigd. Kies de ondertiteling opnieuw.",
+
   "Playback could not be saved. Try again.":
     "Afspelen kon niet worden opgeslagen. Probeer het opnieuw.",
   "Viewing profile changed. Try again.": "Kijkprofiel gewijzigd. Probeer het opnieuw.",

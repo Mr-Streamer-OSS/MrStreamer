@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 // Downloaded cues and timing belong to an exact listed file, never a movie name or TMDB id.
 //
 // Each result also notes which bytes it was saved for, when the playback that saved it could prove
@@ -74,6 +75,8 @@ const Proof = lazy(() =>
 
 /** Also prepared by account erasure when no playback service has run. */
 export function prepareSavedSubtitles(db: DatabaseSync): void {
+  // Profile removal owns exact-owner cleanup, including before any subtitle operation runs.
+  db.exec("drop trigger if exists delete_profile_subtitle_choices");
   db.exec(`create table if not exists profile_subtitle_choices (
     profile_id text not null, account text not null, kind text not null, id text not null,
     source_stamp text not null, listing_key text not null, choice text not null,
@@ -364,7 +367,7 @@ export const savedSubtitlesLayer = Layer.effect(
 
           return yield* attempt(() => {
             if (admitted._tag === "Some" && !admitted.value.current())
-              throw new Error("Viewing profile changed; retry this subtitle choice.");
+              throw new Error(t("Viewing profile changed; retry this subtitle choice."));
             const owner = admitted._tag === "Some" ? admitted.value.owner.id : DEFAULT_PROFILE_ID;
 
             if (
@@ -372,12 +375,10 @@ export const savedSubtitlesLayer = Layer.effect(
                 .prepare("select 1 from sqlite_master where type = 'table' and name = 'profiles'")
                 .get()
             ) {
-              db.exec(`create trigger if not exists delete_profile_subtitle_choices after delete on profiles
-              begin delete from profile_subtitle_choices where profile_id = old.id; end`);
               const registered = db.prepare("select * from profiles where id = ?").get(owner);
 
               if (!registered || registered["deleting"] === 1)
-                throw new Error("This viewing profile is unavailable or being deleted.");
+                throw new Error(t("This viewing profile is unavailable or being deleted."));
             }
 
             return transaction(db, () => work(owner));

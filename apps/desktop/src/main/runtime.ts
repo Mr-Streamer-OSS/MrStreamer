@@ -24,7 +24,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { databaseLayer } from "./platform/database.ts";
-import { Profiles, profilesLayer } from "./platform/profile-store.ts";
+import { Profiles } from "./platform/profile-store.ts";
 import { DetailCache, detailCacheLayer } from "./platform/detail-cache.ts";
 import { diagnosticsLogLayer } from "./platform/diagnostics-log.ts";
 import { downloadStoreLayer } from "./platform/downloads-store.ts";
@@ -355,7 +355,7 @@ export function mainLayer(config: MainConfig): Layer.Layer<MainServices> {
   const profiles = Layer.effect(
     Profiles,
     Effect.map(ProfileSessions, (sessions) => ({ active: sessions.active })),
-  ).pipe(Layer.provideMerge(Layer.mergeAll(profilesLayer.pipe(Layer.provide(database)), sessions)));
+  ).pipe(Layer.provideMerge(sessions));
 
   const personalCopies = Layer.mergeAll(database, profiles);
 

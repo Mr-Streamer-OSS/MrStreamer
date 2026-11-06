@@ -32,7 +32,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_PROFILE_ID } from "@mrstreamer/contracts/profiles";
-import { ViewingRecord } from "@mrstreamer/core/viewing/service";
+import {
+  ViewingRecord,
+  ViewingAccount,
+  ViewingChannels,
+  ViewingSeries,
+  ViewingErasure,
+  LegacyViewing,
+} from "@mrstreamer/core/viewing/service";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
@@ -141,6 +148,7 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
     await earlier.lists.create({ id: randomUUID(), name: "Sport", channel });
     await earlier.settings.update({ volume: 0.3, audioLanguage: "fr" });
     const saved = await personal(earlier);
+    await earlier.profiles.active();
     await earlier.dispose();
     // As every release before profiles leaves the database: without the profile registry.
     onDisk(dataDir, (db) => db.exec("drop table active_profile; drop table profiles"));
@@ -222,7 +230,9 @@ describe("the Default viewing profile", { timeout: 60_000 }, () => {
 
   it("answers no profile when a later release left another one active, and keeps it so", async () => {
     const dataDir = await tempDir();
-    await (await started(dataDir)).dispose();
+    const initial = await started(dataDir);
+    await initial.profiles.active();
+    await initial.dispose();
     // What a release with more profiles leaves after its viewer chose another.
     onDisk(dataDir, (db) =>
       db.exec(`
@@ -440,7 +450,9 @@ describe("profile lifecycle before UI enablement", () => {
       lock.close();
     }
 
-    await expect(runtime.runPromise(a.run(favourites))).rejects.toBeDefined();
+    // Erasure no longer invalidates unrelated work through this admission. A raw durable
+    // read sees the committed erasure; named viewing callbacks carry the source guard.
+    expect(await runtime.runPromise(a.run(favourites))).toEqual([]);
     expect(await runtime.runPromise((await profiles.admit()).run(favourites))).toEqual(["B"]);
     await profiles.eraseSource("source");
     expect(await runtime.runPromise((await profiles.admit()).run(favourites))).toEqual([]);
@@ -654,8 +666,10 @@ it("keeps a failed post-selection configuration visible and retries it before ad
   });
   expect((await profiles.active()).id).toBe(b.id);
   await expect(profiles.admit()).rejects.toBeDefined();
+  const selected = await profiles.active();
   refuse = false;
-  expect((await profiles.switch(b.id)).id).toBe(b.id);
+  await expect(profiles.switch(b.id, { id: "default", revision: 1 })).rejects.toBeDefined();
+  expect(await profiles.switch(b.id, selected)).toEqual(selected);
   expect((await profiles.admit()).owner.id).toBe(b.id);
 });
 
@@ -1540,4 +1554,273 @@ it("applies configured profile locale after catalogue success, retains captured 
   const third = open();
   const restarted = await promised(third, ProfileSessions);
   expect(applied.at(-1)).toEqual({ owner: await restarted.active(), choice: "de-DE" });
+});
+
+it("recovers from unreadable selected preferences using the exact durable owner without admitting stale work", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const profiles = await promised(runtime, ProfileSessions);
+  const before = await profiles.active();
+  const b = await profiles.create("B");
+  await mkdir(profileDirectory(dataDir, b.id), { recursive: true });
+  await writeFile(join(profileDirectory(dataDir, b.id), "preferences.json"), "{");
+  await expect(profiles.switch(b.id, before)).rejects.toBeDefined();
+  const selected = await profiles.active();
+  await writeFile(join(profileDirectory(dataDir, b.id), "preferences.json"), "{}");
+  await expect(profiles.switch(b.id, before)).rejects.toBeDefined();
+  await expect(profiles.switch(before.id, before)).rejects.toBeDefined();
+  await expect(profiles.admitFor(before)).rejects.toBeDefined();
+  expect((await profiles.switch(before.id, selected)).id).toBe(before.id);
+  expect((await profiles.admit()).owner.id).toBe(before.id);
+});
+
+it("subscription update waiting on household writes cannot hold the permit source erasure drains", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const subscriptions = await runtime.runPromise(Subscriptions);
+  const roster = await runtime.runPromise(Roster);
+  const settings = await runtime.runPromise(Settings);
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+  const other = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+  const account = (await runtime.runPromise(subscriptions.saved))[0]!.key;
+  const owner = await runtime.runPromise(sessions.active);
+  const removing = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const handlers = subscriptionHandlers({ roster, subscriptions, settings });
+  registerIpc(runtime.runPromiseExit, handlers as IpcHandlers, () => true, {
+    admit: sessions.admitFor,
+    handlers: () => ({
+      "subscription.update": (input) =>
+        Effect.andThen(
+          Effect.sync(() => entered.resolve()),
+          handlers["subscription.update"](input, "1:1"),
+        ),
+    }),
+  });
+
+  const removal = runtime.runPromiseExit(
+    subscriptions.remove(source.id, {
+      erase: Effect.gen(function* () {
+        removing.resolve();
+        yield* Effect.promise(() => entered.promise);
+        yield* sessions.eraseSource(account).pipe(
+          Effect.timeout("500 millis"),
+          Effect.mapError(
+            () =>
+              new Failed({
+                error: { kind: "unexpected", detail: "Personal permits did not drain." },
+              }),
+          ),
+        );
+      }),
+    }),
+  );
+
+  await removing.promise;
+  const frame = { processId: 1, routingId: 1 };
+  const event = { sender: { mainFrame: frame }, senderFrame: frame } as IpcMainInvokeEvent;
+
+  const update = ipcBoundary.get("subscription.update")!(event, {
+    __profile: { ...owner },
+    input: { subscriptionId: other.id, name: "Renamed" },
+  });
+
+  const result = await removal;
+  await update;
+  expect(Exit.isSuccess(result)).toBe(true);
+});
+
+it("keeps untouched-source callbacks usable but refuses erased-source callbacks begun after failed removal restores the source", async () => {
+  const dataDir = await tempDir();
+
+  const runtime = runtimeFor(
+    mainLayer({
+      ...testConfig(dataDir),
+      profiles: {
+        consent: { read: Effect.succeed(true), write: () => Effect.void },
+        stopInteractive: () => Effect.void,
+      },
+    }),
+  );
+
+  const roster = await runtime.runPromise(Roster);
+  const source = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+  const other = await runtime.runPromise(roster.add(demoLogin(await fakeProvider())));
+  const library = await runtime.runPromise(Library);
+  await runtime.runPromise(library.refresh(source.id));
+  await runtime.runPromise(library.refresh(other.id));
+  const profiles = await promised(runtime, ProfileSessions);
+  const sessions = await runtime.runPromise(ProfileSessions);
+  const b = await profiles.create("B");
+  await profiles.switch(b.id);
+  const retainedB = await profiles.admit();
+
+  const keptLists = await runtime.runPromise(
+    retainedB.run(
+      retainedB.services.lists.create({
+        id: "b-list",
+        name: "B",
+        channel: { subscriptionId: source.id, id: "2014" },
+      }),
+    ),
+  );
+
+  const member = keptLists[0]!.members[0]!.member;
+  await profiles.switch(DEFAULT_PROFILE_ID);
+  const retained = await profiles.admit();
+  await runtime.runPromise(
+    retained.run(retained.services.lists.create({ id: "retained-list", name: "Saved" })),
+  );
+  const onDemand = await runtime.runPromise(OnDemand);
+  await runtime.runPromise(onDemand.refresh(source.id));
+  const subscriptions = await runtime.runPromise(Subscriptions);
+
+  const account = (await runtime.runPromise(subscriptions.saved)).find(
+    (row) => row.id === source.id,
+  )!.key;
+
+  const erased = { subscriptionId: source.id, id: "2014" };
+  const untouched = { subscriptionId: other.id, id: "2014" };
+  await runtime.runPromise(
+    retained.run(retained.services.viewing.recordWatch("same-receipt", erased)),
+  );
+  const lock = new DatabaseSync(join(profileDirectory(dataDir, b.id), "mrstreamer.db"));
+
+  try {
+    lock.exec("begin immediate");
+    await expect(
+      runtime.runPromise(subscriptions.remove(source.id, { erase: sessions.eraseSource(account) })),
+    ).rejects.toBeDefined();
+  } finally {
+    lock.exec("rollback");
+    lock.close();
+  }
+
+  expect((await runtime.runPromise(subscriptions.saved)).some((row) => row.id === source.id)).toBe(
+    true,
+  );
+  await expect(
+    runtime.runPromise(retained.run(retained.services.viewing.recordWatch("same-receipt", erased))),
+  ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+
+  const lateLists = await Promise.allSettled([
+    runtime.runPromise(
+      retained.run(retained.services.lists.setMember("retained-list", erased, true)),
+    ),
+    runtime.runPromise(
+      retained.run(
+        retained.services.watchlist.save("movie", { subscriptionId: source.id, id: "90002" }),
+      ),
+    ),
+  ]);
+
+  expect(lateLists.map((result) => result.status)).toEqual(["rejected", "rejected"]);
+  await expect(
+    runtime.runPromise(retainedB.run(retainedB.services.lists.removeMember("b-list", member))),
+  ).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+  await runtime.runPromise(
+    retained.run(retained.services.lists.setMember("retained-list", untouched, true)),
+  );
+
+  await runtime.runPromise(
+    retained.run(retained.services.viewing.recordWatch("untouched", untouched)),
+  );
+  expect((await runtime.runPromise(retained.run(retained.services.viewing.state))).recent).toEqual([
+    untouched,
+  ]);
+  const fresh = await profiles.admit();
+  await runtime.runPromise(
+    fresh.run(fresh.services.lists.setMember("retained-list", erased, true)),
+  );
+  await runtime.runPromise(fresh.run(fresh.services.viewing.recordWatch("fresh", erased)));
+  expect((await runtime.runPromise(fresh.run(fresh.services.viewing.state))).recent).toContainEqual(
+    erased,
+  );
+  await profiles.switch(b.id);
+  const freshB = await profiles.admit();
+  await runtime.runPromise(freshB.run(freshB.services.lists.removeMember("b-list", member)));
+  expect(
+    (await runtime.runPromise(freshB.run(freshB.services.lists.lists))).find(
+      (list) => list.id === "b-list",
+    )?.members,
+  ).toEqual([]);
+});
+
+it("refuses a viewing command when its named source is erased while its channel read waits", async () => {
+  const dataDir = await tempDir();
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  onTestFinished(() => release.resolve());
+  let held = false;
+
+  const runtime = runtimeFor(
+    ViewingRecord.layer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          personalStoresLayer({ dataDir, profileId: DEFAULT_PROFILE_ID }),
+          Layer.succeed(ViewingAccount, {
+            owners: Effect.succeed([{ subscriptionId: "source", key: "account", original: true }]),
+          }),
+          Layer.succeed(ViewingChannels, {
+            lookup: () =>
+              Effect.gen(function* () {
+                if (held) {
+                  held = false;
+                  arrived.resolve();
+                  yield* Effect.promise(() => release.promise);
+                }
+
+                return () => undefined;
+              }),
+          }),
+          Layer.succeed(ViewingSeries, {
+            identity: () => Effect.die("unused series port"),
+            seasons: () => Effect.die("unused series port"),
+          }),
+          Layer.succeed(LegacyViewing, { take: Effect.succeed(null), drop: Effect.void }),
+        ),
+      ),
+    ),
+  );
+
+  const viewing = await runtime.runPromise(ViewingRecord);
+  const store = await runtime.runPromise(ViewingStore);
+  const title = { subscriptionId: "source", kind: "movie" as const, id: "movie" };
+  let current = true;
+
+  const command = viewing
+    .recordProgress("same-command", title, 30, 100, 1)
+    .pipe(Effect.provideService(ViewingErasure, { current: () => current }));
+
+  await runtime.runPromise(command);
+  held = true;
+  const pending = runtime.runPromise(command);
+  const refused = expect(pending).rejects.toMatchObject({ error: { kind: "no-subscription" } });
+  await arrived.promise;
+  current = false;
+  await runtime.runPromise(store.erase("account"));
+  release.resolve();
+  await refused;
+  expect(await runtime.runPromise(store.titles("account", {}))).toEqual([]);
 });

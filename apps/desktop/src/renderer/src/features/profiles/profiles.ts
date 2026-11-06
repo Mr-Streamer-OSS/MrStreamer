@@ -153,6 +153,7 @@ function acceptOwner(
 
 /** Installs profile events at composition; initial ownership does not reset the background-Quit view. */
 export function syncProfiles(client: QueryClient): () => void {
+  const retry = status.error !== null && status.owner !== null && currentProfile(status.owner);
   const generation = ++lifetime;
   publish({ owner: profileOwner(), pending: true, error: null });
   let alive = true;
@@ -166,10 +167,22 @@ export function syncProfiles(client: QueryClient): () => void {
   };
 
   const stop = listen("profiles.activeChanged", apply);
-  void call("profiles.active").then(apply, (cause: unknown) => {
-    if (alive && generation === lifetime)
-      publish({ owner: profileOwner(), pending: false, error: cause });
-  });
+  void call("profiles.active")
+    .then(async (owner) => {
+      if (!alive || generation !== lifetime) return;
+
+      if (retry) {
+        // Retry exactly the durable selection, without replaying an obsolete playback save.
+        const selected = await call("profiles.switch", { id: owner.id, current: owner });
+
+        if (!alive || generation !== lifetime) return;
+        apply(selected);
+      } else apply(owner);
+    })
+    .catch((cause: unknown) => {
+      if (alive && generation === lifetime)
+        publish({ owner: profileOwner(), pending: false, error: cause });
+    });
 
   return () => {
     alive = false;
@@ -177,7 +190,7 @@ export function syncProfiles(client: QueryClient): () => void {
 
     if (generation === lifetime) {
       lifetime++;
-      publish({ owner: profileOwner(), pending: true, error: null });
+      publish({ owner: profileOwner(), pending: true, error: status.error });
     }
   };
 }
@@ -190,17 +203,37 @@ export async function switchProfile(client: QueryClient, id: string): Promise<vo
 
   if (!owner || switching) throw profileChanged();
   switching = true;
+  let selectionRequested = false;
 
   try {
-    if (!(await titlePlayer.prepareProfileSwitch()))
+    if (status.error === null && !(await titlePlayer.prepareProfileSwitch()))
       throw new AppFailure({
         kind: "unexpected",
         detail: t("Playback could not be saved. Try again."),
       });
 
     if (!currentProfile(owner)) throw profileChanged();
+    selectionRequested = true;
     const selected = await callForProfile(owner, "profiles.switch", { id, current: owner });
     await acceptOwner(client, selected);
+  } catch (cause) {
+    if (!selectionRequested) throw cause;
+    // A failed configuration may follow a committed selection. Read that durable owner;
+    // never retry the queued request with a substituted owner. Recovery is a new user action.
+    const generation = lifetime;
+
+    try {
+      const selected = await call("profiles.active");
+
+      if (generation === lifetime && currentProfile(owner) && !sameProfile(selected, owner)) {
+        await acceptOwner(client, selected).catch(() => {});
+        publish({ owner: selected, pending: false, error: cause });
+      }
+    } catch {
+      if (generation === lifetime) publish({ owner: profileOwner(), pending: false, error: cause });
+    }
+
+    throw cause;
   } finally {
     switching = false;
   }

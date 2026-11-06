@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 import { Library } from "./library.ts";
 import { OnDemand } from "./ondemand.ts";
 import { Watchlist } from "./watchlist.ts";
@@ -13,6 +14,7 @@ import {
   ViewingStore,
   ViewingRecord,
   ViewingProfile,
+  ViewingErasure,
   LegacyViewing,
   ViewingAccount,
   ViewingChannels,
@@ -155,7 +157,7 @@ export function makeProfiles({
         readonly dispose: () => Promise<void>;
         readonly one: Semaphore.Semaphore;
         closed: boolean;
-        epoch: number;
+        readonly erased: Map<string, number>;
       }
     >();
 
@@ -169,7 +171,7 @@ export function makeProfiles({
 
         return found && !found.deleting
           ? Effect.succeed(found)
-          : Effect.fail(refused("This viewing profile is unavailable or being deleted."));
+          : Effect.fail(refused(t("This viewing profile is unavailable or being deleted.")));
       });
 
     const opened = (id: string) =>
@@ -177,7 +179,7 @@ export function makeProfiles({
         const retained = handles.get(id);
 
         if (retained) {
-          if (retained.closed) return yield* refused("This viewing profile is being deleted.");
+          if (retained.closed) return yield* refused(t("This viewing profile is being deleted."));
 
           return retained;
         }
@@ -185,7 +187,7 @@ export function makeProfiles({
         yield* existing(id);
 
         if (id !== DEFAULT_PROFILE_ID && !consent)
-          return yield* refused("Profile switching requires the installation consent owner.");
+          return yield* refused(t("Profile switching requires the installation consent owner."));
 
         const settings = (
           consent
@@ -215,7 +217,9 @@ export function makeProfiles({
         const runtime = id === DEFAULT_PROFILE_ID ? null : ManagedRuntime.make(features);
 
         const context = runtime
-          ? yield* Effect.tryPromise({ try: () => runtime.context(), catch: failedWith })
+          ? yield* Effect.tryPromise({ try: () => runtime.context(), catch: failedWith }).pipe(
+              Effect.onError(() => Effect.promise(() => runtime.dispose())),
+            )
           : consent
             ? Context.add(
                 original,
@@ -229,9 +233,13 @@ export function makeProfiles({
           dispose: () => runtime?.dispose() ?? Promise.resolve(),
           one: yield* Semaphore.make(PROFILE_OPERATIONS),
           closed: false,
-          epoch: 0,
+          erased: new Map<string, number>(),
         };
 
+        // Probe before caching or starting watches, so a failed open remains retryable.
+        yield* Context.get(context, CustomListStore).lists.pipe(
+          Effect.onError(() => Effect.promise(handle.dispose)),
+        );
         handles.set(id, handle);
 
         const viewing = Context.get(context, ViewingRecord);
@@ -259,9 +267,6 @@ export function makeProfiles({
           else yield* Effect.forkIn(watch, scope);
         }
 
-        // A closed/unreadable database must fail admission, never appear as an empty profile.
-        yield* Context.get(context, CustomListStore).lists;
-
         return handle;
       });
 
@@ -276,7 +281,7 @@ export function makeProfiles({
     const expectedOwner = (expected?: ActiveProfile) =>
       Effect.suspend(() =>
         expected && !isActive(expected)
-          ? Effect.fail(refused("Viewing profile changed; retry this request."))
+          ? Effect.fail(refused(t("Viewing profile changed; retry this request.")))
           : Effect.void,
       );
 
@@ -286,31 +291,44 @@ export function makeProfiles({
           if (configuredFor !== active.id)
             return yield* configurationFailure ??
               refused(
-                "Viewing profile configuration did not finish; select the profile again to retry.",
+                t(
+                  "Viewing profile configuration did not finish; select the profile again to retry.",
+                ),
               );
 
           yield* expectedOwner(expected);
           const owner = { ...active };
           const handle = yield* opened(owner.id);
-          const epoch = handle.epoch;
+          const erased = new Map(handle.erased);
+
+          const erasure = {
+            current: (account: string) =>
+              (erased.get(account) ?? 0) === (handle.erased.get(account) ?? 0),
+          };
 
           const run: ProfileAdmission["run"] = (work) =>
             Effect.suspend(() => {
-              if (handle.closed || handle.epoch !== epoch)
+              if (handle.closed)
                 return Effect.fail(
-                  refused("This profile admission has ended; retry the operation."),
+                  refused(t("This profile admission has ended; retry the operation.")),
                 );
 
               return handle.one.withPermits(1)(
                 Effect.gen(function* () {
-                  if (handle.closed || handle.epoch !== epoch)
-                    return yield* refused("This profile admission has ended; retry the operation.");
+                  if (handle.closed)
+                    return yield* refused(
+                      t("This profile admission has ended; retry the operation."),
+                    );
 
                   return yield* Effect.provideContext(
                     work,
                     Context.add(
                       Context.add(
-                        Context.add(handle.context, ViewingProfile, owner),
+                        Context.add(
+                          Context.add(handle.context, ViewingErasure, erasure),
+                          ViewingProfile,
+                          owner,
+                        ),
                         AdmittedViewing,
                         {
                           record: Context.get(handle.context, ViewingRecord),
@@ -361,8 +379,9 @@ export function makeProfiles({
       });
 
     if (configuredFor === null) {
-      const restored = yield* opened(active.id);
-      yield* configure(restored.context, { ...active }).pipe(
+      yield* Effect.flatMap(opened(active.id), (restored) =>
+        configure(restored.context, { ...active }),
+      ).pipe(
         Effect.match({
           onFailure: (failure) => {
             configurationFailure = failure;
@@ -393,7 +412,7 @@ export function makeProfiles({
                     new Failed({
                       error: {
                         kind: "invalid-input",
-                        detail: "A profile name must contain 1 to 80 characters.",
+                        detail: t("A profile name must contain 1 to 80 characters."),
                       },
                     }),
                   );
@@ -409,24 +428,28 @@ export function makeProfiles({
         one.withPermits(1)(
           Effect.gen(function* () {
             // Retrying the same durably selected owner also retries its unfinished configuration.
-            if (!(id === active.id && configuredFor === null)) yield* expectedOwner(expected);
+            yield* expectedOwner(expected);
 
             if (id === active.id && configuredFor === id) return { ...active };
 
             if (!stopInteractive)
               return yield* refused(
-                "Profile switching is not enabled until interactive isolation is ready.",
+                t("Profile switching is not enabled until interactive isolation is ready."),
               );
             const next = yield* opened(id);
-            const previous = yield* opened(active.id);
-            const leaving = { ...active };
-            yield* Effect.provideService(stopInteractive(), AdmittedSettings, {
-              owner: leaving,
-              settings: Context.get(previous.context, Settings),
-              current: () => isActive(leaving),
-            });
+
+            if (configuredFor !== null) {
+              const previous = yield* opened(active.id);
+              const leaving = { ...active };
+              yield* Effect.provideService(stopInteractive(), AdmittedSettings, {
+                owner: leaving,
+                settings: Context.get(previous.context, Settings),
+                current: () => isActive(leaving),
+              });
+            }
+
             // Publish only after the durable selection commits; a failed save leaves the old owner.
-            active = yield* storage.select(id);
+            if (id !== active.id) active = yield* storage.select(id);
             configuredFor = null;
             // While the lifecycle lock holds, no new-owner request reaches the shared catalogue
             // before its existing worker has adopted this owner's TMDB configuration.
@@ -499,10 +522,10 @@ export function makeProfiles({
             for (const row of rows) {
               if (row.deleting)
                 return yield* refused(
-                  "Finish deleting the pending profile before erasing a source.",
+                  t("Finish deleting the pending profile before erasing a source."),
                 );
               const handle = yield* opened(row.id);
-              handle.epoch++;
+              handle.erased.set(account, (handle.erased.get(account) ?? 0) + 1);
               yield* handle.one.withPermits(PROFILE_OPERATIONS)(
                 row.id === DEFAULT_PROFILE_ID && defaultErase
                   ? defaultErase

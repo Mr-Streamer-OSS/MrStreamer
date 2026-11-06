@@ -195,6 +195,14 @@ export class ViewingProfile extends Context.Service<ViewingProfile, ActiveProfil
   "mrstreamer/ViewingProfile",
 ) {}
 
+/** The source generations captured by a desktop profile admission, before any async work. */
+export class ViewingErasure extends Context.Service<
+  ViewingErasure,
+  {
+    readonly current: (account: string) => boolean;
+  }
+>()("mrstreamer/ViewingErasure") {}
+
 export class ViewingStore extends Context.Service<
   ViewingStore,
   {
@@ -228,6 +236,8 @@ export class ViewingStore extends Context.Service<
       readonly accounts: readonly string[];
       readonly commandId: string;
       readonly at: number;
+      /** Checked inside the transaction before receipt lookup, including idempotent retries. */
+      readonly current?: () => boolean;
       readonly decide: (
         stored: StoredViewing,
         look: StoredLook,
@@ -712,7 +722,14 @@ function make() {
       gone: Failed = noSubscription,
     ) =>
       Effect.gen(function* () {
-        if (!ownersOf(yield* account.owners, named)) return yield* gone;
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+        const initial = ownersOf(yield* account.owners, named);
+
+        if (
+          !initial ||
+          (erasure._tag === "Some" && initial.some((owner) => !erasure.value.current(owner.key)))
+        )
+          return yield* gone;
         const found = yield* settled;
         const owners = ownersOf(found.owners, named);
 
@@ -723,6 +740,12 @@ function make() {
           accounts: found.owners.map((owner) => owner.key),
           commandId,
           at,
+          ...defined({
+            current:
+              erasure._tag === "Some"
+                ? () => owners.every((owner) => erasure.value.current(owner.key))
+                : undefined,
+          }),
           decide: (stored, look) =>
             owners.some((owner) => owner.stands?.() === false)
               ? gone

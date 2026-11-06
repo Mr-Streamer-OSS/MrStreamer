@@ -100,7 +100,7 @@ import { Playback } from "./services/playback.ts";
 import { Recordings } from "./services/recordings.ts";
 import { Reminders } from "./services/reminders.ts";
 import { OnlineSubtitles } from "./services/online-subtitles.ts";
-import { Settings } from "./services/preferences.ts";
+import { Settings, AdmittedSettings, viewingPreferences } from "./services/preferences.ts";
 import { preferencePublication, type PreferencePublication } from "./preference-publication.ts";
 import { Roster } from "./services/roster.ts";
 import { Subscriptions } from "./services/subscription.ts";
@@ -908,7 +908,10 @@ async function start(): Promise<void> {
       }).pipe(
         Effect.tap((publication) =>
           Effect.sync(() => {
-            publications.set(profileKey(admission.owner), publication);
+            if (sameProfile(admission.owner, runtime.runSync(profiles.active))) {
+              publications.clear();
+              publications.set(profileKey(admission.owner), publication);
+            }
           }),
         ),
       );
@@ -1261,11 +1264,19 @@ async function start(): Promise<void> {
         },
       }),
       ...reminderHandlers({ reminders }),
-      ...profileHandlers({ profiles, sessions: profileSessions, enabled: true }),
+      ...profileHandlers({ profiles }),
       ...recordingHandlers({
         recordings,
         library,
-        settings,
+        settings: {
+          get: viewingPreferences(settings),
+          ofSubscription: (id) =>
+            Effect.flatMap(Effect.serviceOption(AdmittedSettings), (admitted) =>
+              admitted._tag === "Some"
+                ? admitted.value.settings.ofSubscription(id)
+                : settings.ofSubscription(id),
+            ),
+        },
         chooseFolder: async (current) => {
           const options: Electron.OpenDialogOptions = {
             title: t("Choose a folder for recordings"),

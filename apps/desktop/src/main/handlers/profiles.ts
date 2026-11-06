@@ -1,3 +1,4 @@
+import { t } from "@mrstreamer/core/i18n";
 import * as Effect from "effect/Effect";
 import { Failed } from "@mrstreamer/core/failure";
 import type { ProfileSessions } from "../services/profiles.ts";
@@ -14,7 +15,7 @@ export function profileHandlers({
   readonly enabled?: boolean;
 }): HandlersFor<"profiles"> {
   const unavailable = Effect.fail(
-    new Failed({ error: { kind: "unexpected", detail: "Profile isolation is not ready." } }),
+    new Failed({ error: { kind: "unexpected", detail: t("Profile isolation is not ready.") } }),
   );
 
   return {

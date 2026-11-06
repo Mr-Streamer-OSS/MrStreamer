@@ -167,8 +167,12 @@ export class CustomListStore extends Context.Service<
       readonly same: (stored: StoredMember) => boolean;
       readonly at: number;
     }) => Effect.Effect<boolean, Failed>;
-    /** Takes one channel out of a list, by its member id. Answers whether it was there. */
-    readonly removeMember: (list: string, member: string) => Effect.Effect<boolean, Failed>;
+    /** Removes a member; an admitted source guard is checked in the transaction before mutation. */
+    readonly removeMember: (
+      list: string,
+      member: string,
+      current?: (account: string) => boolean,
+    ) => Effect.Effect<boolean, Failed>;
     /**
      * In one transaction: gives the channels `order` names, by member id, the places those of
      * them had, in that order, and leaves every other where it is. `shown` says which of the
@@ -431,10 +435,16 @@ function storeOn(db: DatabaseSync): CustomListStore["Service"] {
         }),
       ),
 
-    removeMember: (list, member) =>
+    removeMember: (list, member, current) =>
       attempt(() =>
         transaction(db, () => {
           existing(list);
+
+          const found = membersOf(statements.members.all(list)).find(
+            (each) => each.member === member,
+          );
+
+          if (found && current && !current(found.account)) fail("no-subscription");
 
           if (statements.dropMember.run(list, member).changes === 0) return false;
           statements.revise.run(list);

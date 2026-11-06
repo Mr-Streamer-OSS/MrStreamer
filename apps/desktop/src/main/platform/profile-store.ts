@@ -8,11 +8,9 @@
 // all. One that can't (the database is locked or can't be written) answers no profile, and the
 // next read or start tries again; a database that can't open answers none until a restart. Once
 // read, the active profile is kept in memory for the runtime's life. Rows already there are never
-// replaced. A registry a later release left with another profile active answers no profile and
-// stays as it is: this release shows Default's viewing alone, and must not claim another's.
+// replaced. ProfileSessions resolves named active profiles and supplies the runtime owner.
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_PROFILE_ID,
   type ActiveProfile,
@@ -23,7 +21,6 @@ import { lazy } from "@mrstreamer/contracts/lazy";
 import { type } from "arktype";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import { attempt, Database, transaction, unavailable } from "./database.ts";
 
 const SCHEMA = `
@@ -44,66 +41,12 @@ export class Profiles extends Context.Service<
   Profiles,
   {
     /**
-     * The active profile: Default. Fails, publishing none, while the registry can't be written
-     * or read, and while a later release has left another profile active.
+     * The durably selected profile and revision. Fails while the registry cannot be read
+     * or initialized; callers never substitute another owner.
      */
     readonly active: Effect.Effect<ActiveProfile, Failed>;
   }
 >()("mrstreamer/Profiles") {}
-
-/** The registry on the database the runtime keeps open, bound to Default as the runtime starts. */
-export const profilesLayer: Layer.Layer<Profiles, never, Database> = Layer.effect(
-  Profiles,
-  Effect.gen(function* () {
-    const opened = yield* Database;
-    // Only this module changes the registry, so once read it holds for the runtime's life.
-    let bound: ActiveProfile | null = null;
-
-    const active =
-      "failure" in opened
-        ? unavailable(opened.failure)
-        : Effect.suspend(() =>
-            bound ? Effect.succeed(bound) : attempt(() => (bound = activeIn(opened.db))),
-          );
-
-    yield* active.pipe(
-      Effect.catch((failure) =>
-        Effect.logWarning("[profiles] the active profile can't be read", failure.error),
-      ),
-    );
-
-    return { active };
-  }),
-);
-
-/** Registers Default as active, unless a profile already is, and reads that it is Default. */
-function activeIn(db: DatabaseSync): ActiveProfile {
-  return transaction(db, () => {
-    db.exec(SCHEMA);
-    db.prepare("insert or ignore into profiles (id, created_at) values (?, ?)").run(
-      DEFAULT_PROFILE_ID,
-      Date.now(),
-    );
-    db.prepare(
-      "insert or ignore into active_profile (slot, profile_id, revision) values (1, ?, 1)",
-    ).run(DEFAULT_PROFILE_ID);
-
-    const row = ActiveRow().assert(
-      db.prepare("select profile_id, revision from active_profile where slot = 1").get(),
-    );
-
-    if (row.profile_id !== DEFAULT_PROFILE_ID) {
-      throw new Failed({
-        error: {
-          kind: "unexpected",
-          detail: "A later release made another viewing profile active; this one shows Default's.",
-        },
-      });
-    }
-
-    return { id: row.profile_id, revision: row.revision };
-  });
-}
 
 /** Default keeps its legacy paths; other owners never share personal files or SQL receipts. */
 export function profileDirectory(dataDir: string, profileId: string): string {
@@ -236,6 +179,15 @@ export const profileStorage = Effect.gen(function* () {
               .get()
           )
             db.prepare("delete from profile_copy_progress where profile_id = ?").run(id);
+
+          if (
+            db
+              .prepare(
+                "select 1 from sqlite_master where type = 'table' and name = 'profile_subtitle_choices'",
+              )
+              .get()
+          )
+            db.prepare("delete from profile_subtitle_choices where profile_id = ?").run(id);
           db.prepare("delete from profiles where id = ?").run(id);
         }),
       ),

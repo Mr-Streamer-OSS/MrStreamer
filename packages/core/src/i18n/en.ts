@@ -4,6 +4,26 @@
 import type { Plural } from "../i18n.ts";
 
 export const en = {
+  "This viewing profile is unavailable or being deleted.":
+    "This viewing profile is unavailable or being deleted.",
+  "This viewing profile is being deleted.": "This viewing profile is being deleted.",
+  "Profile switching requires the installation consent owner.":
+    "Profile switching requires the installation consent owner.",
+  "Viewing profile changed; retry this request.": "Viewing profile changed; retry this request.",
+  "Viewing profile configuration did not finish; select the profile again to retry.":
+    "Viewing profile configuration did not finish; select the profile again to retry.",
+  "This profile admission has ended; retry the operation.":
+    "This profile admission has ended; retry the operation.",
+  "A profile name must contain 1 to 80 characters.":
+    "A profile name must contain 1 to 80 characters.",
+  "Profile switching is not enabled until interactive isolation is ready.":
+    "Profile switching is not enabled until interactive isolation is ready.",
+  "Finish deleting the pending profile before erasing a source.":
+    "Finish deleting the pending profile before erasing a source.",
+  "Profile isolation is not ready.": "Profile isolation is not ready.",
+  "Viewing profile changed; retry this subtitle choice.":
+    "Viewing profile changed; retry this subtitle choice.",
+
   "Playback could not be saved. Try again.": "Playback could not be saved. Try again.",
   "Viewing profile changed. Try again.": "Viewing profile changed. Try again.",
   Default: "Default",

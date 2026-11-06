@@ -394,6 +394,7 @@ it("creates a profile and keeps a refused deletion listed with Retry until it su
   const held = ipc.hold("profiles.remove");
   await ui.press("Delete Sam");
   expect(ui.rows()[1]?.text).toContain("Recordings and downloads stay.");
+  expect(document.activeElement?.textContent).toBe("Cancel");
   await ui.press("Delete");
   await vi.waitFor(() => expect(ui.named("Deleting…")).toBeDefined());
   // Main keeps the tombstone when it can't finish removing the profile's files.
@@ -447,4 +448,41 @@ it("shows a refused switch in the viewer's language with Retry, which switches o
     { id: B.id, current: A },
     { id: B.id, current: A },
   ]);
+});
+
+it("retries a durably selected owner without saving obsolete playback again", async () => {
+  selectProfileOwner(A);
+  ipc.always("profiles.active", A);
+  ipc.always("output.status", local(A));
+  stop = syncProfiles(client);
+  await vi.waitFor(() => expect(profileStatus().pending).toBe(false));
+  const save = vi.spyOn(titlePlayer, "prepareProfileSwitch").mockResolvedValue(true);
+  ipc.always("profiles.active", B);
+  ipc.refuse("profiles.switch", { kind: "unexpected", detail: "Configuration refused." });
+  await expect(switchProfile(client, B.id)).rejects.toBeDefined();
+  expect(profileOwner()).toEqual(B);
+  save.mockResolvedValue(false);
+  ipc.always("profiles.switch", B);
+  ipc.always("output.status", local(B));
+  await switchProfile(client, B.id);
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(ipc.argsOf("profiles.switch").at(-1)).toEqual({ id: B.id, current: B });
+  expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null });
+});
+
+it("startup Retry configures the exact restored owner before loading private state", async () => {
+  ipc.always("profiles.active", B);
+  ipc.always("output.status", local(B));
+  ipc.refuse("language.get", { kind: "unexpected", detail: "Configuration unfinished." });
+  stop = syncProfiles(client);
+  await vi.waitFor(() => expect(profileStatus()).toMatchObject({ owner: B, pending: false }));
+  expect(profileStatus().error).not.toBeNull();
+  stop();
+  ipc.always("language.get", dutch);
+  ipc.always("profiles.switch", B);
+  stop = syncProfiles(client);
+  await vi.waitFor(() =>
+    expect(profileStatus()).toMatchObject({ owner: B, pending: false, error: null }),
+  );
+  expect(ipc.argsOf("profiles.switch")).toEqual([{ id: B.id, current: B }]);
 });

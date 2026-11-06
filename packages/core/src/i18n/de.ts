@@ -3,6 +3,27 @@
 import type { Translation } from "../i18n.ts";
 
 export const de: Translation = {
+  "This viewing profile is unavailable or being deleted.":
+    "Dieses Profil ist nicht verfügbar oder wird gelöscht.",
+  "This viewing profile is being deleted.": "Dieses Profil wird gelöscht.",
+  "Profile switching requires the installation consent owner.":
+    "Der Profilwechsel benötigt die Zustimmungseinstellungen dieser Installation.",
+  "Viewing profile changed; retry this request.":
+    "Das Profil wurde gewechselt. Bitte erneut versuchen.",
+  "Viewing profile configuration did not finish; select the profile again to retry.":
+    "Die Profileinrichtung ist unvollständig. Bitte erneut auswählen.",
+  "This profile admission has ended; retry the operation.":
+    "Diese Profilanfrage ist abgelaufen. Bitte erneut versuchen.",
+  "A profile name must contain 1 to 80 characters.":
+    "Ein Profilname muss 1 bis 80 Zeichen enthalten.",
+  "Profile switching is not enabled until interactive isolation is ready.":
+    "Der Profilwechsel ist noch nicht verfügbar.",
+  "Finish deleting the pending profile before erasing a source.":
+    "Schließe das Löschen des Profils ab, bevor du eine Quelle löschst.",
+  "Profile isolation is not ready.": "Profile sind noch nicht verfügbar.",
+  "Viewing profile changed; retry this subtitle choice.":
+    "Das Profil wurde gewechselt. Wähle die Untertitel erneut.",
+
   "Playback could not be saved. Try again.":
     "Die Wiedergabe konnte nicht gespeichert werden. Versuche es erneut.",
   "Viewing profile changed. Try again.": "Das Profil wurde gewechselt. Versuche es erneut.",

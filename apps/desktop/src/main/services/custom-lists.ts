@@ -1,3 +1,4 @@
+import { ViewingErasure } from "@mrstreamer/core/viewing/service";
 // The viewer's channel lists: named, in an order of the viewer's, each holding exact channels of
 // any saved subscriptions in an order of its own. Nothing joins two subscriptions' channels, and
 // no channel is ever found by its name.
@@ -219,12 +220,16 @@ function make() {
      */
     const align = (subscription: SavedSubscription) =>
       Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+        if (erasure._tag === "Some" && !erasure.value.current(subscription.key)) return false;
         const channelOf = yield* library.lookup(subscription.id);
 
         // Its catalogue went meanwhile, or the subscription did: asked last, with nothing waiting
         // after.
         if (!(yield* subscriptions.stands(subscription))) return false;
         yield* store.align(subscription.key, (stored) => {
+          if (erasure._tag === "Some" && !erasure.value.current(subscription.key)) return null;
           const resolved = resolve(channelOf, stored);
 
           if (!resolved) return null;
@@ -237,7 +242,7 @@ function make() {
           };
         });
 
-        return true;
+        return erasure._tag === "None" || erasure.value.current(subscription.key);
       }).pipe(
         Effect.catchTag("Failed", (failed) =>
           Effect.as(
@@ -303,11 +308,14 @@ function make() {
      */
     const listedOf = (named: OwnedId) =>
       Effect.gen(function* () {
+        const erasure = yield* Effect.serviceOption(ViewingErasure);
+
         const subscription = (yield* subscriptions.saved).find(
           (each) => each.id === named.subscriptionId,
         );
 
-        if (!subscription) return yield* noSubscription;
+        if (!subscription || (erasure._tag === "Some" && !erasure.value.current(subscription.key)))
+          return yield* noSubscription;
         const channelOf = yield* library.lookup(subscription.id);
         const channel = channelOf(named.id);
 
@@ -324,7 +332,9 @@ function make() {
           streams: streamsOf(channel),
           name: channel.title,
           adult: channel.adult === true,
-          stands: () => subscriptions.standsNow(subscription),
+          stands: () =>
+            subscriptions.standsNow(subscription) &&
+            (erasure._tag === "None" || erasure.value.current(subscription.key)),
         };
 
         return { subscription, channelOf, channel, listed };
@@ -371,10 +381,23 @@ function make() {
           return yield* after(changed);
         }),
 
-      removeMember: (list, member) => Effect.flatMap(store.removeMember(list, member), after),
+      removeMember: (list, member) =>
+        Effect.gen(function* () {
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
+
+          return yield* Effect.flatMap(
+            store.removeMember(
+              list,
+              member,
+              erasure._tag === "Some" ? erasure.value.current : undefined,
+            ),
+            after,
+          );
+        }),
 
       arrange: ({ list, revision, order }) =>
         Effect.gen(function* () {
+          const erasure = yield* Effect.serviceOption(ViewingErasure);
           const found = yield* catalogued;
           const shown = yield* adults;
           // The order was made from the channels of the subscriptions saved then.
@@ -391,12 +414,22 @@ function make() {
             list,
             revision,
             order,
-            shown: (members) =>
-              new Set(
+            shown: (members) => {
+              if (
+                erasure._tag === "Some" &&
+                members.some(
+                  (member) =>
+                    order.includes(member.member) && !erasure.value.current(member.account),
+                )
+              )
+                throw noSubscription;
+
+              return new Set(
                 shownOf(found, shown, { id: list, name: "", revision, members }).members.flatMap(
                   (each) => (each.kind === "listed" ? [each.member] : []),
                 ),
-              ),
+              );
+            },
           });
 
           return yield* after(changed);

@@ -475,6 +475,12 @@ listen("viewing.changed", () => {
   if (store.getState().now?.kind === "provider") void refreshNext();
 });
 
+listen("profiles.viewingChanged", ({ owner }) => {
+  if (!currentProfile(owner) || !playOwner || !currentProfile(playOwner)) return;
+
+  if (store.getState().now?.kind === "provider") void refreshNext();
+});
+
 // What comes after an open copy follows main's list as it changes. A list read for a question,
 // which also looks for files gone, still answers it: what opens is decided on that.
 listen("downloads.changed", (list) => {

@@ -212,9 +212,15 @@ export function registerIpc(
         // union of validated inputs, as the ordinary handler above does.
         const selected = personal.handlers(admitted)[method] as typeof handler | undefined;
 
-        // Removal drains every personal store under the household lifecycle lock. Admission
-        // validates the requested owner, but retaining its personal permit would deadlock that drain.
-        if (method === "subscription.remove") return yield* handler(input, frame);
+        // These household writes serialize with removal, which drains personal permits.
+        // Validate exact ownership first, then release the permit before waiting on that write lock.
+        if (
+          method === "subscription.remove" ||
+          method === "subscription.add" ||
+          method === "subscription.update" ||
+          method === "subscription.recheck"
+        )
+          return yield* (selected ?? handler)(input, frame);
 
         return yield* admitted.run(Effect.suspend(() => (selected ?? handler)(input, frame)));
       });
